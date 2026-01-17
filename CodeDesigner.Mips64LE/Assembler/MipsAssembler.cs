@@ -205,11 +205,17 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Parse an immediate value (supports decimal, hex with 0x prefix, and negative values)
+        /// Parse an immediate value (supports decimal, hex with 0x or $ prefix, and negative values)
         /// </summary>
         private static int ParseImmediate(string imm)
         {
             string normalized = imm.Trim();
+            
+            // Support $ prefix for hex (PS2 MIPS assembler style)
+            if (normalized.StartsWith("$"))
+            {
+                return Convert.ToInt32(normalized.Substring(1), 16);
+            }
             
             if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
             {
@@ -379,17 +385,34 @@ namespace CodeDesigner.Mips64LE
             }
             else if (argNames.Length == 3 && argNames[0] == "rt" && argNames[1] == "offset" && argNames[2] == "rs")
             {
-                // Format: rt, offset(rs) (e.g., LW $t0, 100($s0))
-                // This is typically written as: lw $t0, 100($s0)
-                // But we parse it as three separate operands: rt, offset, rs
-                if (operands.Length != 3)
-                    throw new ArgumentException($"Expected 3 operands for {instr.Name}");
+                // Format: rt, offset(rs) (e.g., LW $t0, 100($s0) or LW $t0, $100($s0))
+                // Support both formats:
+                // 1. Three separate operands: rt, offset, rs
+                // 2. Two operands where second is offset(rs)
                 
-                int rt = ParseRegister(operands[0]);
-                int offset = ParseImmediate(operands[1]);
-                int rs = ParseRegister(operands[2]);
+                if (operands.Length == 2)
+                {
+                    // Parse offset(rs) format
+                    string offsetBaseStr = operands[1];
+                    var match = Regex.Match(offsetBaseStr, @"^(.+?)\((.+)\)$");
+                    if (match.Success)
+                    {
+                        int rt = ParseRegister(operands[0]);
+                        int offset = ParseImmediate(match.Groups[1].Value);
+                        int rs = ParseRegister(match.Groups[2].Value);
+                        return MipsEncoder.EncodeI(instr.Opcode, rs, rt, offset);
+                    }
+                }
+                else if (operands.Length == 3)
+                {
+                    // Three separate operands format
+                    int rt = ParseRegister(operands[0]);
+                    int offset = ParseImmediate(operands[1]);
+                    int rs = ParseRegister(operands[2]);
+                    return MipsEncoder.EncodeI(instr.Opcode, rs, rt, offset);
+                }
                 
-                return MipsEncoder.EncodeI(instr.Opcode, rs, rt, offset);
+                throw new ArgumentException($"Expected 2 or 3 operands for {instr.Name}");
             }
             else if (argNames.Length == 3 && argNames[0] == "rs" && argNames[1] == "rt" && argNames[2] == "offset")
             {

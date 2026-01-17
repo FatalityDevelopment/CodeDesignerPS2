@@ -56,7 +56,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, 0x{target:X8}";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8}";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
         }
@@ -79,14 +79,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal == rtVal;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"0x{target:X8}")}";
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
             }
 
             return eq;
@@ -129,7 +129,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, 0x{target:X8}";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8}";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
         }
@@ -152,14 +152,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal != rtVal;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"0x{target:X8}")}";
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
             }
 
             return eq;
@@ -201,7 +201,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, 0x{target:X8}";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
         }
@@ -221,14 +221,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal <= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"0x{target:X8}")}";
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
             }
 
             return eq;
@@ -270,7 +270,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, 0x{target:X8}";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
         }
@@ -290,14 +290,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal > 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"0x{target:X8}")}";
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
             }
 
             return eq;
@@ -339,7 +339,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, 0x{target:X8}";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
         }
@@ -359,14 +359,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal < 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"0x{target:X8}")}";
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
             }
 
             return eq;
@@ -408,7 +408,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, 0x{target:X8}";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
         }
@@ -428,14 +428,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal >= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"0x{target:X8}")}";
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
             }
 
             return eq;
@@ -479,7 +479,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, 0x{target:X8}";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8}";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
         }
@@ -502,14 +502,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal == rtVal;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (delay slot nullified)")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (delay slot nullified)")}]";
             }
 
             if (pc.HasValue)
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"0x{target:X8}")}";
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
             }
 
             return eq;
@@ -553,7 +553,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, 0x{target:X8}";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8}";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
         }
@@ -576,14 +576,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal != rtVal;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (delay slot nullified)")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (delay slot nullified)")}]";
             }
 
             if (pc.HasValue)
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"0x{target:X8}")}";
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
             }
 
             return eq;
@@ -620,7 +620,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 uint pcUpper = (pc.Value + 4) & 0xF0000000;
                 target = pcUpper | target;
             }
-            return $"{Name} 0x{target:X8}";
+            return $"{Name} ${target:X8}";
         }
 
         public override uint Asm(int[] args)
@@ -634,7 +634,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             {
                 uint pcUpper = (pc.Value + 4) & 0xF0000000;
                 uint target = pcUpper | (args.Addr << 2);
-                return $"{Equation.Replace("target", $"0x{args.Addr:X}")} => 0x{target:X8}";
+                return $"{Equation.Replace("target", $"0x{args.Addr:X}")} => ${target:X8}";
             }
 
             return Equation.Replace("target", $"0x{args.Addr:X}");
@@ -675,7 +675,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 uint pcUpper = (pc.Value + 4) & 0xF0000000;
                 target = pcUpper | target;
             }
-            return $"{Name} 0x{target:X8}";
+            return $"{Name} ${target:X8}";
         }
 
         public override uint Asm(int[] args)
@@ -690,7 +690,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 uint pcUpper = (pc.Value + 4) & 0xF0000000;
                 uint target = pcUpper | (args.Addr << 2);
                 uint returnAddr = pc.Value + 8;
-                return $"{Equation.Replace("target", $"0x{args.Addr:X}")} => target=0x{target:X8}, $ra=0x{returnAddr:X8}";
+                return $"{Equation.Replace("target", $"0x{args.Addr:X}")} => target=${target:X8}, $ra=0x{returnAddr:X8}";
             }
 
             return Equation.Replace("target", $"0x{args.Addr:X}");

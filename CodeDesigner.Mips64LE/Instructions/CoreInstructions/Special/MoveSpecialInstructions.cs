@@ -141,7 +141,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, 0x{args.Imm:X4}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Imm:X4}";
         }
 
         public override uint Asm(int[] args)
@@ -154,11 +154,11 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             uint upperValue = (uint)(args.Imm << 16);
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
-                .Replace("imm", $"0x{args.Imm:X4}");
+                .Replace("imm", $"${args.Imm:X4}");
             
             if (cpu != null)
             {
-                return $"{eq} => 0x{args.Imm:X4} << 16 = 0x{upperValue:X8}";
+                return $"{eq} => ${args.Imm:X4} << 16 = 0x{upperValue:X8}";
             }
             return eq;
         }
