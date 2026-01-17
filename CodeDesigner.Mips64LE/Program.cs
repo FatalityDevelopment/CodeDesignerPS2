@@ -14,6 +14,13 @@ namespace CodeDesigner.Mips64LE
             
             // Test MipsEncoder and MipsDecoder
             TestEncoderDecoder();
+
+            Console.WriteLine();
+            Console.WriteLine("========================================");
+            Console.WriteLine();
+
+            // Test MipsAssembler and MipsDisassembler
+            TestAssemblerDisassembler();
         }
 
         static void TestEncoderDecoder()
@@ -103,6 +110,172 @@ namespace CodeDesigner.Mips64LE
             int decodedOpcode = MipsDecoder.GetOpcode(encoded);
             
             return decodedOpcode == opcode && decoded.Addr == (addr & 0x03FFFFFF);
+        }
+
+        static void TestAssemblerDisassembler()
+        {
+            Console.WriteLine("=== Testing MipsAssembler and MipsDisassembler ===");
+            Console.WriteLine();
+
+            // Test 1: R-type instructions
+            Console.WriteLine("Test 1: R-type arithmetic instructions");
+            TestAsmDisasm("add $t0, $s0, $s1");
+            TestAsmDisasm("addu $t1, $s2, $s3");
+            TestAsmDisasm("sub $t2, $s4, $s5");
+            TestAsmDisasm("mult $s0, $s1");
+            TestAsmDisasm("div $t0, $t1");
+            TestAsmDisasm("mfhi $t0");
+            TestAsmDisasm("mflo $t1");
+            Console.WriteLine();
+
+            // Test 1b: R-type logical instructions
+            Console.WriteLine("Test 1b: R-type logical instructions");
+            TestAsmDisasm("and $t0, $s0, $s1");
+            TestAsmDisasm("or $t1, $s2, $s3");
+            TestAsmDisasm("xor $t2, $s4, $s5");
+            TestAsmDisasm("nor $t3, $s6, $s7");
+            Console.WriteLine();
+
+            // Test 1c: R-type shift instructions
+            Console.WriteLine("Test 1c: R-type shift instructions");
+            TestAsmDisasm("sll $t0, $s0, 5");
+            TestAsmDisasm("srl $t1, $s1, 3");
+            TestAsmDisasm("sra $t2, $s2, 8");
+            TestAsmDisasm("sllv $t3, $s3, $s4");
+            Console.WriteLine();
+
+            // Test 1d: R-type compare and jump instructions
+            Console.WriteLine("Test 1d: R-type compare/jump instructions");
+            TestAsmDisasm("slt $t0, $s0, $s1");
+            TestAsmDisasm("sltu $t1, $s2, $s3");
+            TestAsmDisasm("jr $ra");
+            TestAsmDisasm("jalr $t0, $ra");  // rd, rs format
+            Console.WriteLine();
+
+            // Test 2: I-type instructions
+            Console.WriteLine("Test 2: I-type arithmetic instructions");
+            TestAsmDisasm("addi $t0, $s0, 100");
+            TestAsmDisasm("addiu $t1, $t0, 0x1234");
+            TestAsmDisasm("daddi $t2, $s1, -50");
+            Console.WriteLine();
+
+            // Test 2b: I-type logical instructions
+            Console.WriteLine("Test 2b: I-type logical instructions");
+            TestAsmDisasm("andi $t0, $s0, 0xFF");
+            TestAsmDisasm("ori $t1, $s1, 0x1000");
+            TestAsmDisasm("xori $t2, $s2, 0xABCD");
+            Console.WriteLine();
+
+            // Test 2c: I-type branch instructions
+            Console.WriteLine("Test 2c: I-type branch instructions");
+            TestAsmDisasm("beq $s0, $s1, 0x10");
+            TestAsmDisasm("bne $t0, $t1, 0x20");
+            TestAsmDisasm("blez $s0, 0x30");
+            TestAsmDisasm("bgtz $s1, 0x40");
+            Console.WriteLine();
+
+            // Test 2d: I-type load/store instructions  
+            Console.WriteLine("Test 2d: I-type load/store instructions");
+            TestAsmDisasm("lw $t0, 100, $s0");  // rt, offset, rs format
+            TestAsmDisasm("sw $t1, 200, $s1");
+            TestAsmDisasm("lb $t2, 4, $s2");
+            TestAsmDisasm("sb $t3, 8, $s3");
+            Console.WriteLine();
+
+            // Test 2e: I-type special instructions
+            Console.WriteLine("Test 2e: I-type special instructions");
+            TestAsmDisasm("lui $t0, 0x1234");
+            TestAsmDisasm("slti $t1, $s0, 100");
+            Console.WriteLine();
+
+            // Test 3: J-type instructions
+            Console.WriteLine("Test 3: J-type instructions");
+            TestAsmDisasm("j 0x400000");
+            TestAsmDisasm("jal 0x500000");
+            Console.WriteLine();
+
+            // Test 4: Different register formats
+            Console.WriteLine("Test 4: Different register formats");
+            TestAsmDisasm("add $8, $16, $17");   // Numeric format
+            TestAsmDisasm("add t0, s0, s1");      // Without $ prefix
+            Console.WriteLine();
+
+            // Test 5: Disassemble a block
+            Console.WriteLine("Test 5: Disassemble a block of code");
+            byte[] codeBlock = new byte[]
+            {
+                // add $t0, $s0, $s1 (0x02114020)
+                0x20, 0x40, 0x11, 0x02,
+                // addi $t1, $t0, 0x64 (0x21090064)
+                0x64, 0x00, 0x09, 0x21,
+                // beq $t0, $t1, 0x10 (0x11090010)
+                0x10, 0x00, 0x09, 0x11,
+                // j 0x100000 (0x08100000)
+                0x00, 0x00, 0x10, 0x08
+            };
+            
+            string[] disassembled = MipsDisassembler.DisassembleBlock(codeBlock, 0x80000000);
+            foreach (var line in disassembled)
+            {
+                Console.WriteLine($"  {line}");
+            }
+            Console.WriteLine();
+
+            // Test 6: Round-trip assembly/disassembly
+            Console.WriteLine("Test 6: Round-trip verification");
+            bool success = true;
+            string[] testInstructions = new[]
+            {
+                "add $t0, $s0, $s1",
+                "addi $t1, $t0, 100",
+                "j 0x400000"
+            };
+
+            foreach (var instr in testInstructions)
+            {
+                uint encoded = MipsAssembler.Assemble(instr);
+                string disasm = MipsDisassembler.Disassemble(encoded);
+                // Compare normalized forms (both should be lowercase, same format)
+                string normalized = NormalizeAsm(instr);
+                string disasmNorm = NormalizeAsm(disasm);
+                
+                bool match = normalized == disasmNorm;
+                Console.WriteLine($"  {instr} => 0x{encoded:X8} => {disasm} [{(match ? "PASS" : "FAIL")}]");
+                success &= match;
+            }
+            Console.WriteLine();
+
+            if (success)
+            {
+                Console.WriteLine("✓ All assembler/disassembler tests PASSED!");
+            }
+            else
+            {
+                Console.WriteLine("✗ Some assembler/disassembler tests FAILED!");
+            }
+        }
+
+        static void TestAsmDisasm(string asmLine)
+        {
+            try
+            {
+                uint encoded = MipsAssembler.Assemble(asmLine);
+                string disasm = MipsDisassembler.Disassemble(encoded);
+                Console.WriteLine($"  {asmLine,-30} => 0x{encoded:X8} => {disasm}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  {asmLine,-30} => ERROR: {ex.Message}");
+            }
+        }
+
+        static string NormalizeAsm(string asm)
+        {
+            // Normalize assembly for comparison: lowercase, remove $ prefix, consistent spacing
+            asm = asm.ToLowerInvariant().Replace("$", "").Replace(",", " ");
+            // Split and rejoin to normalize whitespace
+            var parts = asm.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            return string.Join(" ", parts);
         }
     }
 }
