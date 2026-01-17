@@ -217,6 +217,9 @@ namespace CodeDesigner.Mips64LE.CPU.VU0
             // Clear flags for masked components
             ushort newFlags = 0;
 
+            // Denormal threshold for PS2 VU
+            const float DENORMAL_THRESHOLD = 1.175494e-38f;
+
             // Zero flags (bits 0-3)
             if ((mask & 0x1) != 0 && result.X == 0.0f) newFlags |= 0x0001;
             if ((mask & 0x2) != 0 && result.Y == 0.0f) newFlags |= 0x0002;
@@ -236,10 +239,10 @@ namespace CodeDesigner.Mips64LE.CPU.VU0
             if ((mask & 0x8) != 0 && (float.IsInfinity(result.W) || float.IsNaN(result.W))) newFlags |= 0x0800;
 
             // Underflow flags (bits 12-15) - check for denormals
-            if ((mask & 0x1) != 0 && result.X != 0.0f && MathF.Abs(result.X) < float.Epsilon) newFlags |= 0x1000;
-            if ((mask & 0x2) != 0 && result.Y != 0.0f && MathF.Abs(result.Y) < float.Epsilon) newFlags |= 0x2000;
-            if ((mask & 0x4) != 0 && result.Z != 0.0f && MathF.Abs(result.Z) < float.Epsilon) newFlags |= 0x4000;
-            if ((mask & 0x8) != 0 && result.W != 0.0f && MathF.Abs(result.W) < float.Epsilon) newFlags |= 0x8000;
+            if ((mask & 0x1) != 0 && result.X != 0.0f && MathF.Abs(result.X) < DENORMAL_THRESHOLD) newFlags |= 0x1000;
+            if ((mask & 0x2) != 0 && result.Y != 0.0f && MathF.Abs(result.Y) < DENORMAL_THRESHOLD) newFlags |= 0x2000;
+            if ((mask & 0x4) != 0 && result.Z != 0.0f && MathF.Abs(result.Z) < DENORMAL_THRESHOLD) newFlags |= 0x4000;
+            if ((mask & 0x8) != 0 && result.W != 0.0f && MathF.Abs(result.W) < DENORMAL_THRESHOLD) newFlags |= 0x8000;
 
             MACFlags = newFlags;
         }

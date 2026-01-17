@@ -659,12 +659,17 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
         public override void Exec(CpuState cpu, RArgs args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
-            // Treat the bits as integers and convert to float
+            // Reinterpret the float bits as integers and convert to float
+            int ix = BitConverter.SingleToInt32Bits(vs.X);
+            int iy = BitConverter.SingleToInt32Bits(vs.Y);
+            int iz = BitConverter.SingleToInt32Bits(vs.Z);
+            int iw = BitConverter.SingleToInt32Bits(vs.W);
+            
             Vector4 result = new Vector4(
-                (float)((int)vs.X),
-                (float)((int)vs.Y),
-                (float)((int)vs.Z),
-                (float)((int)vs.W)
+                (float)ix,
+                (float)iy,
+                (float)iz,
+                (float)iw
             );
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
