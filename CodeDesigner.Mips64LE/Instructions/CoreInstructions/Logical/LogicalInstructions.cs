@@ -16,7 +16,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 {
     // AND - Bitwise AND
-    public sealed class AND : Instruction<RArgs>
+    public sealed class AND : Instruction<Args_R>
     {
         public AND()
         {
@@ -29,7 +29,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Bitwise AND operation";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -37,7 +37,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = cpu.RegsHi[args.Rs] & cpu.RegsHi[args.Rt];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -47,7 +47,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x24));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -65,7 +65,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // OR - Bitwise OR
-    public sealed class OR : Instruction<RArgs>
+    public sealed class OR : Instruction<Args_R>
     {
         public OR()
         {
@@ -78,7 +78,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Bitwise OR operation";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -86,7 +86,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = cpu.RegsHi[args.Rs] | cpu.RegsHi[args.Rt];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -96,7 +96,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x25));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -114,7 +114,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // XOR - Bitwise XOR
-    public sealed class XOR : Instruction<RArgs>
+    public sealed class XOR : Instruction<Args_R>
     {
         public XOR()
         {
@@ -127,7 +127,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Bitwise XOR (exclusive OR) operation";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -135,7 +135,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = cpu.RegsHi[args.Rs] ^ cpu.RegsHi[args.Rt];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -145,7 +145,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x26));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -163,7 +163,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // NOR - Bitwise NOR
-    public sealed class NOR : Instruction<RArgs>
+    public sealed class NOR : Instruction<Args_R>
     {
         public NOR()
         {
@@ -176,7 +176,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Bitwise NOR (NOT OR) operation";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -184,7 +184,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = ~(cpu.RegsHi[args.Rs] | cpu.RegsHi[args.Rt]);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -194,7 +194,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x27));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -212,7 +212,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // ANDI - AND immediate
-    public sealed class ANDI : Instruction<IArgs>
+    public sealed class ANDI : Instruction<Args_I>
     {
         public ANDI()
         {
@@ -225,7 +225,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Bitwise AND with zero-extended immediate";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong imm = (ushort)args.Imm; // Zero-extend immediate
@@ -233,7 +233,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0; // Upper 64 bits cleared for immediate operations
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
@@ -243,7 +243,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             ushort imm = (ushort)args.Imm;
             string eq = Equation
@@ -261,7 +261,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // ORI - OR immediate
-    public sealed class ORI : Instruction<IArgs>
+    public sealed class ORI : Instruction<Args_I>
     {
         public ORI()
         {
@@ -274,7 +274,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Bitwise OR with zero-extended immediate";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong imm = (ushort)args.Imm; // Zero-extend immediate
@@ -282,7 +282,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = cpu.RegsHi[args.Rs]; // Preserve upper 64 bits
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
@@ -292,7 +292,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             ushort imm = (ushort)args.Imm;
             string eq = Equation
@@ -310,7 +310,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // XORI - XOR immediate
-    public sealed class XORI : Instruction<IArgs>
+    public sealed class XORI : Instruction<Args_I>
     {
         public XORI()
         {
@@ -323,7 +323,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Bitwise XOR with zero-extended immediate";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong imm = (ushort)args.Imm; // Zero-extend immediate
@@ -331,7 +331,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = cpu.RegsHi[args.Rs]; // Preserve upper 64 bits
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
@@ -341,7 +341,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             ushort imm = (ushort)args.Imm;
             string eq = Equation

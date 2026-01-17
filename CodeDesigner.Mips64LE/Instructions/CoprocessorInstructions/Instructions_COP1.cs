@@ -37,7 +37,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
 {
     // MFC1 - Move from COP1 register to GPR (32-bit)
-    public sealed class MFC1 : Instruction<RArgs>
+    public sealed class MFC1 : Instruction<Args_R>
     {
         public MFC1()
         {
@@ -50,7 +50,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Move from COP1 register to GPR - reads 32-bit float register as bits";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Get the float as bits
             uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
@@ -61,7 +61,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
         }
@@ -71,7 +71,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x00 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -88,7 +88,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // DMFC1 - Move from COP1 register to GPR (64-bit)
-    public sealed class DMFC1 : Instruction<RArgs>
+    public sealed class DMFC1 : Instruction<Args_R>
     {
         public DMFC1()
         {
@@ -101,7 +101,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Move from COP1 register to GPR (64-bit) - reads double-precision bits";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Treat two consecutive float registers as a double (fs and fs+1)
             // This is a simplified implementation; real FPU may handle differently
@@ -110,7 +110,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
         }
@@ -120,7 +120,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x01 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -136,7 +136,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // MTC1 - Move from GPR to COP1 register (32-bit)
-    public sealed class MTC1 : Instruction<RArgs>
+    public sealed class MTC1 : Instruction<Args_R>
     {
         public MTC1()
         {
@@ -149,14 +149,14 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Move from GPR to COP1 register - writes 32-bit value as float bits";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Write lower 32 bits of GPR to FPR as bits
             uint bits = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
             cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle(bits);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
         }
@@ -166,7 +166,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x04 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -183,7 +183,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // DMTC1 - Move from GPR to COP1 register (64-bit)
-    public sealed class DMTC1 : Instruction<RArgs>
+    public sealed class DMTC1 : Instruction<Args_R>
     {
         public DMTC1()
         {
@@ -196,14 +196,14 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Move from GPR to COP1 register (64-bit) - writes full 64-bit value";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Write 64-bit GPR value to FPR (simplified as single float from lower bits)
             uint bits = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
             cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle(bits);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
         }
@@ -213,7 +213,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x05 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -229,7 +229,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // CFC1 - Move control from COP1
-    public sealed class CFC1 : Instruction<RArgs>
+    public sealed class CFC1 : Instruction<Args_R>
     {
         public CFC1()
         {
@@ -242,7 +242,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Move control from COP1 - reads FPU control/status register";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Read FPU control register using COP1State
             uint value = cpu.COP1.ReadControlRegister(args.Rd);
@@ -253,7 +253,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
         }
@@ -263,7 +263,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x02 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string regName = COP1State.GetControlRegisterName(args.Rd);
             string eq = Equation
@@ -280,7 +280,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // CTC1 - Move control to COP1
-    public sealed class CTC1 : Instruction<RArgs>
+    public sealed class CTC1 : Instruction<Args_R>
     {
         public CTC1()
         {
@@ -293,14 +293,14 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Move control to COP1 - writes to FPU control/status register";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Write to FPU control register using COP1State
             uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
             cpu.COP1.WriteControlRegister(args.Rd, value);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
         }
@@ -310,7 +310,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x06 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string regName = COP1State.GetControlRegisterName(args.Rd);
             string eq = Equation
@@ -327,7 +327,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // LWC1 - Load word to COP1 register
-    public sealed class LWC1 : Instruction<IArgs>
+    public sealed class LWC1 : Instruction<Args_I>
     {
         public LWC1()
         {
@@ -340,7 +340,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Load word to COP1 register - loads 32-bit float from memory";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
@@ -353,7 +353,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -364,7 +364,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -382,7 +382,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // SWC1 - Store word from COP1 register
-    public sealed class SWC1 : Instruction<IArgs>
+    public sealed class SWC1 : Instruction<Args_I>
     {
         public SWC1()
         {
@@ -395,7 +395,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Store word from COP1 register - stores 32-bit float to memory";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
@@ -409,7 +409,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -420,7 +420,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -439,7 +439,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // ADD.S - Add single-precision floating point
-    public sealed class ADD_S : Instruction<RArgs>
+    public sealed class ADD_S : Instruction<Args_R>
     {
         public ADD_S()
         {
@@ -452,12 +452,12 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Add single-precision floating point";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.FPR[args.Rd] = cpu.FPR[args.Rs] + cpu.FPR[args.Rt];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
         }
@@ -467,7 +467,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x00);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -485,7 +485,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // SUB.S - Subtract single-precision floating point
-    public sealed class SUB_S : Instruction<RArgs>
+    public sealed class SUB_S : Instruction<Args_R>
     {
         public SUB_S()
         {
@@ -498,12 +498,12 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Subtract single-precision floating point";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.FPR[args.Rd] = cpu.FPR[args.Rs] - cpu.FPR[args.Rt];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
         }
@@ -513,7 +513,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x01);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -531,7 +531,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // MUL.S - Multiply single-precision floating point
-    public sealed class MUL_S : Instruction<RArgs>
+    public sealed class MUL_S : Instruction<Args_R>
     {
         public MUL_S()
         {
@@ -544,12 +544,12 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Multiply single-precision floating point";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.FPR[args.Rd] = cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
         }
@@ -559,7 +559,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x02);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -577,7 +577,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // DIV.S - Divide single-precision floating point
-    public sealed class DIV_S : Instruction<RArgs>
+    public sealed class DIV_S : Instruction<Args_R>
     {
         public DIV_S()
         {
@@ -590,12 +590,12 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Divide single-precision floating point";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.FPR[args.Rd] = cpu.FPR[args.Rs] / cpu.FPR[args.Rt];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
         }
@@ -605,7 +605,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x03);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -623,7 +623,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // SQRT.S - Square root single-precision floating point
-    public sealed class SQRT_S : Instruction<RArgs>
+    public sealed class SQRT_S : Instruction<Args_R>
     {
         public SQRT_S()
         {
@@ -636,12 +636,12 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Square root single-precision floating point";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.FPR[args.Rd] = MathF.Sqrt(cpu.FPR[args.Rs]);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}";
         }
@@ -651,7 +651,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x04);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -667,7 +667,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // ABS.S - Absolute value single-precision
-    public sealed class ABS_S : Instruction<RArgs>
+    public sealed class ABS_S : Instruction<Args_R>
     {
         public ABS_S()
         {
@@ -680,12 +680,12 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Absolute value single-precision floating point";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.FPR[args.Rd] = MathF.Abs(cpu.FPR[args.Rs]);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}";
         }
@@ -695,7 +695,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x05);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -711,7 +711,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // MOV.S - Move single-precision floating point
-    public sealed class MOV_S : Instruction<RArgs>
+    public sealed class MOV_S : Instruction<Args_R>
     {
         public MOV_S()
         {
@@ -724,12 +724,12 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Move single-precision floating point";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.FPR[args.Rd] = cpu.FPR[args.Rs];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}";
         }
@@ -739,7 +739,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x06);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -755,7 +755,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // NEG.S - Negate single-precision
-    public sealed class NEG_S : Instruction<RArgs>
+    public sealed class NEG_S : Instruction<Args_R>
     {
         public NEG_S()
         {
@@ -768,12 +768,12 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Negate single-precision floating point";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.FPR[args.Rd] = -cpu.FPR[args.Rs];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}";
         }
@@ -783,7 +783,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x07);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -799,7 +799,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // CVT.W.S - Convert single-precision to word
-    public sealed class CVT_W_S : Instruction<RArgs>
+    public sealed class CVT_W_S : Instruction<Args_R>
     {
         public CVT_W_S()
         {
@@ -812,13 +812,13 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Convert single-precision to 32-bit signed integer";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             int intValue = (int)cpu.FPR[args.Rs];
             cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)intValue);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}";
         }
@@ -828,7 +828,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x24);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -844,7 +844,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // CVT.S.W - Convert word to single-precision
-    public sealed class CVT_S_W : Instruction<RArgs>
+    public sealed class CVT_S_W : Instruction<Args_R>
     {
         public CVT_S_W()
         {
@@ -857,13 +857,13 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Convert 32-bit signed integer to single-precision";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             int intValue = (int)BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rs]);
             cpu.FPR[args.Rd] = (float)intValue;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rd}, $f{args.Rs}";
         }
@@ -873,7 +873,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x14 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x20);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fd", $"$f{args.Rd}")
@@ -889,7 +889,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // C.EQ.S - Compare equal single-precision
-    public sealed class C_EQ_S : Instruction<RArgs>
+    public sealed class C_EQ_S : Instruction<Args_R>
     {
         public C_EQ_S()
         {
@@ -902,13 +902,13 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Compare equal single-precision - sets condition code";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             bool result = cpu.FPR[args.Rs] == cpu.FPR[args.Rt];
             cpu.COP1.SetConditionCode(result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rs}, $f{args.Rt}";
         }
@@ -918,7 +918,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x32);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fs", $"$f{args.Rs}")
@@ -936,7 +936,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // C.LT.S - Compare less than single-precision
-    public sealed class C_LT_S : Instruction<RArgs>
+    public sealed class C_LT_S : Instruction<Args_R>
     {
         public C_LT_S()
         {
@@ -949,13 +949,13 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Compare less than single-precision - sets condition code";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             bool result = cpu.FPR[args.Rs] < cpu.FPR[args.Rt];
             cpu.COP1.SetConditionCode(result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rs}, $f{args.Rt}";
         }
@@ -965,7 +965,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x3C);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fs", $"$f{args.Rs}")
@@ -983,7 +983,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // C.LE.S - Compare less than or equal single-precision
-    public sealed class C_LE_S : Instruction<RArgs>
+    public sealed class C_LE_S : Instruction<Args_R>
     {
         public C_LE_S()
         {
@@ -996,13 +996,13 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Compare less than or equal single-precision - sets condition code";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             bool result = cpu.FPR[args.Rs] <= cpu.FPR[args.Rt];
             cpu.COP1.SetConditionCode(result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} $f{args.Rs}, $f{args.Rt}";
         }
@@ -1012,7 +1012,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x3E);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("fs", $"$f{args.Rs}")
@@ -1030,7 +1030,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // BC1F - Branch on FPU false
-    public sealed class BC1F : Instruction<IArgs>
+    public sealed class BC1F : Instruction<Args_I>
     {
         public BC1F()
         {
@@ -1043,7 +1043,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Branch on FPU condition code false";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             if (!cpu.COP1.GetConditionCode())
             {
@@ -1052,7 +1052,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
             if (pc.HasValue)
@@ -1068,7 +1068,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x08 << 21 | (args[0] >> 2) & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
             
@@ -1083,7 +1083,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // BC1T - Branch on FPU true
-    public sealed class BC1T : Instruction<IArgs>
+    public sealed class BC1T : Instruction<Args_I>
     {
         public BC1T()
         {
@@ -1096,7 +1096,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Branch on FPU condition code true";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             if (cpu.COP1.GetConditionCode())
             {
@@ -1105,7 +1105,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
             if (pc.HasValue)
@@ -1121,7 +1121,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | 0x08 << 21 | 0x01 << 16 | (args[0] >> 2) & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
             

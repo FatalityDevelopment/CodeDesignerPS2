@@ -8,15 +8,15 @@ using System.Threading.Tasks;
 
 namespace CodeDesigner.Mips64LE.Cpu.Instructions
 {
-    public sealed class JInstruction : Instruction<JArgs>
+    public sealed class Instruction_J : Instruction<Args_J>
     {
-        public override void Exec(CpuState cpu, JArgs args)
+        public override void Exec(CpuState cpu, Args_J args)
         {
             // Example: J addr
             cpu.PC = cpu.PC & 0xF0000000 | args.Addr << 2;
         }
 
-        public override string Disasm(JArgs args, uint? pc = null)
+        public override string Disasm(Args_J args, uint? pc = null)
         {
             return $"{Name} 0x{args.Addr:X8}";
         }
@@ -27,7 +27,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions
             return (uint)(Opcode << 26 | args[0] & 0x03FFFFFF);
         }
 
-        public override string Analyze(JArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_J args, CpuState? cpu = null, uint? pc = null)
         {
             return $"J-Type: {Disasm(args, pc)}";
         }

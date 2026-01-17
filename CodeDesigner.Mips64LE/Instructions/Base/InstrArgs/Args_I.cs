@@ -6,19 +6,17 @@ using System.Threading.Tasks;
 
 namespace CodeDesigner.Mips64LE.Cpu.InstrArgs
 {
-    public readonly struct RArgs
+    public readonly struct Args_I
     {
         public int Rs { get; }
         public int Rt { get; }
-        public int Rd { get; }
-        public int Shamt { get; }
+        public int Imm { get; }
 
-        public RArgs(int rs, int rt, int rd, int shamt)
+        public Args_I(int rs, int rt, int imm)
         {
             Rs = rs;
             Rt = rt;
-            Rd = rd;
-            Shamt = shamt;
+            Imm = imm;
         }
     }
 }

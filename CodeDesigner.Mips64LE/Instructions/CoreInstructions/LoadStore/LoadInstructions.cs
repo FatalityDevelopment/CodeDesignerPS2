@@ -21,7 +21,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 {
     // LB - Load byte (signed)
-    public sealed class LB : Instruction<IArgs>
+    public sealed class LB : Instruction<Args_I>
     {
         public LB()
         {
@@ -34,7 +34,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load byte (signed) - loads 8-bit value and sign-extends to 128-bit";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -45,7 +45,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -56,7 +56,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -74,7 +74,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LBU - Load byte (unsigned)
-    public sealed class LBU : Instruction<IArgs>
+    public sealed class LBU : Instruction<Args_I>
     {
         public LBU()
         {
@@ -87,7 +87,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load byte (unsigned) - loads 8-bit value and zero-extends to 128-bit";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -97,7 +97,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -108,7 +108,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -126,7 +126,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LH - Load halfword (signed)
-    public sealed class LH : Instruction<IArgs>
+    public sealed class LH : Instruction<Args_I>
     {
         public LH()
         {
@@ -139,7 +139,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load halfword (signed) - loads 16-bit value and sign-extends to 128-bit";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -151,7 +151,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -162,7 +162,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -180,7 +180,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LHU - Load halfword (unsigned)
-    public sealed class LHU : Instruction<IArgs>
+    public sealed class LHU : Instruction<Args_I>
     {
         public LHU()
         {
@@ -193,7 +193,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load halfword (unsigned) - loads 16-bit value and zero-extends to 128-bit";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -204,7 +204,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -215,7 +215,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -233,7 +233,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LW - Load word (signed)
-    public sealed class LW : Instruction<IArgs>
+    public sealed class LW : Instruction<Args_I>
     {
         public LW()
         {
@@ -246,7 +246,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load word - loads 32-bit value and sign-extends to 128-bit";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -262,7 +262,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -273,7 +273,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -291,7 +291,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LWU - Load word unsigned
-    public sealed class LWU : Instruction<IArgs>
+    public sealed class LWU : Instruction<Args_I>
     {
         public LWU()
         {
@@ -304,7 +304,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load word unsigned - loads 32-bit value and zero-extends to 128-bit";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -319,7 +319,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -330,7 +330,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -348,7 +348,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LD - Load doubleword
-    public sealed class LD : Instruction<IArgs>
+    public sealed class LD : Instruction<Args_I>
     {
         public LD()
         {
@@ -361,7 +361,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load doubleword - loads 64-bit value";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -380,7 +380,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -391,7 +391,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -409,7 +409,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LWL - Load word left
-    public sealed class LWL : Instruction<IArgs>
+    public sealed class LWL : Instruction<Args_I>
     {
         public LWL()
         {
@@ -422,7 +422,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load word left - loads unaligned word (left portion)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -446,7 +446,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -457,7 +457,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -475,7 +475,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LWR - Load word right
-    public sealed class LWR : Instruction<IArgs>
+    public sealed class LWR : Instruction<Args_I>
     {
         public LWR()
         {
@@ -488,7 +488,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load word right - loads unaligned word (right portion)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -512,7 +512,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -523,7 +523,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -541,7 +541,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LDL - Load doubleword left
-    public sealed class LDL : Instruction<IArgs>
+    public sealed class LDL : Instruction<Args_I>
     {
         public LDL()
         {
@@ -554,7 +554,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load doubleword left - loads unaligned doubleword (left portion)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -578,7 +578,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -589,7 +589,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -607,7 +607,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LDR - Load doubleword right
-    public sealed class LDR : Instruction<IArgs>
+    public sealed class LDR : Instruction<Args_I>
     {
         public LDR()
         {
@@ -620,7 +620,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load doubleword right - loads unaligned doubleword (right portion)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -644,7 +644,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -655,7 +655,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -673,7 +673,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LQ - Load quadword (EE extension - 128-bit)
-    public sealed class LQ : Instruction<IArgs>
+    public sealed class LQ : Instruction<Args_I>
     {
         public LQ()
         {
@@ -686,7 +686,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load quadword - loads 128-bit value (EE extension)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -716,7 +716,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = hi;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -727,7 +727,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation

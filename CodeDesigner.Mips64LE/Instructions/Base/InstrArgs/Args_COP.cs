@@ -6,13 +6,15 @@ using System.Threading.Tasks;
 
 namespace CodeDesigner.Mips64LE.Cpu.InstrArgs
 {
-    public readonly struct JArgs
+    public readonly struct Args_COP
     {
-        public uint Addr { get; }
+        public int Rt { get; }
+        public int Rd { get; }
 
-        public JArgs(uint addr)
+        public Args_COP(int rt, int rd)
         {
-            Addr = addr;
+            Rt = rt;
+            Rd = rd;
         }
     }
 }

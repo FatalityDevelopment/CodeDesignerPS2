@@ -21,7 +21,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 {
     // BEQ - Branch if equal
-    public sealed class BEQ : Instruction<IArgs>
+    public sealed class BEQ : Instruction<Args_I>
     {
         public BEQ()
         {
@@ -34,7 +34,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Branch to target address if rs equals rt";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -50,7 +50,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -66,7 +66,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] << 21) | (args[1] << 16) | (args[2] & 0xFFFF));
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
@@ -94,7 +94,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // BNE - Branch if not equal
-    public sealed class BNE : Instruction<IArgs>
+    public sealed class BNE : Instruction<Args_I>
     {
         public BNE()
         {
@@ -107,7 +107,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Branch to target address if rs does not equal rt";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -123,7 +123,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -139,7 +139,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] << 21) | (args[1] << 16) | (args[2] & 0xFFFF));
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
@@ -167,7 +167,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // BLEZ - Branch if less than or equal to zero
-    public sealed class BLEZ : Instruction<IArgs>
+    public sealed class BLEZ : Instruction<Args_I>
     {
         public BLEZ()
         {
@@ -180,7 +180,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Branch to target address if rs is less than or equal to zero";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
 
@@ -195,7 +195,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -211,7 +211,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] << 21) | (args[2] & 0xFFFF));
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
 
@@ -236,7 +236,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // BGTZ - Branch if greater than zero
-    public sealed class BGTZ : Instruction<IArgs>
+    public sealed class BGTZ : Instruction<Args_I>
     {
         public BGTZ()
         {
@@ -249,7 +249,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Branch to target address if rs is greater than zero";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
 
@@ -264,7 +264,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -280,7 +280,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] << 21) | (args[2] & 0xFFFF));
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
 
@@ -305,7 +305,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // BLTZ - Branch if less than zero
-    public sealed class BLTZ : Instruction<IArgs>
+    public sealed class BLTZ : Instruction<Args_I>
     {
         public BLTZ()
         {
@@ -318,7 +318,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Branch to target address if rs is less than zero";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
 
@@ -333,7 +333,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -349,7 +349,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] << 21) | (0x00 << 16) | (args[2] & 0xFFFF));
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
 
@@ -374,7 +374,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // BGEZ - Branch if greater than or equal to zero
-    public sealed class BGEZ : Instruction<IArgs>
+    public sealed class BGEZ : Instruction<Args_I>
     {
         public BGEZ()
         {
@@ -387,7 +387,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Branch to target address if rs is greater than or equal to zero";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
 
@@ -402,7 +402,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -418,7 +418,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] << 21) | (0x01 << 16) | (args[2] & 0xFFFF));
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
 
@@ -443,7 +443,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // BEQL - Branch if equal (likely)
-    public sealed class BEQL : Instruction<IArgs>
+    public sealed class BEQL : Instruction<Args_I>
     {
         public BEQL()
         {
@@ -456,7 +456,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Branch if equal (likely) - nullifies delay slot if not taken";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -473,7 +473,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -489,7 +489,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] << 21) | (args[1] << 16) | (args[2] & 0xFFFF));
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
@@ -517,7 +517,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // BNEL - Branch if not equal (likely)
-    public sealed class BNEL : Instruction<IArgs>
+    public sealed class BNEL : Instruction<Args_I>
     {
         public BNEL()
         {
@@ -530,7 +530,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Branch if not equal (likely) - nullifies delay slot if not taken";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -547,7 +547,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -563,7 +563,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] << 21) | (args[1] << 16) | (args[2] & 0xFFFF));
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
@@ -591,7 +591,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // J - Jump
-    public sealed class J : Instruction<JArgs>
+    public sealed class J : Instruction<Args_J>
     {
         public J()
         {
@@ -604,7 +604,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Unconditional jump to target address";
         }
 
-        public override void Exec(CpuState cpu, JArgs args)
+        public override void Exec(CpuState cpu, Args_J args)
         {
             // Jump target address: upper 4 bits from PC+4, lower 28 bits from instruction
             ulong pcUpper = (cpu.PC + 4) & 0xFFFFFFFF_F0000000UL;
@@ -612,7 +612,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.PC = target;
         }
 
-        public override string Disasm(JArgs args, uint? pc = null)
+        public override string Disasm(Args_J args, uint? pc = null)
         {
             uint target = args.Addr << 2;
             if (pc.HasValue)
@@ -628,7 +628,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] & 0x3FFFFFF));
         }
 
-        public override string Analyze(JArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_J args, CpuState? cpu = null, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -642,7 +642,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // JAL - Jump and link
-    public sealed class JAL : Instruction<JArgs>
+    public sealed class JAL : Instruction<Args_J>
     {
         public JAL()
         {
@@ -655,7 +655,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Jump to target address and save return address in $ra";
         }
 
-        public override void Exec(CpuState cpu, JArgs args)
+        public override void Exec(CpuState cpu, Args_J args)
         {
             // Save return address (PC+8) to $ra (register 31)
             cpu.RegsLo[31] = cpu.PC + 8;
@@ -667,7 +667,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.PC = target;
         }
 
-        public override string Disasm(JArgs args, uint? pc = null)
+        public override string Disasm(Args_J args, uint? pc = null)
         {
             uint target = args.Addr << 2;
             if (pc.HasValue)
@@ -683,7 +683,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((Opcode << 26) | (args[0] & 0x3FFFFFF));
         }
 
-        public override string Analyze(JArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_J args, CpuState? cpu = null, uint? pc = null)
         {
             if (pc.HasValue)
             {
@@ -698,7 +698,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // JR - Jump register
-    public sealed class JR : Instruction<RArgs>
+    public sealed class JR : Instruction<Args_R>
     {
         public JR()
         {
@@ -711,13 +711,13 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Jump to address contained in register rs";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong target = cpu.RegsLo[args.Rs];
             cpu.PC = target;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}";
         }
@@ -727,7 +727,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | (Funct ?? 0x08));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
 
@@ -742,7 +742,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // JALR - Jump and link register
-    public sealed class JALR : Instruction<RArgs>
+    public sealed class JALR : Instruction<Args_R>
     {
         public JALR()
         {
@@ -755,7 +755,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Jump to address in rs and save return address in rd";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong target = cpu.RegsLo[args.Rs];
 
@@ -766,7 +766,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.PC = target;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             if (args.Rd == 31)
             {
@@ -780,7 +780,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[2] << 11 | (Funct ?? 0x09));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))

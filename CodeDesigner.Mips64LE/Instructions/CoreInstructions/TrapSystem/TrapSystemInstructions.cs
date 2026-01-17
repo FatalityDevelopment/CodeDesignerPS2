@@ -17,7 +17,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 {
     // SYSCALL - System call exception
-    public sealed class SYSCALL : Instruction<RArgs>
+    public sealed class SYSCALL : Instruction<Args_R>
     {
         public SYSCALL()
         {
@@ -30,7 +30,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "System call - triggers a system call exception";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Trigger system call exception
             // In a full implementation, this would:
@@ -41,7 +41,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             throw new SystemCallException($"SYSCALL with code 0x{args.Rs:X}");
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             // SYSCALL has an optional code field in bits 25-6
             if (args.Rs != 0 || args.Rt != 0 || args.Rd != 0 || args.Shamt != 0)
@@ -58,14 +58,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((code << 6) | (Funct ?? 0x0C));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return "System call exception - transfers control to OS";
         }
     }
 
     // BREAK - Breakpoint exception
-    public sealed class BREAK : Instruction<RArgs>
+    public sealed class BREAK : Instruction<Args_R>
     {
         public BREAK()
         {
@@ -78,14 +78,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Breakpoint - triggers a breakpoint exception for debugging";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Trigger breakpoint exception
             // Similar to SYSCALL but for debugging purposes
             throw new BreakpointException($"BREAK with code 0x{args.Rs:X}");
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             // BREAK has an optional code field in bits 25-6
             if (args.Rs != 0 || args.Rt != 0 || args.Rd != 0 || args.Shamt != 0)
@@ -102,14 +102,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)((code << 6) | (Funct ?? 0x0D));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return "Breakpoint exception - for debugging purposes";
         }
     }
 
     // TGE - Trap if greater or equal
-    public sealed class TGE : Instruction<RArgs>
+    public sealed class TGE : Instruction<Args_R>
     {
         public TGE()
         {
@@ -122,7 +122,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Trap if greater or equal (signed) - triggers trap exception if rs >= rt";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
@@ -133,7 +133,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -143,7 +143,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x30));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
@@ -161,7 +161,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // TGEU - Trap if greater or equal unsigned
-    public sealed class TGEU : Instruction<RArgs>
+    public sealed class TGEU : Instruction<Args_R>
     {
         public TGEU()
         {
@@ -174,7 +174,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Trap if greater or equal (unsigned) - triggers trap exception if rs >= rt";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -185,7 +185,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -195,7 +195,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x31));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
@@ -213,7 +213,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // TLT - Trap if less than
-    public sealed class TLT : Instruction<RArgs>
+    public sealed class TLT : Instruction<Args_R>
     {
         public TLT()
         {
@@ -226,7 +226,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Trap if less than (signed) - triggers trap exception if rs < rt";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
@@ -237,7 +237,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -247,7 +247,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x32));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
@@ -265,7 +265,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // TLTU - Trap if less than unsigned
-    public sealed class TLTU : Instruction<RArgs>
+    public sealed class TLTU : Instruction<Args_R>
     {
         public TLTU()
         {
@@ -278,7 +278,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Trap if less than (unsigned) - triggers trap exception if rs < rt";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -289,7 +289,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -299,7 +299,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x33));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
@@ -317,7 +317,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // TEQ - Trap if equal
-    public sealed class TEQ : Instruction<RArgs>
+    public sealed class TEQ : Instruction<Args_R>
     {
         public TEQ()
         {
@@ -330,7 +330,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Trap if equal - triggers trap exception if rs == rt";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -341,7 +341,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -351,7 +351,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x34));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
@@ -369,7 +369,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // TNE - Trap if not equal
-    public sealed class TNE : Instruction<RArgs>
+    public sealed class TNE : Instruction<Args_R>
     {
         public TNE()
         {
@@ -382,7 +382,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Trap if not equal - triggers trap exception if rs != rt";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -393,7 +393,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -403,7 +403,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x36));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rs", CpuHelpers.RegName(args.Rs))

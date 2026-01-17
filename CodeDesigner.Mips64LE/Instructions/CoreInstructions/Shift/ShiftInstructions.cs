@@ -19,7 +19,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 {
     // SLL - Shift left logical
-    public sealed class SLL : Instruction<RArgs>
+    public sealed class SLL : Instruction<Args_R>
     {
         public SLL()
         {
@@ -32,7 +32,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift left logical 32-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
             int sa = args.Shamt;
@@ -40,7 +40,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             CpuHelpers.SetReg32(cpu, args.Rd, (int)result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt}";
         }
@@ -50,7 +50,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[1] << 16 | args[0] << 11 | args[2] << 6 | (Funct ?? 0x00));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -67,7 +67,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SRL - Shift right logical
-    public sealed class SRL : Instruction<RArgs>
+    public sealed class SRL : Instruction<Args_R>
     {
         public SRL()
         {
@@ -80,7 +80,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift right logical 32-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
             int sa = args.Shamt;
@@ -88,7 +88,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             CpuHelpers.SetReg32(cpu, args.Rd, (int)result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt}";
         }
@@ -98,7 +98,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[1] << 16 | args[0] << 11 | args[2] << 6 | (Funct ?? 0x02));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -115,7 +115,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SRA - Shift right arithmetic
-    public sealed class SRA : Instruction<RArgs>
+    public sealed class SRA : Instruction<Args_R>
     {
         public SRA()
         {
@@ -128,7 +128,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift right arithmetic 32-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
             int sa = args.Shamt;
@@ -136,7 +136,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             CpuHelpers.SetReg32(cpu, args.Rd, result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt}";
         }
@@ -146,7 +146,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[1] << 16 | args[0] << 11 | args[2] << 6 | (Funct ?? 0x03));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -163,7 +163,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DSLL - Shift left logical (64-bit)
-    public sealed class DSLL : Instruction<RArgs>
+    public sealed class DSLL : Instruction<Args_R>
     {
         public DSLL()
         {
@@ -176,7 +176,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift left logical 64-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rt = cpu.RegsLo[args.Rt];
             int sa = args.Shamt;
@@ -185,7 +185,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt}";
         }
@@ -195,7 +195,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[1] << 16 | args[0] << 11 | args[2] << 6 | (Funct ?? 0x38));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -212,7 +212,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DSRL - Shift right logical (64-bit)
-    public sealed class DSRL : Instruction<RArgs>
+    public sealed class DSRL : Instruction<Args_R>
     {
         public DSRL()
         {
@@ -225,7 +225,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift right logical 64-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rt = cpu.RegsLo[args.Rt];
             int sa = args.Shamt;
@@ -234,7 +234,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt}";
         }
@@ -244,7 +244,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[1] << 16 | args[0] << 11 | args[2] << 6 | (Funct ?? 0x3A));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -261,7 +261,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DSRA - Shift right arithmetic (64-bit)
-    public sealed class DSRA : Instruction<RArgs>
+    public sealed class DSRA : Instruction<Args_R>
     {
         public DSRA()
         {
@@ -274,7 +274,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift right arithmetic 64-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             long rt = (long)cpu.RegsLo[args.Rt];
             int sa = args.Shamt;
@@ -283,7 +283,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt}";
         }
@@ -293,7 +293,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[1] << 16 | args[0] << 11 | args[2] << 6 | (Funct ?? 0x3B));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -310,7 +310,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SLLV - Shift left logical variable
-    public sealed class SLLV : Instruction<RArgs>
+    public sealed class SLLV : Instruction<Args_R>
     {
         public SLLV()
         {
@@ -323,7 +323,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift left logical variable 32-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
@@ -332,7 +332,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             CpuHelpers.SetReg32(cpu, args.Rd, (int)result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}";
         }
@@ -342,7 +342,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[2] << 21 | args[1] << 16 | args[0] << 11 | (Funct ?? 0x04));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -361,7 +361,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SRLV - Shift right logical variable
-    public sealed class SRLV : Instruction<RArgs>
+    public sealed class SRLV : Instruction<Args_R>
     {
         public SRLV()
         {
@@ -374,7 +374,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift right logical variable 32-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
@@ -383,7 +383,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             CpuHelpers.SetReg32(cpu, args.Rd, (int)result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}";
         }
@@ -393,7 +393,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[2] << 21 | args[1] << 16 | args[0] << 11 | (Funct ?? 0x06));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -412,7 +412,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SRAV - Shift right arithmetic variable
-    public sealed class SRAV : Instruction<RArgs>
+    public sealed class SRAV : Instruction<Args_R>
     {
         public SRAV()
         {
@@ -425,7 +425,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift right arithmetic variable 32-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
@@ -434,7 +434,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             CpuHelpers.SetReg32(cpu, args.Rd, result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}";
         }
@@ -444,7 +444,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[2] << 21 | args[1] << 16 | args[0] << 11 | (Funct ?? 0x07));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -463,7 +463,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DSLLV - Shift left logical variable (64-bit)
-    public sealed class DSLLV : Instruction<RArgs>
+    public sealed class DSLLV : Instruction<Args_R>
     {
         public DSLLV()
         {
@@ -476,7 +476,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift left logical variable 64-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rt = cpu.RegsLo[args.Rt];
             int rs = (int)cpu.RegsLo[args.Rs];
@@ -486,7 +486,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}";
         }
@@ -496,7 +496,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[2] << 21 | args[1] << 16 | args[0] << 11 | (Funct ?? 0x14));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -515,7 +515,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DSRLV - Shift right logical variable (64-bit)
-    public sealed class DSRLV : Instruction<RArgs>
+    public sealed class DSRLV : Instruction<Args_R>
     {
         public DSRLV()
         {
@@ -528,7 +528,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift right logical variable 64-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rt = cpu.RegsLo[args.Rt];
             int rs = (int)cpu.RegsLo[args.Rs];
@@ -538,7 +538,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}";
         }
@@ -548,7 +548,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[2] << 21 | args[1] << 16 | args[0] << 11 | (Funct ?? 0x16));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -567,7 +567,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DSRAV - Shift right arithmetic variable (64-bit)
-    public sealed class DSRAV : Instruction<RArgs>
+    public sealed class DSRAV : Instruction<Args_R>
     {
         public DSRAV()
         {
@@ -580,7 +580,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Shift right arithmetic variable 64-bit";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             long rt = (long)cpu.RegsLo[args.Rt];
             int rs = (int)cpu.RegsLo[args.Rs];
@@ -590,7 +590,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}";
         }
@@ -600,7 +600,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[2] << 21 | args[1] << 16 | args[0] << 11 | (Funct ?? 0x17));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))

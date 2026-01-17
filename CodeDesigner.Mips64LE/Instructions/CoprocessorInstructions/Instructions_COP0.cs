@@ -21,7 +21,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
 {
     // MFC0 - Move from COP0 register to GPR (32-bit)
-    public sealed class MFC0 : Instruction<RArgs>
+    public sealed class MFC0 : Instruction<Args_R>
     {
         public MFC0()
         {
@@ -34,7 +34,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Move from COP0 register to GPR - reads 32-bit COP0 register";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Read from COP0 register (rd specifies which COP0 register)
             uint value = cpu.COP0.ReadRegister32(args.Rd);
@@ -45,7 +45,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
         }
@@ -55,7 +55,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x00 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -71,7 +71,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // MTC0 - Move from GPR to COP0 register (32-bit)
-    public sealed class MTC0 : Instruction<RArgs>
+    public sealed class MTC0 : Instruction<Args_R>
     {
         public MTC0()
         {
@@ -84,14 +84,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Move from GPR to COP0 register - writes 32-bit value to COP0";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Write lower 32 bits of GPR to COP0 register
             uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
             cpu.COP0.WriteRegister32(args.Rd, value);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
         }
@@ -101,7 +101,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x04 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -117,7 +117,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // DMFC0 - Move from COP0 register to GPR (64-bit)
-    public sealed class DMFC0 : Instruction<RArgs>
+    public sealed class DMFC0 : Instruction<Args_R>
     {
         public DMFC0()
         {
@@ -130,7 +130,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Move from COP0 register to GPR (64-bit) - reads full 64-bit COP0 register";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Read 64-bit value from COP0 register
             ulong value = cpu.COP0.ReadRegister64(args.Rd);
@@ -138,7 +138,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
         }
@@ -148,7 +148,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x01 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -164,7 +164,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // DMTC0 - Move from GPR to COP0 register (64-bit)
-    public sealed class DMTC0 : Instruction<RArgs>
+    public sealed class DMTC0 : Instruction<Args_R>
     {
         public DMTC0()
         {
@@ -177,14 +177,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Move from GPR to COP0 register (64-bit) - writes full 64-bit value";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Write 64-bit GPR value to COP0 register
             ulong value = cpu.RegsLo[args.Rt];
             cpu.COP0.WriteRegister64(args.Rd, value);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
         }
@@ -194,7 +194,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x05 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -210,7 +210,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // CFC0 - Move control from COP0
-    public sealed class CFC0 : Instruction<RArgs>
+    public sealed class CFC0 : Instruction<Args_R>
     {
         public CFC0()
         {
@@ -223,7 +223,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Move control from COP0 - reads COP0 control register";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Read from COP0 control register
             uint value = cpu.COP0.ReadControlRegister(args.Rd);
@@ -234,7 +234,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
         }
@@ -244,7 +244,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x02 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -260,7 +260,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // CTC0 - Move control to COP0
-    public sealed class CTC0 : Instruction<RArgs>
+    public sealed class CTC0 : Instruction<Args_R>
     {
         public CTC0()
         {
@@ -273,14 +273,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Move control to COP0 - writes to COP0 control register";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Write to COP0 control register
             uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
             cpu.COP0.WriteControlRegister(args.Rd, value);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
         }
@@ -290,7 +290,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x06 << 21 | args[0] << 16 | args[1] << 11);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
@@ -306,7 +306,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // ERET - Return from exception
-    public sealed class ERET : Instruction<RArgs>
+    public sealed class ERET : Instruction<Args_R>
     {
         public ERET()
         {
@@ -319,7 +319,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Return from exception - restores PC from EPC and clears exception state";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Read EPC (Exception Program Counter) - COP0 register 14
             ulong epc = cpu.COP0.ReadRegister64(14);
@@ -331,7 +331,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             cpu.COP0.WriteRegister32(12, status);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return Name;
         }
@@ -341,7 +341,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             if (cpu != null)
             {
@@ -353,7 +353,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // TLBP - Probe TLB for matching entry
-    public sealed class TLBP : Instruction<RArgs>
+    public sealed class TLBP : Instruction<Args_R>
     {
         public TLBP()
         {
@@ -366,7 +366,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Probe TLB for matching entry - searches TLB for entry matching EntryHi";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Probe TLB using EntryHi register (COP0 register 10)
             ulong entryHi = cpu.COP0.ReadRegister64(10);
@@ -378,7 +378,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             cpu.COP0.WriteRegister32(0, indexValue);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return Name;
         }
@@ -388,14 +388,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return "Probe TLB for matching entry based on EntryHi";
         }
     }
 
     // TLBR - Read indexed TLB entry
-    public sealed class TLBR : Instruction<RArgs>
+    public sealed class TLBR : Instruction<Args_R>
     {
         public TLBR()
         {
@@ -408,7 +408,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Read indexed TLB entry - loads TLB entry into COP0 registers";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Read Index register (COP0 register 0)
             uint index = cpu.COP0.ReadRegister32(0);
@@ -423,7 +423,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             cpu.COP0.WriteRegister32(5, entry.PageMask);  // PageMask
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return Name;
         }
@@ -433,7 +433,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             if (cpu != null)
             {
@@ -445,7 +445,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // TLBWI - Write indexed TLB entry
-    public sealed class TLBWI : Instruction<RArgs>
+    public sealed class TLBWI : Instruction<Args_R>
     {
         public TLBWI()
         {
@@ -458,7 +458,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Write indexed TLB entry - writes COP0 registers to TLB entry";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Read Index register (COP0 register 0)
             uint index = cpu.COP0.ReadRegister32(0);
@@ -473,7 +473,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             cpu.COP0.TLB.WriteEntry((int)index, entryHi, entryLo0, entryLo1, pageMask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return Name;
         }
@@ -483,7 +483,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             if (cpu != null)
             {
@@ -495,7 +495,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // TLBWR - Write random TLB entry
-    public sealed class TLBWR : Instruction<RArgs>
+    public sealed class TLBWR : Instruction<Args_R>
     {
         public TLBWR()
         {
@@ -508,7 +508,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Write random TLB entry - writes COP0 registers to random TLB entry";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Read Random register (COP0 register 1)
             uint random = cpu.COP0.ReadRegister32(1);
@@ -523,7 +523,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             cpu.COP0.TLB.WriteEntry((int)random, entryHi, entryLo0, entryLo1, pageMask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return Name;
         }
@@ -533,7 +533,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             if (cpu != null)
             {
@@ -545,7 +545,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
     }
 
     // CACHE - Cache operation
-    public sealed class CACHE : Instruction<IArgs>
+    public sealed class CACHE : Instruction<Args_I>
     {
         public CACHE()
         {
@@ -558,7 +558,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             Description = "Cache operation - performs cache maintenance operation";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -568,7 +568,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             cpu.COP0.Cache.PerformOperation(op, addr);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} 0x{args.Rt:X}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -579,7 +579,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation

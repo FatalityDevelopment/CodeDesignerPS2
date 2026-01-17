@@ -13,7 +13,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 {
     // SLT - Set if less than (signed)
-    public sealed class SLT : Instruction<RArgs>
+    public sealed class SLT : Instruction<Args_R>
     {
         public SLT()
         {
@@ -26,7 +26,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Set if less than (signed) - sets rd to 1 if rs < rt, else 0";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
@@ -35,7 +35,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -45,7 +45,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x2A));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -64,7 +64,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SLTU - Set if less than (unsigned)
-    public sealed class SLTU : Instruction<RArgs>
+    public sealed class SLTU : Instruction<Args_R>
     {
         public SLTU()
         {
@@ -77,7 +77,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Set if less than (unsigned) - sets rd to 1 if rs < rt (unsigned), else 0";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -86,7 +86,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -96,7 +96,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x2B));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -115,7 +115,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SLTI - Set if less than immediate (signed)
-    public sealed class SLTI : Instruction<IArgs>
+    public sealed class SLTI : Instruction<Args_I>
     {
         public SLTI()
         {
@@ -128,7 +128,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Set if less than immediate (signed) - sets rt to 1 if rs < imm, else 0";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long imm = CpuHelpers.SignExtend16(args.Imm);
@@ -137,7 +137,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
@@ -147,7 +147,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int imm = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -166,7 +166,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SLTIU - Set if less than immediate (unsigned)
-    public sealed class SLTIU : Instruction<IArgs>
+    public sealed class SLTIU : Instruction<Args_I>
     {
         public SLTIU()
         {
@@ -179,7 +179,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Set if less than immediate (unsigned) - sets rt to 1 if rs < imm (unsigned), else 0";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             // Sign-extend immediate, then treat as unsigned for comparison
@@ -189,7 +189,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
@@ -199,7 +199,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int immSigned = CpuHelpers.SignExtend16(args.Imm);
             ulong imm = (ulong)(long)immSigned;

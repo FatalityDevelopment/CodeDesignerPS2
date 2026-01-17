@@ -8,11 +8,11 @@ using System.Threading.Tasks;
 
 namespace CodeDesigner.Mips64LE.Cpu.Instructions
 {
-    public sealed class CopInstruction : Instruction<CopArgs>
+    public sealed class Instruction_COP : Instruction<Args_COP>
     {
         public int Coprocessor { get; init; } // 0 = COP0, 1 = COP1, etc.
 
-        public override void Exec(CpuState cpu, CopArgs args)
+        public override void Exec(CpuState cpu, Args_COP args)
         {
             // Example: MFC0 rt, rd
             if (Coprocessor == 0)
@@ -25,7 +25,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions
             }
         }
 
-        public override string Disasm(CopArgs args, uint? pc = null)
+        public override string Disasm(Args_COP args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {args.Rd}";
         }
@@ -36,7 +36,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions
             return (uint)(Opcode << 26 | args[0] << 16 | args[1] << 11 | (Funct ?? 0));
         }
 
-        public override string Analyze(CopArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_COP args, CpuState? cpu = null, uint? pc = null)
         {
             return $"COP{Coprocessor}: {Disasm(args, pc)}";
         }

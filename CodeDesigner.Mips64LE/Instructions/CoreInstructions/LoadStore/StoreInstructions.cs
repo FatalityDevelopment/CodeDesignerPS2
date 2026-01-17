@@ -18,7 +18,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 {
     // SB - Store byte
-    public sealed class SB : Instruction<IArgs>
+    public sealed class SB : Instruction<Args_I>
     {
         public SB()
         {
@@ -31,7 +31,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Store byte - stores lower 8 bits of rt to memory";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -40,7 +40,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.Memory[addr] = value;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -51,7 +51,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -70,7 +70,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SH - Store halfword
-    public sealed class SH : Instruction<IArgs>
+    public sealed class SH : Instruction<Args_I>
     {
         public SH()
         {
@@ -83,7 +83,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Store halfword - stores lower 16 bits of rt to memory";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -95,7 +95,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.Memory[addr + 1] = (byte)((value >> 8) & 0xFF);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -106,7 +106,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -125,7 +125,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SW - Store word
-    public sealed class SW : Instruction<IArgs>
+    public sealed class SW : Instruction<Args_I>
     {
         public SW()
         {
@@ -138,7 +138,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Store word - stores lower 32 bits of rt to memory";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -152,7 +152,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.Memory[addr + 3] = (byte)((value >> 24) & 0xFF);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -163,7 +163,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -182,7 +182,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SD - Store doubleword
-    public sealed class SD : Instruction<IArgs>
+    public sealed class SD : Instruction<Args_I>
     {
         public SD()
         {
@@ -195,7 +195,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Store doubleword - stores 64 bits of rt to memory";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -213,7 +213,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.Memory[addr + 7] = (byte)((value >> 56) & 0xFF);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -224,7 +224,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -243,7 +243,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SWL - Store word left
-    public sealed class SWL : Instruction<IArgs>
+    public sealed class SWL : Instruction<Args_I>
     {
         public SWL()
         {
@@ -256,7 +256,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Store word left - stores unaligned word (left portion)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -281,7 +281,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -292,7 +292,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -310,7 +310,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SWR - Store word right
-    public sealed class SWR : Instruction<IArgs>
+    public sealed class SWR : Instruction<Args_I>
     {
         public SWR()
         {
@@ -323,7 +323,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Store word right - stores unaligned word (right portion)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -348,7 +348,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -359,7 +359,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -377,7 +377,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SDL - Store doubleword left
-    public sealed class SDL : Instruction<IArgs>
+    public sealed class SDL : Instruction<Args_I>
     {
         public SDL()
         {
@@ -390,7 +390,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Store doubleword left - stores unaligned doubleword (left portion)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -423,7 +423,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.Memory[alignedAddr + 7] = (byte)((result >> 56) & 0xFF);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -434,7 +434,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -452,7 +452,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SDR - Store doubleword right
-    public sealed class SDR : Instruction<IArgs>
+    public sealed class SDR : Instruction<Args_I>
     {
         public SDR()
         {
@@ -465,7 +465,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Store doubleword right - stores unaligned doubleword (right portion)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -498,7 +498,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.Memory[alignedAddr + 7] = (byte)((result >> 56) & 0xFF);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -509,7 +509,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -527,7 +527,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SQ - Store quadword (EE extension - 128-bit)
-    public sealed class SQ : Instruction<IArgs>
+    public sealed class SQ : Instruction<Args_I>
     {
         public SQ()
         {
@@ -540,7 +540,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Store quadword - stores 128-bit value (EE extension)";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
@@ -570,7 +570,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.Memory[addr + 15] = (byte)((hi >> 56) & 0xFF);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
@@ -581,7 +581,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation

@@ -14,7 +14,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 {
     // MOVZ - Move if zero
-    public sealed class MOVZ : Instruction<RArgs>
+    public sealed class MOVZ : Instruction<Args_R>
     {
         public MOVZ()
         {
@@ -27,7 +27,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Move if zero - conditionally moves rs to rd if rt is zero";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rt = cpu.RegsLo[args.Rt];
             if (rt == 0)
@@ -37,7 +37,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -47,7 +47,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[1] << 21 | args[2] << 16 | args[0] << 11 | (Funct ?? 0x0A));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -66,7 +66,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // MOVN - Move if not zero
-    public sealed class MOVN : Instruction<RArgs>
+    public sealed class MOVN : Instruction<Args_R>
     {
         public MOVN()
         {
@@ -79,7 +79,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Move if not zero - conditionally moves rs to rd if rt is not zero";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rt = cpu.RegsLo[args.Rt];
             if (rt != 0)
@@ -89,7 +89,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -99,7 +99,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[1] << 21 | args[2] << 16 | args[0] << 11 | (Funct ?? 0x0B));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -118,7 +118,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // LUI - Load upper immediate
-    public sealed class LUI : Instruction<IArgs>
+    public sealed class LUI : Instruction<Args_I>
     {
         public LUI()
         {
@@ -131,7 +131,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Load upper immediate - loads 16-bit immediate into upper half of register";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             // Sign-extend the result to 64-bit
             int result = (int)(args.Imm << 16);
@@ -139,7 +139,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, 0x{args.Imm:X4}";
         }
@@ -149,7 +149,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 16 | args[1] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             uint upperValue = (uint)(args.Imm << 16);
             string eq = Equation
@@ -165,7 +165,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // NOP - No operation
-    public sealed class NOP : Instruction<RArgs>
+    public sealed class NOP : Instruction<Args_R>
     {
         public NOP()
         {
@@ -178,12 +178,12 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "No operation - does nothing (equivalent to SLL $zero, $zero, 0)";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Do nothing
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return Name;
         }
@@ -193,14 +193,14 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return 0x00000000; // All zeros
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return "No operation";
         }
     }
 
     // SYNC - Memory synchronization
-    public sealed class SYNC : Instruction<RArgs>
+    public sealed class SYNC : Instruction<Args_R>
     {
         public SYNC()
         {
@@ -213,7 +213,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Memory synchronization - ensures all loads/stores are completed before proceeding";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             // Memory synchronization barrier
             // In a real implementation, this would ensure all pending memory operations
@@ -222,7 +222,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             System.Threading.Thread.MemoryBarrier();
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             // SYNC can have an optional stype field (bits 10-6)
             if (args.Shamt != 0)
@@ -239,7 +239,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(stype << 6 | (Funct ?? 0x0F));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             if (args.Shamt != 0)
             {

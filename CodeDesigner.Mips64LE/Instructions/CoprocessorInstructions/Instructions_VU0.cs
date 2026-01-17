@@ -69,7 +69,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VADD - Vector Add
-    public sealed class VADD : Instruction<RArgs>
+    public sealed class VADD : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -84,7 +84,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector add - adds two vector registers component-wise";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
@@ -92,7 +92,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}, {VU0State.GetVFRegisterName(args.Rt)}";
         }
@@ -102,7 +102,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | Funct ?? 0x28);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))
@@ -121,7 +121,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VSUB - Vector Subtract
-    public sealed class VSUB : Instruction<RArgs>
+    public sealed class VSUB : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -136,7 +136,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector subtract - subtracts two vector registers component-wise";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
@@ -144,7 +144,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}, {VU0State.GetVFRegisterName(args.Rt)}";
         }
@@ -154,7 +154,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | Funct ?? 0x29);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))
@@ -173,7 +173,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VMUL - Vector Multiply
-    public sealed class VMUL : Instruction<RArgs>
+    public sealed class VMUL : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -188,7 +188,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector multiply - multiplies two vector registers component-wise";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
@@ -196,7 +196,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}, {VU0State.GetVFRegisterName(args.Rt)}";
         }
@@ -206,7 +206,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | Funct ?? 0x2A);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))
@@ -225,7 +225,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VMADD - Vector Multiply-Add (using ACC)
-    public sealed class VMADD : Instruction<RArgs>
+    public sealed class VMADD : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -240,7 +240,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector multiply-add - multiplies vectors and adds accumulator";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
@@ -249,7 +249,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}, {VU0State.GetVFRegisterName(args.Rt)}";
         }
@@ -259,7 +259,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x30);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))
@@ -279,7 +279,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VMSUB - Vector Multiply-Subtract (using ACC)
-    public sealed class VMSUB : Instruction<RArgs>
+    public sealed class VMSUB : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -294,7 +294,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector multiply-subtract - multiplies vectors and subtracts from accumulator";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
@@ -303,7 +303,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}, {VU0State.GetVFRegisterName(args.Rt)}";
         }
@@ -313,7 +313,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | Funct ?? 0x2D);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))
@@ -333,7 +333,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VMAX - Vector Maximum
-    public sealed class VMAX : Instruction<RArgs>
+    public sealed class VMAX : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -348,7 +348,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector maximum - selects maximum component-wise";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
@@ -356,7 +356,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}, {VU0State.GetVFRegisterName(args.Rt)}";
         }
@@ -366,7 +366,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | Funct ?? 0x2B);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))
@@ -385,7 +385,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VMIN - Vector Minimum
-    public sealed class VMIN : Instruction<RArgs>
+    public sealed class VMIN : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -400,7 +400,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector minimum - selects minimum component-wise";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
@@ -408,7 +408,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}, {VU0State.GetVFRegisterName(args.Rt)}";
         }
@@ -418,7 +418,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | Funct ?? 0x2C);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))
@@ -437,7 +437,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VABS - Vector Absolute Value
-    public sealed class VABS : Instruction<RArgs>
+    public sealed class VABS : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -452,14 +452,14 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector absolute value - computes absolute value component-wise";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 result = Vector4.Abs(vs);
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}";
         }
@@ -469,7 +469,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[0] << 11 | Funct ?? 0x2F);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))
@@ -486,7 +486,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VADDA - Vector Add to Accumulator
-    public sealed class VADDA : Instruction<RArgs>
+    public sealed class VADDA : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -501,7 +501,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector add to accumulator - stores result in ACC";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
@@ -509,7 +509,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteACC(result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} ACC, {VU0State.GetVFRegisterName(args.Rs)}, {VU0State.GetVFRegisterName(args.Rt)}";
         }
@@ -519,7 +519,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | Funct ?? 0x2E);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfs", VU0State.GetVFRegisterName(args.Rs))
@@ -537,7 +537,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VMULA - Vector Multiply to Accumulator
-    public sealed class VMULA : Instruction<RArgs>
+    public sealed class VMULA : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -552,7 +552,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Vector multiply to accumulator - stores result in ACC";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
@@ -560,7 +560,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteACC(result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} ACC, {VU0State.GetVFRegisterName(args.Rs)}, {VU0State.GetVFRegisterName(args.Rt)}";
         }
@@ -570,7 +570,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | Funct ?? 0x31);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfs", VU0State.GetVFRegisterName(args.Rs))
@@ -588,7 +588,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VFTOI - Float to Integer Conversion
-    public sealed class VFTOI0 : Instruction<RArgs>
+    public sealed class VFTOI0 : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -603,7 +603,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Float to integer conversion - converts each component to integer";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 result = new Vector4(
@@ -615,7 +615,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}";
         }
@@ -625,7 +625,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[0] << 11 | Funct ?? 0x3C);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))
@@ -641,7 +641,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
     }
 
     // VITOF - Integer to Float Conversion
-    public sealed class VITOF0 : Instruction<RArgs>
+    public sealed class VITOF0 : Instruction<Args_R>
     {
         private byte _mask = 0xF;
 
@@ -656,7 +656,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Description = "Integer to float conversion - converts each component to float";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             // Reinterpret the float bits as integers and convert to float
@@ -674,7 +674,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}";
         }
@@ -684,7 +684,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             return (uint)(Opcode << 26 | args[1] << 21 | args[0] << 11 | Funct ?? 0x3D);
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("vfd", VU0State.GetVFRegisterName(args.Rd))

@@ -32,7 +32,7 @@ using System;
 namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 {
     // ADD - Add signed 32-bit integers (overflow trap)
-    public sealed class ADD : Instruction<RArgs>
+    public sealed class ADD : Instruction<Args_R>
     {
         public ADD()
         {
@@ -45,7 +45,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Add signed 32-bit integers with overflow trap";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
@@ -62,7 +62,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -72,7 +72,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x20));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -90,7 +90,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // ADDU - Add unsigned 32-bit integers
-    public sealed class ADDU : Instruction<RArgs>
+    public sealed class ADDU : Instruction<Args_R>
     {
         public ADDU()
         {
@@ -103,7 +103,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Add unsigned 32-bit integers without overflow trap";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             uint rs = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
@@ -111,7 +111,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             CpuHelpers.SetReg32(cpu, args.Rd, (int)result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -121,7 +121,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x21));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -139,7 +139,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DADD - Add signed 64-bit integers (overflow trap)
-    public sealed class DADD : Instruction<RArgs>
+    public sealed class DADD : Instruction<Args_R>
     {
         public DADD()
         {
@@ -152,7 +152,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Add signed 64-bit integers with overflow trap";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
@@ -170,7 +170,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -180,7 +180,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x2C));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -198,7 +198,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DADDU - Add unsigned 64-bit integers
-    public sealed class DADDU : Instruction<RArgs>
+    public sealed class DADDU : Instruction<Args_R>
     {
         public DADDU()
         {
@@ -211,7 +211,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Add unsigned 64-bit integers without overflow trap";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -220,7 +220,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -230,7 +230,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x2D));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -248,7 +248,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SUB - Subtract signed 32-bit integers
-    public sealed class SUB : Instruction<RArgs>
+    public sealed class SUB : Instruction<Args_R>
     {
         public SUB()
         {
@@ -261,7 +261,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Subtract signed 32-bit integers with overflow trap";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
@@ -278,7 +278,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -288,7 +288,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x22));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -306,7 +306,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // SUBU - Subtract unsigned 32-bit integers
-    public sealed class SUBU : Instruction<RArgs>
+    public sealed class SUBU : Instruction<Args_R>
     {
         public SUBU()
         {
@@ -319,7 +319,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Subtract unsigned 32-bit integers without overflow trap";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             uint rs = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
@@ -327,7 +327,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             CpuHelpers.SetReg32(cpu, args.Rd, (int)result);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -337,7 +337,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x23));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -355,7 +355,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DSUB - Subtract signed 64-bit integers
-    public sealed class DSUB : Instruction<RArgs>
+    public sealed class DSUB : Instruction<Args_R>
     {
         public DSUB()
         {
@@ -368,7 +368,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Subtract signed 64-bit integers with overflow trap";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
@@ -386,7 +386,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -396,7 +396,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x2E));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -414,7 +414,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // DSUBU - Subtract unsigned 64-bit integers
-    public sealed class DSUBU : Instruction<RArgs>
+    public sealed class DSUBU : Instruction<Args_R>
     {
         public DSUBU()
         {
@@ -427,7 +427,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Subtract unsigned 64-bit integers without overflow trap";
         }
 
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -436,7 +436,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -446,7 +446,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | args[2] << 11 | (Funct ?? 0x2F));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
@@ -464,7 +464,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // ADDI - Add immediate (signed, overflow trap)
-    public sealed class ADDI : Instruction<IArgs>
+    public sealed class ADDI : Instruction<Args_I>
     {
         public ADDI()
         {
@@ -477,7 +477,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             Description = "Add signed immediate with overflow trap";
         }
 
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int imm = CpuHelpers.SignExtend16(args.Imm);
@@ -494,7 +494,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
@@ -504,7 +504,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int imm = CpuHelpers.SignExtend16(args.Imm);
             string eq = Equation
@@ -522,9 +522,9 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     }
 
     // ADDIU - Add immediate unsigned
-    public sealed class ADDIU : Instruction<IArgs>
+    public sealed class ADDIU : Instruction<Args_I>
     {
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int imm = CpuHelpers.SignExtend16(args.Imm);
@@ -532,7 +532,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             CpuHelpers.SetReg32(cpu, args.Rt, result);
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
@@ -542,16 +542,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             return $"I-Type: {Disasm(args, pc)} [Unsigned add immediate, no overflow]";
         }
     }
 
     // DADDI - Add immediate 64-bit (overflow trap)
-    public sealed class DADDI : Instruction<IArgs>
+    public sealed class DADDI : Instruction<Args_I>
     {
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long imm = CpuHelpers.SignExtend16(args.Imm);
@@ -569,7 +569,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
@@ -579,16 +579,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             return $"I-Type: {Disasm(args, pc)} [64-bit signed add immediate with overflow trap]";
         }
     }
 
     // DADDIU - Add immediate 64-bit unsigned
-    public sealed class DADDIU : Instruction<IArgs>
+    public sealed class DADDIU : Instruction<Args_I>
     {
-        public override void Exec(CpuState cpu, IArgs args)
+        public override void Exec(CpuState cpu, Args_I args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long imm = CpuHelpers.SignExtend16(args.Imm);
@@ -597,7 +597,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.RegsHi[args.Rt] = 0;
         }
 
-        public override string Disasm(IArgs args, uint? pc = null)
+        public override string Disasm(Args_I args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
@@ -607,16 +607,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | args[2] & 0xFFFF);
         }
 
-        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             return $"I-Type: {Disasm(args, pc)} [64-bit unsigned add immediate, no overflow]";
         }
     }
 
     // MULT - Multiply signed 32-bit
-    public sealed class MULT : Instruction<RArgs>
+    public sealed class MULT : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
@@ -626,7 +626,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.HI = (uint)(result >> 32 & 0xFFFFFFFF);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -636,16 +636,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x18));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [32-bit signed multiply, result in HI:LO]";
         }
     }
 
     // MULTU - Multiply unsigned 32-bit
-    public sealed class MULTU : Instruction<RArgs>
+    public sealed class MULTU : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             uint rs = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
@@ -655,7 +655,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.HI = (uint)(result >> 32 & 0xFFFFFFFF);
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -665,16 +665,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x19));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [32-bit unsigned multiply, result in HI:LO]";
         }
     }
 
     // DMULT - Multiply signed 64-bit
-    public sealed class DMULT : Instruction<RArgs>
+    public sealed class DMULT : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
@@ -700,7 +700,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.HI = high;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -710,16 +710,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1C));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [64-bit signed multiply, result in HI:LO]";
         }
     }
 
     // DMULTU - Multiply unsigned 64-bit
-    public sealed class DMULTU : Instruction<RArgs>
+    public sealed class DMULTU : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -730,7 +730,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             cpu.HI = high;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -740,16 +740,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1D));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [64-bit unsigned multiply, result in HI:LO]";
         }
     }
 
     // DIV - Divide signed 32-bit
-    public sealed class DIV : Instruction<RArgs>
+    public sealed class DIV : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
@@ -775,7 +775,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -785,16 +785,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1A));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [32-bit signed divide, quotient in LO, remainder in HI]";
         }
     }
 
     // DIVU - Divide unsigned 32-bit
-    public sealed class DIVU : Instruction<RArgs>
+    public sealed class DIVU : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             uint rs = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
@@ -814,7 +814,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -824,16 +824,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1B));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [32-bit unsigned divide, quotient in LO, remainder in HI]";
         }
     }
 
     // DDIV - Divide signed 64-bit
-    public sealed class DDIV : Instruction<RArgs>
+    public sealed class DDIV : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
@@ -859,7 +859,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -869,16 +869,16 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1E));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [64-bit signed divide, quotient in LO, remainder in HI]";
         }
     }
 
     // DDIVU - Divide unsigned 64-bit
-    public sealed class DDIVU : Instruction<RArgs>
+    public sealed class DDIVU : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong rt = cpu.RegsLo[args.Rt];
@@ -898,7 +898,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             }
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
         }
@@ -908,22 +908,22 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | args[1] << 16 | (Funct ?? 0x1F));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [64-bit unsigned divide, quotient in LO, remainder in HI]";
         }
     }
 
     // MFHI - Move from HI register
-    public sealed class MFHI : Instruction<RArgs>
+    public sealed class MFHI : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.RegsLo[args.Rd] = cpu.HI;
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}";
         }
@@ -933,22 +933,22 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[2] << 11 | (Funct ?? 0x10));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [Move from HI register]";
         }
     }
 
     // MFLO - Move from LO register
-    public sealed class MFLO : Instruction<RArgs>
+    public sealed class MFLO : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.RegsLo[args.Rd] = cpu.LO;
             cpu.RegsHi[args.Rd] = 0;
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rd)}";
         }
@@ -958,21 +958,21 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[2] << 11 | (Funct ?? 0x12));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [Move from LO register]";
         }
     }
 
     // MTHI - Move to HI register
-    public sealed class MTHI : Instruction<RArgs>
+    public sealed class MTHI : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.HI = cpu.RegsLo[args.Rs];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}";
         }
@@ -982,21 +982,21 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | (Funct ?? 0x11));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [Move to HI register]";
         }
     }
 
     // MTLO - Move to LO register
-    public sealed class MTLO : Instruction<RArgs>
+    public sealed class MTLO : Instruction<Args_R>
     {
-        public override void Exec(CpuState cpu, RArgs args)
+        public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.LO = cpu.RegsLo[args.Rs];
         }
 
-        public override string Disasm(RArgs args, uint? pc = null)
+        public override string Disasm(Args_R args, uint? pc = null)
         {
             return $"{Name} {CpuHelpers.RegName(args.Rs)}";
         }
@@ -1006,7 +1006,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
             return (uint)(args[0] << 21 | (Funct ?? 0x13));
         }
 
-        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             return $"R-Type: {Disasm(args, pc)} [Move to LO register]";
         }
