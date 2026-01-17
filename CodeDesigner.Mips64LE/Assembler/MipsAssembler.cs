@@ -29,7 +29,7 @@ namespace CodeDesigner.Mips64LE
 
         private static void InitializeInstructions()
         {
-            // R-type instructions
+            // R-type arithmetic instructions (opcode = 0x00)
             RegisterR(new ADD());
             RegisterR(new ADDU());
             RegisterR(new DADD());
@@ -51,13 +51,102 @@ namespace CodeDesigner.Mips64LE
             RegisterR(new MTHI());
             RegisterR(new MTLO());
 
-            // I-type instructions
+            // R-type logical instructions
+            RegisterR(new AND());
+            RegisterR(new OR());
+            RegisterR(new XOR());
+            RegisterR(new NOR());
+
+            // R-type shift instructions
+            RegisterR(new SLL());
+            RegisterR(new SRL());
+            RegisterR(new SRA());
+            RegisterR(new DSLL());
+            RegisterR(new DSRL());
+            RegisterR(new DSRA());
+            RegisterR(new SLLV());
+            RegisterR(new SRLV());
+            RegisterR(new SRAV());
+            RegisterR(new DSLLV());
+            RegisterR(new DSRLV());
+            RegisterR(new DSRAV());
+
+            // R-type compare instructions
+            RegisterR(new SLT());
+            RegisterR(new SLTU());
+
+            // R-type branch/jump instructions
+            RegisterR(new JR());
+            RegisterR(new JALR());
+
+            // R-type special instructions
+            RegisterR(new MOVZ());
+            RegisterR(new MOVN());
+            RegisterR(new NOP());  // Still support assembling NOP
+            RegisterR(new SYNC());
+
+            // R-type trap instructions
+            RegisterR(new SYSCALL());
+            RegisterR(new BREAK());
+            RegisterR(new TGE());
+            RegisterR(new TGEU());
+            RegisterR(new TLT());
+            RegisterR(new TLTU());
+            RegisterR(new TEQ());
+            RegisterR(new TNE());
+
+            // I-type arithmetic instructions
             RegisterI(new ADDI());
             RegisterI(new ADDIU());
             RegisterI(new DADDI());
             RegisterI(new DADDIU());
+
+            // I-type logical instructions
+            RegisterI(new ANDI());
+            RegisterI(new ORI());
+            RegisterI(new XORI());
+
+            // I-type compare instructions
+            RegisterI(new SLTI());
+            RegisterI(new SLTIU());
+
+            // I-type branch instructions
             RegisterI(new BEQ());
             RegisterI(new BNE());
+            RegisterI(new BLEZ());
+            RegisterI(new BGTZ());
+            RegisterI(new BLTZ());
+            RegisterI(new BGEZ());
+            RegisterI(new BEQL());
+            RegisterI(new BNEL());
+
+            // I-type load instructions
+            RegisterI(new LB());
+            RegisterI(new LBU());
+            RegisterI(new LH());
+            RegisterI(new LHU());
+            RegisterI(new LW());
+            RegisterI(new LWU());
+            RegisterI(new LD());
+            RegisterI(new LWL());
+            RegisterI(new LWR());
+            RegisterI(new LDL());
+            RegisterI(new LDR());
+            RegisterI(new LQ());
+
+            // I-type store instructions
+            RegisterI(new SB());
+            RegisterI(new SH());
+            RegisterI(new SW());
+            RegisterI(new SD());
+            RegisterI(new SWL());
+            RegisterI(new SWR());
+            RegisterI(new SDL());
+            RegisterI(new SDR());
+            RegisterI(new SQ());
+
+            // I-type special instructions
+            RegisterI(new LUI());
 
             // J-type instructions
             RegisterJ(new J());
@@ -193,6 +282,30 @@ namespace CodeDesigner.Mips64LE
                 
                 return MipsEncoder.EncodeR(instr.Opcode, rs, rt, rd, 0, instr.Funct ?? 0);
             }
+            else if (argNames.Length == 3 && argNames[0] == "rd" && argNames[1] == "rt" && argNames[2] == "sa")
+            {
+                // Format: rd, rt, sa (e.g., SLL $t0, $s0, 5)
+                if (operands.Length != 3)
+                    throw new ArgumentException($"Expected 3 operands for {instr.Name}");
+                
+                int rd = ParseRegister(operands[0]);
+                int rt = ParseRegister(operands[1]);
+                int sa = ParseImmediate(operands[2]);
+                
+                return MipsEncoder.EncodeR(instr.Opcode, 0, rt, rd, sa, instr.Funct ?? 0);
+            }
+            else if (argNames.Length == 3 && argNames[0] == "rd" && argNames[1] == "rt" && argNames[2] == "rs")
+            {
+                // Format: rd, rt, rs (e.g., SLLV $t0, $s0, $s1 - variable shift)
+                if (operands.Length != 3)
+                    throw new ArgumentException($"Expected 3 operands for {instr.Name}");
+                
+                int rd = ParseRegister(operands[0]);
+                int rt = ParseRegister(operands[1]);
+                int rs = ParseRegister(operands[2]);
+                
+                return MipsEncoder.EncodeR(instr.Opcode, rs, rt, rd, 0, instr.Funct ?? 0);
+            }
             else if (argNames.Length == 2 && argNames[0] == "rs" && argNames[1] == "rt")
             {
                 // Format: rs, rt (e.g., MULT $s0, $s1)
@@ -203,6 +316,17 @@ namespace CodeDesigner.Mips64LE
                 int rt = ParseRegister(operands[1]);
                 
                 return MipsEncoder.EncodeR(instr.Opcode, rs, rt, 0, 0, instr.Funct ?? 0);
+            }
+            else if (argNames.Length == 2 && argNames[0] == "rd" && argNames[1] == "rs")
+            {
+                // Format: rd, rs (e.g., JALR $t0, $ra)
+                if (operands.Length != 2)
+                    throw new ArgumentException($"Expected 2 operands for {instr.Name}");
+                
+                int rd = ParseRegister(operands[0]);
+                int rs = ParseRegister(operands[1]);
+                
+                return MipsEncoder.EncodeR(instr.Opcode, rs, 0, rd, 0, instr.Funct ?? 0);
             }
             else if (argNames.Length == 1 && argNames[0] == "rd")
             {
@@ -216,13 +340,21 @@ namespace CodeDesigner.Mips64LE
             }
             else if (argNames.Length == 1 && argNames[0] == "rs")
             {
-                // Format: rs (e.g., MTHI $s0, MTLO $s0)
+                // Format: rs (e.g., MTHI $s0, MTLO $s0, JR $ra)
                 if (operands.Length != 1)
                     throw new ArgumentException($"Expected 1 operand for {instr.Name}");
                 
                 int rs = ParseRegister(operands[0]);
                 
                 return MipsEncoder.EncodeR(instr.Opcode, rs, 0, 0, 0, instr.Funct ?? 0);
+            }
+            else if (argNames.Length == 0)
+            {
+                // Format: no operands (e.g., NOP, SYNC, SYSCALL)
+                if (operands.Length != 0)
+                    throw new ArgumentException($"Expected 0 operands for {instr.Name}");
+                
+                return MipsEncoder.EncodeR(instr.Opcode, 0, 0, 0, 0, instr.Funct ?? 0);
             }
 
             throw new NotImplementedException($"Unsupported R-type format for {instr.Name}");
@@ -245,6 +377,20 @@ namespace CodeDesigner.Mips64LE
                 
                 return MipsEncoder.EncodeI(instr.Opcode, rs, rt, imm);
             }
+            else if (argNames.Length == 3 && argNames[0] == "rt" && argNames[1] == "offset" && argNames[2] == "rs")
+            {
+                // Format: rt, offset(rs) (e.g., LW $t0, 100($s0))
+                // This is typically written as: lw $t0, 100($s0)
+                // But we parse it as three separate operands: rt, offset, rs
+                if (operands.Length != 3)
+                    throw new ArgumentException($"Expected 3 operands for {instr.Name}");
+                
+                int rt = ParseRegister(operands[0]);
+                int offset = ParseImmediate(operands[1]);
+                int rs = ParseRegister(operands[2]);
+                
+                return MipsEncoder.EncodeI(instr.Opcode, rs, rt, offset);
+            }
             else if (argNames.Length == 3 && argNames[0] == "rs" && argNames[1] == "rt" && argNames[2] == "offset")
             {
                 // Format: rs, rt, offset (e.g., BEQ $s0, $s1, 0x1000)
@@ -256,6 +402,28 @@ namespace CodeDesigner.Mips64LE
                 int offset = ParseImmediate(operands[2]);
                 
                 return MipsEncoder.EncodeI(instr.Opcode, rs, rt, offset);
+            }
+            else if (argNames.Length == 2 && argNames[0] == "rs" && argNames[1] == "offset")
+            {
+                // Format: rs, offset (e.g., BLEZ $s0, 0x1000)
+                if (operands.Length != 2)
+                    throw new ArgumentException($"Expected 2 operands for {instr.Name}");
+                
+                int rs = ParseRegister(operands[0]);
+                int offset = ParseImmediate(operands[1]);
+                
+                return MipsEncoder.EncodeI(instr.Opcode, rs, 0, offset);
+            }
+            else if (argNames.Length == 2 && argNames[0] == "rt" && argNames[1] == "imm")
+            {
+                // Format: rt, imm (e.g., LUI $t0, 0x1234)
+                if (operands.Length != 2)
+                    throw new ArgumentException($"Expected 2 operands for {instr.Name}");
+                
+                int rt = ParseRegister(operands[0]);
+                int imm = ParseImmediate(operands[1]);
+                
+                return MipsEncoder.EncodeI(instr.Opcode, 0, rt, imm);
             }
 
             throw new NotImplementedException($"Unsupported I-type format for {instr.Name}");

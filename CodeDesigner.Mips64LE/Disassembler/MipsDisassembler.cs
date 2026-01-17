@@ -25,7 +25,7 @@ namespace CodeDesigner.Mips64LE
 
         private static void InitializeInstructions()
         {
-            // R-type instructions (opcode = 0x00)
+            // R-type arithmetic instructions (opcode = 0x00)
             RegisterR(new ADD());
             RegisterR(new ADDU());
             RegisterR(new DADD());
@@ -47,13 +47,103 @@ namespace CodeDesigner.Mips64LE
             RegisterR(new MTHI());
             RegisterR(new MTLO());
 
-            // I-type instructions
+            // R-type logical instructions
+            RegisterR(new AND());
+            RegisterR(new OR());
+            RegisterR(new XOR());
+            RegisterR(new NOR());
+
+            // R-type shift instructions
+            RegisterR(new SLL());
+            RegisterR(new SRL());
+            RegisterR(new SRA());
+            RegisterR(new DSLL());
+            RegisterR(new DSRL());
+            RegisterR(new DSRA());
+            RegisterR(new SLLV());
+            RegisterR(new SRLV());
+            RegisterR(new SRAV());
+            RegisterR(new DSLLV());
+            RegisterR(new DSRLV());
+            RegisterR(new DSRAV());
+
+            // R-type compare instructions
+            RegisterR(new SLT());
+            RegisterR(new SLTU());
+
+            // R-type branch/jump instructions
+            RegisterR(new JR());
+            RegisterR(new JALR());
+
+            // R-type special instructions
+            RegisterR(new MOVZ());
+            RegisterR(new MOVN());
+            // Note: NOP is not registered as it conflicts with SLL (both have opcode=0, funct=0)
+            // NOP is just SLL $zero, $zero, 0 which will disassemble as "sll zero, zero, 0"
+            RegisterR(new SYNC());
+
+            // R-type trap instructions
+            RegisterR(new SYSCALL());
+            RegisterR(new BREAK());
+            RegisterR(new TGE());
+            RegisterR(new TGEU());
+            RegisterR(new TLT());
+            RegisterR(new TLTU());
+            RegisterR(new TEQ());
+            RegisterR(new TNE());
+
+            // I-type arithmetic instructions
             RegisterI(new ADDI());
             RegisterI(new ADDIU());
             RegisterI(new DADDI());
             RegisterI(new DADDIU());
+
+            // I-type logical instructions
+            RegisterI(new ANDI());
+            RegisterI(new ORI());
+            RegisterI(new XORI());
+
+            // I-type compare instructions
+            RegisterI(new SLTI());
+            RegisterI(new SLTIU());
+
+            // I-type branch instructions
             RegisterI(new BEQ());
             RegisterI(new BNE());
+            RegisterI(new BLEZ());
+            RegisterI(new BGTZ());
+            RegisterI(new BLTZ());
+            RegisterI(new BGEZ());
+            RegisterI(new BEQL());
+            RegisterI(new BNEL());
+
+            // I-type load instructions
+            RegisterI(new LB());
+            RegisterI(new LBU());
+            RegisterI(new LH());
+            RegisterI(new LHU());
+            RegisterI(new LW());
+            RegisterI(new LWU());
+            RegisterI(new LD());
+            RegisterI(new LWL());
+            RegisterI(new LWR());
+            RegisterI(new LDL());
+            RegisterI(new LDR());
+            RegisterI(new LQ());
+
+            // I-type store instructions
+            RegisterI(new SB());
+            RegisterI(new SH());
+            RegisterI(new SW());
+            RegisterI(new SD());
+            RegisterI(new SWL());
+            RegisterI(new SWR());
+            RegisterI(new SDL());
+            RegisterI(new SDR());
+            RegisterI(new SQ());
+
+            // I-type special instructions
+            RegisterI(new LUI());
 
             // J-type instructions
             RegisterJ(new J());
