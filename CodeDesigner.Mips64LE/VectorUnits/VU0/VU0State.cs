@@ -1,7 +1,7 @@
 using System;
 using System.Numerics;
 
-namespace CodeDesigner.Mips64LE.CPU.VU0
+namespace CodeDesigner.Mips64LE.VectorUnits.VU0
 {
     /// <summary>
     /// Vector Unit 0 (VU0) for the Emotion Engine
