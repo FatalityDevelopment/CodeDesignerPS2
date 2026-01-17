@@ -437,11 +437,9 @@ namespace CodeDesigner.Mips64LE
             
             uint target = (uint)ParseImmediate(operands[0]);
             
-            // If target looks like a full address, extract the 26-bit field
-            if (target > 0x03FFFFFF)
-            {
-                target = (target >> 2) & 0x03FFFFFF;
-            }
+            // J-type instructions store word addresses (address >> 2)
+            // The target address must be word-aligned (divisible by 4)
+            target = (target >> 2) & 0x03FFFFFF;
             
             return MipsEncoder.EncodeJ(instr.Opcode, target);
         }

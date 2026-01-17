@@ -620,7 +620,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 uint pcUpper = (pc.Value + 4) & 0xF0000000;
                 target = pcUpper | target;
             }
-            return $"{Name} 0x{target:X8}";
+            return $"{Name} 0x{target:X}";
         }
 
         public override uint Asm(int[] args)
@@ -675,7 +675,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
                 uint pcUpper = (pc.Value + 4) & 0xF0000000;
                 target = pcUpper | target;
             }
-            return $"{Name} 0x{target:X8}";
+            return $"{Name} 0x{target:X}";
         }
 
         public override uint Asm(int[] args)

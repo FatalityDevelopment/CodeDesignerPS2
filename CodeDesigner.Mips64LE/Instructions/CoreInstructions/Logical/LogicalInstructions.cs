@@ -235,7 +235,8 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
+            // Format immediate without leading zeros for logical instructions
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X}";
         }
 
         public override uint Asm(int[] args)
@@ -284,7 +285,8 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
+            // Format immediate without leading zeros for logical instructions
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X}";
         }
 
         public override uint Asm(int[] args)
@@ -333,7 +335,8 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
+            // Format immediate without leading zeros for logical instructions
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X}";
         }
 
         public override uint Asm(int[] args)

@@ -496,7 +496,9 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
+            // Sign-extend the immediate for display
+            short imm = (short)args.Imm;
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
         }
 
         public override uint Asm(int[] args)
@@ -545,7 +547,9 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
+            // Sign-extend the immediate for display
+            short imm = (short)args.Imm;
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
         }
 
         public override uint Asm(int[] args)
@@ -593,7 +597,9 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
+            // Sign-extend the immediate for display
+            short imm = (short)args.Imm;
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
         }
 
         public override uint Asm(int[] args)
@@ -632,7 +638,9 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
+            // Sign-extend the immediate for display
+            short imm = (short)args.Imm;
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
         }
 
         public override uint Asm(int[] args)
