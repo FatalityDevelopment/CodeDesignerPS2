@@ -524,6 +524,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // ADDIU - Add immediate unsigned
     public sealed class ADDIU : Instruction<Args_I>
     {
+        public ADDIU()
+        {
+            Opcode = 0x09;
+            Funct = null;
+            Name = "addiu";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rt", "rs", "imm"];
+            Equation = "rt = rs + SignExt(imm)";
+            Description = "Add unsigned immediate without overflow trap";
+        }
+
         public override void Exec(CpuState cpu, Args_I args)
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
@@ -551,6 +562,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // DADDI - Add immediate 64-bit (overflow trap)
     public sealed class DADDI : Instruction<Args_I>
     {
+        public DADDI()
+        {
+            Opcode = 0x18;
+            Funct = null;
+            Name = "daddi";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rt", "rs", "imm"];
+            Equation = "rt = rs + SignExt(imm)";
+            Description = "Add immediate 64-bit with overflow trap";
+        }
+
         public override void Exec(CpuState cpu, Args_I args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
@@ -588,6 +610,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // DADDIU - Add immediate 64-bit unsigned
     public sealed class DADDIU : Instruction<Args_I>
     {
+        public DADDIU()
+        {
+            Opcode = 0x19;
+            Funct = null;
+            Name = "daddiu";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rt", "rs", "imm"];
+            Equation = "rt = rs + SignExt(imm)";
+            Description = "Add immediate 64-bit unsigned without overflow trap";
+        }
+
         public override void Exec(CpuState cpu, Args_I args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
@@ -616,6 +649,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // MULT - Multiply signed 32-bit
     public sealed class MULT : Instruction<Args_R>
     {
+        public MULT()
+        {
+            Opcode = 0x00;
+            Funct = 0x18;
+            Name = "mult";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs", "rt"];
+            Equation = "HI:LO = rs * rt";
+            Description = "Multiply signed 32-bit, result in HI:LO";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
@@ -645,6 +689,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // MULTU - Multiply unsigned 32-bit
     public sealed class MULTU : Instruction<Args_R>
     {
+        public MULTU()
+        {
+            Opcode = 0x00;
+            Funct = 0x19;
+            Name = "multu";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs", "rt"];
+            Equation = "HI:LO = rs * rt";
+            Description = "Multiply unsigned 32-bit, result in HI:LO";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             uint rs = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
@@ -674,6 +729,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // DMULT - Multiply signed 64-bit
     public sealed class DMULT : Instruction<Args_R>
     {
+        public DMULT()
+        {
+            Opcode = 0x00;
+            Funct = 0x1C;
+            Name = "dmult";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs", "rt"];
+            Equation = "HI:LO = rs * rt";
+            Description = "Multiply signed 64-bit, result in HI:LO";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
@@ -719,6 +785,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // DMULTU - Multiply unsigned 64-bit
     public sealed class DMULTU : Instruction<Args_R>
     {
+        public DMULTU()
+        {
+            Opcode = 0x00;
+            Funct = 0x1D;
+            Name = "dmultu";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs", "rt"];
+            Equation = "HI:LO = rs * rt";
+            Description = "Multiply unsigned 64-bit, result in HI:LO";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
@@ -749,6 +826,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // DIV - Divide signed 32-bit
     public sealed class DIV : Instruction<Args_R>
     {
+        public DIV()
+        {
+            Opcode = 0x00;
+            Funct = 0x1A;
+            Name = "div";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs", "rt"];
+            Equation = "LO = rs / rt; HI = rs % rt";
+            Description = "Divide signed 32-bit, quotient in LO, remainder in HI";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
@@ -794,6 +882,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // DIVU - Divide unsigned 32-bit
     public sealed class DIVU : Instruction<Args_R>
     {
+        public DIVU()
+        {
+            Opcode = 0x00;
+            Funct = 0x1B;
+            Name = "divu";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs", "rt"];
+            Equation = "LO = rs / rt; HI = rs % rt";
+            Description = "Divide unsigned 32-bit, quotient in LO, remainder in HI";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             uint rs = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
@@ -833,6 +932,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // DDIV - Divide signed 64-bit
     public sealed class DDIV : Instruction<Args_R>
     {
+        public DDIV()
+        {
+            Opcode = 0x00;
+            Funct = 0x1E;
+            Name = "ddiv";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs", "rt"];
+            Equation = "LO = rs / rt; HI = rs % rt";
+            Description = "Divide signed 64-bit, quotient in LO, remainder in HI";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             long rs = (long)cpu.RegsLo[args.Rs];
@@ -878,6 +988,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // DDIVU - Divide unsigned 64-bit
     public sealed class DDIVU : Instruction<Args_R>
     {
+        public DDIVU()
+        {
+            Opcode = 0x00;
+            Funct = 0x1F;
+            Name = "ddivu";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs", "rt"];
+            Equation = "LO = rs / rt; HI = rs % rt";
+            Description = "Divide unsigned 64-bit, quotient in LO, remainder in HI";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             ulong rs = cpu.RegsLo[args.Rs];
@@ -917,6 +1038,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // MFHI - Move from HI register
     public sealed class MFHI : Instruction<Args_R>
     {
+        public MFHI()
+        {
+            Opcode = 0x00;
+            Funct = 0x10;
+            Name = "mfhi";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rd"];
+            Equation = "rd = HI";
+            Description = "Move from HI register";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.RegsLo[args.Rd] = cpu.HI;
@@ -942,6 +1074,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // MFLO - Move from LO register
     public sealed class MFLO : Instruction<Args_R>
     {
+        public MFLO()
+        {
+            Opcode = 0x00;
+            Funct = 0x12;
+            Name = "mflo";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rd"];
+            Equation = "rd = LO";
+            Description = "Move from LO register";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.RegsLo[args.Rd] = cpu.LO;
@@ -967,6 +1110,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // MTHI - Move to HI register
     public sealed class MTHI : Instruction<Args_R>
     {
+        public MTHI()
+        {
+            Opcode = 0x00;
+            Funct = 0x11;
+            Name = "mthi";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs"];
+            Equation = "HI = rs";
+            Description = "Move to HI register";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.HI = cpu.RegsLo[args.Rs];
@@ -991,6 +1145,17 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
     // MTLO - Move to LO register
     public sealed class MTLO : Instruction<Args_R>
     {
+        public MTLO()
+        {
+            Opcode = 0x00;
+            Funct = 0x13;
+            Name = "mtlo";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rs"];
+            Equation = "LO = rs";
+            Description = "Move to LO register";
+        }
+
         public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.LO = cpu.RegsLo[args.Rs];
