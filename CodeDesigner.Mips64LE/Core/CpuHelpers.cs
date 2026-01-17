@@ -29,6 +29,8 @@ namespace CodeDesigner.Mips64LE.CPU
         /// <summary>
         /// Format an immediate value in PS2 MIPS assembler style (with $ prefix)
         /// </summary>
+        /// <param name="imm">Immediate value (16-bit)</param>
+        /// <returns>Formatted immediate string (e.g., "$FFD0")</returns>
         public static string FormatImmediate(int imm)
         {
             return $"${imm & 0xFFFF:X4}";
@@ -36,7 +38,11 @@ namespace CodeDesigner.Mips64LE.CPU
 
         /// <summary>
         /// Format an offset for load/store instructions in PS2 MIPS assembler style
+        /// Note: Negative offsets are displayed as 16-bit hex (e.g., -48 becomes $FFD0)
+        /// This matches PS2 MIPS assembler convention where all immediates are shown in hex
         /// </summary>
+        /// <param name="offset">Offset value</param>
+        /// <returns>Formatted offset string (e.g., "$FFD0")</returns>
         public static string FormatOffset(int offset)
         {
             return $"${offset & 0xFFFF:X4}";
