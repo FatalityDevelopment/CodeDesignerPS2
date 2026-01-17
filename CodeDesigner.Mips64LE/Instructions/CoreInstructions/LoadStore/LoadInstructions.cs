@@ -48,7 +48,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -100,7 +100,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -154,7 +154,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -207,7 +207,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -265,7 +265,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -322,7 +322,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -383,7 +383,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -449,7 +449,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -515,7 +515,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -581,7 +581,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -647,7 +647,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)
@@ -719,7 +719,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
         public override string Disasm(Args_I args, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {offset}({CpuHelpers.RegName(args.Rs)})";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.FormatOffset(offset)}({CpuHelpers.RegName(args.Rs)})";
         }
 
         public override uint Asm(int[] args)

@@ -27,6 +27,22 @@ namespace CodeDesigner.Mips64LE.CPU
         }
 
         /// <summary>
+        /// Format an immediate value in PS2 MIPS assembler style (with $ prefix)
+        /// </summary>
+        public static string FormatImmediate(int imm)
+        {
+            return $"${imm & 0xFFFF:X4}";
+        }
+
+        /// <summary>
+        /// Format an offset for load/store instructions in PS2 MIPS assembler style
+        /// </summary>
+        public static string FormatOffset(int offset)
+        {
+            return $"${offset & 0xFFFF:X4}";
+        }
+
+        /// <summary>
         /// Sign-extend a 16-bit value to 32-bit integer.
         /// </summary>
         public static int SignExtend16(int val)

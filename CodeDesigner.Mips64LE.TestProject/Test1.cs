@@ -407,8 +407,8 @@ namespace CodeDesigner.Mips64LE.TestProject
 
         private static string NormalizeAsm(string asm)
         {
-            // Normalize assembly for comparison: lowercase, remove $ prefix, consistent spacing
-            asm = asm.ToLowerInvariant().Replace("$", "").Replace(",", " ");
+            // Normalize assembly for comparison: lowercase, remove $ prefix from registers, consistent spacing
+            asm = asm.ToLowerInvariant().Replace(",", " ");
             // Remove comments
             int commentIndex = asm.IndexOf('#');
             if (commentIndex >= 0)
@@ -416,25 +416,59 @@ namespace CodeDesigner.Mips64LE.TestProject
                 asm = asm.Substring(0, commentIndex);
             }
             // Split and rejoin to normalize whitespace
-            var parts = asm.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            var parts = asm.Split(new[] { ' ', '\t', '(', ')' }, StringSplitOptions.RemoveEmptyEntries);
+            
+            // Register names (used to avoid treating them as hex)
+            var registerNames = new System.Collections.Generic.HashSet<string>
+            {
+                "zero", "at", "v0", "v1", "a0", "a1", "a2", "a3",
+                "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7",
+                "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
+                "t8", "t9", "k0", "k1", "gp", "sp", "fp", "ra"
+            };
             
             // Normalize hex/decimal immediates: convert all numeric values to consistent format
             for (int i = 0; i < parts.Length; i++)
             {
-                // Try to parse as a number (hex or decimal)
-                if (parts[i].StartsWith("0x"))
+                string part = parts[i];
+                
+                // Skip if it's a register name (without or with $ prefix)
+                string partWithoutDollar = part.TrimStart('$');
+                if (registerNames.Contains(partWithoutDollar))
                 {
-                    // It's hex - convert to a normalized hex format with proper padding
-                    if (int.TryParse(parts[i].Substring(2), System.Globalization.NumberStyles.HexNumber, null, out int hexValue))
+                    parts[i] = partWithoutDollar; // Remove $ from registers
+                    continue;
+                }
+                
+                // Remove $ prefix for immediates
+                bool hadDollarPrefix = false;
+                if (part.StartsWith("$"))
+                {
+                    part = part.Substring(1);
+                    hadDollarPrefix = true;
+                }
+                
+                // Try to parse as a number (hex or decimal)
+                if (part.StartsWith("0x"))
+                {
+                    // It's hex with 0x prefix
+                    if (int.TryParse(part.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out int hexValue))
                     {
-                        // Normalize to 4-digit hex for small values (< 0x10000), 8-digit for larger
                         if (hexValue < 0x10000)
                             parts[i] = $"0x{hexValue:x4}";
                         else
                             parts[i] = $"0x{hexValue:x8}";
                     }
                 }
-                else if (int.TryParse(parts[i], out int decValue))
+                else if (hadDollarPrefix && int.TryParse(part, System.Globalization.NumberStyles.HexNumber, null, out int hexValue))
+                {
+                    // It had $ prefix, so it's a hex value
+                    if (hexValue < 0x10000)
+                        parts[i] = $"0x{hexValue:x4}";
+                    else
+                        parts[i] = $"0x{hexValue:x8}";
+                }
+                else if (int.TryParse(part, out int decValue))
                 {
                     // It's a decimal - convert to normalized hex format
                     if (decValue >= 0 && decValue < 0x10000)
