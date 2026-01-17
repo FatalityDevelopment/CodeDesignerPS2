@@ -496,10 +496,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            // Sign-extend the 16-bit immediate field to a signed 16-bit value for display.
-            // args.Imm is masked to 16 bits during decoding, so the cast is safe and intentional.
-            short imm = unchecked((short)(args.Imm & 0xFFFF));
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
 
         public override uint Asm(int[] args)
@@ -548,10 +545,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            // Sign-extend the 16-bit immediate field to a signed 16-bit value for display.
-            // args.Imm is masked to 16 bits during decoding, so the cast is safe and intentional.
-            short imm = unchecked((short)(args.Imm & 0xFFFF));
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
 
         public override uint Asm(int[] args)
@@ -599,10 +593,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            // Sign-extend the 16-bit immediate field to a signed 16-bit value for display.
-            // args.Imm is masked to 16 bits during decoding, so the cast is safe and intentional.
-            short imm = unchecked((short)(args.Imm & 0xFFFF));
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
 
         public override uint Asm(int[] args)
@@ -641,10 +632,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            // Sign-extend the 16-bit immediate field to a signed 16-bit value for display.
-            // args.Imm is masked to 16 bits during decoding, so the cast is safe and intentional.
-            short imm = unchecked((short)(args.Imm & 0xFFFF));
-            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, 0x{args.Imm:X4}";
         }
 
         public override uint Asm(int[] args)
