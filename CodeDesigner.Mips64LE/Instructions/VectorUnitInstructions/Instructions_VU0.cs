@@ -41,7 +41,7 @@ Load/Store Instructions:
 Note: Component masking (.x, .y, .z, .w, .xyz, etc.) is supported
 */
 
-namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
+namespace CodeDesigner.Mips64LE.Instructions.VectorUnitInstructions
 {
     // Helper class for component masking
     public static class VU0Helpers
@@ -245,7 +245,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
             Vector4 acc = cpu.VU0.ReadACC();
-            Vector4 result = acc + (vs * vt);
+            Vector4 result = acc + vs * vt;
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
@@ -271,7 +271,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
                 Vector4 vs = cpu.VU0.ReadVF(args.Rs);
                 Vector4 vt = cpu.VU0.ReadVF(args.Rt);
                 Vector4 acc = cpu.VU0.ReadACC();
-                Vector4 result = acc + (vs * vt);
+                Vector4 result = acc + vs * vt;
                 return $"{eq} => ACC({acc}) + ({vs} * {vt}) = {result}";
             }
             return eq;
@@ -299,7 +299,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 vt = cpu.VU0.ReadVF(args.Rt);
             Vector4 acc = cpu.VU0.ReadACC();
-            Vector4 result = acc - (vs * vt);
+            Vector4 result = acc - vs * vt;
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
 
@@ -325,7 +325,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
                 Vector4 vs = cpu.VU0.ReadVF(args.Rs);
                 Vector4 vt = cpu.VU0.ReadVF(args.Rt);
                 Vector4 acc = cpu.VU0.ReadACC();
-                Vector4 result = acc - (vs * vt);
+                Vector4 result = acc - vs * vt;
                 return $"{eq} => ACC({acc}) - ({vs} * {vt}) = {result}";
             }
             return eq;
@@ -607,10 +607,10 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
         {
             Vector4 vs = cpu.VU0.ReadVF(args.Rs);
             Vector4 result = new Vector4(
-                (float)(int)vs.X,
-                (float)(int)vs.Y,
-                (float)(int)vs.Z,
-                (float)(int)vs.W
+                (int)vs.X,
+                (int)vs.Y,
+                (int)vs.Z,
+                (int)vs.W
             );
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
@@ -666,10 +666,10 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
             int iw = BitConverter.SingleToInt32Bits(vs.W);
             
             Vector4 result = new Vector4(
-                (float)ix,
-                (float)iy,
-                (float)iz,
-                (float)iw
+                ix,
+                iy,
+                iz,
+                iw
             );
             cpu.VU0.WriteVF(args.Rd, result, _mask);
         }
