@@ -595,4 +595,351 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
             return eq;
         }
     }
+    // Add these classes to your existing COP0Instructions.cs file
+
+    // DI - Disable Interrupts
+    public sealed class DI : Instruction<RArgs>
+    {
+        public DI()
+        {
+            Opcode = 0x10;
+            Funct = 0x00;
+            Name = "di";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rt"];
+            Equation = "rt = Status; Status.IE = 0";
+            Description = "Disable Interrupts - clears IE bit in Status register and returns previous Status";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // Read current Status register (COP0 register 12)
+            uint status = cpu.COP0.ReadRegister32(12);
+
+            // Store previous status in rt (if rt != 0)
+            if (args.Rt != 0)
+            {
+                long signExtended = (int)status;
+                cpu.RegsLo[args.Rt] = (ulong)signExtended;
+                cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
+            }
+
+            // Clear IE bit (bit 0)
+            status &= ~(1u << 0);
+            cpu.COP0.WriteRegister32(12, status);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            if (args.Rt != 0)
+                return $"{Name} {CpuHelpers.RegName(args.Rt)}";
+            return Name;
+        }
+
+        public override uint Asm(int[] args)
+        {
+            int rt = args.Length > 0 ? args[0] : 0;
+            return (uint)(Opcode << 26 | 0x0B << 21 | rt << 16 | 0x0C << 11);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (cpu != null)
+            {
+                uint status = cpu.COP0.ReadRegister32(12);
+                bool ieEnabled = (status & 0x1) != 0;
+                return $"{Equation} => IE was {ieEnabled}, now disabled";
+            }
+            return "Disable interrupts, return previous Status";
+        }
+    }
+
+    // EI - Enable Interrupts
+    public sealed class EI : Instruction<RArgs>
+    {
+        public EI()
+        {
+            Opcode = 0x10;
+            Funct = 0x00;
+            Name = "ei";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rt"];
+            Equation = "rt = Status; Status.IE = 1";
+            Description = "Enable Interrupts - sets IE bit in Status register and returns previous Status";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // Read current Status register (COP0 register 12)
+            uint status = cpu.COP0.ReadRegister32(12);
+
+            // Store previous status in rt (if rt != 0)
+            if (args.Rt != 0)
+            {
+                long signExtended = (int)status;
+                cpu.RegsLo[args.Rt] = (ulong)signExtended;
+                cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
+            }
+
+            // Set IE bit (bit 0)
+            status |= (1u << 0);
+            cpu.COP0.WriteRegister32(12, status);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            if (args.Rt != 0)
+                return $"{Name} {CpuHelpers.RegName(args.Rt)}";
+            return Name;
+        }
+
+        public override uint Asm(int[] args)
+        {
+            int rt = args.Length > 0 ? args[0] : 0;
+            return (uint)(Opcode << 26 | 0x0B << 21 | rt << 16 | 0x14 << 11);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (cpu != null)
+            {
+                uint status = cpu.COP0.ReadRegister32(12);
+                bool ieEnabled = (status & 0x1) != 0;
+                return $"{Equation} => IE was {ieEnabled}, now enabled";
+            }
+            return "Enable interrupts, return previous Status";
+        }
+    }
+
+    // WAIT - Wait for interrupt (PS2 EE specific)
+    public sealed class WAIT : Instruction<RArgs>
+    {
+        public WAIT()
+        {
+            Opcode = 0x10;
+            Funct = 0x20;
+            Name = "wait";
+            ArgType = InstrArgType.R;
+            ArgNames = [];
+            Equation = "wait_for_interrupt()";
+            Description = "Wait for interrupt - enters low-power mode until interrupt occurs";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // In a full implementation, this would:
+            // 1. Check if interrupts are enabled
+            // 2. Enter low-power/idle state
+            // 3. Wait for interrupt to occur
+            // 4. Resume execution after interrupt is serviced
+
+            // For emulation, this is typically a hint that the CPU should
+            // yield execution until an interrupt is pending
+
+            // Check if interrupts are enabled
+            uint status = cpu.COP0.ReadRegister32(12);
+            bool ieEnabled = (status & 0x1) != 0;
+
+            if (!ieEnabled)
+            {
+                // If interrupts disabled, this is effectively a NOP or may cause exception
+                // PS2 behavior: continues execution
+                return;
+            }
+
+            // Signal that CPU is waiting (implementation-specific)
+            // This would be handled by the emulator's main loop
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return Name;
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (cpu != null)
+            {
+                uint status = cpu.COP0.ReadRegister32(12);
+                bool ieEnabled = (status & 0x1) != 0;
+                return $"{Equation} => IE={ieEnabled}, {(ieEnabled ? "will wait" : "continues")}";
+            }
+            return "Wait for interrupt (low-power mode)";
+        }
+    }
+
+    // DERET - Debug Exception Return
+    public sealed class DERET : Instruction<RArgs>
+    {
+        public DERET()
+        {
+            Opcode = 0x10;
+            Funct = 0x1F;
+            Name = "deret";
+            ArgType = InstrArgType.R;
+            ArgNames = [];
+            Equation = "PC = DEPC; clear_debug_mode()";
+            Description = "Debug Exception Return - returns from debug exception, restores PC from DEPC";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // Read DEPC (Debug Exception Program Counter) - COP0 register 23
+            ulong depc = cpu.COP0.ReadRegister64(23);
+            cpu.PC = depc;
+
+            // Clear DM bit in Debug register (bit 30 of register 22)
+            uint debug = cpu.COP0.ReadRegister32(22);
+            debug &= ~(1u << 30); // Clear DM (Debug Mode) bit
+            cpu.COP0.WriteRegister32(22, debug);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return Name;
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (cpu != null)
+            {
+                ulong depc = cpu.COP0.ReadRegister64(23);
+                return $"{Equation} => return to PC = 0x{depc:X16}";
+            }
+            return "Return from debug exception, restore PC from DEPC";
+        }
+    }
+
+    // BC0F - Branch on COP0 false (rarely used, included for completeness)
+    public sealed class BC0F : Instruction<IArgs>
+    {
+        public BC0F()
+        {
+            Opcode = 0x10;
+            Funct = null;
+            Name = "bc0f";
+            ArgType = InstrArgType.I;
+            ArgNames = ["offset"];
+            Equation = "if (!COP0_CC) PC = PC + 4 + (offset << 2)";
+            Description = "Branch on COP0 condition false (rarely used)";
+        }
+
+        public override void Exec(CpuState cpu, IArgs args)
+        {
+            // COP0 doesn't typically have a condition code like COP1
+            // This instruction is rarely used on MIPS64/PS2
+            // For completeness, assume a condition bit exists
+
+            // Read Status register and check a condition bit (implementation-specific)
+            uint status = cpu.COP0.ReadRegister32(12);
+            bool condition = (status & (1u << 2)) != 0; // Arbitrary condition bit
+
+            if (!condition)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+        }
+
+        public override string Disasm(IArgs args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            if (pc.HasValue)
+            {
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Name} 0x{target:X}";
+            }
+            return $"{Name} {offset}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x08 << 21 | (args[0] >> 2) & 0xFFFF);
+        }
+
+        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+
+            if (cpu != null && pc.HasValue)
+            {
+                uint status = cpu.COP0.ReadRegister32(12);
+                bool condition = (status & (1u << 2)) != 0;
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Equation} => CC={condition}, {(condition ? "no branch" : $"branch to 0x{target:X}")}";
+            }
+            return Equation;
+        }
+    }
+
+    // BC0T - Branch on COP0 true (rarely used, included for completeness)
+    public sealed class BC0T : Instruction<IArgs>
+    {
+        public BC0T()
+        {
+            Opcode = 0x10;
+            Funct = null;
+            Name = "bc0t";
+            ArgType = InstrArgType.I;
+            ArgNames = ["offset"];
+            Equation = "if (COP0_CC) PC = PC + 4 + (offset << 2)";
+            Description = "Branch on COP0 condition true (rarely used)";
+        }
+
+        public override void Exec(CpuState cpu, IArgs args)
+        {
+            // COP0 doesn't typically have a condition code like COP1
+            // This instruction is rarely used on MIPS64/PS2
+
+            // Read Status register and check a condition bit (implementation-specific)
+            uint status = cpu.COP0.ReadRegister32(12);
+            bool condition = (status & (1u << 2)) != 0; // Arbitrary condition bit
+
+            if (condition)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+        }
+
+        public override string Disasm(IArgs args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            if (pc.HasValue)
+            {
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Name} 0x{target:X}";
+            }
+            return $"{Name} {offset}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x08 << 21 | 0x01 << 16 | (args[0] >> 2) & 0xFFFF);
+        }
+
+        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+
+            if (cpu != null && pc.HasValue)
+            {
+                uint status = cpu.COP0.ReadRegister32(12);
+                bool condition = (status & (1u << 2)) != 0;
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Equation} => CC={condition}, {(condition ? $"branch to 0x{target:X}" : "no branch")}";
+            }
+            return Equation;
+        }
+    }
 }
