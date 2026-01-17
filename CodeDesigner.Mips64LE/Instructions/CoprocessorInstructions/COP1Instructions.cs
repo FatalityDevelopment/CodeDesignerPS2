@@ -1,0 +1,1137 @@
+﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Cpu.Instructions;
+using CodeDesigner.Mips64LE.CPU;
+using CodeDesigner.Mips64LE.CPU.COP1;
+using System;
+
+/*
+| Instruction | Description |
+|-------------|-------------|
+| MFC1 | Move from COP1 (FPU) register to GPR |
+| DMFC1 | Move from COP1 register to GPR (64-bit) |
+| MTC1 | Move from GPR to COP1 (FPU) register |
+| DMTC1 | Move from GPR to COP1 register (64-bit) |
+| CFC1 | Move control from COP1 |
+| CTC1 | Move control to COP1 |
+| LWC1 | Load word to COP1 (FPU) register |
+| LDC1 | Load doubleword to COP1 register |
+| SWC1 | Store word from COP1 register |
+| SDC1 | Store doubleword from COP1 register |
+| ADD.S | Add single-precision floating point |
+| SUB.S | Subtract single-precision floating point |
+| MUL.S | Multiply single-precision floating point |
+| DIV.S | Divide single-precision floating point |
+| SQRT.S | Square root single-precision floating point |
+| ABS.S | Absolute value single-precision |
+| NEG.S | Negate single-precision |
+| MOV.S | Move single-precision floating point |
+| CVT.S.W | Convert word to single-precision |
+| CVT.W.S | Convert single-precision to word |
+| C.EQ.S | Compare equal single-precision |
+| C.LT.S | Compare less than single-precision |
+| C.LE.S | Compare less than or equal single-precision |
+| BC1F | Branch on FPU false |
+| BC1T | Branch on FPU true |
+*/
+
+namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
+{
+    // MFC1 - Move from COP1 register to GPR (32-bit)
+    public sealed class MFC1 : Instruction<RArgs>
+    {
+        public MFC1()
+        {
+            Opcode = 0x11;
+            Funct = 0x00;
+            Name = "mfc1";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rt", "fs"];
+            Equation = "rt = FPR[fs]";
+            Description = "Move from COP1 register to GPR - reads 32-bit float register as bits";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // Get the float as bits
+            uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
+            
+            // Sign-extend to 64-bit and store in GPR
+            long signExtended = (int)bits;
+            cpu.RegsLo[args.Rt] = (ulong)signExtended;
+            cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x00 << 21 | args[0] << 16 | args[1] << 11);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("fs", $"$f{args.Rd}");
+            
+            if (cpu != null)
+            {
+                float value = cpu.FPR[args.Rd];
+                uint bits = BitConverter.SingleToUInt32Bits(value);
+                return $"{eq} => FPR[{args.Rd}] = {value} (0x{bits:X8})";
+            }
+            return eq;
+        }
+    }
+
+    // DMFC1 - Move from COP1 register to GPR (64-bit)
+    public sealed class DMFC1 : Instruction<RArgs>
+    {
+        public DMFC1()
+        {
+            Opcode = 0x11;
+            Funct = 0x00;
+            Name = "dmfc1";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rt", "fs"];
+            Equation = "rt = FPR[fs] (64-bit)";
+            Description = "Move from COP1 register to GPR (64-bit) - reads double-precision bits";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // Treat two consecutive float registers as a double (fs and fs+1)
+            // This is a simplified implementation; real FPU may handle differently
+            uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
+            cpu.RegsLo[args.Rt] = bits;
+            cpu.RegsHi[args.Rt] = 0;
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x01 << 21 | args[0] << 16 | args[1] << 11);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("fs", $"$f{args.Rd}");
+            
+            if (cpu != null)
+            {
+                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
+                return $"{eq} => FPR[{args.Rd}] bits = 0x{bits:X16}";
+            }
+            return eq;
+        }
+    }
+
+    // MTC1 - Move from GPR to COP1 register (32-bit)
+    public sealed class MTC1 : Instruction<RArgs>
+    {
+        public MTC1()
+        {
+            Opcode = 0x11;
+            Funct = 0x00;
+            Name = "mtc1";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rt", "fs"];
+            Equation = "FPR[fs] = rt[31:0]";
+            Description = "Move from GPR to COP1 register - writes 32-bit value as float bits";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // Write lower 32 bits of GPR to FPR as bits
+            uint bits = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
+            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle(bits);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x04 << 21 | args[0] << 16 | args[1] << 11);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("fs", $"$f{args.Rd}");
+            
+            if (cpu != null)
+            {
+                uint bits = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
+                float value = BitConverter.UInt32BitsToSingle(bits);
+                return $"{eq} => write 0x{bits:X8} ({value}) to FPR[{args.Rd}]";
+            }
+            return eq;
+        }
+    }
+
+    // DMTC1 - Move from GPR to COP1 register (64-bit)
+    public sealed class DMTC1 : Instruction<RArgs>
+    {
+        public DMTC1()
+        {
+            Opcode = 0x11;
+            Funct = 0x00;
+            Name = "dmtc1";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rt", "fs"];
+            Equation = "FPR[fs] = rt (64-bit)";
+            Description = "Move from GPR to COP1 register (64-bit) - writes full 64-bit value";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // Write 64-bit GPR value to FPR (simplified as single float from lower bits)
+            uint bits = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
+            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle(bits);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, $f{args.Rd}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x05 << 21 | args[0] << 16 | args[1] << 11);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("fs", $"$f{args.Rd}");
+            
+            if (cpu != null)
+            {
+                ulong value = cpu.RegsLo[args.Rt];
+                return $"{eq} => write 0x{value:X16} to FPR[{args.Rd}]";
+            }
+            return eq;
+        }
+    }
+
+    // CFC1 - Move control from COP1
+    public sealed class CFC1 : Instruction<RArgs>
+    {
+        public CFC1()
+        {
+            Opcode = 0x11;
+            Funct = 0x00;
+            Name = "cfc1";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rt", "fs"];
+            Equation = "rt = FCR[fs]";
+            Description = "Move control from COP1 - reads FPU control/status register";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // Read FPU control register using COP1State
+            uint value = cpu.COP1.ReadControlRegister(args.Rd);
+            
+            // Sign-extend to 64-bit
+            long signExtended = (int)value;
+            cpu.RegsLo[args.Rt] = (ulong)signExtended;
+            cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x02 << 21 | args[0] << 16 | args[1] << 11);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string regName = COP1State.GetControlRegisterName(args.Rd);
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("fs", $"${args.Rd}");
+            
+            if (cpu != null)
+            {
+                uint value = cpu.COP1.ReadControlRegister(args.Rd);
+                return $"{eq} => {regName} = 0x{value:X8}";
+            }
+            return $"{eq} => read {regName}";
+        }
+    }
+
+    // CTC1 - Move control to COP1
+    public sealed class CTC1 : Instruction<RArgs>
+    {
+        public CTC1()
+        {
+            Opcode = 0x11;
+            Funct = 0x00;
+            Name = "ctc1";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rt", "fs"];
+            Equation = "FCR[fs] = rt[31:0]";
+            Description = "Move control to COP1 - writes to FPU control/status register";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            // Write to FPU control register using COP1State
+            uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
+            cpu.COP1.WriteControlRegister(args.Rd, value);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} {CpuHelpers.RegName(args.Rt)}, ${args.Rd}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x06 << 21 | args[0] << 16 | args[1] << 11);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string regName = COP1State.GetControlRegisterName(args.Rd);
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("fs", $"${args.Rd}");
+            
+            if (cpu != null)
+            {
+                uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
+                return $"{eq} => write 0x{value:X8} to {regName}";
+            }
+            return $"{eq} => write to {regName}";
+        }
+    }
+
+    // LWC1 - Load word to COP1 register
+    public sealed class LWC1 : Instruction<IArgs>
+    {
+        public LWC1()
+        {
+            Opcode = 0x31;
+            Funct = null;
+            Name = "lwc1";
+            ArgType = InstrArgType.I;
+            ArgNames = ["ft", "offset", "base"];
+            Equation = "FPR[ft] = Memory[base + offset]";
+            Description = "Load word to COP1 register - loads 32-bit float from memory";
+        }
+
+        public override void Exec(CpuState cpu, IArgs args)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
+            
+            // Load 32-bit value from memory
+            if (addr + 3 < (ulong)cpu.Memory.Length)
+            {
+                uint bits = BitConverter.ToUInt32(cpu.Memory, (int)addr);
+                cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(bits);
+            }
+        }
+
+        public override string Disasm(IArgs args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
+        }
+
+        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation
+                .Replace("ft", $"$f{args.Rt}")
+                .Replace("base", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
+                return $"{eq} => load from addr 0x{addr:X16}";
+            }
+            return eq;
+        }
+    }
+
+    // SWC1 - Store word from COP1 register
+    public sealed class SWC1 : Instruction<IArgs>
+    {
+        public SWC1()
+        {
+            Opcode = 0x39;
+            Funct = null;
+            Name = "swc1";
+            ArgType = InstrArgType.I;
+            ArgNames = ["ft", "offset", "base"];
+            Equation = "Memory[base + offset] = FPR[ft]";
+            Description = "Store word from COP1 register - stores 32-bit float to memory";
+        }
+
+        public override void Exec(CpuState cpu, IArgs args)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
+            
+            // Store 32-bit value to memory
+            if (addr + 3 < (ulong)cpu.Memory.Length)
+            {
+                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
+                byte[] bytes = BitConverter.GetBytes(bits);
+                Array.Copy(bytes, 0, cpu.Memory, (long)addr, 4);
+            }
+        }
+
+        public override string Disasm(IArgs args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
+        }
+
+        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation
+                .Replace("ft", $"$f{args.Rt}")
+                .Replace("base", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
+                float value = cpu.FPR[args.Rt];
+                return $"{eq} => store {value} to addr 0x{addr:X16}";
+            }
+            return eq;
+        }
+    }
+
+    // ADD.S - Add single-precision floating point
+    public sealed class ADD_S : Instruction<RArgs>
+    {
+        public ADD_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x00;
+            Name = "add.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs", "ft"];
+            Equation = "fd = fs + ft";
+            Description = "Add single-precision floating point";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            cpu.FPR[args.Rd] = cpu.FPR[args.Rs] + cpu.FPR[args.Rt];
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x00);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}")
+                .Replace("ft", $"$f{args.Rt}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                float ft = cpu.FPR[args.Rt];
+                return $"{eq} => {fs} + {ft} = {fs + ft}";
+            }
+            return eq;
+        }
+    }
+
+    // SUB.S - Subtract single-precision floating point
+    public sealed class SUB_S : Instruction<RArgs>
+    {
+        public SUB_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x01;
+            Name = "sub.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs", "ft"];
+            Equation = "fd = fs - ft";
+            Description = "Subtract single-precision floating point";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            cpu.FPR[args.Rd] = cpu.FPR[args.Rs] - cpu.FPR[args.Rt];
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x01);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}")
+                .Replace("ft", $"$f{args.Rt}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                float ft = cpu.FPR[args.Rt];
+                return $"{eq} => {fs} - {ft} = {fs - ft}";
+            }
+            return eq;
+        }
+    }
+
+    // MUL.S - Multiply single-precision floating point
+    public sealed class MUL_S : Instruction<RArgs>
+    {
+        public MUL_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x02;
+            Name = "mul.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs", "ft"];
+            Equation = "fd = fs * ft";
+            Description = "Multiply single-precision floating point";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            cpu.FPR[args.Rd] = cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x02);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}")
+                .Replace("ft", $"$f{args.Rt}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                float ft = cpu.FPR[args.Rt];
+                return $"{eq} => {fs} * {ft} = {fs * ft}";
+            }
+            return eq;
+        }
+    }
+
+    // DIV.S - Divide single-precision floating point
+    public sealed class DIV_S : Instruction<RArgs>
+    {
+        public DIV_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x03;
+            Name = "div.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs", "ft"];
+            Equation = "fd = fs / ft";
+            Description = "Divide single-precision floating point";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            cpu.FPR[args.Rd] = cpu.FPR[args.Rs] / cpu.FPR[args.Rt];
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x03);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}")
+                .Replace("ft", $"$f{args.Rt}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                float ft = cpu.FPR[args.Rt];
+                return $"{eq} => {fs} / {ft} = {fs / ft}";
+            }
+            return eq;
+        }
+    }
+
+    // SQRT.S - Square root single-precision floating point
+    public sealed class SQRT_S : Instruction<RArgs>
+    {
+        public SQRT_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x04;
+            Name = "sqrt.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs"];
+            Equation = "fd = sqrt(fs)";
+            Description = "Square root single-precision floating point";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            cpu.FPR[args.Rd] = MathF.Sqrt(cpu.FPR[args.Rs]);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x04);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                return $"{eq} => sqrt({fs}) = {MathF.Sqrt(fs)}";
+            }
+            return eq;
+        }
+    }
+
+    // ABS.S - Absolute value single-precision
+    public sealed class ABS_S : Instruction<RArgs>
+    {
+        public ABS_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x05;
+            Name = "abs.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs"];
+            Equation = "fd = abs(fs)";
+            Description = "Absolute value single-precision floating point";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            cpu.FPR[args.Rd] = MathF.Abs(cpu.FPR[args.Rs]);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x05);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                return $"{eq} => abs({fs}) = {MathF.Abs(fs)}";
+            }
+            return eq;
+        }
+    }
+
+    // MOV.S - Move single-precision floating point
+    public sealed class MOV_S : Instruction<RArgs>
+    {
+        public MOV_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x06;
+            Name = "mov.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs"];
+            Equation = "fd = fs";
+            Description = "Move single-precision floating point";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            cpu.FPR[args.Rd] = cpu.FPR[args.Rs];
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x06);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                return $"{eq} => {fs}";
+            }
+            return eq;
+        }
+    }
+
+    // NEG.S - Negate single-precision
+    public sealed class NEG_S : Instruction<RArgs>
+    {
+        public NEG_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x07;
+            Name = "neg.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs"];
+            Equation = "fd = -fs";
+            Description = "Negate single-precision floating point";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            cpu.FPR[args.Rd] = -cpu.FPR[args.Rs];
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x07);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                return $"{eq} => -({fs}) = {-fs}";
+            }
+            return eq;
+        }
+    }
+
+    // CVT.W.S - Convert single-precision to word
+    public sealed class CVT_W_S : Instruction<RArgs>
+    {
+        public CVT_W_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x24;
+            Name = "cvt.w.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs"];
+            Equation = "fd = (int)fs";
+            Description = "Convert single-precision to 32-bit signed integer";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            int intValue = (int)cpu.FPR[args.Rs];
+            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)intValue);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x24);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                return $"{eq} => convert {fs} to {(int)fs}";
+            }
+            return eq;
+        }
+    }
+
+    // CVT.S.W - Convert word to single-precision
+    public sealed class CVT_S_W : Instruction<RArgs>
+    {
+        public CVT_S_W()
+        {
+            Opcode = 0x11;
+            Funct = 0x20;
+            Name = "cvt.s.w";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fd", "fs"];
+            Equation = "fd = (float)fs";
+            Description = "Convert 32-bit signed integer to single-precision";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            int intValue = (int)BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rs]);
+            cpu.FPR[args.Rd] = (float)intValue;
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x14 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x20);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fd", $"$f{args.Rd}")
+                .Replace("fs", $"$f{args.Rs}");
+            
+            if (cpu != null)
+            {
+                int intValue = (int)BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rs]);
+                return $"{eq} => convert {intValue} to {(float)intValue}";
+            }
+            return eq;
+        }
+    }
+
+    // C.EQ.S - Compare equal single-precision
+    public sealed class C_EQ_S : Instruction<RArgs>
+    {
+        public C_EQ_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x32;
+            Name = "c.eq.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fs", "ft"];
+            Equation = "CC = (fs == ft)";
+            Description = "Compare equal single-precision - sets condition code";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            bool result = cpu.FPR[args.Rs] == cpu.FPR[args.Rt];
+            cpu.COP1.SetConditionCode(result);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rs}, $f{args.Rt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x32);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fs", $"$f{args.Rs}")
+                .Replace("ft", $"$f{args.Rt}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                float ft = cpu.FPR[args.Rt];
+                bool result = fs == ft;
+                return $"{eq} => {fs} == {ft} = {result}";
+            }
+            return eq;
+        }
+    }
+
+    // C.LT.S - Compare less than single-precision
+    public sealed class C_LT_S : Instruction<RArgs>
+    {
+        public C_LT_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x3C;
+            Name = "c.lt.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fs", "ft"];
+            Equation = "CC = (fs < ft)";
+            Description = "Compare less than single-precision - sets condition code";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            bool result = cpu.FPR[args.Rs] < cpu.FPR[args.Rt];
+            cpu.COP1.SetConditionCode(result);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rs}, $f{args.Rt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x3C);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fs", $"$f{args.Rs}")
+                .Replace("ft", $"$f{args.Rt}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                float ft = cpu.FPR[args.Rt];
+                bool result = fs < ft;
+                return $"{eq} => {fs} < {ft} = {result}";
+            }
+            return eq;
+        }
+    }
+
+    // C.LE.S - Compare less than or equal single-precision
+    public sealed class C_LE_S : Instruction<RArgs>
+    {
+        public C_LE_S()
+        {
+            Opcode = 0x11;
+            Funct = 0x3E;
+            Name = "c.le.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fs", "ft"];
+            Equation = "CC = (fs <= ft)";
+            Description = "Compare less than or equal single-precision - sets condition code";
+        }
+
+        public override void Exec(CpuState cpu, RArgs args)
+        {
+            bool result = cpu.FPR[args.Rs] <= cpu.FPR[args.Rt];
+            cpu.COP1.SetConditionCode(result);
+        }
+
+        public override string Disasm(RArgs args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rs}, $f{args.Rt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x3E);
+        }
+
+        public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("fs", $"$f{args.Rs}")
+                .Replace("ft", $"$f{args.Rt}");
+            
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs];
+                float ft = cpu.FPR[args.Rt];
+                bool result = fs <= ft;
+                return $"{eq} => {fs} <= {ft} = {result}";
+            }
+            return eq;
+        }
+    }
+
+    // BC1F - Branch on FPU false
+    public sealed class BC1F : Instruction<IArgs>
+    {
+        public BC1F()
+        {
+            Opcode = 0x11;
+            Funct = null;
+            Name = "bc1f";
+            ArgType = InstrArgType.I;
+            ArgNames = ["offset"];
+            Equation = "if (!CC) PC = PC + 4 + (offset << 2)";
+            Description = "Branch on FPU condition code false";
+        }
+
+        public override void Exec(CpuState cpu, IArgs args)
+        {
+            if (!cpu.COP1.GetConditionCode())
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+        }
+
+        public override string Disasm(IArgs args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            if (pc.HasValue)
+            {
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Name} 0x{target:X}";
+            }
+            return $"{Name} {offset}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x08 << 21 | (args[0] >> 2) & 0xFFFF);
+        }
+
+        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            
+            if (cpu != null && pc.HasValue)
+            {
+                bool cc = cpu.COP1.GetConditionCode();
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Equation} => CC={cc}, {(cc ? "no branch" : $"branch to 0x{target:X}")}";
+            }
+            return Equation;
+        }
+    }
+
+    // BC1T - Branch on FPU true
+    public sealed class BC1T : Instruction<IArgs>
+    {
+        public BC1T()
+        {
+            Opcode = 0x11;
+            Funct = null;
+            Name = "bc1t";
+            ArgType = InstrArgType.I;
+            ArgNames = ["offset"];
+            Equation = "if (CC) PC = PC + 4 + (offset << 2)";
+            Description = "Branch on FPU condition code true";
+        }
+
+        public override void Exec(CpuState cpu, IArgs args)
+        {
+            if (cpu.COP1.GetConditionCode())
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+        }
+
+        public override string Disasm(IArgs args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            if (pc.HasValue)
+            {
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Name} 0x{target:X}";
+            }
+            return $"{Name} {offset}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x08 << 21 | 0x01 << 16 | (args[0] >> 2) & 0xFFFF);
+        }
+
+        public override string Analyze(IArgs args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            
+            if (cpu != null && pc.HasValue)
+            {
+                bool cc = cpu.COP1.GetConditionCode();
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Equation} => CC={cc}, {(cc ? $"branch to 0x{target:X}" : "no branch")}";
+            }
+            return Equation;
+        }
+    }
+}

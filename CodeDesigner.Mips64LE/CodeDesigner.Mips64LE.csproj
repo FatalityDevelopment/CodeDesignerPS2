@@ -7,4 +7,15 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Folder Include="Core\Memory\" />
+    <Folder Include="Core\Registers\" />
+    <Folder Include="Emulator\Pipeline\" />
+    <Folder Include="Tests\AssemblerTests\" />
+    <Folder Include="Tests\DisassemblerTests\" />
+    <Folder Include="Tests\InstructionTests\" />
+    <Folder Include="VectorUnits\VU0\" />
+    <Folder Include="VectorUnits\VU1\" />
+  </ItemGroup>
+
 </Project>

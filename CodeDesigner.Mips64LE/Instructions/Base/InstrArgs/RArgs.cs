@@ -1,0 +1,24 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace CodeDesigner.Mips64LE.Cpu.InstrArgs
+{
+    public readonly struct RArgs
+    {
+        public int Rs { get; }
+        public int Rt { get; }
+        public int Rd { get; }
+        public int Shamt { get; }
+
+        public RArgs(int rs, int rt, int rd, int shamt)
+        {
+            Rs = rs;
+            Rt = rt;
+            Rd = rd;
+            Shamt = shamt;
+        }
+    }
+}
