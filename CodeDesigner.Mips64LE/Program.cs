@@ -29,11 +29,14 @@ namespace CodeDesigner.Mips64LE
                 "sub $t3, $t4, $t5",        // R-type: subtraction
                 "and $t0, $t1, $t2",        // R-type: logical AND
                 "or $t0, $t1, $t2",         // R-type: logical OR
-                "sll $t0, $t1, 4",          // R-type: shift left logical
+                "sll $t0, $t1, 4",          // R-type: shift left logical with immediate
+                "srl $t2, $t3, 8",          // R-type: shift right logical with immediate
                 "addi $t0, $t1, 100",       // I-type: add immediate
-                "ori $t0, $t1, 0xFF",       // I-type: OR immediate
+                "ori $t0, $t1, 0xFF",       // I-type: OR immediate (hex)
+                "lui $t0, 0x1234",          // I-type: load upper immediate
                 "lw $t0, 4($sp)",           // I-type: load word
                 "sw $t0, 8($sp)",           // I-type: store word
+                "lw $t0, 0x10($sp)",        // I-type: load with hex offset
                 "beq $t0, $t1, 16",         // I-type: branch if equal
                 "bne $t0, $t1, -4",         // I-type: branch if not equal
                 "j 0x1000",                 // J-type: jump

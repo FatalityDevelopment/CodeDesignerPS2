@@ -269,6 +269,16 @@ namespace CodeDesigner.Mips64LE
             // Handle different R-type formats
             if (operands.Count == 3)
             {
+                // Check if this is a shift instruction with immediate shamt
+                // Format: rd, rt, shamt (e.g., sll $t0, $t1, 4)
+                if (IsShiftWithImmediate(operands[2]))
+                {
+                    int rdShift = ParseRegister(operands[0]);
+                    int rtShift = ParseRegister(operands[1]);
+                    int shamt = ParseImmediate(operands[2]);
+                    return new int[] { 0, rtShift, rdShift, shamt }; // rs = 0 for shift instructions
+                }
+                
                 // Standard 3-register format: rd, rs, rt (e.g., add $t0, $t1, $t2)
                 int rd = ParseRegister(operands[0]);
                 int rs = ParseRegister(operands[1]);
@@ -296,6 +306,16 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
+        /// Checks if an operand is an immediate value (not a register)
+        /// </summary>
+        private bool IsShiftWithImmediate(string operand)
+        {
+            operand = operand.Trim();
+            // If it doesn't start with $ and isn't a register name, it's likely immediate
+            return !operand.StartsWith("$") && !_registerMap.ContainsKey(operand);
+        }
+
+        /// <summary>
         /// Parses I-type instruction operands
         /// Returns: [rs, rt, immediate]
         /// </summary>
@@ -306,6 +326,7 @@ namespace CodeDesigner.Mips64LE
             if (operands.Count == 3)
             {
                 // Standard format: rt, rs, imm (e.g., addi $t0, $t1, 100)
+                // Or branch format: rs, rt, offset (e.g., beq $t0, $t1, label)
                 int rt = ParseRegister(operands[0]);
                 int rs = ParseRegister(operands[1]);
                 int imm = ParseImmediate(operands[2]);
@@ -314,7 +335,7 @@ namespace CodeDesigner.Mips64LE
             else if (operands.Count == 2)
             {
                 // Load/Store format: rt, offset(rs) (e.g., lw $t0, 4($sp))
-                var match = Regex.Match(operands[1], @"^(-?\d+)\((.+)\)$");
+                var match = Regex.Match(operands[1], @"^(-?(?:0x[0-9a-fA-F]+|0b[01]+|\d+))\((.+)\)$");
                 if (match.Success)
                 {
                     int rt = ParseRegister(operands[0]);
@@ -324,15 +345,15 @@ namespace CodeDesigner.Mips64LE
                 }
                 else
                 {
-                    // Branch format: rs, rt, offset (simplified to 2 regs)
-                    int reg1 = ParseRegister(operands[0]);
-                    int reg2 = ParseRegister(operands[1]);
-                    return new int[] { reg1, reg2, 0 };
+                    // LUI format: rt, imm (e.g., lui $t0, 0x1234)
+                    int rt = ParseRegister(operands[0]);
+                    int imm = ParseImmediate(operands[1]);
+                    return new int[] { 0, rt, imm };
                 }
             }
             else if (operands.Count == 1)
             {
-                // LUI format: rt, imm
+                // Single operand for special I-type instructions
                 int rt = ParseRegister(operands[0]);
                 return new int[] { 0, rt, 0 };
             }
