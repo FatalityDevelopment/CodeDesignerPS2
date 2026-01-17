@@ -417,6 +417,33 @@ namespace CodeDesigner.Mips64LE.TestProject
             }
             // Split and rejoin to normalize whitespace
             var parts = asm.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            
+            // Normalize hex/decimal immediates: convert all numeric values to consistent format
+            for (int i = 0; i < parts.Length; i++)
+            {
+                // Try to parse as a number (hex or decimal)
+                if (parts[i].StartsWith("0x"))
+                {
+                    // It's hex - convert to a normalized hex format with proper padding
+                    if (int.TryParse(parts[i].Substring(2), System.Globalization.NumberStyles.HexNumber, null, out int hexValue))
+                    {
+                        // Normalize to 4-digit hex for small values (< 0x10000), 8-digit for larger
+                        if (hexValue < 0x10000)
+                            parts[i] = $"0x{hexValue:x4}";
+                        else
+                            parts[i] = $"0x{hexValue:x8}";
+                    }
+                }
+                else if (int.TryParse(parts[i], out int decValue))
+                {
+                    // It's a decimal - convert to normalized hex format
+                    if (decValue >= 0 && decValue < 0x10000)
+                        parts[i] = $"0x{decValue:x4}";
+                    else if (decValue >= 0)
+                        parts[i] = $"0x{decValue:x8}";
+                }
+            }
+            
             return string.Join(" ", parts);
         }
 
