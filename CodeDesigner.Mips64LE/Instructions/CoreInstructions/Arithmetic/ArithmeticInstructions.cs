@@ -496,8 +496,9 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            // Sign-extend the immediate for display
-            short imm = (short)args.Imm;
+            // Sign-extend the 16-bit immediate field to a signed 16-bit value for display.
+            // args.Imm is masked to 16 bits during decoding, so the cast is safe and intentional.
+            short imm = unchecked((short)(args.Imm & 0xFFFF));
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
         }
 
@@ -547,8 +548,9 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            // Sign-extend the immediate for display
-            short imm = (short)args.Imm;
+            // Sign-extend the 16-bit immediate field to a signed 16-bit value for display.
+            // args.Imm is masked to 16 bits during decoding, so the cast is safe and intentional.
+            short imm = unchecked((short)(args.Imm & 0xFFFF));
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
         }
 
@@ -597,8 +599,9 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            // Sign-extend the immediate for display
-            short imm = (short)args.Imm;
+            // Sign-extend the 16-bit immediate field to a signed 16-bit value for display.
+            // args.Imm is masked to 16 bits during decoding, so the cast is safe and intentional.
+            short imm = unchecked((short)(args.Imm & 0xFFFF));
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
         }
 
@@ -638,8 +641,9 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
 
         public override string Disasm(Args_I args, uint? pc = null)
         {
-            // Sign-extend the immediate for display
-            short imm = (short)args.Imm;
+            // Sign-extend the 16-bit immediate field to a signed 16-bit value for display.
+            // args.Imm is masked to 16 bits during decoding, so the cast is safe and intentional.
+            short imm = unchecked((short)(args.Imm & 0xFFFF));
             return $"{Name} {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}, {imm}";
         }
 
