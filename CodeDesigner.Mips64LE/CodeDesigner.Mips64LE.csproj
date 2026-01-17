@@ -8,9 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Folder Include="Coprocessors\COP2\" />
     <Folder Include="Core\Memory\" />
     <Folder Include="Core\Registers\" />
     <Folder Include="Emulator\Pipeline\" />
+    <Folder Include="Instructions\MMI\" />
     <Folder Include="Tests\AssemblerTests\" />
     <Folder Include="Tests\DisassemblerTests\" />
     <Folder Include="Tests\InstructionTests\" />
