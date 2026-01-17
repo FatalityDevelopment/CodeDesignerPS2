@@ -1,4 +1,6 @@
-﻿namespace CodeDesigner.Mips64LE
+﻿using System;
+
+namespace CodeDesigner.Mips64LE
 {
     class Program
     {

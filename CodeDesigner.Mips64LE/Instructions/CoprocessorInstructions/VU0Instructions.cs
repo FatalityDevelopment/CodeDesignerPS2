@@ -232,7 +232,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
         public VMADD()
         {
             Opcode = 0x12; // COP2
-            Funct = 0x2C;
+            Funct = 0x30;
             Name = "vmadd";
             ArgType = InstrArgType.R;
             ArgNames = ["vfd", "vfs", "vft"];
@@ -256,7 +256,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x2C);
+            return (uint)(Opcode << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x30);
         }
 
         public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
@@ -544,7 +544,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
         public VMULA()
         {
             Opcode = 0x12; // COP2
-            Funct = 0x2E;
+            Funct = 0x31;
             Name = "vmula";
             ArgType = InstrArgType.R;
             ArgNames = ["vfs", "vft"];
@@ -567,7 +567,7 @@ namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | Funct ?? 0x2E);
+            return (uint)(Opcode << 26 | args[0] << 21 | args[1] << 16 | Funct ?? 0x31);
         }
 
         public override string Analyze(RArgs args, CpuState? cpu = null, uint? pc = null)
