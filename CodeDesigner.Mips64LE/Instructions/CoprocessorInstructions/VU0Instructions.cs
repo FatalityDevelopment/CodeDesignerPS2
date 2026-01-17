@@ -1,7 +1,7 @@
 using CodeDesigner.Mips64LE.Cpu.InstrArgs;
 using CodeDesigner.Mips64LE.Cpu.Instructions;
 using CodeDesigner.Mips64LE.CPU;
-using CodeDesigner.Mips64LE.CPU.VU0;
+using CodeDesigner.Mips64LE.VectorUnits.VU0;
 using System;
 using System.Numerics;
 

@@ -1,6 +1,6 @@
 ﻿using CodeDesigner.Mips64LE.CPU.COP0;
 using CodeDesigner.Mips64LE.CPU.COP1;
-using CodeDesigner.Mips64LE.CPU.VU0;
+using CodeDesigner.Mips64LE.VectorUnits.VU0;
 using System;
 
 namespace CodeDesigner.Mips64LE.CPU
