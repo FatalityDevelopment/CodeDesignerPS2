@@ -1,5 +1,6 @@
 ﻿using CodeDesigner.Mips64LE.CPU.COP0;
 using CodeDesigner.Mips64LE.CPU.COP1;
+using CodeDesigner.Mips64LE.CPU.VU0;
 using System;
 
 namespace CodeDesigner.Mips64LE.CPU
@@ -37,6 +38,9 @@ namespace CodeDesigner.Mips64LE.CPU
 
         // COP1 - Floating Point Coprocessor
         public COP1State COP1 { get; } = new COP1State();
+
+        // VU0 - Vector Unit 0 (COP2 in Macro Mode)
+        public VU0State VU0 { get; } = new VU0State();
 
         public CpuState()
         {

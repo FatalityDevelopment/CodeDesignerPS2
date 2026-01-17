@@ -17,7 +17,7 @@ namespace CodeDesigner.Mips64LE.Cpu.Instructions
             // Example: MFC0 rt, rd
             if (Coprocessor == 0)
             {
-                CpuHelpers.SetReg32(cpu, args.Rt, (int)cpu.COP0[args.Rd]);
+                CpuHelpers.SetReg32(cpu, args.Rt, (int)cpu.COP0.ReadRegister32(args.Rd));
             }
             else
             {
