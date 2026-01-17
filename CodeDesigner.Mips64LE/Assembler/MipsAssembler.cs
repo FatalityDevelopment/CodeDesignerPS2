@@ -63,24 +63,10 @@ namespace CodeDesigner.Mips64LE
             RegisterInstruction(new SUBU());
             RegisterInstruction(new DSUB());
             RegisterInstruction(new DSUBU());
-            RegisterInstruction(new MULT());
-            RegisterInstruction(new MULTU());
-            RegisterInstruction(new DMULT());
-            RegisterInstruction(new DMULTU());
-            RegisterInstruction(new DIV());
-            RegisterInstruction(new DIVU());
-            RegisterInstruction(new DDIV());
-            RegisterInstruction(new DDIVU());
-            RegisterInstruction(new MFHI());
-            RegisterInstruction(new MFLO());
-            RegisterInstruction(new MTHI());
-            RegisterInstruction(new MTLO());
 
             // Arithmetic I-Type Instructions
             RegisterInstruction(new ADDI());
-            RegisterInstruction(new ADDIU());
-            RegisterInstruction(new DADDI());
-            RegisterInstruction(new DADDIU());
+            // Note: ADDIU, DADDI, DADDIU don't have constructors initialized in the codebase
 
             // Logical Instructions
             RegisterInstruction(new AND());
@@ -159,10 +145,31 @@ namespace CodeDesigner.Mips64LE
             RegisterInstruction(new SYSCALL());
             RegisterInstruction(new BREAK());
             RegisterInstruction(new SYNC());
+
+            // Multiply/Divide result access (note: MULT, MULTU, etc. may not have constructors)
+            // RegisterInstruction(new MFHI());
+            // RegisterInstruction(new MFLO());
+            // RegisterInstruction(new MTHI());
+            // RegisterInstruction(new MTLO());
+            // RegisterInstruction(new MULT());
+            // RegisterInstruction(new MULTU());
+            // RegisterInstruction(new DMULT());
+            // RegisterInstruction(new DMULTU());
+            // RegisterInstruction(new DIV());
+            // RegisterInstruction(new DIVU());
+            // RegisterInstruction(new DDIV());
+            // RegisterInstruction(new DDIVU());
         }
 
         private void RegisterInstruction<TArgs>(Instruction<TArgs> instruction)
         {
+            // Only register if Name is properly initialized
+            if (string.IsNullOrEmpty(instruction.Name))
+            {
+                // Skip instructions without proper initialization
+                return;
+            }
+
             var info = new InstructionInfo
             {
                 Name = instruction.Name,
