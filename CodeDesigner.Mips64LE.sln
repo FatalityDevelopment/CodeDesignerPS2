@@ -1,9 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36511.14 d17.14
+VisualStudioVersion = 17.14.36511.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE", "CodeDesigner.Mips64LE\CodeDesigner.Mips64LE.csproj", "{F853B404-EBF3-47DA-B9DE-E634DF32BC6F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE.TestProject", "CodeDesigner.Mips64LE.TestProject\CodeDesigner.Mips64LE.TestProject.csproj", "{E039FFEF-26C5-40C9-9E5B-18970D64259D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +17,10 @@ Global
 		{F853B404-EBF3-47DA-B9DE-E634DF32BC6F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F853B404-EBF3-47DA-B9DE-E634DF32BC6F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F853B404-EBF3-47DA-B9DE-E634DF32BC6F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E039FFEF-26C5-40C9-9E5B-18970D64259D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E039FFEF-26C5-40C9-9E5B-18970D64259D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E039FFEF-26C5-40C9-9E5B-18970D64259D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E039FFEF-26C5-40C9-9E5B-18970D64259D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

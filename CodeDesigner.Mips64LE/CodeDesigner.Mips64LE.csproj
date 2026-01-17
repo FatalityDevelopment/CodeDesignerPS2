@@ -8,14 +8,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Tests\**" />
+    <EmbeddedResource Remove="Tests\**" />
+    <None Remove="Tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Folder Include="Coprocessors\COP2\" />
     <Folder Include="Core\Memory\" />
     <Folder Include="Core\Registers\" />
     <Folder Include="Emulator\Pipeline\" />
     <Folder Include="Instructions\MMI\" />
-    <Folder Include="Tests\AssemblerTests\" />
-    <Folder Include="Tests\DisassemblerTests\" />
-    <Folder Include="Tests\InstructionTests\" />
     <Folder Include="VectorUnits\VU0\" />
     <Folder Include="VectorUnits\VU1\" />
   </ItemGroup>
