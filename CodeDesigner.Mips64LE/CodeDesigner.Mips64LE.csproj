@@ -8,19 +8,22 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Coprocessors\**" />
+    <Compile Remove="Instructions\**" />
     <Compile Remove="Tests\**" />
+    <Compile Remove="VectorUnits\**" />
+    <EmbeddedResource Remove="Coprocessors\**" />
+    <EmbeddedResource Remove="Instructions\**" />
     <EmbeddedResource Remove="Tests\**" />
+    <EmbeddedResource Remove="VectorUnits\**" />
+    <None Remove="Coprocessors\**" />
+    <None Remove="Instructions\**" />
     <None Remove="Tests\**" />
+    <None Remove="VectorUnits\**" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Coprocessors\COP2\" />
-    <Folder Include="Core\Memory\" />
-    <Folder Include="Core\Registers\" />
-    <Folder Include="Emulator\Pipeline\" />
-    <Folder Include="Instructions\MMI\" />
-    <Folder Include="VectorUnits\VU0\" />
-    <Folder Include="VectorUnits\VU1\" />
+    <ProjectReference Include="..\CodeDesiger.Mips64LE.Common\CodeDesiger.Mips64LE.Common.csproj" />
   </ItemGroup>
 
 </Project>

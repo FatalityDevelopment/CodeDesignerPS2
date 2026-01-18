@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CodeDesigner.Mips64LE\CodeDesigner.Mips64LE.csproj" />
+    <ProjectReference Include="..\CodeDesiger.Mips64LE.Common\CodeDesiger.Mips64LE.Common.csproj" />
   </ItemGroup>
 
   <ItemGroup>

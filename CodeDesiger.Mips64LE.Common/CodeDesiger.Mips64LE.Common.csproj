@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="Coprocessors\COP2\" />
+    <Folder Include="Core\Memory\" />
+    <Folder Include="Core\Registers\" />
+    <Folder Include="Emulator\Pipeline\" />
+    <Folder Include="Instructions\MMI\" />
+    <Folder Include="VectorUnits\VU1\" />
+  </ItemGroup>
+
+</Project>
