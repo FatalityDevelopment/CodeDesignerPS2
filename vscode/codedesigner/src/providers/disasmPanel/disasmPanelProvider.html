@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <h3>Disasm Panel Loaded</h3>
+  <button id="btn">Connect</button>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    document.getElementById('btn').onclick = () => {
+      vscode.postMessage({ command: 'connect' });
+    };
+  </script>
+</body>
+</html>

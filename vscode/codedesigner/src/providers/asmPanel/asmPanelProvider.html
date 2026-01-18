@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'unsafe-inline';
+               script-src 'nonce-REPLACED_BY_BACKEND';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+    margin: 0;
+    padding: 10px;
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+    background: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+}
+
+select, textarea, button {
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+}
+
+select, textarea {
+    width: 100%;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    margin-bottom: 8px;
+    padding: 4px;
+}
+
+textarea {
+    height: 220px;
+    resize: vertical;
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+}
+
+button {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 4px 10px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="row">
+    <select>
+        <option>Select Emulator...</option>
+    </select>
+    <button id="connectBtn">Connect</button>
+    <button disabled>Send</button>
+</div>
+
+<textarea id="codeArea"
+    placeholder="Paste CDS source here (optional)..."></textarea>
+
+<div class="row">
+    <button id="compileBtn">Compile</button>
+    <button id="decompileBtn">Decompile</button>
+</div>
+
+<script>
+const vscode = acquireVsCodeApi();
+
+document.getElementById('connectBtn').onclick = () => {
+    vscode.postMessage({ command: 'connect' });
+};
+
+document.getElementById('compileBtn').onclick = () => {
+    vscode.postMessage({ command: 'compile' });
+};
+
+document.getElementById('decompileBtn').onclick = () => {
+    vscode.postMessage({ command: 'decompile' });
+};
+
+window.addEventListener('message', event => {
+    const message = event.data;
+    if (message.command === 'setCode') {
+        document.getElementById('codeArea').value = message.code;
+    }
+});
+</script>
+
+</body>
+</html>

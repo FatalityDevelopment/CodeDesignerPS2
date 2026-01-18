@@ -1,0 +1,52 @@
+{
+  // Comment configuration
+  "comments": {
+    "lineComment": "//",
+    "blockComment": ["/*", "*/"]
+  },
+
+  // Brackets for auto-closing and highlighting
+  "brackets": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"]
+  ],
+
+  // Auto-closing pairs (typing an opening char inserts closing char)
+  "autoClosingPairs": [
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"", "notIn": ["string"] },
+    { "open": "'", "close": "'", "notIn": ["string", "comment"] }
+  ],
+
+  // Surrounding pairs (when selecting text and typing, wrap it)
+  "surroundingPairs": [
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"" },
+    { "open": "'", "close": "'" }
+  ],
+
+  // Folding markers (optional, useful for /* */ blocks)
+  "folding": {
+    "markers": {
+      "start": "^\\s*/\\*",
+      "end": "\\*/"
+    }
+  },
+
+  // Indentation rules
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*.*:$", // Label definitions
+      "action": { "indentAction": "none", "indent": "none" }
+    },
+    {
+      "beforeText": "^\\s*(address|hexcode|print)\\b", // Directives
+      "action": { "indentAction": "none", "indent": "none" }
+    }
+  ]
+}

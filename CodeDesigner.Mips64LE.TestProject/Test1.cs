@@ -1,5 +1,6 @@
 ﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.Cpu; // Add this using directive to bring MipsEncoder into scope
+using CodeDesigner.Mips64LE.Cpu;
+using CodeDesigner.Mips64LE.Common; // Add this using directive to bring MipsEncoder into scope
 
 namespace CodeDesigner.Mips64LE.TestProject
 {

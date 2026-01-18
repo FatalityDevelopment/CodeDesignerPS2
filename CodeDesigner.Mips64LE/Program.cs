@@ -1,5 +1,4 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using System;
+﻿using CodeDesigner.Mips64LE.Common;
 
 namespace CodeDesigner.Mips64LE
 {

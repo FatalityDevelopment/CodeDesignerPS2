@@ -1,0 +1,134 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "CDS (PS2 MIPS64 EE)",
+  "scopeName": "source.cds",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#labelReferences" },
+    { "include": "#labels" },
+    { "include": "#directives" },
+    { "include": "#pseudoInstructions" },
+    { "include": "#instructions" },
+    { "include": "#hexLiterals" },
+    { "include": "#registers" },
+    { "include": "#numbers" },
+    { "include": "#strings" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.cds",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.line.semicolon.cds",
+          "match": ";.*$"
+        },
+        {
+          "name": "comment.line.hash.cds",
+          "match": "#.*$"
+        },
+        {
+          "name": "comment.block.cds",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+
+    "labels": {
+      "patterns": [
+        {
+          "name": "entity.name.label.definition.cds",
+          "match": "^[A-Za-z_][A-Za-z0-9_]*:"
+        }
+      ]
+    },
+
+    "labelReferences": {
+      "patterns": [
+        {
+          "name": "entity.name.label.reference.cds",
+          "match": ":[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+
+    "directives": {
+      "patterns": [
+        {
+          "name": "keyword.directive.cds",
+          "match": "\\b(address|hexcode|print)\\b"
+        },
+        {
+          "name": "keyword.directive.mips",
+          "match": "\\.(text|data|bss|align|globl|global|section|set|macro|endm|ascii|string|byte|half|word|dword|float|double)\\b"
+        }
+      ]
+    },
+
+    "pseudoInstructions": {
+      "patterns": [
+        {
+          "name": "keyword.instruction.pseudo.cds",
+          "match": "\\b(setreg)\\b"
+        }
+      ]
+    },
+
+    "instructions": {
+      "patterns": [
+        {
+          "name": "keyword.instruction.cds",
+          "match": "\\b(NOP|ADD|ADDI|ADDIU|ADDU|AND|ANDI|BEQ|BEQL|BGEZ|BGEZAL|BGEZALL|BGEZL|BGTZ|BGTZL|BLEZ|BLEZL|BLTZ|BLTZAL|BLTZALL|BLTZL|BNE|BNEL|BREAK|DADD|DADDI|DADDIU|DADDU|DIV|DIVU|DSLL|DSLL32|DSLLV|DSRA|DSRA32|DSRAV|DSRL|DSRL32|DSRLV|DSUB|DSUBU|J|JAL|JALR|JR|LB|LBU|LD|LDL|LDR|LH|LHU|LUI|LW|LWL|LWR|LWU|MFHI|MFLO|MOVN|MOVZ|MTLO|MULT|MULTU|NOR|OR|ORI|PREF|SB|SD|SDL|SDR|SH|SLL|SLLV|SLT|SLTI|SLTIU|SLTU|SRA|SRAV|SRL|SRLV|SUB|SUBU|SW|SWL|SWR|SYNC|SYNC\\.P|SYSCALL|TEQ|TEQI|TGE|TGEI|TGEIU|TGEU|TLT|TLTI|TLTIU|TLTU|TNE|TNEI|XOR|XORI|DIV1|DIVU1|LQ|MADD|MADD1|MADDU|MFHI1|MFLO1|MFSA|MTHI1|MTLO1|MTSA|MTSAB|MTSAH|MULT1|MULTU1|PABSH|PABSW|PADDB|PADDH|PADDSB|PADDSH|PADDSW|PADDUB|PADDUH|PADDUW|PADDW|PADSBH|PAND|PCEQB|PCEQH|PCEQW|PCGTB|PCGTH|PCGTW|PCPYH|PCPYLD|PCPYUD|PDIVBW|PDIVUW|PDIVW|PEXCH|PEXCW|PEXEH|PEXEW|PEXT5|PEXTLB|PEXTLH|PEXTLW|PEXTUB|PEXTUH|PEXTUW|PHMADH|PHMSBH|PINTEH|PINTH|PLZCW|PMADDH|PMADDUW|PMADDW|PMAXH|PMAXW|PMFHI|PMFHL\\.LH|PMFHL\\.LW|PMFHL\\.SH|PMFHL\\.SLW|PMFHL\\.UW|PMFLO|PMINH|PMINW|PMSUBH|PMSUBW|PMTHI|PMTHL\\.LW|PMTLO|PMULTH|PMULTUW|PMULTW|PNOR|POR|PPAC5|PPACB|PPACH|PPACW|PREVH|PROT3W|PSLLH|PSLLVW|PSLLW|PSRAH|PSRAVW|PSRAW|PSRLH|PSRLVW|PSRLW|PSUBB|PSUBH|PSUBSB|PSUBSH|PSUBSW|PSUBUB|PSUBUH|PSUBUW|PSUBW|PXOR|QFSRV|SQ|BC0F|BC0FL|BC0T|BC0TL|DI|EI|ERET|MFC0|MTC0|ABS\\.S|ADD\\.S|ADDA\\.S|BC1F|BC1FL|BC1T|BC1TL|C\\.EQ\\.S|C\\.F\\.S|C\\.LE\\.S|C\\.LT\\.S|CFC1|CTC1|CVT\\.S\\.W|CVT\\.W\\.S|DIV\\.S|LWC1|MADD\\.S|MADDA\\.S|MAX\\.S|MFC1|MIN\\.S|MOV\\.S|MSUB\\.S|MSUBA\\.S|MTC1|MUL\\.S|MULA\\.S|NEG\\.S|RSQRT\\.S|SQRT\\.S|SUB\\.S|SUBA\\.S|SWC1)\\b"
+        }
+      ]
+    },
+
+    "hexLiterals": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.cds",
+          "match": "\\$[0-9A-Fa-f]{2,8}\\b"
+        }
+      ]
+    },
+
+    "registers": {
+      "patterns": [
+        {
+          "name": "variable.register.gpr.cds",
+          "match": "\\b(zero|at|v[0-1]|a[0-3]|t[0-9]|s[0-7]|k[0-1]|gp|sp|fp|ra)\\b"
+        },
+        {
+          "name": "variable.register.numeric.cds",
+          "match": "\\$[0-9]{1,2}\\b"
+        },
+        {
+          "name": "variable.register.fpu.cds",
+          "match": "\\$f[0-9]{1,2}\\b"
+        }
+      ]
+    },
+
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.decimal.cds",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.cds",
+          "begin": "\"",
+          "end": "\""
+        }
+      ]
+    }
+  }
+}
