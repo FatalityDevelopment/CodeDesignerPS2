@@ -1,5 +1,5 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.CPU;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 
 /* 
@@ -13,7 +13,7 @@ using System;
 | ORI | OR immediate |
 | XORI | XOR immediate |
 */
-namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
+namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 {
     // AND - Bitwise AND
     public sealed class AND : Instruction<Args_R>

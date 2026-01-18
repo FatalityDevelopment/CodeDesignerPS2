@@ -1,5 +1,5 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.CPU;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -7,7 +7,7 @@ using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace CodeDesigner.Mips64LE.Cpu.Instructions
+namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions
 {
     // Generic base class for all instruction types
     public abstract class Instruction<TArgs>

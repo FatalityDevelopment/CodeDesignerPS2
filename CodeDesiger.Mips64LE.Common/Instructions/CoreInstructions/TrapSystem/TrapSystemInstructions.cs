@@ -1,5 +1,5 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.CPU;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 
 /*
@@ -14,7 +14,7 @@ using System;
 | TEQ | Trap if equal |
 | TNE | Trap if not equal |
  */
-namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
+namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 {
     // SYSCALL - System call exception
     public sealed class SYSCALL : Instruction<Args_R>

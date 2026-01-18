@@ -1,7 +1,7 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.Cpu.Instructions;
-using CodeDesigner.Mips64LE.Cpu.Instructions.EE;
-using CodeDesigner.Mips64LE.CPU;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.Cpu.Instructions;
+using CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,7 +9,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
-namespace CodeDesigner.Mips64LE
+namespace CodeDesigner.Mips64LE.Common
 {
     /// <summary>
     /// Assembles MIPS assembly text into 32-bit instruction words

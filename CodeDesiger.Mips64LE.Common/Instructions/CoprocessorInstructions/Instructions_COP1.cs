@@ -1,7 +1,7 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.Cpu.Instructions;
-using CodeDesigner.Mips64LE.CPU;
-using CodeDesigner.Mips64LE.CPU.COP1;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.Cpu.Instructions;
+using CodeDesigner.Mips64LE.Common.CPU;
+using CodeDesigner.Mips64LE.Common.CPU.COP1;
 using System;
 
 /*
@@ -34,7 +34,7 @@ using System;
 | BC1T | Branch on FPU true |
 */
 
-namespace CodeDesigner.Mips64LE.Instructions.CoprocessorInstructions
+namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 {
     // MFC1 - Move from COP1 register to GPR (32-bit)
     public sealed class MFC1 : Instruction<Args_R>

@@ -1,5 +1,5 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.CPU;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 
 /*
@@ -11,7 +11,7 @@ using System;
 | NOP | No operation |
 | SYNC | Memory synchronization |
 */
-namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
+namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 {
     // MOVZ - Move if zero
     public sealed class MOVZ : Instruction<Args_R>

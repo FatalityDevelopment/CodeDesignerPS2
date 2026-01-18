@@ -1,6 +1,6 @@
 using System;
 
-namespace CodeDesigner.Mips64LE.CPU.COP0
+namespace CodeDesigner.Mips64LE.Common.CPU.COP0
 {
     /// <summary>
     /// System Control Coprocessor (COP0) for the Emotion Engine

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace CodeDesigner.Mips64LE.CPU
+namespace CodeDesigner.Mips64LE.Common.CPU
 {
     public static class CpuHelpers
     {

@@ -1,11 +1,11 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace CodeDesigner.Mips64LE
+namespace CodeDesigner.Mips64LE.Common
 {
     /// <summary>
     /// Encodes MIPS instruction fields into 32-bit instruction words

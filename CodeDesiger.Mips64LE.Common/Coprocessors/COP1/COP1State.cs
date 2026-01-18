@@ -1,6 +1,6 @@
 using System;
 
-namespace CodeDesigner.Mips64LE.CPU.COP1
+namespace CodeDesigner.Mips64LE.Common.CPU.COP1
 {
     /// <summary>
     /// Floating Point Coprocessor (COP1/FPU) for the Emotion Engine

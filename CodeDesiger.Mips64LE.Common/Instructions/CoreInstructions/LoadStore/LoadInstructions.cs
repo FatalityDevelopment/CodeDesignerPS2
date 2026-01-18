@@ -1,5 +1,5 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.CPU;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 
 /*
@@ -18,7 +18,7 @@ using System;
 | LDR | Load doubleword right |
 | LQ | Load quadword (EE extension) |
 */
-namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
+namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 {
     // LB - Load byte (signed)
     public sealed class LB : Instruction<Args_I>

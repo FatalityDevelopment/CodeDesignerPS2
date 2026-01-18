@@ -1,5 +1,5 @@
-using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.CPU;
+using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 /*
 | Instruction | Description |
@@ -29,7 +29,7 @@ using System;
 | MTHI | Move to HI register |
 | MTLO | Move to LO register |
  */
-namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
+namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 {
     // ADD - Add signed 32-bit integers (overflow trap)
     public sealed class ADD : Instruction<Args_R>

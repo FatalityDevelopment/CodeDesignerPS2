@@ -1,7 +1,7 @@
-using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.Cpu.Instructions;
-using CodeDesigner.Mips64LE.CPU;
-using CodeDesigner.Mips64LE.VectorUnits.VU0;
+using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.Cpu.Instructions;
+using CodeDesigner.Mips64LE.Common.CPU;
+using CodeDesigner.Mips64LE.Common.VectorUnits.VU0;
 using System;
 using System.Numerics;
 
@@ -41,7 +41,7 @@ Load/Store Instructions:
 Note: Component masking (.x, .y, .z, .w, .xyz, etc.) is supported
 */
 
-namespace CodeDesigner.Mips64LE.Instructions.VectorUnitInstructions
+namespace CodeDesigner.Mips64LE.Common.Instructions.VectorUnitInstructions
 {
     // Helper class for component masking
     public static class VU0Helpers

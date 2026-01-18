@@ -1,5 +1,5 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.CPU;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 
 /*
@@ -16,7 +16,7 @@ using System;
 | DSRLV | Shift right logical variable (64-bit) |
 | DSRAV | Shift right arithmetic variable (64-bit) |
  */
-namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
+namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 {
     // SLL - Shift left logical
     public sealed class SLL : Instruction<Args_R>

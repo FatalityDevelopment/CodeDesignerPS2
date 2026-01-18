@@ -1,5 +1,5 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.CPU;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 
 /*
@@ -10,7 +10,7 @@ using System;
 | SLTI | Set if less than immediate (signed) |
 | SLTIU | Set if less than immediate (unsigned) |
  */
-namespace CodeDesigner.Mips64LE.Cpu.Instructions.EE
+namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 {
     // SLT - Set if less than (signed)
     public sealed class SLT : Instruction<Args_R>

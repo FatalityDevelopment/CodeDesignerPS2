@@ -1,5 +1,5 @@
-﻿using CodeDesigner.Mips64LE.Cpu.InstrArgs;
-using CodeDesigner.Mips64LE.CPU;
+﻿using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
+using CodeDesigner.Mips64LE.Common.CPU;
 using System;
 
 /*
@@ -18,7 +18,7 @@ using System;
 | TLBWR | Write random TLB entry |
 | CACHE | Cache operation |
 */
-namespace CodeDesigner.Mips64LE.Cpu.Instructions.COP0
+namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
 {
     // MFC0 - Move from COP0 register to GPR (32-bit)
     public sealed class MFC0 : Instruction<Args_R>

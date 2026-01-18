@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace CodeDesigner.Mips64LE
+namespace CodeDesigner.Mips64LE.Common
 {
     /// <summary>
     /// Utility class for formatting MIPS assembly and machine code in various formats

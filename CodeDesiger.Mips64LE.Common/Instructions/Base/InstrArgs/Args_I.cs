@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace CodeDesigner.Mips64LE.Cpu.InstrArgs
+namespace CodeDesigner.Mips64LE.Common.Cpu.InstrArgs
 {
     public readonly struct Args_I
     {
