@@ -9,7 +9,6 @@ namespace CodeDesigner.Mips64LE
         {
             // Entry point for the MIPS64 Emotion Engine project
             Console.WriteLine("MIPS64 Emotion Engine - CodeDesigner");
-            Console.WriteLine("VU0 (Vector Unit 0) implementation loaded.");
             Console.WriteLine();
             
             // Test MipsEncoder and MipsDecoder
