@@ -36,13 +36,27 @@ namespace CodeDesigner.Mips64LE
 
                 var serverTask = server.StartAsync();
                 
-                Console.WriteLine("Press 'q' to quit the server...");
-                while (Console.ReadKey(true).Key != ConsoleKey.Q)
+                // Use CancellationToken to handle shutdown
+                using var cts = new CancellationTokenSource();
+                Console.CancelKeyPress += (sender, e) =>
                 {
-                    // Wait for quit command
-                }
+                    e.Cancel = true;
+                    cts.Cancel();
+                    Console.WriteLine("\nShutting down server...");
+                    server.Stop();
+                };
 
-                server.Stop();
+                Console.WriteLine("Server is running. Press Ctrl+C to stop.");
+                
+                try
+                {
+                    await Task.Delay(-1, cts.Token); // Wait indefinitely until cancelled
+                }
+                catch (TaskCanceledException)
+                {
+                    // Expected when Ctrl+C is pressed
+                }
+                
                 await serverTask;
             }
             else
