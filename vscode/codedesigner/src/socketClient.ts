@@ -1,6 +1,35 @@
 import * as net from 'net';
 
 /**
+ * Command message format for socket communication
+ */
+interface CommandMessage {
+    command: string;
+    data?: string;
+}
+
+/**
+ * Response format for socket communication
+ */
+interface CommandResponse {
+    success: boolean;
+    command?: string;
+    message?: string;
+    error?: string;
+    results?: InstructionResult[];
+}
+
+/**
+ * Result for individual instruction assembly/disassembly
+ */
+interface InstructionResult {
+    success: boolean;
+    assembly?: string;
+    hex?: string;
+    error?: string;
+}
+
+/**
  * Socket client for communication with C# server
  */
 export class SocketClient {
@@ -133,5 +162,124 @@ export class SocketClient {
      */
     public isConnected(): boolean {
         return this.connected;
+    }
+
+    /**
+     * Send a command and wait for response
+     */
+    private sendCommand(command: CommandMessage): Promise<CommandResponse> {
+        return new Promise((resolve, reject) => {
+            if (!this.connected || !this.client) {
+                reject(new Error('Not connected to server'));
+                return;
+            }
+
+            let responseReceived = false;
+            const timeoutMs = 10000; // 10 second timeout
+
+            // Set up one-time response handler
+            const responseHandler = (message: string) => {
+                if (responseReceived) return;
+                responseReceived = true;
+                clearTimeout(timeout);
+
+                // Remove the handler
+                const index = this.messageHandlers.indexOf(responseHandler);
+                if (index > -1) {
+                    this.messageHandlers.splice(index, 1);
+                }
+
+                try {
+                    const response: CommandResponse = JSON.parse(message);
+                    resolve(response);
+                } catch (error) {
+                    reject(new Error(`Failed to parse response: ${message}`));
+                }
+            };
+
+            // Add temporary handler
+            this.messageHandlers.push(responseHandler);
+
+            // Set timeout
+            const timeout = setTimeout(() => {
+                if (!responseReceived) {
+                    responseReceived = true;
+                    // Remove the handler
+                    const index = this.messageHandlers.indexOf(responseHandler);
+                    if (index > -1) {
+                        this.messageHandlers.splice(index, 1);
+                    }
+                    reject(new Error('Command timeout'));
+                }
+            }, timeoutMs);
+
+            // Send command
+            const commandStr = JSON.stringify(command);
+            this.client.write(commandStr, 'utf8', (error) => {
+                if (error) {
+                    clearTimeout(timeout);
+                    responseReceived = true;
+                    // Remove the handler
+                    const index = this.messageHandlers.indexOf(responseHandler);
+                    if (index > -1) {
+                        this.messageHandlers.splice(index, 1);
+                    }
+                    reject(error);
+                }
+            });
+        });
+    }
+
+    /**
+     * Assemble MIPS assembly code to hex
+     */
+    public async assemble(asmCode: string): Promise<InstructionResult[]> {
+        const command: CommandMessage = {
+            command: 'ASSEMBLE',
+            data: asmCode
+        };
+
+        const response = await this.sendCommand(command);
+        
+        if (!response.success) {
+            throw new Error(response.error || 'Assembly failed');
+        }
+
+        return response.results || [];
+    }
+
+    /**
+     * Disassemble hex code to MIPS assembly
+     */
+    public async disassemble(hexCode: string): Promise<InstructionResult[]> {
+        const command: CommandMessage = {
+            command: 'DISASSEMBLE',
+            data: hexCode
+        };
+
+        const response = await this.sendCommand(command);
+        
+        if (!response.success) {
+            throw new Error(response.error || 'Disassembly failed');
+        }
+
+        return response.results || [];
+    }
+
+    /**
+     * Ping the server
+     */
+    public async ping(): Promise<string> {
+        const command: CommandMessage = {
+            command: 'PING'
+        };
+
+        const response = await this.sendCommand(command);
+        
+        if (!response.success) {
+            throw new Error(response.error || 'Ping failed');
+        }
+
+        return response.message || 'PONG';
     }
 }

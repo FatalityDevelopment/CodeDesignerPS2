@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
 import { getNonce } from '../../helpers';
 import { getDisasmPanelHtml, DisasmPanelData } from './disasmPanelTemplate';
+import { getSocketClient } from '../../extension';
 
 export class DisasmPanelProvider implements vscode.WebviewViewProvider {
+    private webview?: vscode.Webview;
+
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
         context.subscriptions.push(
@@ -11,6 +14,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     resolveWebviewView(webviewView: vscode.WebviewView): void {
+        this.webview = webviewView.webview;
+
         // Setup webview options
         webviewView.webview.options = {
             enableScripts: true
@@ -23,10 +28,48 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = getDisasmPanelHtml(templateData, getNonce());
 
         // Listen to messages from the webview
-        webviewView.webview.onDidReceiveMessage(msg => {
-            if (msg.command === 'connect') {
-                vscode.window.showInformationMessage('Panel works!');
+        webviewView.webview.onDidReceiveMessage(async msg => {
+            if (msg.command === 'disassemble') {
+                await this.handleDisassemble(msg.data);
             }
         });
+    }
+
+    private async handleDisassemble(hexCode: string) {
+        const socketClient = getSocketClient();
+        
+        if (!socketClient || !socketClient.isConnected()) {
+            this.sendResult(false, '', 'Not connected to C# server. Use "Connect to Server" command first.');
+            return;
+        }
+
+        try {
+            const results = await socketClient.disassemble(hexCode);
+            
+            // Format results as assembly output
+            const asmLines: string[] = [];
+            for (const result of results) {
+                if (result.success) {
+                    asmLines.push(`${result.hex}  ${result.assembly}`);
+                } else {
+                    asmLines.push(`${result.hex}  ERROR: ${result.error}`);
+                }
+            }
+            
+            this.sendResult(true, asmLines.join('\n'), '');
+        } catch (error: any) {
+            this.sendResult(false, '', error.message || 'Disassembly failed');
+        }
+    }
+
+    private sendResult(success: boolean, data: string, error: string) {
+        if (this.webview) {
+            this.webview.postMessage({
+                command: 'disassembleResult',
+                success: success,
+                data: data,
+                error: error
+            });
+        }
     }
 }
