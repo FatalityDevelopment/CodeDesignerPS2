@@ -56,7 +56,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8}";
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
         }
@@ -129,7 +132,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8}";
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
         }
@@ -201,7 +207,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
         }
@@ -270,7 +279,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
         }
@@ -339,7 +351,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
         }
@@ -408,7 +423,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
         }
@@ -479,7 +497,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8}";
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
         }
@@ -553,7 +574,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8}";
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
             }
             return $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}, {args.Imm:X4}";
         }

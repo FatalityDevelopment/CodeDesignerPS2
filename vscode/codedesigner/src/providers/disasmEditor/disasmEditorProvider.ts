@@ -91,7 +91,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       // Call C# backend to disassemble
       const hexCode = hexInstructions.join(' ');
       console.log(`[DISASM] Disassembling ${hexInstructions.length} instructions starting at 0x${startAddr.toString(16)}`);
-      const results = await this.socketClient.disassemble(hexCode);
+      const results = await this.socketClient.disassemble(hexCode, startAddr);
       console.log(`[DISASM] Received ${results.length} results from backend`);
 
       // Convert results to row format
