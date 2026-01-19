@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
-import { BasePanelProvider } from '../baseProviders/basePanelProvider';
+import { getNonce } from '../../helpers';
+import { getAsmPanelHtml, AsmPanelData } from './asmPanelTemplate';
 
 let outputChannel: vscode.OutputChannel;
 
@@ -9,15 +10,30 @@ interface CompilerResult {
     debugMessages?: string[];
 }
 
-export class AsmPanelProvider extends BasePanelProvider {
+export class AsmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
 
-    constructor() {
-        super('asm.asmPanel', 'asmPanelProvider.html', 'asmPanel');
+    // Register the provider with VS Code
+    public register(context: vscode.ExtensionContext) {
+        context.subscriptions.push(
+            vscode.window.registerWebviewViewProvider('asm.asmPanel', this)
+        );
     }
 
-    protected onDidResolveWebviewView(webviewView: vscode.WebviewView): void {
+    resolveWebviewView(webviewView: vscode.WebviewView): void {
         this.webview = webviewView.webview;
+
+        // Setup webview options
+        webviewView.webview.options = {
+            enableScripts: true
+        };
+
+        // Generate HTML from template
+        const templateData: AsmPanelData = {
+            code: '',
+            emulators: ['Project64', 'Mupen64Plus', 'RetroArch']
+        };
+        webviewView.webview.html = getAsmPanelHtml(templateData, getNonce());
 
         // Ensure output channel exists
         if (!outputChannel) {

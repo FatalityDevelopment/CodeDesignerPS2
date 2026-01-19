@@ -1,288 +1,43 @@
-<!DOCTYPE html> 
+/**
+ * Template for the Disassembly Editor
+ * Large complex HTML moved from external file to TypeScript module
+ */
+
+import { getDisasmEditorStyles } from './disasmEditorStyles';
+
+export interface DisasmEditorData {
+    // Empty for now - can add initialization data later
+}
+
+export function getDisasmEditorHtml(data: DisasmEditorData, nonce: string): string {
+    return `<!DOCTYPE html> 
 <html> 
 <head> 
 <meta charset="UTF-8"> 
- 
-<style> 
-body { 
-    margin: 0; 
-    font-family: monospace; 
-    background: #1e1e1e;
-    color: #d4d4d4;
-} 
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'unsafe-inline';
+               script-src 'nonce-${nonce}';">
 
-#search-panel {
-    display: none;
-    background: #252526;
-    border-bottom: 1px solid #3e3e42;
-    padding: 8px 12px;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-}
+${getDisasmEditorStyles()}
 
-#search-panel.visible {
-    display: block;
-}
-
-.search-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-}
-
-.search-input-wrapper {
-    position: relative;
-    flex: 1;
-    max-width: 400px;
-}
-
-.search-input {
-    width: 100%;
-    background: #3c3c3c;
-    border: 1px solid #3e3e42;
-    color: #cccccc;
-    padding: 4px 24px 4px 8px;
-    font-family: monospace;
-    font-size: 13px;
-    outline: none;
-}
-
-.search-input:focus {
-    border-color: #007acc;
-}
-
-.search-input.error {
-    border-color: #f48771;
-}
-
-.search-clear {
-    position: absolute;
-    right: 4px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: none;
-    border: none;
-    color: #cccccc;
-    cursor: pointer;
-    padding: 2px 4px;
-    font-size: 16px;
-    line-height: 1;
-    display: none;
-}
-
-.search-clear:hover {
-    color: #fff;
-}
-
-.search-input:not(:placeholder-shown) ~ .search-clear {
-    display: block;
-}
-
-.search-mode {
-    display: flex;
-    gap: 4px;
-}
-
-.mode-btn {
-    background: #3c3c3c;
-    border: 1px solid #3e3e42;
-    color: #cccccc;
-    padding: 4px 8px;
-    font-family: monospace;
-    font-size: 11px;
-    cursor: pointer;
-    outline: none;
-}
-
-.mode-btn:hover {
-    background: #505050;
-}
-
-.mode-btn.active {
-    background: #007acc;
-    border-color: #007acc;
-    color: #fff;
-}
-
-.search-nav {
-    display: flex;
-    gap: 4px;
-}
-
-.nav-btn {
-    background: #3c3c3c;
-    border: 1px solid #3e3e42;
-    color: #cccccc;
-    padding: 4px 8px;
-    cursor: pointer;
-    font-size: 11px;
-    outline: none;
-    min-width: 24px;
-}
-
-.nav-btn:hover:not(:disabled) {
-    background: #505050;
-}
-
-.nav-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.search-info {
-    color: #cccccc;
-    font-size: 11px;
-    white-space: nowrap;
-}
-
-.close-search {
-    background: none;
-    border: none;
-    color: #cccccc;
-    cursor: pointer;
-    padding: 4px 8px;
-    font-size: 16px;
-    margin-left: auto;
-}
-
-.close-search:hover {
-    color: #fff;
-}
-
-#hex-container {
-    font-family: monospace;
-    overflow: auto;
-    max-height: 120px;
-    background: #2d2d30;
-    border-bottom: 1px solid #3e3e42;
-    padding: 4px;
-}
-
-.hex-row {
-    display: flex;
-    gap: 8px;
-    padding: 2px 6px;
-    line-height: 1.4;
-}
-
-.hex-addr {
-    color: #858585;
-    width: 10ch;
-}
-
-.hex-bytes {
-    display: flex;
-    gap: 8px;
-    flex: 1;
-}
-
-.hex-byte {
-    color: #d4d4d4;
-    width: 2ch;
-    text-align: center;
-}
-
-.hex-byte.highlight {
-    background: #264f78;
-    color: #fff;
-}
-
-.hex-ascii {
-    color: #608b4e;
-    width: 16ch;
-    border-left: 1px solid #3e3e42;
-    padding-left: 8px;
-    display: flex;
-}
-
-.hex-char {
-    width: 1ch;
-    display: inline-block;
-    text-align: center;
-}
-
-.hex-char.highlight {
-    background: #264f78;
-    color: #fff;
-}
- 
-#grid { 
-    outline: none; 
-    max-height: calc(100vh - 120px); 
-    overflow-y: auto; 
-} 
- 
-.row {
-    display: grid;
-    grid-template-columns: 10ch 12ch 18ch 8ch 40ch 1fr;
-    padding: 2px 6px;
-    cursor: default;
-}
- 
-.row.active {
-    background: #264f78;
-}
-
-.row.branch-highlight {
-    background: #3a3d41;
-}
-
-.row.active.branch-highlight {
-    background: #264f78;
-}
-
-.row.search-match {
-    background: #613214;
-}
-
-.row.search-current {
-    background: #4e3c1e;
-}
-
-.row.active.search-match,
-.row.active.search-current {
-    background: #264f78;
-}
- 
-.addr { color: #c586c0; } 
-.bytes { color: #9cdcfe; } 
-.label { color: #4ec9b0; } 
-.op { color: #dcdcaa; } 
-.args { color: #ce9178; } 
-.comment { color: #6a9955; } 
-
-.search-match-highlight {
-    background: #f9826c;
-    color: #000;
-    padding: 0 2px;
-}
-
-.search-current-highlight {
-    background: #ea5c00;
-    color: #fff;
-    padding: 0 2px;
-}
-#goto-panel {
-    display: none;
-    background: #252526;
-    border-bottom: 1px solid #3e3e42;
-    padding: 8px 12px;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-}
-
-#goto-panel.visible {
-    display: block;
-}
-
-</style> 
 </head> 
  
 <body>
-<div id="goto-panel">
+
+${getGotoPanel()}
+${getSearchPanel()}
+${getHexContainer()}
+${getGrid()}
+
+${getScript(nonce)}
+
+</body> 
+</html>`;
+}
+
+function getGotoPanel(): string {
+    return `<div id="goto-panel">
     <div class="search-row">
         <div class="search-input-wrapper">
             <input
@@ -304,8 +59,11 @@ body {
 
         <button class="close-search" id="close-goto" title="Close (Escape)">×</button>
     </div>
-</div>
-<div id="search-panel">
+</div>`;
+}
+
+function getSearchPanel(): string {
+    return `<div id="search-panel">
     <div class="search-row">
         <div class="search-input-wrapper">
             <input type="text" id="search-input" class="search-input" placeholder="Search (text or bytes: 0x12 34 AB)" />
@@ -324,11 +82,29 @@ body {
         <span class="search-info" id="search-info">No results</span>
         <button class="close-search" id="close-search" title="Close (Escape)">×</button>
     </div>
-</div>
-<div id="hex-container"></div> 
-<div id="grid" tabindex="0"></div> 
- 
-<script> 
+</div>`;
+}
+
+function getHexContainer(): string {
+    return `<div id="hex-container"></div>`;
+}
+
+function getGrid(): string {
+    return `<div id="grid" tabindex="0"></div>`;
+}
+
+function getScript(nonce: string): string {
+    // The JavaScript content from the HTML file - too large to inline
+    // Reading from file would be better, but for now returning the massive script
+    return `<script nonce="${nonce}">
+${getJavaScriptContent()}
+</script>`;
+}
+
+function getJavaScriptContent(): string {
+    // Return the entire JavaScript from the HTML file
+    // This is the 600+ line script - I'll include it inline
+    return `
 const vscode = acquireVsCodeApi();
 const hexContainer = document.getElementById("hex-container");
 const grid = document.getElementById("grid");
@@ -347,43 +123,26 @@ const gotoBtn = document.getElementById("goto-btn");
 const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
 
-/* =========================
-   State
-========================= */
-
 const state = {
     cursor: 0,
     disasmRows: [],
     totalInstructions: 0,
     pageSize: 1000,
     baseAddress: 0,
-
     hexData: [],
     hexOffset: 0,
-
     loadedPages: new Map(),
-    
-    // Search state
     searchMode: 'text',
     searchQuery: '',
     searchMatches: [],
     currentMatch: -1,
     searchActive: false,
-
     gotoActive: false
 };
-
-/* =========================
-   Utilities
-========================= */
 
 const clamp = (val, min, max) => Math.max(min, Math.min(val, max));
 const getPageStart = index => Math.floor(index / state.pageSize) * state.pageSize;
 const getLocalIndex = index => index - getPageStart(index);
-
-/* =========================
-   Message handling
-========================= */
 
 window.addEventListener("message", ({ data: msg }) => {
     switch (msg.type) {
@@ -392,7 +151,6 @@ window.addEventListener("message", ({ data: msg }) => {
             state.pageSize = msg.pageSize;
             state.baseAddress = msg.baseAddress;
             break;
-
         case "disasmPage":
             state.loadedPages.set(msg.startIndex, msg.rows);
             if (msg.startIndex === getPageStart(state.cursor)) {
@@ -400,18 +158,11 @@ window.addEventListener("message", ({ data: msg }) => {
                 renderDisassembly();
             }
             break;
-
         case "hexview":
             state.hexData = msg.data;
             state.hexOffset = msg.offset || 0;
-            renderHexView(
-                msg.data,
-                state.hexOffset,
-                msg.highlight_addr,
-                msg.highlight_length
-            );
+            renderHexView(msg.data, state.hexOffset, msg.highlight_addr, msg.highlight_length);
             break;
-
         case "searchResults":
             handleSearchResults(msg.matches);
             break;
@@ -423,21 +174,10 @@ function parseAddress(input) {
     if (!/^[0-9a-f]+$/.test(cleaned)) return null;
     return parseInt(cleaned, 16);
 }
-/* =========================
-   Search Functions
-========================= */
 
-/**
- * Toggle the search panel visibility
- * - Triggered by Ctrl+F / Cmd+F
- * - Shows/hides search panel at top of view
- * - Auto-focuses search input when opened
- * - Clears matches when closed
- */
 function toggleSearch() {
     state.searchActive = !state.searchActive;
     searchPanel.classList.toggle('visible', state.searchActive);
-    
     if (state.searchActive) {
         searchInput.focus();
         searchInput.select();
@@ -446,86 +186,25 @@ function toggleSearch() {
     }
 }
 
-/**
- * Parse byte pattern from user input
- * 
- * BYTE PATTERN FORMAT
- * -------------------
- * Accepts flexible hex input:
- * - "12 34 AB CD" (space-separated)
- * - "0x12 0x34 0xAB 0xCD" (with 0x prefix)
- * - "12,34,AB,CD" (comma-separated)
- * 
- * Validation:
- * - Each byte must be 1-2 hex digits [0-9A-Fa-f]
- * - Returns null if invalid
- * 
- * Used by: Byte search mode to convert user input to byte array
- */
 function parseBytePattern(pattern) {
-    const cleaned = pattern.replace(/0x/gi, '').replace(/[,\s]+/g, ' ').trim();
+    const cleaned = pattern.replace(/0x/gi, '').replace(/[,\\s]+/g, ' ').trim();
     if (!cleaned) return null;
-    
-    const bytes = cleaned.split(/\s+/);
+    const bytes = cleaned.split(/\\s+/);
     const result = [];
-    
     for (const byte of bytes) {
-        if (!/^[0-9a-f]{1,2}$/i.test(byte)) {
-            return null;
-        }
+        if (!/^[0-9a-f]{1,2}$/i.test(byte)) return null;
         result.push(parseInt(byte, 16));
     }
-    
     return result.length > 0 ? result : null;
 }
 
-/**
- * Initiate a search operation
- * 
- * SEARCH MODES
- * ------------
- * 1. TEXT MODE (Aa button)
- *    - Case-insensitive text search
- *    - Searches in disassembled fields (opcode, args, comments, etc.)
- *    - Example: "addiu" finds all add immediate unsigned instructions
- *    - Example: "sp" finds all stack pointer references
- * 
- * 2. BYTE MODE (0x button)
- *    - Hexadecimal byte pattern search
- *    - Searches raw binary data
- *    - Example: "27 BD FF F0" finds specific instruction encoding
- *    - Use for finding exact opcodes or data patterns
- * 
- * 3. STRING MODE ("ab" button)
- *    - ASCII/UTF-8 string search
- *    - Searches for text strings embedded in binary
- *    - Example: "main" finds "main" function name in data
- *    - Example: "Copyright" finds copyright strings
- *    - Case-sensitive
- * 
- * 4. REGEX MODE (.* button)
- *    - Regular expression search
- *    - Searches in disassembled fields
- *    - Example: "lw.*sp" finds load word from stack pointer
- *    - Example: "^addiu" finds lines starting with addiu
- * 
- * Process:
- * 1. Validate input (especially for byte mode)
- * 2. Send search request to backend
- * 3. Backend searches entire file
- * 4. Results sent back via message
- * 5. Navigate to first match automatically
- */
 function performSearch() {
     const query = searchInput.value.trim();
     const mode = state.searchMode;
-    
     if (!query) {
         clearSearchMatches();
         return;
     }
-    
-    // Validate byte pattern if in byte mode
     if (mode === 'bytes') {
         const pattern = parseBytePattern(query);
         if (!pattern) {
@@ -537,41 +216,14 @@ function performSearch() {
             return;
         }
     }
-    
     searchInput.classList.remove('error');
     state.searchQuery = query;
-    
-    // Request search from backend (searches entire file)
-    vscode.postMessage({
-        type: 'search',
-        query: query,
-        mode: mode
-    });
-    
+    vscode.postMessage({ type: 'search', query: query, mode: mode });
     searchInfo.textContent = 'Searching...';
 }
 
-/**
- * Handle search results from backend
- * 
- * Results format:
- * [{
- *   instructionIndex: number,  // Which instruction (0-based)
- *   address: number,           // Memory address
- *   field: string,             // Which field matched (addr/bytes/op/args/etc)
- *   start: number,             // Character position in field
- *   length: number             // Length of match for highlighting
- * }, ...]
- * 
- * Process:
- * 1. Store matches in state
- * 2. Jump to first match
- * 3. Update UI (counter, navigation buttons)
- * 4. Highlight matches in visible rows
- */
 function handleSearchResults(matches) {
     state.searchMatches = matches || [];
-    
     if (state.searchMatches.length > 0) {
         state.currentMatch = 0;
         jumpToMatch(0);
@@ -582,64 +234,28 @@ function handleSearchResults(matches) {
     }
 }
 
-/**
- * Jump to a specific match
- * 
- * Navigation process:
- * 1. Set current match index
- * 2. Get instruction index from match
- * 3. Update cursor to that instruction
- * 4. Load page if not cached (via checkAndLoadPage)
- * 5. Scroll to instruction (via updateCursor)
- * 6. Update match counter display
- * 
- * Visual feedback:
- * - Current match gets brighter highlight
- * - Instruction scrolls to center of view
- */
 function jumpToMatch(matchIndex) {
     if (matchIndex < 0 || matchIndex >= state.searchMatches.length) return;
-    
     state.currentMatch = matchIndex;
     const match = state.searchMatches[matchIndex];
-    
-    // Jump to the instruction containing this match
     state.cursor = match.instructionIndex;
     checkAndLoadPage();
     updateCursor();
     updateSearchInfo();
 }
 
-/**
- * Navigate to next search match
- * - Wraps around to first match after last
- * - Triggered by: Enter, F3, Next button
- */
 function nextSearchMatch() {
     if (state.searchMatches.length === 0) return;
     const next = (state.currentMatch + 1) % state.searchMatches.length;
     jumpToMatch(next);
 }
 
-/**
- * Navigate to previous search match
- * - Wraps around to last match before first
- * - Triggered by: Shift+Enter, Shift+F3, Previous button
- */
 function prevSearchMatch() {
     if (state.searchMatches.length === 0) return;
     const prev = (state.currentMatch - 1 + state.searchMatches.length) % state.searchMatches.length;
     jumpToMatch(prev);
 }
 
-/**
- * Clear all search state
- * - Removes all matches
- * - Clears input field
- * - Removes error state
- * - Re-renders view without highlights
- * - Triggered by: Clear button (×), or programmatically
- */
 function clearSearchMatches() {
     state.searchMatches = [];
     state.currentMatch = -1;
@@ -650,40 +266,22 @@ function clearSearchMatches() {
     renderDisassembly();
 }
 
-/**
- * Update search information display
- * 
- * Shows:
- * - "X of Y" when matches exist
- * - "No results" when search returns nothing
- * - Empty when no search active
- * 
- * Also enables/disables navigation buttons
- */
 function updateSearchInfo() {
     if (state.searchMatches.length === 0) {
         searchInfo.textContent = state.searchQuery ? 'No results' : '';
         prevMatch.disabled = true;
         nextMatch.disabled = true;
     } else {
-        searchInfo.textContent = `${state.currentMatch + 1} of ${state.searchMatches.length}`;
+        searchInfo.textContent = \`\${state.currentMatch + 1} of \${state.searchMatches.length}\`;
         prevMatch.disabled = false;
         nextMatch.disabled = false;
     }
 }
 
-/**
- * Check if a row has any search matches
- * Used for: Applying search-match CSS class
- */
 function isRowSearchMatch(globalIndex) {
     return state.searchMatches.some(m => m.instructionIndex === globalIndex);
 }
 
-/**
- * Check if a row is the current (selected) match
- * Used for: Applying search-current CSS class for brighter highlight
- */
 function isRowCurrentMatch(globalIndex) {
     if (state.currentMatch === -1) return false;
     const match = state.searchMatches[state.currentMatch];
@@ -693,7 +291,6 @@ function isRowCurrentMatch(globalIndex) {
 function toggleGoto() {
     state.gotoActive = !state.gotoActive;
     gotoPanel.classList.toggle('visible', state.gotoActive);
-
     if (state.gotoActive) {
         gotoInput.focus();
         gotoInput.select();
@@ -706,51 +303,34 @@ function toggleGoto() {
 function goToAddress() {
     const value = gotoInput.value;
     const addr = parseAddress(value);
-
     if (addr === null) {
         gotoInput.classList.add('error');
         gotoInfo.textContent = 'Invalid hex address';
         return;
     }
-
     gotoInput.classList.remove('error');
-
     if (addr < state.baseAddress) {
         gotoInfo.textContent = 'Address below base';
         return;
     }
-
-    const instrIndex = Math.floor(
-        (addr - state.baseAddress) / 4
-    );
-
+    const instrIndex = Math.floor((addr - state.baseAddress) / 4);
     if (instrIndex < 0 || instrIndex >= state.totalInstructions) {
         gotoInfo.textContent = 'Address out of range';
         return;
     }
-
     state.cursor = instrIndex;
     state.searchActive = false;
     searchPanel.classList.remove('visible');
-
     checkAndLoadPage();
     updateCursor();
-
-    gotoInfo.textContent = `Moved to 0x${addr.toString(16).toUpperCase()}`;
+    gotoInfo.textContent = \`Moved to 0x\${addr.toString(16).toUpperCase()}\`;
 }
 
-/* =========================
-   Event Listeners
-========================= */
-
-// Search mode buttons
 document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         state.searchMode = btn.dataset.mode;
-        
-        // Update placeholder based on mode
         if (state.searchMode === 'bytes') {
             searchInput.placeholder = 'Byte pattern: 0x12 34 AB CD';
         } else if (state.searchMode === 'string') {
@@ -760,15 +340,12 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
         } else {
             searchInput.placeholder = 'Search text';
         }
-        
-        // Re-search if there's a query
         if (searchInput.value.trim()) {
             performSearch();
         }
     });
 });
 
-// Search input
 searchInput.addEventListener('input', () => {
     if (!searchInput.value.trim()) {
         clearSearchMatches();
@@ -793,43 +370,33 @@ searchInput.addEventListener('keydown', (e) => {
     }
 });
 
-// Clear button
 searchClear.addEventListener('click', () => {
     clearSearchMatches();
     searchInput.focus();
 });
 
-// Navigation buttons
 prevMatch.addEventListener('click', prevSearchMatch);
 nextMatch.addEventListener('click', nextSearchMatch);
 
-// Close button
 closeSearch.addEventListener('click', () => {
     toggleSearch();
     grid.focus();
 });
 
-// Global keyboard shortcuts
 document.addEventListener('keydown', (e) => {
-    // Ctrl+F or Cmd+F to toggle search
     if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
         toggleSearch();
     }
-    
-    // F3 for next match
     if (e.key === 'F3' && !e.shiftKey && state.searchActive) {
         e.preventDefault();
         nextSearchMatch();
     }
-    
-    // Shift+F3 for previous match
     if (e.key === 'F3' && e.shiftKey && state.searchActive) {
         e.preventDefault();
         prevSearchMatch();
     }
 });
-
 
 gotoBtn.addEventListener('click', goToAddress);
 
@@ -854,15 +421,9 @@ closeGoto.addEventListener('click', () => {
     grid.focus();
 });
 
-
-/* =========================
-   Hex view
-========================= */
-
 function renderHexView(data, offset, highlightAddr = -1, highlightLength = 4) {
     hexContainer.innerHTML = "";
     hexContainer.appendChild(buildHexHeader());
-
     for (let i = 0; i < data.length; i += 16) {
         hexContainer.appendChild(buildHexRow(data, offset, i, highlightAddr, highlightLength));
     }
@@ -871,194 +432,97 @@ function renderHexView(data, offset, highlightAddr = -1, highlightLength = 4) {
 function buildHexHeader() {
     const header = document.createElement("div");
     header.className = "hex-row";
-    header.style.cssText = `
-        border-bottom: 1px solid #3e3e42;
-        padding-bottom: 4px;
-        margin-bottom: 2px;
-    `;
-
+    header.style.cssText = \`border-bottom: 1px solid #3e3e42; padding-bottom: 4px; margin-bottom: 2px;\`;
     let bytes = "";
     for (let i = 0; i < 16; i++) {
         if (i && i % 4 === 0) bytes += '<span style="width:8px"></span>';
-        bytes += `<span class="hex-byte">+${i.toString(16).toUpperCase()}</span>`;
+        bytes += \`<span class="hex-byte">+\${i.toString(16).toUpperCase()}</span>\`;
     }
-
-    header.innerHTML = `
-        <span class="hex-addr">Address:</span>
-        <span class="hex-bytes">${bytes}</span>
-        <span class="hex-ascii">0123456789ABCDEF</span>
-    `;
+    header.innerHTML = \`<span class="hex-addr">Address:</span><span class="hex-bytes">\${bytes}</span><span class="hex-ascii">0123456789ABCDEF</span>\`;
     return header;
 }
 
 function buildHexRow(data, offset, rowOffset, highlightAddr, highlightLength) {
     const row = document.createElement("div");
     row.className = "hex-row";
-
     const addr = (offset + rowOffset).toString(16).padStart(8, "0").toUpperCase();
     let bytesHtml = "";
     let asciiHtml = "";
-
     for (let i = 0; i < 16; i++) {
         if (i && i % 4 === 0) bytesHtml += '<span style="width:8px"></span>';
-
         let byteStr = "  ";
         let char = " ";
         let highlight = false;
-
         const index = rowOffset + i;
         if (index < data.length) {
             const byte = data[index];
             const byteAddr = offset + index;
-
             byteStr = byte.toString(16).padStart(2, "0").toUpperCase();
             char = byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : ".";
-            highlight = highlightAddr !== -1 &&
-                        byteAddr >= highlightAddr &&
-                        byteAddr < highlightAddr + highlightLength;
+            highlight = highlightAddr !== -1 && byteAddr >= highlightAddr && byteAddr < highlightAddr + highlightLength;
         }
-
-        bytesHtml += `<span class="hex-byte${highlight ? " highlight" : ""}">${byteStr}</span>`;
-        asciiHtml += `<span class="hex-char${highlight ? " highlight" : ""}">${char}</span>`;
+        bytesHtml += \`<span class="hex-byte\${highlight ? " highlight" : ""}">\${byteStr}</span>\`;
+        asciiHtml += \`<span class="hex-char\${highlight ? " highlight" : ""}">\${char}</span>\`;
     }
-
-    row.innerHTML = `
-        <span class="hex-addr">${addr}</span>
-        <span class="hex-bytes">${bytesHtml}</span>
-        <span class="hex-ascii">${asciiHtml}</span>
-    `;
+    row.innerHTML = \`<span class="hex-addr">\${addr}</span><span class="hex-bytes">\${bytesHtml}</span><span class="hex-ascii">\${asciiHtml}</span>\`;
     return row;
 }
 
-/* =========================
-   Disassembly view
-========================= */
-
 function renderDisassembly() {
     grid.innerHTML = "";
-
     const pageStart = getPageStart(state.cursor);
     const localCursor = getLocalIndex(state.cursor);
-
     state.disasmRows.forEach((rowData, i) => {
         const globalIndex = pageStart + i;
         const row = document.createElement("div");
         row.className = "row";
         row.dataset.index = i;
         row.dataset.globalIndex = globalIndex;
-
         if (i === localCursor) row.classList.add("active");
         if (isRowSearchMatch(globalIndex)) row.classList.add("search-match");
         if (isRowCurrentMatch(globalIndex)) row.classList.add("search-current");
-
         row.innerHTML = buildDisasmRowHtml(rowData, globalIndex);
-
         row.onclick = () => {
             state.cursor = globalIndex;
             updateCursor();
         };
-
         grid.appendChild(row);
     });
-
     updateCursor();
 }
 
-/**
- * Highlight search matches within text
- * 
- * HIGHLIGHTING LOGIC
- * ------------------
- * Wraps matched text in <span> tags with CSS classes for visual highlighting.
- * 
- * Process:
- * 1. Find match for this specific instruction and field
- * 2. Extract substring based on match.start and match.length
- * 3. Wrap in <span> with appropriate class
- * 4. Return HTML with highlighted portion
- * 
- * CSS Classes:
- * - search-match-highlight: Orange background (#f9826c) for all matches
- * - search-current-highlight: Brighter orange (#ea5c00) for current match
- * 
- * Example:
- * Text: "addiu sp, sp, -16"
- * Query: "sp"
- * Field: "args"
- * Result: "addiu <span class="search-match-highlight">sp</span>, <span class="search-match-highlight">sp</span>, -16"
- * 
- * Note: Only highlights exact field matches from backend results.
- * Does not perform client-side search.
- */
 function highlightSearchInText(text, globalIndex, field) {
     if (!state.searchQuery || !text) return text;
-    
-    const match = state.searchMatches.find(m => 
-        m.instructionIndex === globalIndex && m.field === field
-    );
-    
+    const match = state.searchMatches.find(m => m.instructionIndex === globalIndex && m.field === field);
     if (!match) return text;
-    
     const isCurrent = isRowCurrentMatch(globalIndex);
     const highlightClass = isCurrent ? 'search-current-highlight' : 'search-match-highlight';
-    
     const before = text.substring(0, match.start);
     const highlighted = text.substring(match.start, match.start + match.length);
     const after = text.substring(match.start + match.length);
-    
-    return `${before}<span class="${highlightClass}">${highlighted}</span>${after}`;
+    return \`\${before}<span class="\${highlightClass}">\${highlighted}</span>\${after}\`;
 }
 
 function buildDisasmRowHtml(r, globalIndex) {
-    const branchMatch = r.args.match(/^(.*\$[0-9A-F]{8})\s*(\([+-]\d+[▼▲]\))(.*)$/);
-    let args = branchMatch
-        ? `${branchMatch[1]} <span style="color:#6a9955">${branchMatch[2]}</span>${branchMatch[3]}`
-        : r.args;
-
-    // Apply search highlighting
+    const branchMatch = r.args.match(/^(.*\\$[0-9A-F]{8})\\s*(\\([+-]\\d+[▼▲]\\))(.*)$/);
+    let args = branchMatch ? \`\${branchMatch[1]} <span style="color:#6a9955">\${branchMatch[2]}</span>\${branchMatch[3]}\` : r.args;
     const addr = highlightSearchInText(r.addr, globalIndex, 'addr');
     const bytes = highlightSearchInText(r.bytes, globalIndex, 'bytes');
     const label = highlightSearchInText(r.label || "", globalIndex, 'label');
     const op = highlightSearchInText(r.op, globalIndex, 'op');
     args = highlightSearchInText(args, globalIndex, 'args');
     const comment = highlightSearchInText(r.comment || "", globalIndex, 'comment');
-
-    return `
-        <span class="addr">${addr}</span>
-        <span class="bytes">${bytes}</span>
-        <span class="label">${label}</span>
-        <span class="op">${op}</span>
-        <span class="args">${args}</span>
-        <span class="comment">${comment}</span>
-    `;
+    return \`<span class="addr">\${addr}</span><span class="bytes">\${bytes}</span><span class="label">\${label}</span><span class="op">\${op}</span><span class="args">\${args}</span><span class="comment">\${comment}</span>\`;
 }
 
-/* =========================
-   Navigation
-========================= */
-
 grid.addEventListener("keydown", e => {
-    // Don't handle if search is active and focused
     if (state.searchActive && document.activeElement === searchInput) {
         return;
     }
-
-    const delta = {
-        ArrowDown: 1,
-        ArrowUp: -1,
-        PageDown: 50,
-        PageUp: -50
-    }[e.key];
-
+    const delta = { ArrowDown: 1, ArrowUp: -1, PageDown: 50, PageUp: -50 }[e.key];
     if (!delta) return;
-
     e.preventDefault();
-    state.cursor = clamp(
-        state.cursor + delta,
-        0,
-        state.totalInstructions - 1
-    );
-
+    state.cursor = clamp(state.cursor + delta, 0, state.totalInstructions - 1);
     checkAndLoadPage();
     updateCursor();
 });
@@ -1077,7 +541,6 @@ function checkAndLoadPage() {
 }
 
 window.addEventListener('keydown', (e) => {
-    // Ctrl + Alt + A → Go To Address
     if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyA') {
         e.preventDefault();
         e.stopPropagation();
@@ -1085,70 +548,45 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-/* =========================
-   Cursor & highlighting
-========================= */
-
 function updateCursor() {
     const localIndex = getLocalIndex(state.cursor);
-
     [...grid.children].forEach(r => {
         r.classList.remove("active", "branch-highlight");
     });
-
     const rowEl = grid.children[localIndex];
     if (!rowEl) return;
-
     rowEl.classList.add("active");
     rowEl.scrollIntoView({ block: "center", behavior: "smooth" });
-
     const row = state.disasmRows[localIndex];
     if (!row) return;
-
     handleBranchHighlight(row, localIndex);
     updateHexForRow(row);
 }
 
 function updateHexForRow(row) {
     const addr = parseInt(row.addr, 16);
-    const length = row.bytes?.trim().split(/\s+/).length || 4;
-
-    const inView =
-        addr >= state.hexOffset &&
-        addr + length <= state.hexOffset + state.hexData.length;
-
+    const length = row.bytes?.trim().split(/\\s+/).length || 4;
+    const inView = addr >= state.hexOffset && addr + length <= state.hexOffset + state.hexData.length;
     if (inView) {
         renderHexView(state.hexData, state.hexOffset, addr, length);
     } else {
-        vscode.postMessage({
-            type: "updateHex",
-            address: addr,
-            length
-        });
+        vscode.postMessage({ type: "updateHex", address: addr, length });
     }
 }
 
 function handleBranchHighlight(row, rowIndex) {
-    const match = row.args.match(/\$([0-9A-F]{8})\s*\(([+-]\d+)/);
+    const match = row.args.match(/\\$([0-9A-F]{8})\\s*\\(([+-]\\d+)/);
     if (!match) return;
-
     const targetAddr = parseInt(match[1], 16);
-    const targetIndex = state.disasmRows.findIndex(
-        r => parseInt(r.addr, 16) === targetAddr
-    );
-
+    const targetIndex = state.disasmRows.findIndex(r => parseInt(r.addr, 16) === targetAddr);
     if (targetIndex === -1) return;
-
     const start = Math.min(rowIndex, targetIndex);
     const end = Math.max(rowIndex, targetIndex);
-
     for (let i = start; i <= end; i++) {
         if (i !== rowIndex) {
             grid.children[i]?.classList.add("branch-highlight");
         }
     }
 }
-
-</script>
-</body> 
-</html>
+`;
+}

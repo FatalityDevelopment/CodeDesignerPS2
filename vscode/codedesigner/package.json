@@ -86,16 +86,14 @@
   "scripts": {
     "vscode:prepublish": "npm run package",
     "compile": "webpack",
-    "build": "npm run compile && npm run copy-html",
+    "build": "npm run compile",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test",
-    "copy-html": "node scripts/copy-html.js",
-    "watch:html": "node scripts/copy-html.js --watch"
+    "test": "vscode-test"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -110,5 +108,8 @@
     "typescript-eslint": "^8.52.0",
     "webpack": "^5.104.1",
     "webpack-cli": "^6.0.1"
+  },
+  "dependencies": {
+    "@vscode/webview-ui-toolkit": "^1.4.0"
   }
 }

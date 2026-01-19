@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
-import { disassemble, analyzePointers } from "../../helpers";
-import { BaseEditorProvider } from "../baseProviders/baseEditorProvider";
+import { disassemble, analyzePointers, getNonce } from "../../helpers";
+import { getDisasmEditorHtml, DisasmEditorData } from "./disasmEditorTemplate";
 
 /**
  * Allowed searchable fields in a disassembled instruction row
@@ -16,21 +16,29 @@ interface SearchMatch {
   length: number;
 }
 
-export class DisasmEditorProvider extends BaseEditorProvider {
+export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private static readonly HEX_VIEW_SIZE = 0x30;
   private static readonly INSTRUCTION_SIZE = 4;
   private static readonly BASE_ADDRESS = 0x00000000;
   private static readonly PAGE_SIZE = 1000;
   private static readonly BUFFER_PAGES = 2;
 
-  constructor() {
-    super("disasmEditorProvider.html", "disasmEditor");
+  openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
+    return { uri, dispose: () => {} };
   }
 
-  protected async onDidResolveWebview(
-    webviewPanel: vscode.WebviewPanel,
-    document: vscode.CustomDocument
+  async resolveCustomEditor(
+    document: vscode.CustomDocument,
+    webviewPanel: vscode.WebviewPanel
   ): Promise<void> {
+    // Setup webview options
+    webviewPanel.webview.options = {
+      enableScripts: true
+    };
+
+    // Set HTML from template
+    const templateData: DisasmEditorData = {};
+    webviewPanel.webview.html = getDisasmEditorHtml(templateData, getNonce());
     fs.readFile(document.uri.fsPath, (err, fileData) => {
       if (err) {
         webviewPanel.webview.postMessage({

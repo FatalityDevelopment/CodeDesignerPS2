@@ -49,11 +49,6 @@ const extensionConfig = {
     new CopyWebpackPlugin({
       patterns: [
         {
-          from: '**/*.html',
-          to: 'providers/[path][name][ext]',
-          context: path.resolve(__dirname, 'src/providers')
-        },
-        {
           from: 'src/language-configuration.json',
           to: 'language-configuration.json'
         },
