@@ -181,6 +181,13 @@ export class SocketClient {
             const responseHandler = (message: string) => {
                 if (responseReceived) return;
                 responseReceived = true;
+                clearTimeout(timeout);
+
+                // Remove the handler
+                const index = this.messageHandlers.indexOf(responseHandler);
+                if (index > -1) {
+                    this.messageHandlers.splice(index, 1);
+                }
 
                 try {
                     const response: CommandResponse = JSON.parse(message);
@@ -218,18 +225,6 @@ export class SocketClient {
                         this.messageHandlers.splice(index, 1);
                     }
                     reject(error);
-                } else {
-                    // Wait for response
-                    setTimeout(() => {
-                        if (!responseReceived) {
-                            clearTimeout(timeout);
-                            // Remove the handler after getting response
-                            const index = this.messageHandlers.indexOf(responseHandler);
-                            if (index > -1) {
-                                this.messageHandlers.splice(index, 1);
-                            }
-                        }
-                    }, timeoutMs);
                 }
             });
         });
