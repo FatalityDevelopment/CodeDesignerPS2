@@ -80,7 +80,64 @@ C# Console App (SocketServer)
 
 ### Message Format
 
-Currently, messages are sent as UTF-8 encoded strings. The server echoes back messages with an "Echo: " prefix for testing purposes.
+Messages are sent as JSON-encoded strings with the following structure:
+
+```typescript
+interface CommandMessage {
+    command: string;    // Command type: "ASSEMBLE", "DISASSEMBLE", "PING"
+    data?: string;      // Optional data payload
+    address?: number;   // Optional starting address (for DISASSEMBLE)
+}
+```
+
+Response format:
+
+```typescript
+interface CommandResponse {
+    Success: boolean;
+    Command?: string;
+    Message?: string;
+    Error?: string;
+    Results?: InstructionResult[];
+}
+```
+
+### Supported Commands
+
+#### ASSEMBLE
+Assembles MIPS assembly code to hex.
+
+```json
+{
+    "command": "ASSEMBLE",
+    "data": "add t0, t1, t2\nori t3, t0, 0x1234"
+}
+```
+
+#### DISASSEMBLE
+Disassembles hex code to MIPS assembly. Optionally accepts a starting address for proper branch target calculation.
+
+```json
+{
+    "command": "DISASSEMBLE",
+    "data": "0x02114020 0x35080001",
+    "address": 4096
+}
+```
+
+When `address` is provided, branch instructions will show target addresses and offset indicators:
+- `beq zero, zero, $00001008 (+2▼)` instead of just `beq zero, zero, 0x0001`
+
+#### PING
+Tests server connectivity.
+
+```json
+{
+    "command": "PING"
+}
+```
+
+Response: `{ "Success": true, "Message": "PONG" }`
 
 ### Protocol
 
