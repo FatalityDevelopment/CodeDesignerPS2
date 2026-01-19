@@ -46,7 +46,6 @@ export function activate(context: vscode.ExtensionContext) {
 	const connectCommand = vscode.commands.registerCommand('codedesigner.connectServer', async () => {
 		try {
 			await socketClient?.connect();
-			vscode.window.showInformationMessage('Connected to C# server');
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to connect: ${error}`);
 		}

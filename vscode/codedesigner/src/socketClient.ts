@@ -29,10 +29,12 @@ export class SocketClient {
             }
 
             this.client = new net.Socket();
+            let isResolved = false;
 
             this.client.connect(this.port, this.host, () => {
                 console.log(`Connected to C# server at ${this.host}:${this.port}`);
                 this.connected = true;
+                isResolved = true;
                 this.connectionHandlers.forEach(handler => handler());
                 resolve();
             });
@@ -46,7 +48,10 @@ export class SocketClient {
             this.client.on('error', (error: Error) => {
                 console.error(`Socket error: ${error.message}`);
                 this.connected = false;
-                reject(error);
+                if (!isResolved) {
+                    isResolved = true;
+                    reject(error);
+                }
             });
 
             this.client.on('close', () => {
@@ -58,9 +63,12 @@ export class SocketClient {
             // Set connection timeout
             this.client.setTimeout(5000);
             this.client.on('timeout', () => {
-                console.error('Connection timeout');
-                this.client?.destroy();
-                reject(new Error('Connection timeout'));
+                if (!isResolved) {
+                    console.error('Connection timeout');
+                    this.client?.destroy();
+                    isResolved = true;
+                    reject(new Error('Connection timeout'));
+                }
             });
         });
     }
