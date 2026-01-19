@@ -19,8 +19,11 @@ export function getSocketClient(): SocketClient | null {
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-	// Register custom editor for disassembly
-	const editorProvider = new DisasmEditorProvider();
+	// Initialize socket client
+	socketClient = new SocketClient('localhost', 8765);
+
+	// Register custom editor for disassembly (after socket client is initialized)
+	const editorProvider = new DisasmEditorProvider(socketClient);
 	context.subscriptions.push(
 		vscode.window.registerCustomEditorProvider('disasm.disasmEditor', editorProvider)
 	);
@@ -31,9 +34,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const asmPanelProvider = new AsmPanelProvider();
 	asmPanelProvider.register(context);
-
-	// Initialize socket client
-	socketClient = new SocketClient('localhost', 8765);
 
 	// Register socket event handlers
 	socketClient.onConnected(() => {

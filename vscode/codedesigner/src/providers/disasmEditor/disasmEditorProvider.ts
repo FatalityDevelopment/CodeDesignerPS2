@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
-import { disassemble, analyzePointers, getNonce } from "../../helpers";
+import { analyzePointers, getNonce } from "../../helpers";
 import { getDisasmEditorHtml, DisasmEditorData } from "./disasmEditorTemplate";
+import { SocketClient } from "../../socketClient";
 
 /**
  * Allowed searchable fields in a disassembled instruction row
@@ -16,12 +17,120 @@ interface SearchMatch {
   length: number;
 }
 
+/**
+ * Structure for disassembled instruction row
+ */
+interface DisassembledRow {
+  addr: string;
+  bytes: string;
+  label: string;
+  op: string;
+  args: string;
+  comment: string;
+}
+
 export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private static readonly HEX_VIEW_SIZE = 0x30;
   private static readonly INSTRUCTION_SIZE = 4;
   private static readonly BASE_ADDRESS = 0x00000000;
   private static readonly PAGE_SIZE = 1000;
   private static readonly BUFFER_PAGES = 2;
+  private socketClient: SocketClient | null;
+
+  constructor(socketClient: SocketClient | null) {
+    this.socketClient = socketClient;
+  }
+
+  /**
+   * Format bytes for display (space-separated, big-endian)
+   */
+  private formatBytesForDisplay(buffer: Buffer, offset: number, length: number): string {
+    const slice = buffer.slice(offset, offset + length);
+    return Array.from(slice)
+      .reverse()
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join(" ");
+  }
+
+  /**
+   * Disassemble binary data using the C# backend via socket client
+   * @param startAddr - Starting address for disassembly
+   * @param buffer - Binary data to disassemble
+   * @returns Array of disassembled instruction rows
+   */
+  private async disassembleWithBackend(startAddr: number, buffer: Buffer): Promise<DisassembledRow[]> {
+    const rows: DisassembledRow[] = [];
+    
+    // If no socket client or not connected, return empty array
+    if (!this.socketClient || !this.socketClient.isConnected()) {
+      console.warn("Socket client not available or not connected, cannot disassemble");
+      return rows;
+    }
+
+    try {
+      // Convert buffer to hex strings for each 4-byte instruction
+      const hexInstructions: string[] = [];
+      for (let offset = 0; offset < buffer.length; offset += 4) {
+        if (offset + 4 <= buffer.length) {
+          // Read 4-byte instruction as little-endian and convert to hex string
+          const instruction = buffer.readUInt32LE(offset);
+          hexInstructions.push(`0x${instruction.toString(16).padStart(8, '0')}`);
+        }
+      }
+
+      if (hexInstructions.length === 0) {
+        return rows;
+      }
+
+      // Call C# backend to disassemble
+      const hexCode = hexInstructions.join(' ');
+      const results = await this.socketClient.disassemble(hexCode);
+
+      // Convert results to row format
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const offset = i * DisasmEditorProvider.INSTRUCTION_SIZE;
+        const currentAddr = startAddr + offset;
+
+        if (result.success && result.assembly) {
+          // Parse the assembly instruction to extract op and args
+          const parts = result.assembly.trim().split(/\s+/);
+          const op = parts[0] || '';
+          const args = parts.slice(1).join(' ');
+
+          // Get bytes in display format (space-separated, big-endian)
+          const bytesLE = this.formatBytesForDisplay(buffer, offset, 4);
+
+          rows.push({
+            addr: currentAddr.toString(16).toUpperCase().padStart(8, "0"),
+            bytes: bytesLE,
+            label: "",
+            op: op,
+            args: args,
+            comment: "",
+          });
+        } else if (result.error) {
+          // Handle error case
+          console.error(`Disassembly error at offset ${offset}: ${result.error}`);
+          const bytesLE = this.formatBytesForDisplay(buffer, offset, 4);
+
+          rows.push({
+            addr: currentAddr.toString(16).toUpperCase().padStart(8, "0"),
+            bytes: bytesLE,
+            label: "",
+            op: "???",
+            args: "",
+            comment: `; Error: ${result.error}`,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Failed to disassemble with backend:", error);
+      // Return empty array on error
+    }
+
+    return rows;
+  }
 
   openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
     return { uri, dispose: () => {} };
@@ -69,7 +178,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         DisasmEditorProvider.INSTRUCTION_SIZE
       );
 
-      webviewPanel.webview.onDidReceiveMessage((message) => {
+      webviewPanel.webview.onDidReceiveMessage(async (message) => {
         if (message.type === "updateHex") {
           this.sendHexView(
             webviewPanel,
@@ -79,20 +188,20 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             message.length || DisasmEditorProvider.INSTRUCTION_SIZE
           );
         } else if (message.type === "requestPage") {
-          this.sendDisasmPage(webviewPanel, fileData, message.startIndex);
+          await this.sendDisasmPage(webviewPanel, fileData, message.startIndex);
         } else if (message.type === "search") {
-          this.performSearch(webviewPanel, fileData, message.query, message.mode);
+          await this.performSearch(webviewPanel, fileData, message.query, message.mode);
         }
       });
     });
   }
 
-  private performSearch(
+  private async performSearch(
     webviewPanel: vscode.WebviewPanel,
     fileData: Buffer,
     query: string,
     mode: 'text' | 'bytes' | 'string' | 'regex'
-  ): void {
+  ): Promise<void> {
     const matches: SearchMatch[] = [];
 
     if (mode === 'bytes') {
@@ -164,7 +273,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         if (slice.length < DisasmEditorProvider.INSTRUCTION_SIZE) break;
 
         const address = DisasmEditorProvider.BASE_ADDRESS + offset;
-        const rows = disassemble(address, slice);
+        const rows = await this.disassembleWithBackend(address, slice);
 
         if (rows.length === 0) continue;
 
@@ -260,11 +369,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     return matches;
   }
 
-  private sendDisasmPage(
+  private async sendDisasmPage(
     webviewPanel: vscode.WebviewPanel,
     fileData: Buffer,
     startIndex: number
-  ): void {
+  ): Promise<void> {
     const startOffset = startIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
     const endOffset = Math.min(
       fileData.length,
@@ -274,7 +383,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     const slice = fileData.slice(startOffset, endOffset);
     const startAddr = DisasmEditorProvider.BASE_ADDRESS + startOffset;
 
-    const rows = disassemble(startAddr, slice);
+    const rows = await this.disassembleWithBackend(startAddr, slice);
     const refs = analyzePointers(rows);
 
     const refMap = new Map<number, any[]>();
