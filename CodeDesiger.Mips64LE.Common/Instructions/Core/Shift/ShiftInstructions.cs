@@ -52,6 +52,12 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
+            // Check if this is actually a NOP (all fields are zero)
+            if (args.Rd == 0 && args.Rt == 0 && args.Shamt == 0)
+            {
+                return "No operation";
+            }
+            
             string eq = Equation
                 .Replace("rd", CpuHelpers.RegName(args.Rd))
                 .Replace("rt", CpuHelpers.RegName(args.Rt))

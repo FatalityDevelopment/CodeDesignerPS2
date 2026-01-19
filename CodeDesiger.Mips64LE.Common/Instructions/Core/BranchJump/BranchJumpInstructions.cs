@@ -658,10 +658,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 uint pcUpper = (pc.Value + 4) & 0xF0000000;
                 uint target = pcUpper | (args.Addr << 2);
-                return $"{Equation.Replace("target", $"0x{args.Addr:X}")} => ${target:X8}";
+                return $"jump to ${target:X8}";
             }
 
-            return Equation.Replace("target", $"0x{args.Addr:X}");
+            return $"jump to target 0x{args.Addr:X}";
         }
     }
 
@@ -714,10 +714,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 uint pcUpper = (pc.Value + 4) & 0xF0000000;
                 uint target = pcUpper | (args.Addr << 2);
                 uint returnAddr = pc.Value + 8;
-                return $"{Equation.Replace("target", $"0x{args.Addr:X}")} => target=${target:X8}, $ra=0x{returnAddr:X8}";
+                return $"call to function at ${target:X8} ($ra=0x{returnAddr:X8})";
             }
 
-            return Equation.Replace("target", $"0x{args.Addr:X}");
+            return $"call to function at target 0x{args.Addr:X}";
         }
     }
 
@@ -753,15 +753,14 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-
             if (cpu != null)
             {
                 ulong target = cpu.RegsLo[args.Rs];
-                return $"{eq} => 0x{target:X16}";
+                // Cast to uint: MIPS uses 32-bit addresses even in 64-bit mode
+                return $"jump to ${(uint)target:X8} (ptr)";
             }
 
-            return eq;
+            return $"jump to {CpuHelpers.RegName(args.Rs)} (ptr)";
         }
     }
 
@@ -806,18 +805,15 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs));
-
             if (cpu != null && pc.HasValue)
             {
                 ulong target = cpu.RegsLo[args.Rs];
                 uint returnAddr = pc.Value + 8;
-                return $"{eq} => target=0x{target:X16}, {CpuHelpers.RegName(args.Rd)}=0x{returnAddr:X8}";
+                // Cast to uint: MIPS uses 32-bit addresses even in 64-bit mode
+                return $"call to function at ${(uint)target:X8} ({CpuHelpers.RegName(args.Rd)}=0x{returnAddr:X8})";
             }
 
-            return eq;
+            return $"call to function at {CpuHelpers.RegName(args.Rs)} (ptr)";
         }
     }
 

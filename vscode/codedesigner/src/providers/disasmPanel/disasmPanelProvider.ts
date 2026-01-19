@@ -50,7 +50,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             const asmLines: string[] = [];
             for (const result of results) {
                 if (result.Success) {
-                    asmLines.push(`${result.Hex}  ${result.Assembly}`);
+                    const line = result.Comment 
+                        ? `${result.Hex}  ${result.Assembly}  ${result.Comment}`
+                        : `${result.Hex}  ${result.Assembly}`;
+                    asmLines.push(line);
                 } else {
                     asmLines.push(`${result.Hex}  ERROR: ${result.Error}`);
                 }
