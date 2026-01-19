@@ -247,6 +247,7 @@ namespace CodeDesigner.Mips64LE
                 // Split into lines and disassemble each hex value
                 var lines = hexCode.Split(new[] { '\n', '\r', ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
                 var results = new List<InstructionResult>();
+                var instructionList = new List<(uint instruction, uint address)>();
                 
                 // Track current PC for branch calculations
                 uint currentPc = startAddress ?? 0;
@@ -279,6 +280,9 @@ namespace CodeDesigner.Mips64LE
                             Success = true
                         });
                         
+                        // Store instruction for analysis
+                        instructionList.Add((instruction, currentPc));
+                        
                         // Increment PC by 4 bytes (one instruction)
                         currentPc += 4;
                     }
@@ -296,35 +300,23 @@ namespace CodeDesigner.Mips64LE
                     }
                 }
 
-                // Run analyzer to generate comments
-                var rows = results
-                    .Select((r, index) => new { Result = r, Index = index })
-                    .Where(x => x.Result.Success && x.Result.Assembly != null)
-                    .Select(x => 
-                    {
-                        var parts = x.Result.Assembly!.Trim().Split(new[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries);
-                        return new 
-                        {
-                            Row = new MipsAnalyzer.DisassembledRow
-                            {
-                                Addr = (startAddress ?? 0) + (uint)(x.Index * 4),
-                                Op = parts.Length > 0 ? parts[0] : "",
-                                Args = parts.Length > 1 ? parts[1] : ""
-                            },
-                            OriginalIndex = x.Index
-                        };
-                    })
-                    .ToList();
+                // Run analyzer using the instruction's built-in Analyze() method
+                var comments = MipsAnalyzer.AnalyzeInstructions(
+                    instructionList, 
+                    startAddress ?? 0,
+                    executeInstructions: true  // Execute instructions to track register state
+                );
 
-                var comments = MipsAnalyzer.AnalyzeAndGenerateComments(rows.Select(x => x.Row));
-
-                // Apply comments to results using original indices
-                foreach (var item in rows)
+                // Apply comments to results
+                for (int i = 0; i < results.Count; i++)
                 {
-                    var addr = (startAddress ?? 0) + (uint)(item.OriginalIndex * 4);
-                    if (comments.TryGetValue(addr, out var comment))
+                    if (results[i].Success && instructionList.Count > i)
                     {
-                        results[item.OriginalIndex].Comment = comment;
+                        var addr = instructionList[i].address;
+                        if (comments.TryGetValue(addr, out var comment))
+                        {
+                            results[i].Comment = comment;
+                        }
                     }
                 }
 
