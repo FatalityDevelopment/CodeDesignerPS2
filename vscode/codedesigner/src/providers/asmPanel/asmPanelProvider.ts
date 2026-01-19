@@ -79,10 +79,10 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
             // Format results as hex output
             const hexLines: string[] = [];
             for (const result of results) {
-                if (result.success) {
-                    hexLines.push(`${result.hex}  # ${result.assembly}`);
+                if (result.Success) {
+                    hexLines.push(`${result.Hex}  # ${result.Assembly}`);
                 } else {
-                    hexLines.push(`ERROR: ${result.error} (${result.assembly})`);
+                    hexLines.push(`ERROR: ${result.Error} (${result.Assembly})`);
                 }
             }
             

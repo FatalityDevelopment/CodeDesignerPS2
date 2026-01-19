@@ -145,25 +145,33 @@ const getPageStart = index => Math.floor(index / state.pageSize) * state.pageSiz
 const getLocalIndex = index => index - getPageStart(index);
 
 window.addEventListener("message", ({ data: msg }) => {
+    console.log('[WEBVIEW] Received message:', msg.type, msg);
     switch (msg.type) {
         case "init":
+            console.log('[WEBVIEW] Init:', msg.totalInstructions, 'instructions');
             state.totalInstructions = msg.totalInstructions;
             state.pageSize = msg.pageSize;
             state.baseAddress = msg.baseAddress;
             break;
         case "disasmPage":
+            console.log('[WEBVIEW] disasmPage:', msg.rows?.length || 0, 'rows, startIndex:', msg.startIndex);
             state.loadedPages.set(msg.startIndex, msg.rows);
             if (msg.startIndex === getPageStart(state.cursor)) {
                 state.disasmRows = msg.rows;
+                console.log('[WEBVIEW] Rendering', state.disasmRows.length, 'rows');
                 renderDisassembly();
+            } else {
+                console.log('[WEBVIEW] Page cached but not rendering (cursor at different page)');
             }
             break;
         case "hexview":
+            console.log('[WEBVIEW] hexview:', msg.data?.length || 0, 'bytes');
             state.hexData = msg.data;
             state.hexOffset = msg.offset || 0;
             renderHexView(msg.data, state.hexOffset, msg.highlight_addr, msg.highlight_length);
             break;
         case "searchResults":
+            console.log('[WEBVIEW] searchResults:', msg.matches?.length || 0, 'matches');
             handleSearchResults(msg.matches);
             break;
     }

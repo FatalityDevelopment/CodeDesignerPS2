@@ -7,6 +7,7 @@ import { AsmPanelProvider } from './providers/asmPanel/asmPanelProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
+let outputChannel: vscode.OutputChannel;
 
 /**
  * Get the socket client instance
@@ -15,9 +16,20 @@ export function getSocketClient(): SocketClient | null {
     return socketClient;
 }
 
+/**
+ * Get the output channel instance
+ */
+export function getOutputChannel(): vscode.OutputChannel {
+    return outputChannel;
+}
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+
+	// Create output channel for logging
+	outputChannel = vscode.window.createOutputChannel('CodeDesigner');
+	context.subscriptions.push(outputChannel);
 
 	// Initialize socket client
 	socketClient = new SocketClient('localhost', 8765);
@@ -37,15 +49,16 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Register socket event handlers
 	socketClient.onConnected(() => {
+		outputChannel.appendLine('[INFO] Connected to C# server');
 		vscode.window.showInformationMessage('Connected to C# server');
 	});
 
 	socketClient.onMessage((message: string) => {
-		console.log(`Message from server: ${message}`);
-		vscode.window.showInformationMessage(`Server: ${message}`);
+		outputChannel.appendLine(`[MESSAGE] ${message}`);
 	});
 
 	socketClient.onDisconnected(() => {
+		outputChannel.appendLine('[WARN] Disconnected from C# server');
 		vscode.window.showWarningMessage('Disconnected from C# server');
 	});
 
@@ -83,13 +96,18 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(connectCommand, disconnectCommand, sendMessageCommand);
 
-	// Auto-connect on activation (optional)
-	// Uncomment if you want automatic connection
-	// setTimeout(() => {
-	// 	socketClient?.connect().catch(err => {
-	// 		console.log('Failed to auto-connect:', err.message);
-	// 	});
-	// }, 1000);
+	// Auto-connect on activation
+	outputChannel.appendLine('[INFO] Extension activated, attempting to connect to server...');
+	setTimeout(() => {
+		socketClient?.connect().then(() => {
+			outputChannel.appendLine('[SUCCESS] Auto-connected to server');
+		}).catch(err => {
+			const errorMsg = err?.message || err?.toString() || 'Unknown error';
+			outputChannel.appendLine(`[ERROR] Failed to auto-connect: ${errorMsg}`);
+			outputChannel.appendLine('[INFO] You can manually connect using "CodeDesigner: Connect to Server" command');
+			outputChannel.appendLine('[INFO] Make sure the C# server is running on localhost:8765');
+		});
+	}, 1000);
 }
 
 // This method is called when your extension is deactivated

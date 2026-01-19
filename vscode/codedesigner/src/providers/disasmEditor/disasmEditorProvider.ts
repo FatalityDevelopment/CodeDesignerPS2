@@ -63,7 +63,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     
     // If no socket client or not connected, return empty array
     if (!this.socketClient || !this.socketClient.isConnected()) {
-      console.warn("Socket client not available or not connected, cannot disassemble");
+      const msg = "Socket client not available or not connected, cannot disassemble";
+      console.warn(msg);
+      const vscode = require('vscode');
+      const outputChannel = vscode.window.outputChannel;
+      if (outputChannel) {
+        outputChannel.appendLine(`[WARN] ${msg}`);
+      }
       return rows;
     }
 
@@ -84,7 +90,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
       // Call C# backend to disassemble
       const hexCode = hexInstructions.join(' ');
+      console.log(`[DISASM] Disassembling ${hexInstructions.length} instructions starting at 0x${startAddr.toString(16)}`);
       const results = await this.socketClient.disassemble(hexCode);
+      console.log(`[DISASM] Received ${results.length} results from backend`);
 
       // Convert results to row format
       for (let i = 0; i < results.length; i++) {
@@ -92,9 +100,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const offset = i * DisasmEditorProvider.INSTRUCTION_SIZE;
         const currentAddr = startAddr + offset;
 
-        if (result.success && result.assembly) {
+        if (result.Success && result.Assembly) {
           // Parse the assembly instruction to extract op and args
-          const parts = result.assembly.trim().split(/\s+/);
+          const parts = result.Assembly.trim().split(/\s+/);
           const op = parts[0] || '';
           const args = parts.slice(1).join(' ');
 
@@ -109,9 +117,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             args: args,
             comment: "",
           });
-        } else if (result.error) {
+        } else if (result.Error) {
           // Handle error case
-          console.error(`Disassembly error at offset ${offset}: ${result.error}`);
+          const errorMsg = `Disassembly error at offset ${offset}: ${result.Error}`;
+          console.error(`[DISASM] ${errorMsg}`);
           const bytesLE = this.formatBytesForDisplay(buffer, offset, 4);
 
           rows.push({
@@ -120,12 +129,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             label: "",
             op: "???",
             args: "",
-            comment: `; Error: ${result.error}`,
+            comment: `; Error: ${result.Error}`,
           });
         }
       }
     } catch (error) {
-      console.error("Failed to disassemble with backend:", error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[DISASM] Failed to disassemble with backend: ${errorMsg}`);
+      const vscode = require('vscode');
+      vscode.window.showErrorMessage(`Disassembly failed: ${errorMsg}`);
       // Return empty array on error
     }
 
@@ -150,6 +162,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     webviewPanel.webview.html = getDisasmEditorHtml(templateData, getNonce());
     fs.readFile(document.uri.fsPath, (err, fileData) => {
       if (err) {
+        console.error(`[DISASM] Failed to read file: ${err.message}`);
         webviewPanel.webview.postMessage({
           type: "error",
           message: err.message,
@@ -157,10 +170,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         return;
       }
 
+      console.log(`[DISASM] File loaded: ${fileData.length} bytes`);
       const totalInstructions = Math.floor(
         fileData.length / DisasmEditorProvider.INSTRUCTION_SIZE
       );
 
+      console.log(`[DISASM] Sending init message: ${totalInstructions} total instructions, page size: ${DisasmEditorProvider.PAGE_SIZE}`);
       webviewPanel.webview.postMessage({
         type: "init",
         totalInstructions,
@@ -168,8 +183,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         baseAddress: DisasmEditorProvider.BASE_ADDRESS,
       });
 
+      console.log(`[DISASM] Requesting first page (startIndex: 0)`);
       this.sendDisasmPage(webviewPanel, fileData, 0);
 
+      console.log(`[DISASM] Sending initial hex view`);
       this.sendHexView(
         webviewPanel,
         fileData,
@@ -179,6 +196,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       );
 
       webviewPanel.webview.onDidReceiveMessage(async (message) => {
+        console.log(`[DISASM] Received message from webview:`, message.type);
         if (message.type === "updateHex") {
           this.sendHexView(
             webviewPanel,
@@ -374,16 +392,20 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     fileData: Buffer,
     startIndex: number
   ): Promise<void> {
+    console.log(`[DISASM] sendDisasmPage called: startIndex=${startIndex}`);
     const startOffset = startIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
     const endOffset = Math.min(
       fileData.length,
       startOffset + DisasmEditorProvider.PAGE_SIZE * DisasmEditorProvider.INSTRUCTION_SIZE
     );
 
+    console.log(`[DISASM] Extracting bytes ${startOffset}-${endOffset} (${endOffset - startOffset} bytes)`);
     const slice = fileData.slice(startOffset, endOffset);
     const startAddr = DisasmEditorProvider.BASE_ADDRESS + startOffset;
 
+    console.log(`[DISASM] Calling disassembleWithBackend...`);
     const rows = await this.disassembleWithBackend(startAddr, slice);
+    console.log(`[DISASM] Got ${rows.length} disassembled rows`);
     const refs = analyzePointers(rows);
 
     const refMap = new Map<number, any[]>();
@@ -414,6 +436,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         : annotations.join(', ');
     }
 
+    console.log(`[DISASM] Sending disasmPage message with ${rows.length} rows, startIndex: ${startIndex}`);
+    if (rows.length > 0) {
+      console.log(`[DISASM] First row sample:`, rows[0]);
+    }
     webviewPanel.webview.postMessage({
       type: "disasmPage",
       rows,
@@ -437,6 +463,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
     const slice = fileData.slice(fileOffset, endOffset);
 
+    console.log(`[DISASM] Sending hexview: ${slice.length} bytes at offset ${alignedAddr}`);
     webviewPanel.webview.postMessage({
       type: "hexview",
       data: Array.from(slice),

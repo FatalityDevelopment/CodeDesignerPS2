@@ -12,21 +12,21 @@ interface CommandMessage {
  * Response format for socket communication
  */
 interface CommandResponse {
-    success: boolean;
-    command?: string;
-    message?: string;
-    error?: string;
-    results?: InstructionResult[];
+    Success: boolean;
+    Command?: string;
+    Message?: string;
+    Error?: string;
+    Results?: InstructionResult[];
 }
 
 /**
  * Result for individual instruction assembly/disassembly
  */
 interface InstructionResult {
-    success: boolean;
-    assembly?: string;
-    hex?: string;
-    error?: string;
+    Success: boolean;
+    Assembly?: string;
+    Hex?: string;
+    Error?: string;
 }
 
 /**
@@ -37,6 +37,7 @@ export class SocketClient {
     private host: string;
     private port: number;
     private connected: boolean = false;
+    private wasConnected: boolean = false;
     private messageHandlers: Array<(message: string) => void> = [];
     private connectionHandlers: Array<() => void> = [];
     private disconnectionHandlers: Array<() => void> = [];
@@ -60,9 +61,11 @@ export class SocketClient {
             this.client = new net.Socket();
             let isResolved = false;
 
+            console.log(`[SOCKET] Attempting to connect to ${this.host}:${this.port}...`);
             this.client.connect(this.port, this.host, () => {
-                console.log(`Connected to C# server at ${this.host}:${this.port}`);
+                console.log(`[SOCKET] Connected to C# server at ${this.host}:${this.port}`);
                 this.connected = true;
+                this.wasConnected = true;
                 isResolved = true;
                 this.connectionHandlers.forEach(handler => handler());
                 resolve();
@@ -70,12 +73,14 @@ export class SocketClient {
 
             this.client.on('data', (data: Buffer) => {
                 const message = data.toString('utf8');
-                console.log(`Received from server: ${message}`);
+                console.log(`[SOCKET] Received from server: ${message}`);
                 this.messageHandlers.forEach(handler => handler(message));
             });
 
             this.client.on('error', (error: Error) => {
-                console.error(`Socket error: ${error.message}`);
+                const errorMsg = error?.message || error?.toString() || 'Unknown socket error';
+                console.error(`[SOCKET] Socket error: ${errorMsg}`);
+                console.error(`[SOCKET] Error details:`, error);
                 this.connected = false;
                 if (!isResolved) {
                     isResolved = true;
@@ -84,16 +89,21 @@ export class SocketClient {
             });
 
             this.client.on('close', () => {
-                console.log('Connection closed');
+                console.log('[SOCKET] Connection closed');
+                const wasActuallyConnected = this.wasConnected;
                 this.connected = false;
-                this.disconnectionHandlers.forEach(handler => handler());
+                this.wasConnected = false;
+                // Only call disconnect handlers if we were actually connected
+                if (wasActuallyConnected) {
+                    this.disconnectionHandlers.forEach(handler => handler());
+                }
             });
 
             // Set connection timeout
             this.client.setTimeout(5000);
             this.client.on('timeout', () => {
                 if (!isResolved) {
-                    console.error('Connection timeout');
+                    console.error('[SOCKET] Connection timeout');
                     this.client?.destroy();
                     isResolved = true;
                     reject(new Error('Connection timeout'));
@@ -114,10 +124,10 @@ export class SocketClient {
 
             this.client.write(message, 'utf8', (error) => {
                 if (error) {
-                    console.error(`Error sending message: ${error.message}`);
+                    console.error(`[SOCKET] Error sending message: ${error.message}`);
                     reject(error);
                 } else {
-                    console.log(`Sent: ${message}`);
+                    console.log(`[SOCKET] Sent: ${message}`);
                     resolve();
                 }
             });
@@ -133,7 +143,8 @@ export class SocketClient {
             this.client = null;
         }
         this.connected = false;
-        console.log('Disconnected from server');
+        this.wasConnected = false;
+        console.log('[SOCKET] Disconnected from server');
     }
 
     /**
@@ -241,11 +252,11 @@ export class SocketClient {
 
         const response = await this.sendCommand(command);
         
-        if (!response.success) {
-            throw new Error(response.error || 'Assembly failed');
+        if (!response.Success) {
+            throw new Error(response.Error || 'Assembly failed');
         }
 
-        return response.results || [];
+        return response.Results || [];
     }
 
     /**
@@ -259,11 +270,11 @@ export class SocketClient {
 
         const response = await this.sendCommand(command);
         
-        if (!response.success) {
-            throw new Error(response.error || 'Disassembly failed');
+        if (!response.Success) {
+            throw new Error(response.Error || 'Disassembly failed');
         }
 
-        return response.results || [];
+        return response.Results || [];
     }
 
     /**
@@ -276,10 +287,10 @@ export class SocketClient {
 
         const response = await this.sendCommand(command);
         
-        if (!response.success) {
-            throw new Error(response.error || 'Ping failed');
+        if (!response.Success) {
+            throw new Error(response.Error || 'Ping failed');
         }
 
-        return response.message || 'PONG';
+        return response.Message || 'PONG';
     }
 }
