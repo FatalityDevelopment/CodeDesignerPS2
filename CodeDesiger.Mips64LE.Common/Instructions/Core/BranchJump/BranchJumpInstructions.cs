@@ -820,4 +820,312 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             return eq;
         }
     }
+
+    // BLTZAL - Branch if less than zero and link
+    public sealed class BLTZAL : Instruction<Args_I>
+    {
+        public BLTZAL()
+        {
+            Opcode = 0x01;
+            Funct = null;
+            Name = "bltzal";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rs", "offset"];
+            Equation = "$ra = PC + 8; if (rs < 0) PC = PC + 4 + (offset << 2)";
+            Description = "Branch to target address if rs is less than zero and link";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            long rs = (long)cpu.RegsLo[args.Rs];
+            
+            // Save return address to $ra (register 31)
+            cpu.RegsLo[31] = cpu.PC + 8;
+            cpu.RegsHi[31] = 0;
+
+            if (rs < 0)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 4;
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
+            }
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)((Opcode << 26) | (args[0] << 21) | (0x10 << 16) | (args[1] & 0xFFFF));
+        }
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+
+            if (cpu != null && pc.HasValue)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                uint returnAddr = pc.Value + 8;
+                bool taken = rsVal < 0;
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+            }
+
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
+            }
+
+            return eq;
+        }
+    }
+
+    // BGEZAL - Branch if greater than or equal to zero and link
+    public sealed class BGEZAL : Instruction<Args_I>
+    {
+        public BGEZAL()
+        {
+            Opcode = 0x01;
+            Funct = null;
+            Name = "bgezal";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rs", "offset"];
+            Equation = "$ra = PC + 8; if (rs >= 0) PC = PC + 4 + (offset << 2)";
+            Description = "Branch to target address if rs is greater than or equal to zero and link";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            long rs = (long)cpu.RegsLo[args.Rs];
+            
+            // Save return address to $ra (register 31)
+            cpu.RegsLo[31] = cpu.PC + 8;
+            cpu.RegsHi[31] = 0;
+
+            if (rs >= 0)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 4;
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
+            }
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)((Opcode << 26) | (args[0] << 21) | (0x11 << 16) | (args[1] & 0xFFFF));
+        }
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+
+            if (cpu != null && pc.HasValue)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                uint returnAddr = pc.Value + 8;
+                bool taken = rsVal >= 0;
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+            }
+
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
+            }
+
+            return eq;
+        }
+    }
+
+    // BLTZALL - Branch if less than zero and link (likely)
+    public sealed class BLTZALL : Instruction<Args_I>
+    {
+        public BLTZALL()
+        {
+            Opcode = 0x01;
+            Funct = null;
+            Name = "bltzall";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rs", "offset"];
+            Equation = "$ra = PC + 8; if (rs < 0) PC = PC + 4 + (offset << 2)";
+            Description = "Branch to target address if rs is less than zero and link (likely)";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            long rs = (long)cpu.RegsLo[args.Rs];
+            
+            // Save return address to $ra (register 31)
+            cpu.RegsLo[31] = cpu.PC + 8;
+            cpu.RegsHi[31] = 0;
+
+            if (rs < 0)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 4;
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
+            }
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)((Opcode << 26) | (args[0] << 21) | (0x12 << 16) | (args[1] & 0xFFFF));
+        }
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+
+            if (cpu != null && pc.HasValue)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                uint returnAddr = pc.Value + 8;
+                bool taken = rsVal < 0;
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+            }
+
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
+            }
+
+            return eq;
+        }
+    }
+
+    // BGEZALL - Branch if greater than or equal to zero and link (likely)
+    public sealed class BGEZALL : Instruction<Args_I>
+    {
+        public BGEZALL()
+        {
+            Opcode = 0x01;
+            Funct = null;
+            Name = "bgezall";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rs", "offset"];
+            Equation = "$ra = PC + 8; if (rs >= 0) PC = PC + 4 + (offset << 2)";
+            Description = "Branch to target address if rs is greater than or equal to zero and link (likely)";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            long rs = (long)cpu.RegsLo[args.Rs];
+            
+            // Save return address to $ra (register 31)
+            cpu.RegsLo[31] = cpu.PC + 8;
+            cpu.RegsHi[31] = 0;
+
+            if (rs >= 0)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 4;
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                int instrCount = offset / 4;
+                string sign = instrCount >= 0 ? "+" : "";
+                string arrow = instrCount >= 0 ? "▼" : "▲";
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8} ({sign}{instrCount + 1}{arrow})";
+            }
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)((Opcode << 26) | (args[0] << 21) | (0x13 << 16) | (args[1] & 0xFFFF));
+        }
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+
+            if (cpu != null && pc.HasValue)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                uint returnAddr = pc.Value + 8;
+                bool taken = rsVal >= 0;
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+            }
+
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
+            }
+
+            return eq;
+        }
+    }
 }
