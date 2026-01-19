@@ -298,31 +298,33 @@ namespace CodeDesigner.Mips64LE
 
                 // Run analyzer to generate comments
                 var rows = results
-                    .Where(r => r.Success && r.Assembly != null)
-                    .Select((r, index) => 
+                    .Select((r, index) => new { Result = r, Index = index })
+                    .Where(x => x.Result.Success && x.Result.Assembly != null)
+                    .Select(x => 
                     {
-                        var parts = r.Assembly!.Trim().Split(new[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries);
-                        return new MipsAnalyzer.DisassembledRow
+                        var parts = x.Result.Assembly!.Trim().Split(new[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                        return new 
                         {
-                            Addr = (startAddress ?? 0) + (uint)(index * 4),
-                            Op = parts.Length > 0 ? parts[0] : "",
-                            Args = parts.Length > 1 ? parts[1] : ""
+                            Row = new MipsAnalyzer.DisassembledRow
+                            {
+                                Addr = (startAddress ?? 0) + (uint)(x.Index * 4),
+                                Op = parts.Length > 0 ? parts[0] : "",
+                                Args = parts.Length > 1 ? parts[1] : ""
+                            },
+                            OriginalIndex = x.Index
                         };
                     })
                     .ToList();
 
-                var comments = MipsAnalyzer.AnalyzeAndGenerateComments(rows);
+                var comments = MipsAnalyzer.AnalyzeAndGenerateComments(rows.Select(x => x.Row));
 
-                // Apply comments to results
-                for (int i = 0; i < results.Count; i++)
+                // Apply comments to results using original indices
+                foreach (var item in rows)
                 {
-                    if (results[i].Success)
+                    var addr = (startAddress ?? 0) + (uint)(item.OriginalIndex * 4);
+                    if (comments.TryGetValue(addr, out var comment))
                     {
-                        var addr = (startAddress ?? 0) + (uint)(i * 4);
-                        if (comments.TryGetValue(addr, out var comment))
-                        {
-                            results[i].Comment = comment;
-                        }
+                        results[item.OriginalIndex].Comment = comment;
                     }
                 }
 

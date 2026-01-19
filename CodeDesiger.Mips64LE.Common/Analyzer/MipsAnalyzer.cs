@@ -123,16 +123,41 @@ namespace CodeDesigner.Mips64LE.Common
                 var memArg = args.FirstOrDefault(a => a.Contains("(") && a.Contains(")"));
                 if (memArg != null)
                 {
-                    var match = System.Text.RegularExpressions.Regex.Match(memArg, @"\$([0-9A-Fa-f]+)\((\w+)\)");
+                    // Match decimal offsets like "4(sp)" or "-8(gp)" or "$0004(gp)" (hex with $ prefix)
+                    var match = System.Text.RegularExpressions.Regex.Match(memArg, @"(-?\$?[0-9A-Fa-f]+)\((\w+)\)");
                     if (match.Success)
                     {
                         var offsetStr = match.Groups[1].Value;
                         var baseReg = match.Groups[2].Value;
-                        var offset = ParseImm("$" + offsetStr);
-
-                        if (offset.HasValue && regs.TryGetValue(baseReg, out var baseValue))
+                        
+                        // Parse offset - handle both decimal and hex with $ prefix
+                        int offset;
+                        if (offsetStr.StartsWith("$") || offsetStr.StartsWith("-$"))
                         {
-                            var signedOffset = GetSignedImm(offset.Value);
+                            // Hex format with $ prefix
+                            var hexPart = offsetStr.Replace("$", "").Replace("-", "");
+                            var isNegative = offsetStr.Contains("-");
+                            if (int.TryParse(hexPart, System.Globalization.NumberStyles.HexNumber, null, out var hexValue))
+                            {
+                                offset = isNegative ? -hexValue : hexValue;
+                            }
+                            else
+                            {
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            // Decimal format
+                            if (!int.TryParse(offsetStr, out offset))
+                            {
+                                continue;
+                            }
+                        }
+
+                        if (regs.TryGetValue(baseReg, out var baseValue))
+                        {
+                            var signedOffset = GetSignedImm(offset);
                             var targetAddr = (uint)(baseValue + signedOffset);
 
                             // Determine if it's likely a function
