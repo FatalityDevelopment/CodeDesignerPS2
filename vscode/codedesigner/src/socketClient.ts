@@ -6,6 +6,7 @@ import * as net from 'net';
 interface CommandMessage {
     command: string;
     data?: string;
+    address?: number;
 }
 
 /**
@@ -261,12 +262,19 @@ export class SocketClient {
 
     /**
      * Disassemble hex code to MIPS assembly
+     * @param hexCode - Hex instruction codes to disassemble (space/comma separated)
+     * @param startAddress - Optional starting address for branch calculation
      */
-    public async disassemble(hexCode: string): Promise<InstructionResult[]> {
+    public async disassemble(hexCode: string, startAddress?: number): Promise<InstructionResult[]> {
         const command: CommandMessage = {
             command: 'DISASSEMBLE',
             data: hexCode
         };
+        
+        // Include address if provided
+        if (startAddress !== undefined) {
+            command.address = startAddress;
+        }
 
         const response = await this.sendCommand(command);
         

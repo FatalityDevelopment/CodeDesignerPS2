@@ -131,7 +131,7 @@ namespace CodeDesigner.Mips64LE
                         return HandleAssemble(command.Data);
                     
                     case "DISASSEMBLE":
-                        return HandleDisassemble(command.Data);
+                        return HandleDisassemble(command.Data, command.Address);
                     
                     case "PING":
                         return CreateSuccessResponse("PONG");
@@ -217,7 +217,7 @@ namespace CodeDesigner.Mips64LE
         /// <summary>
         /// Handle DISASSEMBLE command
         /// </summary>
-        private string HandleDisassemble(string? hexCode)
+        private string HandleDisassemble(string? hexCode, uint? startAddress = null)
         {
             try
             {
@@ -229,6 +229,9 @@ namespace CodeDesigner.Mips64LE
                 // Split into lines and disassemble each hex value
                 var lines = hexCode.Split(new[] { '\n', '\r', ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
                 var results = new List<InstructionResult>();
+                
+                // Track current PC for branch calculations
+                uint currentPc = startAddress ?? 0;
 
                 foreach (var line in lines)
                 {
@@ -248,7 +251,8 @@ namespace CodeDesigner.Mips64LE
                             : trimmed;
                         
                         uint instruction = Convert.ToUInt32(hexValue, 16);
-                        string disasm = MipsDisassembler.Disassemble(instruction);
+                        // Pass PC to disassembler for proper branch target calculation
+                        string disasm = MipsDisassembler.Disassemble(instruction, currentPc);
 
                         results.Add(new InstructionResult
                         {
@@ -256,6 +260,9 @@ namespace CodeDesigner.Mips64LE
                             Assembly = disasm,
                             Success = true
                         });
+                        
+                        // Increment PC by 4 bytes (one instruction)
+                        currentPc += 4;
                     }
                     catch (Exception ex)
                     {
@@ -265,6 +272,9 @@ namespace CodeDesigner.Mips64LE
                             Error = ex.Message,
                             Success = false
                         });
+                        
+                        // Still increment PC even on error to maintain alignment
+                        currentPc += 4;
                     }
                 }
 
@@ -334,6 +344,7 @@ namespace CodeDesigner.Mips64LE
     {
         public string Command { get; set; } = string.Empty;
         public string? Data { get; set; }
+        public uint? Address { get; set; }  // Optional starting address for disassembly
     }
 
     /// <summary>
