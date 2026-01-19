@@ -4,21 +4,61 @@ namespace CodeDesigner.Mips64LE
 {
     class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             // Entry point for the MIPS64 Emotion Engine project
             Console.WriteLine("MIPS64 Emotion Engine - CodeDesigner");
             Console.WriteLine();
             
-            // Test MipsEncoder and MipsDecoder
-            TestEncoderDecoder();
+            // Check if --server flag is passed
+            bool startServer = args.Length > 0 && args[0] == "--server";
 
-            Console.WriteLine();
-            Console.WriteLine("========================================");
-            Console.WriteLine();
+            if (startServer)
+            {
+                // Start socket server for VSCode extension communication
+                Console.WriteLine("Starting socket server mode...");
+                var server = new SocketServer(8765);
+                
+                server.MessageReceived += (sender, message) =>
+                {
+                    Console.WriteLine($"[Server] Received message: {message}");
+                };
 
-            // Test MipsAssembler and MipsDisassembler
-            TestAssemblerDisassembler();
+                server.ClientConnected += (sender, endpoint) =>
+                {
+                    Console.WriteLine($"[Server] Client connected: {endpoint}");
+                };
+
+                server.ClientDisconnected += (sender, e) =>
+                {
+                    Console.WriteLine("[Server] Client disconnected");
+                };
+
+                var serverTask = server.StartAsync();
+                
+                Console.WriteLine("Press 'q' to quit the server...");
+                while (Console.ReadKey(true).Key != ConsoleKey.Q)
+                {
+                    // Wait for quit command
+                }
+
+                server.Stop();
+                await serverTask;
+            }
+            else
+            {
+                // Run tests as before
+                TestEncoderDecoder();
+
+                Console.WriteLine();
+                Console.WriteLine("========================================");
+                Console.WriteLine();
+
+                TestAssemblerDisassembler();
+                
+                Console.WriteLine();
+                Console.WriteLine("To start the socket server, run with --server flag");
+            }
         }
 
         static void TestEncoderDecoder()
