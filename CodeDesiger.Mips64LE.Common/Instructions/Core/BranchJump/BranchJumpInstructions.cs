@@ -756,6 +756,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 ulong target = cpu.RegsLo[args.Rs];
+                // Cast to uint: MIPS uses 32-bit addresses even in 64-bit mode
                 return $"jump to ${(uint)target:X8} (ptr)";
             }
 
@@ -808,6 +809,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 ulong target = cpu.RegsLo[args.Rs];
                 uint returnAddr = pc.Value + 8;
+                // Cast to uint: MIPS uses 32-bit addresses even in 64-bit mode
                 return $"call to function at ${(uint)target:X8} ({CpuHelpers.RegName(args.Rd)}=0x{returnAddr:X8})";
             }
 
