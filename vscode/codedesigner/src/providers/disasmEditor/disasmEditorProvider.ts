@@ -72,7 +72,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       const hexInstructions: string[] = [];
       for (let offset = 0; offset < buffer.length; offset += 4) {
         if (offset + 4 <= buffer.length) {
-          // Read as little-endian 32-bit integer
+          // Read 4-byte instruction as little-endian and convert to hex string
           const instruction = buffer.readUInt32LE(offset);
           hexInstructions.push(`0x${instruction.toString(16).padStart(8, '0')}`);
         }
