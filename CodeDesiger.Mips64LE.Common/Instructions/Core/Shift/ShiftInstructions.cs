@@ -617,4 +617,154 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             return eq;
         }
     }
+
+    // DSLL32 - Shift left logical (64-bit) + 32
+    public sealed class DSLL32 : Instruction<Args_R>
+    {
+        public DSLL32()
+        {
+            Opcode = 0x00;
+            Funct = 0x3C;
+            Name = "dsll32";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rd", "rt", "sa"];
+            Equation = "rd = rt << (sa + 32)";
+            Description = "Shift left logical 64-bit with sa + 32";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            ulong rt = cpu.RegsLo[args.Rt];
+            int sa = args.Shamt + 32;
+            ulong result = rt << sa;
+            cpu.RegsLo[args.Rd] = result;
+            cpu.RegsHi[args.Rd] = 0;
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+        {
+            return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(args[1] << 16 | args[0] << 11 | args[2] << 6 | (Funct ?? 0x3C));
+        }
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("rd", CpuHelpers.RegName(args.Rd))
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("sa", args.Shamt.ToString());
+            
+            if (cpu != null)
+            {
+                ulong rtVal = cpu.RegsLo[args.Rt];
+                int sa = args.Shamt + 32;
+                return $"{eq} => 0x{rtVal:X16} << {sa} = 0x{rtVal << sa:X16}";
+            }
+            return eq;
+        }
+    }
+
+    // DSRL32 - Shift right logical (64-bit) + 32
+    public sealed class DSRL32 : Instruction<Args_R>
+    {
+        public DSRL32()
+        {
+            Opcode = 0x00;
+            Funct = 0x3E;
+            Name = "dsrl32";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rd", "rt", "sa"];
+            Equation = "rd = rt >> (sa + 32)";
+            Description = "Shift right logical 64-bit with sa + 32";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            ulong rt = cpu.RegsLo[args.Rt];
+            int sa = args.Shamt + 32;
+            ulong result = rt >> sa;
+            cpu.RegsLo[args.Rd] = result;
+            cpu.RegsHi[args.Rd] = 0;
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+        {
+            return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(args[1] << 16 | args[0] << 11 | args[2] << 6 | (Funct ?? 0x3E));
+        }
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("rd", CpuHelpers.RegName(args.Rd))
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("sa", args.Shamt.ToString());
+            
+            if (cpu != null)
+            {
+                ulong rtVal = cpu.RegsLo[args.Rt];
+                int sa = args.Shamt + 32;
+                return $"{eq} => 0x{rtVal:X16} >> {sa} = 0x{rtVal >> sa:X16}";
+            }
+            return eq;
+        }
+    }
+
+    // DSRA32 - Shift right arithmetic (64-bit) + 32
+    public sealed class DSRA32 : Instruction<Args_R>
+    {
+        public DSRA32()
+        {
+            Opcode = 0x00;
+            Funct = 0x3F;
+            Name = "dsra32";
+            ArgType = InstrArgType.R;
+            ArgNames = ["rd", "rt", "sa"];
+            Equation = "rd = rt >> (sa + 32) (arithmetic)";
+            Description = "Shift right arithmetic 64-bit with sa + 32";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            long rt = (long)cpu.RegsLo[args.Rt];
+            int sa = args.Shamt + 32;
+            long result = rt >> sa;
+            cpu.RegsLo[args.Rd] = (ulong)result;
+            cpu.RegsHi[args.Rd] = 0;
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+        {
+            return $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(args[1] << 16 | args[0] << 11 | args[2] << 6 | (Funct ?? 0x3F));
+        }
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation
+                .Replace("rd", CpuHelpers.RegName(args.Rd))
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("sa", args.Shamt.ToString());
+            
+            if (cpu != null)
+            {
+                long rtVal = (long)cpu.RegsLo[args.Rt];
+                int sa = args.Shamt + 32;
+                return $"{eq} => {rtVal} >> {sa} = {rtVal >> sa}";
+            }
+            return eq;
+        }
+    }
 }
