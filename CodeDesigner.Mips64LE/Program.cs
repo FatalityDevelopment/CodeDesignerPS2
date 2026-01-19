@@ -6,74 +6,56 @@ namespace CodeDesigner.Mips64LE
     {
         static async Task Main(string[] args)
         {
-            // Entry point for the MIPS64 Emotion Engine project
-            Console.WriteLine("MIPS64 Emotion Engine - CodeDesigner");
+            // Entry point for the MIPS64 Emotion Engine socket server
+            Console.WriteLine("MIPS64 Emotion Engine - Socket Server");
             Console.WriteLine();
             
-            // Check if --server flag is passed
-            bool startServer = args.Length > 0 && args[0] == "--server";
-
-            if (startServer)
+            // Start socket server for VSCode extension communication
+            Console.WriteLine("Starting socket server on port 8765...");
+            var server = new SocketServer(8765);
+            
+            server.MessageReceived += (sender, message) =>
             {
-                // Start socket server for VSCode extension communication
-                Console.WriteLine("Starting socket server mode...");
-                var server = new SocketServer(8765);
-                
-                server.MessageReceived += (sender, message) =>
-                {
-                    Console.WriteLine($"[Server] Received message: {message}");
-                };
+                Console.WriteLine($"[Server] Received: {message.Substring(0, Math.Min(100, message.Length))}...");
+            };
 
-                server.ClientConnected += (sender, endpoint) =>
-                {
-                    Console.WriteLine($"[Server] Client connected: {endpoint}");
-                };
-
-                server.ClientDisconnected += (sender, e) =>
-                {
-                    Console.WriteLine("[Server] Client disconnected");
-                };
-
-                var serverTask = server.StartAsync();
-                
-                // Use CancellationToken to handle shutdown
-                using var cts = new CancellationTokenSource();
-                Console.CancelKeyPress += (sender, e) =>
-                {
-                    e.Cancel = true;
-                    cts.Cancel();
-                    Console.WriteLine("\nShutting down server...");
-                    server.Stop();
-                };
-
-                Console.WriteLine("Server is running. Press Ctrl+C to stop.");
-                
-                try
-                {
-                    await Task.Delay(-1, cts.Token); // Wait indefinitely until cancelled
-                }
-                catch (TaskCanceledException)
-                {
-                    // Expected when Ctrl+C is pressed
-                }
-                
-                await serverTask;
-            }
-            else
+            server.ClientConnected += (sender, endpoint) =>
             {
-                // Run tests as before
-                TestEncoderDecoder();
+                Console.WriteLine($"[Server] Client connected: {endpoint}");
+            };
 
-                Console.WriteLine();
-                Console.WriteLine("========================================");
-                Console.WriteLine();
+            server.ClientDisconnected += (sender, e) =>
+            {
+                Console.WriteLine("[Server] Client disconnected");
+            };
 
-                TestAssemblerDisassembler();
-                
-                Console.WriteLine();
-                Console.WriteLine("To start the socket server, run with --server flag");
+            var serverTask = server.StartAsync();
+            
+            // Use CancellationToken to handle shutdown
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (sender, e) =>
+            {
+                e.Cancel = true;
+                cts.Cancel();
+                Console.WriteLine("\nShutting down server...");
+                server.Stop();
+            };
+
+            Console.WriteLine("Server is running. Press Ctrl+C to stop.");
+            
+            try
+            {
+                await Task.Delay(-1, cts.Token); // Wait indefinitely until cancelled
             }
+            catch (TaskCanceledException)
+            {
+                // Expected when Ctrl+C is pressed
+            }
+            
+            await serverTask;
         }
+    }
+}
 
         static void TestEncoderDecoder()
         {

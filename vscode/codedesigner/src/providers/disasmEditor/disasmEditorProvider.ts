@@ -17,6 +17,18 @@ interface SearchMatch {
   length: number;
 }
 
+/**
+ * Structure for disassembled instruction row
+ */
+interface DisassembledRow {
+  addr: string;
+  bytes: string;
+  label: string;
+  op: string;
+  args: string;
+  comment: string;
+}
+
 export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private static readonly HEX_VIEW_SIZE = 0x30;
   private static readonly INSTRUCTION_SIZE = 4;
@@ -30,13 +42,24 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Format bytes for display (space-separated, big-endian)
+   */
+  private formatBytesForDisplay(buffer: Buffer, offset: number, length: number): string {
+    const slice = buffer.slice(offset, offset + length);
+    return Array.from(slice)
+      .reverse()
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join(" ");
+  }
+
+  /**
    * Disassemble binary data using the C# backend via socket client
    * @param startAddr - Starting address for disassembly
    * @param buffer - Binary data to disassemble
    * @returns Array of disassembled instruction rows
    */
-  private async disassembleWithBackend(startAddr: number, buffer: Buffer): Promise<any[]> {
-    const rows: any[] = [];
+  private async disassembleWithBackend(startAddr: number, buffer: Buffer): Promise<DisassembledRow[]> {
+    const rows: DisassembledRow[] = [];
     
     // If no socket client or not connected, return empty array
     if (!this.socketClient || !this.socketClient.isConnected()) {
@@ -76,11 +99,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const args = parts.slice(1).join(' ');
 
           // Get bytes in display format (space-separated, big-endian)
-          const slice = buffer.slice(offset, offset + 4);
-          const bytesLE = Array.from(slice)
-            .reverse()
-            .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-            .join(" ");
+          const bytesLE = this.formatBytesForDisplay(buffer, offset, 4);
 
           rows.push({
             addr: currentAddr.toString(16).toUpperCase().padStart(8, "0"),
@@ -93,11 +112,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         } else if (result.error) {
           // Handle error case
           console.error(`Disassembly error at offset ${offset}: ${result.error}`);
-          const slice = buffer.slice(offset, offset + 4);
-          const bytesLE = Array.from(slice)
-            .reverse()
-            .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-            .join(" ");
+          const bytesLE = this.formatBytesForDisplay(buffer, offset, 4);
 
           rows.push({
             addr: currentAddr.toString(16).toUpperCase().padStart(8, "0"),
