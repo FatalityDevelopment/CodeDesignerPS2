@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
-import { analyzePointers, getNonce } from "../../helpers";
+import { getNonce } from "../../helpers";
 import { getDisasmEditorHtml, DisasmEditorData } from "./disasmEditorTemplate";
 import { SocketClient } from "../../socketClient";
 
@@ -115,7 +115,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             label: "",
             op: op,
             args: args,
-            comment: "",
+            comment: result.Comment || "",  // Use comment from backend analyzer
           });
         } else if (result.Error) {
           // Handle error case
@@ -406,35 +406,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     console.log(`[DISASM] Calling disassembleWithBackend...`);
     const rows = await this.disassembleWithBackend(startAddr, slice);
     console.log(`[DISASM] Got ${rows.length} disassembled rows`);
-    const refs = analyzePointers(rows);
 
-    const refMap = new Map<number, any[]>();
-    for (const ref of refs) {
-      if (!refMap.has(ref.instrAddr)) {
-        refMap.set(ref.instrAddr, []);
-      }
-      refMap.get(ref.instrAddr)!.push(ref);
-    }
-
-    for (const row of rows) {
-      const addr = parseInt(row.addr, 16);
-      const rowRefs = refMap.get(addr);
-      if (!rowRefs) continue;
-
-      const annotations = rowRefs.map(ref => {
-        if (ref.targetAddr !== undefined) {
-          const addrStr = `0x${ref.targetAddr.toString(16).toUpperCase()}`;
-          return ref.isFunction
-            ? `; ptr to function at ${addrStr}`
-            : `; ptr [${addrStr}]`;
-        }
-        return `; ptr: ${ref.baseReg ?? '?'} (unresolved)`;
-      });
-
-      row.comment = row.comment
-        ? `${row.comment} ${annotations.join(', ')}`
-        : annotations.join(', ');
-    }
+    // Comments are now provided by the backend analyzer, no need to call analyzePointers
+    // The backend already includes analysis in the Comment field
 
     console.log(`[DISASM] Sending disasmPage message with ${rows.length} rows, startIndex: ${startIndex}`);
     if (rows.length > 0) {

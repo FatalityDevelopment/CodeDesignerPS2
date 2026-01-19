@@ -256,6 +256,12 @@ namespace CodeDesigner.Mips64LE.Common
         /// <returns>Assembly text representation of the instruction</returns>
         public static string Disassemble(uint instruction, uint? pc = null)
         {
+            // Check for NOP (0x00000000) explicitly
+            if (instruction == 0x00000000)
+            {
+                return "nop";
+            }
+
             int opcode = MipsDecoder.GetOpcode(instruction);
 
             // Check for R-type instructions (opcode = 0x00)

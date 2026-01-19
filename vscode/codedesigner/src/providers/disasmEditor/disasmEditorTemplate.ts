@@ -564,7 +564,7 @@ function updateCursor() {
     const rowEl = grid.children[localIndex];
     if (!rowEl) return;
     rowEl.classList.add("active");
-    rowEl.scrollIntoView({ block: "center", behavior: "smooth" });
+    rowEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
     const row = state.disasmRows[localIndex];
     if (!row) return;
     handleBranchHighlight(row, localIndex);

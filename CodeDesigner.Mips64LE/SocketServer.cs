@@ -296,6 +296,36 @@ namespace CodeDesigner.Mips64LE
                     }
                 }
 
+                // Run analyzer to generate comments
+                var rows = results
+                    .Where(r => r.Success && r.Assembly != null)
+                    .Select((r, index) => 
+                    {
+                        var parts = r.Assembly!.Trim().Split(new[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                        return new MipsAnalyzer.DisassembledRow
+                        {
+                            Addr = (startAddress ?? 0) + (uint)(index * 4),
+                            Op = parts.Length > 0 ? parts[0] : "",
+                            Args = parts.Length > 1 ? parts[1] : ""
+                        };
+                    })
+                    .ToList();
+
+                var comments = MipsAnalyzer.AnalyzeAndGenerateComments(rows);
+
+                // Apply comments to results
+                for (int i = 0; i < results.Count; i++)
+                {
+                    if (results[i].Success)
+                    {
+                        var addr = (startAddress ?? 0) + (uint)(i * 4);
+                        if (comments.TryGetValue(addr, out var comment))
+                        {
+                            results[i].Comment = comment;
+                        }
+                    }
+                }
+
                 var response = new CommandResponse
                 {
                     Success = true,
@@ -386,5 +416,6 @@ namespace CodeDesigner.Mips64LE
         public string? Assembly { get; set; }
         public string? Hex { get; set; }
         public string? Error { get; set; }
+        public string? Comment { get; set; }  // Added for analyzer-generated comments
     }
 }
