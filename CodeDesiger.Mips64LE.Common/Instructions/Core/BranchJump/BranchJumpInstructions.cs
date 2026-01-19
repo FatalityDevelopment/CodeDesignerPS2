@@ -756,7 +756,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 ulong target = cpu.RegsLo[args.Rs];
-                return $"jump to ${target:X8} (ptr)";
+                return $"jump to ${(uint)target:X8} (ptr)";
             }
 
             return $"jump to {CpuHelpers.RegName(args.Rs)} (ptr)";
@@ -808,7 +808,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 ulong target = cpu.RegsLo[args.Rs];
                 uint returnAddr = pc.Value + 8;
-                return $"call to function at ${target:X8} ({CpuHelpers.RegName(args.Rd)}=0x{returnAddr:X8})";
+                return $"call to function at ${(uint)target:X8} ({CpuHelpers.RegName(args.Rd)}=0x{returnAddr:X8})";
             }
 
             return $"call to function at {CpuHelpers.RegName(args.Rs)} (ptr)";
