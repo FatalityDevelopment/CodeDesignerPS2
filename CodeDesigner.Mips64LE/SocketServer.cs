@@ -71,7 +71,8 @@ namespace CodeDesigner.Mips64LE
             using (client)
             {
                 var stream = client.GetStream();
-                var buffer = new byte[4096];
+                var buffer = new byte[8192]; // Increased buffer size
+                var messageBuffer = new StringBuilder();
 
                 try
                 {
@@ -84,14 +85,31 @@ namespace CodeDesigner.Mips64LE
                             break;
                         }
 
-                        var message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                        Console.WriteLine($"Received: {message}");
-                        MessageReceived?.Invoke(this, message);
+                        var chunk = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                        messageBuffer.Append(chunk);
 
-                        // Process command and generate response
-                        var response = ProcessCommand(message);
-                        var responseBytes = Encoding.UTF8.GetBytes(response);
-                        await stream.WriteAsync(responseBytes, 0, responseBytes.Length, cancellationToken);
+                        // Process complete messages (delimited by newline)
+                        string bufferContent = messageBuffer.ToString();
+                        int newlineIndex;
+                        
+                        while ((newlineIndex = bufferContent.IndexOf('\n')) != -1)
+                        {
+                            string message = bufferContent.Substring(0, newlineIndex).Trim();
+                            bufferContent = bufferContent.Substring(newlineIndex + 1);
+                            messageBuffer.Clear();
+                            messageBuffer.Append(bufferContent);
+
+                            if (!string.IsNullOrEmpty(message))
+                            {
+                                Console.WriteLine($"Received message ({message.Length} chars)");
+                                MessageReceived?.Invoke(this, message);
+
+                                // Process command and generate response
+                                var response = ProcessCommand(message);
+                                var responseBytes = Encoding.UTF8.GetBytes(response + "\n");
+                                await stream.WriteAsync(responseBytes, 0, responseBytes.Length, cancellationToken);
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)

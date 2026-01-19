@@ -4,9 +4,9 @@ import * as net from 'net';
  * Command message format for socket communication
  */
 interface CommandMessage {
-    command: string;
-    data?: string;
-    address?: number;
+    Command: string;
+    Data?: string;
+    Address?: number;
 }
 
 /**
@@ -39,6 +39,7 @@ export class SocketClient {
     private port: number;
     private connected: boolean = false;
     private wasConnected: boolean = false;
+    private messageBuffer: string = '';
     private messageHandlers: Array<(message: string) => void> = [];
     private connectionHandlers: Array<() => void> = [];
     private disconnectionHandlers: Array<() => void> = [];
@@ -73,9 +74,23 @@ export class SocketClient {
             });
 
             this.client.on('data', (data: Buffer) => {
-                const message = data.toString('utf8');
-                console.log(`[SOCKET] Received from server: ${message}`);
-                this.messageHandlers.forEach(handler => handler(message));
+                const chunk = data.toString('utf8');
+                console.log(`[SOCKET] Received chunk (${chunk.length} chars)`);
+                
+                // Add to buffer
+                this.messageBuffer += chunk;
+                
+                // Process complete messages (delimited by newline)
+                let newlineIndex: number;
+                while ((newlineIndex = this.messageBuffer.indexOf('\n')) !== -1) {
+                    const message = this.messageBuffer.substring(0, newlineIndex).trim();
+                    this.messageBuffer = this.messageBuffer.substring(newlineIndex + 1);
+                    
+                    if (message.length > 0) {
+                        console.log(`[SOCKET] Complete message received (${message.length} chars): ${message.substring(0, 100)}...`);
+                        this.messageHandlers.forEach(handler => handler(message));
+                    }
+                }
             });
 
             this.client.on('error', (error: Error) => {
@@ -131,6 +146,7 @@ export class SocketClient {
                     console.log(`[SOCKET] Sent: ${message}`);
                     resolve();
                 }
+        this.messageBuffer = '';
             });
         });
     }
@@ -202,10 +218,25 @@ export class SocketClient {
                 }
 
                 try {
-                    const response: CommandResponse = JSON.parse(message);
+                    // Strip "Echo: " prefix if present
+                    let cleanMessage = message;
+                    const echoPrefix = 'Echo: ';
+                    if (cleanMessage.startsWith(echoPrefix)) {
+                        cleanMessage = cleanMessage.substring(echoPrefix.length);
+                        console.log('[SOCKET] Stripped Echo prefix from response');
+                    }
+                    
+                    // Try to parse JSON
+                    const response: CommandResponse = JSON.parse(cleanMessage);
+                    console.log('[SOCKET] Successfully parsed response:', response.Success ? 'SUCCESS' : 'FAILED');
                     resolve(response);
                 } catch (error) {
-                    reject(new Error(`Failed to parse response: ${message}`));
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    console.error('[SOCKET] Failed to parse response:', errorMsg);
+                    console.error('[SOCKET] Message length:', message.length);
+                    console.error('[SOCKET] First 200 chars:', message.substring(0, 200));
+                    console.error('[SOCKET] Last 200 chars:', message.substring(Math.max(0, message.length - 200)));
+                    reject(new Error(`Failed to parse response: ${errorMsg}`));
                 }
             };
 
@@ -226,7 +257,8 @@ export class SocketClient {
             }, timeoutMs);
 
             // Send command
-            const commandStr = JSON.stringify(command);
+            const commandStr = JSON.stringify(command) + '\n';
+            console.log(`[SOCKET] Sending command: ${commandStr.trim()}`);
             this.client.write(commandStr, 'utf8', (error) => {
                 if (error) {
                     clearTimeout(timeout);
@@ -247,8 +279,8 @@ export class SocketClient {
      */
     public async assemble(asmCode: string): Promise<InstructionResult[]> {
         const command: CommandMessage = {
-            command: 'ASSEMBLE',
-            data: asmCode
+            Command: 'ASSEMBLE',
+            Data: asmCode
         };
 
         const response = await this.sendCommand(command);
@@ -267,13 +299,13 @@ export class SocketClient {
      */
     public async disassemble(hexCode: string, startAddress?: number): Promise<InstructionResult[]> {
         const command: CommandMessage = {
-            command: 'DISASSEMBLE',
-            data: hexCode
+            Command: 'DISASSEMBLE',
+            Data: hexCode
         };
         
         // Include address if provided
         if (startAddress !== undefined) {
-            command.address = startAddress;
+            command.Address = startAddress;
         }
 
         const response = await this.sendCommand(command);
@@ -290,7 +322,7 @@ export class SocketClient {
      */
     public async ping(): Promise<string> {
         const command: CommandMessage = {
-            command: 'PING'
+            Command: 'PING'
         };
 
         const response = await this.sendCommand(command);
