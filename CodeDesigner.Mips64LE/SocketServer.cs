@@ -113,8 +113,12 @@ namespace CodeDesigner.Mips64LE
         {
             try
             {
-                // Parse JSON command
-                var command = JsonSerializer.Deserialize<CommandMessage>(message);
+                // Parse JSON command with case-insensitive property names
+                var options = new JsonSerializerOptions 
+                { 
+                    PropertyNameCaseInsensitive = true 
+                };
+                var command = JsonSerializer.Deserialize<CommandMessage>(message, options);
                 
                 if (command == null || string.IsNullOrEmpty(command.Command))
                 {
