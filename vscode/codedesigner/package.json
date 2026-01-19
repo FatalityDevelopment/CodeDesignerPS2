@@ -60,6 +60,18 @@
       {
         "command": "asm.showPanel",
         "title": "Show Asm Panel"
+      },
+      {
+        "command": "codedesigner.connectServer",
+        "title": "CodeDesigner: Connect to Server"
+      },
+      {
+        "command": "codedesigner.disconnectServer",
+        "title": "CodeDesigner: Disconnect from Server"
+      },
+      {
+        "command": "codedesigner.sendMessage",
+        "title": "CodeDesigner: Send Message to Server"
       }
     ],
     "languages": [
