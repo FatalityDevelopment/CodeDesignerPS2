@@ -256,6 +256,12 @@ namespace CodeDesigner.Mips64LE.Common
         /// <returns>Assembly text representation of the instruction</returns>
         public static string Disassemble(uint instruction, uint? pc = null)
         {
+            // Check for NOP (0x00000000) explicitly
+            if (instruction == 0x00000000)
+            {
+                return "nop";
+            }
+
             int opcode = MipsDecoder.GetOpcode(instruction);
 
             // Check for R-type instructions (opcode = 0x00)
@@ -332,6 +338,104 @@ namespace CodeDesigner.Mips64LE.Common
 
             // Unknown instruction
             return $".word 0x{instruction:X8}  # Unknown (opcode=0x{opcode:X2})";
+        }
+
+        /// <summary>
+        /// Get the instruction object and decoded args for an instruction word
+        /// This allows calling Exec() and Analyze() methods directly
+        /// </summary>
+        /// <param name="instruction">The 32-bit instruction word</param>
+        /// <returns>Tuple of instruction object and args, or (null, null) if unknown</returns>
+        public static (IInstruction? instrObj, object? args) GetInstructionObject(uint instruction)
+        {
+            // Check for NOP (0x00000000) - return NOP instruction
+            if (instruction == 0x00000000)
+            {
+                // NOP is registered as SLL with all zeros, but we can return SLL instruction
+                int opcode = MipsDecoder.GetOpcode(instruction);
+                int funct = MipsDecoder.GetFunct(instruction);
+                if (RTypeInstructions.TryGetValue((opcode, funct), out var nopInstr))
+                {
+                    var args = MipsDecoder.DecodeR(instruction);
+                    return (nopInstr, args);
+                }
+            }
+
+            int op = MipsDecoder.GetOpcode(instruction);
+
+            // Check for R-type instructions (opcode = 0x00)
+            if (op == 0x00)
+            {
+                int funct = MipsDecoder.GetFunct(instruction);
+                if (RTypeInstructions.TryGetValue((op, funct), out var rInstr))
+                {
+                    var args = MipsDecoder.DecodeR(instruction);
+                    return (rInstr, args);
+                }
+                return (null, null);
+            }
+
+            // Check for REGIMM instructions (opcode = 0x01)
+            if (op == 0x01)
+            {
+                int rt = MipsDecoder.GetRt(instruction);
+                if (RegimmInstructions.TryGetValue((op, rt), out var regimmInstr))
+                {
+                    var args = MipsDecoder.DecodeI(instruction);
+                    return (regimmInstr, args);
+                }
+                return (null, null);
+            }
+
+            // Check for coprocessor instructions (opcode = 0x10, 0x11, 0x12, 0x13)
+            if (op >= 0x10 && op <= 0x13)
+            {
+                int rs = MipsDecoder.GetRs(instruction);
+                int funct = MipsDecoder.GetFunct(instruction);
+                
+                // Try with funct first (for CO instructions and FPU ops)
+                if (CopInstructions.TryGetValue((op, rs, funct), out var copInstr))
+                {
+                    var args = MipsDecoder.DecodeR(instruction);
+                    return (copInstr, args);
+                }
+                
+                // Try without funct (for MFC/MTC type instructions)
+                if (CopInstructions.TryGetValue((op, rs, null), out copInstr))
+                {
+                    var args = MipsDecoder.DecodeR(instruction);
+                    return (copInstr, args);
+                }
+
+                // Check if it might be a branch instruction (BC1F/BC1T)
+                if (op == 0x11 && rs == 0x08)
+                {
+                    if (ITypeInstructions.TryGetValue(op, out var iInstr))
+                    {
+                        var args = MipsDecoder.DecodeI(instruction);
+                        return (iInstr, args);
+                    }
+                }
+
+                return (null, null);
+            }
+
+            // Check for J-type instructions
+            if (JTypeInstructions.TryGetValue(op, out var jInstr))
+            {
+                var args = MipsDecoder.DecodeJ(instruction);
+                return (jInstr, args);
+            }
+
+            // Check for I-type instructions
+            if (ITypeInstructions.TryGetValue(op, out var iInstr2))
+            {
+                var args = MipsDecoder.DecodeI(instruction);
+                return (iInstr2, args);
+            }
+
+            // Unknown instruction
+            return (null, null);
         }
 
         /// <summary>

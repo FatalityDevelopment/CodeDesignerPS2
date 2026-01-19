@@ -28,6 +28,7 @@ interface InstructionResult {
     Assembly?: string;
     Hex?: string;
     Error?: string;
+    Comment?: string;
 }
 
 /**

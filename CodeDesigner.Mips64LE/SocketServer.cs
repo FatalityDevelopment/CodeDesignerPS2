@@ -247,6 +247,7 @@ namespace CodeDesigner.Mips64LE
                 // Split into lines and disassemble each hex value
                 var lines = hexCode.Split(new[] { '\n', '\r', ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
                 var results = new List<InstructionResult>();
+                var instructionList = new List<(uint instruction, uint address)>();
                 
                 // Track current PC for branch calculations
                 uint currentPc = startAddress ?? 0;
@@ -279,6 +280,9 @@ namespace CodeDesigner.Mips64LE
                             Success = true
                         });
                         
+                        // Store instruction for analysis
+                        instructionList.Add((instruction, currentPc));
+                        
                         // Increment PC by 4 bytes (one instruction)
                         currentPc += 4;
                     }
@@ -293,6 +297,26 @@ namespace CodeDesigner.Mips64LE
                         
                         // Still increment PC even on error to maintain alignment
                         currentPc += 4;
+                    }
+                }
+
+                // Run analyzer using the instruction's built-in Analyze() method
+                var comments = MipsAnalyzer.AnalyzeInstructions(
+                    instructionList, 
+                    startAddress ?? 0,
+                    executeInstructions: true  // Execute instructions to track register state
+                );
+
+                // Apply comments to results
+                for (int i = 0; i < results.Count; i++)
+                {
+                    if (results[i].Success && instructionList.Count > i)
+                    {
+                        var addr = instructionList[i].address;
+                        if (comments.TryGetValue(addr, out var comment))
+                        {
+                            results[i].Comment = comment;
+                        }
                     }
                 }
 
@@ -386,5 +410,6 @@ namespace CodeDesigner.Mips64LE
         public string? Assembly { get; set; }
         public string? Hex { get; set; }
         public string? Error { get; set; }
+        public string? Comment { get; set; }  // Added for analyzer-generated comments
     }
 }

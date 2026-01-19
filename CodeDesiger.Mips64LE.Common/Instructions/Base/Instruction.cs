@@ -9,8 +9,15 @@ using System.Threading.Tasks;
 
 namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions
 {
+    // Non-generic base interface for dynamic invocation
+    public interface IInstruction
+    {
+        void ExecuteGeneric(CpuState cpu, object args);
+        string AnalyzeGeneric(object args, CpuState? cpu = null, uint? pc = null);
+    }
+
     // Generic base class for all instruction types
-    public abstract class Instruction<TArgs>
+    public abstract class Instruction<TArgs> : IInstruction
     {
         public int Opcode { get; init; }
         public int? Funct { get; init; }
@@ -33,5 +40,23 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions
 
         // Analysis helper
         public abstract string Analyze(TArgs args, CpuState? cpu = null, uint? pc = null);
+        
+        // Generic wrappers for working with instructions without knowing the exact TArgs type
+        public virtual void ExecuteGeneric(CpuState cpu, object args)
+        {
+            if (args is TArgs typedArgs)
+            {
+                Exec(cpu, typedArgs);
+            }
+        }
+        
+        public virtual string AnalyzeGeneric(object args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (args is TArgs typedArgs)
+            {
+                return Analyze(typedArgs, cpu, pc);
+            }
+            return string.Empty;
+        }
     }
 }
