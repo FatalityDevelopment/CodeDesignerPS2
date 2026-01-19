@@ -103,9 +103,9 @@ string result5 = MipsDisassembler.Disassemble(0x04100010);
 ```
 
 ## Files Modified
-1. `CodeDesiger.Mips64LE.Common/Disassembler/MipsDisassembler.cs`
-2. `CodeDesiger.Mips64LE.Common/Instructions/Core/Shift/ShiftInstructions.cs`
-3. `CodeDesiger.Mips64LE.Common/Instructions/Core/BranchJump/BranchJumpInstructions.cs`
+1. `CodeDesigner.Mips64LE.Common/Disassembler/MipsDisassembler.cs`
+2. `CodeDesigner.Mips64LE.Common/Instructions/Core/Shift/ShiftInstructions.cs`
+3. `CodeDesigner.Mips64LE.Common/Instructions/Core/BranchJump/BranchJumpInstructions.cs`
 4. `CodeDesigner.Mips64LE.TestProject/TestCoprocessorInstructions.cs` (new)
 
 ## Backward Compatibility
