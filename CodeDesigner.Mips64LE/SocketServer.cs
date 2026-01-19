@@ -2,8 +2,10 @@ using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using CodeDesigner.Mips64LE.Common;
 
 namespace CodeDesigner.Mips64LE
 {
@@ -86,8 +88,8 @@ namespace CodeDesigner.Mips64LE
                         Console.WriteLine($"Received: {message}");
                         MessageReceived?.Invoke(this, message);
 
-                        // Echo response
-                        var response = $"Echo: {message}";
+                        // Process command and generate response
+                        var response = ProcessCommand(message);
                         var responseBytes = Encoding.UTF8.GetBytes(response);
                         await stream.WriteAsync(responseBytes, 0, responseBytes.Length, cancellationToken);
                     }
@@ -102,6 +104,199 @@ namespace CodeDesigner.Mips64LE
                     ClientDisconnected?.Invoke(this, EventArgs.Empty);
                 }
             }
+        }
+
+        /// <summary>
+        /// Process incoming command and return response
+        /// </summary>
+        private string ProcessCommand(string message)
+        {
+            try
+            {
+                // Parse JSON command
+                var command = JsonSerializer.Deserialize<CommandMessage>(message);
+                
+                if (command == null || string.IsNullOrEmpty(command.Command))
+                {
+                    return CreateErrorResponse("Invalid command format");
+                }
+
+                switch (command.Command.ToUpperInvariant())
+                {
+                    case "ASSEMBLE":
+                        return HandleAssemble(command.Data);
+                    
+                    case "DISASSEMBLE":
+                        return HandleDisassemble(command.Data);
+                    
+                    case "PING":
+                        return CreateSuccessResponse("PONG");
+                    
+                    default:
+                        // Echo for unknown commands
+                        return $"Echo: {message}";
+                }
+            }
+            catch (JsonException)
+            {
+                // If not JSON, just echo back
+                return $"Echo: {message}";
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Error processing command: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle ASSEMBLE command
+        /// </summary>
+        private string HandleAssemble(string? asmCode)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(asmCode))
+                {
+                    return CreateErrorResponse("No assembly code provided");
+                }
+
+                // Split into lines and assemble each
+                var lines = asmCode.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                var results = new List<InstructionResult>();
+
+                foreach (var line in lines)
+                {
+                    var trimmed = line.Trim();
+                    
+                    // Skip empty lines and comments
+                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#"))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        uint encoded = MipsAssembler.Assemble(trimmed);
+                        results.Add(new InstructionResult
+                        {
+                            Assembly = trimmed,
+                            Hex = $"0x{encoded:X8}",
+                            Success = true
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        results.Add(new InstructionResult
+                        {
+                            Assembly = trimmed,
+                            Error = ex.Message,
+                            Success = false
+                        });
+                    }
+                }
+
+                var response = new CommandResponse
+                {
+                    Success = true,
+                    Command = "ASSEMBLE",
+                    Results = results
+                };
+
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Assemble error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle DISASSEMBLE command
+        /// </summary>
+        private string HandleDisassemble(string? hexCode)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(hexCode))
+                {
+                    return CreateErrorResponse("No hex code provided");
+                }
+
+                // Split into lines and disassemble each hex value
+                var lines = hexCode.Split(new[] { '\n', '\r', ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                var results = new List<InstructionResult>();
+
+                foreach (var line in lines)
+                {
+                    var trimmed = line.Trim();
+                    
+                    // Skip empty lines and comments
+                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#"))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        // Parse hex value (support 0x prefix or raw hex)
+                        string hexValue = trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase) 
+                            ? trimmed.Substring(2) 
+                            : trimmed;
+                        
+                        uint instruction = Convert.ToUInt32(hexValue, 16);
+                        string disasm = MipsDisassembler.Disassemble(instruction);
+
+                        results.Add(new InstructionResult
+                        {
+                            Hex = $"0x{instruction:X8}",
+                            Assembly = disasm,
+                            Success = true
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        results.Add(new InstructionResult
+                        {
+                            Hex = trimmed,
+                            Error = ex.Message,
+                            Success = false
+                        });
+                    }
+                }
+
+                var response = new CommandResponse
+                {
+                    Success = true,
+                    Command = "DISASSEMBLE",
+                    Results = results
+                };
+
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Disassemble error: {ex.Message}");
+            }
+        }
+
+        private string CreateSuccessResponse(string message)
+        {
+            var response = new CommandResponse
+            {
+                Success = true,
+                Message = message
+            };
+            return JsonSerializer.Serialize(response);
+        }
+
+        private string CreateErrorResponse(string error)
+        {
+            var response = new CommandResponse
+            {
+                Success = false,
+                Error = error
+            };
+            return JsonSerializer.Serialize(response);
         }
 
         public async Task SendMessageAsync(TcpClient client, string message)
@@ -126,5 +321,37 @@ namespace CodeDesigner.Mips64LE
             _listener?.Stop();
             Console.WriteLine("Server stopped.");
         }
+    }
+
+    /// <summary>
+    /// Command message format for socket communication
+    /// </summary>
+    public class CommandMessage
+    {
+        public string Command { get; set; } = string.Empty;
+        public string? Data { get; set; }
+    }
+
+    /// <summary>
+    /// Response format for socket communication
+    /// </summary>
+    public class CommandResponse
+    {
+        public bool Success { get; set; }
+        public string? Command { get; set; }
+        public string? Message { get; set; }
+        public string? Error { get; set; }
+        public List<InstructionResult>? Results { get; set; }
+    }
+
+    /// <summary>
+    /// Result for individual instruction assembly/disassembly
+    /// </summary>
+    public class InstructionResult
+    {
+        public bool Success { get; set; }
+        public string? Assembly { get; set; }
+        public string? Hex { get; set; }
+        public string? Error { get; set; }
     }
 }

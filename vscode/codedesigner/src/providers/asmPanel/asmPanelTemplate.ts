@@ -65,8 +65,17 @@ function getControlsSection(data: AsmPanelData): string {
  */
 function getTextAreaSection(data: AsmPanelData): string {
     const code = data.code || '';
-    return `<textarea id="codeArea"
-    placeholder="Paste CDS source here (optional)...">${code}</textarea>`;
+    return `<div class="textarea-container">
+    <label for="asmInput">Assembly Code:</label>
+    <textarea id="asmInput"
+        placeholder="add $t0, $s0, $s1&#10;addi $t1, $t0, 100&#10;j 0x400000">${code}</textarea>
+    
+    <label for="hexOutput">Hex Output:</label>
+    <textarea id="hexOutput" readonly
+        placeholder="Assembled hex will appear here..."></textarea>
+        
+    <div id="status" class="status"></div>
+</div>`;
 }
 
 /**
@@ -74,8 +83,7 @@ function getTextAreaSection(data: AsmPanelData): string {
  */
 function getButtonSection(): string {
     return `<div class="row">
-    <button id="compileBtn">Compile</button>
-    <button id="decompileBtn">Decompile</button>
+    <button id="assembleBtn">Assemble</button>
 </div>`;
 }
 
@@ -91,16 +99,21 @@ document.getElementById('connectBtn').onclick = () => {
 };
 
 document.getElementById('sendBtn').onclick = () => {
-    const code = document.getElementById('codeArea').value;
+    const code = document.getElementById('asmInput').value;
     vscode.postMessage({ command: 'send', code });
 };
 
-document.getElementById('compileBtn').onclick = () => {
-    vscode.postMessage({ command: 'compile' });
-};
-
-document.getElementById('decompileBtn').onclick = () => {
-    vscode.postMessage({ command: 'decompile' });
+document.getElementById('assembleBtn').onclick = () => {
+    const asmInput = document.getElementById('asmInput').value;
+    const statusDiv = document.getElementById('status');
+    
+    statusDiv.textContent = 'Assembling...';
+    statusDiv.className = 'status';
+    
+    vscode.postMessage({ 
+        command: 'assemble',
+        data: asmInput
+    });
 };
 
 document.getElementById('emulatorSelect').onchange = (e) => {
@@ -109,8 +122,25 @@ document.getElementById('emulatorSelect').onchange = (e) => {
 
 window.addEventListener('message', event => {
     const message = event.data;
-    if (message.command === 'setCode') {
-        document.getElementById('codeArea').value = message.code;
+    
+    switch (message.command) {
+        case 'setCode':
+            document.getElementById('asmInput').value = message.code;
+            break;
+            
+        case 'assembleResult':
+            const hexOutput = document.getElementById('hexOutput');
+            const statusDiv = document.getElementById('status');
+            
+            if (message.success) {
+                hexOutput.value = message.data;
+                statusDiv.textContent = 'Assembly complete!';
+                statusDiv.className = 'status success';
+            } else {
+                statusDiv.textContent = 'Error: ' + message.error;
+                statusDiv.className = 'status error';
+            }
+            break;
     }
 });
 </script>`;

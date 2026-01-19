@@ -8,6 +8,13 @@ import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
 
+/**
+ * Get the socket client instance
+ */
+export function getSocketClient(): SocketClient | null {
+    return socketClient;
+}
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
