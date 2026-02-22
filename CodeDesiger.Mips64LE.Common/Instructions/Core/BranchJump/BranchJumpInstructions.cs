@@ -394,7 +394,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         public BGEZ()
         {
             Opcode = 0x01;
-            Funct = null;
+            Funct = 0x01; // REGIMM sub-opcode: rt=1 distinguishes BGEZ from BLTZ (rt=0)
             Name = "bgez";
             ArgType = InstrArgType.I;
             ArgNames = ["rs", "offset"];

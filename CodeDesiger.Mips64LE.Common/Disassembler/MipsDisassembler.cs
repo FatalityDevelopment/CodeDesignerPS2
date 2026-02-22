@@ -22,6 +22,8 @@ namespace CodeDesigner.Mips64LE.Common
         private static readonly Dictionary<int, Instruction<Args_J>> JTypeInstructions = new();
         private static readonly Dictionary<(int opcode, int rs, int? funct), Instruction<Args_R>> CopInstructions = new();
         private static readonly Dictionary<(int opcode, int rt), Instruction<Args_I>> RegimmInstructions = new();
+        // BC1F/BC1T share opcode=0x11 with other COP1 instructions; rt distinguishes them
+        private static readonly Dictionary<int, Instruction<Args_I>> Bc1BranchInstructions = new();
 
         static MipsDisassembler()
         {
@@ -216,8 +218,10 @@ namespace CodeDesigner.Mips64LE.Common
             // I-type COP1 load/store and branch instructions
             RegisterI(new LWC1());
             RegisterI(new SWC1());
-            RegisterI(new BC1F());
-            RegisterI(new BC1T());
+            // BC1F (rt=0) and BC1T (rt=1) share opcode=0x11 with other COP1 instructions;
+            // register them in the dedicated rt-keyed dictionary so they can be distinguished
+            Bc1BranchInstructions[0] = new BC1F();
+            Bc1BranchInstructions[1] = new BC1T();
 
             // I-type COP0 CACHE instruction
             RegisterI(new CACHE());
@@ -311,11 +315,11 @@ namespace CodeDesigner.Mips64LE.Common
                 // Check if it might be a branch instruction (BC1F/BC1T)
                 if (opcode == 0x11 && rs == 0x08)
                 {
-                    // This is handled by I-type instructions (BC1F/BC1T)
-                    if (ITypeInstructions.TryGetValue(opcode, out var iInstr))
+                    int rt = MipsDecoder.GetRt(instruction);
+                    if (Bc1BranchInstructions.TryGetValue(rt, out var bc1Instr))
                     {
                         var args = MipsDecoder.DecodeI(instruction);
-                        return iInstr.Disasm(args, pc);
+                        return bc1Instr.Disasm(args, pc);
                     }
                 }
 
@@ -410,10 +414,11 @@ namespace CodeDesigner.Mips64LE.Common
                 // Check if it might be a branch instruction (BC1F/BC1T)
                 if (op == 0x11 && rs == 0x08)
                 {
-                    if (ITypeInstructions.TryGetValue(op, out var iInstr))
+                    int rt = MipsDecoder.GetRt(instruction);
+                    if (Bc1BranchInstructions.TryGetValue(rt, out var bc1Instr))
                     {
                         var args = MipsDecoder.DecodeI(instruction);
-                        return (iInstr, args);
+                        return (bc1Instr, args);
                     }
                 }
 
