@@ -27,6 +27,9 @@ namespace CodeDesigner.Mips64LE.Common.CPU
         // Shift Amount register (PS2 specific)
         public int SA { get; set; }
 
+        // COP1 FPU Accumulator register (PS2 EE specific, used by ADDA.S/MADD.S/etc.)
+        public float FACC { get; set; }
+
         // Main memory
         public byte[] Memory { get; set; } = Array.Empty<byte>();
 

@@ -2,6 +2,7 @@
 using CodeDesigner.Mips64LE.Common.Cpu.Instructions;
 using CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE;
 using CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0;
+using CodeDesigner.Mips64LE.Common.Cpu.Instructions.MMI;
 using CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions;
 using CodeDesigner.Mips64LE.Common.Instructions.VectorUnitInstructions;
 using System;
@@ -24,6 +25,8 @@ namespace CodeDesigner.Mips64LE.Common
         private static readonly Dictionary<(int opcode, int rt), Instruction<Args_I>> RegimmInstructions = new();
         // BC1F/BC1T share opcode=0x11 with other COP1 instructions; rt distinguishes them
         private static readonly Dictionary<int, Instruction<Args_I>> Bc1BranchInstructions = new();
+        // MMI sub-instructions (opcode=0x1C, funct=MMI group, shamt=sub-opcode)
+        private static readonly Dictionary<(int funct, int shamt), Instruction<Args_R>> MmiSubInstructions = new();
 
         static MipsDisassembler()
         {
@@ -214,17 +217,112 @@ namespace CodeDesigner.Mips64LE.Common
             RegisterCop(new VMULA(), 0x10);  // rs varies, funct = 0x31
             RegisterCop(new VFTOI0(), 0x10); // rs varies, funct = 0x3C
             RegisterCop(new VITOF0(), 0x10); // rs varies, funct = 0x3D
+            // Additional VU0 instructions
+            RegisterCop(new VSUBA(), 0x10);   // funct = 0x32
+            RegisterCop(new VOPMULA(), 0x10); // funct = 0x33
+            RegisterCop(new VOPMSUB(), 0x10); // funct = 0x34
+            RegisterCop(new VDIV(), 0x10);    // funct = 0x35
+            RegisterCop(new VSQRT(), 0x10);   // funct = 0x36
+            RegisterCop(new VRSQRT(), 0x10);  // funct = 0x37
+            RegisterCop(new VMOVE(), 0x10);   // funct = 0x38
+            RegisterCop(new VMR32(), 0x10);   // funct = 0x39
+            RegisterCop(new VNOP(), 0x10);    // funct = 0x3A
+            RegisterCop(new VCLIPW(), 0x10);  // funct = 0x3B
 
             // I-type COP1 load/store and branch instructions
             RegisterI(new LWC1());
             RegisterI(new SWC1());
+            RegisterI(new LDC1());  // opcode = 0x35
+            RegisterI(new SDC1());  // opcode = 0x3D
             // BC1F (rt=0) and BC1T (rt=1) share opcode=0x11 with other COP1 instructions;
             // register them in the dedicated rt-keyed dictionary so they can be distinguished
             Bc1BranchInstructions[0] = new BC1F();
             Bc1BranchInstructions[1] = new BC1T();
+            Bc1BranchInstructions[2] = new BC1FL();
+            Bc1BranchInstructions[3] = new BC1TL();
+
+            // I-type COP2 load/store
+            RegisterI(new VLQ());  // opcode = 0x36
+            RegisterI(new VSQ());  // opcode = 0x3E
 
             // I-type COP0 CACHE instruction
             RegisterI(new CACHE());
+
+            // Additional COP1 single-precision instructions (rs = 0x10)
+            RegisterCop(new RSQRT_S(), 0x10);   // funct = 0x16
+            RegisterCop(new ROUND_W_S(), 0x10); // funct = 0x0C
+            RegisterCop(new TRUNC_W_S(), 0x10); // funct = 0x0D
+            RegisterCop(new CEIL_W_S(), 0x10);  // funct = 0x0E
+            RegisterCop(new FLOOR_W_S(), 0x10); // funct = 0x0F
+            RegisterCop(new ADDA_S(), 0x10);    // funct = 0x18
+            RegisterCop(new SUBA_S(), 0x10);    // funct = 0x19
+            RegisterCop(new MULA_S(), 0x10);    // funct = 0x1A
+            RegisterCop(new MADD_S(), 0x10);    // funct = 0x1C
+            RegisterCop(new MSUB_S(), 0x10);    // funct = 0x1D
+            RegisterCop(new MADDA_S(), 0x10);   // funct = 0x1E
+            RegisterCop(new MSUBA_S(), 0x10);   // funct = 0x1F
+            RegisterCop(new MAX_S(), 0x10);     // funct = 0x28
+            RegisterCop(new MIN_S(), 0x10);     // funct = 0x29
+
+            // MMI (EE Multimedia) direct instructions (opcode = 0x1C)
+            RegisterR(new MADD());    // funct = 0x00
+            RegisterR(new MADDU());   // funct = 0x01
+            RegisterR(new PLZCW());   // funct = 0x04
+            RegisterR(new MFHI1());   // funct = 0x10
+            RegisterR(new MTHI1());   // funct = 0x11
+            RegisterR(new MFLO1());   // funct = 0x12
+            RegisterR(new MTLO1());   // funct = 0x13
+            RegisterR(new MULT1());   // funct = 0x18
+            RegisterR(new MULTU1());  // funct = 0x19
+            RegisterR(new DIV1());    // funct = 0x1A
+            RegisterR(new DIVU1());   // funct = 0x1B
+            RegisterR(new MADD1());   // funct = 0x20
+            RegisterR(new MADDU1());  // funct = 0x21
+
+            // MMI0 sub-group (funct=0x08, shamt=sub-opcode)
+            RegisterMmiSub(new PADDW(),  0x08, 0x00);
+            RegisterMmiSub(new PSUBW(),  0x08, 0x01);
+            RegisterMmiSub(new PCGTW(),  0x08, 0x02);
+            RegisterMmiSub(new PMAXW(),  0x08, 0x03);
+            RegisterMmiSub(new PADDH(),  0x08, 0x04);
+            RegisterMmiSub(new PSUBH(),  0x08, 0x05);
+            RegisterMmiSub(new PMAXH(),  0x08, 0x07);
+            RegisterMmiSub(new PADDB(),  0x08, 0x08);
+            RegisterMmiSub(new PSUBB(),  0x08, 0x09);
+            RegisterMmiSub(new PEXTLW(), 0x08, 0x12);
+            RegisterMmiSub(new PPACW(),  0x08, 0x13);
+            RegisterMmiSub(new PEXTLH(), 0x08, 0x16);
+            RegisterMmiSub(new PPACH(),  0x08, 0x17);
+            RegisterMmiSub(new PEXTLB(), 0x08, 0x1A);
+            RegisterMmiSub(new PPACB(),  0x08, 0x1B);
+
+            // MMI1 sub-group (funct=0x28, shamt=sub-opcode)
+            RegisterMmiSub(new PABSW(),  0x28, 0x01);
+            RegisterMmiSub(new PCEQW(),  0x28, 0x02);
+            RegisterMmiSub(new PMINW(),  0x28, 0x03);
+            RegisterMmiSub(new PABSH(),  0x28, 0x05);
+            RegisterMmiSub(new PCEQH(),  0x28, 0x06);
+            RegisterMmiSub(new PMINH(),  0x28, 0x07);
+            RegisterMmiSub(new PCEQB(),  0x28, 0x0A);
+            RegisterMmiSub(new PADDUW(), 0x28, 0x10);
+            RegisterMmiSub(new PSUBUW(), 0x28, 0x11);
+            RegisterMmiSub(new PADDUH(), 0x28, 0x14);
+            RegisterMmiSub(new PSUBUH(), 0x28, 0x15);
+            RegisterMmiSub(new PADDUB(), 0x28, 0x18);
+            RegisterMmiSub(new PSUBUB(), 0x28, 0x19);
+
+            // MMI2 sub-group (funct=0x09, shamt=sub-opcode)
+            RegisterMmiSub(new PMFHI(),  0x09, 0x08);
+            RegisterMmiSub(new PMFLO(),  0x09, 0x09);
+            RegisterMmiSub(new PCPYLD(), 0x09, 0x0E);
+
+            // MMI3 sub-group (funct=0x29, shamt=sub-opcode)
+            RegisterMmiSub(new PMTHI(),  0x29, 0x08);
+            RegisterMmiSub(new PMTLO(),  0x29, 0x09);
+            RegisterMmiSub(new PCPYUD(), 0x29, 0x0E);
+            RegisterMmiSub(new PAND(),   0x29, 0x12);
+            RegisterMmiSub(new POR(),    0x29, 0x13);
+            RegisterMmiSub(new PCPYH(),  0x29, 0x1B);
         }
 
         private static void RegisterR(Instruction<Args_R> instr)
@@ -250,6 +348,11 @@ namespace CodeDesigner.Mips64LE.Common
         private static void RegisterRegimm(Instruction<Args_I> instr, int rt)
         {
             RegimmInstructions[(instr.Opcode, rt)] = instr;
+        }
+
+        private static void RegisterMmiSub(Instruction<Args_R> instr, int funct, int shamt)
+        {
+            MmiSubInstructions[(funct, shamt)] = instr;
         }
 
         /// <summary>
@@ -292,9 +395,31 @@ namespace CodeDesigner.Mips64LE.Common
                 return $".word 0x{instruction:X8}  # Unknown REGIMM (rt=0x{rt:X2})";
             }
 
-            // Check for coprocessor instructions (opcode = 0x10, 0x11, 0x12, 0x13)
-            if (opcode >= 0x10 && opcode <= 0x13)
+            // Check for MMI (EE Multimedia) instructions (opcode = 0x1C)
+            if (opcode == 0x1C)
             {
+                int funct = MipsDecoder.GetFunct(instruction);
+                // Try direct MMI instruction (unique funct)
+                if (RTypeInstructions.TryGetValue((opcode, funct), out var mmiInstr))
+                {
+                    var args = MipsDecoder.DecodeR(instruction);
+                    return mmiInstr.Disasm(args, pc);
+                }
+                // MMI sub-groups use shamt as sub-opcode
+                if (funct == 0x08 || funct == 0x09 || funct == 0x28 || funct == 0x29)
+                {
+                    int shamt = MipsDecoder.GetShamt(instruction);
+                    if (MmiSubInstructions.TryGetValue((funct, shamt), out var mmiSubInstr))
+                    {
+                        var args = MipsDecoder.DecodeR(instruction);
+                        return mmiSubInstr.Disasm(args, pc);
+                    }
+                }
+                return $".word 0x{instruction:X8}  # Unknown MMI (funct=0x{funct:X2})";
+            }
+
+            // Check for coprocessor instructions (opcode = 0x10, 0x11, 0x12, 0x13)
+            if (opcode >= 0x10 && opcode <= 0x13)            {
                 int rs = MipsDecoder.GetRs(instruction);
                 int funct = MipsDecoder.GetFunct(instruction);
                 
@@ -387,6 +512,27 @@ namespace CodeDesigner.Mips64LE.Common
                 {
                     var args = MipsDecoder.DecodeI(instruction);
                     return (regimmInstr, args);
+                }
+                return (null, null);
+            }
+
+            // Check for MMI (EE Multimedia) instructions (opcode = 0x1C)
+            if (op == 0x1C)
+            {
+                int funct = MipsDecoder.GetFunct(instruction);
+                if (RTypeInstructions.TryGetValue((op, funct), out var mmiInstr))
+                {
+                    var args = MipsDecoder.DecodeR(instruction);
+                    return (mmiInstr, args);
+                }
+                if (funct == 0x08 || funct == 0x09 || funct == 0x28 || funct == 0x29)
+                {
+                    int shamt = MipsDecoder.GetShamt(instruction);
+                    if (MmiSubInstructions.TryGetValue((funct, shamt), out var mmiSubInstr))
+                    {
+                        var args = MipsDecoder.DecodeR(instruction);
+                        return (mmiSubInstr, args);
+                    }
                 }
                 return (null, null);
             }
