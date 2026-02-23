@@ -362,6 +362,18 @@ namespace CodeDesigner.Mips64LE.Common
                 
                 return MipsEncoder.EncodeR(instr.Opcode, 0, 0, 0, 0, instr.Funct ?? 0);
             }
+            else if (argNames.Length == 1 && argNames[0] == "code")
+            {
+                // Format: optional code (e.g., SYSCALL, BREAK) - code embedded in bits 25-6
+                uint code = operands.Length > 0 ? (uint)ParseImmediate(operands[0]) : 0;
+                return (uint)((code << 6) | (instr.Funct ?? 0));
+            }
+            else if (argNames.Length == 1 && argNames[0] == "stype")
+            {
+                // Format: optional stype (e.g., SYNC) - stype in shamt field (bits 10-6)
+                int stype = operands.Length > 0 ? ParseImmediate(operands[0]) : 0;
+                return MipsEncoder.EncodeR(instr.Opcode, 0, 0, 0, stype, instr.Funct ?? 0);
+            }
 
             throw new NotImplementedException($"Unsupported R-type format for {instr.Name}");
         }
@@ -429,13 +441,16 @@ namespace CodeDesigner.Mips64LE.Common
             else if (argNames.Length == 2 && argNames[0] == "rs" && argNames[1] == "offset")
             {
                 // Format: rs, offset (e.g., BLEZ $s0, 0x1000)
+                // For REGIMM instructions (opcode=0x01), Funct encodes the rt sub-opcode
+                // e.g. BGEZ has Funct=0x01 so rt=1, while BLTZ has Funct=null so rt=0
                 if (operands.Length != 2)
                     throw new ArgumentException($"Expected 2 operands for {instr.Name}");
                 
                 int rs = ParseRegister(operands[0]);
                 int offset = ParseImmediate(operands[1]);
+                int rt = instr.Funct ?? 0;
                 
-                return MipsEncoder.EncodeI(instr.Opcode, rs, 0, offset);
+                return MipsEncoder.EncodeI(instr.Opcode, rs, rt, offset);
             }
             else if (argNames.Length == 2 && argNames[0] == "rt" && argNames[1] == "imm")
             {
