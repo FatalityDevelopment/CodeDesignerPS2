@@ -279,8 +279,8 @@ npm run compile
 # Start server
 dotnet run --project CodeDesigner.Mips64LE/CodeDesigner.Mips64LE.csproj -- --server
 
-# In another terminal, use the test script
-node /tmp/test_socket_server_v2.js
+# In another terminal, connect with any TCP client and send a JSON PING command:
+# {"command":"PING"}
 ```
 
 **VSCode Extension Test:**
@@ -318,7 +318,6 @@ Potential improvements for this integration:
 - [ ] Export assembled code to binary file
 - [ ] Import binary files for disassembly
 - [ ] Real-time assembly validation as you type
-- [ ] Integration with emulator for live execution
 
 ## References
 

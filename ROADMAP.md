@@ -46,11 +46,9 @@ Minimum hardware the BIOS needs immediately after reset.
 
 ---
 
-## Phase 3 — IOP (I/O Processor) 🔧 IN PROGRESS
+## Phase 3 — IOP (I/O Processor) ✅ COMPLETE
 
 The PS2's second CPU — a MIPS R3000A running at ~36.864 MHz — handles all I/O.
-
-### Completed
 
 | Component | Status | File(s) | Notes |
 |-----------|--------|---------|-------|
@@ -61,15 +59,7 @@ The PS2's second CPU — a MIPS R3000A running at ~36.864 MHz — handles all I/
 | IOP DMA controller (IopDmac) | ✅ | `Emulator/IOP/IopDmac.cs`, `IopDmacChannel.cs` | 13 channels (MDECin…cdrom); burst mode; DPCR/DICR/DPCR2/DICR2; INTC bit 3 |
 | CDVD subsystem | ✅ | `Emulator/IOP/Cdvd.cs`, `IopMemoryBus.cs`, `IopDmacChannel.cs` | ISO-9660 reader; registers at 0x1F402000–0x1F40201F; N-command ReadCd feeds DMAC channel 3; INTC bit 2 |
 | Pad/controller input | ✅ | `Emulator/IOP/Sio2.cs`, `Emulator/IOP/PadState.cs`, `IopMemoryBus.cs` | SIO2 at 0x1F808200; SEND3/FIFO_IN/FIFO_OUT/CTRL/RECV registers; DualShock 2 poll (cmd 0x42); INTC bit 17 |
-
-### Still Needed
-
-| Component | Priority | Notes |
-|-----------|----------|-------|
-| IOP DMA controller (IopDmac) | ~~High~~ | ~~The IOP has 13 DMA channels (MDECin, MDECout, GPU, CDVD, SPU, PIO, OTC, SPU2, DEV9, SIF0, SIF1, SIF2, cdrom).  The BIOS uses SIF0/SIF1 and CDVD channels immediately.  Add `IopDmac.cs` in `Emulator/IOP/`.~~ ✅ Done |
-| CDVD subsystem | ~~Medium~~ | ~~ISO-9660 disc image reader; feeds data to the IOP CDVD DMA channel.  Required for loading game executables.~~ ✅ Done |
-| Pad/controller input | ~~Medium~~ | ~~IOP-side SIO2 + pad protocol emulation.  Required for any interactive game.~~ ✅ Done |
-| IOP module loader | Low | The BIOS loads IOP modules (IRX files) into IOP RAM.  Needed for full BIOS boot but can stub for now. |
+| IOP module loader | ✅ | `Emulator/IOP/IopModuleLoader.cs` | Loads ELF32 MIPS R3000A IRX modules into IOP RAM; KSEG0/KSEG1 address translation; entry-point return |
 
 ---
 
@@ -136,4 +126,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-24.  Current test count: 502 (all passing).*
+*Last updated: 2026-02-24.  Current test count: 511 (all passing).*

@@ -26,7 +26,7 @@ This repository/project focuses on **understanding, documenting, and working wit
 - **Execution:** In-order with instruction pairing rules
 
 #### Registers
-- **32 × 64-bit General Purpose Registers (GPRs)**
+- **32 × 128-bit General Purpose Registers (GPRs)** — integer operations use the lower 64-bit lane; the upper 64 bits are sign-extended from bit 63
 - **HI / LO registers** for multiply/divide results
 - **Program Counter (PC)**
 - **Special-purpose system registers** accessed via COP0

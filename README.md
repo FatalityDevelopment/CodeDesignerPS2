@@ -8,9 +8,9 @@ A C# library and toolset for working with the **Sony PlayStation 2 Emotion Engin
 
 ```
 Mips64LE/
-├── CodeDesigner.Mips64LE.Common/     # Core library (assembler, disassembler, instructions)
+├── CodeDesigner.Mips64LE.Common/     # Core library (assembler, disassembler, instructions, emulator)
 ├── CodeDesigner.Mips64LE/           # Console application + socket server
-├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (297 tests)
+├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (511 tests)
 └── vscode/codedesigner/             # VSCode extension frontend
 ```
 
@@ -34,7 +34,7 @@ dotnet build CodeDesigner.Mips64LE.sln
 dotnet test CodeDesigner.Mips64LE.TestProject/
 ```
 
-All 297 tests should pass.
+All 511 tests should pass.
 
 ### Console Application
 
@@ -66,6 +66,18 @@ dotnet run -- --server
 | MMI multimedia extensions | ✅ |
 | 64-bit EE-specific behaviour (HI/LO sign-ext) | ✅ |
 | FPU flush-to-zero for denormals | ✅ |
+| Branch delay slots + branch-likely | ✅ |
+| COP0 exception dispatch (SYSCALL, BREAK, overflow, trap) | ✅ |
+| ELF32 loader (EE `.elf` into RAM) | ✅ |
+| EE timers T0–T3 + INTC | ✅ |
+| EE DMAC (10 channels, normal mode) | ✅ |
+| SIF (EE↔IOP sub-bus interface) | ✅ |
+| IOP (R3000A) emulator + memory bus | ✅ |
+| IOP timers T0–T5 | ✅ |
+| IOP DMAC (13 channels) | ✅ |
+| CDVD subsystem (ISO-9660) | ✅ |
+| SIO2 + DualShock 2 pad input | ✅ |
+| IOP module loader (IRX/ELF32) | ✅ |
 | VSCode extension frontend | ✅ |
 
 ---
@@ -226,7 +238,7 @@ All instruction semantics have been cross-referenced with [PCSX2](https://pcsx2.
 - `pcsx2/FPU.cpp` — COP1 floating-point unit
 
 ### Test Coverage
-- **297 unit tests** covering core, FPU, COP0, COP2/VU0, and MMI instructions
+- **511 unit tests** covering core, FPU, COP0, COP2/VU0, MMI, EE hardware, IOP, CDVD, SIO2, and IOP module loader
 - Tests verify both disassembly output and execution correctness
 - Special cases: long.MinValue in DMULT, negative DIV sign-extension, ERET ERL handling
 
@@ -240,6 +252,7 @@ All instruction semantics have been cross-referenced with [PCSX2](https://pcsx2.
 | `QUICKSTART.md` | Step-by-step guide to using the assembler/disassembler |
 | `ASSEMBLER_DISASSEMBLER_INTEGRATION.md` | Technical details of the assembler and disassembler |
 | `SOCKET_COMMUNICATION.md` | VSCode extension ↔ C# server protocol |
+| `ROADMAP.md` | Development roadmap tracking completed and upcoming phases |
 | `CodeDesigner.Mips64LE.Common/Documentation/` | Architecture deep-dives (EE, COP0, COP1, VU0, VU1) |
 
 ---

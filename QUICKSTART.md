@@ -202,7 +202,7 @@ jr $ra
 - Read the full documentation in `ASSEMBLER_DISASSEMBLER_INTEGRATION.md`
 - Explore the supported instruction set
 - Try assembling/disassembling your own MIPS programs
-- Integrate with emulators for live execution (coming soon!)
+- Check the emulator API in `CodeDesigner.Mips64LE.Common/Emulator/` for loading and running ELF/IRX images
 
 ## Support
 

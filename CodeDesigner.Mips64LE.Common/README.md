@@ -26,9 +26,10 @@ This repository/project focuses on **understanding, documenting, and working wit
 - **Execution:** In-order with instruction pairing rules
 
 #### Registers
-- **32 × 64-bit General Purpose Registers (GPRs)**
-- **HI / LO registers** for multiply/divide results
+- **32 × 128-bit General Purpose Registers (GPRs)** — integer operations use the lower 64-bit lane; the upper 64 bits are sign-extended from bit 63
+- **HI / LO registers** (and PS2-specific **HI1 / LO1**) for multiply/divide results
 - **Program Counter (PC)**
+- **SA register** — shift-amount register for EE-specific funnel-shift instructions (`MTSAB`, `MTSAH`, `QFSRV`)
 - **Special-purpose system registers** accessed via COP0
 
 The EE core supports both **32-bit and 64-bit integer operations**, allowing legacy MIPS code and new 64-bit code to coexist.
