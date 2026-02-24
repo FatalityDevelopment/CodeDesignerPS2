@@ -40,9 +40,19 @@ namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU0
         public float P { get; set; }
 
         /// <summary>
-        /// R Register - random number generator state
+        /// R Register - random number generator state (float representation)
         /// </summary>
         public float R { get; set; }
+
+        /// <summary>
+        /// LFSR pseudo-random number generator state, stored in PS2/PCSX2 format:
+        ///   <c>0x3F800000 | mantissa_23_bits</c>  (always a float in [1.0, 2.0))
+        ///
+        /// This matches the PS2 hardware R register format. The actual random bits
+        /// live in the 23-bit mantissa. When written to a VF register (VRNEXT/VRGET),
+        /// the full uint value is reinterpreted as a float and broadcast to all components.
+        /// </summary>
+        public uint RngState { get; set; }
 
         /// <summary>
         /// I Register - intermediate value for load operations
@@ -110,6 +120,7 @@ namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU0
             P = 1.0f;
             R = 0.0f;
             I = 0.0f;
+            RngState = 0x3F800001u; // default hardware reset value; game code overrides with VRINIT
 
             // Clear flags
             StatusFlags = 0;

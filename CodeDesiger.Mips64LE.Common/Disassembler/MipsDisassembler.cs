@@ -365,6 +365,32 @@ namespace CodeDesigner.Mips64LE.Common
             RegisterCop(new VFTOI4(), 0x10);  // funct=0x3E
             RegisterCop(new VITOF4(), 0x10);  // funct=0x3F
 
+            // COP2 component-broadcast variants: SPECIAL1 functs 0x00-0x27
+            // Each operation has 4 variants (x=0, y=1, z=2, w=3)
+            for (int bc = 0; bc < 4; bc++)
+            {
+                RegisterCop(new VADDBc(bc),  0x10); // VADDx/y/z/w  funct=0x00-0x03
+                RegisterCop(new VSUBBc(bc),  0x10); // VSUBx/y/z/w  funct=0x04-0x07
+                RegisterCop(new VMULBc(bc),  0x10); // VMULx/y/z/w  funct=0x08-0x0B
+                RegisterCop(new VMADDBc(bc), 0x10); // VMADDx/y/z/w funct=0x0C-0x0F
+                RegisterCop(new VMSUBBc(bc), 0x10); // VMSUBx/y/z/w funct=0x10-0x13
+                RegisterCop(new VMAXBc(bc),  0x10); // VMAXx/y/z/w  funct=0x14-0x17
+                RegisterCop(new VMINBc(bc),  0x10); // VMINx/y/z/w  funct=0x18-0x1B
+                RegisterCop(new VMULABc(bc), 0x10); // VMULAx/y/z/w funct=0x1C-0x1F
+                RegisterCop(new VADDABc(bc), 0x10); // VADDAx/y/z/w funct=0x20-0x23
+                RegisterCop(new VSUBABc(bc), 0x10); // VSUBAx/y/z/w funct=0x24-0x27
+            }
+
+            // VCALLMS (rs=0x18) and VCALLMSR (rs=0x19): trigger VU0 micro-mode
+            RegisterCop(new VCALLMS(),  0x18);
+            RegisterCop(new VCALLMSR(), 0x19);
+
+            // COP2 SPECIAL2 (rs=0x1E): LFSR pseudo-random instructions
+            RegisterCop(new VRNEXT(), 0x1E); // funct=0x1C
+            RegisterCop(new VRGET(),  0x1E); // funct=0x1D
+            RegisterCop(new VRINIT(), 0x1E); // funct=0x1E
+            RegisterCop(new VRXOR(),  0x1E); // funct=0x1F
+
             // MMI direct instructions: shift and move
             RegisterR(new PMFHL());   // funct=0x30
             RegisterR(new PMTHL());   // funct=0x31

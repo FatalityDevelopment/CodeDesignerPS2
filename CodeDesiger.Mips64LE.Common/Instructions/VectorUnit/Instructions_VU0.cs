@@ -66,6 +66,46 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.VectorUnitInstructions
             if ((mask & 0x8) != 0) result += "w";
             return result;
         }
+
+        /// <summary>
+        /// Extract a single component from a Vector4.
+        /// comp: 0=x, 1=y, 2=z, 3=w
+        /// </summary>
+        public static float GetComponent(Vector4 v, int comp) => comp switch
+        {
+            0 => v.X,
+            1 => v.Y,
+            2 => v.Z,
+            _ => v.W,
+        };
+
+        /// <summary>
+        /// Extract a single component from a Vector4 as raw IEEE-754 bits.
+        /// comp: 0=x, 1=y, 2=z, 3=w
+        /// </summary>
+        public static uint GetComponentBits(Vector4 v, int comp)
+            => BitConverter.SingleToUInt32Bits(GetComponent(v, comp));
+
+        /// <summary>
+        /// Advance the PS2 VU0 23-bit LFSR by one step and return the new state.
+        ///
+        /// The R register is stored in PCSX2/PS2 format: 0x3F800000 | mantissa_23_bits
+        /// (always represents a float in [1.0, 2.0)).
+        ///
+        /// Algorithm from PCSX2 VUops.cpp AdvanceLFSR():
+        ///   Feedback taps: bit 22 XOR bit 4 of the full 32-bit R register value.
+        ///   The mantissa bits are left-shifted by 1 and bit 0 is set to the feedback.
+        /// </summary>
+        public static uint NextRng(uint state)
+        {
+            // state = 0x3F800000 | mantissa; taps are at bits 22 and 4 of the full value
+            int x = (int)((state >> 4) & 1u);
+            int y = (int)((state >> 22) & 1u);
+            state <<= 1;
+            state ^= (uint)(x ^ y);
+            // Restore the IEEE exponent (0x3F800000) so R stays in [1.0, 2.0) float format
+            return (state & 0x7FFFFFu) | 0x3F800000u;
+        }
     }
 
     // VADD - Vector Add
@@ -1367,6 +1407,754 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.VectorUnitInstructions
             string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Rd)).Replace("vfs", VU0State.GetVFRegisterName(args.Rs));
             if (cpu != null) { Vector4 vs = cpu.VU0.ReadVF(args.Rs); return $"{eq} => {vs} / 16"; }
             return eq;
+        }
+    }
+
+
+    // =====================================================================
+    // VU0 Component-Broadcast Variants (COP2 SPECIAL1, functs 0x00-0x27)
+    //
+    // Instruction field mapping for COP2 SPECIAL1 (opcode=0x12, rs=0x10):
+    //   args.Rs    = 0x10  (format type indicator, not a register)
+    //   args.Rt    = vft   (bits[20:16] - broadcast source register)
+    //   args.Rd    = vfs   (bits[15:11] - first source register)
+    //   args.Shamt = vfd   (bits[10:6]  - destination register)
+    //
+    // Each operation broadcasts one scalar component of vft before operating:
+    //   vaddx: vfd = vfs + {vft.x, vft.x, vft.x, vft.x}
+    //   vaddy: vfd = vfs + {vft.y, vft.y, vft.y, vft.y}   ... etc.
+    //
+    // Encoding: funct bits [1:0] = bc component (00=x, 01=y, 10=z, 11=w)
+    //           funct bits [5:2] = operation (0=VADD .. 9=VSUBA)
+    //
+    // Operation table:
+    //   op 0 (0x00-0x03): VADDx/y/z/w   -> vfd = vfs + bc(vft)
+    //   op 1 (0x04-0x07): VSUBx/y/z/w   -> vfd = vfs - bc(vft)
+    //   op 2 (0x08-0x0B): VMULx/y/z/w   -> vfd = vfs * bc(vft)
+    //   op 3 (0x0C-0x0F): VMADDx/y/z/w  -> vfd = ACC + vfs * bc(vft)
+    //   op 4 (0x10-0x13): VMSUBx/y/z/w  -> vfd = ACC - vfs * bc(vft)
+    //   op 5 (0x14-0x17): VMAXx/y/z/w   -> vfd = max(vfs, bc(vft))
+    //   op 6 (0x18-0x1B): VMINx/y/z/w   -> vfd = min(vfs, bc(vft))
+    //   op 7 (0x1C-0x1F): VMULAx/y/z/w  -> ACC = vfs * bc(vft)
+    //   op 8 (0x20-0x23): VADDAx/y/z/w  -> ACC = vfs + bc(vft)
+    //   op 9 (0x24-0x27): VSUBAx/y/z/w  -> ACC = vfs - bc(vft)
+    // =====================================================================
+
+    // VADDx/y/z/w - Vector Add with Broadcast Component (functs 0x00-0x03)
+    public sealed class VADDBc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VADDBc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = bc; // 0x00-0x03
+            Name = "vadd" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "vfs", "vft"];
+            Equation = $"vfd = vfs + vft.{_compChar[bc]}";
+            Description = $"Vector add broadcast {_compChar[bc]}: vfs + broadcast(vft.{_compChar[bc]})";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // args.Rd = vfs source; args.Rt = vft source; args.Shamt = vfd destination
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            cpu.VU0.WriteVF(args.Shamt, vs + new Vector4(c), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Shamt)}, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            // args[0]=vfd, args[1]=vfs, args[2]=vft
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | _bc);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Shamt))
+                .Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                return $"{eq} => {vs} + {c}";
+            }
+            return eq;
+        }
+    }
+
+    // VSUBx/y/z/w - Vector Subtract with Broadcast Component (functs 0x04-0x07)
+    public sealed class VSUBBc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VSUBBc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = 0x04 + bc; // 0x04-0x07
+            Name = "vsub" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "vfs", "vft"];
+            Equation = $"vfd = vfs - vft.{_compChar[bc]}";
+            Description = $"Vector subtract broadcast {_compChar[bc]}: vfs - broadcast(vft.{_compChar[bc]})";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            cpu.VU0.WriteVF(args.Shamt, vs - new Vector4(c), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Shamt)}, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | (0x04 + _bc));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Shamt))
+                .Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                return $"{eq} => {vs} - {c}";
+            }
+            return eq;
+        }
+    }
+
+    // VMULx/y/z/w - Vector Multiply with Broadcast Component (functs 0x08-0x0B)
+    public sealed class VMULBc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VMULBc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = 0x08 + bc; // 0x08-0x0B
+            Name = "vmul" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "vfs", "vft"];
+            Equation = $"vfd = vfs * vft.{_compChar[bc]}";
+            Description = $"Vector multiply broadcast {_compChar[bc]}: vfs * broadcast(vft.{_compChar[bc]})";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            cpu.VU0.WriteVF(args.Shamt, vs * new Vector4(c), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Shamt)}, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | (0x08 + _bc));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Shamt))
+                .Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                return $"{eq} => {vs} * {c}";
+            }
+            return eq;
+        }
+    }
+
+    // VMADDx/y/z/w - Vector Multiply-Add with Broadcast Component (functs 0x0C-0x0F)
+    public sealed class VMADDBc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VMADDBc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = 0x0C + bc; // 0x0C-0x0F
+            Name = "vmadd" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "vfs", "vft"];
+            Equation = $"vfd = ACC + vfs * vft.{_compChar[bc]}";
+            Description = $"Vector multiply-add broadcast {_compChar[bc]}: ACC + vfs * broadcast(vft.{_compChar[bc]})";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            Vector4 acc = cpu.VU0.ReadACC();
+            cpu.VU0.WriteVF(args.Shamt, acc + vs * new Vector4(c), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Shamt)}, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | (0x0C + _bc));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Shamt))
+                .Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                Vector4 acc = cpu.VU0.ReadACC();
+                return $"{eq} => ACC({acc}) + {vs} * {c}";
+            }
+            return eq;
+        }
+    }
+
+    // VMSUBx/y/z/w - Vector Multiply-Subtract with Broadcast Component (functs 0x10-0x13)
+    public sealed class VMSUBBc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VMSUBBc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = 0x10 + bc; // 0x10-0x13
+            Name = "vmsub" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "vfs", "vft"];
+            Equation = $"vfd = ACC - vfs * vft.{_compChar[bc]}";
+            Description = $"Vector multiply-subtract broadcast {_compChar[bc]}: ACC - vfs * broadcast(vft.{_compChar[bc]})";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            Vector4 acc = cpu.VU0.ReadACC();
+            cpu.VU0.WriteVF(args.Shamt, acc - vs * new Vector4(c), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Shamt)}, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | (0x10 + _bc));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Shamt))
+                .Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                Vector4 acc = cpu.VU0.ReadACC();
+                return $"{eq} => ACC({acc}) - {vs} * {c}";
+            }
+            return eq;
+        }
+    }
+
+    // VMAXx/y/z/w - Vector Maximum with Broadcast Component (functs 0x14-0x17)
+    public sealed class VMAXBc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VMAXBc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = 0x14 + bc; // 0x14-0x17
+            Name = "vmax" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "vfs", "vft"];
+            Equation = $"vfd = max(vfs, vft.{_compChar[bc]})";
+            Description = $"Vector max broadcast {_compChar[bc]}: component-wise max(vfs, broadcast(vft.{_compChar[bc]}))";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            cpu.VU0.WriteVF(args.Shamt, Vector4.Max(vs, new Vector4(c)), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Shamt)}, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | (0x14 + _bc));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Shamt))
+                .Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                return $"{eq} => max({vs}, {c})";
+            }
+            return eq;
+        }
+    }
+
+    // VMINx/y/z/w - Vector Minimum with Broadcast Component (functs 0x18-0x1B)
+    public sealed class VMINBc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VMINBc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = 0x18 + bc; // 0x18-0x1B
+            Name = "vmin" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "vfs", "vft"];
+            Equation = $"vfd = min(vfs, vft.{_compChar[bc]})";
+            Description = $"Vector min broadcast {_compChar[bc]}: component-wise min(vfs, broadcast(vft.{_compChar[bc]}))";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            cpu.VU0.WriteVF(args.Shamt, Vector4.Min(vs, new Vector4(c)), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Shamt)}, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | (0x18 + _bc));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Shamt))
+                .Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                return $"{eq} => min({vs}, {c})";
+            }
+            return eq;
+        }
+    }
+
+    // VMULAx/y/z/w - Vector Multiply to ACC with Broadcast Component (functs 0x1C-0x1F)
+    public sealed class VMULABc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VMULABc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = 0x1C + bc; // 0x1C-0x1F
+            Name = "vmula" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfs", "vft"];
+            Equation = $"ACC = vfs * vft.{_compChar[bc]}";
+            Description = $"Vector multiply broadcast {_compChar[bc]} to ACC: vfs * broadcast(vft.{_compChar[bc]})";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // For ACC-writing variants: args.Rd = vfs, args.Rt = vft
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            cpu.VU0.WriteACC(vs * new Vector4(c), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} ACC, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            // args[0]=vfs, args[1]=vft
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | (0x1C + _bc));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                return $"{eq} => {vs} * {c}";
+            }
+            return eq;
+        }
+    }
+
+    // VADDAx/y/z/w - Vector Add to ACC with Broadcast Component (functs 0x20-0x23)
+    public sealed class VADDABc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VADDABc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = 0x20 + bc; // 0x20-0x23
+            Name = "vadda" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfs", "vft"];
+            Equation = $"ACC = vfs + vft.{_compChar[bc]}";
+            Description = $"Vector add broadcast {_compChar[bc]} to ACC: vfs + broadcast(vft.{_compChar[bc]})";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            cpu.VU0.WriteACC(vs + new Vector4(c), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} ACC, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | (0x20 + _bc));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                return $"{eq} => {vs} + {c}";
+            }
+            return eq;
+        }
+    }
+
+    // VSUBAx/y/z/w - Vector Subtract to ACC with Broadcast Component (functs 0x24-0x27)
+    public sealed class VSUBABc : Instruction<Args_R>
+    {
+        private static readonly char[] _compChar = ['x', 'y', 'z', 'w'];
+        private readonly int _bc;
+
+        public VSUBABc(int bc)
+        {
+            _bc = bc;
+            Opcode = 0x12; Funct = 0x24 + bc; // 0x24-0x27
+            Name = "vsuba" + _compChar[bc];
+            ArgType = InstrArgType.R; ArgNames = ["vfs", "vft"];
+            Equation = $"ACC = vfs - vft.{_compChar[bc]}";
+            Description = $"Vector subtract broadcast {_compChar[bc]} to ACC: vfs - broadcast(vft.{_compChar[bc]})";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+            float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+            cpu.VU0.WriteACC(vs - new Vector4(c), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} ACC, {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | (0x24 + _bc));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfs", VU0State.GetVFRegisterName(args.Rd))
+                .Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null)
+            {
+                Vector4 vs = cpu.VU0.ReadVF(args.Rd);
+                float c = VU0Helpers.GetComponent(cpu.VU0.ReadVF(args.Rt), _bc);
+                return $"{eq} => {vs} - {c}";
+            }
+            return eq;
+        }
+    }
+
+    // =====================================================================
+    // VU0 Micro-Mode Trigger Instructions
+    // =====================================================================
+
+    // VCALLMS - Vector Call Micro Subroutine (COP2 rs=0x18)
+    // Starts VU0 micro-mode execution at the specified immediate address.
+    // The 15-bit entry address is encoded in instruction bits [20:6]:
+    //   args.Rt = bits[20:16], args.Rd = bits[15:11], args.Shamt = bits[10:6]
+    //   byte_address = ((args.Rt<<10)|(args.Rd<<5)|args.Shamt) * 8
+    public sealed class VCALLMS : Instruction<Args_R>
+    {
+        public VCALLMS()
+        {
+            Opcode = 0x12; Funct = null; // rs=0x18 distinguishes this instruction
+            Name = "vcallms";
+            ArgType = InstrArgType.R; ArgNames = ["imm15"];
+            Equation = "VU0.Start(imm15 * 8)";
+            Description = "Call Micro Subroutine: start VU0 micro-mode at address imm15*8";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // Reconstruct the 15-bit address from Rt, Rd, Shamt fields
+            uint entry = (uint)((args.Rt << 10) | (args.Rd << 5) | args.Shamt);
+            cpu.VU0.Start((ushort)(entry * 8));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+        {
+            uint entry = (uint)((args.Rt << 10) | (args.Rd << 5) | args.Shamt);
+            return $"{Name} 0x{entry:X4}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            // args[0] = 15-bit address; encode into Rt:Rd:Shamt fields
+            uint addr = (uint)args[0];
+            uint rt = (addr >> 10) & 0x1F;
+            uint rd = (addr >> 5) & 0x1F;
+            uint shamt = addr & 0x1F;
+            return (uint)(0x12 << 26 | 0x18 << 21 | rt << 16 | rd << 11 | shamt << 6);
+        }
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            uint entry = (uint)((args.Rt << 10) | (args.Rd << 5) | args.Shamt);
+            return $"VU0.Start(0x{entry * 8:X4}) [entry=0x{entry:X4}]";
+        }
+    }
+
+    // VCALLMSR - Vector Call Micro Subroutine Register (COP2 rs=0x19)
+    // Starts VU0 micro-mode execution at the address stored in a VI register.
+    // The VI register index is encoded in the Rd field (bits[15:11]).
+    public sealed class VCALLMSR : Instruction<Args_R>
+    {
+        public VCALLMSR()
+        {
+            Opcode = 0x12; Funct = null; // rs=0x19 distinguishes this instruction
+            Name = "vcallmsr";
+            ArgType = InstrArgType.R; ArgNames = ["vis"];
+            Equation = "VU0.Start(VI[vis] * 8)";
+            Description = "Call Micro Subroutine Register: start VU0 micro-mode at VI[vis]*8";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            ushort addr = cpu.VU0.ReadVI(args.Rd & 0xF);
+            cpu.VU0.Start((ushort)(addr * 8));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} vi{args.Rd & 0xF}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x19 << 21 | (args[0] & 0xF) << 11);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (cpu != null)
+            {
+                ushort addr = cpu.VU0.ReadVI(args.Rd & 0xF);
+                return $"VU0.Start(0x{addr * 8:X4}) [vi{args.Rd & 0xF}=0x{addr:X4}]";
+            }
+            return $"VU0.Start(VI[vi{args.Rd & 0xF}] * 8)";
+        }
+    }
+
+    // =====================================================================
+    // VU0 LFSR Pseudo-Random Number Generator Instructions
+    //
+    // Verified against PCSX2 VUops.cpp AdvanceLFSR() / _vuRNEXT() etc.
+    //
+    // R register format (PCSX2 VI[REG_R]):
+    //   Stored as 0x3F800000 | mantissa_23_bits  (always a float in [1.0, 2.0))
+    //   Written to VF registers as-is (reinterpreted as float, not as raw integer).
+    //
+    // Field mapping (COP2 instruction bits, consistent with VU micro-mode lower format):
+    //   args.Rs    = rs field (bits[25:21]); bits[22:21] of this = _Fsf_ component selector
+    //   args.Rt    = ft field (bits[20:16]): destination register for VRNEXT/VRGET
+    //   args.Rd    = fs field (bits[15:11]): source register for VRINIT/VRXOR
+    //
+    // COP2 SPECIAL2 dispatch: rs=0x1E routes to the SPECIAL2 handler.
+    // For VRINIT/VRXOR rs also carries the component selector (bits[22:21]).
+    // =====================================================================
+
+    // VRNEXT - Vector Random Next (COP2 rs=0x1E, funct=0x1C)
+    // Advances the LFSR and writes the new R value to the _Ft_ (args.Rt) VF register.
+    // Per PCSX2: _Ft_ = bits[20:16] = args.Rt; writes full R value (0x3F800000|mantissa).
+    public sealed class VRNEXT : Instruction<Args_R>
+    {
+        public VRNEXT()
+        {
+            Opcode = 0x12; Funct = 0x1C;
+            Name = "vrnext";
+            ArgType = InstrArgType.R; ArgNames = ["vft"];
+            Equation = "R = NextRng(R); vft = R";
+            Description = "Advance LFSR and write next pseudo-random R value to vft (bits[20:16])";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            cpu.VU0.RngState = VU0Helpers.NextRng(cpu.VU0.RngState);
+            // R is stored as 0x3F800000|mantissa; reinterpret those bits directly as float
+            float rval = BitConverter.UInt32BitsToSingle(cpu.VU0.RngState);
+            cpu.VU0.WriteVF(args.Rt, new Vector4(rval), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Rt)}, R";
+
+        public override uint Asm(int[] args)
+            // args[0] = vft destination register (bits[20:16])
+            => (uint)(0x12 << 26 | 0x1E << 21 | args[0] << 16 | 0x1C);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (cpu != null)
+            {
+                uint next = VU0Helpers.NextRng(cpu.VU0.RngState);
+                return $"R = 0x{next:X8}; {VU0State.GetVFRegisterName(args.Rt)} = {BitConverter.UInt32BitsToSingle(next)}";
+            }
+            return Equation.Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+        }
+    }
+
+    // VRGET - Vector Random Get (COP2 rs=0x1E, funct=0x1D)
+    // Reads the current R value into _Ft_ (args.Rt) VF register without advancing.
+    // Per PCSX2: _Ft_ = bits[20:16] = args.Rt.
+    public sealed class VRGET : Instruction<Args_R>
+    {
+        public VRGET()
+        {
+            Opcode = 0x12; Funct = 0x1D;
+            Name = "vrget";
+            ArgType = InstrArgType.R; ArgNames = ["vft"];
+            Equation = "vft = R";
+            Description = "Get current R value into vft (bits[20:16]) without advancing LFSR";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            float rval = BitConverter.UInt32BitsToSingle(cpu.VU0.RngState);
+            cpu.VU0.WriteVF(args.Rt, new Vector4(rval), 0xF);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Rt)}, R";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x1E << 21 | args[0] << 16 | 0x1D);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (cpu != null)
+                return $"{VU0State.GetVFRegisterName(args.Rt)} = R = 0x{cpu.VU0.RngState:X8} ({BitConverter.UInt32BitsToSingle(cpu.VU0.RngState)})";
+            return Equation.Replace("vft", VU0State.GetVFRegisterName(args.Rt));
+        }
+    }
+
+    // VRINIT - Vector Random Init (COP2 rs=0x1E, funct=0x1E)
+    // Initializes R from the VF source register's component selected by bits[22:21] (= args.Rs & 0x3).
+    // Per PCSX2: R = 0x3F800000 | (VF[_Fs_].UL[_Fsf_] & 0x007FFFFF)
+    //   _Fs_  = bits[15:11] = args.Rd   (source VF register)
+    //   _Fsf_ = bits[22:21] = args.Rs & 0x3  (component selector: 0=X, 1=Y, 2=Z, 3=W)
+    public sealed class VRINIT : Instruction<Args_R>
+    {
+        public VRINIT()
+        {
+            Opcode = 0x12; Funct = 0x1E;
+            Name = "vrinit";
+            ArgType = InstrArgType.R; ArgNames = ["vfs"];
+            Equation = "R = 0x3F800000 | (vfs[fsf] & 0x7FFFFF)";
+            Description = "Init LFSR from VF source bits (fs=bits[15:11], fsf=bits[22:21])";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // Source register is args.Rd (bits[15:11]); component from bits[22:21] = args.Rs & 0x3
+            int fsf = args.Rs & 0x3;
+            uint bits = VU0Helpers.GetComponentBits(cpu.VU0.ReadVF(args.Rd), fsf);
+            cpu.VU0.RngState = 0x3F800000u | (bits & 0x7FFFFFu);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+        {
+            string[] compNames = ["x", "y", "z", "w"];
+            return $"{Name} R, {VU0State.GetVFRegisterName(args.Rd)}.{compNames[args.Rs & 0x3]}";
+        }
+
+        public override uint Asm(int[] args)
+            // args[0] = vfs source register (bits[15:11])
+            => (uint)(0x12 << 26 | 0x1E << 21 | args[0] << 11 | 0x1E);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            int fsf = args.Rs & 0x3;
+            string[] compNames = ["x", "y", "z", "w"];
+            if (cpu != null)
+            {
+                uint bits = VU0Helpers.GetComponentBits(cpu.VU0.ReadVF(args.Rd), fsf);
+                return $"R = 0x{0x3F800000u | (bits & 0x7FFFFFu):X8} (from {VU0State.GetVFRegisterName(args.Rd)}.{compNames[fsf]})";
+            }
+            return $"R = 0x3F800000 | ({VU0State.GetVFRegisterName(args.Rd)}.{compNames[fsf]} & 0x7FFFFF)";
+        }
+    }
+
+    // VRXOR - Vector Random XOR (COP2 rs=0x1E, funct=0x1F)
+    // XORs the R mantissa with the VF source register's component selected by bits[22:21].
+    // Per PCSX2: R = 0x3F800000 | ((R ^ VF[_Fs_].UL[_Fsf_]) & 0x007FFFFF)
+    //   _Fs_  = bits[15:11] = args.Rd   (source VF register)
+    //   _Fsf_ = bits[22:21] = args.Rs & 0x3  (component selector: 0=X, 1=Y, 2=Z, 3=W)
+    public sealed class VRXOR : Instruction<Args_R>
+    {
+        public VRXOR()
+        {
+            Opcode = 0x12; Funct = 0x1F;
+            Name = "vrxor";
+            ArgType = InstrArgType.R; ArgNames = ["vfs"];
+            Equation = "R = 0x3F800000 | ((R ^ vfs[fsf]) & 0x7FFFFF)";
+            Description = "XOR R mantissa with VF source bits (fs=bits[15:11], fsf=bits[22:21])";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int fsf = args.Rs & 0x3;
+            uint bits = VU0Helpers.GetComponentBits(cpu.VU0.ReadVF(args.Rd), fsf);
+            cpu.VU0.RngState = 0x3F800000u | ((cpu.VU0.RngState ^ bits) & 0x7FFFFFu);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+        {
+            string[] compNames = ["x", "y", "z", "w"];
+            return $"{Name} R, {VU0State.GetVFRegisterName(args.Rd)}.{compNames[args.Rs & 0x3]}";
+        }
+
+        public override uint Asm(int[] args)
+            // args[0] = vfs source register (bits[15:11])
+            => (uint)(0x12 << 26 | 0x1E << 21 | args[0] << 11 | 0x1F);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            int fsf = args.Rs & 0x3;
+            string[] compNames = ["x", "y", "z", "w"];
+            if (cpu != null)
+            {
+                uint bits = VU0Helpers.GetComponentBits(cpu.VU0.ReadVF(args.Rd), fsf);
+                uint newState = 0x3F800000u | ((cpu.VU0.RngState ^ bits) & 0x7FFFFFu);
+                return $"R = 0x{newState:X8} (R.mant ^ {VU0State.GetVFRegisterName(args.Rd)}.{compNames[fsf]}.mant)";
+            }
+            return $"R = 0x3F800000 | ((R ^ {VU0State.GetVFRegisterName(args.Rd)}.{compNames[fsf]}) & 0x7FFFFF)";
         }
     }
 }

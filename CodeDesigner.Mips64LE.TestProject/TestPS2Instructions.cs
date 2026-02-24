@@ -927,5 +927,272 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(0xABCDUL, cpu.LO, "PMTHL: LO = rs.lo");
             Assert.AreEqual(0xEF01UL, cpu.HI, "PMTHL: HI = rs.hi");
         }
+
+        // =====================================================================
+        // VU0 Component-Broadcast Variant Instructions
+        // COP2 SPECIAL1 (opcode=0x12, rs=0x10), functs 0x00-0x27
+        // =====================================================================
+
+        private static CpuState MakeVU0Cpu()
+        {
+            var cpu = new CpuState();
+            cpu.PC = 0x80000000;
+            // vf1 = (1, 2, 3, 4)
+            cpu.VU0.WriteVF(1, new System.Numerics.Vector4(1f, 2f, 3f, 4f));
+            // vf2 = (10, 20, 30, 40)
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(10f, 20f, 30f, 40f));
+            return cpu;
+        }
+
+        // Helper: encode a COP2 SPECIAL1 R-type instruction (opcode=0x12, rs=0x10)
+        private static uint EncVU0(int vft, int vfs, int vfd, int funct)
+            => (uint)(0x12 << 26 | 0x10 << 21 | vft << 16 | vfs << 11 | vfd << 6 | funct);
+
+        [TestMethod]
+        public void Test_VADDx()
+        {
+            // vaddx vf3, vf1, vf2  =>  vf3 = vf1 + {vf2.x, vf2.x, vf2.x, vf2.x}
+            //                       = (1,2,3,4) + (10,10,10,10) = (11,12,13,14)
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x00);
+            AssertDisasm(enc, "vaddx");
+            var cpu = MakeVU0Cpu();
+            Exec(cpu, enc);
+            var r = cpu.VU0.ReadVF(3);
+            Assert.AreEqual(11f, r.X, "VADDx: X"); Assert.AreEqual(12f, r.Y, "VADDx: Y");
+            Assert.AreEqual(13f, r.Z, "VADDx: Z"); Assert.AreEqual(14f, r.W, "VADDx: W");
+        }
+
+        [TestMethod]
+        public void Test_VADDw()
+        {
+            // vaddw vf3, vf1, vf2  =>  vf3 = vf1 + {vf2.w, ...} = (1+40, 2+40, 3+40, 4+40)
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x03);
+            AssertDisasm(enc, "vaddw");
+            var cpu = MakeVU0Cpu();
+            Exec(cpu, enc);
+            var r = cpu.VU0.ReadVF(3);
+            Assert.AreEqual(41f, r.X, "VADDw: X"); Assert.AreEqual(42f, r.Y, "VADDw: Y");
+        }
+
+        [TestMethod]
+        public void Test_VSUBBc()
+        {
+            // vsuby vf3, vf1, vf2  =>  vf3 = vf1 - {vf2.y, ...} = (1-20, 2-20, 3-20, 4-20)
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x05);
+            AssertDisasm(enc, "vsuby");
+            var cpu = MakeVU0Cpu();
+            Exec(cpu, enc);
+            var r = cpu.VU0.ReadVF(3);
+            Assert.AreEqual(-19f, r.X, "VSUBy: X"); Assert.AreEqual(-18f, r.Y, "VSUBy: Y");
+        }
+
+        [TestMethod]
+        public void Test_VMULBc()
+        {
+            // vmulz vf3, vf1, vf2  =>  vf3 = vf1 * {vf2.z, ...} = (30, 60, 90, 120)
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x0A);
+            AssertDisasm(enc, "vmulz");
+            var cpu = MakeVU0Cpu();
+            Exec(cpu, enc);
+            var r = cpu.VU0.ReadVF(3);
+            Assert.AreEqual(30f, r.X, "VMULz: X"); Assert.AreEqual(60f, r.Y, "VMULz: Y");
+            Assert.AreEqual(90f, r.Z, "VMULz: Z"); Assert.AreEqual(120f, r.W, "VMULz: W");
+        }
+
+        [TestMethod]
+        public void Test_VMADDBc()
+        {
+            // vmaddx vf3, vf1, vf2  =>  vf3 = ACC + vf1 * {vf2.x, ...}
+            //   ACC=(0,0,0,0), vf1=(1,2,3,4), vf2.x=10  => (10,20,30,40)
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x0C);
+            AssertDisasm(enc, "vmaddx");
+            var cpu = MakeVU0Cpu();
+            cpu.VU0.WriteACC(new System.Numerics.Vector4(0, 0, 0, 0));
+            Exec(cpu, enc);
+            var r = cpu.VU0.ReadVF(3);
+            Assert.AreEqual(10f, r.X, "VMADDx: X"); Assert.AreEqual(20f, r.Y, "VMADDx: Y");
+        }
+
+        [TestMethod]
+        public void Test_VMSUBBc()
+        {
+            // vmsuby vf3, vf1, vf2  =>  vf3 = ACC - vf1 * {vf2.y, ...}
+            //   ACC=(100,100,100,100), vf1=(1,2,3,4), vf2.y=20 => (80, 60, 40, 20)
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x11);
+            AssertDisasm(enc, "vmsuby");
+            var cpu = MakeVU0Cpu();
+            cpu.VU0.WriteACC(new System.Numerics.Vector4(100f, 100f, 100f, 100f));
+            Exec(cpu, enc);
+            var r = cpu.VU0.ReadVF(3);
+            Assert.AreEqual(80f, r.X, "VMSUBy: X"); Assert.AreEqual(60f, r.Y, "VMSUBy: Y");
+            Assert.AreEqual(40f, r.Z, "VMSUBy: Z"); Assert.AreEqual(20f, r.W, "VMSUBy: W");
+        }
+
+        [TestMethod]
+        public void Test_VMAXBc()
+        {
+            // vmaxz vf3, vf1, vf2  =>  vf3 = max(vf1, {vf2.z,...}) = max((1,2,3,4), (30,...))
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x16);
+            AssertDisasm(enc, "vmaxz");
+            var cpu = MakeVU0Cpu();
+            Exec(cpu, enc);
+            var r = cpu.VU0.ReadVF(3);
+            Assert.AreEqual(30f, r.X, "VMAXz: X"); Assert.AreEqual(30f, r.Y, "VMAXz: Y");
+            Assert.AreEqual(30f, r.Z, "VMAXz: Z"); Assert.AreEqual(30f, r.W, "VMAXz: W");
+        }
+
+        [TestMethod]
+        public void Test_VMINBc()
+        {
+            // vminw vf3, vf1, vf2  =>  vf3 = min(vf1, {vf2.w,...}) = min((1,2,3,4), (40,...))
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 3, funct: 0x1B);
+            AssertDisasm(enc, "vminw");
+            var cpu = MakeVU0Cpu();
+            Exec(cpu, enc);
+            var r = cpu.VU0.ReadVF(3);
+            Assert.AreEqual(1f, r.X, "VMINw: X"); Assert.AreEqual(2f, r.Y, "VMINw: Y");
+        }
+
+        [TestMethod]
+        public void Test_VMULABc()
+        {
+            // vmulax ACC, vf1, vf2  =>  ACC = vf1 * {vf2.x,...} = (10, 20, 30, 40)
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 0, funct: 0x1C);
+            AssertDisasm(enc, "vmulax");
+            var cpu = MakeVU0Cpu();
+            Exec(cpu, enc);
+            var acc = cpu.VU0.ReadACC();
+            Assert.AreEqual(10f, acc.X, "VMULAx: ACC.X"); Assert.AreEqual(20f, acc.Y, "VMULAx: ACC.Y");
+            Assert.AreEqual(30f, acc.Z, "VMULAx: ACC.Z"); Assert.AreEqual(40f, acc.W, "VMULAx: ACC.W");
+        }
+
+        [TestMethod]
+        public void Test_VADDABc()
+        {
+            // vaddaw ACC, vf1, vf2  =>  ACC = vf1 + {vf2.w,...} = (1+40, 2+40, 3+40, 4+40)
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 0, funct: 0x23);
+            AssertDisasm(enc, "vaddaw");
+            var cpu = MakeVU0Cpu();
+            Exec(cpu, enc);
+            var acc = cpu.VU0.ReadACC();
+            Assert.AreEqual(41f, acc.X, "VADDAw: ACC.X"); Assert.AreEqual(42f, acc.Y, "VADDAw: ACC.Y");
+        }
+
+        [TestMethod]
+        public void Test_VSUBABc()
+        {
+            // vsubay ACC, vf1, vf2  =>  ACC = vf1 - {vf2.y,...} = (1-20, 2-20, 3-20, 4-20)
+            uint enc = EncVU0(vft: 2, vfs: 1, vfd: 0, funct: 0x25);
+            AssertDisasm(enc, "vsubay");
+            var cpu = MakeVU0Cpu();
+            Exec(cpu, enc);
+            var acc = cpu.VU0.ReadACC();
+            Assert.AreEqual(-19f, acc.X, "VSUBAy: ACC.X"); Assert.AreEqual(-18f, acc.Y, "VSUBAy: ACC.Y");
+        }
+
+        // =====================================================================
+        // VCALLMS / VCALLMSR — Trigger VU0 Micro-Mode
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_VCALLMS()
+        {
+            // VCALLMS with 15-bit address = 0x10 (byte address = 0x80)
+            // Encode: opcode=0x12, rs=0x18, bits[20:6] = 0x0010
+            // imm15 = 0x0010 → Rt=0, Rd=0, Shamt=0x10
+            uint enc = (uint)(0x12 << 26 | 0x18 << 21 | 0x10 << 6);
+            AssertDisasm(enc, "vcallms");
+            var cpu = MakeVU0Cpu();
+            cpu.VU0.IsRunning = false;
+            Exec(cpu, enc);
+            Assert.IsTrue(cpu.VU0.IsRunning, "VCALLMS: VU0 should be running");
+            Assert.AreEqual((ushort)(0x10 * 8), cpu.VU0.PC, "VCALLMS: PC should be address * 8");
+        }
+
+        [TestMethod]
+        public void Test_VCALLMSR()
+        {
+            // VCALLMSR vi1  (VI register 1 holds the address)
+            // Encode: opcode=0x12, rs=0x19, Rd=1 (vi register index)
+            uint enc = (uint)(0x12 << 26 | 0x19 << 21 | 1 << 11);
+            AssertDisasm(enc, "vcallmsr");
+            var cpu = MakeVU0Cpu();
+            cpu.VU0.WriteVI(1, 0x20); // vi1 = 0x20
+            cpu.VU0.IsRunning = false;
+            Exec(cpu, enc);
+            Assert.IsTrue(cpu.VU0.IsRunning, "VCALLMSR: VU0 should be running");
+            Assert.AreEqual((ushort)(0x20 * 8), cpu.VU0.PC, "VCALLMSR: PC should be VI[1] * 8");
+        }
+
+        // =====================================================================
+        // VRNEXT / VRGET / VRINIT / VRXOR — LFSR Pseudo-Random Instructions
+        // COP2 SPECIAL2 (opcode=0x12, rs=0x1E)
+        // Verified field mapping against PCSX2 VUops.cpp:
+        //   VRNEXT/VRGET: dest = _Ft_ = bits[20:16] = args.Rt
+        //   VRINIT/VRXOR: source = _Fs_ = bits[15:11] = args.Rd; component = bits[22:21] = args.Rs & 0x3
+        //   R register stored as 0x3F800000 | mantissa_23_bits (float in [1.0, 2.0))
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_VRNEXT()
+        {
+            // vrnext vf3, R  =>  advance LFSR, write R value to vf3 (dest in bits[20:16] = rt field)
+            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 3 << 16 | 0x1C);
+            AssertDisasm(enc, "vrnext");
+            var cpu = MakeVU0Cpu();
+            uint before = cpu.VU0.RngState;
+            Exec(cpu, enc);
+            // R should have advanced
+            Assert.AreNotEqual(before, cpu.VU0.RngState, "VRNEXT: RngState should advance");
+            // vf3 should contain the new R value reinterpreted as float
+            float expected = BitConverter.UInt32BitsToSingle(cpu.VU0.RngState);
+            Assert.AreEqual(expected, cpu.VU0.ReadVF(3).X, "VRNEXT: vf3.x = R float value");
+        }
+
+        [TestMethod]
+        public void Test_VRGET()
+        {
+            // vrget vf3, R  =>  read current R into vf3 (no advance), dest in bits[20:16] = rt field
+            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 3 << 16 | 0x1D);
+            AssertDisasm(enc, "vrget");
+            var cpu = MakeVU0Cpu();
+            uint before = cpu.VU0.RngState;
+            Exec(cpu, enc);
+            Assert.AreEqual(before, cpu.VU0.RngState, "VRGET: RngState should NOT change");
+            float expected = BitConverter.UInt32BitsToSingle(before);
+            Assert.AreEqual(expected, cpu.VU0.ReadVF(3).X, "VRGET: vf3.x = R float value");
+        }
+
+        [TestMethod]
+        public void Test_VRINIT()
+        {
+            // vrinit R, vf1.z  =>  R = 0x3F800000 | (vf1.z_bits & 0x7FFFFF)
+            // source register = bits[15:11] = rd field; component = bits[22:21] = rs[1:0] = 0x1E & 0x3 = 2 = Z
+            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 1 << 11 | 0x1E);
+            AssertDisasm(enc, "vrinit");
+            var cpu = MakeVU0Cpu();
+            // vf1 = (1, 2, 3, 4), so vf1.z = 3.0f; its bits & 0x7FFFFF
+            uint zBits = BitConverter.SingleToUInt32Bits(3f) & 0x7FFFFFu;
+            uint expected = 0x3F800000u | zBits;
+            Exec(cpu, enc);
+            Assert.AreEqual(expected, cpu.VU0.RngState, $"VRINIT: RngState = 0x{expected:X8}");
+        }
+
+        [TestMethod]
+        public void Test_VRXOR()
+        {
+            // vrxor R, vf2.z  =>  R = 0x3F800000 | ((R ^ vf2.z_bits) & 0x7FFFFF)
+            // source register = bits[15:11] = rd field; component = bits[22:21] = 0x1E & 0x3 = 2 = Z
+            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 2 << 11 | 0x1F);
+            AssertDisasm(enc, "vrxor");
+            var cpu = MakeVU0Cpu();
+            // Set a known R value in proper format
+            cpu.VU0.RngState = 0x3F800000u;
+            // vf2 = (10, 20, 30, 40), vf2.z = 30.0f — use full float bits (matching PCSX2 and our impl)
+            uint zBitsRaw = BitConverter.SingleToUInt32Bits(30f);
+            uint expected = 0x3F800000u | ((cpu.VU0.RngState ^ zBitsRaw) & 0x7FFFFFu);
+            Exec(cpu, enc);
+            Assert.AreEqual(expected, cpu.VU0.RngState, $"VRXOR: RngState = 0x{expected:X8}");
+        }
     }
 }
