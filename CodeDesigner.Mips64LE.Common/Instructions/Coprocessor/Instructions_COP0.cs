@@ -321,13 +321,21 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            // Read EPC (Exception Program Counter) - COP0 register 14
-            ulong epc = cpu.COP0.ReadRegister64(14);
-            cpu.PC = epc;
-            
-            // Clear EXL bit in Status register (bit 1)
+            // Check ERL bit (bit 2) in Status register (COP0 reg 12)
             uint status = cpu.COP0.ReadRegister32(12);
-            status &= ~(1u << 1); // Clear EXL bit
+            bool erl = (status & (1u << 2)) != 0;
+            if (erl)
+            {
+                // Return from error exception: restore from ErrorEPC (COP0 reg 30), clear ERL
+                cpu.PC = cpu.COP0.ReadRegister64(30);
+                status &= ~(1u << 2); // Clear ERL bit
+            }
+            else
+            {
+                // Return from normal exception: restore from EPC (COP0 reg 14), clear EXL
+                cpu.PC = cpu.COP0.ReadRegister64(14);
+                status &= ~(1u << 1); // Clear EXL bit
+            }
             cpu.COP0.WriteRegister32(12, status);
         }
 

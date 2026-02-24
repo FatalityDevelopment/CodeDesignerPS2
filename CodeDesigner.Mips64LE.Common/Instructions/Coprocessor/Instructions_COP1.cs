@@ -454,12 +454,19 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            cpu.FPR[args.Rd] = cpu.FPR[args.Rs] + cpu.FPR[args.Rt];
+            // COP1 S-format: args.Rs=fmt(0x10), args.Rd=fs, args.Rt=ft, args.Shamt=fd
+            float fs = cpu.FPR[args.Rd];
+            float ft = cpu.FPR[args.Rt];
+            if (float.IsSubnormal(fs)) fs = 0f;
+            if (float.IsSubnormal(ft)) ft = 0f;
+            float result = fs + ft;
+            if (float.IsSubnormal(result)) result = 0f;
+            cpu.FPR[args.Shamt] = result;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}, $f{args.Rt}";
         }
 
         public override uint Asm(int[] args)
@@ -470,13 +477,13 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}")
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}")
                 .Replace("ft", $"$f{args.Rt}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 float ft = cpu.FPR[args.Rt];
                 return $"{eq} => {fs} + {ft} = {fs + ft}";
             }
@@ -500,12 +507,19 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            cpu.FPR[args.Rd] = cpu.FPR[args.Rs] - cpu.FPR[args.Rt];
+            // COP1 S-format: args.Rs=fmt(0x10), args.Rd=fs, args.Rt=ft, args.Shamt=fd
+            float fs = cpu.FPR[args.Rd];
+            float ft = cpu.FPR[args.Rt];
+            if (float.IsSubnormal(fs)) fs = 0f;
+            if (float.IsSubnormal(ft)) ft = 0f;
+            float result = fs - ft;
+            if (float.IsSubnormal(result)) result = 0f;
+            cpu.FPR[args.Shamt] = result;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}, $f{args.Rt}";
         }
 
         public override uint Asm(int[] args)
@@ -516,13 +530,13 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}")
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}")
                 .Replace("ft", $"$f{args.Rt}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 float ft = cpu.FPR[args.Rt];
                 return $"{eq} => {fs} - {ft} = {fs - ft}";
             }
@@ -546,12 +560,19 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            cpu.FPR[args.Rd] = cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
+            // COP1 S-format: args.Rs=fmt(0x10), args.Rd=fs, args.Rt=ft, args.Shamt=fd
+            float fs = cpu.FPR[args.Rd];
+            float ft = cpu.FPR[args.Rt];
+            if (float.IsSubnormal(fs)) fs = 0f;
+            if (float.IsSubnormal(ft)) ft = 0f;
+            float result = fs * ft;
+            if (float.IsSubnormal(result)) result = 0f;
+            cpu.FPR[args.Shamt] = result;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}, $f{args.Rt}";
         }
 
         public override uint Asm(int[] args)
@@ -562,13 +583,13 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}")
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}")
                 .Replace("ft", $"$f{args.Rt}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 float ft = cpu.FPR[args.Rt];
                 return $"{eq} => {fs} * {ft} = {fs * ft}";
             }
@@ -592,12 +613,19 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            cpu.FPR[args.Rd] = cpu.FPR[args.Rs] / cpu.FPR[args.Rt];
+            // COP1 S-format: args.Rs=fmt(0x10), args.Rd=fs, args.Rt=ft, args.Shamt=fd
+            float fs = cpu.FPR[args.Rd];
+            float ft = cpu.FPR[args.Rt];
+            if (float.IsSubnormal(fs)) fs = 0f;
+            if (float.IsSubnormal(ft)) ft = 0f;
+            float result = fs / ft;
+            if (float.IsSubnormal(result)) result = 0f;
+            cpu.FPR[args.Shamt] = result;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}, $f{args.Rt}";
         }
 
         public override uint Asm(int[] args)
@@ -608,13 +636,13 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}")
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}")
                 .Replace("ft", $"$f{args.Rt}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 float ft = cpu.FPR[args.Rt];
                 return $"{eq} => {fs} / {ft} = {fs / ft}";
             }
@@ -638,12 +666,17 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            cpu.FPR[args.Rd] = MathF.Sqrt(cpu.FPR[args.Rs]);
+            // COP1 S-format: args.Rs=fmt(0x10), args.Rd=fs, args.Shamt=fd
+            float fs = cpu.FPR[args.Rd];
+            if (float.IsSubnormal(fs)) fs = 0f;
+            float result = MathF.Sqrt(fs);
+            if (float.IsSubnormal(result)) result = 0f;
+            cpu.FPR[args.Shamt] = result;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}";
         }
 
         public override uint Asm(int[] args)
@@ -654,12 +687,12 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}");
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 return $"{eq} => sqrt({fs}) = {MathF.Sqrt(fs)}";
             }
             return eq;
@@ -682,12 +715,15 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            cpu.FPR[args.Rd] = MathF.Abs(cpu.FPR[args.Rs]);
+            // COP1 S-format: args.Rs=fmt(0x10), args.Rd=fs, args.Shamt=fd
+            float fs = cpu.FPR[args.Rd];
+            if (float.IsSubnormal(fs)) fs = 0f;
+            cpu.FPR[args.Shamt] = MathF.Abs(fs);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}";
         }
 
         public override uint Asm(int[] args)
@@ -698,12 +734,12 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}");
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 return $"{eq} => abs({fs}) = {MathF.Abs(fs)}";
             }
             return eq;
@@ -726,12 +762,13 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            cpu.FPR[args.Rd] = cpu.FPR[args.Rs];
+            // COP1 S-format: args.Rs=fmt(0x10), args.Rd=fs, args.Shamt=fd
+            cpu.FPR[args.Shamt] = cpu.FPR[args.Rd];
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}";
         }
 
         public override uint Asm(int[] args)
@@ -742,12 +779,12 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}");
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 return $"{eq} => {fs}";
             }
             return eq;
@@ -770,12 +807,15 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            cpu.FPR[args.Rd] = -cpu.FPR[args.Rs];
+            // COP1 S-format: args.Rs=fmt(0x10), args.Rd=fs, args.Shamt=fd
+            float fs = cpu.FPR[args.Rd];
+            if (float.IsSubnormal(fs)) fs = 0f;
+            cpu.FPR[args.Shamt] = -fs;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}";
         }
 
         public override uint Asm(int[] args)
@@ -786,12 +826,12 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}");
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 return $"{eq} => -({fs}) = {-fs}";
             }
             return eq;
@@ -814,13 +854,16 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            int intValue = (int)cpu.FPR[args.Rs];
-            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)intValue);
+            // COP1 S-format: args.Rs=fmt(0x10), args.Rd=fs, args.Shamt=fd
+            float fs = cpu.FPR[args.Rd];
+            if (float.IsSubnormal(fs)) fs = 0f;
+            int intValue = (int)fs;
+            cpu.FPR[args.Shamt] = BitConverter.UInt32BitsToSingle((uint)intValue);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}";
         }
 
         public override uint Asm(int[] args)
@@ -831,12 +874,12 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}");
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 return $"{eq} => convert {fs} to {(int)fs}";
             }
             return eq;
@@ -859,13 +902,16 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            int intValue = (int)BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rs]);
-            cpu.FPR[args.Rd] = (float)intValue;
+            // COP1 W-format (fmt=0x14): args.Rd=fs, args.Shamt=fd
+            int intValue = (int)BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
+            float result = (float)intValue;
+            if (float.IsSubnormal(result)) result = 0f;
+            cpu.FPR[args.Shamt] = result;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rd}, $f{args.Rs}";
+            return $"{Name} $f{args.Shamt}, $f{args.Rd}";
         }
 
         public override uint Asm(int[] args)
@@ -876,12 +922,12 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fd", $"$f{args.Rd}")
-                .Replace("fs", $"$f{args.Rs}");
+                .Replace("fd", $"$f{args.Shamt}")
+                .Replace("fs", $"$f{args.Rd}");
             
             if (cpu != null)
             {
-                int intValue = (int)BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rs]);
+                int intValue = (int)BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rd]);
                 return $"{eq} => convert {intValue} to {(float)intValue}";
             }
             return eq;
@@ -909,7 +955,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rs}, $f{args.Rt}";
+            return $"{Name} $f{args.Rd}, $f{args.Rt}";
         }
 
         public override uint Asm(int[] args)
@@ -919,7 +965,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"c.f.s $f{args.Rs}, $f{args.Rt} => CC = false";
+            return $"c.f.s $f{args.Rd}, $f{args.Rt} => CC = false";
         }
     }
 
@@ -939,13 +985,14 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            bool result = cpu.FPR[args.Rs] == cpu.FPR[args.Rt];
+            // COP1 S-format: args.Rd=fs, args.Rt=ft
+            bool result = cpu.FPR[args.Rd] == cpu.FPR[args.Rt];
             cpu.COP1.SetConditionCode(result);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rs}, $f{args.Rt}";
+            return $"{Name} $f{args.Rd}, $f{args.Rt}";
         }
 
         public override uint Asm(int[] args)
@@ -956,12 +1003,12 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fs", $"$f{args.Rs}")
+                .Replace("fs", $"$f{args.Rd}")
                 .Replace("ft", $"$f{args.Rt}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 float ft = cpu.FPR[args.Rt];
                 bool result = fs == ft;
                 return $"{eq} => {fs} == {ft} = {result}";
@@ -986,13 +1033,14 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            bool result = cpu.FPR[args.Rs] < cpu.FPR[args.Rt];
+            // COP1 S-format: args.Rd=fs, args.Rt=ft
+            bool result = cpu.FPR[args.Rd] < cpu.FPR[args.Rt];
             cpu.COP1.SetConditionCode(result);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rs}, $f{args.Rt}";
+            return $"{Name} $f{args.Rd}, $f{args.Rt}";
         }
 
         public override uint Asm(int[] args)
@@ -1003,12 +1051,12 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fs", $"$f{args.Rs}")
+                .Replace("fs", $"$f{args.Rd}")
                 .Replace("ft", $"$f{args.Rt}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 float ft = cpu.FPR[args.Rt];
                 bool result = fs < ft;
                 return $"{eq} => {fs} < {ft} = {result}";
@@ -1033,13 +1081,14 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            bool result = cpu.FPR[args.Rs] <= cpu.FPR[args.Rt];
+            // COP1 S-format: args.Rd=fs, args.Rt=ft
+            bool result = cpu.FPR[args.Rd] <= cpu.FPR[args.Rt];
             cpu.COP1.SetConditionCode(result);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
         {
-            return $"{Name} $f{args.Rs}, $f{args.Rt}";
+            return $"{Name} $f{args.Rd}, $f{args.Rt}";
         }
 
         public override uint Asm(int[] args)
@@ -1050,12 +1099,12 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             string eq = Equation
-                .Replace("fs", $"$f{args.Rs}")
+                .Replace("fs", $"$f{args.Rd}")
                 .Replace("ft", $"$f{args.Rt}");
             
             if (cpu != null)
             {
-                float fs = cpu.FPR[args.Rs];
+                float fs = cpu.FPR[args.Rd];
                 float ft = cpu.FPR[args.Rt];
                 bool result = fs <= ft;
                 return $"{eq} => {fs} <= {ft} = {result}";
@@ -1084,6 +1133,10 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 4;
             }
         }
 
@@ -1137,6 +1190,10 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             {
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 4;
             }
         }
 
