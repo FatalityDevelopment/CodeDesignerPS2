@@ -1,4 +1,5 @@
 using System;
+using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 
 namespace CodeDesigner.Mips64LE.Common.Emulator
 {
@@ -12,6 +13,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
     ///   0x1FC00000 - 0x1FFFFFFF  BIOS ROM  (4 MB, read-only)
     ///   0x70000000 - 0x70003FFF  Scratchpad RAM (16 KB)
     ///   0x10000000 - 0x1000FFFF  EE I/O registers
+    ///     0x10000000 - 0x10001FFF  EE Timers T0–T3 (0x800 bytes each)
+    ///     0x1000F000 - 0x1000F01F  INTC (interrupt controller)
     ///   0x12000000 - 0x12001FFF  GS privileged registers
     ///
     /// MIPS KSEG0/KSEG1 unmapping (strips top 3 bits when bit31 is set):
@@ -34,11 +37,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private const uint IoBase         = 0x10000000u;
         private const uint GsPrivBase     = 0x12000000u;
 
+        // Hardware I/O base addresses (physical)
+        private const uint TimerBase = 0x10000000u;  // T0 base; each timer is 0x800 apart
+        private const uint IntcBase  = 0x1000F000u;  // INTC_STAT / INTC_MASK
+
         private readonly byte[] _ram        = new byte[MainRamSize];
         private readonly byte[] _bios       = new byte[BiosRomSize];
         private readonly byte[] _scratchpad = new byte[ScratchpadSize];
         private readonly byte[] _io         = new byte[IoRegisterSize];
         private readonly byte[] _gsPriv     = new byte[GsPrivRegSize];
+
+        /// <summary>The four EE hardware timers (T0–T3).</summary>
+        public EETimer[] Timers { get; } = { new EETimer(0), new EETimer(1), new EETimer(2), new EETimer(3) };
+
+        /// <summary>The EE interrupt controller.</summary>
+        public INTC Intc { get; } = new INTC();
 
         /// <summary>Exposes main RAM so callers can bulk-load programs.</summary>
         public byte[] Ram => _ram;
@@ -112,6 +125,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public uint ReadWord(uint vaddr)
         {
             uint paddr = TranslateAddress(vaddr);
+
+            // Hardware I/O: timers and INTC
+            if (paddr >= TimerBase && paddr < TimerBase + 0x2000u)
+                return ReadTimerWord(paddr);
+            if (paddr >= IntcBase && paddr < IntcBase + 0x20u)
+                return Intc.ReadRegister(paddr - IntcBase);
+
             (byte[] region, uint offset) = MapPhysical(paddr);
             // Fast path if all 4 bytes fit in the same region
             return (uint)(region[offset]
@@ -123,6 +143,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public void WriteWord(uint vaddr, uint value)
         {
             uint paddr = TranslateAddress(vaddr);
+
+            // Hardware I/O: timers and INTC
+            if (paddr >= TimerBase && paddr < TimerBase + 0x2000u)
+            {
+                WriteTimerWord(paddr, value);
+                return;
+            }
+            if (paddr >= IntcBase && paddr < IntcBase + 0x20u)
+            {
+                Intc.WriteRegister(paddr - IntcBase, value);
+                return;
+            }
+
             (byte[] region, uint offset, bool ro) = MapPhysicalWrite(paddr);
             if (!ro)
             {
@@ -162,6 +195,37 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             WriteDoubleWord(vaddr,     lo);
             WriteDoubleWord(vaddr + 8, hi);
+        }
+
+        // -----------------------------------------------------------------------
+        // Hardware I/O helpers (timers and INTC)
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Decode a physical address in the timer region (0x10000000–0x10001FFF)
+        /// into a timer index (0–3) and per-timer register offset.
+        /// Each timer occupies a 0x800-byte window.
+        /// </summary>
+        private static (int timerIndex, uint regOffset) DecodeTimerAddress(uint paddr)
+        {
+            uint offset = paddr - TimerBase;
+            int  index  = (int)(offset >> 11); // divide by 0x800
+            uint reg    = offset & 0x30u;       // bits [5:4] select register within timer window
+            return (index, reg);
+        }
+
+        private uint ReadTimerWord(uint paddr)
+        {
+            var (idx, reg) = DecodeTimerAddress(paddr);
+            if ((uint)idx >= (uint)Timers.Length) return 0u;
+            return Timers[idx].ReadRegister(reg);
+        }
+
+        private void WriteTimerWord(uint paddr, uint value)
+        {
+            var (idx, reg) = DecodeTimerAddress(paddr);
+            if ((uint)idx >= (uint)Timers.Length) return;
+            Timers[idx].WriteRegister(reg, value);
         }
 
         // -----------------------------------------------------------------------
