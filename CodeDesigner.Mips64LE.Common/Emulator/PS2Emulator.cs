@@ -53,6 +53,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// <summary>Raised when a SYSCALL instruction is executed.</summary>
         public event EventHandler<uint>? SyscallRaised;
 
+        /// <summary>
+        /// Raised when the INTC reports a pending interrupt (INTC_STAT &amp; INTC_MASK != 0).
+        /// The event argument is the INTC_STAT value at the time of detection.
+        /// A full emulator would route this into the MIPS interrupt exception handler;
+        /// here it is surfaced as an event so callers can respond as needed.
+        /// </summary>
+        public event EventHandler<uint>? InterruptPending;
+
         public PS2Emulator(PS2MemoryBus? bus = null)
         {
             Bus = bus ?? new PS2MemoryBus();
@@ -65,7 +73,26 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // handles KSEG0/KSEG1 virtual-to-physical translation.
             Cpu.Memory = Bus.Ram;
 
+            // Wire timer interrupt events to INTC
+            WireTimerInterrupts();
+
             Reset();
+        }
+
+        /// <summary>
+        /// Subscribe each timer's compare/overflow events to the INTC so that
+        /// timer interrupts automatically set the corresponding INTC_STAT bits.
+        /// </summary>
+        private void WireTimerInterrupts()
+        {
+            for (int i = 0; i < Bus.Timers.Length; i++)
+            {
+                int timerIndex = i; // capture for closure
+                Bus.Timers[i].CompareInterruptPending  += (_, _) =>
+                    Bus.Intc.RaiseInterrupt(Hardware.INTC.INT_TIMER0 + timerIndex);
+                Bus.Timers[i].OverflowInterruptPending += (_, _) =>
+                    Bus.Intc.RaiseInterrupt(Hardware.INTC.INT_TIMER0 + timerIndex);
+            }
         }
 
         /// <summary>
@@ -302,6 +329,28 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 }
             }
             return executed;
+        }
+
+        /// <summary>
+        /// Advance all hardware peripherals (timers, INTC) by
+        /// <paramref name="busCycles"/> EE bus-clock cycles (~75 MHz).
+        ///
+        /// Call this periodically between calls to <see cref="Step"/> or
+        /// <see cref="Run"/> to keep timer counts accurate.  A typical usage
+        /// pattern is to tick hardware once per instruction (passing 1–4 cycles)
+        /// or once per basic block.
+        ///
+        /// If any timer fires an interrupt whose corresponding INTC_MASK bit is
+        /// set, <see cref="InterruptPending"/> is raised with the current
+        /// INTC_STAT value.
+        /// </summary>
+        public void TickHardware(uint busCycles = 1)
+        {
+            foreach (var timer in Bus.Timers)
+                timer.Tick(busCycles);
+
+            if (Bus.Intc.IsInterruptPending)
+                InterruptPending?.Invoke(this, Bus.Intc.Stat);
         }
 
         /// <summary>
