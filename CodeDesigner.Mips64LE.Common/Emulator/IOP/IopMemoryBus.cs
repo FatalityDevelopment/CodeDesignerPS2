@@ -208,12 +208,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             //   IOP:0x00 → same SMCOM the EE writes
             //   IOP:0x10 → same MSCOM the IOP writes
             // Map to EE SIF register offsets (same layout, just swapped COM roles)
-            return SharedSif!.ReadRegister(relOffset);
+            return SharedSif?.ReadRegister(relOffset) ?? 0u;
         }
 
         private void WriteSifMirror(uint relOffset, uint value)
         {
-            SharedSif!.WriteRegister(relOffset, value);
+            SharedSif?.WriteRegister(relOffset, value);
         }
 
         // ── Region mapping ────────────────────────────────────────────────────

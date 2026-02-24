@@ -226,8 +226,8 @@ namespace CodeDesigner.Mips64LE.TestProject
         {
             var emu = new IopEmulator();
             // ADDIU $1, $0, 99 → $1 = 99
-            uint addiu = MakeAddiu(0, 1, 99);
-            emu.Bus.WriteWord(0u, addiu);
+            uint addiuWord = MakeAddiu(0, 1, 99);
+            emu.Bus.WriteWord(0u, addiuWord);
             emu.State.PC = 0u;
 
             emu.Step();
@@ -322,10 +322,10 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void IopEmulator_Syscall_DispatchesToCop0Vector()
         {
             var emu = new IopEmulator();
-            // SYSCALL instruction word (opcode=0, funct=0x0C)
-            const uint syscallWord = 0x0000000Cu;
+            // SYSCALL encoded instruction word (opcode=0, funct=0x0C)
+            const uint syscallInstructionWord = 0x0000000Cu;
 
-            emu.Bus.WriteWord(0u, syscallWord);
+            emu.Bus.WriteWord(0u, syscallInstructionWord);
             emu.State.PC = 0u;
             emu.State.SR = IopState.SR_BEV; // BEV=1 → vector 0xBFC00180
 
@@ -343,9 +343,9 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void IopEmulator_Syscall_WithBev0_UsesRamVector()
         {
             var emu = new IopEmulator();
-            const uint syscallWord = 0x0000000Cu;
+            const uint syscallInstructionWord = 0x0000000Cu;
 
-            emu.Bus.WriteWord(0u, syscallWord);
+            emu.Bus.WriteWord(0u, syscallInstructionWord);
             emu.State.PC = 0u;
             emu.State.SR = 0u; // BEV=0 → vector 0x80000080
 
