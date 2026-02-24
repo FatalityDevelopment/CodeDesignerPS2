@@ -68,6 +68,20 @@ cd CodeDesigner.Mips64LE && dotnet run -- --server
 - MMI sub-group dispatch keys: MMI0=funct `0x08`, MMI1=`0x28`, MMI2=`0x09`, MMI3=`0x29`.
 - `PAND` → MMI2(0x09, shamt=0x12), `POR`/`PNOR`/`PXOR` → MMI3(0x29, shamt=0x12/0x13/...).
 
+### Hardware Peripherals
+
+- **EETimer (T0–T3)**: memory-mapped at `0x10000000` / `0x10000800` / `0x10001000` / `0x10001800` (one per timer, 0x800-byte window each).
+  - `+0x00` = TN_COUNT (write resets to 0), `+0x10` = TN_MODE (EQUF/OVFF flags clear-on-read), `+0x20` = TN_COMP, `+0x30` = TN_HOLD (T0/T1 only).
+  - `EETimer.CompareInterruptPending` / `OverflowInterruptPending` events fire when the corresponding interrupt condition is met.
+- **INTC**: `0x1000F000` = INTC_STAT (write-1-to-clear), `0x1000F010` = INTC_MASK (write-1-to-toggle).
+  - Timer interrupt bits: 9 (T0), 10 (T1), 11 (T2), 12 (T3). `INTC.IsInterruptPending` is true when `STAT & MASK != 0`.
+
+### ELF Loader
+
+- `ElfLoader.Load(ReadOnlySpan<byte>, PS2MemoryBus)` loads ELF32 LE MIPS images and returns the entry-point virtual address.
+- `ElfLoader.LoadIntoEmulator(ReadOnlySpan<byte>, PS2Emulator)` additionally sets `emulator.Cpu.PC` to the entry point.
+- Validates: ELF magic, `EI_CLASS=1` (ELF32), `EI_DATA=1` (ELFDATA2LSB little-endian). Iterates PT_LOAD segments, copies `p_filesz` bytes to `p_vaddr`, zero-fills BSS (`p_memsz - p_filesz`).
+
 ### Testing
 
 - All tests live in `CodeDesigner.Mips64LE.TestProject/`.
