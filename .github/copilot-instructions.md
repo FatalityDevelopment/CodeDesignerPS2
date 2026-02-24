@@ -57,16 +57,28 @@ cd CodeDesigner.Mips64LE && dotnet run -- --server
 - `ExceptionCode` enum: Syscall=8, Breakpoint=9, Overflow=12, Trap=13.
 - EPC stored in COP0 reg 14, Status in reg 12, Cause in reg 13.
 
+### CPU State (`CpuState`)
+
+- **GPRs**: `RegsLo[32]` (lower 64 bits) + `RegsHi[32]` (upper 64 bits) for 128-bit registers. `$zero` (index 0) is always 0.
+- **HI/LO pipelines**: `HI`/`LO` (pipeline 0) and `HI1`/`LO1` (pipeline 1, PS2-specific). All sign-extended to 64 bits.
+- **SA register** (PS2-specific shift amount): `CpuState.SA`.
+- **FPU accumulator**: `CpuState.FACC` (used by `ADDA.S`, `MADD.S`, etc.).
+- **Coprocessors**: `CpuState.COP0` (system control), `CpuState.COP1` (FPU), `CpuState.VU0` (vector unit 0 / COP2 macro mode).
+
 ### Emulator / Execution
 
+- **Reset**: `PS2Emulator.Reset()` sets PC to `0xBFC00000` (KSEG1 mirror of BIOS ROM base).
 - `PS2Emulator.Step()` implements MIPS branch delay slots: a taken branch executes the delay-slot instruction at PC+4 before jumping.
 - Branch-likely-not-taken instructions (opcodes 0x14–0x17, REGIMM rt=2/3/0x12/0x13, COP1 bc-likely) **nullify** the delay slot when the branch is not taken.
+- **Events**: `UnknownInstruction` (unrecognised opcode), `SyscallRaised` (SYSCALL executed), `InterruptPending` (INTC_STAT & INTC_MASK ≠ 0).
 - `PS2MemoryBus` handles KSEG0/KSEG1 translation by stripping the top 3 bits of addresses in `0x80000000–0xBFFFFFFF`.
+- **Physical memory map**: Main RAM 32 MB (`0x00000000`), BIOS ROM 4 MB (`0x1FC00000`), Scratchpad 16 KB (`0x70000000`), I/O registers (`0x10000000–0x1000FFFF`), GS privileged regs (`0x12000000`).
 
 ### MMI Instruction Dispatch
 
 - MMI sub-group dispatch keys: MMI0=funct `0x08`, MMI1=`0x28`, MMI2=`0x09`, MMI3=`0x29`.
-- `PAND` → MMI2(0x09, shamt=0x12), `POR`/`PNOR`/`PXOR` → MMI3(0x29, shamt=0x12/0x13/...).
+- `PAND` → MMI2(funct=0x09, shamt=0x12), `PXOR` → MMI2(funct=0x09, shamt=0x13).
+- `POR` → MMI3(funct=0x29, shamt=0x12), `PNOR` → MMI3(funct=0x29, shamt=0x13).
 
 ### Hardware Peripherals
 
