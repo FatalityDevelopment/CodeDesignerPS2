@@ -1127,56 +1127,72 @@ namespace CodeDesigner.Mips64LE.TestProject
         // =====================================================================
         // VRNEXT / VRGET / VRINIT / VRXOR — LFSR Pseudo-Random Instructions
         // COP2 SPECIAL2 (opcode=0x12, rs=0x1E)
+        // Verified field mapping against PCSX2 VUops.cpp:
+        //   VRNEXT/VRGET: dest = _Ft_ = bits[20:16] = args.Rt
+        //   VRINIT/VRXOR: source = _Fs_ = bits[15:11] = args.Rd; component = bits[22:21] = args.Rs & 0x3
+        //   R register stored as 0x3F800000 | mantissa_23_bits (float in [1.0, 2.0))
         // =====================================================================
 
         [TestMethod]
         public void Test_VRNEXT()
         {
-            // vrnext vf3, R  =>  advance LFSR, write to vf3
-            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 3 << 11 | 0x1C);
+            // vrnext vf3, R  =>  advance LFSR, write R value to vf3 (dest in bits[20:16] = rt field)
+            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 3 << 16 | 0x1C);
             AssertDisasm(enc, "vrnext");
             var cpu = MakeVU0Cpu();
             uint before = cpu.VU0.RngState;
             Exec(cpu, enc);
+            // R should have advanced
             Assert.AreNotEqual(before, cpu.VU0.RngState, "VRNEXT: RngState should advance");
+            // vf3 should contain the new R value reinterpreted as float
+            float expected = BitConverter.UInt32BitsToSingle(cpu.VU0.RngState);
+            Assert.AreEqual(expected, cpu.VU0.ReadVF(3).X, "VRNEXT: vf3.x = R float value");
         }
 
         [TestMethod]
         public void Test_VRGET()
         {
-            // vrget vf3, R  =>  read current LFSR into vf3 (no advance)
-            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 3 << 11 | 0x1D);
+            // vrget vf3, R  =>  read current R into vf3 (no advance), dest in bits[20:16] = rt field
+            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 3 << 16 | 0x1D);
             AssertDisasm(enc, "vrget");
             var cpu = MakeVU0Cpu();
             uint before = cpu.VU0.RngState;
             Exec(cpu, enc);
             Assert.AreEqual(before, cpu.VU0.RngState, "VRGET: RngState should NOT change");
+            float expected = BitConverter.UInt32BitsToSingle(before);
+            Assert.AreEqual(expected, cpu.VU0.ReadVF(3).X, "VRGET: vf3.x = R float value");
         }
 
         [TestMethod]
         public void Test_VRINIT()
         {
-            // vrinit R, vf1  =>  initialize LFSR from vf1.w bits
-            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 1 << 16 | 0x1E);
+            // vrinit R, vf1.z  =>  R = 0x3F800000 | (vf1.z_bits & 0x7FFFFF)
+            // source register = bits[15:11] = rd field; component = bits[22:21] = rs[1:0] = 0x1E & 0x3 = 2 = Z
+            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 1 << 11 | 0x1E);
             AssertDisasm(enc, "vrinit");
             var cpu = MakeVU0Cpu();
-            // vf1.w = 4.0f; its bit pattern & 0x7FFFFF
-            uint expected = BitConverter.SingleToUInt32Bits(4f) & 0x7FFFFFu;
+            // vf1 = (1, 2, 3, 4), so vf1.z = 3.0f; its bits & 0x7FFFFF
+            uint zBits = BitConverter.SingleToUInt32Bits(3f) & 0x7FFFFFu;
+            uint expected = 0x3F800000u | zBits;
             Exec(cpu, enc);
-            Assert.AreEqual(expected, cpu.VU0.RngState, "VRINIT: RngState set from vf1.w bits");
+            Assert.AreEqual(expected, cpu.VU0.RngState, $"VRINIT: RngState = 0x{expected:X8}");
         }
 
         [TestMethod]
         public void Test_VRXOR()
         {
-            // vrxor R, vf2  =>  R ^= vf2.w bits
-            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 2 << 16 | 0x1F);
+            // vrxor R, vf2.z  =>  R = 0x3F800000 | ((R ^ vf2.z_bits) & 0x7FFFFF)
+            // source register = bits[15:11] = rd field; component = bits[22:21] = 0x1E & 0x3 = 2 = Z
+            uint enc = (uint)(0x12 << 26 | 0x1E << 21 | 2 << 11 | 0x1F);
             AssertDisasm(enc, "vrxor");
             var cpu = MakeVU0Cpu();
-            cpu.VU0.RngState = 0x123456;
-            uint wbits = BitConverter.SingleToUInt32Bits(cpu.VU0.ReadVF(2).W) & 0x7FFFFFu;
+            // Set a known R value in proper format
+            cpu.VU0.RngState = 0x3F800000u;
+            // vf2 = (10, 20, 30, 40), vf2.z = 30.0f — use full float bits (matching PCSX2 and our impl)
+            uint zBitsRaw = BitConverter.SingleToUInt32Bits(30f);
+            uint expected = 0x3F800000u | ((cpu.VU0.RngState ^ zBitsRaw) & 0x7FFFFFu);
             Exec(cpu, enc);
-            Assert.AreEqual(0x123456u ^ wbits, cpu.VU0.RngState, "VRXOR: RngState XORed");
+            Assert.AreEqual(expected, cpu.VU0.RngState, $"VRXOR: RngState = 0x{expected:X8}");
         }
     }
 }
