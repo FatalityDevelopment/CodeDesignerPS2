@@ -48,6 +48,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <summary>Raised when a DMA transfer completes on this channel.</summary>
         public event EventHandler? TransferComplete;
 
+        /// <summary>
+        /// Optional callback invoked once per word during a device→RAM burst transfer.
+        /// When <c>null</c>, the channel zero-fills the destination region (default
+        /// behaviour when no device FIFO is wired to the channel).
+        /// Set by <see cref="IopMemoryBus"/> to feed CDVD sector data into channel 3.
+        /// </summary>
+        public Func<uint>? DeviceDataProvider { get; set; }
+
         public IopDmacChannel(int id) => ChannelId = id;
 
         // ── Register access ───────────────────────────────────────────────────
@@ -133,10 +141,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             if (DirectionToMemory)
             {
-                // Device→RAM: zero-fill (no real FIFO data in this emulator).
+                // Device→RAM: pull data from the device's FIFO via the callback,
+                // or zero-fill if no device is wired to this channel.
                 for (uint w = 0; w < wordCount; w++)
                 {
-                    bus.WriteWord(addr, 0u);
+                    uint data = DeviceDataProvider?.Invoke() ?? 0u;
+                    bus.WriteWord(addr, data);
                     addr += 4u;
                 }
             }

@@ -1051,5 +1051,418 @@ namespace CodeDesigner.Mips64LE.TestProject
         /// <summary>OR rd, rs, rt  (opcode=0, funct=0x25)</summary>
         private static uint MakeOr(int rs, int rt, int rd)
             => ((uint)rs << 21) | ((uint)rt << 16) | ((uint)rd << 11) | 0x25u;
+
+        // =====================================================================
+        // Cdvd unit tests
+        // =====================================================================
+
+        [TestMethod]
+        public void Cdvd_NoDisc_HasDiscFalse_AndDiscTypeNoDisc()
+        {
+            var cdvd = new Cdvd();
+            Assert.IsFalse(cdvd.HasDisc,               "HasDisc must be false when no image loaded");
+            Assert.AreEqual(Cdvd.DISC_NO_DISC, cdvd.DiscType, "DiscType must be DISC_NO_DISC when empty");
+        }
+
+        [TestMethod]
+        public void Cdvd_LoadImage_SetsHasDiscAndDiscType()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("TEST.TXT", "hello"));
+            Assert.IsTrue(cdvd.HasDisc,                  "HasDisc must be true after LoadImage");
+            Assert.AreEqual(Cdvd.DISC_PS2_DVD, cdvd.DiscType, "DiscType must be DISC_PS2_DVD after load");
+        }
+
+        [TestMethod]
+        public void Cdvd_LoadImage_NullImage_ClearsDisc()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("X", "data"));
+            cdvd.LoadImage(null);
+            Assert.IsFalse(cdvd.HasDisc, "HasDisc must be false after loading null image");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadRegister_CrtReturns_DiscType()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+            // CRT register is at offset 0x0B
+            Assert.AreEqual(Cdvd.DISC_PS2_DVD, cdvd.ReadRegister(0x0Bu),
+                "CRT register must return DISC_PS2_DVD when image is loaded");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadRegister_NreadyReturnsZero_WhenIdle()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+            Assert.AreEqual(0, cdvd.ReadRegister(0x05u),
+                "NREADY must return 0 (ready) when no command is pending");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadRegister_IstatHasDataReadyBit_AfterNCommand()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+
+            // Issue a ReadCd command for sector 0
+            cdvd.WriteRegister(0x00u, 0); // LBA byte 0
+            cdvd.WriteRegister(0x00u, 0); // LBA byte 1
+            cdvd.WriteRegister(0x00u, 0); // LBA byte 2
+            cdvd.WriteRegister(0x00u, 0); // LBA byte 3
+            cdvd.WriteRegister(0x00u, 1); // count = 1
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            byte istat = cdvd.ReadRegister(0x08u);
+            Assert.AreNotEqual(0, istat & 0x04, "INTR_STAT bit 2 (data ready) must be set after N-command");
+        }
+
+        [TestMethod]
+        public void Cdvd_WriteRegister_IstatW1C_ClearsFlag()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+
+            // Trigger an N-command to set INTR_STAT
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1);
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            // Clear the data-ready bit
+            cdvd.WriteRegister(0x08u, 0x04);
+            Assert.AreEqual(0, cdvd.ReadRegister(0x08u) & 0x04,
+                "INTR_STAT bit 2 must be cleared by W1C write");
+        }
+
+        [TestMethod]
+        public void Cdvd_DataReady_EventFires_AfterNCommand()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+
+            bool fired = false;
+            cdvd.DataReady += (_, _) => fired = true;
+
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1);
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            Assert.IsTrue(fired, "DataReady event must fire when N-command completes");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadNextDmaWord_ReturnsZero_WhenNoCommandIssued()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+            Assert.AreEqual(0u, cdvd.ReadNextDmaWord(),
+                "ReadNextDmaWord must return 0 when no sector has been read");
+        }
+
+        [TestMethod]
+        public void Cdvd_NCommand_ReadCd_FillsBuffer_WithIsoSectorData()
+        {
+            const int FileLba = 18;
+            var cdvd = new Cdvd();
+            // Put known data at sector 18
+            byte[] iso = BuildMinimalIso("DATA.BIN", "\x01\x02\x03\x04\x05\x06\x07\x08");
+            cdvd.LoadImage(iso);
+
+            // Issue ReadCd for sector 18, 1 sector
+            cdvd.WriteRegister(0x00u, (byte)(FileLba & 0xFF));
+            cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1); // count
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            // First word = bytes 0x01 0x02 0x03 0x04 in little-endian = 0x04030201
+            uint word0 = cdvd.ReadNextDmaWord();
+            Assert.AreEqual(0x04030201u, word0,
+                "First DMA word must match first 4 bytes of sector 18 content");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadNextDmaWord_ReturnsZero_AfterBufferExhausted()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+
+            // Read 1 sector = 2048 bytes = 512 words
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1);
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            for (int i = 0; i < 512; i++) cdvd.ReadNextDmaWord();
+
+            Assert.AreEqual(0u, cdvd.ReadNextDmaWord(),
+                "ReadNextDmaWord must return 0 once sector buffer is exhausted");
+        }
+
+        [TestMethod]
+        public void Cdvd_FindFile_ReturnsNull_WhenNoDisc()
+        {
+            var cdvd = new Cdvd();
+            Assert.IsNull(cdvd.FindFile("SYSTEM.CNF"), "FindFile must return null when no disc");
+        }
+
+        [TestMethod]
+        public void Cdvd_FindFile_LocatesRootFile_CaseInsensitive()
+        {
+            const string content = "BOOT2 = cdrom0:\\SLPM_550.01;1";
+            byte[] iso = BuildMinimalIso("SYSTEM.CNF", content);
+
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(iso);
+
+            Cdvd.IsoEntry? entry = cdvd.FindFile("system.cnf");
+            Assert.IsNotNull(entry, "FindFile must locate SYSTEM.CNF case-insensitively");
+            Assert.AreEqual((uint)content.Length, entry!.Value.Size,
+                "IsoEntry.Size must match the file content length");
+        }
+
+        [TestMethod]
+        public void Cdvd_FindFile_ReturnsNull_ForMissingFile()
+        {
+            byte[] iso = BuildMinimalIso("SYSTEM.CNF", "data");
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(iso);
+            Assert.IsNull(cdvd.FindFile("NONEXISTENT.TXT"),
+                "FindFile must return null for a file that does not exist");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadFile_ReturnsFileBytes()
+        {
+            const string content = "PS2 game executable content";
+            byte[] iso = BuildMinimalIso("SYSTEM.CNF", content);
+
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(iso);
+
+            Cdvd.IsoEntry? entry = cdvd.FindFile("SYSTEM.CNF");
+            Assert.IsNotNull(entry, "File must be found");
+
+            byte[] data = cdvd.ReadFile(entry!.Value);
+            string text = System.Text.Encoding.ASCII.GetString(data);
+            Assert.AreEqual(content, text, "ReadFile must return the exact file bytes");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadSectors_CopiesDataIntoBuffer()
+        {
+            byte[] iso = BuildMinimalIso("X", "Y");
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(iso);
+
+            // Sector 16 is the PVD; byte 0 should be 1 (PVD type)
+            byte[] buf = new byte[Cdvd.SectorSize];
+            cdvd.ReadSectors(16, 1, buf);
+            Assert.AreEqual(1, buf[0],    "PVD type byte must be 1");
+            Assert.AreEqual('C', (char)buf[1], "PVD identifier byte 1 must be 'C'");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_CdvdProperty_SetAndGet()
+        {
+            var bus  = new IopMemoryBus();
+            var cdvd = new Cdvd();
+            bus.Cdvd = cdvd;
+            Assert.AreSame(cdvd, bus.Cdvd, "Cdvd property must return the assigned instance");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_CdvdRegister_ReadByte_ReturnsDiscType()
+        {
+            var bus  = new IopMemoryBus();
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("X", "Y"));
+            bus.Cdvd = cdvd;
+
+            // CRT register at 0x1F40200B (offset 0x0B from RegBase 0x1F402000)
+            byte crt = bus.ReadByte(0x1F40200Bu);
+            Assert.AreEqual(Cdvd.DISC_PS2_DVD, crt, "ReadByte of CRT register must return DISC_PS2_DVD");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_CdvdRegister_WriteByte_NCommand_TriggersDataReady()
+        {
+            var bus  = new IopMemoryBus();
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("X", "Y"));
+            bus.Cdvd = cdvd;
+
+            bool fired = false;
+            cdvd.DataReady += (_, _) => fired = true;
+
+            // Write 5 param bytes to REG_DATA (0x1F402000), then NCMD (0x1F402004)
+            for (int i = 0; i < 5; i++)
+                bus.WriteByte(0x1F402000u, 0);
+            bus.WriteByte(0x1F402004u, Cdvd.NCMD_READ_CD);
+
+            Assert.IsTrue(fired, "DataReady must fire when NCMD written via IopMemoryBus.WriteByte");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_CdvdDataReady_RaisesIntcBit2()
+        {
+            var bus  = new IopMemoryBus();
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("X", "Y"));
+            bus.Cdvd = cdvd;
+
+            // Issue a minimal N-command
+            for (int i = 0; i < 5; i++) bus.WriteByte(0x1F402000u, 0);
+            bus.WriteByte(0x1F402004u, Cdvd.NCMD_READ_CD);
+
+            Assert.AreNotEqual(0u, bus.IStat & (1u << 2),
+                "IOP INTC bit 2 must be set when CDVD DataReady fires");
+        }
+
+        [TestMethod]
+        public void IopDmac_Channel3_CdvdDeviceToRam_WritesBufferedSectorData()
+        {
+            const int FileLba = 18;
+            // File content: 8 known bytes followed by zeros
+            byte[] iso = BuildMinimalIso("DATA.BIN", "\x11\x22\x33\x44\x55\x66\x77\x88");
+
+            var bus  = new IopMemoryBus();
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(iso);
+            bus.Cdvd = cdvd;
+
+            // Fill CDVD sector buffer via N-command
+            cdvd.WriteRegister(0x00u, (byte)(FileLba & 0xFF));
+            cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1); // 1 sector
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            // Configure DMAC channel 3 (CDVD): device→RAM, 2 words, dest = 0x1000
+            uint destAddr = 0x1000u;
+            bus.Dmac.Channels[3].WriteRegister(IopDmacChannel.REG_MADR, destAddr);
+            bus.Dmac.Channels[3].WriteRegister(IopDmacChannel.REG_BCR,  2u);
+            // DIR=1 (device→RAM), STR=1
+            bus.Dmac.Channels[3].WriteRegister(IopDmacChannel.REG_CHCR, (1u << 24) | 1u);
+            bus.Dmac.ExecuteChannel(3, bus);
+
+            // Verify the first 8 bytes were DMA'd to RAM
+            uint word0 = bus.ReadWord(destAddr);
+            uint word1 = bus.ReadWord(destAddr + 4u);
+            Assert.AreEqual(0x44332211u, word0, "First DMA word must be bytes 0x11 0x22 0x33 0x44 LE");
+            Assert.AreEqual(0x88776655u, word1, "Second DMA word must be bytes 0x55 0x66 0x77 0x88 LE");
+        }
+
+        [TestMethod]
+        public void IopDmac_Channel3_DeviceToRam_ZeroFills_WhenNoCdvd()
+        {
+            var bus = new IopMemoryBus();
+            // No CDVD attached; pre-fill RAM to detect overwrite
+            for (int i = 0; i < 8; i++) bus.Ram[0x3000 + i] = 0xFF;
+
+            bus.Dmac.Channels[3].WriteRegister(IopDmacChannel.REG_MADR, 0x3000u);
+            bus.Dmac.Channels[3].WriteRegister(IopDmacChannel.REG_BCR,  2u);
+            bus.Dmac.Channels[3].WriteRegister(IopDmacChannel.REG_CHCR, (1u << 24) | 1u);
+            bus.Dmac.ExecuteChannel(3, bus);
+
+            for (int i = 0; i < 8; i++)
+                Assert.AreEqual(0, bus.Ram[0x3000 + i],
+                    $"RAM byte {i} must be zero-filled when no CDVD is attached");
+        }
+
+        // ── Minimal ISO-9660 builder helper ──────────────────────────────────
+
+        /// <summary>
+        /// Build a minimal valid ISO-9660 image with one file in the root directory.
+        /// Layout: sectors 0–15 = system area (zeros); sector 16 = PVD;
+        /// sector 17 = root directory; sector 18 = file data.
+        /// </summary>
+        private static byte[] BuildMinimalIso(string fileName, string fileContent)
+        {
+            const int SectorSize = 2048;
+            const int RootDirLba = 17;
+            const int FileLba    = 18;
+
+            byte[] iso = new byte[SectorSize * 19]; // sectors 0–18
+
+            // ── Sector 16: Primary Volume Descriptor ──────────────────────────
+            int pvd = 16 * SectorSize;
+            iso[pvd + 0] = 1;       // PVD type
+            iso[pvd + 1] = (byte)'C';
+            iso[pvd + 2] = (byte)'D';
+            iso[pvd + 3] = (byte)'0';
+            iso[pvd + 4] = (byte)'0';
+            iso[pvd + 5] = (byte)'1';
+            iso[pvd + 6] = 1;       // descriptor version
+
+            // Root Directory Record at PVD offset 156
+            int rr = pvd + 156;
+            iso[rr + 0] = 34;       // record length
+            // LBA LE
+            iso[rr + 2] = (byte)(RootDirLba & 0xFF);
+            // Size LE (one sector = 2048 bytes = 0x800)
+            iso[rr + 10] = 0x00;
+            iso[rr + 11] = 0x08;
+            // File flags: directory
+            iso[rr + 25] = 2;
+            // Name length = 1, name = 0x00 (".")
+            iso[rr + 32] = 1;
+            iso[rr + 33] = 0;
+
+            // ── Sector 17: Root directory ─────────────────────────────────────
+            int dir = RootDirLba * SectorSize;
+            int pos = dir;
+
+            // "." entry
+            iso[pos + 0]  = 34;
+            iso[pos + 2]  = (byte)(RootDirLba & 0xFF);
+            iso[pos + 10] = 0x00; iso[pos + 11] = 0x08;
+            iso[pos + 25] = 2;
+            iso[pos + 32] = 1;
+            iso[pos + 33] = 0x00; // "."
+            pos += 34;
+
+            // ".." entry
+            iso[pos + 0]  = 34;
+            iso[pos + 2]  = (byte)(RootDirLba & 0xFF);
+            iso[pos + 10] = 0x00; iso[pos + 11] = 0x08;
+            iso[pos + 25] = 2;
+            iso[pos + 32] = 1;
+            iso[pos + 33] = 0x01; // ".."
+            pos += 34;
+
+            // File entry
+            string nameWithVer = fileName.ToUpperInvariant() + ";1";
+            int    nameLen     = nameWithVer.Length;
+            int    recLen      = 33 + nameLen;
+            if ((recLen & 1) != 0) recLen++; // pad to even length
+
+            byte[] fileBytes = System.Text.Encoding.Latin1.GetBytes(fileContent);
+            uint   fileSize  = (uint)fileBytes.Length;
+
+            iso[pos + 0]  = (byte)recLen;
+            iso[pos + 2]  = (byte)(FileLba & 0xFF);
+            // Size LE
+            iso[pos + 10] = (byte)(fileSize & 0xFF);
+            iso[pos + 11] = (byte)((fileSize >> 8) & 0xFF);
+            iso[pos + 12] = (byte)((fileSize >> 16) & 0xFF);
+            iso[pos + 13] = (byte)((fileSize >> 24) & 0xFF);
+            iso[pos + 25] = 0; // not a directory
+            iso[pos + 32] = (byte)nameLen;
+            for (int i = 0; i < nameLen; i++)
+                iso[pos + 33 + i] = (byte)nameWithVer[i];
+
+            // ── Sector 18: File data ──────────────────────────────────────────
+            int fileBase = FileLba * SectorSize;
+            Array.Copy(fileBytes, 0, iso, fileBase, fileBytes.Length);
+
+            return iso;
+        }
     }
 }

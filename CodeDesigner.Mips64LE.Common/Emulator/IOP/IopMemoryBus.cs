@@ -78,10 +78,44 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// </summary>
         public SIF? SharedSif { get; set; }
 
+        private Cdvd? _cdvd;
+
+        /// <summary>
+        /// Optional CDVD controller.  When set:
+        /// <list type="bullet">
+        ///   <item>Byte-level reads/writes to 0x1F402000–0x1F40201F are forwarded
+        ///     to the CDVD register file.</item>
+        ///   <item>The CDVD's <see cref="Cdvd.DataReady"/> event asserts IOP INTC
+        ///     bit 2 (CDVD interrupt).</item>
+        /// </list>
+        /// </summary>
+        public Cdvd? Cdvd
+        {
+            get => _cdvd;
+            set
+            {
+                if (_cdvd != null)
+                    _cdvd.DataReady -= HandleCdvdDataReady;
+                _cdvd = value;
+                if (_cdvd != null)
+                    _cdvd.DataReady += HandleCdvdDataReady;
+            }
+        }
+
+        private const int CdvdIntcBit = 2;
+
+        private void HandleCdvdDataReady(object? sender, EventArgs e)
+            => RaiseInterrupt(CdvdIntcBit);
+
         public IopMemoryBus()
         {
             for (int i = 0; i < 6; i++)
                 _timers[i] = new IopTimer(i);
+
+            // Wire CDVD sector-buffer data to DMAC channel 3 (CDVD channel)
+            // for device→RAM transfers.  The lambda reads _cdvd lazily so the
+            // Cdvd property may be set any time before the transfer runs.
+            Dmac.Channels[3].DeviceDataProvider = () => _cdvd?.ReadNextDmaWord() ?? 0u;
         }
 
         // ── IOP INTC accessors ────────────────────────────────────────────────
@@ -129,6 +163,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             // SIF mirror
             if (SharedSif != null && addr >= SifMirrorBase && addr < SifMirrorBase + 0x70u)
                 return ReadSifMirror(addr - SifMirrorBase);
+
+            // CDVD registers (byte-granular; assemble 4 bytes for a word read)
+            if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
+            {
+                uint off = addr - Cdvd.RegBase;
+                return (uint)(_cdvd.ReadRegister(off)
+                            | (_cdvd.ReadRegister(off + 1) << 8)
+                            | (_cdvd.ReadRegister(off + 2) << 16)
+                            | (_cdvd.ReadRegister(off + 3) << 24));
+            }
 
             var (region, offset) = Map(addr);
             return ReadWordFromRegion(region, offset);
@@ -178,6 +222,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 return;
             }
 
+            // CDVD registers (byte-granular; dispatch each of the 4 bytes)
+            if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
+            {
+                uint off = addr - Cdvd.RegBase;
+                _cdvd.WriteRegister(off,     (byte)value);
+                _cdvd.WriteRegister(off + 1, (byte)(value >> 8));
+                _cdvd.WriteRegister(off + 2, (byte)(value >> 16));
+                _cdvd.WriteRegister(off + 3, (byte)(value >> 24));
+                return;
+            }
+
             var (region, offset, ro) = MapWrite(addr);
             if (!ro) WriteWordToRegion(region, offset, value);
         }
@@ -186,12 +241,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         public byte ReadByte(uint addr)
         {
+            if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
+                return _cdvd.ReadRegister(addr - Cdvd.RegBase);
+
             var (region, offset) = Map(addr);
             return region[offset];
         }
 
         public void WriteByte(uint addr, byte value)
         {
+            if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
+            {
+                _cdvd.WriteRegister(addr - Cdvd.RegBase, value);
+                return;
+            }
+
             var (region, offset, ro) = MapWrite(addr);
             if (!ro) region[offset] = value;
         }
