@@ -73,8 +73,8 @@ The Emotion Engine’s defining feature is its **two programmable vector coproce
 ## Floating Point & Coprocessors
 
 ### COP1 – Floating Point Unit (FPU)
-- IEEE-754 compliant
-- Supports single and double precision
+- **Single-precision only** (PS2 EE does not have double-precision FPU)
+- **Denormals flushed to zero** (not IEEE 754 compliant for denormal inputs/outputs)
 - Mostly used for:
   - Game logic
   - Non-vectorized math

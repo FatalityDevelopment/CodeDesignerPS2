@@ -1195,4 +1195,179 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(expected, cpu.VU0.RngState, $"VRXOR: RngState = 0x{expected:X8}");
         }
     }
+
+    // =====================================================================
+    // Bug fix verification tests
+    // =====================================================================
+
+    [TestClass]
+    public class TestBugFixes
+    {
+        private static CpuState MakeCpu()
+        {
+            var cpu = new CpuState();
+            cpu.PC = 0x80000000;
+            return cpu;
+        }
+
+        private static void Exec(CpuState cpu, uint encoded)
+        {
+            var (obj, args) = MipsDisassembler.GetInstructionObject(encoded);
+            Assert.IsNotNull(obj,  $"No instruction for 0x{encoded:X8}");
+            Assert.IsNotNull(args, $"No args for 0x{encoded:X8}");
+            obj!.ExecuteGeneric(cpu, args!);
+        }
+
+        // BUG 2: MULT — EE sign-extends 32-bit halves to 64-bit LO/HI
+        [TestMethod]
+        public void Test_MULT_NegativeSignExtend()
+        {
+            // mult $t0, $t1 with negative result: (-5) * 3 = -15
+            // opcode=0, rs=8, rt=9, funct=0x18
+            uint enc = (uint)(8 << 21 | 9 << 16 | 0x18);
+            var cpu = MakeCpu();
+            cpu.RegsLo[8] = unchecked((ulong)(long)-5); // -5
+            cpu.RegsLo[9] = 3;
+            Exec(cpu, enc);
+            // -15 = 0xFFFFFFF1, sign-extended to 64-bit = 0xFFFFFFFFFFFFFFF1
+            Assert.AreEqual(0xFFFFFFFFFFFFFFF1UL, cpu.LO, "MULT negative: LO should be sign-extended -15");
+            Assert.AreEqual(0xFFFFFFFFFFFFFFFFUL, cpu.HI, "MULT negative: HI should be sign-extended -1 (upper half of -15 * 1)");
+        }
+
+        // BUG 2: MULTU — EE sign-extends 32-bit halves to 64-bit LO/HI
+        [TestMethod]
+        public void Test_MULTU_LargeSignExtend()
+        {
+            // multu with large result where lower half has bit 31 set
+            // 0x80000001 * 1 = 0x80000001 (bit 31 set → sign-extend to 0xFFFFFFFF80000001)
+            uint enc = (uint)(8 << 21 | 9 << 16 | 0x19);
+            var cpu = MakeCpu();
+            cpu.RegsLo[8] = 0x80000001; // large unsigned
+            cpu.RegsLo[9] = 1;
+            Exec(cpu, enc);
+            Assert.AreEqual(0xFFFFFFFF80000001UL, cpu.LO, "MULTU: LO sign-extended from 32 bits");
+            Assert.AreEqual(0UL, cpu.HI, "MULTU: HI should be 0");
+        }
+
+        // BUG 3: DIV — EE sign-extends quotient/remainder to 64-bit
+        [TestMethod]
+        public void Test_DIV_NegativeSignExtend()
+        {
+            // div: -7 / 2 = quotient=-3, remainder=-1
+            uint enc = (uint)(8 << 21 | 9 << 16 | 0x1A);
+            var cpu = MakeCpu();
+            cpu.RegsLo[8] = unchecked((ulong)(long)-7); // -7
+            cpu.RegsLo[9] = 2;
+            Exec(cpu, enc);
+            Assert.AreEqual(0xFFFFFFFFFFFFFFFDUL, cpu.LO, "DIV: quotient -3 sign-extended");
+            Assert.AreEqual(0xFFFFFFFFFFFFFFFFUL, cpu.HI, "DIV: remainder -1 sign-extended");
+        }
+
+        // BUG 9: BC1F — PC should advance when branch not taken
+        [TestMethod]
+        public void Test_BC1F_NotTaken()
+        {
+            // bc1f offset=4 — CC=true so branch not taken, PC should advance by 4
+            uint enc = (uint)(0x11 << 26 | 0x08 << 21 | 0x00 << 16 | 4);
+            var cpu = MakeCpu();
+            cpu.COP1.SetConditionCode(true); // branch not taken (BC1F branches when false)
+            cpu.PC = 0x80000000;
+            Exec(cpu, enc);
+            Assert.AreEqual(0x80000004UL, cpu.PC, "BC1F not taken: PC should advance by 4");
+        }
+
+        // BUG 9: BC1T — PC should advance when branch not taken
+        [TestMethod]
+        public void Test_BC1T_NotTaken()
+        {
+            uint enc = (uint)(0x11 << 26 | 0x08 << 21 | 0x01 << 16 | 4);
+            var cpu = MakeCpu();
+            cpu.COP1.SetConditionCode(false); // branch not taken (BC1T branches when true)
+            cpu.PC = 0x80000000;
+            Exec(cpu, enc);
+            Assert.AreEqual(0x80000004UL, cpu.PC, "BC1T not taken: PC should advance by 4");
+        }
+
+        // BUG 10: ERET — should use ErrorEPC when ERL is set
+        [TestMethod]
+        public void Test_ERET_ERL()
+        {
+            uint enc = (uint)(0x10 << 26 | 0x10 << 21 | 0x18);
+            var cpu = MakeCpu();
+            // Set ERL bit (bit 2) in Status register
+            uint status = cpu.COP0.ReadRegister32(12);
+            cpu.COP0.WriteRegister32(12, status | (1u << 2));
+            // Set ErrorEPC (reg 30) to known address
+            cpu.COP0.WriteRegister64(30, 0x80001234);
+            Exec(cpu, enc);
+            Assert.AreEqual(0x80001234UL, cpu.PC, "ERET with ERL: should restore from ErrorEPC");
+            // ERL bit should be cleared
+            Assert.AreEqual(0u, cpu.COP0.ReadRegister32(12) & (1u << 2), "ERET with ERL: ERL bit should be cleared");
+        }
+
+        // BUG 11: MFHI — RegsHi sign-extended from HI bit 63
+        [TestMethod]
+        public void Test_MFHI_SignExtend()
+        {
+            uint enc = (uint)(8 << 11 | 0x10); // mfhi $t0
+            var cpu = MakeCpu();
+            cpu.HI = 0x8000000000000000UL; // bit 63 set → negative
+            Exec(cpu, enc);
+            Assert.AreEqual(0xFFFFFFFFFFFFFFFFUL, cpu.RegsHi[8], "MFHI: RegsHi should be sign-extended -1");
+        }
+
+        // BUG 11: MFLO — RegsHi sign-extended from LO bit 63
+        [TestMethod]
+        public void Test_MFLO_SignExtend()
+        {
+            uint enc = (uint)(8 << 11 | 0x12); // mflo $t0
+            var cpu = MakeCpu();
+            cpu.LO = 0xFFFFFFFFFFFFFFFFUL;
+            Exec(cpu, enc);
+            Assert.AreEqual(0xFFFFFFFFFFFFFFFFUL, cpu.RegsHi[8], "MFLO: RegsHi should be sign-extended -1");
+        }
+
+        // BUG 12: DMULT — should handle long.MinValue without overflow
+        [TestMethod]
+        public void Test_DMULT_LongMinValue()
+        {
+            uint enc = (uint)(8 << 21 | 9 << 16 | 0x1C); // dmult $t0, $t1
+            var cpu = MakeCpu();
+            cpu.RegsLo[8] = unchecked((ulong)long.MinValue); // -2^63
+            cpu.RegsLo[9] = 1;
+            // Should not throw; -2^63 * 1 = -2^63 → LO = 0x8000000000000000, HI = 0xFFFFFFFFFFFFFFFF
+            Exec(cpu, enc);
+            Assert.AreEqual(unchecked((ulong)long.MinValue), cpu.LO, "DMULT: LO = long.MinValue");
+            Assert.AreEqual(0xFFFFFFFFFFFFFFFFUL, cpu.HI, "DMULT: HI = -1 sign bits");
+        }
+
+        // BUG 14: DSRA — RegsHi sign-extended for negative result
+        [TestMethod]
+        public void Test_DSRA_NegativeSignExtend()
+        {
+            // dsra $t0, $t1, 1 — shift -4 right by 1 = -2
+            uint enc = (uint)(9 << 16 | 8 << 11 | 1 << 6 | 0x3B);
+            var cpu = MakeCpu();
+            cpu.RegsLo[9] = unchecked((ulong)(long)-4); // -4
+            Exec(cpu, enc);
+            Assert.AreEqual(unchecked((ulong)(long)-2), cpu.RegsLo[8], "DSRA: -4>>1 = -2");
+            Assert.AreEqual(0xFFFFFFFFFFFFFFFFUL, cpu.RegsHi[8], "DSRA: RegsHi sign-extended for negative");
+        }
+
+        // FPU: Test proper register field mapping (fd=shamt, fs=rd, ft=rt)
+        [TestMethod]
+        public void Test_FPU_RegisterFieldMapping()
+        {
+            // add.s $f5, $f3, $f4 => fd=5(shamt), fs=3(rd), ft=4(rt)
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (4 << 16) | (3 << 11) | (5 << 6) | 0x00);
+            var cpu = MakeCpu();
+            cpu.FPR[3] = 10.0f; // fs
+            cpu.FPR[4] = 5.0f;  // ft
+            Exec(cpu, enc);
+            Assert.AreEqual(15.0f, cpu.FPR[5], 0.001f, "ADD.S: fd=f5 should get fs+ft=15");
+            // Source registers should be unchanged
+            Assert.AreEqual(10.0f, cpu.FPR[3], 0.001f, "ADD.S: fs=f3 should be unchanged");
+            Assert.AreEqual(5.0f, cpu.FPR[4], 0.001f, "ADD.S: ft=f4 should be unchanged");
+        }
+    }
 }
