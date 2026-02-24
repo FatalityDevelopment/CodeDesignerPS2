@@ -1,0 +1,114 @@
+using CodeDesigner.Mips64LE.Common.CPU;
+
+namespace CodeDesigner.Mips64LE.Common.CPU.COP0
+{
+    /// <summary>
+    /// Exception codes for the COP0 Cause register ExcCode field (bits 6:2).
+    /// Matches the MIPS R5900 / PS2 EE specification.
+    /// </summary>
+    public enum ExceptionCode : uint
+    {
+        Interrupt        = 0,   // External interrupt
+        TlbModification  = 1,   // TLB modification
+        TlbLoad          = 2,   // TLB load / instruction fetch miss
+        TlbStore         = 3,   // TLB store miss
+        AddressLoad      = 4,   // Address error on load or instruction fetch
+        AddressStore     = 5,   // Address error on store
+        InstructionBus   = 6,   // Instruction bus error
+        DataBus          = 7,   // Data bus error
+        Syscall          = 8,   // SYSCALL instruction
+        Breakpoint       = 9,   // BREAK instruction
+        ReservedInstr    = 10,  // Reserved / unrecognised instruction
+        CopUnusable      = 11,  // Coprocessor unusable
+        Overflow         = 12,  // Arithmetic overflow (ADD/ADDI/DADD/DADDI)
+        Trap             = 13,  // TGE/TLT/TEQ/TNE and immediate variants
+    }
+
+    /// <summary>
+    /// COP0 exception dispatcher for the PS2 Emotion Engine.
+    ///
+    /// On any exception this performs three steps, matching PCSX2 behaviour:
+    ///   1. If not already in an exception (Status.EXL == 0):
+    ///        • Write the faulting instruction address to EPC (COP0 reg 14).
+    ///          If the instruction is in a branch delay slot, EPC is set to the
+    ///          preceding branch instruction (epc − 4) and Cause.BD is set.
+    ///        • Set Status.EXL = 1 to enter exception mode.
+    ///   2. Write the exception code into Cause.ExcCode (bits 6:2).
+    ///   3. Redirect cpu.PC to the appropriate exception vector:
+    ///        • BEV = 0 → 0x80000080  (general exception, RAM handler)
+    ///        • BEV = 1 → 0xBFC00180  (general exception, BIOS ROM handler)
+    /// </summary>
+    public static class COP0ExceptionDispatcher
+    {
+        // General exception vector addresses
+        private const uint ExceptionVectorBev0 = 0x80000080u;
+        private const uint ExceptionVectorBev1 = 0xBFC00180u;
+
+        // COP0 register indices
+        private const int StatusReg = 12;
+        private const int CauseReg  = 13;
+        private const int EpcReg    = 14;
+
+        // Status register bit masks
+        private const uint StatusExl = 1u << 1;   // Exception Level
+        private const uint StatusBev = 1u << 22;  // Bootstrap Exception Vectors
+
+        // Cause register bit masks / shifts
+        private const uint CauseBd           = 1u << 31; // Branch Delay slot
+        private const int  CauseExcCodeShift = 2;
+        private const uint CauseExcCodeMask  = 0x7Cu;    // bits 6:2
+
+        /// <summary>
+        /// Dispatch an exception: update COP0 state and redirect the program counter.
+        /// </summary>
+        /// <param name="cpu">CPU state to update.</param>
+        /// <param name="code">Exception code to record in Cause.ExcCode.</param>
+        /// <param name="epc">Address of the instruction that caused the exception.</param>
+        /// <param name="inDelaySlot">
+        ///   True if the faulting instruction resides in a branch delay slot.
+        ///   In that case EPC is set to the branch instruction (epc − 4) and
+        ///   Cause.BD is set.
+        /// </param>
+        public static void Dispatch(CpuState cpu, ExceptionCode code, ulong epc, bool inDelaySlot)
+        {
+            uint status = cpu.COP0.ReadRegister32(StatusReg);
+
+            // Only save EPC and set EXL when not already handling an exception.
+            if ((status & StatusExl) == 0)
+            {
+                uint cause = cpu.COP0.ReadRegister32(CauseReg);
+
+                if (inDelaySlot)
+                {
+                    // EPC points to the branch instruction (epc − 4); BD flag set.
+                    cpu.COP0.WriteRegister64(EpcReg, epc - 4);
+                    cause |= CauseBd;
+                }
+                else
+                {
+                    cpu.COP0.WriteRegister64(EpcReg, epc);
+                    cause &= ~CauseBd;
+                }
+
+                // Write ExcCode and BD together in a single read-modify-write.
+                cause = (cause & ~CauseExcCodeMask) | ((uint)code << CauseExcCodeShift);
+                cpu.COP0.WriteRegister32(CauseReg, cause);
+
+                // Enter exception level.
+                status |= StatusExl;
+                cpu.COP0.WriteRegister32(StatusReg, status);
+            }
+            else
+            {
+                // Already in exception level — only update ExcCode in Cause.
+                uint cause = cpu.COP0.ReadRegister32(CauseReg);
+                cause = (cause & ~CauseExcCodeMask) | ((uint)code << CauseExcCodeShift);
+                cpu.COP0.WriteRegister32(CauseReg, cause);
+            }
+
+            // Select exception vector based on BEV bit in Status.
+            uint vector = (status & StatusBev) != 0 ? ExceptionVectorBev1 : ExceptionVectorBev0;
+            cpu.PC = vector;
+        }
+    }
+}
