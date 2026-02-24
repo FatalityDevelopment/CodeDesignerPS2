@@ -55,6 +55,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private uint _iStat;
         private uint _iMask;
 
+        private Sio2? _sio2;
+
+        private const int Sio2IntcBit = 17;
+
         // IOP timers T0–T5 (T0–T2 at 0x1F801100; T3–T5 at 0x1F801480)
         private readonly IopTimer[] _timers = new IopTimer[6];
 
@@ -106,6 +110,27 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         private void HandleCdvdDataReady(object? sender, EventArgs e)
             => RaiseInterrupt(CdvdIntcBit);
+
+        /// <summary>
+        /// Optional SIO2 controller.  When set, reads/writes to
+        /// 0x1F808200–0x1F80827F are forwarded to the SIO2 register file and
+        /// <see cref="Sio2.TransferComplete"/> asserts IOP INTC bit 17.
+        /// </summary>
+        public Sio2? Sio2
+        {
+            get => _sio2;
+            set
+            {
+                if (_sio2 != null)
+                    _sio2.TransferComplete -= HandleSio2TransferComplete;
+                _sio2 = value;
+                if (_sio2 != null)
+                    _sio2.TransferComplete += HandleSio2TransferComplete;
+            }
+        }
+
+        private void HandleSio2TransferComplete(object? sender, EventArgs e)
+            => RaiseInterrupt(Sio2IntcBit);
 
         public IopMemoryBus()
         {
@@ -174,6 +199,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                             | (_cdvd.ReadRegister(off + 3) << 24));
             }
 
+            // SIO2 registers
+            if (_sio2 != null && addr >= Sio2.RegBase && addr < Sio2.RegBase + Sio2.RegSize)
+                return _sio2.ReadRegister(addr - Sio2.RegBase);
+
             var (region, offset) = Map(addr);
             return ReadWordFromRegion(region, offset);
         }
@@ -233,6 +262,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 return;
             }
 
+            // SIO2 registers
+            if (_sio2 != null && addr >= Sio2.RegBase && addr < Sio2.RegBase + Sio2.RegSize)
+            {
+                _sio2.WriteRegister(addr - Sio2.RegBase, value);
+                return;
+            }
+
             var (region, offset, ro) = MapWrite(addr);
             if (!ro) WriteWordToRegion(region, offset, value);
         }
@@ -244,6 +280,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
                 return _cdvd.ReadRegister(addr - Cdvd.RegBase);
 
+            if (_sio2 != null && addr >= Sio2.RegBase && addr < Sio2.RegBase + Sio2.RegSize)
+                return (byte)_sio2.ReadRegister(addr - Sio2.RegBase);
+
             var (region, offset) = Map(addr);
             return region[offset];
         }
@@ -253,6 +292,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
             {
                 _cdvd.WriteRegister(addr - Cdvd.RegBase, value);
+                return;
+            }
+
+            if (_sio2 != null && addr >= Sio2.RegBase && addr < Sio2.RegBase + Sio2.RegSize)
+            {
+                _sio2.WriteRegister(addr - Sio2.RegBase, value);
                 return;
             }
 
