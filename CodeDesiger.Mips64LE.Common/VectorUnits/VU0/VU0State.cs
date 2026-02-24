@@ -40,9 +40,15 @@ namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU0
         public float P { get; set; }
 
         /// <summary>
-        /// R Register - random number generator state
+        /// R Register - random number generator state (float representation)
         /// </summary>
         public float R { get; set; }
+
+        /// <summary>
+        /// Internal 23-bit LFSR state for the pseudo-random number generator.
+        /// Used by VRNEXT, VRGET, VRINIT, VRXOR instructions.
+        /// </summary>
+        public uint RngState { get; set; }
 
         /// <summary>
         /// I Register - intermediate value for load operations
@@ -110,6 +116,7 @@ namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU0
             P = 1.0f;
             R = 0.0f;
             I = 0.0f;
+            RngState = 0x1; // non-zero initial LFSR seed (game code uses VRINIT to set the actual seed)
 
             // Clear flags
             StatusFlags = 0;
