@@ -879,12 +879,8 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void SIF_SmFlag_Write1ToClear()
         {
             var sif = new SIF();
-            // Simulate IOP setting SMFLAG by using SmCom as a stand-in
-            // We can write directly to SMFLAG via SMCOM write, but SMFLAG is W1C
-            // so we need to prime it. Use the direct property path instead.
-            // Prime: write 0xFF via multiple W1S calls on MSFLAG… but SMFLAG is W1C.
-            // Pre-prime SMFLAG via reflection of the fact that SMFLAG starts at 0:
-            // Write 0x0F to confirm W1C with all-zero base is still 0.
+            // SMFLAG uses write-1-to-clear (W1C) semantics.
+            // Writing bits to a register that starts at zero must leave it at zero.
             sif.WriteRegister(SIF.REG_SMFLAG, 0x0000000Fu);
             Assert.AreEqual(0u, sif.SmFlag, "W1C on zero SMFLAG must remain 0");
         }
