@@ -8,7 +8,7 @@ A C# library and toolset for working with the **Sony PlayStation 2 Emotion Engin
 
 ```
 Mips64LE/
-├── CodeDesiger.Mips64LE.Common/     # Core library (assembler, disassembler, instructions)
+├── CodeDesigner.Mips64LE.Common/     # Core library (assembler, disassembler, instructions)
 ├── CodeDesigner.Mips64LE/           # Console application + socket server
 ├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (297 tests)
 └── vscode/codedesigner/             # VSCode extension frontend
@@ -240,7 +240,7 @@ All instruction semantics have been cross-referenced with [PCSX2](https://pcsx2.
 | `QUICKSTART.md` | Step-by-step guide to using the assembler/disassembler |
 | `ASSEMBLER_DISASSEMBLER_INTEGRATION.md` | Technical details of the assembler and disassembler |
 | `SOCKET_COMMUNICATION.md` | VSCode extension ↔ C# server protocol |
-| `CodeDesiger.Mips64LE.Common/Documentation/` | Architecture deep-dives (EE, COP0, COP1, VU0, VU1) |
+| `CodeDesigner.Mips64LE.Common/Documentation/` | Architecture deep-dives (EE, COP0, COP1, VU0, VU1) |
 
 ---
 

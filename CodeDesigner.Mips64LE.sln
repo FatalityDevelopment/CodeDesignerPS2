@@ -7,7 +7,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE", "Co
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE.TestProject", "CodeDesigner.Mips64LE.TestProject\CodeDesigner.Mips64LE.TestProject.csproj", "{E039FFEF-26C5-40C9-9E5B-18970D64259D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesiger.Mips64LE.Common", "CodeDesiger.Mips64LE.Common\CodeDesiger.Mips64LE.Common.csproj", "{9E3FB743-92F2-429A-B18B-D7D09F0D2F2C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE.Common", "CodeDesigner.Mips64LE.Common\CodeDesigner.Mips64LE.Common.csproj", "{9E3FB743-92F2-429A-B18B-D7D09F0D2F2C}"
 EndProject
 Project("{54A90642-561A-4BB1-A94E-469ADEE60C69}") = "codedesigner", "vscode\codedesigner\codedesigner.esproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
