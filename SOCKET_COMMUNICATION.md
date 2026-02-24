@@ -142,8 +142,9 @@ Response: `{ "Success": true, "Message": "PONG" }`
 ### Protocol
 
 - **Connection**: Client initiates connection to `localhost:8765`
-- **Message Exchange**: UTF-8 text messages over TCP
-- **Echo Response**: Server responds with `"Echo: {original_message}"`
+- **Message Exchange**: UTF-8 text messages over TCP, newline-terminated
+- **Commands**: JSON-encoded `CommandMessage` objects (see Supported Commands above)
+- **Responses**: JSON-encoded `CommandResponse` objects
 - **Disconnection**: Either side can close the connection
 
 ## Development

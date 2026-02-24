@@ -2,9 +2,12 @@
 
 ## Overview
 
-**COP1** is the **Floating Point Unit (FPU)** of the PlayStation 2 Emotion Engine.  
-It is responsible for IEEE-754 floating-point arithmetic and supports both
-single-precision and double-precision operations.
+**COP1** is the **Floating Point Unit (FPU)** of the PlayStation 2 Emotion Engine.
+
+> ⚠️ **PS2 EE COP1 is single-precision (32-bit) only.**  There is no double-precision
+> support on the EE FPU.  All FPU registers hold 32-bit IEEE 754 values, and the
+> `fmt` field in COP1 instruction encodings is always `0x10` (S) — it is **not** a
+> source register.  Register fields: `fd` = bits[10:6], `fs` = bits[15:11], `ft` = bits[20:16].
 
 While the PS2 relies heavily on its **Vector Units (VU0/VU1)** for performance-critical math,
 COP1 is still used for:
@@ -14,29 +17,22 @@ COP1 is still used for:
 
 ---
 
-## COP1 Register File
+## PS2 EE FPU Behaviour
 
-### Floating-Point Registers
-
-- **32 Floating-Point Registers (FPRs)**
-- Each register is **32-bit**
-- Can be paired for **64-bit double-precision** operations
-
-| Register Range | Usage |
-|----------------|------|
-| `f0 – f31` | Single-precision floats |
-| Paired (`f0/f1`, `f2/f3`, …) | Double-precision floats |
+| Property | Value |
+|----------|-------|
+| Precision | Single (32-bit) only |
+| Denormals | **Flushed to zero** — not IEEE 754 compliant |
+| Compare functs | `C.F`=0x30, `C.EQ`=0x32, `C.LT`=0x34, `C.LE`=0x36 (differ from standard MIPS) |
+| `fmt` field | Always `0x10` in instruction words — not a register index |
 
 ---
 
-### FPU Control & Status Register (FCSR)
+## COP1 Register File
 
-| Field | Description |
-|------|-------------|
-| FCC | Floating-point condition codes |
-| RM | Rounding mode |
-| Flags | Exception flags |
-| Enables | Exception enables |
+- **32 Floating-Point Registers (FPRs)** — `f0`–`f31`, each 32 bits
+- **FPU Accumulator (ACC / FACC)** — 32-bit accumulator for `ADDA.S`, `MADD.S`, etc.
+- **FCSR** (Floating-Point Control/Status Register at FCR31) — holds the FCC condition flag and rounding mode
 
 ---
 
@@ -46,16 +42,12 @@ COP1 is still used for:
 |-------------|-------------|
 | MFC1 | Move from FPU register to GPR |
 | MTC1 | Move from GPR to FPU register |
-| DMFC1 | Move from FPU register to GPR (64-bit) |
-| DMTC1 | Move from GPR to FPU register (64-bit) |
-| CFC1 | Move control from FPU |
-| CTC1 | Move control to FPU |
+| CFC1 | Move control from FCSR to GPR |
+| CTC1 | Move control from GPR to FCSR |
 
 ---
 
 ## Floating-Point Arithmetic Instructions
-
-### Single-Precision
 
 | Instruction | Description |
 |-------------|-------------|
@@ -67,21 +59,16 @@ COP1 is still used for:
 | ABS.S | Absolute value |
 | MOV.S | Move |
 | NEG.S | Negate |
-
----
-
-### Double-Precision
-
-| Instruction | Description |
-|-------------|-------------|
-| ADD.D | Add double-precision |
-| SUB.D | Subtract double-precision |
-| MUL.D | Multiply double-precision |
-| DIV.D | Divide double-precision |
-| SQRT.D | Square root |
-| ABS.D | Absolute value |
-| MOV.D | Move |
-| NEG.D | Negate |
+| RSQRT.S | Reciprocal square root |
+| ADDA.S | Add to accumulator |
+| SUBA.S | Subtract from accumulator |
+| MULA.S | Multiply to accumulator |
+| MADD.S | Multiply-add using accumulator |
+| MSUB.S | Multiply-subtract using accumulator |
+| MADDA.S | Multiply-add, result to accumulator |
+| MSUBA.S | Multiply-subtract, result to accumulator |
+| MAX.S | Maximum of two floats |
+| MIN.S | Minimum of two floats |
 
 ---
 
@@ -89,36 +76,27 @@ COP1 is still used for:
 
 | Instruction | Description |
 |-------------|-------------|
-| CVT.S.W | Convert word to single |
-| CVT.D.W | Convert word to double |
-| CVT.S.D | Convert double to single |
-| CVT.D.S | Convert single to double |
-| CVT.W.S | Convert single to word |
-| CVT.W.D | Convert double to word |
+| CVT.S.W | Convert word integer to single-precision |
+| CVT.W.S | Convert single-precision to word integer |
+| CEIL.W.S | Ceiling towards +∞ |
+| FLOOR.W.S | Floor towards −∞ |
+| ROUND.W.S | Round to nearest integer |
+| TRUNC.W.S | Truncate towards zero |
 
 ---
 
 ## Comparison Instructions
 
-### Single-Precision
+> PS2 EE compare functs differ from standard MIPS R4000.
 
-| Instruction | Description |
-|-------------|-------------|
-| C.EQ.S | Compare equal |
-| C.LT.S | Compare less than |
-| C.LE.S | Compare less than or equal |
+| Instruction | Funct | Description |
+|-------------|-------|-------------|
+| C.F.S | 0x30 | Always false |
+| C.EQ.S | 0x32 | Compare equal |
+| C.LT.S | 0x34 | Compare less than |
+| C.LE.S | 0x36 | Compare less than or equal |
 
----
-
-### Double-Precision
-
-| Instruction | Description |
-|-------------|-------------|
-| C.EQ.D | Compare equal |
-| C.LT.D | Compare less than |
-| C.LE.D | Compare less than or equal |
-
-Comparison results update the **FPU condition flag**, used by branch instructions.
+Comparison results set the **FPU condition flag (FCC)** in FCSR, used by branch instructions.
 
 ---
 
@@ -126,42 +104,32 @@ Comparison results update the **FPU condition flag**, used by branch instruction
 
 | Instruction | Description |
 |-------------|-------------|
-| BC1T | Branch if FP condition true |
-| BC1F | Branch if FP condition false |
+| BC1F | Branch if FPU condition false |
+| BC1T | Branch if FPU condition true |
+| BC1FL | Branch if FPU condition false (likely) |
+| BC1TL | Branch if FPU condition true (likely) |
 
 ---
 
-## Exception Behavior
+## FPU Load/Store Instructions
 
-COP1 can raise exceptions for:
-- Invalid operations
-- Divide by zero
-- Overflow / underflow
-- Inexact results
-
-Exception handling is controlled via **FCSR** and routed through COP0.
-
----
-
-## Emotion Engine Notes
-
-- COP1 is **in-order** and slower than VU units
-- Not commonly used for heavy vector math
-- Precision and rounding behavior must be accurate for emulation
-- Some games rely on exact IEEE-754 edge cases
+| Instruction | Description |
+|-------------|-------------|
+| LWC1 | Load word to FPU register |
+| SWC1 | Store word from FPU register |
 
 ---
 
 ## Emulation Considerations
 
-- Correct NaN handling is critical
-- Paired-register behavior for doubles must be preserved
-- FCSR rounding modes affect results
-- Timing differences can break physics or animation code
+- Denormal inputs and outputs must be **flushed to zero** before and after every operation.
+- The `fmt` field in COP1 encodings is always `0x10` (single) — never treat it as a register.
+- Compare functs 0x34 (`C.LT`) and 0x36 (`C.LE`) differ from standard MIPS 0x3C/0x3E.
+- The FPU accumulator (`FACC`) is a persistent register used across MADD/MSUB chains.
 
 ---
 
 ## Disclaimer
 
-This documentation is for **educational and research purposes only**.  
+This documentation is for **educational and research purposes only**.
 PlayStation and Emotion Engine are trademarks of Sony Interactive Entertainment.
