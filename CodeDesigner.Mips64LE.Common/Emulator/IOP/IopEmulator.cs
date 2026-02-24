@@ -73,6 +73,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 Memory = Bus.Ram
             };
             WireTimerInterrupts();
+            WireDmacInterrupts();
             Reset();
         }
 
@@ -283,6 +284,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 Bus.Timers[i].CompareInterruptPending  += (_, _) => Bus.RaiseInterrupt(intcBit);
                 Bus.Timers[i].OverflowInterruptPending += (_, _) => Bus.RaiseInterrupt(intcBit);
             }
+        }
+
+        // ── DMAC → INTC wiring ────────────────────────────────────────────────
+        //
+        // IOP INTC bit 3 is the DMA interrupt (PCSX2 IopBios.cpp / IopDma.cpp).
+
+        private void WireDmacInterrupts()
+        {
+            Bus.Dmac.ChannelTransferComplete += (_, _) => Bus.RaiseInterrupt(3);
         }
 
         /// <summary>

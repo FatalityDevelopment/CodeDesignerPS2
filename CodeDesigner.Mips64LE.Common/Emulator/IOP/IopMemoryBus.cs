@@ -10,8 +10,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     ///   0x00000000 – 0x001FFFFF  IOP main RAM (2 MB)
     ///   0x1F800000 – 0x1F8003FF  Scratchpad (1 KB)
     ///   0x1F801070 – 0x1F801077  IOP INTC (I_STAT / I_MASK)
+    ///   0x1F801080 – 0x1F8010EF  IOP DMAC channels 0–6 (MDECin … OTC)
+    ///   0x1F8010F0 – 0x1F8010F7  IOP DMAC global registers (DPCR / DICR)
     ///   0x1F801100 – 0x1F80112F  IOP Timers 0–2 (counter/mode/target, 0x10 stride)
     ///   0x1F801480 – 0x1F8014AF  IOP Timers 3–5 (counter/mode/target, 0x10 stride)
+    ///   0x1F801500 – 0x1F801557  IOP DMAC channels 7–12 (SPU2 … cdrom)
+    ///   0x1F801570 – 0x1F801577  IOP DMAC global registers 2 (DPCR2 / DICR2)
     ///   0x1D000000 – 0x1D00006F  SIF registers (EE side mapped into IOP address space)
     ///   0x1FC00000 – 0x1FFFFFFF  BIOS ROM (4 MB, shared with EE, read-only from IOP)
     ///
@@ -58,6 +62,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// IOP timers T0–T5.  T0–T2 are mapped at 0x1F801100; T3–T5 at 0x1F801480.
         /// </summary>
         public IopTimer[] Timers => _timers;
+
+        /// <summary>IOP DMA controller (13 channels).</summary>
+        public IopDmac Dmac { get; } = new IopDmac();
 
         /// <summary>Exposes IOP RAM for bulk loading (e.g. from SIF DMA).</summary>
         public byte[] Ram => _ram;
@@ -111,6 +118,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (addr >= TimerBase2 && addr < TimerBase2 + TimerBankSize)
                 return ReadTimerWord(addr, TimerBase2, 3);
 
+            // IOP DMAC channel registers
+            if (IopDmac.TryDecodeChannelAddress(addr, out int chIdx, out uint chReg))
+                return Dmac.Channels[chIdx].ReadRegister(chReg);
+
+            // IOP DMAC global registers (DPCR/DICR/DPCR2/DICR2)
+            if (IopDmac.IsGlobalRegister(addr))
+                return Dmac.ReadGlobal(addr);
+
             // SIF mirror
             if (SharedSif != null && addr >= SifMirrorBase && addr < SifMirrorBase + 0x70u)
                 return ReadSifMirror(addr - SifMirrorBase);
@@ -137,6 +152,22 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (addr >= TimerBase2 && addr < TimerBase2 + TimerBankSize)
             {
                 WriteTimerWord(addr, value, TimerBase2, 3);
+                return;
+            }
+
+            // IOP DMAC channel registers — execute transfer if CHCR.STR is set.
+            if (IopDmac.TryDecodeChannelAddress(addr, out int chIdx, out uint chReg))
+            {
+                Dmac.Channels[chIdx].WriteRegister(chReg, value);
+                if (chReg == IopDmacChannel.REG_CHCR && Dmac.Channels[chIdx].IsRunning)
+                    Dmac.ExecuteChannel(chIdx, this);
+                return;
+            }
+
+            // IOP DMAC global registers (DPCR/DICR/DPCR2/DICR2)
+            if (IopDmac.IsGlobalRegister(addr))
+            {
+                Dmac.WriteGlobal(addr, value);
                 return;
             }
 

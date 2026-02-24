@@ -58,12 +58,13 @@ The PS2's second CPU — a MIPS R3000A running at ~36.864 MHz — handles all I/
 | `IopMemoryBus` — RAM/ROM/scratchpad/INTC/SIF | ✅ | `Emulator/IOP/IopMemoryBus.cs` | 2 MB RAM, 4 MB BIOS ROM, 1 KB scratchpad, I_STAT/I_MASK, SIF mirror at 0x1D000000 |
 | `IopEmulator` — Step() with delay slots + COP0 | ✅ | `Emulator/IOP/IopEmulator.cs` | Reuses EE instruction objects via bridge CpuState |
 | IOP timers T0–T5 (full tick logic) | ✅ | `Emulator/IOP/IopTimer.cs`, `IopMemoryBus.cs`, `IopEmulator.cs` | T0–T2 at 0x1F801100, T3–T5 at 0x1F801480; 16-bit counters, compare/overflow events, INTC bits 4–6/14–16 |
+| IOP DMA controller (IopDmac) | ✅ | `Emulator/IOP/IopDmac.cs`, `IopDmacChannel.cs` | 13 channels (MDECin…cdrom); burst mode; DPCR/DICR/DPCR2/DICR2; INTC bit 3 |
 
 ### Still Needed
 
 | Component | Priority | Notes |
 |-----------|----------|-------|
-| IOP DMA controller (IopDmac) | High | The IOP has 13 DMA channels (MDECin, MDECout, GPU, CDVD, SPU, PIO, OTC, SPU2, DEV9, SIF0, SIF1, SIF2, cdrom).  The BIOS uses SIF0/SIF1 and CDVD channels immediately.  Add `IopDmac.cs` in `Emulator/IOP/`. |
+| IOP DMA controller (IopDmac) | ~~High~~ | ~~The IOP has 13 DMA channels (MDECin, MDECout, GPU, CDVD, SPU, PIO, OTC, SPU2, DEV9, SIF0, SIF1, SIF2, cdrom).  The BIOS uses SIF0/SIF1 and CDVD channels immediately.  Add `IopDmac.cs` in `Emulator/IOP/`.~~ ✅ Done |
 | CDVD subsystem | Medium | ISO-9660 disc image reader; feeds data to the IOP CDVD DMA channel.  Required for loading game executables. |
 | Pad/controller input | Medium | IOP-side SIO2 + pad protocol emulation.  Required for any interactive game. |
 | IOP module loader | Low | The BIOS loads IOP modules (IRX files) into IOP RAM.  Needed for full BIOS boot but can stub for now. |
@@ -133,4 +134,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-24.  Current test count: 440 (all passing).*
+*Last updated: 2026-02-24.  Current test count: 457 (all passing).*
