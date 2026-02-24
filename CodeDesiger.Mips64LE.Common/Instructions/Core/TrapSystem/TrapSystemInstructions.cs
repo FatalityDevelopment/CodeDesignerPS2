@@ -419,4 +419,262 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             return eq;
         }
     }
+
+    // TGEI - Trap if Greater or Equal Immediate (REGIMM rt=0x08)
+    public sealed class TGEI : Instruction<Args_I>
+    {
+        public TGEI()
+        {
+            Opcode = 0x01; Funct = null; Name = "tgei";
+            ArgType = InstrArgType.I; ArgNames = ["rs", "imm"];
+            Equation = "if (signed(rs) >= SignExtend(imm)) trap()";
+            Description = "Trap if greater or equal immediate (signed)";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            long rs = (long)cpu.RegsLo[args.Rs];
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            if (rs >= imm) throw new TrapException($"TGEI: {rs} >= {imm}");
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.SignExtend16(args.Imm)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x01 << 26 | args[0] << 21 | 0x08 << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("SignExtend(imm)", imm.ToString());
+            if (cpu != null) { long rsVal = (long)cpu.RegsLo[args.Rs]; return $"{eq} => {rsVal} >= {imm} = {rsVal >= imm}"; }
+            return eq;
+        }
+    }
+
+    // TGEIU - Trap if Greater or Equal Immediate Unsigned (REGIMM rt=0x09)
+    public sealed class TGEIU : Instruction<Args_I>
+    {
+        public TGEIU()
+        {
+            Opcode = 0x01; Funct = null; Name = "tgeiu";
+            ArgType = InstrArgType.I; ArgNames = ["rs", "imm"];
+            Equation = "if (rs >= (ulong)SignExtend(imm)) trap()";
+            Description = "Trap if greater or equal immediate (unsigned)";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            ulong rs = cpu.RegsLo[args.Rs];
+            ulong imm = (ulong)(long)CpuHelpers.SignExtend16(args.Imm);
+            if (rs >= imm) throw new TrapException($"TGEIU: 0x{rs:X16} >= 0x{imm:X16}");
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.SignExtend16(args.Imm)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x01 << 26 | args[0] << 21 | 0x09 << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            ulong imm = (ulong)(long)CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+            if (cpu != null) { ulong rsVal = cpu.RegsLo[args.Rs]; return $"{eq} => 0x{rsVal:X16} >= 0x{imm:X16} = {rsVal >= imm}"; }
+            return eq;
+        }
+    }
+
+    // TLTI - Trap if Less Than Immediate (REGIMM rt=0x0A)
+    public sealed class TLTI : Instruction<Args_I>
+    {
+        public TLTI()
+        {
+            Opcode = 0x01; Funct = null; Name = "tlti";
+            ArgType = InstrArgType.I; ArgNames = ["rs", "imm"];
+            Equation = "if (signed(rs) < SignExtend(imm)) trap()";
+            Description = "Trap if less than immediate (signed)";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            long rs = (long)cpu.RegsLo[args.Rs];
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            if (rs < imm) throw new TrapException($"TLTI: {rs} < {imm}");
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.SignExtend16(args.Imm)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x01 << 26 | args[0] << 21 | 0x0A << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("SignExtend(imm)", imm.ToString());
+            if (cpu != null) { long rsVal = (long)cpu.RegsLo[args.Rs]; return $"{eq} => {rsVal} < {imm} = {rsVal < imm}"; }
+            return eq;
+        }
+    }
+
+    // TLTIU - Trap if Less Than Immediate Unsigned (REGIMM rt=0x0B)
+    public sealed class TLTIU : Instruction<Args_I>
+    {
+        public TLTIU()
+        {
+            Opcode = 0x01; Funct = null; Name = "tltiu";
+            ArgType = InstrArgType.I; ArgNames = ["rs", "imm"];
+            Equation = "if (rs < (ulong)SignExtend(imm)) trap()";
+            Description = "Trap if less than immediate (unsigned)";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            ulong rs = cpu.RegsLo[args.Rs];
+            ulong imm = (ulong)(long)CpuHelpers.SignExtend16(args.Imm);
+            if (rs < imm) throw new TrapException($"TLTIU: 0x{rs:X16} < 0x{imm:X16}");
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.SignExtend16(args.Imm)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x01 << 26 | args[0] << 21 | 0x0B << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            ulong imm = (ulong)(long)CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+            if (cpu != null) { ulong rsVal = cpu.RegsLo[args.Rs]; return $"{eq} => 0x{rsVal:X16} < 0x{imm:X16} = {rsVal < imm}"; }
+            return eq;
+        }
+    }
+
+    // TEQI - Trap if Equal Immediate (REGIMM rt=0x0C)
+    public sealed class TEQI : Instruction<Args_I>
+    {
+        public TEQI()
+        {
+            Opcode = 0x01; Funct = null; Name = "teqi";
+            ArgType = InstrArgType.I; ArgNames = ["rs", "imm"];
+            Equation = "if (signed(rs) == SignExtend(imm)) trap()";
+            Description = "Trap if equal immediate";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            long rs = (long)cpu.RegsLo[args.Rs];
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            if (rs == imm) throw new TrapException($"TEQI: {rs} == {imm}");
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.SignExtend16(args.Imm)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x01 << 26 | args[0] << 21 | 0x0C << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("SignExtend(imm)", imm.ToString());
+            if (cpu != null) { long rsVal = (long)cpu.RegsLo[args.Rs]; return $"{eq} => {rsVal} == {imm} = {rsVal == imm}"; }
+            return eq;
+        }
+    }
+
+    // TNEI - Trap if Not Equal Immediate (REGIMM rt=0x0E)
+    public sealed class TNEI : Instruction<Args_I>
+    {
+        public TNEI()
+        {
+            Opcode = 0x01; Funct = null; Name = "tnei";
+            ArgType = InstrArgType.I; ArgNames = ["rs", "imm"];
+            Equation = "if (signed(rs) != SignExtend(imm)) trap()";
+            Description = "Trap if not equal immediate";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            long rs = (long)cpu.RegsLo[args.Rs];
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            if (rs != imm) throw new TrapException($"TNEI: {rs} != {imm}");
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.SignExtend16(args.Imm)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x01 << 26 | args[0] << 21 | 0x0E << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("SignExtend(imm)", imm.ToString());
+            if (cpu != null) { long rsVal = (long)cpu.RegsLo[args.Rs]; return $"{eq} => {rsVal} != {imm} = {rsVal != imm}"; }
+            return eq;
+        }
+    }
+
+    // MTSAB - Move To SA register Byte (REGIMM rt=0x18)
+    public sealed class MTSAB : Instruction<Args_I>
+    {
+        public MTSAB()
+        {
+            Opcode = 0x01; Funct = null; Name = "mtsab";
+            ArgType = InstrArgType.I; ArgNames = ["rs", "imm"];
+            Equation = "SA = ((rs & 0xF) ^ (imm & 0xF)) * 8";
+            Description = "Move To SA register (byte granularity) - sets shift amount in bits";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            cpu.SA = (int)(((cpu.RegsLo[args.Rs] & 0xF) ^ ((ulong)args.Imm & 0xF)) * 8);
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm & 0xF}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x01 << 26 | args[0] << 21 | 0x18 << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("imm", (args.Imm & 0xF).ToString());
+            if (cpu != null) { int sa = (int)(((cpu.RegsLo[args.Rs] & 0xF) ^ ((ulong)args.Imm & 0xF)) * 8); return $"{eq} => SA={sa}"; }
+            return eq;
+        }
+    }
+
+    // MTSAH - Move To SA register Halfword (REGIMM rt=0x19)
+    public sealed class MTSAH : Instruction<Args_I>
+    {
+        public MTSAH()
+        {
+            Opcode = 0x01; Funct = null; Name = "mtsah";
+            ArgType = InstrArgType.I; ArgNames = ["rs", "imm"];
+            Equation = "SA = ((rs & 0x7) ^ (imm & 0x7)) * 16";
+            Description = "Move To SA register (halfword granularity) - sets shift amount in bits";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            cpu.SA = (int)(((cpu.RegsLo[args.Rs] & 0x7) ^ ((ulong)args.Imm & 0x7)) * 16);
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm & 0x7}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x01 << 26 | args[0] << 21 | 0x19 << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("imm", (args.Imm & 0x7).ToString());
+            if (cpu != null) { int sa = (int)(((cpu.RegsLo[args.Rs] & 0x7) ^ ((ulong)args.Imm & 0x7)) * 16); return $"{eq} => SA={sa}"; }
+            return eq;
+        }
+    }
 }

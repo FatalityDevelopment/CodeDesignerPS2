@@ -248,4 +248,64 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             return "Memory synchronization barrier";
         }
     }
+
+    // MFSA - Move From SA register (SPECIAL funct=0x28)
+    public sealed class MFSA : Instruction<Args_R>
+    {
+        public MFSA()
+        {
+            Opcode = 0x00; Funct = 0x28; Name = "mfsa";
+            ArgType = InstrArgType.R; ArgNames = ["rd"];
+            Equation = "rd = SA";
+            Description = "Move From SA register - reads the SA (shift amount) register";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            if (args.Rd != 0) cpu.RegsLo[args.Rd] = (ulong)cpu.SA;
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(args[0] << 11 | 0x28);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd));
+            if (cpu != null) return $"{eq} => SA={cpu.SA}, rd={CpuHelpers.RegName(args.Rd)}";
+            return eq;
+        }
+    }
+
+    // MTSA - Move To SA register (SPECIAL funct=0x29)
+    public sealed class MTSA : Instruction<Args_R>
+    {
+        public MTSA()
+        {
+            Opcode = 0x00; Funct = 0x29; Name = "mtsa";
+            ArgType = InstrArgType.R; ArgNames = ["rs"];
+            Equation = "SA = rs";
+            Description = "Move To SA register - writes to the SA (shift amount) register";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            cpu.SA = (int)cpu.RegsLo[args.Rs];
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(args[0] << 21 | 0x29);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+            if (cpu != null) return $"{eq} => {CpuHelpers.RegName(args.Rs)}={cpu.RegsLo[args.Rs]}, SA={cpu.SA}";
+            return eq;
+        }
+    }
 }

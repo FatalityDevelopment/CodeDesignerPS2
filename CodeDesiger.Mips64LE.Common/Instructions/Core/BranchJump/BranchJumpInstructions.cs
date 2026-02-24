@@ -1124,4 +1124,260 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             return eq;
         }
     }
+
+    // BLTZL - Branch if Less Than Zero Likely (REGIMM, rt=0x02)
+    public sealed class BLTZL : Instruction<Args_I>
+    {
+        public BLTZL()
+        {
+            Opcode = 0x01;
+            Funct = null;
+            Name = "bltzl";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rs", "offset"];
+            Equation = "if (rs < 0) PC = PC + 4 + (offset << 2); else nullify";
+            Description = "Branch if less than zero likely - nullifies delay slot if not taken";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            if ((long)cpu.RegsLo[args.Rs] < 0)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 8; // nullify delay slot
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
+            }
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(0x01 << 26 | args[0] << 21 | 0x02 << 16 | args[1] & 0xFFFF);
+        }
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+            if (cpu != null && pc.HasValue)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                bool taken = rsVal < 0;
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+            }
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
+            }
+            return eq;
+        }
+    }
+
+    // BGEZL - Branch if Greater than or Equal Zero Likely (REGIMM, rt=0x03)
+    public sealed class BGEZL : Instruction<Args_I>
+    {
+        public BGEZL()
+        {
+            Opcode = 0x01;
+            Funct = null;
+            Name = "bgezl";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rs", "offset"];
+            Equation = "if (rs >= 0) PC = PC + 4 + (offset << 2); else nullify";
+            Description = "Branch if greater than or equal zero likely - nullifies delay slot if not taken";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            if ((long)cpu.RegsLo[args.Rs] >= 0)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 8; // nullify delay slot
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
+            }
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(0x01 << 26 | args[0] << 21 | 0x03 << 16 | args[1] & 0xFFFF);
+        }
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+            if (cpu != null && pc.HasValue)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                bool taken = rsVal >= 0;
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+            }
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
+            }
+            return eq;
+        }
+    }
+
+    // BLEZL - Branch if Less than or Equal Zero Likely (opcode=0x16)
+    public sealed class BLEZL : Instruction<Args_I>
+    {
+        public BLEZL()
+        {
+            Opcode = 0x16;
+            Funct = null;
+            Name = "blezl";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rs", "offset"];
+            Equation = "if (rs <= 0) PC = PC + 4 + (offset << 2); else nullify";
+            Description = "Branch if less than or equal zero likely - nullifies delay slot if not taken";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            if ((long)cpu.RegsLo[args.Rs] <= 0)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 8; // nullify delay slot
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
+            }
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(0x16 << 26 | args[0] << 21 | args[1] & 0xFFFF);
+        }
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+            if (cpu != null && pc.HasValue)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                bool taken = rsVal <= 0;
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+            }
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
+            }
+            return eq;
+        }
+    }
+
+    // BGTZL - Branch if Greater Than Zero Likely (opcode=0x17)
+    public sealed class BGTZL : Instruction<Args_I>
+    {
+        public BGTZL()
+        {
+            Opcode = 0x17;
+            Funct = null;
+            Name = "bgtzl";
+            ArgType = InstrArgType.I;
+            ArgNames = ["rs", "offset"];
+            Equation = "if (rs > 0) PC = PC + 4 + (offset << 2); else nullify";
+            Description = "Branch if greater than zero likely - nullifies delay slot if not taken";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            if ((long)cpu.RegsLo[args.Rs] > 0)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            else
+            {
+                cpu.PC += 8; // nullify delay slot
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{Name} {CpuHelpers.RegName(args.Rs)}, ${target:X8}";
+            }
+            return $"{Name} {CpuHelpers.RegName(args.Rs)}, {args.Imm:X4}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(0x17 << 26 | args[0] << 21 | args[1] & 0xFFFF);
+        }
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+            if (cpu != null && pc.HasValue)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                bool taken = rsVal > 0;
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+            }
+            if (pc.HasValue)
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                uint target = (uint)((int)pc.Value + 4 + offset);
+                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
+            }
+            return eq;
+        }
+    }
 }

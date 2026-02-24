@@ -888,6 +888,41 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         }
     }
 
+    // C.F.S - Compare False (always sets CC=false)
+    public sealed class C_F : Instruction<Args_R>
+    {
+        public C_F()
+        {
+            Opcode = 0x11;
+            Funct = 0x30;
+            Name = "c.f.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fs", "ft"];
+            Equation = "CC = false";
+            Description = "Compare false single-precision - always clears condition code";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            cpu.COP1.SetConditionCode(false);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rs}, $f{args.Rt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x30);
+        }
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            return $"c.f.s $f{args.Rs}, $f{args.Rt} => CC = false";
+        }
+    }
+
     // C.EQ.S - Compare equal single-precision
     public sealed class C_EQ_S : Instruction<Args_R>
     {
@@ -941,7 +976,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public C_LT_S()
         {
             Opcode = 0x11;
-            Funct = 0x3C;
+            Funct = 0x34;
             Name = "c.lt.s";
             ArgType = InstrArgType.R;
             ArgNames = ["fs", "ft"];
@@ -962,7 +997,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x3C);
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x34);
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
@@ -988,7 +1023,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public C_LE_S()
         {
             Opcode = 0x11;
-            Funct = 0x3E;
+            Funct = 0x36;
             Name = "c.le.s";
             ArgType = InstrArgType.R;
             ArgNames = ["fs", "ft"];
@@ -1009,7 +1044,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x3E);
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x36);
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
@@ -1130,6 +1165,513 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
                 bool cc = cpu.COP1.GetConditionCode();
                 ulong target = (ulong)((long)pc.Value + 4 + offset);
                 return $"{Equation} => CC={cc}, {(cc ? $"branch to 0x{target:X}" : "no branch")}";
+            }
+            return Equation;
+        }
+    }
+
+    // =========================================================================
+    // PS2 EE COP1 extensions: accumulator ops, rounding, reciprocal sqrt,
+    // max/min, load/store double, and likely branches
+    // =========================================================================
+
+    // RSQRT.S - Reciprocal Square Root (PS2 EE specific)
+    public sealed class RSQRT_S : Instruction<Args_R>
+    {
+        public RSQRT_S()
+        {
+            Opcode = 0x11; Funct = 0x16; Name = "rsqrt.s";
+            ArgType = InstrArgType.R; ArgNames = ["fd", "fs", "ft"];
+            Equation = "fd = fs / sqrt(|ft|)"; Description = "Reciprocal square root (PS2 EE): fd = fs / sqrt(|ft|)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            float ft = MathF.Abs(cpu.FPR[args.Rt]);
+            cpu.FPR[args.Rd] = ft != 0 ? cpu.FPR[args.Rs] / MathF.Sqrt(ft) : float.MaxValue;
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+
+        public override uint Asm(int[] args)
+            => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x16);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null)
+            {
+                float fs = cpu.FPR[args.Rs]; float ft = MathF.Abs(cpu.FPR[args.Rt]);
+                return $"{eq} => {fs} / sqrt({ft}) = {(ft != 0 ? fs / MathF.Sqrt(ft) : float.MaxValue)}";
+            }
+            return eq;
+        }
+    }
+
+    // ROUND.W.S - Round to Word
+    public sealed class ROUND_W_S : Instruction<Args_R>
+    {
+        public ROUND_W_S()
+        {
+            Opcode = 0x11; Funct = 0x0C; Name = "round.w.s";
+            ArgType = InstrArgType.R; ArgNames = ["fd", "fs"];
+            Equation = "fd = round(fs)"; Description = "Round single-precision to nearest integer word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // PS2 EE rounds using AwayFromZero (banker's rounding is not used on PS2)
+            int r = (int)MathF.Round(cpu.FPR[args.Rs], MidpointRounding.AwayFromZero);
+            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)r);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x0C);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rs]; return $"{eq} => round({fs}) = {(int)MathF.Round(fs, MidpointRounding.AwayFromZero)}"; }
+            return eq;
+        }
+    }
+
+    // TRUNC.W.S - Truncate to Word
+    public sealed class TRUNC_W_S : Instruction<Args_R>
+    {
+        public TRUNC_W_S()
+        {
+            Opcode = 0x11; Funct = 0x0D; Name = "trunc.w.s";
+            ArgType = InstrArgType.R; ArgNames = ["fd", "fs"];
+            Equation = "fd = trunc(fs)"; Description = "Truncate single-precision to integer word (toward zero)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int r = (int)MathF.Truncate(cpu.FPR[args.Rs]);
+            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)r);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x0D);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rs]; return $"{eq} => trunc({fs}) = {(int)MathF.Truncate(fs)}"; }
+            return eq;
+        }
+    }
+
+    // CEIL.W.S - Ceiling to Word
+    public sealed class CEIL_W_S : Instruction<Args_R>
+    {
+        public CEIL_W_S()
+        {
+            Opcode = 0x11; Funct = 0x0E; Name = "ceil.w.s";
+            ArgType = InstrArgType.R; ArgNames = ["fd", "fs"];
+            Equation = "fd = ceil(fs)"; Description = "Ceiling single-precision to integer word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int r = (int)MathF.Ceiling(cpu.FPR[args.Rs]);
+            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)r);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x0E);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rs]; return $"{eq} => ceil({fs}) = {(int)MathF.Ceiling(fs)}"; }
+            return eq;
+        }
+    }
+
+    // FLOOR.W.S - Floor to Word
+    public sealed class FLOOR_W_S : Instruction<Args_R>
+    {
+        public FLOOR_W_S()
+        {
+            Opcode = 0x11; Funct = 0x0F; Name = "floor.w.s";
+            ArgType = InstrArgType.R; ArgNames = ["fd", "fs"];
+            Equation = "fd = floor(fs)"; Description = "Floor single-precision to integer word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int r = (int)MathF.Floor(cpu.FPR[args.Rs]);
+            cpu.FPR[args.Rd] = BitConverter.UInt32BitsToSingle((uint)r);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 11 | args[0] << 6 | Funct ?? 0x0F);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rs]; return $"{eq} => floor({fs}) = {(int)MathF.Floor(fs)}"; }
+            return eq;
+        }
+    }
+
+    // ADDA.S - Add to Accumulator (PS2 EE specific)
+    public sealed class ADDA_S : Instruction<Args_R>
+    {
+        public ADDA_S()
+        {
+            Opcode = 0x11; Funct = 0x18; Name = "adda.s";
+            ArgType = InstrArgType.R; ArgNames = ["fs", "ft"];
+            Equation = "ACC = fs + ft"; Description = "Add single-precision to FPU accumulator (PS2 EE)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC = cpu.FPR[args.Rs] + cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x18);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => ACC = {fs} + {ft} = {fs + ft}"; }
+            return eq;
+        }
+    }
+
+    // SUBA.S - Subtract to Accumulator (PS2 EE specific)
+    public sealed class SUBA_S : Instruction<Args_R>
+    {
+        public SUBA_S()
+        {
+            Opcode = 0x11; Funct = 0x19; Name = "suba.s";
+            ArgType = InstrArgType.R; ArgNames = ["fs", "ft"];
+            Equation = "ACC = fs - ft"; Description = "Subtract single-precision to FPU accumulator (PS2 EE)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC = cpu.FPR[args.Rs] - cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x19);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => ACC = {fs} - {ft} = {fs - ft}"; }
+            return eq;
+        }
+    }
+
+    // MULA.S - Multiply to Accumulator (PS2 EE specific)
+    public sealed class MULA_S : Instruction<Args_R>
+    {
+        public MULA_S()
+        {
+            Opcode = 0x11; Funct = 0x1A; Name = "mula.s";
+            ArgType = InstrArgType.R; ArgNames = ["fs", "ft"];
+            Equation = "ACC = fs * ft"; Description = "Multiply single-precision to FPU accumulator (PS2 EE)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC = cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x1A);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => ACC = {fs} * {ft} = {fs * ft}"; }
+            return eq;
+        }
+    }
+
+    // MADD.S - Multiply-Add using Accumulator (PS2 EE specific): fd = ACC + fs*ft
+    public sealed class MADD_S : Instruction<Args_R>
+    {
+        public MADD_S()
+        {
+            Opcode = 0x11; Funct = 0x1C; Name = "madd.s";
+            ArgType = InstrArgType.R; ArgNames = ["fd", "fs", "ft"];
+            Equation = "fd = ACC + fs * ft"; Description = "Multiply-Add: fd = ACC + fs*ft (PS2 EE FPU)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+            => cpu.FPR[args.Rd] = cpu.FACC + cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
+
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x1C);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) + {cpu.FPR[args.Rs]} * {cpu.FPR[args.Rt]} = {cpu.FACC + cpu.FPR[args.Rs] * cpu.FPR[args.Rt]}"; }
+            return eq;
+        }
+    }
+
+    // MSUB.S - Multiply-Subtract using Accumulator (PS2 EE specific): fd = ACC - fs*ft
+    public sealed class MSUB_S : Instruction<Args_R>
+    {
+        public MSUB_S()
+        {
+            Opcode = 0x11; Funct = 0x1D; Name = "msub.s";
+            ArgType = InstrArgType.R; ArgNames = ["fd", "fs", "ft"];
+            Equation = "fd = ACC - fs * ft"; Description = "Multiply-Subtract: fd = ACC - fs*ft (PS2 EE FPU)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+            => cpu.FPR[args.Rd] = cpu.FACC - cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
+
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x1D);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) - {cpu.FPR[args.Rs]} * {cpu.FPR[args.Rt]} = {cpu.FACC - cpu.FPR[args.Rs] * cpu.FPR[args.Rt]}"; }
+            return eq;
+        }
+    }
+
+    // MADDA.S - Multiply-Add to Accumulator (PS2 EE specific): ACC = ACC + fs*ft
+    public sealed class MADDA_S : Instruction<Args_R>
+    {
+        public MADDA_S()
+        {
+            Opcode = 0x11; Funct = 0x1E; Name = "madda.s";
+            ArgType = InstrArgType.R; ArgNames = ["fs", "ft"];
+            Equation = "ACC = ACC + fs * ft"; Description = "Multiply-Add to Accumulator: ACC += fs*ft (PS2 EE FPU)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC += cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x1E);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) + {cpu.FPR[args.Rs]} * {cpu.FPR[args.Rt]} = {cpu.FACC + cpu.FPR[args.Rs] * cpu.FPR[args.Rt]}"; }
+            return eq;
+        }
+    }
+
+    // MSUBA.S - Multiply-Subtract from Accumulator (PS2 EE specific): ACC = ACC - fs*ft
+    public sealed class MSUBA_S : Instruction<Args_R>
+    {
+        public MSUBA_S()
+        {
+            Opcode = 0x11; Funct = 0x1F; Name = "msuba.s";
+            ArgType = InstrArgType.R; ArgNames = ["fs", "ft"];
+            Equation = "ACC = ACC - fs * ft"; Description = "Multiply-Subtract from Accumulator: ACC -= fs*ft (PS2 EE FPU)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FACC -= cpu.FPR[args.Rs] * cpu.FPR[args.Rt];
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rs}, $f{args.Rt}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x1F);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { return $"{eq} => ACC({cpu.FACC}) - {cpu.FPR[args.Rs]} * {cpu.FPR[args.Rt]} = {cpu.FACC - cpu.FPR[args.Rs] * cpu.FPR[args.Rt]}"; }
+            return eq;
+        }
+    }
+
+    // MAX.S - Maximum single-precision (PS2 EE specific)
+    public sealed class MAX_S : Instruction<Args_R>
+    {
+        public MAX_S()
+        {
+            Opcode = 0x11; Funct = 0x28; Name = "max.s";
+            ArgType = InstrArgType.R; ArgNames = ["fd", "fs", "ft"];
+            Equation = "fd = max(fs, ft)"; Description = "Maximum single-precision floating point (PS2 EE)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FPR[args.Rd] = MathF.Max(cpu.FPR[args.Rs], cpu.FPR[args.Rt]);
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x28);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => max({fs}, {ft}) = {MathF.Max(fs, ft)}"; }
+            return eq;
+        }
+    }
+
+    // MIN.S - Minimum single-precision (PS2 EE specific)
+    public sealed class MIN_S : Instruction<Args_R>
+    {
+        public MIN_S()
+        {
+            Opcode = 0x11; Funct = 0x29; Name = "min.s";
+            ArgType = InstrArgType.R; ArgNames = ["fd", "fs", "ft"];
+            Equation = "fd = min(fs, ft)"; Description = "Minimum single-precision floating point (PS2 EE)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args) => cpu.FPR[args.Rd] = MathF.Min(cpu.FPR[args.Rs], cpu.FPR[args.Rt]);
+        public override string Disasm(Args_R args, uint? pc = null) => $"{Name} $f{args.Rd}, $f{args.Rs}, $f{args.Rt}";
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x10 << 21 | args[2] << 16 | args[1] << 11 | args[0] << 6 | Funct ?? 0x29);
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("fd", $"$f{args.Rd}").Replace("fs", $"$f{args.Rs}").Replace("ft", $"$f{args.Rt}");
+            if (cpu != null) { float fs = cpu.FPR[args.Rs]; float ft = cpu.FPR[args.Rt]; return $"{eq} => min({fs}, {ft}) = {MathF.Min(fs, ft)}"; }
+            return eq;
+        }
+    }
+
+    // LDC1 - Load Doubleword to COP1 register (opcode=0x35)
+    public sealed class LDC1 : Instruction<Args_I>
+    {
+        public LDC1()
+        {
+            Opcode = 0x35; Funct = null; Name = "ldc1";
+            ArgType = InstrArgType.I; ArgNames = ["ft", "offset", "base"];
+            Equation = "FPR[ft] = Memory[base + offset] (64-bit)"; Description = "Load doubleword to COP1 register pair";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
+            if (addr + 7 < (ulong)cpu.Memory.Length)
+            {
+                // Load 64-bit value; store lower 32 bits in FPR[ft], upper 32 in FPR[ft+1]
+                uint lo = BitConverter.ToUInt32(cpu.Memory, (int)addr);
+                uint hi = BitConverter.ToUInt32(cpu.Memory, (int)addr + 4);
+                cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(lo);
+                if (args.Rt + 1 < cpu.FPR.Length) cpu.FPR[args.Rt + 1] = BitConverter.UInt32BitsToSingle(hi);
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
+        }
+
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation.Replace("ft", $"$f{args.Rt}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("offset", offset.ToString());
+            if (cpu != null) { ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset); return $"{eq} => addr=0x{addr:X16}"; }
+            return eq;
+        }
+    }
+
+    // SDC1 - Store Doubleword from COP1 register (opcode=0x3D)
+    public sealed class SDC1 : Instruction<Args_I>
+    {
+        public SDC1()
+        {
+            Opcode = 0x3D; Funct = null; Name = "sdc1";
+            ArgType = InstrArgType.I; ArgNames = ["ft", "offset", "base"];
+            Equation = "Memory[base + offset] = FPR[ft] (64-bit)"; Description = "Store doubleword from COP1 register pair";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
+            if (addr + 7 < (ulong)cpu.Memory.Length)
+            {
+                uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
+                uint hi = args.Rt + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt + 1]) : 0;
+                byte[] buf = new byte[8];
+                Buffer.BlockCopy(BitConverter.GetBytes(lo), 0, buf, 0, 4);
+                Buffer.BlockCopy(BitConverter.GetBytes(hi), 0, buf, 4, 4);
+                Buffer.BlockCopy(buf, 0, cpu.Memory, (int)addr, 8);
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            return $"{Name} $f{args.Rt}, {offset}({CpuHelpers.RegName(args.Rs)})";
+        }
+
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | args[2] << 21 | args[0] << 16 | args[1] & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation.Replace("ft", $"$f{args.Rt}").Replace("base", CpuHelpers.RegName(args.Rs)).Replace("offset", offset.ToString());
+            if (cpu != null)
+            {
+                ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
+                float val = cpu.FPR[args.Rt];
+                return $"{eq} => store {val} to addr=0x{addr:X16}";
+            }
+            return eq;
+        }
+    }
+
+    // BC1FL - Branch on FPU false (likely)
+    public sealed class BC1FL : Instruction<Args_I>
+    {
+        public BC1FL()
+        {
+            Opcode = 0x11; Funct = null; Name = "bc1fl";
+            ArgType = InstrArgType.I; ArgNames = ["offset"];
+            Equation = "if (!CC) PC = PC + 4 + (offset << 2); else nullify"; Description = "Branch on FPU false (likely) - nullifies delay slot if not taken";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            if (!cpu.COP1.GetConditionCode())
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+            // On PS2 hardware, the delay slot is nullified if not taken; emulated as NOP
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            if (pc.HasValue) { ulong target = (ulong)((long)pc.Value + 4 + offset); return $"{Name} 0x{target:X}"; }
+            return $"{Name} {offset}";
+        }
+
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x08 << 21 | 0x02 << 16 | (args[0] >> 2) & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            if (cpu != null && pc.HasValue)
+            {
+                bool cc = cpu.COP1.GetConditionCode();
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Equation} => CC={cc}, {(cc ? "no branch (delay nullified)" : $"branch to 0x{target:X}")}";
+            }
+            return Equation;
+        }
+    }
+
+    // BC1TL - Branch on FPU true (likely)
+    public sealed class BC1TL : Instruction<Args_I>
+    {
+        public BC1TL()
+        {
+            Opcode = 0x11; Funct = null; Name = "bc1tl";
+            ArgType = InstrArgType.I; ArgNames = ["offset"];
+            Equation = "if (CC) PC = PC + 4 + (offset << 2); else nullify"; Description = "Branch on FPU true (likely) - nullifies delay slot if not taken";
+        }
+
+        public override void Exec(CpuState cpu, Args_I args)
+        {
+            if (cpu.COP1.GetConditionCode())
+            {
+                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+                cpu.PC = (ulong)((long)cpu.PC + 4 + offset);
+            }
+        }
+
+        public override string Disasm(Args_I args, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            if (pc.HasValue) { ulong target = (ulong)((long)pc.Value + 4 + offset); return $"{Name} 0x{target:X}"; }
+            return $"{Name} {offset}";
+        }
+
+        public override uint Asm(int[] args) => (uint)(Opcode << 26 | 0x08 << 21 | 0x03 << 16 | (args[0] >> 2) & 0xFFFF);
+
+        public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
+        {
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            if (cpu != null && pc.HasValue)
+            {
+                bool cc = cpu.COP1.GetConditionCode();
+                ulong target = (ulong)((long)pc.Value + 4 + offset);
+                return $"{Equation} => CC={cc}, {(cc ? $"branch to 0x{target:X}" : "no branch (delay nullified)")}";
             }
             return Equation;
         }
