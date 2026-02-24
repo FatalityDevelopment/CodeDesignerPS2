@@ -14,7 +14,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
     ///   0x70000000 - 0x70003FFF  Scratchpad RAM (16 KB)
     ///   0x10000000 - 0x1000FFFF  EE I/O registers
     ///     0x10000000 - 0x10001FFF  EE Timers T0–T3 (0x800 bytes each)
+    ///     0x10008000 - 0x1000DFFF  DMAC channel registers (10 channels)
+    ///     0x1000E000 - 0x1000E0FF  DMAC global registers (D_CTRL/D_STAT/…)
     ///     0x1000F000 - 0x1000F01F  INTC (interrupt controller)
+    ///     0x1000F200 - 0x1000F26F  SIF (sub-bus interface)
     ///   0x12000000 - 0x12001FFF  GS privileged registers
     ///
     /// MIPS KSEG0/KSEG1 unmapping (strips top 3 bits when bit31 is set):
@@ -38,8 +41,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private const uint GsPrivBase     = 0x12000000u;
 
         // Hardware I/O base addresses (physical)
-        private const uint TimerBase = 0x10000000u;  // T0 base; each timer is 0x800 apart
-        private const uint IntcBase  = 0x1000F000u;  // INTC_STAT / INTC_MASK
+        private const uint TimerBase  = 0x10000000u;  // T0 base; each timer is 0x800 apart
+        private const uint IntcBase   = 0x1000F000u;  // INTC_STAT / INTC_MASK
+        private const uint SifBase    = 0x1000F200u;  // SIF registers
 
         private readonly byte[] _ram        = new byte[MainRamSize];
         private readonly byte[] _bios       = new byte[BiosRomSize];
@@ -52,6 +56,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         /// <summary>The EE interrupt controller.</summary>
         public INTC Intc { get; } = new INTC();
+
+        /// <summary>The EE DMA controller.</summary>
+        public DMAC Dmac { get; } = new DMAC();
+
+        /// <summary>The sub-bus interface (EE ↔ IOP communication).</summary>
+        public SIF Sif { get; } = new SIF();
 
         /// <summary>Exposes main RAM so callers can bulk-load programs.</summary>
         public byte[] Ram => _ram;
@@ -131,6 +141,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 return ReadTimerWord(paddr);
             if (paddr >= IntcBase && paddr < IntcBase + 0x20u)
                 return Intc.ReadRegister(paddr - IntcBase);
+            if (paddr >= SifBase && paddr < SifBase + 0x70u)
+                return Sif.ReadRegister(paddr - SifBase);
+
+            // Hardware I/O: DMAC channels (0x10008000-0x1000DFFF) and global regs (0x1000E000-0x1000E0FF)
+            if (DMAC.TryDecodeChannelAddress(paddr, out int chIdx, out uint chReg))
+                return Dmac.Channels[chIdx].ReadRegister(chReg);
+            if (DMAC.IsGlobalRegion(paddr))
+                return Dmac.ReadGlobal(paddr - 0x1000E000u);
 
             (byte[] region, uint offset) = MapPhysical(paddr);
             // Fast path if all 4 bytes fit in the same region
@@ -153,6 +171,25 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (paddr >= IntcBase && paddr < IntcBase + 0x20u)
             {
                 Intc.WriteRegister(paddr - IntcBase, value);
+                return;
+            }
+            if (paddr >= SifBase && paddr < SifBase + 0x70u)
+            {
+                Sif.WriteRegister(paddr - SifBase, value);
+                return;
+            }
+
+            // Hardware I/O: DMAC channel registers — execute transfer if CHCR.STR is set.
+            if (DMAC.TryDecodeChannelAddress(paddr, out int chIdx, out uint chReg))
+            {
+                Dmac.Channels[chIdx].WriteRegister(chReg, value);
+                if (chReg == DmacChannel.REG_CHCR && Dmac.Channels[chIdx].IsRunning)
+                    Dmac.ExecuteChannel(chIdx, this);
+                return;
+            }
+            if (DMAC.IsGlobalRegion(paddr))
+            {
+                Dmac.WriteGlobal(paddr - 0x1000E000u, value);
                 return;
             }
 

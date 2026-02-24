@@ -61,6 +61,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// </summary>
         public event EventHandler<uint>? InterruptPending;
 
+        /// <summary>
+        /// Raised when a DMAC channel completes a transfer and its D_STAT enable bit
+        /// is set.  The event argument is the 0-based channel index (0–9).
+        /// </summary>
+        public event EventHandler<int>? DmaChannelComplete;
+
         public PS2Emulator(PS2MemoryBus? bus = null)
         {
             Bus = bus ?? new PS2MemoryBus();
@@ -75,6 +81,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             // Wire timer interrupt events to INTC
             WireTimerInterrupts();
+
+            // Wire DMAC channel-complete events
+            WireDmacEvents();
 
             Reset();
         }
@@ -93,6 +102,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 Bus.Timers[i].OverflowInterruptPending += (_, _) =>
                     Bus.Intc.RaiseInterrupt(Hardware.INTC.INT_TIMER0 + timerIndex);
             }
+        }
+
+        /// <summary>
+        /// Subscribe DMAC channel-complete events and forward them through the
+        /// <see cref="DmaChannelComplete"/> event so callers can act on DMA
+        /// completion (e.g. raise an INTC interrupt or wake a waiting thread).
+        /// </summary>
+        private void WireDmacEvents()
+        {
+            Bus.Dmac.ChannelTransferComplete += (_, chIdx) =>
+                DmaChannelComplete?.Invoke(this, chIdx);
         }
 
         /// <summary>

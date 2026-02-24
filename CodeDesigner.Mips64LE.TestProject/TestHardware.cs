@@ -556,5 +556,387 @@ namespace CodeDesigner.Mips64LE.TestProject
             buf[offset + 0] = (byte)(value);
             buf[offset + 1] = (byte)(value >> 8);
         }
+
+        // =====================================================================
+        // DMAC unit tests
+        // =====================================================================
+
+        [TestMethod]
+        public void DmacChannel_InitialState_IsNotRunning()
+        {
+            var ch = new DmacChannel(0);
+            Assert.IsFalse(ch.IsRunning, "Channel must not be running at startup");
+            Assert.AreEqual(0u, ch.Qwc);
+            Assert.AreEqual(0u, ch.Madr);
+        }
+
+        [TestMethod]
+        public void DmacChannel_WriteChcr_SetsFields()
+        {
+            var ch = new DmacChannel(2);
+            // DIR=1, MOD=00, STR=1 → CHCR = 0x0101
+            ch.WriteRegister(DmacChannel.REG_CHCR, 0x0101u);
+            Assert.IsTrue(ch.IsRunning,             "STR bit must be reflected in IsRunning");
+            Assert.IsTrue(ch.DirectionToMemory,     "DIR bit must be reflected in DirectionToMemory");
+            Assert.AreEqual(0, ch.Mode,             "MOD must be 0 (normal) when bits [3:2] are 0");
+        }
+
+        [TestMethod]
+        public void DmacChannel_NormalMode_RamToFifo_AdvancesMadr()
+        {
+            var bus  = new PS2MemoryBus();
+            var dmac = new DMAC();
+            // Populate source memory
+            bus.WriteWord(0x00100000u, 0xDEADBEEFu);
+
+            dmac.Channels[2].WriteRegister(DmacChannel.REG_MADR, 0x00100000u);
+            dmac.Channels[2].WriteRegister(DmacChannel.REG_QWC,  2u);      // 2 QW = 32 bytes
+            dmac.Channels[2].WriteRegister(DmacChannel.REG_CHCR, 0x0100u); // STR=1, DIR=0
+
+            dmac.ExecuteChannel(2, bus);
+
+            Assert.IsFalse(dmac.Channels[2].IsRunning, "STR must be cleared after transfer");
+            Assert.AreEqual(0u,          dmac.Channels[2].Qwc,  "QWC must be 0 after transfer");
+            Assert.AreEqual(0x00100020u, dmac.Channels[2].Madr, "MADR must advance by QWC*16");
+            Assert.AreEqual(0xDEADBEEFu, bus.ReadWord(0x00100000u),
+                "Source RAM must be unchanged after RAM→FIFO transfer");
+        }
+
+        [TestMethod]
+        public void DmacChannel_NormalMode_FifoToRam_ZeroFillsDestination()
+        {
+            var bus  = new PS2MemoryBus();
+            var dmac = new DMAC();
+            bus.WriteWord(0x00200000u, 0xCAFEBABEu);
+            bus.WriteWord(0x00200004u, 0x12345678u);
+
+            dmac.Channels[5].WriteRegister(DmacChannel.REG_MADR, 0x00200000u);
+            dmac.Channels[5].WriteRegister(DmacChannel.REG_QWC,  1u);      // 1 QW = 16 bytes
+            dmac.Channels[5].WriteRegister(DmacChannel.REG_CHCR, 0x0101u); // STR=1, DIR=1
+
+            dmac.ExecuteChannel(5, bus);
+
+            Assert.IsFalse(dmac.Channels[5].IsRunning, "STR must be cleared");
+            Assert.AreEqual(0u, bus.ReadWord(0x00200000u), "FIFO→RAM must zero-fill destination");
+            Assert.AreEqual(0u, bus.ReadWord(0x00200004u), "FIFO→RAM must zero-fill all 16 bytes");
+        }
+
+        [TestMethod]
+        public void DmacChannel_TransferComplete_EventFires()
+        {
+            var bus  = new PS2MemoryBus();
+            var dmac = new DMAC();
+            dmac.Channels[0].WriteRegister(DmacChannel.REG_MADR, 0u);
+            dmac.Channels[0].WriteRegister(DmacChannel.REG_QWC,  4u);
+            dmac.Channels[0].WriteRegister(DmacChannel.REG_CHCR, 0x0100u);
+
+            bool fired = false;
+            dmac.Channels[0].TransferComplete += (_, _) => fired = true;
+
+            dmac.ExecuteChannel(0, bus);
+
+            Assert.IsTrue(fired, "TransferComplete event must fire on normal-mode completion");
+        }
+
+        [TestMethod]
+        public void DmacChannel_ReadWriteRegisters_RoundTrip()
+        {
+            var ch = new DmacChannel(1);
+            ch.WriteRegister(DmacChannel.REG_MADR, 0xAABBCCDDu);
+            ch.WriteRegister(DmacChannel.REG_QWC,  0x0000007Fu);
+            ch.WriteRegister(DmacChannel.REG_TADR, 0x11223344u);
+            ch.WriteRegister(DmacChannel.REG_SADR, 0x70001000u);
+
+            Assert.AreEqual(0xAABBCCDDu, ch.ReadRegister(DmacChannel.REG_MADR));
+            Assert.AreEqual(0x0000007Fu, ch.ReadRegister(DmacChannel.REG_QWC));
+            Assert.AreEqual(0x11223344u, ch.ReadRegister(DmacChannel.REG_TADR));
+            Assert.AreEqual(0x70001000u, ch.ReadRegister(DmacChannel.REG_SADR));
+        }
+
+        [TestMethod]
+        public void DMAC_InitialState_AllChannelsIdle()
+        {
+            var dmac = new DMAC();
+            for (int i = 0; i < DMAC.ChannelCount; i++)
+                Assert.IsFalse(dmac.Channels[i].IsRunning,
+                    $"Channel {i} must not be running at startup");
+        }
+
+        [TestMethod]
+        public void DMAC_DStatWrite_W1CandToggle()
+        {
+            var dmac = new DMAC();
+            var bus  = new PS2MemoryBus();
+
+            // Simulate two channel completions (zero-QWC normal transfers set D_STAT bits)
+            dmac.Channels[0].WriteRegister(DmacChannel.REG_CHCR, 0x0100u); // STR=1, QWC=0
+            dmac.ExecuteChannel(0, bus);
+            dmac.Channels[1].WriteRegister(DmacChannel.REG_CHCR, 0x0100u);
+            dmac.ExecuteChannel(1, bus);
+
+            Assert.AreNotEqual(0u, dmac.Stat & 0x3u, "D_STAT bits 0 and 1 must be set after completions");
+
+            // W1C: clear bit 0 only
+            dmac.WriteGlobal(DMAC.REG_STAT, 0x0001u);
+            Assert.AreEqual(0u, dmac.Stat & 0x1u, "D_STAT bit 0 must be W1C cleared");
+            Assert.AreNotEqual(0u, dmac.Stat & 0x2u, "D_STAT bit 1 must remain set");
+
+            // Toggle upper half: enable channel 1 interrupt (bit 17)
+            dmac.WriteGlobal(DMAC.REG_STAT, 0x00020000u);
+            Assert.AreNotEqual(0u, dmac.Stat & 0x00020000u, "D_STAT bit 17 must be toggled on");
+            dmac.WriteGlobal(DMAC.REG_STAT, 0x00020000u);
+            Assert.AreEqual(0u, dmac.Stat & 0x00020000u, "D_STAT bit 17 must toggle back to 0");
+        }
+
+        [TestMethod]
+        public void DMAC_ChannelTransferComplete_EventFiredWhenEnabled()
+        {
+            var dmac = new DMAC();
+            var bus  = new PS2MemoryBus();
+
+            // Enable channel 2 interrupt in D_STAT (toggle bit 18)
+            dmac.WriteGlobal(DMAC.REG_STAT, 1u << 18);
+
+            int completedChannel = -1;
+            dmac.ChannelTransferComplete += (_, ch) => completedChannel = ch;
+
+            dmac.Channels[2].WriteRegister(DmacChannel.REG_CHCR, 0x0100u);
+            dmac.ExecuteChannel(2, bus);
+
+            Assert.AreEqual(2, completedChannel,
+                "ChannelTransferComplete must fire with the correct channel index");
+        }
+
+        [TestMethod]
+        public void DMAC_ChannelTransferComplete_NotFiredWhenDisabled()
+        {
+            var dmac = new DMAC();
+            var bus  = new PS2MemoryBus();
+
+            // D_STAT enable bit NOT set for channel 3
+            bool fired = false;
+            dmac.ChannelTransferComplete += (_, _) => fired = true;
+
+            dmac.Channels[3].WriteRegister(DmacChannel.REG_CHCR, 0x0100u);
+            dmac.ExecuteChannel(3, bus);
+
+            Assert.IsFalse(fired,
+                "ChannelTransferComplete must NOT fire when channel enable bit is unset");
+            Assert.AreNotEqual(0u, dmac.Stat & (1u << 3),
+                "D_STAT pending bit must still be set even when enable bit is unset");
+        }
+
+        [TestMethod]
+        public void DMAC_GlobalRegisters_RoundTrip()
+        {
+            var dmac = new DMAC();
+            dmac.WriteGlobal(DMAC.REG_CTRL,  0x00000001u);  // DMAE=1
+            dmac.WriteGlobal(DMAC.REG_PCR,   0x80000001u);
+            dmac.WriteGlobal(DMAC.REG_SQWC,  0x00010001u);
+            dmac.WriteGlobal(DMAC.REG_RBSR,  0x00100000u);
+            dmac.WriteGlobal(DMAC.REG_RBOR,  0x00200000u);
+            dmac.WriteGlobal(DMAC.REG_STADR, 0x00300000u);
+
+            Assert.AreEqual(0x00000001u, dmac.ReadGlobal(DMAC.REG_CTRL));
+            Assert.AreEqual(0x80000001u, dmac.ReadGlobal(DMAC.REG_PCR));
+            Assert.AreEqual(0x00010001u, dmac.ReadGlobal(DMAC.REG_SQWC));
+            Assert.AreEqual(0x00100000u, dmac.ReadGlobal(DMAC.REG_RBSR));
+            Assert.AreEqual(0x00200000u, dmac.ReadGlobal(DMAC.REG_RBOR));
+            Assert.AreEqual(0x00300000u, dmac.ReadGlobal(DMAC.REG_STADR));
+        }
+
+        // =====================================================================
+        // DMAC I/O register routing via PS2MemoryBus
+        // =====================================================================
+
+        [TestMethod]
+        public void MemoryBus_DmacChannel0_MadrQwcReadWrite()
+        {
+            var bus = new PS2MemoryBus();
+            // CH0 VIF0 base = 0x10008000; MADR at +0x10, QWC at +0x20
+            bus.WriteWord(0x10008010u, 0x00500000u);
+            bus.WriteWord(0x10008020u, 8u);
+
+            Assert.AreEqual(0x00500000u, bus.ReadWord(0x10008010u), "CH0 MADR read-back");
+            Assert.AreEqual(8u,          bus.ReadWord(0x10008020u), "CH0 QWC read-back");
+        }
+
+        [TestMethod]
+        public void MemoryBus_DmacChannel2_GIF_BaseAddress()
+        {
+            var bus = new PS2MemoryBus();
+            // CH2 GIF base = 0x1000A000
+            bus.WriteWord(0x1000A010u, 0x00A00000u);
+            Assert.AreEqual(0x00A00000u, bus.ReadWord(0x1000A010u), "CH2 (GIF) MADR read-back");
+        }
+
+        [TestMethod]
+        public void MemoryBus_DmacChannel5_SIF0_BaseAddress()
+        {
+            var bus = new PS2MemoryBus();
+            // CH5 SIF0 base = 0x1000C000
+            bus.WriteWord(0x1000C010u, 0x00C00000u);
+            Assert.AreEqual(0x00C00000u, bus.ReadWord(0x1000C010u), "CH5 (SIF0) MADR read-back");
+        }
+
+        [TestMethod]
+        public void MemoryBus_DmacChcr_Write_ExecutesTransfer()
+        {
+            var bus = new PS2MemoryBus();
+            // CH0 VIF0: set MADR, QWC, then write CHCR with STR=1 to trigger transfer
+            bus.WriteWord(0x10008010u, 0x00100000u); // MADR
+            bus.WriteWord(0x10008020u, 2u);           // QWC = 2 quadwords
+            // Write CHCR with STR=1, DIR=0 (RAM→FIFO)
+            bus.WriteWord(0x10008000u, 0x0100u);
+
+            // After WriteWord to CHCR the bus calls ExecuteChannel synchronously.
+            // STR should be cleared and D_STAT bit 0 should be set.
+            Assert.IsFalse(bus.Dmac.Channels[0].IsRunning, "STR must be cleared after transfer");
+            Assert.AreNotEqual(0u, bus.Dmac.Stat & 1u,    "D_STAT bit 0 must be set after CH0 completion");
+        }
+
+        [TestMethod]
+        public void MemoryBus_DmacGlobal_Ctrl_ReadWrite()
+        {
+            var bus = new PS2MemoryBus();
+            bus.WriteWord(0x1000E000u, 0x00000001u); // D_CTRL DMAE=1
+            Assert.AreEqual(0x00000001u, bus.ReadWord(0x1000E000u), "D_CTRL read-back via bus");
+        }
+
+        [TestMethod]
+        public void MemoryBus_DmacGlobal_Stat_ReadWrite()
+        {
+            var bus = new PS2MemoryBus();
+            // Execute a zero-QWC transfer on CH0 to set D_STAT bit 0
+            bus.WriteWord(0x10008000u, 0x0100u);
+            uint stat = bus.ReadWord(0x1000E010u);
+            Assert.AreNotEqual(0u, stat & 1u, "D_STAT bit 0 must be readable via bus");
+        }
+
+        [TestMethod]
+        public void Emulator_DmaChannelComplete_EventFired()
+        {
+            var emu = new PS2Emulator();
+
+            // Enable CH2 (GIF) interrupt in D_STAT (toggle bit 18)
+            emu.Bus.WriteWord(0x1000E010u, 1u << 18);
+
+            int completedCh = -1;
+            emu.DmaChannelComplete += (_, ch) => completedCh = ch;
+
+            // Program CH2 and start DMA via CHCR write
+            emu.Bus.WriteWord(0x1000A010u, 0x00500000u);  // MADR
+            emu.Bus.WriteWord(0x1000A020u, 4u);            // QWC
+            emu.Bus.WriteWord(0x1000A000u, 0x0100u);       // CHCR STR=1, DIR=0
+
+            Assert.AreEqual(2, completedCh, "DmaChannelComplete must fire with channel index 2");
+        }
+
+        // =====================================================================
+        // SIF unit tests
+        // =====================================================================
+
+        [TestMethod]
+        public void SIF_InitialState_AllZero()
+        {
+            var sif = new SIF();
+            Assert.AreEqual(0u, sif.MsCom);
+            Assert.AreEqual(0u, sif.SmCom);
+            Assert.AreEqual(0u, sif.MsFlag);
+            Assert.AreEqual(0u, sif.SmFlag);
+            Assert.AreEqual(0u, sif.F240);
+        }
+
+        [TestMethod]
+        public void SIF_MsCom_PlainWrite()
+        {
+            var sif = new SIF();
+            sif.WriteRegister(SIF.REG_MSCOM, 0xDEAD1234u);
+            Assert.AreEqual(0xDEAD1234u, sif.ReadRegister(SIF.REG_MSCOM));
+            Assert.AreEqual(0xDEAD1234u, sif.MsCom);
+        }
+
+        [TestMethod]
+        public void SIF_SmCom_PlainWrite()
+        {
+            var sif = new SIF();
+            sif.WriteRegister(SIF.REG_SMCOM, 0xBEEF5678u);
+            Assert.AreEqual(0xBEEF5678u, sif.SmCom);
+        }
+
+        [TestMethod]
+        public void SIF_MsFlag_Write1ToSet()
+        {
+            var sif = new SIF();
+            sif.WriteRegister(SIF.REG_MSFLAG, 0x0000000Fu);  // set bits 0-3
+            Assert.AreEqual(0x0Fu, sif.MsFlag, "MSFLAG must OR (W1S) on write");
+
+            sif.WriteRegister(SIF.REG_MSFLAG, 0x000000F0u);  // set bits 4-7
+            Assert.AreEqual(0xFFu, sif.MsFlag, "MSFLAG must accumulate set bits");
+        }
+
+        [TestMethod]
+        public void SIF_SmFlag_Write1ToClear()
+        {
+            var sif = new SIF();
+            // SMFLAG uses write-1-to-clear (W1C) semantics.
+            // Writing bits to a register that starts at zero must leave it at zero.
+            sif.WriteRegister(SIF.REG_SMFLAG, 0x0000000Fu);
+            Assert.AreEqual(0u, sif.SmFlag, "W1C on zero SMFLAG must remain 0");
+        }
+
+        [TestMethod]
+        public void SIF_F240_HandshakeRegister()
+        {
+            var sif = new SIF();
+            sif.WriteRegister(SIF.REG_F240, 0xBEEF0000u);
+            Assert.AreEqual(0xBEEF0000u, sif.F240);
+            Assert.AreEqual(0xBEEF0000u, sif.ReadRegister(SIF.REG_F240));
+        }
+
+        [TestMethod]
+        public void SIF_UnknownOffset_ReturnsZero()
+        {
+            var sif = new SIF();
+            Assert.AreEqual(0u, sif.ReadRegister(0xFFu), "Unknown SIF offset must return 0");
+        }
+
+        // =====================================================================
+        // SIF I/O register routing via PS2MemoryBus
+        // =====================================================================
+
+        [TestMethod]
+        public void MemoryBus_Sif_MsCom_ReadWrite()
+        {
+            var bus = new PS2MemoryBus();
+            bus.WriteWord(0x1000F200u, 0xABCD1234u);
+            Assert.AreEqual(0xABCD1234u, bus.ReadWord(0x1000F200u), "MSCOM read-back via bus");
+        }
+
+        [TestMethod]
+        public void MemoryBus_Sif_SmFlag_W1C()
+        {
+            var bus = new PS2MemoryBus();
+            // SMFLAG is W1C; writing to a zero register keeps it zero
+            bus.WriteWord(0x1000F230u, 0xFFFFFFFFu);
+            Assert.AreEqual(0u, bus.ReadWord(0x1000F230u), "SMFLAG W1C on zero must remain 0");
+        }
+
+        [TestMethod]
+        public void MemoryBus_Sif_F240_ReadWrite()
+        {
+            var bus = new PS2MemoryBus();
+            bus.WriteWord(0x1000F240u, 0x000000BFu); // typical BIOS handshake value
+            Assert.AreEqual(0x000000BFu, bus.ReadWord(0x1000F240u), "F240 read-back via bus");
+        }
+
+        [TestMethod]
+        public void MemoryBus_Sif_MsFlag_W1S()
+        {
+            var bus = new PS2MemoryBus();
+            bus.WriteWord(0x1000F220u, 0x00000001u);
+            bus.WriteWord(0x1000F220u, 0x00000002u);
+            Assert.AreEqual(0x00000003u, bus.ReadWord(0x1000F220u), "MSFLAG must OR set bits");
+        }
     }
 }
