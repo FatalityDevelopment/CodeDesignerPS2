@@ -1,6 +1,7 @@
 using CodeDesigner.Mips64LE.Common.Cpu.InstrArgs;
 using CodeDesigner.Mips64LE.Common.CPU;
 using System;
+using System.Numerics;
 /*
 | Instruction | Description |
 |-------------|-------------|
@@ -161,7 +162,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 long result = checked(rs + rt);
                 cpu.RegsLo[args.Rd] = (ulong)result;
-                cpu.RegsHi[args.Rd] = 0;
+                cpu.RegsHi[args.Rd] = result < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
             }
             catch (OverflowException)
             {
@@ -217,7 +218,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong rt = cpu.RegsLo[args.Rt];
             ulong result = rs + rt;
             cpu.RegsLo[args.Rd] = result;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = ((long)result < 0) ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -377,7 +378,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 long result = checked(rs - rt);
                 cpu.RegsLo[args.Rd] = (ulong)result;
-                cpu.RegsHi[args.Rd] = 0;
+                cpu.RegsHi[args.Rd] = result < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
             }
             catch (OverflowException)
             {
@@ -433,7 +434,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong rt = cpu.RegsLo[args.Rt];
             ulong result = rs - rt;
             cpu.RegsLo[args.Rd] = result;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = ((long)result < 0) ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -666,8 +667,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
             long result = rs * (long)rt;
             
-            cpu.LO = (uint)(result & 0xFFFFFFFF);
-            cpu.HI = (uint)(result >> 32 & 0xFFFFFFFF);
+            // EE sign-extends each 32-bit half to 64 bits when writing to HI/LO
+            cpu.LO = (ulong)(long)(int)(result & 0xFFFFFFFF);
+            cpu.HI = (ulong)(long)(int)(result >> 32);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -706,8 +708,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
             ulong result = rs * (ulong)rt;
             
-            cpu.LO = (uint)(result & 0xFFFFFFFF);
-            cpu.HI = (uint)(result >> 32 & 0xFFFFFFFF);
+            // EE sign-extends each 32-bit half to 64 bits when writing to HI/LO
+            cpu.LO = (ulong)(long)(int)(result & 0xFFFFFFFF);
+            cpu.HI = (ulong)(long)(int)(result >> 32);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -745,25 +748,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
             
-            // 64-bit x 64-bit = 128-bit result
-            ulong absRs = (ulong)Math.Abs(rs);
-            ulong absRt = (ulong)Math.Abs(rt);
-            bool negative = rs < 0 ^ rt < 0;
-            
-            // Multiply as unsigned
-            ulong low = absRs * absRt;
-            ulong high = Math.BigMul(absRs, absRt, out _);
-            
-            if (negative)
-            {
-                // Two's complement negation for 128-bit
-                low = ~low + 1;
-                high = ~high;
-                if (low == 0) high++;
-            }
-            
-            cpu.LO = low;
-            cpu.HI = high;
+            // Use BigInteger to handle the long.MinValue case safely
+            var product = (System.Numerics.BigInteger)rs * rt;
+            cpu.LO = (ulong)(product & 0xFFFFFFFFFFFFFFFF);
+            cpu.HI = (ulong)((product >> 64) & 0xFFFFFFFFFFFFFFFF);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -845,21 +833,23 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (rt == 0)
             {
                 // Division by zero - undefined behavior on MIPS
-                cpu.LO = rs >= 0 ? 0xFFFFFFFF : 1;
-                cpu.HI = (uint)rs;
+                // EE: LO = 0xFFFFFFFF (-1) sign-extended if rs>=0, else 1; HI = sign-extended rs
+                cpu.LO = rs >= 0 ? 0xFFFFFFFFFFFFFFFFUL : 1UL;
+                cpu.HI = (ulong)(long)rs;
             }
             else if (rs == int.MinValue && rt == -1)
             {
-                // Overflow case
-                cpu.LO = unchecked((uint)int.MinValue);
+                // Overflow case - EE sign-extends result
+                cpu.LO = unchecked((ulong)(long)int.MinValue);
                 cpu.HI = 0;
             }
             else
             {
                 int quotient = rs / rt;
                 int remainder = rs % rt;
-                cpu.LO = (uint)quotient;
-                cpu.HI = (uint)remainder;
+                // EE sign-extends 32-bit results to 64-bit in HI/LO
+                cpu.LO = (ulong)(long)quotient;
+                cpu.HI = (ulong)(long)remainder;
             }
         }
 
@@ -900,16 +890,17 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             
             if (rt == 0)
             {
-                // Division by zero
-                cpu.LO = 0xFFFFFFFF;
-                cpu.HI = rs;
+                // Division by zero - EE sign-extends 32-bit results
+                cpu.LO = 0xFFFFFFFFFFFFFFFFUL; // -1 sign-extended
+                cpu.HI = (ulong)(long)(int)rs;
             }
             else
             {
                 uint quotient = rs / rt;
                 uint remainder = rs % rt;
-                cpu.LO = quotient;
-                cpu.HI = remainder;
+                // EE sign-extends 32-bit results to 64-bit in HI/LO
+                cpu.LO = (ulong)(long)(int)quotient;
+                cpu.HI = (ulong)(long)(int)remainder;
             }
         }
 
@@ -1052,7 +1043,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.RegsLo[args.Rd] = cpu.HI;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = ((long)cpu.HI < 0) ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -1088,7 +1079,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         public override void Exec(CpuState cpu, Args_R args)
         {
             cpu.RegsLo[args.Rd] = cpu.LO;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = ((long)cpu.LO < 0) ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)

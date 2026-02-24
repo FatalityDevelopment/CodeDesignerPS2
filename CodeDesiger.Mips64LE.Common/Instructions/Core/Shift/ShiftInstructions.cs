@@ -188,7 +188,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int sa = args.Shamt;
             ulong result = rt << sa;
             cpu.RegsLo[args.Rd] = result;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = ((long)result < 0) ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -237,7 +237,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int sa = args.Shamt;
             ulong result = rt >> sa;
             cpu.RegsLo[args.Rd] = result;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = ((long)result < 0) ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -286,7 +286,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int sa = args.Shamt;
             long result = rt >> sa;
             cpu.RegsLo[args.Rd] = (ulong)result;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = result < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -593,7 +593,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int sa = rs & 0x3F; // Use only lower 6 bits
             long result = rt >> sa;
             cpu.RegsLo[args.Rd] = (ulong)result;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = result < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -644,7 +644,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int sa = args.Shamt + 32;
             ulong result = rt << sa;
             cpu.RegsLo[args.Rd] = result;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = ((long)result < 0) ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -694,7 +694,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int sa = args.Shamt + 32;
             ulong result = rt >> sa;
             cpu.RegsLo[args.Rd] = result;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = ((long)result < 0) ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -744,7 +744,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int sa = args.Shamt + 32;
             long result = rt >> sa;
             cpu.RegsLo[args.Rd] = (ulong)result;
-            cpu.RegsHi[args.Rd] = 0;
+            cpu.RegsHi[args.Rd] = result < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)

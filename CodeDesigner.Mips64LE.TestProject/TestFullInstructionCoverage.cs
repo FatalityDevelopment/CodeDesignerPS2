@@ -1491,155 +1491,165 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void Test_ADD_S()
         {
-            // add.s $f1, $f1, $f1  => 0x46010800 (from existing test)
-            uint enc = 0x46010800u;
+            // add.s $f2, $f0, $f1 => fd=f2(shamt), fs=f0(rd), ft=f1(rt), funct=0x00
+            // enc: opcode=0x11, fmt=0x10, ft=1, fs=0, fd=2, funct=0x00
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | (2 << 6) | 0x00);
             AssertDisasm(enc, "add.s");
             var cpu = MakeCpu();
-            // Rs in decoded R-type = 0x10 (format field) → FPR[16]
-            // Set FPR values based on how the instruction will decode
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 1.5f;
+            // fs=f0=decoded.Rd, ft=f1=decoded.Rt, fd=f2=decoded.Shamt
+            cpu.FPR[decoded.Rd] = 1.5f;
             cpu.FPR[decoded.Rt] = 2.5f;
             Exec(cpu, enc);
-            Assert.AreEqual(4.0f, cpu.FPR[decoded.Rd], 0.001f, "ADD.S: 1.5+2.5=4.0");
+            Assert.AreEqual(4.0f, cpu.FPR[decoded.Shamt], 0.001f, "ADD.S: 1.5+2.5=4.0");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_SUB_S()
         {
-            uint enc = 0x46010801u; // sub.s $f1, $f1, $f1
+            // sub.s $f2, $f0, $f1 => fd=f2(shamt), fs=f0(rd), ft=f1(rt), funct=0x01
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | (2 << 6) | 0x01);
             AssertDisasm(enc, "sub.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 5.0f;
-            cpu.FPR[decoded.Rt] = 2.0f;
+            cpu.FPR[decoded.Rd] = 5.0f;  // fs
+            cpu.FPR[decoded.Rt] = 2.0f;  // ft
             Exec(cpu, enc);
-            Assert.AreEqual(3.0f, cpu.FPR[decoded.Rd], 0.001f, "SUB.S: 5-2=3");
+            Assert.AreEqual(3.0f, cpu.FPR[decoded.Shamt], 0.001f, "SUB.S: 5-2=3");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_MUL_S()
         {
-            uint enc = 0x46010802u;
+            // mul.s $f2, $f0, $f1 => fd=f2(shamt), fs=f0(rd), ft=f1(rt), funct=0x02
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | (2 << 6) | 0x02);
             AssertDisasm(enc, "mul.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 3.0f;
-            cpu.FPR[decoded.Rt] = 4.0f;
+            cpu.FPR[decoded.Rd] = 3.0f;  // fs
+            cpu.FPR[decoded.Rt] = 4.0f;  // ft
             Exec(cpu, enc);
-            Assert.AreEqual(12.0f, cpu.FPR[decoded.Rd], 0.001f, "MUL.S: 3*4=12");
+            Assert.AreEqual(12.0f, cpu.FPR[decoded.Shamt], 0.001f, "MUL.S: 3*4=12");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_DIV_S()
         {
-            uint enc = 0x46010803u;
+            // div.s $f2, $f0, $f1 => fd=f2(shamt), fs=f0(rd), ft=f1(rt), funct=0x03
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | (2 << 6) | 0x03);
             AssertDisasm(enc, "div.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 9.0f;
-            cpu.FPR[decoded.Rt] = 3.0f;
+            cpu.FPR[decoded.Rd] = 9.0f;  // fs
+            cpu.FPR[decoded.Rt] = 3.0f;  // ft
             Exec(cpu, enc);
-            Assert.AreEqual(3.0f, cpu.FPR[decoded.Rd], 0.001f, "DIV.S: 9/3=3");
+            Assert.AreEqual(3.0f, cpu.FPR[decoded.Shamt], 0.001f, "DIV.S: 9/3=3");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_SQRT_S()
         {
-            // sqrt.s $f1, $f1  => fmt=0x10, fs=$f1 at rd-position, fd=$f0 at shamt-position, funct=4
-            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 11) | (1 << 6) | 0x04);
+            // sqrt.s $f2, $f1 => fd=f2(shamt), fs=f1(rd), funct=0x04
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 11) | (2 << 6) | 0x04);
             AssertDisasm(enc, "sqrt.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 9.0f;
+            cpu.FPR[decoded.Rd] = 9.0f;  // fs=f1
             Exec(cpu, enc);
-            Assert.AreEqual(3.0f, cpu.FPR[decoded.Rd], 0.001f, "SQRT.S: sqrt(9)=3");
+            Assert.AreEqual(3.0f, cpu.FPR[decoded.Shamt], 0.001f, "SQRT.S: sqrt(9)=3");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_ABS_S()
         {
-            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 11) | (1 << 6) | 0x05);
+            // abs.s $f2, $f1 => fd=f2(shamt), fs=f1(rd), funct=0x05
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 11) | (2 << 6) | 0x05);
             AssertDisasm(enc, "abs.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = -5.0f;
+            cpu.FPR[decoded.Rd] = -5.0f;  // fs=f1
             Exec(cpu, enc);
-            Assert.AreEqual(5.0f, cpu.FPR[decoded.Rd], 0.001f, "ABS.S: |-5|=5");
+            Assert.AreEqual(5.0f, cpu.FPR[decoded.Shamt], 0.001f, "ABS.S: |-5|=5");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_MOV_S()
         {
-            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (2 << 11) | (1 << 6) | 0x06);
+            // mov.s $f2, $f1 => fd=f2(shamt), fs=f1(rd), funct=0x06
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 11) | (2 << 6) | 0x06);
             AssertDisasm(enc, "mov.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 7.77f;
+            cpu.FPR[decoded.Rd] = 7.77f;  // fs=f1
             Exec(cpu, enc);
-            Assert.AreEqual(7.77f, cpu.FPR[decoded.Rd], 0.001f, "MOV.S: copy");
+            Assert.AreEqual(7.77f, cpu.FPR[decoded.Shamt], 0.001f, "MOV.S: copy");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_NEG_S()
         {
-            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 11) | (1 << 6) | 0x07);
+            // neg.s $f2, $f1 => fd=f2(shamt), fs=f1(rd), funct=0x07
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 11) | (2 << 6) | 0x07);
             AssertDisasm(enc, "neg.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 3.5f;
+            cpu.FPR[decoded.Rd] = 3.5f;  // fs=f1
             Exec(cpu, enc);
-            Assert.AreEqual(-3.5f, cpu.FPR[decoded.Rd], 0.001f, "NEG.S: -(3.5)=-3.5");
+            Assert.AreEqual(-3.5f, cpu.FPR[decoded.Shamt], 0.001f, "NEG.S: -(3.5)=-3.5");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_CVT_W_S()
         {
-            // cvt.w.s $f1, $f1  => rs=0x10, funct=0x24
-            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 11) | (1 << 6) | 0x24);
+            // cvt.w.s $f2, $f1 => fd=f2(shamt), fs=f1(rd), funct=0x24
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 11) | (2 << 6) | 0x24);
             AssertDisasm(enc, "cvt.w.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 3.7f;
+            cpu.FPR[decoded.Rd] = 3.7f;  // fs=f1
             Exec(cpu, enc);
-            // Truncates to integer
+            // Result in fd: 3.7 truncated to 3 stored as IEEE bits
+            int resultBits = (int)BitConverter.SingleToUInt32Bits(cpu.FPR[decoded.Shamt]);
+            Assert.AreEqual(3, resultBits, "CVT.W.S: 3.7 truncates to 3");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_CVT_S_W()
         {
-            // cvt.s.w $f1, $f1  => rs=0x14, funct=0x20
-            uint enc = (uint)((0x11 << 26) | (0x14 << 21) | (1 << 11) | (1 << 6) | 0x20);
+            // cvt.s.w $f2, $f1 => fd=f2(shamt), fs=f1(rd), funct=0x20
+            uint enc = (uint)((0x11 << 26) | (0x14 << 21) | (1 << 11) | (2 << 6) | 0x20);
             AssertDisasm(enc, "cvt.s.w");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            // FPR[decoded.Rs] as integer bits = 5 => cvt to float 5.0
-            cpu.FPR[decoded.Rs] = BitConverter.Int32BitsToSingle(5);
+            // FPR[decoded.Rd] (fs=f1) as integer bits = 5 => cvt to float 5.0
+            cpu.FPR[decoded.Rd] = BitConverter.Int32BitsToSingle(5);
             Exec(cpu, enc);
-            Assert.AreEqual(5.0f, cpu.FPR[decoded.Rd], 0.001f, "CVT.S.W: int 5 -> 5.0f");
+            Assert.AreEqual(5.0f, cpu.FPR[decoded.Shamt], 0.001f, "CVT.S.W: int 5 -> 5.0f");
             AssertAnalysis(enc);
         }
 
         [TestMethod]
         public void Test_C_EQ_S()
         {
-            // c.eq.s $f0, $f1  => rs=0x10, funct=0x32
+            // c.eq.s $f0, $f1 => fs=f0(rd), ft=f1(rt), funct=0x32
             uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | 0x32);
             AssertDisasm(enc, "c.eq.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 1.5f;
+            // fs=decoded.Rd, ft=decoded.Rt
+            cpu.FPR[decoded.Rd] = 1.5f;
             cpu.FPR[decoded.Rt] = 1.5f;
-            Exec(cpu, enc); // Should set condition flag
+            Exec(cpu, enc); // Should set condition flag (equal)
+            Assert.IsTrue(cpu.COP1.GetConditionCode(), "C.EQ.S: 1.5==1.5 should set CC");
             AssertAnalysis(enc);
         }
 
@@ -1650,9 +1660,10 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertDisasm(enc, "c.lt.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
-            cpu.FPR[decoded.Rs] = 1.0f;
-            cpu.FPR[decoded.Rt] = 2.0f;
+            cpu.FPR[decoded.Rd] = 1.0f;  // fs
+            cpu.FPR[decoded.Rt] = 2.0f;  // ft
             Exec(cpu, enc);
+            Assert.IsTrue(cpu.COP1.GetConditionCode(), "C.LT.S: 1.0<2.0 should set CC");
             AssertAnalysis(enc);
         }
 
@@ -1662,7 +1673,11 @@ namespace CodeDesigner.Mips64LE.TestProject
             uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | 0x36);
             AssertDisasm(enc, "c.le.s");
             var cpu = MakeCpu();
+            var decoded = MipsDecoder.DecodeR(enc);
+            cpu.FPR[decoded.Rd] = 2.0f;  // fs
+            cpu.FPR[decoded.Rt] = 2.0f;  // ft
             Exec(cpu, enc);
+            Assert.IsTrue(cpu.COP1.GetConditionCode(), "C.LE.S: 2.0<=2.0 should set CC");
             AssertAnalysis(enc);
         }
 

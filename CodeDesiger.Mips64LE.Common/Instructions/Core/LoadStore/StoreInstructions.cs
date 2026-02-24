@@ -272,8 +272,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                                       (cpu.Memory[alignedAddr + 3] << 24));
             
             // Merge and write back
-            uint mask = 0xFFFFFFFFu << shift;
-            uint result = (existingWord & ~mask) | (value >> (32 - shift * 8));
+            // In LE mode: preserve lower byteOff bytes of existing word, replace upper (4-byteOff) bytes with rt shifted left
+            int byteOff = (int)(addr & 3);
+            uint mask = byteOff > 0 ? (1u << (byteOff * 8)) - 1u : 0u;
+            uint result = (existingWord & mask) | (value << (byteOff * 8));
             
             cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
             cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
@@ -339,8 +341,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                                       (cpu.Memory[alignedAddr + 3] << 24));
             
             // Merge and write back
+            // In LE mode: preserve upper (shift) bits, replace lower (byteOff+1) bytes of existing word with rt's lower bytes
             uint mask = 0xFFFFFFFFu >> shift;
-            uint result = (existingWord & ~mask) | (value << (32 - shift * 8));
+            uint result = (existingWord & ~mask) | (value & mask);
             
             cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
             cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
@@ -410,8 +413,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                                  ((ulong)cpu.Memory[alignedAddr + 7] << 56);
             
             // Merge and write back
-            ulong mask = 0xFFFFFFFFFFFFFFFFul << shift;
-            ulong result = (existingDword & ~mask) | (value >> (64 - shift * 8));
+            // In LE mode: preserve lower byteOff bytes of existing dword, replace upper (8-byteOff) bytes with value shifted left
+            int byteOff = (int)(addr & 7);
+            ulong mask = byteOff > 0 ? (1ul << (byteOff * 8)) - 1ul : 0ul;
+            ulong result = (existingDword & mask) | (value << (byteOff * 8));
             
             cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
             cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
@@ -485,8 +490,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                                  ((ulong)cpu.Memory[alignedAddr + 7] << 56);
             
             // Merge and write back
+            // In LE mode: preserve upper (shift) bits, replace lower (byteOff+1) bytes of existing dword with value's lower bytes
             ulong mask = 0xFFFFFFFFFFFFFFFFul >> shift;
-            ulong result = (existingDword & ~mask) | (value << (64 - shift * 8));
+            ulong result = (existingDword & ~mask) | (value & mask);
             
             cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
             cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
