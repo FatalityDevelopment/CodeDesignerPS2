@@ -72,6 +72,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             {
                 Memory = Bus.Ram
             };
+            WireTimerInterrupts();
             Reset();
         }
 
@@ -254,16 +255,34 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         }
 
         /// <summary>
-        /// Tick IOP hardware (check INTC) by <paramref name="cycles"/> cycles.
-        /// Raises <see cref="InterruptPending"/> when I_STAT &amp; I_MASK != 0.
+        /// Tick IOP hardware by <paramref name="cycles"/> IOP sysclock cycles.
+        /// Advances all six timers and raises <see cref="InterruptPending"/> when
+        /// I_STAT &amp; I_MASK != 0.
         /// </summary>
         public void TickHardware(uint cycles = 1)
         {
-            // Future: advance IOP timers here when IopTimers are implemented.
-            _ = cycles;
+            for (int i = 0; i < 6; i++)
+                Bus.Timers[i].Tick(cycles);
 
             if (Bus.IsInterruptPending)
                 InterruptPending?.Invoke(this, Bus.IStat);
+        }
+
+        // ── Timer → INTC wiring ───────────────────────────────────────────────
+        //
+        // INTC bits (PCSX2 IopCounters.cpp):
+        //   T0 → bit 4, T1 → bit 5, T2 → bit 6
+        //   T3 → bit 14, T4 → bit 15, T5 → bit 16
+
+        private void WireTimerInterrupts()
+        {
+            int[] bits = { 4, 5, 6, 14, 15, 16 };
+            for (int i = 0; i < 6; i++)
+            {
+                int intcBit = bits[i];
+                Bus.Timers[i].CompareInterruptPending  += (_, _) => Bus.RaiseInterrupt(intcBit);
+                Bus.Timers[i].OverflowInterruptPending += (_, _) => Bus.RaiseInterrupt(intcBit);
+            }
         }
 
         /// <summary>
