@@ -1376,7 +1376,348 @@ namespace CodeDesigner.Mips64LE.TestProject
                     $"RAM byte {i} must be zero-filled when no CDVD is attached");
         }
 
+        // =====================================================================
+        // PadState unit tests
+        // =====================================================================
+
+        [TestMethod]
+        public void PadState_InitialState_AllButtonsReleasedAndSticksCentred()
+        {
+            var pad = new PadState();
+            Assert.AreEqual(0xFFFF, pad.Buttons, "All buttons must be released (0xFFFF) initially");
+            Assert.AreEqual(0x80, pad.RightX, "RightX must be 0x80 (centre) initially");
+            Assert.AreEqual(0x80, pad.RightY, "RightY must be 0x80 (centre) initially");
+            Assert.AreEqual(0x80, pad.LeftX,  "LeftX must be 0x80 (centre) initially");
+            Assert.AreEqual(0x80, pad.LeftY,  "LeftY must be 0x80 (centre) initially");
+        }
+
+        [TestMethod]
+        public void PadState_Press_ClearsButtonBit()
+        {
+            var pad = new PadState();
+            pad.Press(PadState.BTN_CROSS);
+            Assert.AreEqual(0, pad.Buttons & PadState.BTN_CROSS, "BTN_CROSS bit must be 0 after Press");
+        }
+
+        [TestMethod]
+        public void PadState_Release_SetsButtonBit()
+        {
+            var pad = new PadState();
+            pad.Press(PadState.BTN_CROSS);
+            pad.Release(PadState.BTN_CROSS);
+            Assert.AreNotEqual(0, pad.Buttons & PadState.BTN_CROSS, "BTN_CROSS bit must be 1 after Release");
+        }
+
+        [TestMethod]
+        public void PadState_Press_MultipleMask_ClearsAllBits()
+        {
+            var pad = new PadState();
+            ushort mask = (ushort)(PadState.BTN_START | PadState.BTN_CROSS | PadState.BTN_CIRCLE);
+            pad.Press(mask);
+            Assert.AreEqual(0, pad.Buttons & mask, "All masked bits must be 0 after Press");
+        }
+
+        [TestMethod]
+        public void PadState_ProcessCommand_UnknownCommand_ReturnsAllFF()
+        {
+            var pad = new PadState();
+            byte[] resp = pad.ProcessCommand(new byte[] { 0x01, 0x44 }, 4);
+            Assert.AreEqual(4, resp.Length, "Response must have requested length");
+            foreach (byte b in resp)
+                Assert.AreEqual(0xFF, b, "Unknown command must return 0xFF for every byte");
+        }
+
+        [TestMethod]
+        public void PadState_ProcessCommand_Poll_HasCorrectDeviceIdAndAck()
+        {
+            var pad = new PadState();
+            byte[] resp = pad.ProcessCommand(new byte[] { PadState.AddrPad, PadState.CmdPoll }, 9);
+            Assert.AreEqual(9, resp.Length);
+            Assert.AreEqual(PadState.DeviceId, resp[1], "Response[1] must be DualShock2 device ID 0x73");
+            Assert.AreEqual(PadState.AckByte,  resp[2], "Response[2] must be acknowledge byte 0x5A");
+        }
+
+        [TestMethod]
+        public void PadState_ProcessCommand_Poll_AllButtonsReleasedByDefault()
+        {
+            var pad = new PadState();
+            byte[] resp = pad.ProcessCommand(new byte[] { PadState.AddrPad, PadState.CmdPoll, 0, 0, 0 }, 9);
+            // All buttons released → both button bytes must be 0xFF (active-low)
+            Assert.AreEqual(0xFF, resp[3], "Button byte 0 must be 0xFF (all released)");
+            Assert.AreEqual(0xFF, resp[4], "Button byte 1 must be 0xFF (all released)");
+        }
+
+        [TestMethod]
+        public void PadState_ProcessCommand_Poll_ReflectsPressedButton()
+        {
+            var pad = new PadState();
+            pad.Press(PadState.BTN_CROSS); // bit 14 → byte 1, bit 6
+            byte[] resp = pad.ProcessCommand(new byte[] { PadState.AddrPad, PadState.CmdPoll, 0, 0, 0 }, 9);
+            // BTN_CROSS is bit 14 → high byte (resp[4]), bit 6
+            Assert.AreEqual(0, resp[4] & (1 << 6), "Cross button bit must be 0 (pressed) in response byte 1");
+        }
+
+        [TestMethod]
+        public void PadState_ProcessCommand_Poll_ReflectsAnalogStickValues()
+        {
+            var pad = new PadState();
+            pad.RightX = 0x10;
+            pad.RightY = 0x20;
+            pad.LeftX  = 0x30;
+            pad.LeftY  = 0x40;
+            byte[] resp = pad.ProcessCommand(new byte[] { PadState.AddrPad, PadState.CmdPoll, 0, 0, 0 }, 9);
+            Assert.AreEqual(0x10, resp[5], "RightX must appear at resp[5]");
+            Assert.AreEqual(0x20, resp[6], "RightY must appear at resp[6]");
+            Assert.AreEqual(0x30, resp[7], "LeftX must appear at resp[7]");
+            Assert.AreEqual(0x40, resp[8], "LeftY must appear at resp[8]");
+        }
+
+        [TestMethod]
+        public void PadState_ProcessCommand_Poll_TruncatesResponseToRequestedLength()
+        {
+            var pad = new PadState();
+            byte[] resp = pad.ProcessCommand(new byte[] { PadState.AddrPad, PadState.CmdPoll }, 4);
+            Assert.AreEqual(4, resp.Length, "Response must be truncated to the requested length");
+            Assert.AreEqual(PadState.DeviceId, resp[1]);
+        }
+
+        // =====================================================================
+        // Sio2 unit tests
+        // =====================================================================
+
+        [TestMethod]
+        public void Sio2_Send3_ReadWrite_RoundTrip()
+        {
+            var sio2 = new Sio2();
+            // Write to SEND3[0] at offset 0x00, SEND3[3] at offset 0x0C
+            sio2.WriteRegister(0x00u, 0xDEADBEEFu);
+            sio2.WriteRegister(0x0Cu, 0x12345678u);
+            Assert.AreEqual(0xDEADBEEFu, sio2.ReadRegister(0x00u), "SEND3[0] round-trip");
+            Assert.AreEqual(0x12345678u, sio2.ReadRegister(0x0Cu), "SEND3[3] round-trip");
+        }
+
+        [TestMethod]
+        public void Sio2_Send1Send2_ReadWrite_RoundTrip()
+        {
+            var sio2 = new Sio2();
+            sio2.WriteRegister(0x40u, 0x11111111u);
+            sio2.WriteRegister(0x44u, 0x22222222u);
+            sio2.WriteRegister(0x48u, 0x33333333u);
+            sio2.WriteRegister(0x4Cu, 0x44444444u);
+            Assert.AreEqual(0x11111111u, sio2.ReadRegister(0x40u), "SEND1 port0");
+            Assert.AreEqual(0x22222222u, sio2.ReadRegister(0x44u), "SEND1 port1");
+            Assert.AreEqual(0x33333333u, sio2.ReadRegister(0x48u), "SEND2 port0");
+            Assert.AreEqual(0x44444444u, sio2.ReadRegister(0x4Cu), "SEND2 port1");
+        }
+
+        [TestMethod]
+        public void Sio2_FifoOut_ReturnsFF_WhenEmpty()
+        {
+            var sio2 = new Sio2();
+            uint val = sio2.ReadRegister(0x64u); // FIFO_OUT offset
+            Assert.AreEqual(0xFFu, val, "FIFO_OUT must return 0xFF when empty");
+        }
+
+        [TestMethod]
+        public void Sio2_Transfer_NoPad_FifoOut_AllFF()
+        {
+            var sio2 = new Sio2();
+            // SEND3[0]: port=0, sendLen=3, recvLen=3  (bits[16:8]=3, bits[26:18]=3)
+            sio2.WriteRegister(0x00u, BuildSend3(port: 0, sendLen: 3, recvLen: 3));
+            sio2.WriteRegister(0x60u, 0x01u); // FIFO_IN
+            sio2.WriteRegister(0x60u, 0x42u);
+            sio2.WriteRegister(0x60u, 0x00u);
+            sio2.WriteRegister(0x68u, 0x01u); // CTRL START
+
+            uint b0 = sio2.ReadRegister(0x64u);
+            uint b1 = sio2.ReadRegister(0x64u);
+            uint b2 = sio2.ReadRegister(0x64u);
+            Assert.AreEqual(0xFFu, b0, "No-device response byte 0 must be 0xFF");
+            Assert.AreEqual(0xFFu, b1, "No-device response byte 1 must be 0xFF");
+            Assert.AreEqual(0xFFu, b2, "No-device response byte 2 must be 0xFF");
+        }
+
+        [TestMethod]
+        public void Sio2_Transfer_WithPad_FifoOut_HasPollResponse()
+        {
+            var sio2 = new Sio2();
+            var pad  = new PadState();
+            sio2.Port0 = pad;
+
+            // SEND3[0]: port=0, sendLen=2 (addr+cmd), recvLen=9
+            sio2.WriteRegister(0x00u, BuildSend3(port: 0, sendLen: 2, recvLen: 9));
+            sio2.WriteRegister(0x60u, PadState.AddrPad);
+            sio2.WriteRegister(0x60u, PadState.CmdPoll);
+            sio2.WriteRegister(0x68u, 0x01u); // CTRL START
+
+            // Skip leading 0xFF
+            sio2.ReadRegister(0x64u);
+            uint devId = sio2.ReadRegister(0x64u);
+            uint ack   = sio2.ReadRegister(0x64u);
+            Assert.AreEqual((uint)PadState.DeviceId, devId, "Device ID must be 0x73");
+            Assert.AreEqual((uint)PadState.AckByte,  ack,   "Ack byte must be 0x5A");
+        }
+
+        [TestMethod]
+        public void Sio2_Transfer_TransferComplete_EventFires()
+        {
+            var sio2 = new Sio2();
+            sio2.WriteRegister(0x00u, BuildSend3(port: 0, sendLen: 1, recvLen: 1));
+            sio2.WriteRegister(0x60u, 0x00u);
+
+            bool fired = false;
+            sio2.TransferComplete += (_, _) => fired = true;
+
+            sio2.WriteRegister(0x68u, 0x01u); // CTRL START
+            Assert.IsTrue(fired, "TransferComplete must fire when transfer is executed");
+        }
+
+        [TestMethod]
+        public void Sio2_Transfer_Recv1_IsSuccessValueAfterTransfer()
+        {
+            var sio2 = new Sio2();
+            sio2.WriteRegister(0x00u, BuildSend3(port: 0, sendLen: 1, recvLen: 1));
+            sio2.WriteRegister(0x60u, 0x00u);
+            sio2.WriteRegister(0x68u, 0x01u); // CTRL START
+
+            Assert.AreEqual(Sio2.RECV1_SUCCESS, sio2.ReadRegister(0x70u),
+                "RECV1 must equal RECV1_SUCCESS after a completed transfer");
+        }
+
+        [TestMethod]
+        public void Sio2_Ctrl_Reset_ClearsFifos_And_ResetsSend3Head()
+        {
+            var sio2 = new Sio2();
+            var pad  = new PadState();
+            sio2.Port0 = pad;
+
+            // First transfer to populate FIFO_OUT
+            sio2.WriteRegister(0x00u, BuildSend3(port: 0, sendLen: 2, recvLen: 9));
+            sio2.WriteRegister(0x60u, PadState.AddrPad);
+            sio2.WriteRegister(0x60u, PadState.CmdPoll);
+            sio2.WriteRegister(0x68u, 0x01u); // START
+
+            // Write CTRL RESET — should clear FIFO_OUT so it reads back 0xFF
+            sio2.WriteRegister(0x68u, 0x04u); // CTRL RESET (bit 2)
+            uint val = sio2.ReadRegister(0x64u); // FIFO_OUT
+            Assert.AreEqual(0xFFu, val, "FIFO_OUT must return 0xFF after CTRL RESET");
+        }
+
+        [TestMethod]
+        public void Sio2_MultipleSend3Descriptors_ProcessedInSequence()
+        {
+            var sio2 = new Sio2();
+            var pad0 = new PadState();
+            var pad1 = new PadState();
+            pad0.Press(PadState.BTN_START);   // Start pressed on port 0
+            pad1.Press(PadState.BTN_CROSS);   // Cross pressed on port 1
+            sio2.Port0 = pad0;
+            sio2.Port1 = pad1;
+
+            // Two descriptors: port 0 and port 1, each poll 2 cmd → 9 recv
+            sio2.WriteRegister(0x00u, BuildSend3(port: 0, sendLen: 2, recvLen: 9));
+            sio2.WriteRegister(0x04u, BuildSend3(port: 1, sendLen: 2, recvLen: 9));
+
+            // FIFO_IN: cmd for port 0 then port 1
+            sio2.WriteRegister(0x60u, PadState.AddrPad); sio2.WriteRegister(0x60u, PadState.CmdPoll);
+            sio2.WriteRegister(0x60u, PadState.AddrPad); sio2.WriteRegister(0x60u, PadState.CmdPoll);
+
+            sio2.WriteRegister(0x68u, 0x01u); // START
+
+            // Port 0 response: 9 bytes — skip 0xFF, devId, ack; read button bytes
+            byte[] out0 = new byte[9];
+            for (int i = 0; i < 9; i++)
+                out0[i] = (byte)sio2.ReadRegister(0x64u);
+
+            // Port 1 response: 9 bytes
+            byte[] out1 = new byte[9];
+            for (int i = 0; i < 9; i++)
+                out1[i] = (byte)sio2.ReadRegister(0x64u);
+
+            // BTN_START is bit 3 in button byte 0 → out0[3] low nibble, bit 3 = 0 when pressed
+            Assert.AreEqual(0, out0[3] & (PadState.BTN_START & 0xFF),
+                "Port 0 button byte 0: Start bit must be 0 (pressed)");
+            // BTN_CROSS is bit 14 in the word → bit 6 of button byte 1 → out1[4] bit 6 = 0 when pressed
+            Assert.AreEqual(0, out1[4] & (int)((PadState.BTN_CROSS >> 8) & 0xFF),
+                "Port 1 button byte 1: Cross bit must be 0 (pressed)");
+        }
+
+        // =====================================================================
+        // IopMemoryBus + Sio2 integration tests
+        // =====================================================================
+
+        [TestMethod]
+        public void IopMemoryBus_Sio2Property_SetAndGet()
+        {
+            var bus  = new IopMemoryBus();
+            var sio2 = new Sio2();
+            bus.Sio2 = sio2;
+            Assert.AreSame(sio2, bus.Sio2, "Sio2 property must return the assigned instance");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_Sio2_WriteWordSend3_RoundTrip()
+        {
+            var bus  = new IopMemoryBus();
+            var sio2 = new Sio2();
+            bus.Sio2 = sio2;
+
+            uint addr = Sio2.RegBase;           // SEND3[0] at RegBase+0x00
+            bus.WriteWord(addr, 0xAABBCCDDu);
+            uint readBack = bus.ReadWord(addr);
+            Assert.AreEqual(0xAABBCCDDu, readBack, "SEND3[0] word round-trip via IopMemoryBus");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_Sio2_WriteByteToFifoIn_TriggerTransfer()
+        {
+            var bus  = new IopMemoryBus();
+            var sio2 = new Sio2();
+            var pad  = new PadState();
+            sio2.Port0 = pad;
+            bus.Sio2   = sio2;
+
+            // Write SEND3[0] descriptor
+            bus.WriteWord(Sio2.RegBase, BuildSend3(port: 0, sendLen: 2, recvLen: 9));
+            // Write command bytes to FIFO_IN via byte access
+            bus.WriteByte(Sio2.RegBase + 0x60u, PadState.AddrPad);
+            bus.WriteByte(Sio2.RegBase + 0x60u, PadState.CmdPoll);
+            // Trigger via CTRL byte write
+            bus.WriteByte(Sio2.RegBase + 0x68u, 0x01);
+
+            // Read response word (FIFO_OUT at +0x64)
+            uint resp0 = bus.ReadWord(Sio2.RegBase + 0x64u); // 0xFF (leading)
+            uint resp1 = bus.ReadWord(Sio2.RegBase + 0x64u); // 0x73 device ID
+            Assert.AreEqual((uint)PadState.DeviceId, resp1, "Device ID must be 0x73 via IopMemoryBus word read");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_Sio2TransferComplete_RaisesIntcBit17()
+        {
+            var bus  = new IopMemoryBus();
+            var sio2 = new Sio2();
+            bus.Sio2 = sio2;
+
+            bus.WriteWord(Sio2.RegBase, BuildSend3(port: 0, sendLen: 1, recvLen: 1));
+            bus.WriteByte(Sio2.RegBase + 0x60u, 0x00);
+            bus.WriteWord(Sio2.RegBase + 0x68u, 0x01u); // CTRL START
+
+            Assert.AreNotEqual(0u, bus.IStat & (1u << 17),
+                "IOP INTC bit 17 must be set when SIO2 TransferComplete fires");
+        }
+
+        // ── SEND3 descriptor builder helper ───────────────────────────────────
+
+        /// <summary>
+        /// Build a SEND3 descriptor word with the given port, send length, and receive length.
+        /// </summary>
+        private static uint BuildSend3(int port, int sendLen, int recvLen)
+            => (uint)(port & 0x3)
+             | ((uint)(sendLen & 0x1FF) << 8)
+             | ((uint)(recvLen & 0x1FF) << 18);
+
         // ── Minimal ISO-9660 builder helper ──────────────────────────────────
+
 
         /// <summary>
         /// Build a minimal valid ISO-9660 image with one file in the root directory.
