@@ -1,4 +1,5 @@
 using CodeDesigner.Mips64LE.Common.CPU;
+using CodeDesigner.Mips64LE.Common.CPU.COP0;
 using System;
 
 namespace CodeDesigner.Mips64LE.Common.Emulator
@@ -17,10 +18,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
     ///   - "Branch likely" not-taken instructions write pc+8 (skipping the delay slot);
     ///     the emulator uses that value directly as well.
     ///
-    /// Note: MIPS branch delay slots are intentionally not emulated in this first-pass
-    /// implementation. When a branch is taken the delay-slot instruction at pc+4 is
-    /// skipped. This is sufficient for programs that do not rely on delay-slot
-    /// side-effects.
+    /// Branch delay slots:
+    ///   MIPS requires that the instruction immediately following every branch or jump
+    ///   (the "delay slot") always executes before the CPU transfers control.  This
+    ///   emulator implements the full delay-slot pipeline:
+    ///     - Branch/jump taken  → execute delay slot at pc+4, then jump to target.
+    ///     - Branch not taken   → delay slot instruction executes naturally as the
+    ///                            next sequential instruction (pc advances to pc+4).
+    ///     - Branch likely not taken → delay slot is nullified (pc+8 skips it).
+    ///
+    /// COP0 exceptions:
+    ///   SYSCALL, BREAK, arithmetic overflow and trap instructions no longer throw
+    ///   raw C# exceptions out of Step().  Instead they are routed through
+    ///   <see cref="COP0ExceptionDispatcher"/> which saves the faulting PC to EPC,
+    ///   sets Status.EXL, writes the exception code to Cause, and redirects the
+    ///   program counter to the appropriate exception vector.
     ///
     /// The <see cref="PS2MemoryBus"/> translates KSEG0/KSEG1 virtual addresses for
     /// instruction fetch.  Data load/store uses cpu.Memory which is wired to the bus
@@ -72,7 +84,23 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         }
 
         /// <summary>
-        /// Execute a single instruction at the current PC and advance PC.
+        /// Execute a single instruction at the current PC, honouring the MIPS branch
+        /// delay slot and routing CPU exceptions through the COP0 dispatcher.
+        ///
+        /// Branch delay slot rules implemented here:
+        ///   • Branch/jump taken       → execute the delay-slot instruction at pc+4,
+        ///                               then transfer to the branch target.
+        ///   • Branch not taken        → delay slot executes as the natural next
+        ///                               instruction (pc advances to pc+4 and the
+        ///                               delay slot runs on the following Step() call).
+        ///   • Branch-likely not taken → delay slot is nullified; pc is already at
+        ///                               pc+8 as set by the instruction.
+        ///
+        /// COP0 exception routing:
+        ///   OverflowException, TrapException, SystemCallException and
+        ///   BreakpointException are caught and forwarded to
+        ///   <see cref="COP0ExceptionDispatcher.Dispatch"/>, which saves EPC,
+        ///   updates Status/Cause and redirects cpu.PC to the exception vector.
         /// </summary>
         public void Step()
         {
@@ -82,7 +110,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             ulong pcBefore = Cpu.PC;
 
-            // Decode & execute
+            // Decode
             var (instrObj, instrArgs) = MipsDisassembler.GetInstructionObject(word);
 
             if (instrObj == null)
@@ -92,18 +120,170 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 return;
             }
 
-            instrObj.ExecuteGeneric(Cpu, instrArgs!);
+            // Execute with COP0 exception routing.
+            try
+            {
+                instrObj.ExecuteGeneric(Cpu, instrArgs!);
+            }
+            catch (OverflowException)
+            {
+                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Overflow, pcBefore, inDelaySlot: false);
+                InstructionCount++;
+                return;
+            }
+            catch (Cpu.Instructions.EE.TrapException)
+            {
+                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Trap, pcBefore, inDelaySlot: false);
+                InstructionCount++;
+                return;
+            }
+            catch (Cpu.Instructions.EE.SystemCallException)
+            {
+                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Syscall, pcBefore, inDelaySlot: false);
+                InstructionCount++;
+                SyscallRaised?.Invoke(this, (uint)pcBefore);
+                return;
+            }
+            catch (Cpu.Instructions.EE.BreakpointException)
+            {
+                // BREAK is routed through COP0 (EPC, Status.EXL, Cause.ExcCode=9)
+                // and then re-thrown so that debugger-aware callers (e.g. Run()) can
+                // halt execution.  All other exception types are fully consumed here.
+                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Breakpoint, pcBefore, inDelaySlot: false);
+                InstructionCount++;
+                throw;
+            }
+
             InstructionCount++;
 
-            // If the instruction did not modify PC (non-branch case), advance by 4.
-            // Branch/jump instructions update cpu.PC themselves (to target or pc+4).
+            // ── PC advancement and branch delay slot ──────────────────────────────
+
             if (Cpu.PC == pcBefore)
+            {
+                // Non-branch instruction: advance PC by 4 — no delay slot.
                 Cpu.PC = pcBefore + 4;
+                return;
+            }
+
+            // Detect branch-likely not-taken: these instructions set PC=pcBefore+8
+            // to nullify the delay slot.  We must check the instruction opcode here
+            // because a regular taken branch can also produce pc==pcBefore+8 (e.g.
+            // BEQ with offset=+1 taken).
+            if (Cpu.PC == pcBefore + 8 && IsBranchLikelyInstruction(word))
+            {
+                // Branch-likely not taken: delay slot has been nullified.
+                // PC is already at pcBefore+8 (set by the instruction).
+                return;
+            }
+
+            ulong branchTarget = Cpu.PC;
+
+            if (branchTarget != pcBefore + 4)
+            {
+                // Branch/jump taken: execute the delay-slot instruction at pc+4
+                // before transferring to the target.
+                uint dsPc32 = (uint)((pcBefore + 4) & 0xFFFFFFFFUL);
+                uint dsWord = Bus.ReadWord(dsPc32);
+
+                // Restore PC to the delay-slot address before execution so that
+                // any PC-relative computation inside the delay slot is correct.
+                Cpu.PC = pcBefore + 4;
+
+                var (dsObj, dsArgs) = MipsDisassembler.GetInstructionObject(dsWord);
+                if (dsObj != null)
+                {
+                    // Exceptions raised by a delay-slot instruction are also routed
+                    // through COP0, with inDelaySlot=true so EPC points to the branch
+                    // instruction (pcBefore) and Cause.BD is set.
+                    try
+                    {
+                        dsObj.ExecuteGeneric(Cpu, dsArgs!);
+                        InstructionCount++;
+                    }
+                    catch (OverflowException)
+                    {
+                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Overflow, pcBefore + 4, inDelaySlot: true);
+                        InstructionCount++;
+                        return;
+                    }
+                    catch (Cpu.Instructions.EE.TrapException)
+                    {
+                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Trap, pcBefore + 4, inDelaySlot: true);
+                        InstructionCount++;
+                        return;
+                    }
+                    catch (Cpu.Instructions.EE.SystemCallException)
+                    {
+                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Syscall, pcBefore + 4, inDelaySlot: true);
+                        InstructionCount++;
+                        SyscallRaised?.Invoke(this, (uint)(pcBefore + 4));
+                        return;
+                    }
+                    catch (Cpu.Instructions.EE.BreakpointException)
+                    {
+                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Breakpoint, pcBefore + 4, inDelaySlot: true);
+                        InstructionCount++;
+                        throw;
+                    }
+                }
+                else
+                {
+                    UnknownInstruction?.Invoke(this, dsWord);
+                }
+
+                // Transfer to the branch target regardless of what the delay-slot
+                // instruction did to cpu.PC.
+                Cpu.PC = branchTarget;
+            }
+            // else: branchTarget == pcBefore+4 (branch not taken).
+            // The delay slot at pcBefore+4 will run as the next sequential Step().
+        }
+
+        /// <summary>
+        /// Returns true if <paramref name="word"/> encodes a "branch-likely"
+        /// instruction (BxxL / BCxL family).  Branch-likely instructions set
+        /// cpu.PC = pc+8 when not taken in order to nullify the delay slot; they
+        /// must be identified so that a regular taken branch to pc+8 is not
+        /// mistaken for a nullified delay slot.
+        /// </summary>
+        private static bool IsBranchLikelyInstruction(uint word)
+        {
+            int opcode = (int)(word >> 26) & 0x3F;
+
+            switch (opcode)
+            {
+                // BEQL=0x14, BNEL=0x15, BLEZL=0x16, BGTZL=0x17
+                case 0x14: case 0x15: case 0x16: case 0x17:
+                    return true;
+
+                // REGIMM group (opcode=0x01): rt field selects sub-opcode.
+                // BLTZL=0x02, BGEZL=0x03, BLTZALL=0x12, BGEZALL=0x13
+                case 0x01:
+                {
+                    int rt = (int)(word >> 16) & 0x1F;
+                    return rt == 0x02 || rt == 0x03 || rt == 0x12 || rt == 0x13;
+                }
+
+                // COP1 branch-likely: opcode=0x11, rs=8 (BC sub-group),
+                // rt=0x02 (BC1FL) or rt=0x03 (BC1TL)
+                case 0x11:
+                {
+                    int rs = (int)(word >> 21) & 0x1F;
+                    int rt = (int)(word >> 16) & 0x1F;
+                    return rs == 8 && (rt == 0x02 || rt == 0x03);
+                }
+
+                default:
+                    return false;
+            }
         }
 
         /// <summary>
         /// Run the CPU for at most <paramref name="maxInstructions"/> steps,
-        /// or until a SYSCALL/BREAK is encountered.
+        /// stopping early if a BREAK instruction is executed (which re-throws
+        /// <see cref="Cpu.Instructions.EE.BreakpointException"/> out of Step()).
+        /// SYSCALL exceptions are handled internally by Step() via COP0 exception
+        /// dispatch and do not propagate here.
         /// Returns the number of instructions actually executed.
         /// </summary>
         public ulong Run(ulong maxInstructions = ulong.MaxValue)
@@ -115,12 +295,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 {
                     Step();
                     executed++;
-                }
-                catch (Cpu.Instructions.EE.SystemCallException)
-                {
-                    SyscallRaised?.Invoke(this, (uint)Cpu.PC);
-                    // Propagate so the caller can decide whether to continue
-                    throw;
                 }
                 catch (Cpu.Instructions.EE.BreakpointException)
                 {

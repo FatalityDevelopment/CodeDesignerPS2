@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Mips64LE.Common;
+using CodeDesigner.Mips64LE.Common.CPU.COP0;
 using CodeDesigner.Mips64LE.Common.Emulator;
 
 namespace CodeDesigner.Mips64LE.TestProject
@@ -280,6 +281,287 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             Assert.AreEqual(0x12345678UL, emu.Cpu.RegsLo[9],
                 "LW should read back the value written by SW");
+        }
+
+        // =====================================================================
+        // Branch delay slot tests
+        // =====================================================================
+
+        [TestMethod]
+        public void Emulator_BranchDelaySlot_TakenExecutesDelaySlot()
+        {
+            // Program:
+            //   0x00: beq $t0,$t0,+1  (taken, target = 0 + 4 + 4 = 8)
+            //   0x04: addiu $t1,$zero,99  (delay slot — must execute)
+            //   0x08: addiu $t2,$zero,55  (should NOT execute before the delay slot)
+            //
+            // beq rs=8, rt=8, offset=1  →  taken (t0==t0)
+            uint beq     = (0x04u << 26) | (8u << 21) | (8u << 16) | 1u;
+            // addiu $t1,$zero,99
+            uint addiu99 = (0x09u << 26) | (0u << 21) | (9u << 16) | 99u;
+            // addiu $t2,$zero,55
+            uint addiu55 = (0x09u << 26) | (0u << 21) | (10u << 16) | 55u;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000000, new[] { beq, addiu99, addiu55 });
+            emu.Cpu.PC = 0x00000000;
+
+            // Single Step() should execute beq AND its delay slot (addiu99).
+            emu.Step();
+
+            Assert.AreEqual(8UL, emu.Cpu.PC,
+                "After taken BEQ, PC should be at the branch target (0x8)");
+            Assert.AreEqual(99UL, emu.Cpu.RegsLo[9],
+                "Delay-slot instruction (addiu $t1,99) must have executed");
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[10],
+                "Instruction after delay slot must NOT have executed yet");
+        }
+
+        [TestMethod]
+        public void Emulator_BranchDelaySlot_NotTakenDelaySlotRunsNextStep()
+        {
+            // Program:
+            //   0x00: beq $t0,$t1,+5  (not taken: $t0=1, $t1=2)
+            //   0x04: addiu $t2,$zero,77  (delay slot — runs as next sequential instr)
+            //   0x08: nop
+            //
+            // beq rs=8, rt=9, offset=5 (not taken)
+            uint beq     = (0x04u << 26) | (8u << 21) | (9u << 16) | 5u;
+            uint addiu77 = (0x09u << 26) | (0u << 21) | (10u << 16) | 77u;
+            uint nop     = 0x00000000u;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000000, new[] { beq, addiu77, nop });
+            emu.Cpu.PC        = 0x00000000;
+            emu.Cpu.RegsLo[8] = 1; // $t0
+            emu.Cpu.RegsLo[9] = 2; // $t1
+
+            // Step 1: execute BEQ (not taken) — PC should move to 0x4 (the delay slot).
+            emu.Step();
+            Assert.AreEqual(4UL, emu.Cpu.PC,
+                "Not-taken BEQ: PC should advance to delay-slot address (0x4)");
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[10],
+                "Delay slot not yet executed after not-taken branch");
+
+            // Step 2: execute the delay slot instruction.
+            emu.Step();
+            Assert.AreEqual(8UL, emu.Cpu.PC,
+                "After delay slot, PC should be at 0x8");
+            Assert.AreEqual(77UL, emu.Cpu.RegsLo[10],
+                "Delay slot instruction (addiu $t2,77) must have executed");
+        }
+
+        [TestMethod]
+        public void Emulator_BranchDelaySlot_JumpExecutesDelaySlot()
+        {
+            // Program:
+            //   0x100: j 0x110    (jump to 0x110, delay slot at 0x104)
+            //   0x104: addiu $t0,$zero,42  (delay slot — must execute)
+            //   0x108: addiu $t1,$zero,11  (must NOT run before target)
+            //   0x110: nop
+            //
+            // J: opcode=2, instr_index = 0x110 >> 2 = 0x44
+            uint j       = (0x02u << 26) | (0x110u >> 2);
+            uint addiu42 = (0x09u << 26) | (0u << 21) | (8u << 16) | 42u;
+            uint addiu11 = (0x09u << 26) | (0u << 21) | (9u << 16) | 11u;
+            uint nop     = 0x00000000u;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000100, new[] { j, addiu42, addiu11 });
+            emu.LoadProgram(0x00000110, new[] { nop });
+            emu.Cpu.PC = 0x00000100;
+
+            emu.Step();
+
+            Assert.AreEqual(0x110UL, emu.Cpu.PC,
+                "J: PC should be at jump target (0x110)");
+            Assert.AreEqual(42UL, emu.Cpu.RegsLo[8],
+                "J delay-slot instruction must have executed");
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[9],
+                "Instruction at 0x108 (past delay slot) must not have run");
+        }
+
+        [TestMethod]
+        public void Emulator_BranchDelaySlot_BranchLikelyNotTaken_NullifiesDelaySlot()
+        {
+            // Program:
+            //   0x00: beql $t0,$t1,+5  (not taken: $t0=1, $t1=2) → nullifies delay slot
+            //   0x04: addiu $t2,$zero,99  (delay slot — must NOT execute)
+            //   0x08: nop
+            //
+            // beql rs=8, rt=9, offset=5, opcode=0x14
+            uint beql    = (0x14u << 26) | (8u << 21) | (9u << 16) | 5u;
+            uint addiu99 = (0x09u << 26) | (0u << 21) | (10u << 16) | 99u;
+            uint nop     = 0x00000000u;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000000, new[] { beql, addiu99, nop });
+            emu.Cpu.PC        = 0x00000000;
+            emu.Cpu.RegsLo[8] = 1; // $t0
+            emu.Cpu.RegsLo[9] = 2; // $t1
+
+            emu.Step();
+
+            Assert.AreEqual(8UL, emu.Cpu.PC,
+                "BEQL not-taken: PC should skip delay slot to 0x8");
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[10],
+                "BEQL not-taken: delay slot must have been nullified (not executed)");
+        }
+
+        // =====================================================================
+        // COP0 exception dispatch tests
+        // =====================================================================
+
+        [TestMethod]
+        public void Emulator_COP0_SyscallSetsEPC()
+        {
+            // syscall encodes as opcode=0, funct=0x0C
+            uint syscall = 0x0000000Cu; // syscall 0
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000200, new[] { syscall });
+            emu.Cpu.PC = 0x00000200;
+
+            // Clear BEV so vector is 0x80000080
+            uint status = emu.Cpu.COP0.ReadRegister32(12);
+            status &= ~(1u << 22); // Clear BEV
+            emu.Cpu.COP0.WriteRegister32(12, status);
+
+            emu.Step(); // SYSCALL is consumed by COP0 dispatch — no exception thrown
+
+            // EPC should be the address of the SYSCALL instruction
+            Assert.AreEqual(0x200UL, emu.Cpu.COP0.ReadRegister64(14),
+                "EPC must be set to the address of the SYSCALL instruction");
+
+            // Status.EXL should be set
+            uint newStatus = emu.Cpu.COP0.ReadRegister32(12);
+            Assert.IsTrue((newStatus & (1u << 1)) != 0,
+                "Status.EXL must be set after SYSCALL");
+
+            // Cause.ExcCode should be 8 (Syscall)
+            uint cause = emu.Cpu.COP0.ReadRegister32(13);
+            uint excCode = (cause >> 2) & 0x1Fu;
+            Assert.AreEqual(8u, excCode, "Cause.ExcCode must be 8 (Syscall)");
+
+            // PC should be at the general exception vector (BEV=0 → 0x80000080)
+            Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
+                "PC must be redirected to the general exception vector");
+        }
+
+        [TestMethod]
+        public void Emulator_COP0_SyscallBev1UsesRomVector()
+        {
+            // syscall with BEV=1 (BIOS ROM exception vector)
+            uint syscall = 0x0000000Cu;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000300, new[] { syscall });
+            emu.Cpu.PC = 0x00000300;
+
+            // Ensure BEV=1 (default after reset)
+            uint status = emu.Cpu.COP0.ReadRegister32(12);
+            status |= (1u << 22); // Set BEV
+            emu.Cpu.COP0.WriteRegister32(12, status);
+
+            emu.Step();
+
+            Assert.AreEqual(0xBFC00180UL, emu.Cpu.PC,
+                "With BEV=1 the exception vector must be 0xBFC00180");
+        }
+
+        [TestMethod]
+        public void Emulator_COP0_OverflowDispatch()
+        {
+            // ADD $t0, $t0, $t1 with values that overflow a 32-bit signed integer.
+            // add $t0,$t0,$t1 : opcode=0, rs=8, rt=9, rd=8, funct=0x20
+            uint add = (0u << 26) | (8u << 21) | (9u << 16) | (8u << 11) | 0x20u;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000400, new[] { add });
+            emu.Cpu.PC        = 0x00000400;
+            emu.Cpu.RegsLo[8] = 0x7FFFFFFFu; // INT32_MAX
+            emu.Cpu.RegsLo[9] = 1u;           // +1 → overflow
+
+            // Clear BEV
+            uint status = emu.Cpu.COP0.ReadRegister32(12);
+            status &= ~(1u << 22);
+            emu.Cpu.COP0.WriteRegister32(12, status);
+
+            emu.Step(); // Should not throw — overflow routed through COP0
+
+            // Cause.ExcCode should be 12 (Overflow)
+            uint cause   = emu.Cpu.COP0.ReadRegister32(13);
+            uint excCode = (cause >> 2) & 0x1Fu;
+            Assert.AreEqual(12u, excCode, "Cause.ExcCode must be 12 (Overflow)");
+
+            Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
+                "PC must be at the exception vector after overflow");
+        }
+
+        [TestMethod]
+        public void Emulator_COP0_SyscallEventFired()
+        {
+            uint syscall = 0x0000000Cu;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000500, new[] { syscall });
+            emu.Cpu.PC = 0x00000500;
+
+            // Clear BEV
+            uint s = emu.Cpu.COP0.ReadRegister32(12);
+            s &= ~(1u << 22);
+            emu.Cpu.COP0.WriteRegister32(12, s);
+
+            uint firedAt = 0;
+            bool eventRaised = false;
+            emu.SyscallRaised += (_, addr) => { firedAt = addr; eventRaised = true; };
+
+            emu.Step();
+
+            Assert.IsTrue(eventRaised, "SyscallRaised event must fire on SYSCALL");
+            Assert.AreEqual(0x500u, firedAt,
+                "SyscallRaised must report the address of the SYSCALL instruction");
+        }
+
+        [TestMethod]
+        public void COP0Dispatcher_Dispatch_WritesEpcAndExcCode()
+        {
+            // Unit-test the dispatcher directly (no emulator loop needed).
+            var cpu = new CodeDesigner.Mips64LE.Common.CPU.CpuState();
+
+            // BEV=0 so vector is 0x80000080
+            cpu.COP0.WriteRegister32(12, 0x00000000u); // Status: BEV=0, EXL=0
+
+            COP0ExceptionDispatcher.Dispatch(cpu, ExceptionCode.Syscall, 0x1000UL, inDelaySlot: false);
+
+            Assert.AreEqual(0x1000UL, cpu.COP0.ReadRegister64(14), "EPC must equal the faulting PC");
+            Assert.AreEqual(0x80000080UL, cpu.PC, "PC must be redirected to exception vector");
+
+            uint cause   = cpu.COP0.ReadRegister32(13);
+            uint excCode = (cause >> 2) & 0x1Fu;
+            Assert.AreEqual(8u, excCode, "Cause.ExcCode must be 8 (Syscall)");
+
+            uint status = cpu.COP0.ReadRegister32(12);
+            Assert.IsTrue((status & 2u) != 0, "Status.EXL must be set");
+        }
+
+        [TestMethod]
+        public void COP0Dispatcher_Dispatch_DelaySlot_SetsBDAndAdjustsEpc()
+        {
+            var cpu = new CodeDesigner.Mips64LE.Common.CPU.CpuState();
+            cpu.COP0.WriteRegister32(12, 0x00000000u); // BEV=0, EXL=0
+
+            // Faulting instruction is in the delay slot of an instruction at 0x2000.
+            // epc passed in is the delay-slot address (0x2004), inDelaySlot=true.
+            COP0ExceptionDispatcher.Dispatch(cpu, ExceptionCode.Overflow, 0x2004UL, inDelaySlot: true);
+
+            // EPC must point to the branch at 0x2000.
+            Assert.AreEqual(0x2000UL, cpu.COP0.ReadRegister64(14),
+                "EPC must point to the branch instruction (epc - 4) when in delay slot");
+
+            // Cause.BD must be set.
+            uint cause = cpu.COP0.ReadRegister32(13);
+            Assert.IsTrue((cause & (1u << 31)) != 0, "Cause.BD must be set for delay-slot exception");
         }
     }
 }
