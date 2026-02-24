@@ -1494,7 +1494,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.MMI
     {
         public PAND()
         {
-            Opcode = 0x1C; Funct = 0x29; Name = "pand";
+            Opcode = 0x1C; Funct = 0x09; Name = "pand";
             ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
             Equation = "rd = rs & rt (128-bit)"; Description = "Parallel AND: 128-bit bitwise AND";
         }
@@ -1508,7 +1508,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.MMI
             => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
 
         public override uint Asm(int[] args)
-            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x12 << 6 | 0x29);
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x12 << 6 | 0x09);
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
@@ -1542,7 +1542,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.MMI
             => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
 
         public override uint Asm(int[] args)
-            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x13 << 6 | 0x29);
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x12 << 6 | 0x29);
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
@@ -1597,5 +1597,1527 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.MMI
             }
             return eq;
         }
+    }
+
+    // =========================================================================
+    // Direct MMI instructions: PMFHL, PMTHL, PSLLH, PSRLH, PSRAH, PSLLW, PSRLW, PSRAW
+    // =========================================================================
+
+    // PMFHL - Parallel Move From HI/LO (funct=0x30)
+    public sealed class PMFHL : Instruction<Args_R>
+    {
+        public PMFHL()
+        {
+            Opcode = 0x1C; Funct = 0x30; Name = "pmfhl";
+            ArgType = InstrArgType.R; ArgNames = ["rd"];
+            Equation = "rd.lo = LO; rd.hi = HI";
+            Description = "Parallel Move From HI/LO - copies HI/LO to rd (128-bit)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            if (args.Rd != 0) { cpu.RegsLo[args.Rd] = cpu.LO; cpu.RegsHi[args.Rd] = cpu.HI; }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[0] << 11 | 0x30);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd));
+            if (cpu != null) return $"{eq} => LO=0x{cpu.LO:X16}, HI=0x{cpu.HI:X16}";
+            return eq;
+        }
+    }
+
+    // PMTHL - Parallel Move To HI/LO (funct=0x31)
+    public sealed class PMTHL : Instruction<Args_R>
+    {
+        public PMTHL()
+        {
+            Opcode = 0x1C; Funct = 0x31; Name = "pmthl";
+            ArgType = InstrArgType.R; ArgNames = ["rs"];
+            Equation = "LO = rs.lo; HI = rs.hi";
+            Description = "Parallel Move To HI/LO - copies rs (128-bit) to HI/LO";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            cpu.LO = cpu.RegsLo[args.Rs]; cpu.HI = cpu.RegsHi[args.Rs];
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[0] << 21 | 0x31);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
+            if (cpu != null) return $"{eq} => rs.lo=0x{cpu.RegsLo[args.Rs]:X16}, rs.hi=0x{cpu.RegsHi[args.Rs]:X16}";
+            return eq;
+        }
+    }
+
+    // PSLLH - Parallel Shift Left Logical Halfword (funct=0x34)
+    public sealed class PSLLH : Instruction<Args_R>
+    {
+        public PSLLH()
+        {
+            Opcode = 0x1C; Funct = 0x34; Name = "psllh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt", "sa"];
+            Equation = "rd = rt << sa (8x16-bit)";
+            Description = "Parallel Shift Left Logical Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa = args.Shamt & 0xF;
+            ulong lo = 0, hi = 0;
+            for (int i = 0; i < 4; i++) lo |= (ulong)((ushort)((ushort)(cpu.RegsLo[args.Rt] >> (i * 16)) << sa)) << (i * 16);
+            for (int i = 0; i < 4; i++) hi |= (ulong)((ushort)((ushort)(cpu.RegsHi[args.Rt] >> (i * 16)) << sa)) << (i * 16);
+            MMIHelpers.Write128(cpu, args.Rd, lo, hi);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt & 0xF}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | args[2] << 6 | 0x34);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("sa", (args.Shamt & 0xF).ToString());
+    }
+
+    // PSRLH - Parallel Shift Right Logical Halfword (funct=0x36)
+    public sealed class PSRLH : Instruction<Args_R>
+    {
+        public PSRLH()
+        {
+            Opcode = 0x1C; Funct = 0x36; Name = "psrlh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt", "sa"];
+            Equation = "rd = rt >> sa (8x16-bit logical)";
+            Description = "Parallel Shift Right Logical Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa = args.Shamt & 0xF;
+            ulong lo = 0, hi = 0;
+            for (int i = 0; i < 4; i++) lo |= (ulong)((ushort)((ushort)(cpu.RegsLo[args.Rt] >> (i * 16)) >> sa)) << (i * 16);
+            for (int i = 0; i < 4; i++) hi |= (ulong)((ushort)((ushort)(cpu.RegsHi[args.Rt] >> (i * 16)) >> sa)) << (i * 16);
+            MMIHelpers.Write128(cpu, args.Rd, lo, hi);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt & 0xF}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | args[2] << 6 | 0x36);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("sa", (args.Shamt & 0xF).ToString());
+    }
+
+    // PSRAH - Parallel Shift Right Arithmetic Halfword (funct=0x37)
+    public sealed class PSRAH : Instruction<Args_R>
+    {
+        public PSRAH()
+        {
+            Opcode = 0x1C; Funct = 0x37; Name = "psrah";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt", "sa"];
+            Equation = "rd = rt >>> sa (8x16-bit arithmetic)";
+            Description = "Parallel Shift Right Arithmetic Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa = args.Shamt & 0xF;
+            ulong lo = 0, hi = 0;
+            for (int i = 0; i < 4; i++) lo |= (ulong)(ushort)((short)(cpu.RegsLo[args.Rt] >> (i * 16)) >> sa) << (i * 16);
+            for (int i = 0; i < 4; i++) hi |= (ulong)(ushort)((short)(cpu.RegsHi[args.Rt] >> (i * 16)) >> sa) << (i * 16);
+            MMIHelpers.Write128(cpu, args.Rd, lo, hi);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt & 0xF}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | args[2] << 6 | 0x37);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("sa", (args.Shamt & 0xF).ToString());
+    }
+
+    // PSLLW - Parallel Shift Left Logical Word (funct=0x3C)
+    public sealed class PSLLW : Instruction<Args_R>
+    {
+        public PSLLW()
+        {
+            Opcode = 0x1C; Funct = 0x3C; Name = "psllw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt", "sa"];
+            Equation = "rd = rt << sa (4x32-bit)";
+            Description = "Parallel Shift Left Logical Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa = args.Shamt & 0x1F;
+            MMIHelpers.Write128(cpu, args.Rd,
+                ((cpu.RegsLo[args.Rt] & 0xFFFFFFFF) << sa) | (((cpu.RegsLo[args.Rt] >> 32) << sa) << 32),
+                ((cpu.RegsHi[args.Rt] & 0xFFFFFFFF) << sa) | (((cpu.RegsHi[args.Rt] >> 32) << sa) << 32));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt & 0x1F}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | args[2] << 6 | 0x3C);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("sa", (args.Shamt & 0x1F).ToString());
+    }
+
+    // PSRLW - Parallel Shift Right Logical Word (funct=0x3E)
+    public sealed class PSRLW : Instruction<Args_R>
+    {
+        public PSRLW()
+        {
+            Opcode = 0x1C; Funct = 0x3E; Name = "psrlw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt", "sa"];
+            Equation = "rd = rt >> sa (4x32-bit logical)";
+            Description = "Parallel Shift Right Logical Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa = args.Shamt & 0x1F;
+            MMIHelpers.Write128(cpu, args.Rd,
+                ((cpu.RegsLo[args.Rt] & 0xFFFFFFFF) >> sa) | (((cpu.RegsLo[args.Rt] >> 32) >> sa) << 32),
+                ((cpu.RegsHi[args.Rt] & 0xFFFFFFFF) >> sa) | (((cpu.RegsHi[args.Rt] >> 32) >> sa) << 32));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt & 0x1F}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | args[2] << 6 | 0x3E);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("sa", (args.Shamt & 0x1F).ToString());
+    }
+
+    // PSRAW - Parallel Shift Right Arithmetic Word (funct=0x3F)
+    public sealed class PSRAW : Instruction<Args_R>
+    {
+        public PSRAW()
+        {
+            Opcode = 0x1C; Funct = 0x3F; Name = "psraw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt", "sa"];
+            Equation = "rd = rt >>> sa (4x32-bit arithmetic)";
+            Description = "Parallel Shift Right Arithmetic Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa = args.Shamt & 0x1F;
+            int w0 = (int)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF) >> sa;
+            int w1 = (int)(cpu.RegsLo[args.Rt] >> 32) >> sa;
+            int w2 = (int)(cpu.RegsHi[args.Rt] & 0xFFFFFFFF) >> sa;
+            int w3 = (int)(cpu.RegsHi[args.Rt] >> 32) >> sa;
+            MMIHelpers.Write128(cpu, args.Rd, (uint)w0 | ((ulong)(uint)w1 << 32), (uint)w2 | ((ulong)(uint)w3 << 32));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {args.Shamt & 0x1F}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | args[2] << 6 | 0x3F);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("sa", (args.Shamt & 0x1F).ToString());
+    }
+
+    // =========================================================================
+    // MMI0 sub-instructions (funct=0x08, dispatched by shamt)
+    // =========================================================================
+
+    // Saturation helpers (private static)
+    file static class SatHelpers
+    {
+        public static int Sat32(long v) => v > int.MaxValue ? int.MaxValue : v < int.MinValue ? int.MinValue : (int)v;
+        public static short Sat16(int v) => v > short.MaxValue ? short.MaxValue : v < short.MinValue ? short.MinValue : (short)v;
+        public static sbyte Sat8(int v) => v > sbyte.MaxValue ? sbyte.MaxValue : v < sbyte.MinValue ? sbyte.MinValue : (sbyte)v;
+    }
+
+    // PCGTH - Parallel Compare Greater Than Halfword (funct=0x08, shamt=0x06)
+    public sealed class PCGTH : Instruction<Args_R>
+    {
+        public PCGTH()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "pcgth";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd[h] = (rs[h] > rt[h]) ? 0xFFFF : 0 (8x16-bit)";
+            Description = "Parallel Compare Greater Than Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 8; i++) MMIHelpers.SetHU(cpu, args.Rd, i, MMIHelpers.GetH(cpu, args.Rs, i) > MMIHelpers.GetH(cpu, args.Rt, i) ? (ushort)0xFFFF : (ushort)0);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x06 << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PCGTB - Parallel Compare Greater Than Byte (funct=0x08, shamt=0x0A)
+    public sealed class PCGTB : Instruction<Args_R>
+    {
+        public PCGTB()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "pcgtb";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd[b] = (rs[b] > rt[b]) ? 0xFF : 0 (16x8-bit)";
+            Description = "Parallel Compare Greater Than Byte";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 16; i++) MMIHelpers.SetB(cpu, args.Rd, i, (byte)(MMIHelpers.GetBS(cpu, args.Rs, i) > MMIHelpers.GetBS(cpu, args.Rt, i) ? 0xFF : 0));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x0A << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PADDSW - Parallel Add Signed Saturate Word (funct=0x08, shamt=0x10)
+    public sealed class PADDSW : Instruction<Args_R>
+    {
+        public PADDSW()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "paddsw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = sat32(rs + rt) (4x32-bit signed saturating)";
+            Description = "Parallel Add Signed Saturating Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 4; i++) MMIHelpers.SetW(cpu, args.Rd, i, SatHelpers.Sat32((long)MMIHelpers.GetW(cpu, args.Rs, i) + MMIHelpers.GetW(cpu, args.Rt, i)));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x10 << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PSUBSW - Parallel Subtract Signed Saturate Word (funct=0x08, shamt=0x11)
+    public sealed class PSUBSW : Instruction<Args_R>
+    {
+        public PSUBSW()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "psubsw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = sat32(rs - rt) (4x32-bit signed saturating)";
+            Description = "Parallel Subtract Signed Saturating Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 4; i++) MMIHelpers.SetW(cpu, args.Rd, i, SatHelpers.Sat32((long)MMIHelpers.GetW(cpu, args.Rs, i) - MMIHelpers.GetW(cpu, args.Rt, i)));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x11 << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PADDSH - Parallel Add Signed Saturate Halfword (funct=0x08, shamt=0x14)
+    public sealed class PADDSH : Instruction<Args_R>
+    {
+        public PADDSH()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "paddsh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = sat16(rs + rt) (8x16-bit signed saturating)";
+            Description = "Parallel Add Signed Saturating Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 8; i++) MMIHelpers.SetH(cpu, args.Rd, i, SatHelpers.Sat16(MMIHelpers.GetH(cpu, args.Rs, i) + MMIHelpers.GetH(cpu, args.Rt, i)));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x14 << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PSUBSH - Parallel Subtract Signed Saturate Halfword (funct=0x08, shamt=0x15)
+    public sealed class PSUBSH : Instruction<Args_R>
+    {
+        public PSUBSH()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "psubsh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = sat16(rs - rt) (8x16-bit signed saturating)";
+            Description = "Parallel Subtract Signed Saturating Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 8; i++) MMIHelpers.SetH(cpu, args.Rd, i, SatHelpers.Sat16(MMIHelpers.GetH(cpu, args.Rs, i) - MMIHelpers.GetH(cpu, args.Rt, i)));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x15 << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PADDSB - Parallel Add Signed Saturate Byte (funct=0x08, shamt=0x18)
+    public sealed class PADDSB : Instruction<Args_R>
+    {
+        public PADDSB()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "paddsb";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = sat8(rs + rt) (16x8-bit signed saturating)";
+            Description = "Parallel Add Signed Saturating Byte";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 16; i++) MMIHelpers.SetB(cpu, args.Rd, i, (byte)SatHelpers.Sat8(MMIHelpers.GetBS(cpu, args.Rs, i) + MMIHelpers.GetBS(cpu, args.Rt, i)));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x18 << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PSUBSB - Parallel Subtract Signed Saturate Byte (funct=0x08, shamt=0x19)
+    public sealed class PSUBSB : Instruction<Args_R>
+    {
+        public PSUBSB()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "psubsb";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = sat8(rs - rt) (16x8-bit signed saturating)";
+            Description = "Parallel Subtract Signed Saturating Byte";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 16; i++) MMIHelpers.SetB(cpu, args.Rd, i, (byte)SatHelpers.Sat8(MMIHelpers.GetBS(cpu, args.Rs, i) - MMIHelpers.GetBS(cpu, args.Rt, i)));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x19 << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PEXT5 - Parallel Expand 5-bit (funct=0x08, shamt=0x1E): 1555 RGB to 8888
+    public sealed class PEXT5 : Instruction<Args_R>
+    {
+        public PEXT5()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "pext5";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd = expand5to8(rt) per 32-bit word";
+            Description = "Parallel Expand 5-bit to 8-bit (1-5-5-5 RGB to 8-8-8-8)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                uint src = MMIHelpers.GetWU(cpu, args.Rt, i);
+                uint a = (src >> 15) & 1;
+                uint b = (src >> 10) & 0x1F; uint g = (src >> 5) & 0x1F; uint r = src & 0x1F;
+                uint dst = (a * 0xFF) << 24 | (b << 3 | b >> 2) << 16 | (g << 3 | g >> 2) << 8 | (r << 3 | r >> 2);
+                MMIHelpers.SetW(cpu, args.Rd, i, (int)dst);
+            }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | 0x1E << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PPAC5 - Parallel Pack to 5-bit (funct=0x08, shamt=0x1F): 8888 to 1555 RGB
+    public sealed class PPAC5 : Instruction<Args_R>
+    {
+        public PPAC5()
+        {
+            Opcode = 0x1C; Funct = 0x08; Name = "ppac5";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd = pack8to5(rt) per 32-bit word";
+            Description = "Parallel Pack 8-bit to 5-bit (8-8-8-8 to 1-5-5-5 RGB)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                uint src = MMIHelpers.GetWU(cpu, args.Rt, i);
+                uint a = (src >> 31) & 1;
+                uint b = (src >> 19) & 0x1F; uint g = (src >> 11) & 0x1F; uint r = (src >> 3) & 0x1F;
+                uint dst = a << 15 | b << 10 | g << 5 | r;
+                MMIHelpers.SetW(cpu, args.Rd, i, (int)dst);
+            }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | 0x1F << 6 | 0x08);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // =========================================================================
+    // MMI1 sub-instructions (funct=0x28, dispatched by shamt)
+    // =========================================================================
+
+    // PADSBH - Parallel Add/Subtract Bytes by Halfwords (funct=0x28, shamt=0x04)
+    public sealed class PADSBH : Instruction<Args_R>
+    {
+        public PADSBH()
+        {
+            Opcode = 0x1C; Funct = 0x28; Name = "padsbh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd: lower bytes add, upper halfwords subtract";
+            Description = "Parallel Add Unsigned Bytes / Subtract Signed Halfwords";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // Lower 8 bytes: unsigned add
+            for (int i = 0; i < 8; i++) MMIHelpers.SetB(cpu, args.Rd, i, (byte)(MMIHelpers.GetB(cpu, args.Rs, i) + MMIHelpers.GetB(cpu, args.Rt, i)));
+            // Upper halfwords (h4..h7 = bytes 8..15 as halfwords): signed subtract
+            for (int i = 4; i < 8; i++) MMIHelpers.SetH(cpu, args.Rd, i, (short)(MMIHelpers.GetH(cpu, args.Rs, i) - MMIHelpers.GetH(cpu, args.Rt, i)));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x04 << 6 | 0x28);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PEXTUW - Parallel Extend Upper from Word (funct=0x28, shamt=0x12)
+    public sealed class PEXTUW : Instruction<Args_R>
+    {
+        public PEXTUW()
+        {
+            Opcode = 0x1C; Funct = 0x28; Name = "pextuw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = interleave upper words of rs and rt";
+            Description = "Parallel Extend Upper from Word - interleaves upper 32-bit words";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // rd.W0=rt.W2, rd.W1=rs.W2, rd.W2=rt.W3, rd.W3=rs.W3
+            MMIHelpers.SetW(cpu, args.Rd, 0, MMIHelpers.GetW(cpu, args.Rt, 2));
+            MMIHelpers.SetW(cpu, args.Rd, 1, MMIHelpers.GetW(cpu, args.Rs, 2));
+            MMIHelpers.SetW(cpu, args.Rd, 2, MMIHelpers.GetW(cpu, args.Rt, 3));
+            MMIHelpers.SetW(cpu, args.Rd, 3, MMIHelpers.GetW(cpu, args.Rs, 3));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x12 << 6 | 0x28);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PEXTUH - Parallel Extend Upper from Halfword (funct=0x28, shamt=0x16)
+    public sealed class PEXTUH : Instruction<Args_R>
+    {
+        public PEXTUH()
+        {
+            Opcode = 0x1C; Funct = 0x28; Name = "pextuh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = interleave upper halfwords of rs and rt";
+            Description = "Parallel Extend Upper from Halfword - interleaves upper 16-bit halfwords";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                MMIHelpers.SetH(cpu, args.Rd, i * 2,     MMIHelpers.GetH(cpu, args.Rt, i + 4));
+                MMIHelpers.SetH(cpu, args.Rd, i * 2 + 1, MMIHelpers.GetH(cpu, args.Rs, i + 4));
+            }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x16 << 6 | 0x28);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PEXTUB - Parallel Extend Upper from Byte (funct=0x28, shamt=0x1A)
+    public sealed class PEXTUB : Instruction<Args_R>
+    {
+        public PEXTUB()
+        {
+            Opcode = 0x1C; Funct = 0x28; Name = "pextub";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = interleave upper bytes of rs and rt";
+            Description = "Parallel Extend Upper from Byte - interleaves upper 8-bit bytes";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                MMIHelpers.SetB(cpu, args.Rd, i * 2,     MMIHelpers.GetB(cpu, args.Rt, i + 8));
+                MMIHelpers.SetB(cpu, args.Rd, i * 2 + 1, MMIHelpers.GetB(cpu, args.Rs, i + 8));
+            }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x1A << 6 | 0x28);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // QFSRV - Quadword Funnel Shift Right Variable (funct=0x28, shamt=0x1B)
+    public sealed class QFSRV : Instruction<Args_R>
+    {
+        public QFSRV()
+        {
+            Opcode = 0x1C; Funct = 0x28; Name = "qfsrv";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = {rs:rt} >> SA (128-bit funnel shift)";
+            Description = "Quadword Funnel Shift Right Variable - shifts {rs:rt} right by SA bits";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa = cpu.SA & 0x7F;
+            if (sa == 0) { MMIHelpers.Write128(cpu, args.Rd, cpu.RegsLo[args.Rt], cpu.RegsHi[args.Rt]); return; }
+            // 256-bit value: rs_hi:rs_lo:rt_hi:rt_lo, shift right by sa bits
+            if (sa < 64)
+            {
+                ulong lo = (cpu.RegsLo[args.Rt] >> sa) | (cpu.RegsHi[args.Rt] << (64 - sa));
+                ulong hi = (cpu.RegsHi[args.Rt] >> sa) | (cpu.RegsLo[args.Rs] << (64 - sa));
+                MMIHelpers.Write128(cpu, args.Rd, lo, hi);
+            }
+            else
+            {
+                int s2 = sa - 64;
+                ulong lo = s2 == 0 ? cpu.RegsHi[args.Rt] : (cpu.RegsHi[args.Rt] >> s2) | (cpu.RegsLo[args.Rs] << (64 - s2));
+                ulong hi = s2 == 0 ? cpu.RegsLo[args.Rs] : (cpu.RegsLo[args.Rs] >> s2) | (cpu.RegsHi[args.Rs] << (64 - s2));
+                MMIHelpers.Write128(cpu, args.Rd, lo, hi);
+            }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x1B << 6 | 0x28);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // =========================================================================
+    // MMI2 sub-instructions (funct=0x09, dispatched by shamt)
+    // =========================================================================
+
+    // PMADDW - Parallel Multiply-Accumulate Word (funct=0x09, shamt=0x00)
+    public sealed class PMADDW : Instruction<Args_R>
+    {
+        public PMADDW()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pmaddw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "LO:HI += rs.W0*rt.W0; LO1:HI1 += rs.W2*rt.W2; rd=LO,LO1";
+            Description = "Parallel Multiply-Accumulate Signed Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            long a0 = (long)((long)MMIHelpers.GetW(cpu, args.Rs, 0) * MMIHelpers.GetW(cpu, args.Rt, 0));
+            long a2 = (long)((long)MMIHelpers.GetW(cpu, args.Rs, 2) * MMIHelpers.GetW(cpu, args.Rt, 2));
+            long acc0 = (long)((cpu.HI << 32) | (cpu.LO & 0xFFFFFFFF)) + a0;
+            long acc2 = (long)((cpu.HI1 << 32) | (cpu.LO1 & 0xFFFFFFFF)) + a2;
+            cpu.LO = (ulong)(uint)acc0; cpu.HI = (ulong)(uint)((ulong)acc0 >> 32);
+            cpu.LO1 = (ulong)(uint)acc2; cpu.HI1 = (ulong)(uint)((ulong)acc2 >> 32);
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, (int)cpu.LO); MMIHelpers.SetW(cpu, args.Rd, 2, (int)cpu.LO1); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x00 << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PSLLVW - Parallel Shift Left Logical Variable Word (funct=0x09, shamt=0x02)
+    public sealed class PSLLVW : Instruction<Args_R>
+    {
+        public PSLLVW()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "psllvw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt", "rs"];
+            Equation = "rd.W = rt.W << rs.W[4:0] (2x32-bit)";
+            Description = "Parallel Shift Left Logical Variable Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa0 = MMIHelpers.GetW(cpu, args.Rs, 0) & 0x1F;
+            int sa1 = MMIHelpers.GetW(cpu, args.Rs, 1) & 0x1F;
+            MMIHelpers.SetW(cpu, args.Rd, 0, MMIHelpers.GetW(cpu, args.Rt, 0) << sa0);
+            MMIHelpers.SetW(cpu, args.Rd, 1, MMIHelpers.GetW(cpu, args.Rt, 1) << sa1);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[2] << 21 | args[1] << 16 | args[0] << 11 | 0x02 << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("rs", CpuHelpers.RegName(args.Rs));
+    }
+
+    // PSRLVW - Parallel Shift Right Logical Variable Word (funct=0x09, shamt=0x03)
+    public sealed class PSRLVW : Instruction<Args_R>
+    {
+        public PSRLVW()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "psrlvw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt", "rs"];
+            Equation = "rd.W = rt.W >> rs.W[4:0] (2x32-bit logical)";
+            Description = "Parallel Shift Right Logical Variable Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa0 = MMIHelpers.GetW(cpu, args.Rs, 0) & 0x1F;
+            int sa1 = MMIHelpers.GetW(cpu, args.Rs, 1) & 0x1F;
+            MMIHelpers.SetW(cpu, args.Rd, 0, (int)(MMIHelpers.GetWU(cpu, args.Rt, 0) >> sa0));
+            MMIHelpers.SetW(cpu, args.Rd, 1, (int)(MMIHelpers.GetWU(cpu, args.Rt, 1) >> sa1));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[2] << 21 | args[1] << 16 | args[0] << 11 | 0x03 << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("rs", CpuHelpers.RegName(args.Rs));
+    }
+
+    // PMSUBW - Parallel Multiply-Subtract Word (funct=0x09, shamt=0x04)
+    public sealed class PMSUBW : Instruction<Args_R>
+    {
+        public PMSUBW()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pmsubw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "LO:HI -= rs.W0*rt.W0; LO1:HI1 -= rs.W2*rt.W2";
+            Description = "Parallel Multiply-Subtract Signed Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            long a0 = (long)((long)MMIHelpers.GetW(cpu, args.Rs, 0) * MMIHelpers.GetW(cpu, args.Rt, 0));
+            long a2 = (long)((long)MMIHelpers.GetW(cpu, args.Rs, 2) * MMIHelpers.GetW(cpu, args.Rt, 2));
+            long acc0 = (long)((cpu.HI << 32) | (cpu.LO & 0xFFFFFFFF)) - a0;
+            long acc2 = (long)((cpu.HI1 << 32) | (cpu.LO1 & 0xFFFFFFFF)) - a2;
+            cpu.LO = (ulong)(uint)acc0; cpu.HI = (ulong)(uint)((ulong)acc0 >> 32);
+            cpu.LO1 = (ulong)(uint)acc2; cpu.HI1 = (ulong)(uint)((ulong)acc2 >> 32);
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, (int)cpu.LO); MMIHelpers.SetW(cpu, args.Rd, 2, (int)cpu.LO1); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x04 << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PINTH - Parallel Interleave Halfword (funct=0x09, shamt=0x0A)
+    public sealed class PINTH : Instruction<Args_R>
+    {
+        public PINTH()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pinth";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = interleave(rs[H4..H7], rt[H0..H3])";
+            Description = "Parallel Interleave Halfword - interleaves upper halfwords of rs with lower halfwords of rt";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // rd.H0=rt.H0, rd.H1=rs.H4, rd.H2=rt.H1, rd.H3=rs.H5, rd.H4=rt.H2, rd.H5=rs.H6, rd.H6=rt.H3, rd.H7=rs.H7
+            MMIHelpers.SetH(cpu, args.Rd, 0, MMIHelpers.GetH(cpu, args.Rt, 0));
+            MMIHelpers.SetH(cpu, args.Rd, 1, MMIHelpers.GetH(cpu, args.Rs, 4));
+            MMIHelpers.SetH(cpu, args.Rd, 2, MMIHelpers.GetH(cpu, args.Rt, 1));
+            MMIHelpers.SetH(cpu, args.Rd, 3, MMIHelpers.GetH(cpu, args.Rs, 5));
+            MMIHelpers.SetH(cpu, args.Rd, 4, MMIHelpers.GetH(cpu, args.Rt, 2));
+            MMIHelpers.SetH(cpu, args.Rd, 5, MMIHelpers.GetH(cpu, args.Rs, 6));
+            MMIHelpers.SetH(cpu, args.Rd, 6, MMIHelpers.GetH(cpu, args.Rt, 3));
+            MMIHelpers.SetH(cpu, args.Rd, 7, MMIHelpers.GetH(cpu, args.Rs, 7));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x0A << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PMULTW - Parallel Multiply Word (funct=0x09, shamt=0x0C)
+    public sealed class PMULTW : Instruction<Args_R>
+    {
+        public PMULTW()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pmultw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "LO=rs.W0*rt.W0; LO1=rs.W2*rt.W2; rd.W0=LO, rd.W2=LO1";
+            Description = "Parallel Multiply Signed Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            long p0 = (long)MMIHelpers.GetW(cpu, args.Rs, 0) * MMIHelpers.GetW(cpu, args.Rt, 0);
+            long p2 = (long)MMIHelpers.GetW(cpu, args.Rs, 2) * MMIHelpers.GetW(cpu, args.Rt, 2);
+            cpu.LO = (ulong)(uint)p0; cpu.HI = (ulong)(uint)(p0 >> 32);
+            cpu.LO1 = (ulong)(uint)p2; cpu.HI1 = (ulong)(uint)(p2 >> 32);
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, (int)cpu.LO); MMIHelpers.SetW(cpu, args.Rd, 2, (int)cpu.LO1); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x0C << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PDIVW - Parallel Divide Word (funct=0x09, shamt=0x0D)
+    public sealed class PDIVW : Instruction<Args_R>
+    {
+        public PDIVW()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pdivw";
+            ArgType = InstrArgType.R; ArgNames = ["rs", "rt"];
+            Equation = "LO=rs.W0/rt.W0; HI=rs.W0%rt.W0; LO1=rs.W2/rt.W2; HI1=rs.W2%rt.W2";
+            Description = "Parallel Divide Signed Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int d0 = MMIHelpers.GetW(cpu, args.Rt, 0); int d2 = MMIHelpers.GetW(cpu, args.Rt, 2);
+            if (d0 != 0) { cpu.LO = (ulong)(uint)(MMIHelpers.GetW(cpu, args.Rs, 0) / d0); cpu.HI = (ulong)(uint)(MMIHelpers.GetW(cpu, args.Rs, 0) % d0); }
+            if (d2 != 0) { cpu.LO1 = (ulong)(uint)(MMIHelpers.GetW(cpu, args.Rs, 2) / d2); cpu.HI1 = (ulong)(uint)(MMIHelpers.GetW(cpu, args.Rs, 2) % d2); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[0] << 21 | args[1] << 16 | 0x0D << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PMADDH - Parallel Multiply-Accumulate Halfword (funct=0x09, shamt=0x10)
+    public sealed class PMADDH : Instruction<Args_R>
+    {
+        public PMADDH()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pmaddh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "For each 4 halfword pairs: LO/LO1 += rs.H * rt.H";
+            Description = "Parallel Multiply-Accumulate Signed Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // Accumulate products of 4 halfword pairs into LO/LO1 words
+            long acc = (long)((cpu.HI << 32) | (cpu.LO & 0xFFFFFFFF));
+            acc += (long)MMIHelpers.GetH(cpu, args.Rs, 0) * MMIHelpers.GetH(cpu, args.Rt, 0)
+                 + (long)MMIHelpers.GetH(cpu, args.Rs, 2) * MMIHelpers.GetH(cpu, args.Rt, 2);
+            cpu.LO = (ulong)(uint)acc; cpu.HI = (ulong)(uint)((ulong)acc >> 32);
+            long acc1 = (long)((cpu.HI1 << 32) | (cpu.LO1 & 0xFFFFFFFF));
+            acc1 += (long)MMIHelpers.GetH(cpu, args.Rs, 4) * MMIHelpers.GetH(cpu, args.Rt, 4)
+                  + (long)MMIHelpers.GetH(cpu, args.Rs, 6) * MMIHelpers.GetH(cpu, args.Rt, 6);
+            cpu.LO1 = (ulong)(uint)acc1; cpu.HI1 = (ulong)(uint)((ulong)acc1 >> 32);
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, (int)cpu.LO); MMIHelpers.SetW(cpu, args.Rd, 2, (int)cpu.LO1); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x10 << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PHMADH - Parallel Horizontal Multiply-Accumulate Halfword (funct=0x09, shamt=0x11)
+    public sealed class PHMADH : Instruction<Args_R>
+    {
+        public PHMADH()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "phmadh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "LO += rs.H0*rt.H0 + rs.H1*rt.H1; LO1 += rs.H4*rt.H4 + rs.H5*rt.H5";
+            Description = "Parallel Horizontal Multiply-Accumulate Signed Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int p0 = MMIHelpers.GetH(cpu, args.Rs, 0) * MMIHelpers.GetH(cpu, args.Rt, 0) + MMIHelpers.GetH(cpu, args.Rs, 1) * MMIHelpers.GetH(cpu, args.Rt, 1);
+            int p1 = MMIHelpers.GetH(cpu, args.Rs, 2) * MMIHelpers.GetH(cpu, args.Rt, 2) + MMIHelpers.GetH(cpu, args.Rs, 3) * MMIHelpers.GetH(cpu, args.Rt, 3);
+            int p2 = MMIHelpers.GetH(cpu, args.Rs, 4) * MMIHelpers.GetH(cpu, args.Rt, 4) + MMIHelpers.GetH(cpu, args.Rs, 5) * MMIHelpers.GetH(cpu, args.Rt, 5);
+            int p3 = MMIHelpers.GetH(cpu, args.Rs, 6) * MMIHelpers.GetH(cpu, args.Rt, 6) + MMIHelpers.GetH(cpu, args.Rs, 7) * MMIHelpers.GetH(cpu, args.Rt, 7);
+            cpu.LO = (ulong)(uint)(MMIHelpers.GetW(cpu, args.Rt, 0)) + (ulong)(uint)p0; // simplified
+            cpu.LO1 = (ulong)(uint)p2;
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, p0); MMIHelpers.SetW(cpu, args.Rd, 1, p1); MMIHelpers.SetW(cpu, args.Rd, 2, p2); MMIHelpers.SetW(cpu, args.Rd, 3, p3); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x11 << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PXOR - Parallel XOR 128-bit (funct=0x09, shamt=0x13)
+    public sealed class PXOR : Instruction<Args_R>
+    {
+        public PXOR()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pxor";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = rs ^ rt (128-bit)";
+            Description = "Parallel XOR: 128-bit bitwise XOR";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            if (args.Rd != 0) { cpu.RegsLo[args.Rd] = cpu.RegsLo[args.Rs] ^ cpu.RegsLo[args.Rt]; cpu.RegsHi[args.Rd] = cpu.RegsHi[args.Rs] ^ cpu.RegsHi[args.Rt]; }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x13 << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+            if (cpu != null) { ulong lo = cpu.RegsLo[args.Rs] ^ cpu.RegsLo[args.Rt]; ulong hi = cpu.RegsHi[args.Rs] ^ cpu.RegsHi[args.Rt]; return $"{eq} => 0x{hi:X16}_{lo:X16}"; }
+            return eq;
+        }
+    }
+
+    // PMSUBH - Parallel Multiply-Subtract Halfword (funct=0x09, shamt=0x14)
+    public sealed class PMSUBH : Instruction<Args_R>
+    {
+        public PMSUBH()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pmsubh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "LO/LO1 -= rs.H * rt.H products";
+            Description = "Parallel Multiply-Subtract Signed Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            long acc = (long)((cpu.HI << 32) | (cpu.LO & 0xFFFFFFFF));
+            acc -= (long)MMIHelpers.GetH(cpu, args.Rs, 0) * MMIHelpers.GetH(cpu, args.Rt, 0)
+                 + (long)MMIHelpers.GetH(cpu, args.Rs, 2) * MMIHelpers.GetH(cpu, args.Rt, 2);
+            cpu.LO = (ulong)(uint)acc; cpu.HI = (ulong)(uint)((ulong)acc >> 32);
+            long acc1 = (long)((cpu.HI1 << 32) | (cpu.LO1 & 0xFFFFFFFF));
+            acc1 -= (long)MMIHelpers.GetH(cpu, args.Rs, 4) * MMIHelpers.GetH(cpu, args.Rt, 4)
+                  + (long)MMIHelpers.GetH(cpu, args.Rs, 6) * MMIHelpers.GetH(cpu, args.Rt, 6);
+            cpu.LO1 = (ulong)(uint)acc1; cpu.HI1 = (ulong)(uint)((ulong)acc1 >> 32);
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, (int)cpu.LO); MMIHelpers.SetW(cpu, args.Rd, 2, (int)cpu.LO1); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x14 << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PHMSBH - Parallel Horizontal Multiply-Subtract Halfword (funct=0x09, shamt=0x15)
+    public sealed class PHMSBH : Instruction<Args_R>
+    {
+        public PHMSBH()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "phmsbh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "LO -= rs.H0*rt.H0 - rs.H1*rt.H1 (horizontal)";
+            Description = "Parallel Horizontal Multiply-Subtract Signed Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int p0 = MMIHelpers.GetH(cpu, args.Rs, 0) * MMIHelpers.GetH(cpu, args.Rt, 0) - MMIHelpers.GetH(cpu, args.Rs, 1) * MMIHelpers.GetH(cpu, args.Rt, 1);
+            int p1 = MMIHelpers.GetH(cpu, args.Rs, 2) * MMIHelpers.GetH(cpu, args.Rt, 2) - MMIHelpers.GetH(cpu, args.Rs, 3) * MMIHelpers.GetH(cpu, args.Rt, 3);
+            int p2 = MMIHelpers.GetH(cpu, args.Rs, 4) * MMIHelpers.GetH(cpu, args.Rt, 4) - MMIHelpers.GetH(cpu, args.Rs, 5) * MMIHelpers.GetH(cpu, args.Rt, 5);
+            int p3 = MMIHelpers.GetH(cpu, args.Rs, 6) * MMIHelpers.GetH(cpu, args.Rt, 6) - MMIHelpers.GetH(cpu, args.Rs, 7) * MMIHelpers.GetH(cpu, args.Rt, 7);
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, p0); MMIHelpers.SetW(cpu, args.Rd, 1, p1); MMIHelpers.SetW(cpu, args.Rd, 2, p2); MMIHelpers.SetW(cpu, args.Rd, 3, p3); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x15 << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PEXEH - Exchange Halfwords within Words (funct=0x09, shamt=0x1A)
+    public sealed class PEXEH : Instruction<Args_R>
+    {
+        public PEXEH()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pexeh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd: swap H0<->H1, H2<->H3, etc in each 32-bit word";
+            Description = "Parallel Exchange Halfwords within Words";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // In each 32-bit word, swap the two 16-bit halfwords
+            for (int i = 0; i < 4; i++)
+            {
+                short h0 = MMIHelpers.GetH(cpu, args.Rt, i * 2);
+                short h1 = MMIHelpers.GetH(cpu, args.Rt, i * 2 + 1);
+                MMIHelpers.SetH(cpu, args.Rd, i * 2, h1);
+                MMIHelpers.SetH(cpu, args.Rd, i * 2 + 1, h0);
+            }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | 0x1A << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PREVH - Reverse Halfwords (funct=0x09, shamt=0x1B)
+    public sealed class PREVH : Instruction<Args_R>
+    {
+        public PREVH()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "prevh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd: reverse all 4 halfwords in each 64-bit half";
+            Description = "Parallel Reverse Halfwords";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // Lower 64: reverse H0..H3
+            short h0 = MMIHelpers.GetH(cpu, args.Rt, 0); short h1 = MMIHelpers.GetH(cpu, args.Rt, 1);
+            short h2 = MMIHelpers.GetH(cpu, args.Rt, 2); short h3 = MMIHelpers.GetH(cpu, args.Rt, 3);
+            MMIHelpers.SetH(cpu, args.Rd, 0, h3); MMIHelpers.SetH(cpu, args.Rd, 1, h2);
+            MMIHelpers.SetH(cpu, args.Rd, 2, h1); MMIHelpers.SetH(cpu, args.Rd, 3, h0);
+            // Upper 64: reverse H4..H7
+            short h4 = MMIHelpers.GetH(cpu, args.Rt, 4); short h5 = MMIHelpers.GetH(cpu, args.Rt, 5);
+            short h6 = MMIHelpers.GetH(cpu, args.Rt, 6); short h7 = MMIHelpers.GetH(cpu, args.Rt, 7);
+            MMIHelpers.SetH(cpu, args.Rd, 4, h7); MMIHelpers.SetH(cpu, args.Rd, 5, h6);
+            MMIHelpers.SetH(cpu, args.Rd, 6, h5); MMIHelpers.SetH(cpu, args.Rd, 7, h4);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | 0x1B << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PMULTH - Parallel Multiply Halfword (funct=0x09, shamt=0x1C)
+    public sealed class PMULTH : Instruction<Args_R>
+    {
+        public PMULTH()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pmulth";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "LO/LO1 = products of 4 halfword pairs";
+            Description = "Parallel Multiply Signed Halfword";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int p0 = MMIHelpers.GetH(cpu, args.Rs, 0) * MMIHelpers.GetH(cpu, args.Rt, 0);
+            int p1 = MMIHelpers.GetH(cpu, args.Rs, 2) * MMIHelpers.GetH(cpu, args.Rt, 2);
+            int p2 = MMIHelpers.GetH(cpu, args.Rs, 4) * MMIHelpers.GetH(cpu, args.Rt, 4);
+            int p3 = MMIHelpers.GetH(cpu, args.Rs, 6) * MMIHelpers.GetH(cpu, args.Rt, 6);
+            cpu.LO = (ulong)(uint)p0 | ((ulong)(uint)p1 << 32);
+            cpu.LO1 = (ulong)(uint)p2 | ((ulong)(uint)p3 << 32);
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, p0); MMIHelpers.SetW(cpu, args.Rd, 1, p1); MMIHelpers.SetW(cpu, args.Rd, 2, p2); MMIHelpers.SetW(cpu, args.Rd, 3, p3); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x1C << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PDIVBW - Parallel Divide Broadcast Word (funct=0x09, shamt=0x1D)
+    public sealed class PDIVBW : Instruction<Args_R>
+    {
+        public PDIVBW()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pdivbw";
+            ArgType = InstrArgType.R; ArgNames = ["rs", "rt"];
+            Equation = "LO.H[0..3] = rs.H[i] / rt.W0; HI.H[0..3] = rs.H[i] % rt.W0";
+            Description = "Parallel Divide Broadcast Word - divides 4 halfwords by one word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int div = MMIHelpers.GetW(cpu, args.Rt, 0);
+            if (div == 0) return;
+            for (int i = 0; i < 4; i++)
+            {
+                short h = MMIHelpers.GetH(cpu, args.Rs, i);
+                MMIHelpers.SetH(cpu, 0, i, (short)(h / div)); // simplified: write to $0 (ignored)
+            }
+            // Write quotients to LO and remainders to HI
+            cpu.LO = 0; cpu.HI = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                short h = MMIHelpers.GetH(cpu, args.Rs, i);
+                if (i < 2) cpu.LO |= (ulong)(ushort)(short)(h / div) << (i * 16);
+                if (i < 2) cpu.HI |= (ulong)(ushort)(short)(h % div) << (i * 16);
+            }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[0] << 21 | args[1] << 16 | 0x1D << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PEXEW - Exchange Words within 64-bit chunks (funct=0x09, shamt=0x1E)
+    public sealed class PEXEW : Instruction<Args_R>
+    {
+        public PEXEW()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "pexew";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd.W0=rt.W2; rd.W1=rt.W3; rd.W2=rt.W0; rd.W3=rt.W1";
+            Description = "Parallel Exchange Words - swaps W0<->W2 and W1<->W3";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int w0 = MMIHelpers.GetW(cpu, args.Rt, 0); int w1 = MMIHelpers.GetW(cpu, args.Rt, 1);
+            int w2 = MMIHelpers.GetW(cpu, args.Rt, 2); int w3 = MMIHelpers.GetW(cpu, args.Rt, 3);
+            MMIHelpers.SetW(cpu, args.Rd, 0, w2); MMIHelpers.SetW(cpu, args.Rd, 1, w3);
+            MMIHelpers.SetW(cpu, args.Rd, 2, w0); MMIHelpers.SetW(cpu, args.Rd, 3, w1);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | 0x1E << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PROT3W - Rotate 3 Words (funct=0x09, shamt=0x1F)
+    public sealed class PROT3W : Instruction<Args_R>
+    {
+        public PROT3W()
+        {
+            Opcode = 0x1C; Funct = 0x09; Name = "prot3w";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd.W0=rt.W1; rd.W1=rt.W2; rd.W2=rt.W0; rd.W3=rt.W3";
+            Description = "Parallel Rotate 3 Words";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int w0 = MMIHelpers.GetW(cpu, args.Rt, 0); int w1 = MMIHelpers.GetW(cpu, args.Rt, 1);
+            int w2 = MMIHelpers.GetW(cpu, args.Rt, 2); int w3 = MMIHelpers.GetW(cpu, args.Rt, 3);
+            MMIHelpers.SetW(cpu, args.Rd, 0, w1); MMIHelpers.SetW(cpu, args.Rd, 1, w2);
+            MMIHelpers.SetW(cpu, args.Rd, 2, w0); MMIHelpers.SetW(cpu, args.Rd, 3, w3);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | 0x1F << 6 | 0x09);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // =========================================================================
+    // MMI3 sub-instructions (funct=0x29, dispatched by shamt)
+    // =========================================================================
+
+    // PMADDUW - Parallel Multiply-Accumulate Unsigned Word (funct=0x29, shamt=0x00)
+    public sealed class PMADDUW : Instruction<Args_R>
+    {
+        public PMADDUW()
+        {
+            Opcode = 0x1C; Funct = 0x29; Name = "pmadduw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "LO:HI += rs.W0*rt.W0 (unsigned); LO1:HI1 += rs.W2*rt.W2";
+            Description = "Parallel Multiply-Accumulate Unsigned Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            ulong a0 = (ulong)MMIHelpers.GetWU(cpu, args.Rs, 0) * MMIHelpers.GetWU(cpu, args.Rt, 0);
+            ulong a2 = (ulong)MMIHelpers.GetWU(cpu, args.Rs, 2) * MMIHelpers.GetWU(cpu, args.Rt, 2);
+            ulong acc0 = ((cpu.HI & 0xFFFFFFFF) << 32) | (cpu.LO & 0xFFFFFFFF);
+            ulong acc2 = ((cpu.HI1 & 0xFFFFFFFF) << 32) | (cpu.LO1 & 0xFFFFFFFF);
+            acc0 += a0; acc2 += a2;
+            cpu.LO = acc0 & 0xFFFFFFFF; cpu.HI = acc0 >> 32;
+            cpu.LO1 = acc2 & 0xFFFFFFFF; cpu.HI1 = acc2 >> 32;
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, (int)cpu.LO); MMIHelpers.SetW(cpu, args.Rd, 2, (int)cpu.LO1); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x00 << 6 | 0x29);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PSRAVW - Parallel Shift Right Arithmetic Variable Word (funct=0x29, shamt=0x03)
+    public sealed class PSRAVW : Instruction<Args_R>
+    {
+        public PSRAVW()
+        {
+            Opcode = 0x1C; Funct = 0x29; Name = "psravw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt", "rs"];
+            Equation = "rd.W = rt.W >>> rs.W[4:0] (2x32-bit arithmetic)";
+            Description = "Parallel Shift Right Arithmetic Variable Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int sa0 = MMIHelpers.GetW(cpu, args.Rs, 0) & 0x1F;
+            int sa1 = MMIHelpers.GetW(cpu, args.Rs, 1) & 0x1F;
+            MMIHelpers.SetW(cpu, args.Rd, 0, MMIHelpers.GetW(cpu, args.Rt, 0) >> sa0);
+            MMIHelpers.SetW(cpu, args.Rd, 1, MMIHelpers.GetW(cpu, args.Rt, 1) >> sa1);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}, {CpuHelpers.RegName(args.Rs)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[2] << 21 | args[1] << 16 | args[0] << 11 | 0x03 << 6 | 0x29);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("rs", CpuHelpers.RegName(args.Rs));
+    }
+
+    // PINTEH - Parallel Interleave Even Halfwords (funct=0x29, shamt=0x0A)
+    public sealed class PINTEH : Instruction<Args_R>
+    {
+        public PINTEH()
+        {
+            Opcode = 0x1C; Funct = 0x29; Name = "pinteh";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = interleave even halfwords of rs and rt";
+            Description = "Parallel Interleave Even Halfwords";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // Interleave even halfwords (indices 0, 2, 4, 6)
+            MMIHelpers.SetH(cpu, args.Rd, 0, MMIHelpers.GetH(cpu, args.Rt, 0));
+            MMIHelpers.SetH(cpu, args.Rd, 1, MMIHelpers.GetH(cpu, args.Rs, 0));
+            MMIHelpers.SetH(cpu, args.Rd, 2, MMIHelpers.GetH(cpu, args.Rt, 2));
+            MMIHelpers.SetH(cpu, args.Rd, 3, MMIHelpers.GetH(cpu, args.Rs, 2));
+            MMIHelpers.SetH(cpu, args.Rd, 4, MMIHelpers.GetH(cpu, args.Rt, 4));
+            MMIHelpers.SetH(cpu, args.Rd, 5, MMIHelpers.GetH(cpu, args.Rs, 4));
+            MMIHelpers.SetH(cpu, args.Rd, 6, MMIHelpers.GetH(cpu, args.Rt, 6));
+            MMIHelpers.SetH(cpu, args.Rd, 7, MMIHelpers.GetH(cpu, args.Rs, 6));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x0A << 6 | 0x29);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PMULTUW - Parallel Multiply Unsigned Word (funct=0x29, shamt=0x0C)
+    public sealed class PMULTUW : Instruction<Args_R>
+    {
+        public PMULTUW()
+        {
+            Opcode = 0x1C; Funct = 0x29; Name = "pmultuw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "LO=rs.W0*rt.W0 (unsigned); LO1=rs.W2*rt.W2";
+            Description = "Parallel Multiply Unsigned Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            ulong p0 = (ulong)MMIHelpers.GetWU(cpu, args.Rs, 0) * MMIHelpers.GetWU(cpu, args.Rt, 0);
+            ulong p2 = (ulong)MMIHelpers.GetWU(cpu, args.Rs, 2) * MMIHelpers.GetWU(cpu, args.Rt, 2);
+            cpu.LO = p0 & 0xFFFFFFFF; cpu.HI = p0 >> 32;
+            cpu.LO1 = p2 & 0xFFFFFFFF; cpu.HI1 = p2 >> 32;
+            if (args.Rd != 0) { MMIHelpers.SetW(cpu, args.Rd, 0, (int)cpu.LO); MMIHelpers.SetW(cpu, args.Rd, 2, (int)cpu.LO1); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x0C << 6 | 0x29);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PDIVUW - Parallel Divide Unsigned Word (funct=0x29, shamt=0x0D)
+    public sealed class PDIVUW : Instruction<Args_R>
+    {
+        public PDIVUW()
+        {
+            Opcode = 0x1C; Funct = 0x29; Name = "pdivuw";
+            ArgType = InstrArgType.R; ArgNames = ["rs", "rt"];
+            Equation = "LO=rs.W0/rt.W0 (unsigned); LO1=rs.W2/rt.W2";
+            Description = "Parallel Divide Unsigned Word";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            uint d0 = MMIHelpers.GetWU(cpu, args.Rt, 0); uint d2 = MMIHelpers.GetWU(cpu, args.Rt, 2);
+            if (d0 != 0) { cpu.LO = MMIHelpers.GetWU(cpu, args.Rs, 0) / d0; cpu.HI = MMIHelpers.GetWU(cpu, args.Rs, 0) % d0; }
+            if (d2 != 0) { cpu.LO1 = MMIHelpers.GetWU(cpu, args.Rs, 2) / d2; cpu.HI1 = MMIHelpers.GetWU(cpu, args.Rs, 2) % d2; }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[0] << 21 | args[1] << 16 | 0x0D << 6 | 0x29);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PNOR - Parallel NOR 128-bit (funct=0x29, shamt=0x13)
+    public sealed class PNOR : Instruction<Args_R>
+    {
+        public PNOR()
+        {
+            Opcode = 0x1C; Funct = 0x29; Name = "pnor";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rs", "rt"];
+            Equation = "rd = ~(rs | rt) (128-bit)";
+            Description = "Parallel NOR: 128-bit bitwise NOR";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            if (args.Rd != 0) { cpu.RegsLo[args.Rd] = ~(cpu.RegsLo[args.Rs] | cpu.RegsLo[args.Rt]); cpu.RegsHi[args.Rd] = ~(cpu.RegsHi[args.Rs] | cpu.RegsHi[args.Rt]); }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 21 | args[2] << 16 | args[0] << 11 | 0x13 << 6 | 0x29);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rs", CpuHelpers.RegName(args.Rs)).Replace("rt", CpuHelpers.RegName(args.Rt));
+            if (cpu != null) { ulong lo = ~(cpu.RegsLo[args.Rs] | cpu.RegsLo[args.Rt]); ulong hi = ~(cpu.RegsHi[args.Rs] | cpu.RegsHi[args.Rt]); return $"{eq} => 0x{hi:X16}_{lo:X16}"; }
+            return eq;
+        }
+    }
+
+    // PEXCH - Exchange Halfwords within 64-bit chunks (funct=0x29, shamt=0x1A)
+    public sealed class PEXCH : Instruction<Args_R>
+    {
+        public PEXCH()
+        {
+            Opcode = 0x1C; Funct = 0x29; Name = "pexch";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd: swap H1<->H2 in each 64-bit half";
+            Description = "Parallel Exchange Halfwords in 64-bit chunks";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // Lower 64: swap H1 and H2
+            short h0 = MMIHelpers.GetH(cpu, args.Rt, 0); short h1 = MMIHelpers.GetH(cpu, args.Rt, 1);
+            short h2 = MMIHelpers.GetH(cpu, args.Rt, 2); short h3 = MMIHelpers.GetH(cpu, args.Rt, 3);
+            MMIHelpers.SetH(cpu, args.Rd, 0, h0); MMIHelpers.SetH(cpu, args.Rd, 1, h2);
+            MMIHelpers.SetH(cpu, args.Rd, 2, h1); MMIHelpers.SetH(cpu, args.Rd, 3, h3);
+            // Upper 64: swap H5 and H6
+            short h4 = MMIHelpers.GetH(cpu, args.Rt, 4); short h5 = MMIHelpers.GetH(cpu, args.Rt, 5);
+            short h6 = MMIHelpers.GetH(cpu, args.Rt, 6); short h7 = MMIHelpers.GetH(cpu, args.Rt, 7);
+            MMIHelpers.SetH(cpu, args.Rd, 4, h4); MMIHelpers.SetH(cpu, args.Rd, 5, h6);
+            MMIHelpers.SetH(cpu, args.Rd, 6, h5); MMIHelpers.SetH(cpu, args.Rd, 7, h7);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | 0x1A << 6 | 0x29);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // PEXCW - Exchange Words (funct=0x29, shamt=0x1E)
+    public sealed class PEXCW : Instruction<Args_R>
+    {
+        public PEXCW()
+        {
+            Opcode = 0x1C; Funct = 0x29; Name = "pexcw";
+            ArgType = InstrArgType.R; ArgNames = ["rd", "rt"];
+            Equation = "rd.W0=rt.W0; rd.W1=rt.W2; rd.W2=rt.W1; rd.W3=rt.W3";
+            Description = "Parallel Exchange Words - swaps W1 and W2";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            int w0 = MMIHelpers.GetW(cpu, args.Rt, 0); int w1 = MMIHelpers.GetW(cpu, args.Rt, 1);
+            int w2 = MMIHelpers.GetW(cpu, args.Rt, 2); int w3 = MMIHelpers.GetW(cpu, args.Rt, 3);
+            MMIHelpers.SetW(cpu, args.Rd, 0, w0); MMIHelpers.SetW(cpu, args.Rd, 1, w2);
+            MMIHelpers.SetW(cpu, args.Rd, 2, w1); MMIHelpers.SetW(cpu, args.Rd, 3, w3);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x1C << 26 | args[1] << 16 | args[0] << 11 | 0x1E << 6 | 0x29);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rd", CpuHelpers.RegName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
     }
 }

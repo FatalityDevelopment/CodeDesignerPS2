@@ -399,7 +399,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void Test_PAND()
         {
-            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 8 << 11 | 0x12 << 6 | 0x29);
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 8 << 11 | 0x12 << 6 | 0x09);
             AssertDisasm(enc, "pand");
             var cpu = MakeCpu();
             // $s0=10 (0b1010), $s1=7 (0b0111) => AND = 0b0010 = 2
@@ -410,7 +410,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void Test_POR()
         {
-            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 8 << 11 | 0x13 << 6 | 0x29);
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 8 << 11 | 0x12 << 6 | 0x29);
             AssertDisasm(enc, "por");
             var cpu = MakeCpu();
             // $s0=10 (0b1010), $s1=7 (0b0111) => OR = 0b1111 = 15
@@ -722,6 +722,210 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.IsTrue(MipsDisassembler.Disassemble(0x46010800).Contains("add.s"), "ADD.S should still work");
             Assert.IsTrue(MipsDisassembler.Disassemble(0x4A000028).Contains("vadd"),  "VADD should still work");
             Assert.IsTrue(MipsDisassembler.Disassemble(0x42000018).Contains("eret"),  "ERET should still work");
+        }
+
+        // =====================================================================
+        // New branch likely instructions
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_BLTZL()
+        {
+            // bltzl $s0, offset=4 => opcode=0x01, rs=16, rt=0x02, imm=4
+            uint enc = (uint)(0x01 << 26 | 16 << 21 | 0x02 << 16 | 4);
+            AssertDisasm(enc, "bltzl");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = unchecked((ulong)-1L); // negative
+            cpu.PC = 0x80000000;
+            Exec(cpu, enc);
+            Assert.AreEqual(0x80000014UL, cpu.PC, "BLTZL taken: PC = PC + 4 + 16 = 0x80000014");
+        }
+
+        [TestMethod]
+        public void Test_BGEZL()
+        {
+            uint enc = (uint)(0x01 << 26 | 16 << 21 | 0x03 << 16 | 2);
+            AssertDisasm(enc, "bgezl");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 10; // non-negative
+            cpu.PC = 0x80000000;
+            Exec(cpu, enc);
+            Assert.AreEqual(0x8000000CUL, cpu.PC, "BGEZL taken: PC = PC + 4 + 8 = 0x8000000C");
+        }
+
+        [TestMethod]
+        public void Test_BLEZL()
+        {
+            uint enc = (uint)(0x16 << 26 | 16 << 21 | 2);
+            AssertDisasm(enc, "blezl");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 0; // zero <= 0
+            cpu.PC = 0x80000000;
+            Exec(cpu, enc);
+            Assert.AreEqual(0x8000000CUL, cpu.PC, "BLEZL taken: PC = PC + 4 + 8 = 0x8000000C");
+        }
+
+        [TestMethod]
+        public void Test_BGTZL()
+        {
+            uint enc = (uint)(0x17 << 26 | 16 << 21 | 2);
+            AssertDisasm(enc, "bgtzl");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 5; // positive
+            cpu.PC = 0x80000000;
+            Exec(cpu, enc);
+            Assert.AreEqual(0x8000000CUL, cpu.PC, "BGTZL taken: PC = PC + 4 + 8 = 0x8000000C");
+        }
+
+        // =====================================================================
+        // MFSA / MTSA tests
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_MFSA()
+        {
+            // mfsa $t0 => rd=8, funct=0x28
+            uint enc = (uint)(8 << 11 | 0x28);
+            AssertDisasm(enc, "mfsa");
+            var cpu = MakeCpu(); cpu.SA = 42;
+            Exec(cpu, enc);
+            Assert.AreEqual(42UL, cpu.RegsLo[8], "MFSA: $t0 = SA = 42");
+        }
+
+        [TestMethod]
+        public void Test_MTSA()
+        {
+            // mtsa $s0 => rs=16, funct=0x29
+            uint enc = (uint)(16 << 21 | 0x29);
+            AssertDisasm(enc, "mtsa");
+            var cpu = MakeCpu(); cpu.RegsLo[16] = 7;
+            Exec(cpu, enc);
+            Assert.AreEqual(7, cpu.SA, "MTSA: SA = $s0 = 7");
+        }
+
+        // =====================================================================
+        // MTSAB / MTSAH tests
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_MTSAB()
+        {
+            // mtsab $s0, 0 => REGIMM rt=0x18, rs=16, imm=0
+            uint enc = (uint)(0x01 << 26 | 16 << 21 | 0x18 << 16 | 0);
+            AssertDisasm(enc, "mtsab");
+            var cpu = MakeCpu(); cpu.RegsLo[16] = 2; // rs=2, imm=0 => SA = (2^0)*8 = 16
+            Exec(cpu, enc);
+            Assert.AreEqual(16, cpu.SA, "MTSAB: SA = (2 ^ 0) * 8 = 16");
+        }
+
+        [TestMethod]
+        public void Test_MTSAH()
+        {
+            // mtsah $s0, 0 => REGIMM rt=0x19, rs=16, imm=0
+            uint enc = (uint)(0x01 << 26 | 16 << 21 | 0x19 << 16 | 0);
+            AssertDisasm(enc, "mtsah");
+            var cpu = MakeCpu(); cpu.RegsLo[16] = 3; // rs=3, imm=0 => SA = (3^0)*16 = 48
+            Exec(cpu, enc);
+            Assert.AreEqual(48, cpu.SA, "MTSAH: SA = (3 ^ 0) * 16 = 48");
+        }
+
+        // =====================================================================
+        // COP0 EI / DI tests
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_EI()
+        {
+            // ei => opcode=0x10 (COP0), rs=0x10, funct=0x38
+            uint enc = (uint)(0x10 << 26 | 0x10 << 21 | 0x38);
+            AssertDisasm(enc, "ei");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+            Assert.IsTrue((cpu.COP0.ReadRegister32(12) & 0x10000u) != 0, "EI: sets EIE bit");
+        }
+
+        [TestMethod]
+        public void Test_DI()
+        {
+            uint enc = (uint)(0x10 << 26 | 0x10 << 21 | 0x39);
+            AssertDisasm(enc, "di");
+            var cpu = MakeCpu();
+            cpu.COP0.WriteRegister32(12, cpu.COP0.ReadRegister32(12) | 0x10000u);
+            Exec(cpu, enc);
+            Assert.IsTrue((cpu.COP0.ReadRegister32(12) & 0x10000u) == 0, "DI: clears EIE bit");
+        }
+
+        // =====================================================================
+        // COP1 C_F test
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_C_F()
+        {
+            uint enc = (uint)(0x11 << 26 | 0x10 << 21 | 1 << 16 | 0 << 11 | 0x30);
+            AssertDisasm(enc, "c.f.s");
+            var cpu = MakeCpu();
+            cpu.COP1.SetConditionCode(true); // pre-set to true
+            Exec(cpu, enc);
+            Assert.IsFalse(cpu.COP1.GetConditionCode(), "C.F.S: always sets CC=false");
+        }
+
+        // =====================================================================
+        // MMI shift tests
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_PSLLH()
+        {
+            // psllh $t0, $s0, 2 => funct=0x34, rd=8, rt=16, sa=2
+            uint enc = (uint)(0x1C << 26 | 16 << 16 | 8 << 11 | 2 << 6 | 0x34);
+            AssertDisasm(enc, "psllh");
+            var cpu = MakeCpu(); cpu.RegsLo[16] = 0x0001000200030004UL;
+            Exec(cpu, enc);
+            Assert.AreEqual(0x00040008000C0010UL, cpu.RegsLo[8], "PSLLH: shift each halfword left by 2");
+        }
+
+        [TestMethod]
+        public void Test_PXOR()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 8 << 11 | 0x13 << 6 | 0x09);
+            AssertDisasm(enc, "pxor");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+            Assert.AreEqual(cpu.RegsLo[16] ^ cpu.RegsLo[17], cpu.RegsLo[8], "PXOR: 128-bit XOR");
+        }
+
+        [TestMethod]
+        public void Test_PNOR()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 8 << 11 | 0x13 << 6 | 0x29);
+            AssertDisasm(enc, "pnor");
+            var cpu = MakeCpu();
+            ulong expectedLo = ~(cpu.RegsLo[16] | cpu.RegsLo[17]);
+            Exec(cpu, enc);
+            Assert.AreEqual(expectedLo, cpu.RegsLo[8], "PNOR: 128-bit NOR");
+        }
+
+        [TestMethod]
+        public void Test_PMFHL()
+        {
+            uint enc = (uint)(0x1C << 26 | 8 << 11 | 0x30);
+            AssertDisasm(enc, "pmfhl");
+            var cpu = MakeCpu(); cpu.LO = 0x1234; cpu.HI = 0x5678;
+            Exec(cpu, enc);
+            Assert.AreEqual(0x1234UL, cpu.RegsLo[8], "PMFHL: rd.lo = LO");
+            Assert.AreEqual(0x5678UL, cpu.RegsHi[8], "PMFHL: rd.hi = HI");
+        }
+
+        [TestMethod]
+        public void Test_PMTHL()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 0x31);
+            AssertDisasm(enc, "pmthl");
+            var cpu = MakeCpu(); cpu.RegsLo[16] = 0xABCD; cpu.RegsHi[16] = 0xEF01;
+            Exec(cpu, enc);
+            Assert.AreEqual(0xABCDUL, cpu.LO, "PMTHL: LO = rs.lo");
+            Assert.AreEqual(0xEF01UL, cpu.HI, "PMTHL: HI = rs.hi");
         }
     }
 }

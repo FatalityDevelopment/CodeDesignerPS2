@@ -1646,7 +1646,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void Test_C_LT_S()
         {
-            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | 0x3C);
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | 0x34);
             AssertDisasm(enc, "c.lt.s");
             var cpu = MakeCpu();
             var decoded = MipsDecoder.DecodeR(enc);
@@ -1659,7 +1659,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void Test_C_LE_S()
         {
-            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | 0x3E);
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | 0x36);
             AssertDisasm(enc, "c.le.s");
             var cpu = MakeCpu();
             Exec(cpu, enc);

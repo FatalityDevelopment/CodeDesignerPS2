@@ -888,6 +888,41 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         }
     }
 
+    // C.F.S - Compare False (always sets CC=false)
+    public sealed class C_F : Instruction<Args_R>
+    {
+        public C_F()
+        {
+            Opcode = 0x11;
+            Funct = 0x30;
+            Name = "c.f.s";
+            ArgType = InstrArgType.R;
+            ArgNames = ["fs", "ft"];
+            Equation = "CC = false";
+            Description = "Compare false single-precision - always clears condition code";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            cpu.COP1.SetConditionCode(false);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+        {
+            return $"{Name} $f{args.Rs}, $f{args.Rt}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x30);
+        }
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            return $"c.f.s $f{args.Rs}, $f{args.Rt} => CC = false";
+        }
+    }
+
     // C.EQ.S - Compare equal single-precision
     public sealed class C_EQ_S : Instruction<Args_R>
     {
@@ -941,7 +976,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public C_LT_S()
         {
             Opcode = 0x11;
-            Funct = 0x3C;
+            Funct = 0x34;
             Name = "c.lt.s";
             ArgType = InstrArgType.R;
             ArgNames = ["fs", "ft"];
@@ -962,7 +997,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x3C);
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x34);
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
@@ -988,7 +1023,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public C_LE_S()
         {
             Opcode = 0x11;
-            Funct = 0x3E;
+            Funct = 0x36;
             Name = "c.le.s";
             ArgType = InstrArgType.R;
             ArgNames = ["fs", "ft"];
@@ -1009,7 +1044,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x3E);
+            return (uint)(Opcode << 26 | 0x10 << 21 | args[1] << 16 | args[0] << 11 | Funct ?? 0x36);
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)

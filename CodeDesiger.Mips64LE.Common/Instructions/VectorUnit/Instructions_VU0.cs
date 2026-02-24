@@ -1163,4 +1163,210 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.VectorUnitInstructions
             return eq;
         }
     }
+
+    // QMFC2 - Quadword Move From COP2 (COP2 rs=0x01, opcode=0x12)
+    public sealed class QMFC2 : Instruction<Args_R>
+    {
+        public QMFC2()
+        {
+            Opcode = 0x12; Funct = 0x00; Name = "qmfc2";
+            ArgType = InstrArgType.R; ArgNames = ["rt", "vfs"];
+            Equation = "GPR[rt] = VF[vfs] (128-bit move to two 64-bit GPRs)";
+            Description = "Quadword Move From COP2 - moves 128-bit VF register to GPR pair";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 v = cpu.VU0.ReadVF(args.Rt);
+            cpu.RegsLo[args.Rd] = (ulong)BitConverter.SingleToUInt32Bits(v.X) | ((ulong)BitConverter.SingleToUInt32Bits(v.Y) << 32);
+            cpu.RegsHi[args.Rd] = (ulong)BitConverter.SingleToUInt32Bits(v.Z) | ((ulong)BitConverter.SingleToUInt32Bits(v.W) << 32);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x01 << 21 | args[1] << 16 | args[0] << 11);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("rt", CpuHelpers.RegName(args.Rd)).Replace("vfs", VU0State.GetVFRegisterName(args.Rt));
+            if (cpu != null) { Vector4 v = cpu.VU0.ReadVF(args.Rt); return $"{eq} => {v}"; }
+            return eq;
+        }
+    }
+
+    // CFC2 - Control From COP2 (COP2 rs=0x02, opcode=0x12)
+    public sealed class CFC2 : Instruction<Args_R>
+    {
+        public CFC2()
+        {
+            Opcode = 0x12; Funct = 0x00; Name = "cfc2";
+            ArgType = InstrArgType.R; ArgNames = ["rt", "ctrl"];
+            Equation = "GPR[rt] = VU0_ControlReg[ctrl]";
+            Description = "Control From COP2 - reads VU0 control register";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // Read control register (simplified: return status flags for known regs)
+            uint val = args.Rt switch {
+                16 => cpu.VU0.StatusFlags,
+                17 => cpu.VU0.MACFlags,
+                18 => cpu.VU0.ClipFlags,
+                _ => 0
+            };
+            cpu.RegsLo[args.Rd] = (ulong)(int)val; // sign-extend 32-bit
+            cpu.RegsHi[args.Rd] = val > 0x7FFFFFFF ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {CpuHelpers.RegName(args.Rd)}, vi{args.Rt}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x02 << 21 | args[1] << 16 | args[0] << 11);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("rt", CpuHelpers.RegName(args.Rd)).Replace("ctrl", $"vi{args.Rt}");
+    }
+
+    // QMTC2 - Quadword Move To COP2 (COP2 rs=0x05, opcode=0x12)
+    public sealed class QMTC2 : Instruction<Args_R>
+    {
+        public QMTC2()
+        {
+            Opcode = 0x12; Funct = 0x00; Name = "qmtc2";
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "rt"];
+            Equation = "VF[vfd] = GPR[rt] (128-bit move from two 64-bit GPRs)";
+            Description = "Quadword Move To COP2 - moves GPR pair to 128-bit VF register";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            float x = BitConverter.UInt32BitsToSingle((uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF));
+            float y = BitConverter.UInt32BitsToSingle((uint)(cpu.RegsLo[args.Rt] >> 32));
+            float z = BitConverter.UInt32BitsToSingle((uint)(cpu.RegsHi[args.Rt] & 0xFFFFFFFF));
+            float w = BitConverter.UInt32BitsToSingle((uint)(cpu.RegsHi[args.Rt] >> 32));
+            cpu.VU0.WriteVF(args.Rd, new Vector4(x, y, z, w));
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} {VU0State.GetVFRegisterName(args.Rd)}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x05 << 21 | args[1] << 16 | args[0] << 11);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Rd)).Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // CTC2 - Control To COP2 (COP2 rs=0x06, opcode=0x12)
+    public sealed class CTC2 : Instruction<Args_R>
+    {
+        public CTC2()
+        {
+            Opcode = 0x12; Funct = 0x00; Name = "ctc2";
+            ArgType = InstrArgType.R; ArgNames = ["ctrl", "rt"];
+            Equation = "VU0_ControlReg[ctrl] = GPR[rt]";
+            Description = "Control To COP2 - writes VU0 control register";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            uint val = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
+            switch (args.Rd)
+            {
+                case 16: cpu.VU0.StatusFlags = val; break;
+                case 17: cpu.VU0.MACFlags = (ushort)val; break;
+                case 18: cpu.VU0.ClipFlags = val; break;
+            }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name} vi{args.Rd}, {CpuHelpers.RegName(args.Rt)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(0x12 << 26 | 0x06 << 21 | args[1] << 16 | args[0] << 11);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => Equation.Replace("ctrl", $"vi{args.Rd}").Replace("rt", CpuHelpers.RegName(args.Rt));
+    }
+
+    // VFTOI4 - VU Float to Int with factor 2^4 (COP2 rs=0x10, funct=0x3E - overrides VFTOI0 at 0x3C? No, different funct)
+    // Actually this is funct=0x3E (VFTOI4 is at 0x3E in the COP2 table per EE spec)
+    public sealed class VFTOI4 : Instruction<Args_R>
+    {
+        private byte _mask = 0xF;
+
+        public VFTOI4()
+        {
+            Opcode = 0x12; Funct = 0x3E; Name = "vftoi4";
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "vfs"];
+            Equation = "vfd = (int)(vfs * 16.0)";
+            Description = "VU Float To Integer with factor 2^4 - converts float to fixed-point integer";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rs);
+            Vector4 result = new Vector4(
+                (int)(vs.X * 16.0f),
+                (int)(vs.Y * 16.0f),
+                (int)(vs.Z * 16.0f),
+                (int)(vs.W * 16.0f)
+            );
+            cpu.VU0.WriteVF(args.Rd, result, _mask);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(Opcode << 26 | args[1] << 21 | args[0] << 11 | Funct ?? 0x3E);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Rd)).Replace("vfs", VU0State.GetVFRegisterName(args.Rs));
+            if (cpu != null) { Vector4 vs = cpu.VU0.ReadVF(args.Rs); return $"{eq} => {vs} * 16"; }
+            return eq;
+        }
+    }
+
+    // VITOF4 - VU Int to Float with factor 2^-4 (COP2 rs=0x10, funct=0x3F)
+    public sealed class VITOF4 : Instruction<Args_R>
+    {
+        private byte _mask = 0xF;
+
+        public VITOF4()
+        {
+            Opcode = 0x12; Funct = 0x3F; Name = "vitof4";
+            ArgType = InstrArgType.R; ArgNames = ["vfd", "vfs"];
+            Equation = "vfd = (float)vfs / 16.0";
+            Description = "VU Integer To Float with factor 2^-4 - converts fixed-point integer to float";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            Vector4 vs = cpu.VU0.ReadVF(args.Rs);
+            int ix = BitConverter.SingleToInt32Bits(vs.X);
+            int iy = BitConverter.SingleToInt32Bits(vs.Y);
+            int iz = BitConverter.SingleToInt32Bits(vs.Z);
+            int iw = BitConverter.SingleToInt32Bits(vs.W);
+            Vector4 result = new Vector4(ix / 16.0f, iy / 16.0f, iz / 16.0f, iw / 16.0f);
+            cpu.VU0.WriteVF(args.Rd, result, _mask);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+            => $"{Name}{VU0Helpers.MaskToString(_mask)} {VU0State.GetVFRegisterName(args.Rd)}, {VU0State.GetVFRegisterName(args.Rs)}";
+
+        public override uint Asm(int[] args)
+            => (uint)(Opcode << 26 | args[1] << 21 | args[0] << 11 | Funct ?? 0x3F);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            string eq = Equation.Replace("vfd", VU0State.GetVFRegisterName(args.Rd)).Replace("vfs", VU0State.GetVFRegisterName(args.Rs));
+            if (cpu != null) { Vector4 vs = cpu.VU0.ReadVF(args.Rs); return $"{eq} => {vs} / 16"; }
+            return eq;
+        }
+    }
 }

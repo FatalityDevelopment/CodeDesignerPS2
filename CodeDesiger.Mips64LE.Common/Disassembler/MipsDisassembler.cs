@@ -320,9 +320,109 @@ namespace CodeDesigner.Mips64LE.Common
             RegisterMmiSub(new PMTHI(),  0x29, 0x08);
             RegisterMmiSub(new PMTLO(),  0x29, 0x09);
             RegisterMmiSub(new PCPYUD(), 0x29, 0x0E);
-            RegisterMmiSub(new PAND(),   0x29, 0x12);
-            RegisterMmiSub(new POR(),    0x29, 0x13);
+            RegisterMmiSub(new PAND(),   0x09, 0x12);
+            RegisterMmiSub(new POR(),    0x29, 0x12);
             RegisterMmiSub(new PCPYH(),  0x29, 0x1B);
+
+            // New branch likely instructions (REGIMM)
+            RegisterRegimm(new BLTZL(), 0x02);
+            RegisterRegimm(new BGEZL(), 0x03);
+
+            // Trap-on-immediate (REGIMM)
+            RegisterRegimm(new TGEI(),  0x08);
+            RegisterRegimm(new TGEIU(), 0x09);
+            RegisterRegimm(new TLTI(),  0x0A);
+            RegisterRegimm(new TLTIU(), 0x0B);
+            RegisterRegimm(new TEQI(),  0x0C);
+            RegisterRegimm(new TNEI(),  0x0E);
+
+            // SA register move REGIMM
+            RegisterRegimm(new MTSAB(), 0x18);
+            RegisterRegimm(new MTSAH(), 0x19);
+
+            // Branch likely I-type
+            RegisterI(new BLEZL());  // opcode=0x16
+            RegisterI(new BGTZL());  // opcode=0x17
+
+            // SPECIAL SA instructions
+            RegisterR(new MFSA());  // funct=0x28
+            RegisterR(new MTSA());  // funct=0x29
+
+            // COP0: EI, DI
+            RegisterCop(new EI(), 0x10);  // funct=0x38
+            RegisterCop(new DI(), 0x10);  // funct=0x39
+
+            // COP1: Add C_F
+            RegisterCop(new C_F(), 0x10);  // funct=0x30
+
+            // COP2 register moves
+            RegisterCop(new QMFC2(), 0x01);  // rs=0x01
+            RegisterCop(new CFC2(),  0x02);  // rs=0x02
+            RegisterCop(new QMTC2(), 0x05);  // rs=0x05
+            RegisterCop(new CTC2(),  0x06);  // rs=0x06
+
+            // VU0 additional float conversion
+            RegisterCop(new VFTOI4(), 0x10);  // funct=0x3E
+            RegisterCop(new VITOF4(), 0x10);  // funct=0x3F
+
+            // MMI direct instructions: shift and move
+            RegisterR(new PMFHL());   // funct=0x30
+            RegisterR(new PMTHL());   // funct=0x31
+            RegisterR(new PSLLH());   // funct=0x34
+            RegisterR(new PSRLH());   // funct=0x36
+            RegisterR(new PSRAH());   // funct=0x37
+            RegisterR(new PSLLW());   // funct=0x3C
+            RegisterR(new PSRLW());   // funct=0x3E
+            RegisterR(new PSRAW());   // funct=0x3F
+
+            // MMI0 new sub-instructions (funct=0x08)
+            RegisterMmiSub(new PCGTH(),  0x08, 0x06);
+            RegisterMmiSub(new PCGTB(),  0x08, 0x0A);
+            RegisterMmiSub(new PADDSW(), 0x08, 0x10);
+            RegisterMmiSub(new PSUBSW(), 0x08, 0x11);
+            RegisterMmiSub(new PADDSH(), 0x08, 0x14);
+            RegisterMmiSub(new PSUBSH(), 0x08, 0x15);
+            RegisterMmiSub(new PADDSB(), 0x08, 0x18);
+            RegisterMmiSub(new PSUBSB(), 0x08, 0x19);
+            RegisterMmiSub(new PEXT5(),  0x08, 0x1E);
+            RegisterMmiSub(new PPAC5(),  0x08, 0x1F);
+
+            // MMI1 new sub-instructions (funct=0x28)
+            RegisterMmiSub(new PADSBH(), 0x28, 0x04);
+            RegisterMmiSub(new PEXTUW(), 0x28, 0x12);
+            RegisterMmiSub(new PEXTUH(), 0x28, 0x16);
+            RegisterMmiSub(new PEXTUB(), 0x28, 0x1A);
+            RegisterMmiSub(new QFSRV(),  0x28, 0x1B);
+
+            // MMI2 new sub-instructions (funct=0x09)
+            RegisterMmiSub(new PMADDW(), 0x09, 0x00);
+            RegisterMmiSub(new PSLLVW(), 0x09, 0x02);
+            RegisterMmiSub(new PSRLVW(), 0x09, 0x03);
+            RegisterMmiSub(new PMSUBW(), 0x09, 0x04);
+            RegisterMmiSub(new PINTH(),  0x09, 0x0A);
+            RegisterMmiSub(new PMULTW(), 0x09, 0x0C);
+            RegisterMmiSub(new PDIVW(),  0x09, 0x0D);
+            RegisterMmiSub(new PMADDH(), 0x09, 0x10);
+            RegisterMmiSub(new PHMADH(), 0x09, 0x11);
+            RegisterMmiSub(new PXOR(),   0x09, 0x13);
+            RegisterMmiSub(new PMSUBH(), 0x09, 0x14);
+            RegisterMmiSub(new PHMSBH(), 0x09, 0x15);
+            RegisterMmiSub(new PEXEH(),  0x09, 0x1A);
+            RegisterMmiSub(new PREVH(),  0x09, 0x1B);
+            RegisterMmiSub(new PMULTH(), 0x09, 0x1C);
+            RegisterMmiSub(new PDIVBW(), 0x09, 0x1D);
+            RegisterMmiSub(new PEXEW(),  0x09, 0x1E);
+            RegisterMmiSub(new PROT3W(), 0x09, 0x1F);
+
+            // MMI3 new sub-instructions (funct=0x29)
+            RegisterMmiSub(new PMADDUW(), 0x29, 0x00);
+            RegisterMmiSub(new PSRAVW(),  0x29, 0x03);
+            RegisterMmiSub(new PINTEH(),  0x29, 0x0A);
+            RegisterMmiSub(new PMULTUW(), 0x29, 0x0C);
+            RegisterMmiSub(new PDIVUW(),  0x29, 0x0D);
+            RegisterMmiSub(new PNOR(),    0x29, 0x13);
+            RegisterMmiSub(new PEXCH(),   0x29, 0x1A);
+            RegisterMmiSub(new PEXCW(),   0x29, 0x1E);
         }
 
         private static void RegisterR(Instruction<Args_R> instr)

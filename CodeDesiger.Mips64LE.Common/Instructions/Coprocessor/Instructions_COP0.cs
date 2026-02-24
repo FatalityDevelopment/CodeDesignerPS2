@@ -595,4 +595,62 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
             return eq;
         }
     }
+
+    // EI - Enable Interrupts (COP0 rs=0x10, funct=0x38)
+    public sealed class EI : Instruction<Args_R>
+    {
+        public EI()
+        {
+            Opcode = 0x10; Funct = 0x38; Name = "ei";
+            ArgType = InstrArgType.R; ArgNames = [];
+            Equation = "Status.EIE = 1";
+            Description = "Enable Interrupts - sets EIE bit in Status register";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            uint status = cpu.COP0.ReadRegister32(12);
+            cpu.COP0.WriteRegister32(12, status | 0x10000u);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null) => Name;
+
+        public override uint Asm(int[] args)
+            => (uint)(0x10 << 26 | 0x10 << 21 | 0x38);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (cpu != null) { uint st = cpu.COP0.ReadRegister32(12); return $"{Equation} => Status=0x{st | 0x10000u:X8}"; }
+            return Equation;
+        }
+    }
+
+    // DI - Disable Interrupts (COP0 rs=0x10, funct=0x39)
+    public sealed class DI : Instruction<Args_R>
+    {
+        public DI()
+        {
+            Opcode = 0x10; Funct = 0x39; Name = "di";
+            ArgType = InstrArgType.R; ArgNames = [];
+            Equation = "Status.EIE = 0";
+            Description = "Disable Interrupts - clears EIE bit in Status register";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            uint status = cpu.COP0.ReadRegister32(12);
+            cpu.COP0.WriteRegister32(12, status & ~0x10000u);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null) => Name;
+
+        public override uint Asm(int[] args)
+            => (uint)(0x10 << 26 | 0x10 << 21 | 0x39);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            if (cpu != null) { uint st = cpu.COP0.ReadRegister32(12); return $"{Equation} => Status=0x{st & ~0x10000u:X8}"; }
+            return Equation;
+        }
+    }
 }
