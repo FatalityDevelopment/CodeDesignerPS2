@@ -10,7 +10,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     ///   0x00000000 – 0x001FFFFF  IOP main RAM (2 MB)
     ///   0x1F800000 – 0x1F8003FF  Scratchpad (1 KB)
     ///   0x1F801070 – 0x1F801077  IOP INTC (I_STAT / I_MASK)
-    ///   0x1F801100 – 0x1F801170  IOP Timers 0–2 (counter/mode/target, 0x10 stride)
+    ///   0x1F801100 – 0x1F80112F  IOP Timers 0–2 (counter/mode/target, 0x10 stride)
+    ///   0x1F801480 – 0x1F8014AF  IOP Timers 3–5 (counter/mode/target, 0x10 stride)
     ///   0x1D000000 – 0x1D00006F  SIF registers (EE side mapped into IOP address space)
     ///   0x1FC00000 – 0x1FFFFFFF  BIOS ROM (4 MB, shared with EE, read-only from IOP)
     ///
@@ -31,12 +32,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public const int BiosRomSize   = 4 * 1024 * 1024;  // 4 MB
 
         // ── Physical base addresses ───────────────────────────────────────────
-        private const uint RamBase       = 0x00000000u;
+        private const uint RamBase        = 0x00000000u;
         private const uint ScratchpadBase = 0x1F800000u;
-        private const uint IntcBase      = 0x1F801070u;
-        private const uint TimerBase     = 0x1F801100u;
-        private const uint SifMirrorBase = 0x1D000000u;
-        private const uint BiosBase      = 0x1FC00000u;
+        private const uint IntcBase       = 0x1F801070u;
+        private const uint TimerBase      = 0x1F801100u;  // T0–T2
+        private const uint TimerBase2     = 0x1F801480u;  // T3–T5
+        private const uint SifMirrorBase  = 0x1D000000u;
+        private const uint BiosBase       = 0x1FC00000u;
+
+        // Each timer bank covers 3 timers × 0x10 bytes = 0x30 bytes.
+        private const uint TimerBankSize  = 0x30u;
 
         private readonly byte[] _ram        = new byte[RamSize];
         private readonly byte[] _scratchpad = new byte[ScratchpadSize];
@@ -46,10 +51,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private uint _iStat;
         private uint _iMask;
 
-        // IOP timers (3 simple countdown timers — counter/mode/target)
-        private readonly uint[] _timerCount  = new uint[3];
-        private readonly uint[] _timerMode   = new uint[3];
-        private readonly uint[] _timerTarget = new uint[3];
+        // IOP timers T0–T5 (T0–T2 at 0x1F801100; T3–T5 at 0x1F801480)
+        private readonly IopTimer[] _timers = new IopTimer[6];
+
+        /// <summary>
+        /// IOP timers T0–T5.  T0–T2 are mapped at 0x1F801100; T3–T5 at 0x1F801480.
+        /// </summary>
+        public IopTimer[] Timers => _timers;
 
         /// <summary>Exposes IOP RAM for bulk loading (e.g. from SIF DMA).</summary>
         public byte[] Ram => _ram;
@@ -62,6 +70,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// to the SIF mirror region (0x1D000000) are forwarded to this object.
         /// </summary>
         public SIF? SharedSif { get; set; }
+
+        public IopMemoryBus()
+        {
+            for (int i = 0; i < 6; i++)
+                _timers[i] = new IopTimer(i);
+        }
 
         // ── IOP INTC accessors ────────────────────────────────────────────────
 
@@ -89,9 +103,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (addr == IntcBase)      return _iStat;
             if (addr == IntcBase + 4u) return _iMask;
 
-            // IOP timers (0x1F801100 – 0x1F80116F)
-            if (addr >= TimerBase && addr < TimerBase + 0x70u)
-                return ReadTimerWord(addr);
+            // IOP timers T0–T2 (0x1F801100)
+            if (addr >= TimerBase && addr < TimerBase + TimerBankSize)
+                return ReadTimerWord(addr, TimerBase, 0);
+
+            // IOP timers T3–T5 (0x1F801480)
+            if (addr >= TimerBase2 && addr < TimerBase2 + TimerBankSize)
+                return ReadTimerWord(addr, TimerBase2, 3);
 
             // SIF mirror
             if (SharedSif != null && addr >= SifMirrorBase && addr < SifMirrorBase + 0x70u)
@@ -108,10 +126,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (addr == IntcBase)      { _iStat &= ~value; return; }  // W1C
             if (addr == IntcBase + 4u) { _iMask  = value;  return; }
 
-            // IOP timers
-            if (addr >= TimerBase && addr < TimerBase + 0x70u)
+            // IOP timers T0–T2 (0x1F801100)
+            if (addr >= TimerBase && addr < TimerBase + TimerBankSize)
             {
-                WriteTimerWord(addr, value);
+                WriteTimerWord(addr, value, TimerBase, 0);
+                return;
+            }
+
+            // IOP timers T3–T5 (0x1F801480)
+            if (addr >= TimerBase2 && addr < TimerBase2 + TimerBankSize)
+            {
+                WriteTimerWord(addr, value, TimerBase2, 3);
                 return;
             }
 
@@ -150,41 +175,24 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         }
 
         // ── Timer helpers ─────────────────────────────────────────────────────
+        //
+        // Each IOP timer occupies 3 × 4-byte slots at base + timer*0x10 + reg*4
+        //   reg offset 0x00 = count, 0x04 = mode, 0x08 = target
 
-        // Each IOP timer occupies 3 × 4-byte slots at TimerBase + timer*0x10 + reg*4
-        // reg 0 = counter, reg 1 = mode, reg 2 = target
-
-        private (int idx, int reg) DecodeTimerAddr(uint addr)
+        private uint ReadTimerWord(uint addr, uint bankBase, int bankOffset)
         {
-            uint off = addr - TimerBase;
-            int idx = (int)(off >> 4);            // each timer is 0x10 bytes
-            int reg = (int)((off & 0xFu) >> 2);  // register within timer
-            return (idx, reg);
+            uint off = addr - bankBase;
+            int idx  = (int)(off >> 4) + bankOffset; // timer index 0–5
+            if ((uint)idx >= 6u) return 0u;
+            return _timers[idx].ReadRegister(off & 0x0Fu);
         }
 
-        private uint ReadTimerWord(uint addr)
+        private void WriteTimerWord(uint addr, uint value, uint bankBase, int bankOffset)
         {
-            var (idx, reg) = DecodeTimerAddr(addr);
-            if ((uint)idx >= 3u) return 0u;
-            return reg switch
-            {
-                0 => _timerCount[idx],
-                1 => _timerMode[idx],
-                2 => _timerTarget[idx],
-                _ => 0u
-            };
-        }
-
-        private void WriteTimerWord(uint addr, uint value)
-        {
-            var (idx, reg) = DecodeTimerAddr(addr);
-            if ((uint)idx >= 3u) return;
-            switch (reg)
-            {
-                case 0: _timerCount[idx]  = value; break;
-                case 1: _timerMode[idx]   = value; break;
-                case 2: _timerTarget[idx] = value; break;
-            }
+            uint off = addr - bankBase;
+            int idx  = (int)(off >> 4) + bankOffset;
+            if ((uint)idx >= 6u) return;
+            _timers[idx].WriteRegister(off & 0x0Fu, value);
         }
 
         // ── SIF mirror helpers ────────────────────────────────────────────────

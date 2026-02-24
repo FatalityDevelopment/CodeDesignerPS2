@@ -441,8 +441,301 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         // =====================================================================
-        // Instruction encoding helpers
+        // IopTimer tests
         // =====================================================================
+
+        [TestMethod]
+        public void IopTimer_Tick_IncrementsCount()
+        {
+            var t = new IopTimer(0);
+            t.WriteRegister(IopTimer.REG_MODE, 0x0080u); // CUE=1
+            t.Tick(5);
+            Assert.AreEqual(5u, t.Count, "Count must increment by ticks when CUE is set");
+        }
+
+        [TestMethod]
+        public void IopTimer_Tick_DisabledWhenCueNotSet()
+        {
+            var t = new IopTimer(0);
+            // CUE=0 → timer should not count
+            t.Tick(100);
+            Assert.AreEqual(0u, t.Count, "Count must not increment when CUE is clear");
+        }
+
+        [TestMethod]
+        public void IopTimer_Tick_CompareFires_WhenCmpeSet()
+        {
+            var t = new IopTimer(0);
+            t.WriteRegister(IopTimer.REG_MODE,   0x0090u); // CUE | CMPE
+            t.WriteRegister(IopTimer.REG_TARGET,  10u);
+
+            bool fired = false;
+            t.CompareInterruptPending += (_, _) => fired = true;
+
+            t.Tick(10);
+
+            Assert.IsTrue(fired, "CompareInterruptPending must fire when count reaches target");
+            Assert.AreNotEqual(0u, t.Mode & 0x0400u, "EQUF must be set after compare match");
+        }
+
+        [TestMethod]
+        public void IopTimer_Tick_CompareNotFired_WhenCmpeCleared()
+        {
+            var t = new IopTimer(0);
+            t.WriteRegister(IopTimer.REG_MODE,   0x0080u); // CUE only; CMPE=0
+            t.WriteRegister(IopTimer.REG_TARGET,  5u);
+
+            bool fired = false;
+            t.CompareInterruptPending += (_, _) => fired = true;
+
+            t.Tick(5);
+
+            Assert.IsFalse(fired, "CompareInterruptPending must not fire when CMPE is clear");
+        }
+
+        [TestMethod]
+        public void IopTimer_Tick_OverflowFires_WhenOvfeSet()
+        {
+            var t = new IopTimer(0);
+            t.WriteRegister(IopTimer.REG_MODE, 0x00A0u); // CUE | OVFE
+
+            bool fired = false;
+            t.OverflowInterruptPending += (_, _) => fired = true;
+
+            // Tick past 0xFFFF to cause a 16-bit overflow
+            t.Tick(0x10000u);
+
+            Assert.IsTrue(fired, "OverflowInterruptPending must fire on 16-bit counter wrap");
+            Assert.AreNotEqual(0u, t.Mode & 0x0800u, "OVFF must be set after overflow");
+        }
+
+        [TestMethod]
+        public void IopTimer_Tick_OverflowNotFired_WhenOvfeCleared()
+        {
+            var t = new IopTimer(0);
+            t.WriteRegister(IopTimer.REG_MODE, 0x0080u); // CUE only; OVFE=0
+
+            bool fired = false;
+            t.OverflowInterruptPending += (_, _) => fired = true;
+
+            t.Tick(0x10000u);
+
+            Assert.IsFalse(fired, "OverflowInterruptPending must not fire when OVFE is clear");
+        }
+
+        [TestMethod]
+        public void IopTimer_ModeRead_ClearsEqufAndOvff()
+        {
+            var t = new IopTimer(0);
+            t.WriteRegister(IopTimer.REG_MODE,   0x00B0u); // CUE | CMPE | OVFE
+            t.WriteRegister(IopTimer.REG_TARGET,  3u);
+
+            t.Tick(3);           // hit compare → sets EQUF
+            t.Tick(0x10000u);    // overflow → sets OVFF
+
+            uint modeBeforeRead = t.Mode;
+            Assert.AreNotEqual(0u, modeBeforeRead & 0x0C00u, "Both flags must be set before read");
+
+            // Reading mode via ReadRegister clears sticky flags
+            uint modeAfterRead = t.ReadRegister(IopTimer.REG_MODE);
+            Assert.AreNotEqual(0u, modeAfterRead & 0x0C00u, "Returned value must have flags set");
+            Assert.AreEqual(0u, t.Mode & 0x0C00u, "Flags must be cleared in register after read");
+        }
+
+        [TestMethod]
+        public void IopTimer_WriteCount_ResetsCounter()
+        {
+            var t = new IopTimer(0);
+            t.WriteRegister(IopTimer.REG_MODE, 0x0080u); // CUE
+            t.Tick(50);
+            Assert.AreEqual(50u, t.Count);
+
+            t.WriteRegister(IopTimer.REG_COUNT, 0u); // writing count resets to 0
+            Assert.AreEqual(0u, t.Count, "Writing TN_COUNT must reset counter to 0");
+        }
+
+        [TestMethod]
+        public void IopTimer_AltSource_DividesBy8()
+        {
+            var t = new IopTimer(2); // T2 supports alternate source
+            t.WriteRegister(IopTimer.REG_MODE, 0x0180u); // CUE | ALT (÷8)
+
+            t.Tick(8);   // 8 sysclock cycles → 1 timer increment
+            Assert.AreEqual(1u, t.Count, "Alternate source (÷8) must count once per 8 cycles");
+
+            t.Tick(7);   // 7 more → still 1 (accumulator not full)
+            Assert.AreEqual(1u, t.Count);
+
+            t.Tick(1);   // one more → 2 total
+            Assert.AreEqual(2u, t.Count);
+        }
+
+        [TestMethod]
+        public void IopTimer_Counter_Wraps16Bit()
+        {
+            var t = new IopTimer(0);
+            t.WriteRegister(IopTimer.REG_MODE, 0x0080u); // CUE, no interrupts
+
+            // Drive count to 0xFFFE
+            t.Tick(0xFFFEu);
+            Assert.AreEqual(0xFFFEu, t.Count);
+
+            // Tick 3 more: 0xFFFE → 0xFFFF → 0x0000 (wrap) → 0x0001
+            t.Tick(3u);
+            Assert.AreEqual(1u, t.Count, "Counter must wrap at 16-bit boundary");
+        }
+
+        // ── T3–T5 bus mapping tests ───────────────────────────────────────────
+
+        [TestMethod]
+        public void IopMemoryBus_TimerT3_BaseAddress_ReadWrite()
+        {
+            var bus = new IopMemoryBus();
+            // T3 at 0x1F801480; mode=+4, target=+8
+            bus.WriteWord(0x1F801484u, 0x0080u); // T3 mode: CUE
+            bus.WriteWord(0x1F801488u, 200u);    // T3 target = 200
+
+            Assert.AreEqual(0x0080u, bus.ReadWord(0x1F801484u), "T3 mode read-back");
+            Assert.AreEqual(200u,    bus.ReadWord(0x1F801488u), "T3 target read-back");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_TimerT4_BaseAddress_ReadWrite()
+        {
+            var bus = new IopMemoryBus();
+            // T4 at 0x1F801490
+            bus.WriteWord(0x1F801498u, 300u);
+            Assert.AreEqual(300u, bus.ReadWord(0x1F801498u), "T4 target read-back");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_TimerT5_BaseAddress_ReadWrite()
+        {
+            var bus = new IopMemoryBus();
+            // T5 at 0x1F8014A0
+            bus.WriteWord(0x1F8014A8u, 400u);
+            Assert.AreEqual(400u, bus.ReadWord(0x1F8014A8u), "T5 target read-back");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_Timers_Property_ReturnsAllSix()
+        {
+            var bus = new IopMemoryBus();
+            Assert.AreEqual(6, bus.Timers.Length, "IopMemoryBus.Timers must expose 6 timers");
+            for (int i = 0; i < 6; i++)
+                Assert.IsNotNull(bus.Timers[i], $"Timers[{i}] must not be null");
+        }
+
+        // ── TickHardware timer→INTC integration tests ─────────────────────────
+
+        [TestMethod]
+        public void IopEmulator_TickHardware_T0Compare_RaisesIntcBit4()
+        {
+            var emu = new IopEmulator();
+
+            // Enable T0 with compare target=1, compare interrupt enabled
+            emu.Bus.WriteWord(0x1F801104u, 0x0090u); // T0 mode: CUE | CMPE
+            emu.Bus.WriteWord(0x1F801108u, 1u);      // T0 target = 1
+            emu.Bus.WriteWord(0x1F801074u, 1u << 4); // I_MASK: enable T0 interrupt
+
+            emu.TickHardware(1); // T0 count becomes 1 == target → INTC bit 4 raised
+
+            Assert.AreNotEqual(0u, emu.Bus.IStat & (1u << 4),
+                "INTC bit 4 must be set when T0 compare interrupt fires");
+        }
+
+        [TestMethod]
+        public void IopEmulator_TickHardware_T1Compare_RaisesIntcBit5()
+        {
+            var emu = new IopEmulator();
+
+            emu.Bus.WriteWord(0x1F801114u, 0x0090u); // T1 mode: CUE | CMPE
+            emu.Bus.WriteWord(0x1F801118u, 1u);      // T1 target = 1
+            emu.Bus.WriteWord(0x1F801074u, 1u << 5); // I_MASK: enable T1 interrupt
+
+            emu.TickHardware(1);
+
+            Assert.AreNotEqual(0u, emu.Bus.IStat & (1u << 5),
+                "INTC bit 5 must be set when T1 compare interrupt fires");
+        }
+
+        [TestMethod]
+        public void IopEmulator_TickHardware_T2Compare_RaisesIntcBit6()
+        {
+            var emu = new IopEmulator();
+
+            emu.Bus.WriteWord(0x1F801124u, 0x0090u); // T2 mode: CUE | CMPE
+            emu.Bus.WriteWord(0x1F801128u, 1u);      // T2 target = 1
+            emu.Bus.WriteWord(0x1F801074u, 1u << 6);
+
+            emu.TickHardware(1);
+
+            Assert.AreNotEqual(0u, emu.Bus.IStat & (1u << 6),
+                "INTC bit 6 must be set when T2 compare interrupt fires");
+        }
+
+        [TestMethod]
+        public void IopEmulator_TickHardware_T3Compare_RaisesIntcBit14()
+        {
+            var emu = new IopEmulator();
+
+            emu.Bus.WriteWord(0x1F801484u, 0x0090u); // T3 mode: CUE | CMPE
+            emu.Bus.WriteWord(0x1F801488u, 1u);      // T3 target = 1
+            emu.Bus.WriteWord(0x1F801074u, 1u << 14);
+
+            emu.TickHardware(1);
+
+            Assert.AreNotEqual(0u, emu.Bus.IStat & (1u << 14),
+                "INTC bit 14 must be set when T3 compare interrupt fires");
+        }
+
+        [TestMethod]
+        public void IopEmulator_TickHardware_T0Overflow_RaisesIntcBit4()
+        {
+            var emu = new IopEmulator();
+
+            emu.Bus.WriteWord(0x1F801104u, 0x00A0u); // T0 mode: CUE | OVFE
+            emu.Bus.WriteWord(0x1F801074u, 1u << 4);
+
+            emu.TickHardware(0x10000u); // force 16-bit overflow
+
+            Assert.AreNotEqual(0u, emu.Bus.IStat & (1u << 4),
+                "INTC bit 4 must be set when T0 overflow interrupt fires");
+        }
+
+        [TestMethod]
+        public void IopEmulator_TickHardware_MultipleTimerTicks_Accumulate()
+        {
+            var emu = new IopEmulator();
+
+            emu.Bus.WriteWord(0x1F801104u, 0x0080u); // T0 CUE only
+
+            emu.TickHardware(10);
+            emu.TickHardware(5);
+
+            Assert.AreEqual(15u, emu.Bus.Timers[0].Count,
+                "Timer count must accumulate across multiple TickHardware calls");
+        }
+
+        [TestMethod]
+        public void IopEmulator_TickHardware_InterruptPendingFired_OnTimerInterrupt()
+        {
+            var emu = new IopEmulator();
+
+            emu.Bus.WriteWord(0x1F801104u, 0x0090u); // T0 CUE | CMPE
+            emu.Bus.WriteWord(0x1F801108u, 1u);      // target = 1
+            emu.Bus.WriteWord(0x1F801074u, 1u << 4); // mask bit 4
+
+            bool fired = false;
+            emu.InterruptPending += (_, _) => fired = true;
+
+            emu.TickHardware(1);
+
+            Assert.IsTrue(fired,
+                "InterruptPending must fire when a timer interrupt sets I_STAT & I_MASK");
+        }
+
+
 
         /// <summary>ADDIU rt, rs, imm  (opcode=0x09)</summary>
         private static uint MakeAddiu(int rs, int rt, int imm)
