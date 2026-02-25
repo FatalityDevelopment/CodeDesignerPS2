@@ -796,5 +796,163 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(4, DualCpuScheduler.EeToIopRatio,
                 "EE:IOP ratio must be 4 (147.456 MHz / 36.864 MHz)");
         }
+
+        // =====================================================================
+        // SIF DMA transfer (IOP↔EE handshake) tests
+        // =====================================================================
+
+        [TestMethod]
+        public void SifDma_EeCh6_Ram_To_Sif1Fifo()
+        {
+            // EE DMAC CH6 (SIF1, RAM→FIFO) should push EE RAM contents into SIF1 FIFO.
+            var emu = new PS2Emulator();
+
+            // Write one quadword (4 words) of test data into EE main RAM at address 0x1000.
+            emu.Bus.WriteWord(0x1000u, 0x11111111u);
+            emu.Bus.WriteWord(0x1004u, 0x22222222u);
+            emu.Bus.WriteWord(0x1008u, 0x33333333u);
+            emu.Bus.WriteWord(0x100Cu, 0x44444444u);
+
+            // Set up DMAC CH6 for a normal-mode RAM→FIFO transfer of 1 quadword.
+            // CHCR: DIR=0 (RAM→FIFO), MOD=0 (normal), STR=1.
+            emu.Bus.WriteWord(0x1000C400u + DmacChannel.REG_MADR, 0x00001000u);  // source = 0x1000
+            emu.Bus.WriteWord(0x1000C400u + DmacChannel.REG_QWC,  0x00000001u);  // 1 QW
+            emu.Bus.WriteWord(0x1000C400u + DmacChannel.REG_CHCR, 0x00000100u);  // STR=1, DIR=0
+
+            Assert.AreEqual(4, emu.Bus.Sif.Sif1Count, "SIF1 FIFO must contain 4 words after CH6 transfer");
+            Assert.AreEqual(0x11111111u, emu.Bus.Sif.ReadSif1(), "Word 0");
+            Assert.AreEqual(0x22222222u, emu.Bus.Sif.ReadSif1(), "Word 1");
+            Assert.AreEqual(0x33333333u, emu.Bus.Sif.ReadSif1(), "Word 2");
+            Assert.AreEqual(0x44444444u, emu.Bus.Sif.ReadSif1(), "Word 3");
+        }
+
+        [TestMethod]
+        public void SifDma_EeCh5_Sif0Fifo_To_Ram()
+        {
+            // EE DMAC CH5 (SIF0, FIFO→RAM) should drain SIF0 FIFO into EE main RAM.
+            var emu = new PS2Emulator();
+
+            // Pre-fill SIF0 FIFO with one quadword of data (simulating IOP push).
+            emu.Bus.Sif.WriteSif0(0xAABBCCDDu);
+            emu.Bus.Sif.WriteSif0(0x11223344u);
+            emu.Bus.Sif.WriteSif0(0xDEADBEEFu);
+            emu.Bus.Sif.WriteSif0(0xCAFEBABEu);
+
+            // Set up DMAC CH5 for a normal-mode FIFO→RAM transfer of 1 quadword.
+            // CHCR: DIR=1 (FIFO→RAM), MOD=0 (normal), STR=1.
+            emu.Bus.WriteWord(0x1000C000u + DmacChannel.REG_MADR, 0x00002000u);  // dest = 0x2000
+            emu.Bus.WriteWord(0x1000C000u + DmacChannel.REG_QWC,  0x00000001u);  // 1 QW
+            emu.Bus.WriteWord(0x1000C000u + DmacChannel.REG_CHCR, 0x00000101u);  // STR=1, DIR=1
+
+            Assert.AreEqual(0, emu.Bus.Sif.Sif0Count, "SIF0 FIFO must be drained after CH5 transfer");
+            Assert.AreEqual(0xAABBCCDDu, emu.Bus.ReadWord(0x2000u), "EE RAM[0x2000] word 0");
+            Assert.AreEqual(0x11223344u, emu.Bus.ReadWord(0x2004u), "EE RAM[0x2004] word 1");
+            Assert.AreEqual(0xDEADBEEFu, emu.Bus.ReadWord(0x2008u), "EE RAM[0x2008] word 2");
+            Assert.AreEqual(0xCAFEBABEu, emu.Bus.ReadWord(0x200Cu), "EE RAM[0x200C] word 3");
+        }
+
+        [TestMethod]
+        public void SifDma_IopCh9_IopRam_To_Sif0Fifo()
+        {
+            // IOP DMAC CH9 (SIF0, RAM→device) should push IOP RAM contents into SIF0 FIFO.
+            var sched = new DualCpuScheduler();
+
+            // Write test words into IOP RAM at address 0x100.
+            sched.IOP.Bus.WriteWord(0x100u, 0xFEDC9876u);
+            sched.IOP.Bus.WriteWord(0x104u, 0x13572468u);
+
+            // Set up IOP DMAC CH9 for a burst RAM→SIF0 transfer of 2 words.
+            // CHCR: DIR=0 (RAM→device), SYNC=0 (burst), STR=bit24.
+            sched.IOP.Bus.WriteWord(0x1F801520u + IopDmacChannel.REG_MADR, 0x00000100u);
+            sched.IOP.Bus.WriteWord(0x1F801520u + IopDmacChannel.REG_BCR,  0x00000002u);  // 2 words
+            sched.IOP.Bus.WriteWord(0x1F801520u + IopDmacChannel.REG_CHCR, 0x01000000u);  // STR=1, DIR=0
+
+            Assert.AreEqual(2, sched.EE.Bus.Sif.Sif0Count, "SIF0 FIFO must contain 2 words after IOP CH9 transfer");
+            Assert.AreEqual(0xFEDC9876u, sched.EE.Bus.Sif.ReadSif0(), "SIF0 FIFO word 0");
+            Assert.AreEqual(0x13572468u, sched.EE.Bus.Sif.ReadSif0(), "SIF0 FIFO word 1");
+        }
+
+        [TestMethod]
+        public void SifDma_IopCh10_Sif1Fifo_To_IopRam()
+        {
+            // IOP DMAC CH10 (SIF1, device→RAM) should drain SIF1 FIFO into IOP RAM.
+            var sched = new DualCpuScheduler();
+
+            // Pre-fill SIF1 FIFO with 2 words (simulating EE push).
+            sched.EE.Bus.Sif.WriteSif1(0xABCD1234u);
+            sched.EE.Bus.Sif.WriteSif1(0x56789ABCu);
+
+            // Set up IOP DMAC CH10 for a burst device→RAM transfer of 2 words.
+            // CHCR: DIR=1 (device→RAM), SYNC=0 (burst), STR=bit24.
+            sched.IOP.Bus.WriteWord(0x1F801530u + IopDmacChannel.REG_MADR, 0x00000200u);
+            sched.IOP.Bus.WriteWord(0x1F801530u + IopDmacChannel.REG_BCR,  0x00000002u);  // 2 words
+            sched.IOP.Bus.WriteWord(0x1F801530u + IopDmacChannel.REG_CHCR, 0x01000001u);  // STR=1, DIR=1
+
+            Assert.AreEqual(0, sched.EE.Bus.Sif.Sif1Count, "SIF1 FIFO must be drained after IOP CH10 transfer");
+            Assert.AreEqual(0xABCD1234u, sched.IOP.Bus.ReadWord(0x200u), "IOP RAM[0x200] word 0");
+            Assert.AreEqual(0x56789ABCu, sched.IOP.Bus.ReadWord(0x204u), "IOP RAM[0x204] word 1");
+        }
+
+        [TestMethod]
+        public void SifDma_FullRoundTrip_EeToIop()
+        {
+            // Full round-trip: EE writes data via CH6 → SIF1 FIFO → IOP reads via CH10.
+            var sched = new DualCpuScheduler();
+
+            // 1. Write payload into EE main RAM.
+            sched.EE.Bus.WriteWord(0x3000u, 0xC0FFEE00u);
+            sched.EE.Bus.WriteWord(0x3004u, 0xC0FFEE01u);
+            sched.EE.Bus.WriteWord(0x3008u, 0xC0FFEE02u);
+            sched.EE.Bus.WriteWord(0x300Cu, 0xC0FFEE03u);
+
+            // 2. EE DMAC CH6 (SIF1, RAM→FIFO): push 1 QW into SIF1 FIFO.
+            sched.EE.Bus.WriteWord(0x1000C400u + DmacChannel.REG_MADR, 0x00003000u);
+            sched.EE.Bus.WriteWord(0x1000C400u + DmacChannel.REG_QWC,  0x00000001u);
+            sched.EE.Bus.WriteWord(0x1000C400u + DmacChannel.REG_CHCR, 0x00000100u);  // STR=1, DIR=0
+
+            Assert.AreEqual(4, sched.EE.Bus.Sif.Sif1Count, "SIF1 FIFO must have 4 words after EE push");
+
+            // 3. IOP DMAC CH10 (SIF1, device→RAM): drain SIF1 FIFO into IOP RAM.
+            sched.IOP.Bus.WriteWord(0x1F801530u + IopDmacChannel.REG_MADR, 0x00000400u);
+            sched.IOP.Bus.WriteWord(0x1F801530u + IopDmacChannel.REG_BCR,  0x00000004u);  // 4 words
+            sched.IOP.Bus.WriteWord(0x1F801530u + IopDmacChannel.REG_CHCR, 0x01000001u);  // STR=1, DIR=1
+
+            Assert.AreEqual(0, sched.EE.Bus.Sif.Sif1Count, "SIF1 FIFO must be empty after IOP drain");
+            Assert.AreEqual(0xC0FFEE00u, sched.IOP.Bus.ReadWord(0x400u), "IOP word 0");
+            Assert.AreEqual(0xC0FFEE01u, sched.IOP.Bus.ReadWord(0x404u), "IOP word 1");
+            Assert.AreEqual(0xC0FFEE02u, sched.IOP.Bus.ReadWord(0x408u), "IOP word 2");
+            Assert.AreEqual(0xC0FFEE03u, sched.IOP.Bus.ReadWord(0x40Cu), "IOP word 3");
+        }
+
+        [TestMethod]
+        public void SifDma_FullRoundTrip_IopToEe()
+        {
+            // Full round-trip: IOP writes data via CH9 → SIF0 FIFO → EE reads via CH5.
+            var sched = new DualCpuScheduler();
+
+            // 1. Write payload into IOP RAM.
+            sched.IOP.Bus.WriteWord(0x500u, 0xB00B0000u);
+            sched.IOP.Bus.WriteWord(0x504u, 0xB00B0001u);
+            sched.IOP.Bus.WriteWord(0x508u, 0xB00B0002u);
+            sched.IOP.Bus.WriteWord(0x50Cu, 0xB00B0003u);
+
+            // 2. IOP DMAC CH9 (SIF0, RAM→device): push 4 words into SIF0 FIFO.
+            sched.IOP.Bus.WriteWord(0x1F801520u + IopDmacChannel.REG_MADR, 0x00000500u);
+            sched.IOP.Bus.WriteWord(0x1F801520u + IopDmacChannel.REG_BCR,  0x00000004u);  // 4 words
+            sched.IOP.Bus.WriteWord(0x1F801520u + IopDmacChannel.REG_CHCR, 0x01000000u);  // STR=1, DIR=0
+
+            Assert.AreEqual(4, sched.EE.Bus.Sif.Sif0Count, "SIF0 FIFO must have 4 words after IOP push");
+
+            // 3. EE DMAC CH5 (SIF0, FIFO→RAM): drain SIF0 FIFO into EE main RAM.
+            sched.EE.Bus.WriteWord(0x1000C000u + DmacChannel.REG_MADR, 0x00006000u);
+            sched.EE.Bus.WriteWord(0x1000C000u + DmacChannel.REG_QWC,  0x00000001u);  // 1 QW = 4 words
+            sched.EE.Bus.WriteWord(0x1000C000u + DmacChannel.REG_CHCR, 0x00000101u);  // STR=1, DIR=1
+
+            Assert.AreEqual(0, sched.EE.Bus.Sif.Sif0Count, "SIF0 FIFO must be empty after EE drain");
+            Assert.AreEqual(0xB00B0000u, sched.EE.Bus.ReadWord(0x6000u), "EE word 0");
+            Assert.AreEqual(0xB00B0001u, sched.EE.Bus.ReadWord(0x6004u), "EE word 1");
+            Assert.AreEqual(0xB00B0002u, sched.EE.Bus.ReadWord(0x6008u), "EE word 2");
+            Assert.AreEqual(0xB00B0003u, sched.EE.Bus.ReadWord(0x600Cu), "EE word 3");
+        }
     }
 }

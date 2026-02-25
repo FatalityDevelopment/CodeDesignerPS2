@@ -942,6 +942,70 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         // =====================================================================
+        // SIF FIFO tests
+        // =====================================================================
+
+        [TestMethod]
+        public void SIF_Sif0Fifo_WriteThenRead()
+        {
+            var sif = new SIF();
+            sif.WriteSif0(0x11223344u);
+            sif.WriteSif0(0xAABBCCDDu);
+            Assert.AreEqual(2, sif.Sif0Count, "SIF0 FIFO should hold 2 words");
+            Assert.AreEqual(0x11223344u, sif.ReadSif0(), "First word must match");
+            Assert.AreEqual(0xAABBCCDDu, sif.ReadSif0(), "Second word must match");
+            Assert.AreEqual(0, sif.Sif0Count, "SIF0 FIFO should be empty after drain");
+        }
+
+        [TestMethod]
+        public void SIF_Sif0Fifo_ReadEmptyReturnsZero()
+        {
+            var sif = new SIF();
+            Assert.AreEqual(0u, sif.ReadSif0(), "Reading empty SIF0 FIFO must return 0");
+        }
+
+        [TestMethod]
+        public void SIF_Sif1Fifo_WriteThenRead()
+        {
+            var sif = new SIF();
+            sif.WriteSif1(0xDEADBEEFu);
+            sif.WriteSif1(0xCAFEBABEu);
+            Assert.AreEqual(2, sif.Sif1Count, "SIF1 FIFO should hold 2 words");
+            Assert.AreEqual(0xDEADBEEFu, sif.ReadSif1(), "First word must match");
+            Assert.AreEqual(0xCAFEBABEu, sif.ReadSif1(), "Second word must match");
+            Assert.AreEqual(0, sif.Sif1Count, "SIF1 FIFO should be empty after drain");
+        }
+
+        [TestMethod]
+        public void SIF_Sif1Fifo_ReadEmptyReturnsZero()
+        {
+            var sif = new SIF();
+            Assert.AreEqual(0u, sif.ReadSif1(), "Reading empty SIF1 FIFO must return 0");
+        }
+
+        [TestMethod]
+        public void SIF_Sif0Fifo_CapacityClamp()
+        {
+            var sif = new SIF();
+            // Write one more than capacity; the extra word must be dropped
+            for (int i = 0; i < SIF.FifoCapacity + 5; i++)
+                sif.WriteSif0((uint)i);
+            Assert.AreEqual(SIF.FifoCapacity, sif.Sif0Count, "SIF0 FIFO must not exceed capacity");
+            // First read must return the first word written (FIFO order)
+            Assert.AreEqual(0u, sif.ReadSif0(), "SIF0 FIFO must be FIFO-ordered");
+        }
+
+        [TestMethod]
+        public void SIF_Sif1Fifo_CapacityClamp()
+        {
+            var sif = new SIF();
+            for (int i = 0; i < SIF.FifoCapacity + 5; i++)
+                sif.WriteSif1((uint)i);
+            Assert.AreEqual(SIF.FifoCapacity, sif.Sif1Count, "SIF1 FIFO must not exceed capacity");
+            Assert.AreEqual(0u, sif.ReadSif1(), "SIF1 FIFO must be FIFO-ordered");
+        }
+
+        // =====================================================================
         // VIF0 / VIF1 tests
         // =====================================================================
 

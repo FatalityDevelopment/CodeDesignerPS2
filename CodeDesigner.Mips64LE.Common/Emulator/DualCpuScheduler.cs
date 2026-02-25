@@ -77,6 +77,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             EE  = ee ?? new PS2Emulator();
             IOP = new IopEmulator(EE.Bus); // shares SIF via PS2MemoryBus.Sif
+
+            // Wire IOP DMAC CH9 (SIF0, RAM→device): IOP sends data to EE via SIF0 FIFO.
+            IOP.Bus.Dmac.Channels[9].DeviceDataConsumer  = w => EE.Bus.Sif.WriteSif0(w);
+
+            // Wire IOP DMAC CH10 (SIF1, device→RAM): IOP receives data from EE via SIF1 FIFO.
+            IOP.Bus.Dmac.Channels[10].DeviceDataProvider = () => EE.Bus.Sif.ReadSif1();
         }
 
         /// <summary>
