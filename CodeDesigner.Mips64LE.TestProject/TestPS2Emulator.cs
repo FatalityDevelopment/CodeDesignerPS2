@@ -954,5 +954,173 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(0xB00B0002u, sched.EE.Bus.ReadWord(0x6008u), "EE word 2");
             Assert.AreEqual(0xB00B0003u, sched.EE.Bus.ReadWord(0x600Cu), "EE word 3");
         }
+
+        // =====================================================================
+        // Controller input end-to-end tests
+        // IOP pad protocol → SIO2 → IOP RAM → SIF DMA → EE RAM
+        // =====================================================================
+
+        [TestMethod]
+        public void DualCpuScheduler_HasSio2_WithPad0AndPad1()
+        {
+            var sched = new DualCpuScheduler();
+            Assert.IsNotNull(sched.Sio2, "Sio2 must not be null");
+            Assert.IsNotNull(sched.Pad0, "Pad0 must not be null");
+            Assert.IsNotNull(sched.Pad1, "Pad1 must not be null");
+            Assert.AreSame(sched.Pad0, sched.Sio2.Port0, "Sio2.Port0 must reference Pad0");
+            Assert.AreSame(sched.Pad1, sched.Sio2.Port1, "Sio2.Port1 must reference Pad1");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_Sio2_IsWiredToIopBus()
+        {
+            var sched = new DualCpuScheduler();
+            Assert.AreSame(sched.Sio2, sched.IOP.Bus.Sio2,
+                "IOP bus must use the scheduler's Sio2 instance");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_PollPads_DefaultState_WritesDeviceIdToIopRam()
+        {
+            var sched = new DualCpuScheduler();
+
+            sched.PollPads();
+
+            // Port 0 buffer: byte[1] = device ID 0x73, byte[2] = ack 0x5A
+            byte devId = sched.IOP.Bus.ReadByte(DualCpuScheduler.DefaultPad0BufAddr + 1u);
+            byte ack   = sched.IOP.Bus.ReadByte(DualCpuScheduler.DefaultPad0BufAddr + 2u);
+            Assert.AreEqual(PadState.DeviceId, devId, "Port 0 buffer[1] must be DualShock 2 device ID 0x73");
+            Assert.AreEqual(PadState.AckByte,  ack,   "Port 0 buffer[2] must be acknowledge byte 0x5A");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_PollPads_ButtonPressed_ReflectedInIopRamBuffer()
+        {
+            var sched = new DualCpuScheduler();
+
+            // Press Cross (bit 14) on port 0.
+            sched.Pad0.Press(PadState.BTN_CROSS);
+
+            sched.PollPads();
+
+            // button byte 1 (offset +4) bit 6 must be 0 (Cross is active-low).
+            byte btnHi = sched.IOP.Bus.ReadByte(DualCpuScheduler.DefaultPad0BufAddr + 4u);
+            Assert.AreEqual(0, btnHi & (int)((PadState.BTN_CROSS >> 8) & 0xFF),
+                "Cross button bit in IOP pad buffer must be 0 (pressed)");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_PollPads_AllButtonsReleased_IopRamBufferShowsAllFF()
+        {
+            var sched = new DualCpuScheduler();
+
+            sched.PollPads();
+
+            // Default: Buttons = 0xFFFF → button bytes should both be 0xFF.
+            byte btnLo = sched.IOP.Bus.ReadByte(DualCpuScheduler.DefaultPad0BufAddr + 3u);
+            byte btnHi = sched.IOP.Bus.ReadByte(DualCpuScheduler.DefaultPad0BufAddr + 4u);
+            Assert.AreEqual(0xFFu, (uint)btnLo, "Button byte 0 must be 0xFF when all released");
+            Assert.AreEqual(0xFFu, (uint)btnHi, "Button byte 1 must be 0xFF when all released");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_PollPads_AnalogStick_ReflectedInIopRamBuffer()
+        {
+            var sched = new DualCpuScheduler();
+            sched.Pad0.RightX = 0x10;
+            sched.Pad0.LeftY  = 0xE0;
+
+            sched.PollPads();
+
+            byte rx = sched.IOP.Bus.ReadByte(DualCpuScheduler.DefaultPad0BufAddr + 5u);
+            byte ly = sched.IOP.Bus.ReadByte(DualCpuScheduler.DefaultPad0BufAddr + 8u);
+            Assert.AreEqual(0x10u, (uint)rx, "RightX must be written to IOP buffer[5]");
+            Assert.AreEqual(0xE0u, (uint)ly, "LeftY must be written to IOP buffer[8]");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_PollPads_Port1_IndependentFromPort0()
+        {
+            var sched = new DualCpuScheduler();
+
+            sched.Pad0.Press(PadState.BTN_START);   // Start pressed on port 0
+            sched.Pad1.Press(PadState.BTN_CIRCLE);  // Circle pressed on port 1
+
+            sched.PollPads();
+
+            // Port 0: Start (bit 3) in byte 0 (offset +3) must be 0
+            byte p0Lo = sched.IOP.Bus.ReadByte(DualCpuScheduler.DefaultPad0BufAddr + 3u);
+            Assert.AreEqual(0, p0Lo & (PadState.BTN_START & 0xFF),
+                "Start must be pressed (bit 0) in port 0 buffer byte 0");
+
+            // Port 1: Circle (bit 13) in byte 1 (offset +4) must be 0
+            byte p1Hi = sched.IOP.Bus.ReadByte(DualCpuScheduler.DefaultPad1BufAddr + 4u);
+            Assert.AreEqual(0, p1Hi & (int)((PadState.BTN_CIRCLE >> 8) & 0xFF),
+                "Circle must be pressed in port 1 buffer byte 1");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_PollPads_CustomAddress_WritesToSpecifiedIopRamAddr()
+        {
+            var sched = new DualCpuScheduler();
+            const uint customAddr = 0x500u;
+
+            sched.PollPads(pad0BufAddr: customAddr);
+
+            byte devId = sched.IOP.Bus.ReadByte(customAddr + 1u);
+            Assert.AreEqual(PadState.DeviceId, devId,
+                "Custom-address poll must write device ID to the specified address");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_ControllerInput_EndToEnd_IopRamToEeRam()
+        {
+            // Full end-to-end: press button → PollPads → IOP RAM buffer →
+            //   IOP DMAC CH9 (RAM→SIF0) → EE DMAC CH5 (SIF0→EE RAM) → EE reads button state.
+            var sched = new DualCpuScheduler();
+
+            // 1. Press Cross on port 0.
+            sched.Pad0.Press(PadState.BTN_CROSS);
+
+            // 2. PollPads writes the 9-byte DualShock 2 response to IOP RAM.
+            const uint iopBuf = DualCpuScheduler.DefaultPad0BufAddr;
+            sched.PollPads();
+
+            // Verify: IOP RAM has the correct button byte (pre-transfer sanity check).
+            byte btnHi = sched.IOP.Bus.ReadByte(iopBuf + 4u);
+            Assert.AreEqual(0, btnHi & (int)((PadState.BTN_CROSS >> 8) & 0xFF),
+                "Cross must be reflected in IOP RAM pad buffer");
+
+            // 3. IOP DMAC CH9: transfer the 9-byte buffer (as 3 words, padding to 12 bytes)
+            //    from IOP RAM to SIF0 FIFO.  We transfer 3 words (12 bytes) to stay word-aligned.
+            sched.IOP.Bus.WriteWord(0x1F801520u + IopDmacChannel.REG_MADR, iopBuf);
+            sched.IOP.Bus.WriteWord(0x1F801520u + IopDmacChannel.REG_BCR,  3u);  // 3 words = 12 bytes
+            sched.IOP.Bus.WriteWord(0x1F801520u + IopDmacChannel.REG_CHCR, 0x01000000u);  // STR=1, DIR=0
+
+            Assert.AreEqual(3, sched.EE.Bus.Sif.Sif0Count, "SIF0 FIFO must have 3 words after IOP push");
+
+            // 4. EE DMAC CH5: drain SIF0 FIFO into EE main RAM at address 0x7000.
+            //    CH5 transfers in QWs; 3 words = < 1 QW, so we transfer the words individually
+            //    by reading directly from SIF0 and writing to EE RAM (mimicking the DMA).
+            const uint eeDestBase = 0x7000u;
+            for (int i = 0; i < 3; i++)
+                sched.EE.Bus.WriteWord(eeDestBase + (uint)(i * 4), sched.EE.Bus.Sif.ReadSif0());
+
+            // 5. Game reads button byte 1 from EE RAM (word 1, byte offset 4 into the buffer).
+            //    Buffer layout: [0xFF, DevId, Ack, btnLo, btnHi, RX, RY, LX, LY]
+            //    In EE RAM: word0 = [0xFF, DevId, Ack, btnLo], word1 = [btnHi, RX, RY, LX], word2 = [LY, ...]
+            uint word0 = sched.EE.Bus.ReadWord(eeDestBase);
+            uint word1 = sched.EE.Bus.ReadWord(eeDestBase + 4u);
+
+            // btnLo is byte 3 of word 0 (big-endian position in the 9-byte stream),
+            // but stored little-endian in memory: word0 bits[31:24] = byte index 3.
+            byte eeDevId = (byte)((word0 >>  8) & 0xFF); // byte index 1 of the stream
+            byte eeBtnHi = (byte)( word1        & 0xFF); // byte index 4 of the stream (first byte of word1)
+
+            Assert.AreEqual(PadState.DeviceId, eeDevId,
+                "Device ID must be readable from EE RAM after full pipeline transfer");
+            Assert.AreEqual(0, eeBtnHi & (int)((PadState.BTN_CROSS >> 8) & 0xFF),
+                "Cross button must be pressed (bit=0) in EE RAM after full pipeline transfer");
+        }
     }
 }

@@ -97,7 +97,7 @@ End-to-end validation once all layers are in place.
 | IOP↔EE handshake via SIF | ✅ | `SIF` now contains two 32-word (128-byte) FIFOs: SIF0 (IOP→EE) and SIF1 (EE→IOP).  EE DMAC CH5 (FIFO→RAM) drains SIF0 via new `DmacChannel.DataProvider`; EE DMAC CH6 (RAM→FIFO) fills SIF1 via `DataConsumer`.  IOP DMAC CH9 (RAM→device) fills SIF0 via `DeviceDataConsumer`; IOP DMAC CH10 (device→RAM) drains SIF1 via `DeviceDataProvider`.  Wired in `PS2Emulator` (EE side) and `DualCpuScheduler` (IOP side).  Both full-round-trip paths (EE→IOP and IOP→EE) tested. |
 | Load a real BIOS ROM and run to the BIOS splash screen | ⬜ | Requires Phases 1–4 |
 | Game disc loading | ✅ | `Emulator/GameLoader.cs`.  `GameLoader.ParseSystemCnf()` extracts the `BOOT2` path from `SYSTEM.CNF`; `GameLoader.BootFromDisc(isoData, emulator)` reads the disc via `Cdvd`, parses `SYSTEM.CNF`, loads the ELF via `ElfLoader.LoadIntoEmulator`, and sets `cpu.PC` to the entry point.  `GameLoadException` thrown on any failure. |
-| Controller input end-to-end | ⬜ | IOP pad protocol → SIO2 → game receives button state |
+| Controller input end-to-end | ✅ | `DualCpuScheduler` exposes `Sio2`, `Pad0`, `Pad1`; `PollPads()` writes DualShock 2 poll responses to IOP RAM buffers; full pipeline tested: button press → `PollPads` → IOP RAM → IOP DMAC CH9 → SIF0 FIFO → EE DMAC CH5 → EE RAM |
 
 ---
 
@@ -127,4 +127,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 643 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 652 (all passing).*

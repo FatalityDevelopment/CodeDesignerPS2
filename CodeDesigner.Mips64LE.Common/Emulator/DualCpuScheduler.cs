@@ -2,6 +2,7 @@ using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 
 namespace CodeDesigner.Mips64LE.Common.Emulator
 {
+
     /// <summary>
     /// Coordinates execution of the EE (Emotion Engine) and IOP (I/O Processor)
     /// running at their native clock ratios.
@@ -41,11 +42,36 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// </summary>
         public const int EeToIopRatio = 4;
 
+        // ── Pad buffer addresses in IOP RAM ───────────────────────────────────
+
+        /// <summary>
+        /// Default IOP RAM address for the port 0 pad data buffer (9 bytes).
+        /// Mirrors the region used by padman.irx in a real PS2.
+        /// </summary>
+        public const uint DefaultPad0BufAddr = 0x1F200u;
+
+        /// <summary>
+        /// Default IOP RAM address for the port 1 pad data buffer (9 bytes).
+        /// </summary>
+        public const uint DefaultPad1BufAddr = 0x1F210u;
+
         /// <summary>The EE (Emotion Engine) emulator.</summary>
         public PS2Emulator EE { get; }
 
         /// <summary>The IOP (I/O Processor) emulator.</summary>
         public IopEmulator IOP { get; }
+
+        /// <summary>
+        /// The SIO2 serial I/O controller shared between this scheduler and the IOP bus.
+        /// IOP software (padman.irx) polls this device to read controller input.
+        /// </summary>
+        public Sio2 Sio2 { get; }
+
+        /// <summary>DualShock 2 state for controller port 0 (wired to <see cref="Sio2"/> port 0).</summary>
+        public PadState Pad0 { get; }
+
+        /// <summary>DualShock 2 state for controller port 1 (wired to <see cref="Sio2"/> port 1).</summary>
+        public PadState Pad1 { get; }
 
         /// <summary>
         /// Total EE instruction steps executed since the last <see cref="Reset"/>.
@@ -83,6 +109,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             // Wire IOP DMAC CH10 (SIF1, device→RAM): IOP receives data from EE via SIF1 FIFO.
             IOP.Bus.Dmac.Channels[10].DeviceDataProvider = () => EE.Bus.Sif.ReadSif1();
+
+            // Wire SIO2 and pad states so IOP software can poll controllers.
+            Pad0 = new PadState();
+            Pad1 = new PadState();
+            Sio2 = new Sio2 { Port0 = Pad0, Port1 = Pad1 };
+            IOP.Bus.Sio2 = Sio2;
         }
 
         /// <summary>
@@ -132,6 +164,46 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             for (int i = 0; i < iopSteps; i++)
                 IOP.Step();
             TotalIopSteps += (ulong)iopSteps;
+        }
+
+        /// <summary>
+        /// Poll both SIO2 ports using the DualShock 2 command 0x42 (read data) and
+        /// write the 9-byte response for each port to the specified IOP RAM addresses.
+        ///
+        /// This replicates the periodic polling performed by the IOP padman.irx driver.
+        /// After calling this method the raw pad response bytes are available in IOP RAM
+        /// and can be transferred to EE RAM via IOP DMAC CH9 → SIF0 → EE DMAC CH5.
+        ///
+        /// Layout of each 9-byte buffer (DualShock 2 poll response):
+        /// <list type="table">
+        ///   <item><term>[0]</term><description>0xFF (leading idle)</description></item>
+        ///   <item><term>[1]</term><description>0x73 (device ID = DualShock 2 analog)</description></item>
+        ///   <item><term>[2]</term><description>0x5A (acknowledge)</description></item>
+        ///   <item><term>[3]</term><description>button byte 0 (Select/L3/R3/Start/Up/Right/Down/Left, active-low)</description></item>
+        ///   <item><term>[4]</term><description>button byte 1 (L2/R2/L1/R1/Triangle/Circle/Cross/Square, active-low)</description></item>
+        ///   <item><term>[5]</term><description>right stick X</description></item>
+        ///   <item><term>[6]</term><description>right stick Y</description></item>
+        ///   <item><term>[7]</term><description>left stick X</description></item>
+        ///   <item><term>[8]</term><description>left stick Y</description></item>
+        /// </list>
+        /// </summary>
+        /// <param name="pad0BufAddr">IOP RAM address for port 0 result (default <see cref="DefaultPad0BufAddr"/>).</param>
+        /// <param name="pad1BufAddr">IOP RAM address for port 1 result (default <see cref="DefaultPad1BufAddr"/>).</param>
+        public void PollPads(uint pad0BufAddr = DefaultPad0BufAddr,
+                             uint pad1BufAddr = DefaultPad1BufAddr)
+        {
+            PollOnePad(Pad0, pad0BufAddr);
+            PollOnePad(Pad1, pad1BufAddr);
+        }
+
+        private void PollOnePad(PadState pad, uint bufAddr)
+        {
+            byte[] cmd = new byte[PadState.PollResponseMinSize]; // 9 zeros; byte[1]=0x42 set implicitly below
+            cmd[0] = PadState.AddrPad;
+            cmd[1] = PadState.CmdPoll;
+            byte[] resp = pad.ProcessCommand(cmd, PadState.PollResponseMinSize);
+            for (int i = 0; i < resp.Length; i++)
+                IOP.Bus.WriteByte(bufAddr + (uint)i, resp[i]);
         }
 
         /// <summary>
