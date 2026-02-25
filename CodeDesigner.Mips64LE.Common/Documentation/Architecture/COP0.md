@@ -25,7 +25,9 @@ privileged CPU state and are typically used by the kernel, runtime, or emulator.
 | TLBR | Read indexed TLB entry |
 | TLBWI | Write indexed TLB entry |
 | TLBWR | Write random TLB entry |
-| CACHE | Cache operation |
+| CACHE | Cache operation (no-op in emulation) |
+| EI | Enable interrupts — sets Status.EIE (bit 16) |
+| DI | Disable interrupts — clears Status.EIE (bit 16) |
 
 ---
 
@@ -98,8 +100,11 @@ Cache behavior is **critical for EE performance and correctness**.
 
 - COP0 behavior is **timing-sensitive**
 - Incorrect Status/Cause handling breaks games
-- TLB is often unused on PS2 but must exist
+- TLB is fully implemented; `HasAnyValidEntry` gate preserves identity-mapping for pre-TLB unit tests
 - Count/Compare registers are used for timing and interrupts
+- `ERET` checks `ERL` first — if set it clears `ERL` and returns via `ErrorEPC` (reg 29); otherwise it clears `EXL` and returns via `EPC` (reg 14)
+- `EI`/`DI` are EE-specific extensions encoded in the COP0 sub-opcode space; they are **not** present on standard MIPS CPUs
+- Default Status after reset is `0x00400000` (BEV=1, interrupts disabled)
 
 ---
 

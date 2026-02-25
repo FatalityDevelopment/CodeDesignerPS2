@@ -352,7 +352,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 ushort old  = _spu2.ReadHalf(hOff);
                 ushort nov  = (off & 1u) == 0u
                     ? (ushort)((old & 0xFF00u) | value)
-                    : (ushort)((old & 0x00FFu) | (value << 8));
+                    : (ushort)((old & 0x00FFu) | ((uint)value << 8));
                 _spu2.WriteHalf(hOff, nov);
                 return;
             }

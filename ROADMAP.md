@@ -115,7 +115,72 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-## Reference Sources
+## Phase 7 — Accuracy & Advanced Features ⬜
+
+These items represent the next tier of accuracy and feature-completeness needed
+for running a wider range of commercial PS2 titles correctly.  Each is identified
+by comparing this emulator's behaviour with PCSX2's reference implementation.
+
+### 7.1 — DMAC Chain Mode
+
+| Item | Status | Notes |
+|------|--------|-------|
+| EE DMAC chain/list mode (D_CHCR.MOD=01) | ⬜ | Required by BIOS and most games; DMAC reads a linked-list of DMA tags from RAM and processes each segment in sequence.  Reference: PCSX2 `pcsx2/Dmac.cpp` `dmaChain()`. |
+| EE DMAC interleave mode (D_CHCR.MOD=10) | ⬜ | Used by a small number of titles; alternates between transfer and skip blocks.  Reference: PCSX2 `pcsx2/Dmac.cpp`. |
+| IOP DMAC linked-list mode | ⬜ | IOP channels 2 (GPU)/4 (MDEC) use GPU/MDEC linked-list DMA; currently only burst mode is implemented. |
+
+### 7.2 — VU0 Micro-Mode
+
+| Item | Status | Notes |
+|------|--------|-------|
+| VU0 independent microprogram execution | ⬜ | VU0 can run programs autonomously (not just COP2 macro-mode).  Triggered by writing to the VU0 program counter via `VCALLMS`/`VCALLMSR` in a way that starts the micro-pipeline independently.  Reference: PCSX2 `pcsx2/VU0.cpp`. |
+| VU0 micro-mode interlocking with EE | ⬜ | EE must stall (via `VWAITQ` / status polling) until VU0 finishes.  VIF0 `MSCAL`/`MSCNT` already start VU0 programs synchronously; the async path needs adding. |
+
+### 7.3 — Graphics Enhancements
+
+| Item | Status | Notes |
+|------|--------|-------|
+| GS bilinear texture filtering | ⬜ | Current implementation uses nearest-neighbour only.  Many titles rely on bilinear sampling for smooth textures.  Reference: PCSX2 `pcsx2/GS/Renderers/SW/GSRasterizer.cpp`. |
+| GS FOG attribute | ⬜ | `FOG` register and per-vertex fog value in XYZF2/XYZF3 are decoded but not applied during rasterisation. |
+| GS LOCAL→HOST VRAM readback | ⬜ | `TRXDIR=1` (LOCAL→HOST) transfers pixels from VRAM back to the EE bus via `HWREG` reads.  Required for shadow maps and render-to-texture effects. |
+| GS CLAMP texture wrap modes | ⬜ | CLAMP_1/CLAMP_2 register supports REPEAT, CLAMP, REGION_CLAMP, REGION_REPEAT; only REPEAT is currently active. |
+| GS display output (NTSC/PAL timing) | ⬜ | DISPFB1/DISPLAY1 and DISPFB2/DISPLAY2 registers define the display circuit output; a raster scan loop is needed to produce a frame buffer for the host display. |
+
+### 7.4 — Audio
+
+| Item | Status | Notes |
+|------|--------|-------|
+| SPU2 audio mixing and PCM output | ⬜ | ADPCM decoding is implemented per-voice, but the 48 voices are not mixed and no PCM/WAV output is produced.  Reference: PCSX2 `pcsx2/SPU2/Mixer.cpp`. |
+| SPU2 reverb / effects processing | ⬜ | SPU2 has a 128 KB effects buffer per core; reverb algorithms defined by core effect registers are not yet implemented. |
+| IOP CDDA (CD audio) | ⬜ | CD audio tracks are not read; only data sectors are supported in the current CDVD. |
+
+### 7.5 — Storage & Memory Card
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Memory card emulation (MEC / MC2) | ⬜ | The PS2 memory card protocol is SIO-based (IOP SIO2 port 0/1 with device IDs 0x17/0x27).  Required for save/load functionality.  Reference: PCSX2 `pcsx2/Sio.cpp`, `pcsx2/MemoryCardFile.cpp`. |
+| DVD-Video sector types | ⬜ | CDVD currently handles Mode 1 (2048-byte) data sectors.  DVD-Video discs use 2048-byte sectors with different lead-in/lead-out structure; sub-channel data emulation needed for some titles. |
+
+### 7.6 — CPU Accuracy
+
+| Item | Status | Notes |
+|------|--------|-------|
+| COP0 Performance Counters (reg 25) | ⬜ | PCSX2 implements basic performance counter emulation for the BIOS perf-monitor syscall.  Currently reg 25 reads back 0. |
+| EE COP0 Count/Compare interrupt | ⬜ | The COP0 Count register increments every cycle; when it equals Compare a timer interrupt (INTC bit 8 / IP7) is raised.  Currently Count/Compare are readable/writable but do not generate interrupts. |
+| FPU sticky exception flags (FCSR) | ⬜ | FCSR bits [17:12] (cause/enable flags for overflow, underflow, division by zero, invalid op) are written correctly by the PS2 BIOS but are not acted on during arithmetic. |
+| Superscalar dual-issue model | ⬜ | The EE pipeline can issue two instructions per cycle under pairing rules.  Emulation is currently single-issue; cycle-accurate timing is not modelled. |
+
+### 7.7 — IOP Additional Peripherals
+
+| Item | Status | Notes |
+|------|--------|-------|
+| USB controller (USBD.IRX) | ⬜ | IOP USB host controller at physical 0x1F801600; required for USB keyboard/mouse support. |
+| i.LINK / FireWire (IEEE 1394) | ⬜ | Used for multi-PS2 LAN play (e.g. network adapter); not required for single-player titles. |
+| IOP parallel port | ⬜ | DEV9 interface used by the official network adapter and HDD add-on; required for online-capable titles. |
+
+---
+
+
 
 | Source | URL |
 |--------|-----|

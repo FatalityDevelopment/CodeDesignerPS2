@@ -346,7 +346,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
+            return (uint)(Opcode << 26 | 0x10 << 21 | (Funct ?? 0));
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
@@ -393,7 +393,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
+            return (uint)(Opcode << 26 | 0x10 << 21 | (Funct ?? 0));
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
@@ -438,7 +438,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
+            return (uint)(Opcode << 26 | 0x10 << 21 | (Funct ?? 0));
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
@@ -488,7 +488,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
+            return (uint)(Opcode << 26 | 0x10 << 21 | (Funct ?? 0));
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
@@ -538,7 +538,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
 
         public override uint Asm(int[] args)
         {
-            return (uint)(Opcode << 26 | 0x10 << 21 | Funct);
+            return (uint)(Opcode << 26 | 0x10 << 21 | (Funct ?? 0));
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
