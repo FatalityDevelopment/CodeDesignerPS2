@@ -28,6 +28,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         public const byte REG_CLAMP_1    = 0x08;
         public const byte REG_CLAMP_2    = 0x09;
         public const byte REG_FOG        = 0x0A;
+        public const byte REG_TEX1_1     = 0x14;
+        public const byte REG_TEX1_2     = 0x15;
         public const byte REG_XYZF3      = 0x0C;
         public const byte REG_XYZ3       = 0x0D;
         public const byte REG_AD         = 0x0E;
@@ -35,6 +37,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         public const byte REG_XYOFFSET_1 = 0x18;
         public const byte REG_XYOFFSET_2 = 0x19;
         public const byte REG_TEXFLUSH   = 0x3F;
+        public const byte REG_FOGCOL     = 0x3D;
         public const byte REG_HWREG      = 0x54;
         public const byte REG_SCISSOR_1  = 0x5C;
         public const byte REG_SCISSOR_2  = 0x5D;
@@ -354,6 +357,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             public bool TME, FST;
             public uint TBP0, TBW;
             public int  TexPsm, TW, TH, TFX;
+            // Texture wrap modes (CLAMP register)
+            public int  WmS, WmT;
+            public int  MinU, MaxU, MinV, MaxV;
+            // Bilinear filtering (TEX1 register)
+            public bool BilinearMag, BilinearMin;
+            // Fog (PRIM bit 11, FOGCOL register)
+            public bool FogEnable;
+            public uint FogRgb;
         }
 
         private DrawContext GetDrawContext(int ctxt)
@@ -364,6 +375,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             byte testReg    = ctxt == 0 ? REG_TEST_1     : REG_TEST_2;
             byte xyoffReg   = ctxt == 0 ? REG_XYOFFSET_1 : REG_XYOFFSET_2;
             byte tex0Reg    = ctxt == 0 ? REG_TEX0_1     : REG_TEX0_2;
+            byte tex1Reg    = ctxt == 0 ? REG_TEX1_1     : REG_TEX1_2;
+            byte clampReg   = ctxt == 0 ? REG_CLAMP_1    : REG_CLAMP_2;
 
             ulong frame   = _internalRegs[frameReg];
             ulong zbuf    = _internalRegs[zbufReg];
@@ -371,7 +384,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             ulong test    = _internalRegs[testReg];
             ulong xyoff   = _internalRegs[xyoffReg];
             ulong tex0    = _internalRegs[tex0Reg];
+            ulong tex1    = _internalRegs[tex1Reg];
+            ulong clamp   = _internalRegs[clampReg];
             ulong prim    = _internalRegs[REG_PRIM];
+            ulong fogcol  = _internalRegs[REG_FOGCOL];
 
             var dc = new DrawContext();
 
@@ -406,9 +422,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             dc.Ofy = (int)((xyoff >> 32) & 0xFFFFu);
 
             // PRIM-derived
-            dc.Abe = (prim & (1u << 6)) != 0u;
-            dc.TME = (prim & (1u << 4)) != 0u;
-            dc.FST = (prim & (1u << 8)) != 0u;
+            dc.Abe      = (prim & (1u << 6)) != 0u;
+            dc.TME      = (prim & (1u << 4)) != 0u;
+            dc.FST      = (prim & (1u << 8)) != 0u;
+            dc.FogEnable = (prim & (1u << 11)) != 0u;
 
             // TEX0
             dc.TBP0   = (uint)(tex0 & 0x3FFFu);
@@ -417,6 +434,23 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             dc.TW     = (int)((tex0 >> 26) & 0xFu);
             dc.TH     = (int)((tex0 >> 30) & 0xFu);
             dc.TFX    = (int)((tex0 >> 35) & 3u);
+
+            // TEX1 – bilinear filtering
+            int mmag = (int)((tex1 >> 5) & 3u);
+            int mmin = (int)((tex1 >> 7) & 7u);
+            dc.BilinearMag = mmag == 1;
+            dc.BilinearMin = mmin == 1 || mmin >= 4;
+
+            // CLAMP – texture wrap modes
+            dc.WmS  = (int)(clamp & 3u);
+            dc.WmT  = (int)((clamp >> 2) & 3u);
+            dc.MinU = (int)((clamp >> 4)  & 0x3FFFu);
+            dc.MaxU = (int)((clamp >> 18) & 0x3FFFu);
+            dc.MinV = (int)((clamp >> 32) & 0x3FFFu);
+            dc.MaxV = (int)((clamp >> 46) & 0x3FFFu);
+
+            // FOGCOL
+            dc.FogRgb = (uint)(fogcol & 0xFFFFFFu);
 
             return dc;
         }
@@ -600,7 +634,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             _ => true
         };
 
-        private void DrawPixel(int px, int py, uint color, uint z, DrawContext dc)
+        private void DrawPixel(int px, int py, uint color, uint z, byte fog, DrawContext dc)
         {
             if (px < dc.Scax0 || px > dc.Scax1 || py < dc.Scay0 || py > dc.Scay1) return;
 
@@ -646,6 +680,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                     uint dst = ReadPixel(px, py, dc.Fbp, dc.Fbw, dc.Psm);
                     color = BlendPixel(color, dst);
                 }
+                if (dc.FogEnable && fog > 0)
+                {
+                    uint fr = dc.FogRgb & 0xFFu;
+                    uint fg = (dc.FogRgb >> 8) & 0xFFu;
+                    uint fb = (dc.FogRgb >> 16) & 0xFFu;
+                    float f = fog / 255.0f;
+                    uint r = (uint)((1f - f) * (color & 0xFFu)          + f * fr);
+                    uint g = (uint)((1f - f) * ((color >> 8)  & 0xFFu)  + f * fg);
+                    uint b = (uint)((1f - f) * ((color >> 16) & 0xFFu)  + f * fb);
+                    color = Math.Min(255u, r) | (Math.Min(255u, g) << 8) | (Math.Min(255u, b) << 16) | (color & 0xFF000000u);
+                }
                 WritePixel(px, py, color, dc.Fbp, dc.Fbw, dc.Psm, dc.Fbmask);
             }
         }
@@ -665,7 +710,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             int  py    = (v.Y - dc.Ofy) >> 4;
             uint color = VertexColor(v);
             if (dc.TME) color = ApplyTexPoint(dc, v, color);
-            DrawPixel(px, py, color, v.Z, dc);
+            DrawPixel(px, py, color, v.Z, v.Fog, dc);
         }
 
         private void DrawLine(Vertex v0, Vertex v1, DrawContext dc)
@@ -683,9 +728,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             {
                 float t     = steps > 1 ? (float)i / (steps - 1) : 0f;
                 uint  z     = LerpZ(v0.Z, v1.Z, t);
+                byte  fog   = LerpFog(v0.Fog, v1.Fog, t);
                 uint  color = iip ? LerpColor(v0, v1, t) : VertexColor(v1);
                 if (dc.TME) color = ApplyTexPoint(dc, v1, color);
-                DrawPixel(x0, y0, color, z, dc);
+                DrawPixel(x0, y0, color, z, fog, dc);
                 if (x0 == x1 && y0 == y1) break;
                 int e2 = 2 * err;
                 if (e2 >= dy) { err += dy; x0 += sx; }
@@ -728,9 +774,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                     float lc   = 1f - la - lb;
 
                     uint z     = (uint)Math.Max(0f, la * va.Z + lb * vb.Z + lc * vc.Z);
+                    byte fog   = (byte)Math.Min(255, (int)(la * va.Fog + lb * vb.Fog + lc * vc.Fog));
                     uint color = iip ? LerpColorBary(va, vb, vc, la, lb, lc) : VertexColor(vc);
                     if (dc.TME) color = ApplyTexBary(dc, va, vb, vc, la, lb, lc, color);
-                    DrawPixel(px, py, color, z, dc);
+                    DrawPixel(px, py, color, z, fog, dc);
                 }
             }
         }
@@ -783,10 +830,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                             u = s * tw;
                             v = t2 * th;
                         }
-                        uint texColor = SampleTexture(dc, u, v);
+                        uint texColor = dc.BilinearMag
+                            ? SampleTextureBilinear(dc, u, v)
+                            : SampleTexture(dc, u, v);
                         color = ApplyTexFunc(dc.TFX, texColor, baseColor);
                     }
-                    DrawPixel(px, py, color, spriteZ, dc);
+                    DrawPixel(px, py, color, spriteZ, v1.Fog, dc);
                 }
             }
         }
@@ -815,6 +864,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         private static uint LerpZ(uint z0, uint z1, float t)
             => (uint)Math.Max(0f, (1f - t) * z0 + t * z1);
 
+        private static byte LerpFog(byte a, byte b, float t)
+            => (byte)Math.Min(255, (int)((1f - t) * a + t * b));
+
         #endregion
 
         // =======================================================================
@@ -825,10 +877,56 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         {
             int  tw     = dc.TW > 0 ? (1 << dc.TW) : 1;
             int  th     = dc.TH > 0 ? (1 << dc.TH) : 1;
-            int  ui     = ((int)u) & (tw - 1);
-            int  vi     = ((int)v) & (th - 1);
+            int  ui     = ApplyWrap((int)u, dc.WmS, dc.MinU, dc.MaxU, tw);
+            int  vi     = ApplyWrap((int)v, dc.WmT, dc.MinV, dc.MaxV, th);
             uint texFbp = dc.TBP0 / 32u;
             return ReadPixel(ui, vi, texFbp, dc.TBW, dc.TexPsm);
+        }
+
+        private static int ApplyWrap(int coord, int wm, int min, int max, int size)
+        {
+            switch (wm)
+            {
+                case 0: // REPEAT
+                    return coord & (size - 1);
+                case 1: // CLAMP
+                    return Math.Max(0, Math.Min(size - 1, coord));
+                case 2: // REGION_CLAMP
+                    return Math.Max(min, Math.Min(max, coord));
+                case 3: // REGION_REPEAT
+                    return (coord & (max - min)) | min;
+                default:
+                    return coord & (size - 1);
+            }
+        }
+
+        private uint SampleTextureBilinear(DrawContext dc, float u, float v)
+        {
+            int  tw  = dc.TW > 0 ? (1 << dc.TW) : 1;
+            int  th  = dc.TH > 0 ? (1 << dc.TH) : 1;
+            uint fbp = dc.TBP0 / 32u;
+
+            float uf = u - 0.5f, vf = v - 0.5f;
+            int u0 = (int)Math.Floor(uf), u1 = u0 + 1;
+            int v0 = (int)Math.Floor(vf), v1 = v0 + 1;
+            float fu = uf - u0, fv = vf - v0;
+
+            int wu0 = ApplyWrap(u0, dc.WmS, dc.MinU, dc.MaxU, tw);
+            int wu1 = ApplyWrap(u1, dc.WmS, dc.MinU, dc.MaxU, tw);
+            int wv0 = ApplyWrap(v0, dc.WmT, dc.MinV, dc.MaxV, th);
+            int wv1 = ApplyWrap(v1, dc.WmT, dc.MinV, dc.MaxV, th);
+
+            uint c00 = ReadPixel(wu0, wv0, fbp, dc.TBW, dc.TexPsm);
+            uint c10 = ReadPixel(wu1, wv0, fbp, dc.TBW, dc.TexPsm);
+            uint c01 = ReadPixel(wu0, wv1, fbp, dc.TBW, dc.TexPsm);
+            uint c11 = ReadPixel(wu1, wv1, fbp, dc.TBW, dc.TexPsm);
+
+            uint r = (uint)((1f-fu)*(1f-fv)*(c00&0xFFu)       + fu*(1f-fv)*(c10&0xFFu)       + (1f-fu)*fv*(c01&0xFFu)       + fu*fv*(c11&0xFFu)       + 0.5f);
+            uint g = (uint)((1f-fu)*(1f-fv)*((c00>>8)&0xFFu)  + fu*(1f-fv)*((c10>>8)&0xFFu)  + (1f-fu)*fv*((c01>>8)&0xFFu)  + fu*fv*((c11>>8)&0xFFu)  + 0.5f);
+            uint b = (uint)((1f-fu)*(1f-fv)*((c00>>16)&0xFFu) + fu*(1f-fv)*((c10>>16)&0xFFu) + (1f-fu)*fv*((c01>>16)&0xFFu) + fu*fv*((c11>>16)&0xFFu) + 0.5f);
+            uint a = (uint)((1f-fu)*(1f-fv)*((c00>>24)&0xFFu) + fu*(1f-fv)*((c10>>24)&0xFFu) + (1f-fu)*fv*((c01>>24)&0xFFu) + fu*fv*((c11>>24)&0xFFu) + 0.5f);
+
+            return Math.Min(255u,r) | (Math.Min(255u,g)<<8) | (Math.Min(255u,b)<<16) | (Math.Min(255u,a)<<24);
         }
 
         private uint ApplyTexPoint(DrawContext dc, Vertex v, uint vtxColor)
@@ -847,7 +945,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 u      = v.S / q * tw;
                 vCoord = v.T / q * th;
             }
-            return ApplyTexFunc(dc.TFX, SampleTexture(dc, u, vCoord), vtxColor);
+            return ApplyTexFunc(dc.TFX, dc.BilinearMag ? SampleTextureBilinear(dc, u, vCoord) : SampleTexture(dc, u, vCoord), vtxColor);
         }
 
         private uint ApplyTexBary(DrawContext dc,
@@ -872,7 +970,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 u      = s  * tw;
                 vCoord = t2 * th;
             }
-            return ApplyTexFunc(dc.TFX, SampleTexture(dc, u, vCoord), vtxColor);
+            return ApplyTexFunc(dc.TFX, dc.BilinearMag ? SampleTextureBilinear(dc, u, vCoord) : SampleTexture(dc, u, vCoord), vtxColor);
         }
 
         private static uint ApplyTexFunc(int tfx, uint tex, uint vtx)
@@ -922,6 +1020,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         private int  _trxDpsm;
         private uint _trxCurX, _trxCurY;
 
+        // LOCAL→HOST readback state
+        private bool _trxReadActive;
+        private uint _trxSsax, _trxSsay;
+        private uint _trxSfbp, _trxSfbw;
+        private int  _trxSpsm;
+        private uint _trxReadX, _trxReadY;
+
         private void StartTransfer(int dir)
         {
             _trxActive = false;
@@ -947,6 +1052,23 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 case 2: // LOCAL->LOCAL
                     DoLocalToLocal();
                     break;
+                case 1: // LOCAL->HOST
+                {
+                    ulong blt = _internalRegs[REG_BITBLTBUF];
+                    ulong pos = _internalRegs[REG_TRXPOS];
+                    ulong reg = _internalRegs[REG_TRXREG];
+                    _trxSfbp  = (uint)(blt & 0x3FFFu);
+                    _trxSfbw  = Math.Max(1u, (uint)((blt >> 16) & 0x3Fu));
+                    _trxSpsm  = (int)((blt >> 24) & 0x3Fu);
+                    _trxSsax  = (uint)(pos & 0x7FFu);
+                    _trxSsay  = (uint)((pos >> 16) & 0x7FFu);
+                    _trxRrw   = (uint)(reg & 0xFFFu);
+                    _trxRrh   = (uint)((reg >> 16) & 0x7FFu);
+                    _trxReadX = _trxSsax;
+                    _trxReadY = _trxSsay;
+                    _trxReadActive = _trxRrw > 0u && _trxRrh > 0u;
+                    break;
+                }
             }
         }
 
@@ -1042,7 +1164,60 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         public ulong ReadInternal(byte addr)
         {
             if (addr >= 128) return 0ul;
+            if (addr == REG_HWREG && _trxReadActive) return ReadHwreg();
             return _internalRegs[addr];
+        }
+
+        private ulong ReadHwreg()
+        {
+            if (!_trxReadActive) return 0ul;
+            uint sfbp = _trxSfbp / 32u;
+            int  psm  = _trxSpsm;
+            int  pixPerQword;
+            switch (psm)
+            {
+                case PSM_PSMCT32: case PSM_PSMCT24: case PSM_PSMZ32:
+                    pixPerQword = 2; break;
+                case PSM_PSMCT16: case PSM_PSMCT16S: case PSM_PSMZ16: case PSM_PSMZ16S:
+                    pixPerQword = 4; break;
+                case PSM_PSMT8:
+                    pixPerQword = 8; break;
+                case PSM_PSMT4:
+                    pixPerQword = 16; break;
+                default:
+                    pixPerQword = 2; break;
+            }
+            ulong result = 0ul;
+            for (int i = 0; i < pixPerQword; i++)
+            {
+                if (_trxReadY >= _trxSsay + _trxRrh) { _trxReadActive = false; break; }
+                uint pix = ReadPixel((int)_trxReadX, (int)_trxReadY, sfbp, _trxSfbw, psm);
+                switch (psm)
+                {
+                    case PSM_PSMCT32: case PSM_PSMCT24: case PSM_PSMZ32:
+                        result |= ((ulong)pix << (i * 32));
+                        break;
+                    case PSM_PSMCT16: case PSM_PSMCT16S: case PSM_PSMZ16: case PSM_PSMZ16S:
+                        result |= ((ulong)Pack32To16(pix) << (i * 16));
+                        break;
+                    case PSM_PSMT8:
+                        result |= ((ulong)(pix & 0xFFu) << (i * 8));
+                        break;
+                    case PSM_PSMT4:
+                        result |= ((ulong)(pix & 0xFu) << (i * 4));
+                        break;
+                    default:
+                        result |= ((ulong)pix << (i * 32));
+                        break;
+                }
+                _trxReadX++;
+                if (_trxReadX >= _trxSsax + _trxRrw)
+                {
+                    _trxReadX = _trxSsax;
+                    _trxReadY++;
+                }
+            }
+            return result;
         }
 
         /// <summary>
@@ -1226,6 +1401,45 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 case PRIV_BUSDIR:   _busdir   = value; break;
                 case PRIV_SIGLBLID: _siglblid = value; break;
             }
+        }
+
+        #endregion
+
+        // =======================================================================
+        #region Display Output
+        // =======================================================================
+
+        /// <summary>
+        /// Read the display framebuffer as a flat ARGB32 pixel array.
+        /// Returns (pixels, width, height). pixels is null if the display is not configured.
+        /// circuit=1 uses DISPFB1/DISPLAY1; circuit=2 uses DISPFB2/DISPLAY2.
+        /// </summary>
+        public (uint[]? Pixels, int Width, int Height) GetFrameBuffer(int circuit = 1)
+        {
+            ulong dispfb  = circuit == 1 ? _dispfb1  : _dispfb2;
+            ulong display = circuit == 1 ? _display1 : _display2;
+
+            uint fbp = (uint)(dispfb & 0x1FFu);
+            uint fbw = Math.Max(1u, (uint)((dispfb >> 9) & 0x3Fu));
+            int  psm = (int)((dispfb >> 15) & 0x1Fu);
+            uint dbx = (uint)((dispfb >> 32) & 0x7FFu);
+            uint dby = (uint)((dispfb >> 43) & 0x7FFu);
+
+            uint magh = (uint)((display >> 23) & 0xFu);
+            uint dw   = (uint)((display >> 32) & 0x7FFu);
+            uint dh   = (uint)((display >> 43) & 0x7FFu);
+
+            int width  = (magh + 1) > 0 ? (int)((dw + 1) / (magh + 1)) : 0;
+            int height = (int)(dh + 1);
+
+            if (width <= 0 || height <= 0 || dw == 0) return (null, 0, 0);
+
+            var pixels = new uint[width * height];
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    pixels[y * width + x] = ReadPixel((int)(dbx + x), (int)(dby + y), fbp, fbw, psm);
+
+            return (pixels, width, height);
         }
 
         #endregion
