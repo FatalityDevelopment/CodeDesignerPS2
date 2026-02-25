@@ -893,7 +893,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                     return Math.Max(0, Math.Min(size - 1, coord));
                 case 2: // REGION_CLAMP
                     return Math.Max(min, Math.Min(max, coord));
-                case 3: // REGION_REPEAT
+                case 3: // REGION_REPEAT: PS2 HW uses MAXU as a bitmask; MINU as a base OR.
+                    // Correct usage requires (max - min) to be a power-of-two minus one.
                     return (coord & (max - min)) | min;
                 default:
                     return coord & (size - 1);
@@ -921,12 +922,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             uint c01 = ReadPixel(wu0, wv1, fbp, dc.TBW, dc.TexPsm);
             uint c11 = ReadPixel(wu1, wv1, fbp, dc.TBW, dc.TexPsm);
 
-            uint r = (uint)((1f-fu)*(1f-fv)*(c00&0xFFu)       + fu*(1f-fv)*(c10&0xFFu)       + (1f-fu)*fv*(c01&0xFFu)       + fu*fv*(c11&0xFFu)       + 0.5f);
-            uint g = (uint)((1f-fu)*(1f-fv)*((c00>>8)&0xFFu)  + fu*(1f-fv)*((c10>>8)&0xFFu)  + (1f-fu)*fv*((c01>>8)&0xFFu)  + fu*fv*((c11>>8)&0xFFu)  + 0.5f);
-            uint b = (uint)((1f-fu)*(1f-fv)*((c00>>16)&0xFFu) + fu*(1f-fv)*((c10>>16)&0xFFu) + (1f-fu)*fv*((c01>>16)&0xFFu) + fu*fv*((c11>>16)&0xFFu) + 0.5f);
-            uint a = (uint)((1f-fu)*(1f-fv)*((c00>>24)&0xFFu) + fu*(1f-fv)*((c10>>24)&0xFFu) + (1f-fu)*fv*((c01>>24)&0xFFu) + fu*fv*((c11>>24)&0xFFu) + 0.5f);
+            uint r = BilinearChannel(c00, c10, c01, c11, 0,  fu, fv);
+            uint g = BilinearChannel(c00, c10, c01, c11, 8,  fu, fv);
+            uint b = BilinearChannel(c00, c10, c01, c11, 16, fu, fv);
+            uint a = BilinearChannel(c00, c10, c01, c11, 24, fu, fv);
 
             return Math.Min(255u,r) | (Math.Min(255u,g)<<8) | (Math.Min(255u,b)<<16) | (Math.Min(255u,a)<<24);
+        }
+
+        private static uint BilinearChannel(uint c00, uint c10, uint c01, uint c11, int shift, float fu, float fv)
+        {
+            float v00 = (c00 >> shift) & 0xFFu;
+            float v10 = (c10 >> shift) & 0xFFu;
+            float v01 = (c01 >> shift) & 0xFFu;
+            float v11 = (c11 >> shift) & 0xFFu;
+            return (uint)((1f-fu)*(1f-fv)*v00 + fu*(1f-fv)*v10 + (1f-fu)*fv*v01 + fu*fv*v11 + 0.5f);
         }
 
         private uint ApplyTexPoint(DrawContext dc, Vertex v, uint vtxColor)
