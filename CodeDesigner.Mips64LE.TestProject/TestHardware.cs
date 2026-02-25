@@ -3,6 +3,7 @@ using System.Numerics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
+using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU1;
 
 namespace CodeDesigner.Mips64LE.TestProject
@@ -2727,6 +2728,183 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             Assert.AreEqual(11f, vu1.VF[1].X, 1e-5f, "VU1 ADD result x after MSCAL");
             Assert.AreEqual(22f, vu1.VF[1].Y, 1e-5f, "VU1 ADD result y after MSCAL");
+        }
+
+        // =====================================================================
+        // BiosLoader tests
+        // =====================================================================
+
+        /// <summary>
+        /// Build a minimal synthetic BIOS image (ROMDIR with RESET + ROMVER entries
+        /// followed by their data) and verify that BiosLoader.Validate returns the
+        /// correct version, region and date.
+        /// </summary>
+        private static byte[] BuildMinimalBios(
+            string romVerString = "0160JC 20020426",
+            int    padToSize    = 0x400)
+        {
+            // ROMDIR layout (16 bytes per entry):
+            //   [0]  "RESET\0\0\0\0\0"  extInfoSize=0  fileSize=<romdir bytes>
+            //   [1]  "ROMVER\0\0\0\0"   extInfoSize=0  fileSize=15
+            //   [2]  "\0\0\0\0\0\0\0\0\0\0" (terminator)
+            // Each entry is 16 bytes; 3 entries = 48 bytes of ROMDIR.
+            const int entrySize = 16;
+            int romDirBytes = 3 * entrySize; // 48 bytes
+
+            byte[] bios = new byte[Math.Max(padToSize, romDirBytes + 14)];
+
+            void WriteEntry(int idx, string name, uint fileSize)
+            {
+                int off = idx * entrySize;
+                // name (10 bytes, null-padded)
+                for (int c = 0; c < 10; c++)
+                    bios[off + c] = c < name.Length ? (byte)name[c] : (byte)0;
+                // extInfoSize = 0 (2 bytes LE)
+                bios[off + 10] = 0; bios[off + 11] = 0;
+                // fileSize (4 bytes LE)
+                bios[off + 12] = (byte)fileSize;
+                bios[off + 13] = (byte)(fileSize >> 8);
+                bios[off + 14] = (byte)(fileSize >> 16);
+                bios[off + 15] = (byte)(fileSize >> 24);
+            }
+
+            // Entry 0: RESET — module data = the ROMDIR table itself.
+            WriteEntry(0, "RESET",  (uint)romDirBytes);
+            // Entry 1: ROMVER — 15 bytes.
+            WriteEntry(1, "ROMVER", 15);
+            // Entry 2: terminator (zero name).
+            WriteEntry(2, "",  0);
+
+            // Write ROMVER string immediately after the ROMDIR table.
+            // RESET file occupies bytes [0 .. romDirBytes-1], rounded to 16-byte boundary,
+            // so ROMVER data starts at offset romDirBytes (already 16-byte aligned: 48 bytes).
+            byte[] verBytes = System.Text.Encoding.ASCII.GetBytes(romVerString.PadRight(15)[..15]);
+            Array.Copy(verBytes, 0, bios, romDirBytes, verBytes.Length);
+
+            return bios;
+        }
+
+        [TestMethod]
+        public void BiosLoader_Validate_ReturnsCorrectVersionInfo()
+        {
+            byte[] bios = BuildMinimalBios("0160JC 20020426");
+            BiosInfo info = BiosLoader.Validate(bios);
+
+            Assert.AreEqual("1.60",       info.Version, "Version should be 1.60");
+            Assert.AreEqual("Japan",      info.Region,  "Region should be Japan");
+            Assert.AreEqual("2002-04-26", info.Date,    "Date should be 2002-04-26");
+        }
+
+        [TestMethod]
+        public void BiosLoader_Validate_UsaRegion()
+        {
+            byte[] bios = BuildMinimalBios("0200AC 20030929");
+            BiosInfo info = BiosLoader.Validate(bios);
+            Assert.AreEqual("USA", info.Region);
+        }
+
+        [TestMethod]
+        public void BiosLoader_Validate_EuropeRegion()
+        {
+            byte[] bios = BuildMinimalBios("0200EC 20030929");
+            BiosInfo info = BiosLoader.Validate(bios);
+            Assert.AreEqual("Europe", info.Region);
+        }
+
+        [TestMethod]
+        public void BiosLoader_Validate_EmptyImage_Throws()
+        {
+            Assert.ThrowsException<BiosLoadException>(
+                () => BiosLoader.Validate(Array.Empty<byte>()),
+                "Empty BIOS must throw BiosLoadException");
+        }
+
+        [TestMethod]
+        public void BiosLoader_Validate_ImageTooLarge_Throws()
+        {
+            byte[] oversized = new byte[BiosLoader.BiosRomSize + 1];
+            Assert.ThrowsException<BiosLoadException>(
+                () => BiosLoader.Validate(oversized),
+                "Oversized image must throw BiosLoadException");
+        }
+
+        [TestMethod]
+        public void BiosLoader_Validate_BadFirstEntry_Throws()
+        {
+            byte[] bios = BuildMinimalBios(); // valid content...
+            // Overwrite the first ROMDIR entry name with something other than "RESET"
+            byte[] badName = System.Text.Encoding.ASCII.GetBytes("KERNEL\0\0\0\0");
+            Array.Copy(badName, 0, bios, 0, 10);
+
+            Assert.ThrowsException<BiosLoadException>(
+                () => BiosLoader.Validate(bios),
+                "Non-RESET first entry must throw BiosLoadException");
+        }
+
+        [TestMethod]
+        public void BiosLoader_Load_CopiesBiosIntoEeAndIopBuses()
+        {
+            byte[] bios = BuildMinimalBios("0160JC 20020426", padToSize: BiosLoader.BiosRomSize);
+            var emu = new PS2Emulator();
+            var iop = new IopEmulator(emu.Bus);
+
+            BiosInfo info = BiosLoader.Load(bios, emu, iop);
+
+            // BIOS bytes must have been copied into the EE bus
+            for (int i = 0; i < bios.Length; i++)
+                Assert.AreEqual(bios[i], emu.Bus.Bios[i],
+                    $"EE bus BIOS byte mismatch at offset 0x{i:X}");
+
+            // BIOS bytes must have been copied into the IOP bus
+            for (int i = 0; i < bios.Length; i++)
+                Assert.AreEqual(bios[i], iop.Bus.Bios[i],
+                    $"IOP bus BIOS byte mismatch at offset 0x{i:X}");
+
+            // Version info should be extracted correctly
+            Assert.AreEqual("1.60", info.Version);
+        }
+
+        [TestMethod]
+        public void BiosLoader_Load_ResetsEeToPowerOnVector()
+        {
+            byte[] bios = BuildMinimalBios();
+            var emu = new PS2Emulator();
+            var iop = new IopEmulator(emu.Bus);
+
+            BiosLoader.Load(bios, emu, iop);
+
+            // After load + reset the EE PC must be at the MIPS reset vector.
+            Assert.AreEqual(0xBFC00000UL, emu.Cpu.PC,
+                "EE PC must be 0xBFC00000 after BIOS load");
+        }
+
+        [TestMethod]
+        public void BiosLoader_Load_Scheduler_LoadsBothBuses()
+        {
+            byte[] bios = BuildMinimalBios("0300JC 20040614", padToSize: BiosLoader.BiosRomSize);
+            var scheduler = new DualCpuScheduler();
+
+            BiosInfo info = BiosLoader.Load(bios, scheduler);
+
+            Assert.AreEqual("3.00", info.Version);
+            Assert.AreEqual("Japan", info.Region);
+
+            // Both buses must contain the loaded ROM.
+            Assert.AreEqual(bios[0], scheduler.EE.Bus.Bios[0], "EE bus byte 0");
+            Assert.AreEqual(bios[0], scheduler.IOP.Bus.Bios[0], "IOP bus byte 0");
+
+            // Both CPUs should be at the reset vector.
+            Assert.AreEqual(0xBFC00000UL, scheduler.EE.Cpu.PC,
+                "EE PC must be at reset vector after BIOS load");
+        }
+
+        [TestMethod]
+        public void BiosLoader_BiosInfo_ToString_ContainsVersion()
+        {
+            var info = new BiosInfo("1.60", "Japan", "2002-04-26");
+            string s = info.ToString();
+            StringAssert.Contains(s, "1.60");
+            StringAssert.Contains(s, "Japan");
         }
     }
 }
