@@ -1,6 +1,7 @@
 ﻿using CodeDesigner.Mips64LE.Common.CPU.COP0;
 using CodeDesigner.Mips64LE.Common.CPU.COP1;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU0;
+using CodeDesigner.Mips64LE.Common.VectorUnits.VU1;
 using System;
 
 namespace CodeDesigner.Mips64LE.Common.CPU
@@ -44,6 +45,9 @@ namespace CodeDesigner.Mips64LE.Common.CPU
 
         // VU0 - Vector Unit 0 (COP2 in Macro Mode)
         public VU0State VU0 { get; } = new VU0State();
+
+        // VU1 - Vector Unit 1 (standalone microprogram execution)
+        public VU1State VU1 { get; } = new VU1State();
 
         public CpuState()
         {
