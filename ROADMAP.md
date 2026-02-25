@@ -86,17 +86,18 @@ Needed once both CPUs are stable enough to reach the BIOS graphics init sequence
 
 ---
 
-## Phase 6 — Integration & BIOS Boot ⬜ NOT STARTED
+## Phase 6 — Integration & BIOS Boot 🔧 IN PROGRESS
 
 End-to-end validation once all layers are in place.
 
-| Item | Notes |
-|------|-------|
-| Load a real BIOS ROM and run to the BIOS splash screen | Requires Phases 1–4 |
-| IOP↔EE handshake via SIF | BIOS sends EE kernel modules to IOP over SIF; both CPUs must run concurrently |
-| Dual-CPU scheduler | Run EE and IOP in lock-step (e.g. EE runs N cycles, then IOP runs proportional cycles at 36/150 ratio) |
-| Game disc loading | Requires Phase 5 CDVD; load an ISO, parse the `SYSTEM.CNF`, boot the game executable |
-| Controller input end-to-end | IOP pad protocol → SIO2 → game receives button state |
+| Item | Status | Notes |
+|------|--------|-------|
+| EE hardware interrupt delivery | ✅ | `PS2Emulator.Step()` checks INTC pending + Status.IE/EXL/ERL/EIE/IM2 before each instruction; dispatches ExcCode=0 via COP0ExceptionDispatcher; Cause.IP2 set to reflect INTC source. |
+| Dual-CPU scheduler (EE + IOP lock-step) | ✅ | `DualCpuScheduler` in `Emulator/DualCpuScheduler.cs`.  Runs EE and IOP at 4:1 cycle ratio (147.456 MHz / 36.864 MHz).  Shares SIF between EE and IOP.  `RunSlice(eeSteps)` with fractional IOP accumulator; `TickHardware()` advances both timer stacks. |
+| Load a real BIOS ROM and run to the BIOS splash screen | ⬜ | Requires Phases 1–4 |
+| IOP↔EE handshake via SIF | ⬜ | BIOS sends EE kernel modules to IOP over SIF; both CPUs must run concurrently |
+| Game disc loading | ⬜ | Requires Phase 5 CDVD; load an ISO, parse the `SYSTEM.CNF`, boot the game executable |
+| Controller input end-to-end | ⬜ | IOP pad protocol → SIO2 → game receives button state |
 
 ---
 
@@ -108,7 +109,7 @@ These are not phase-specific but should be addressed progressively.
 |------|-------|
 | TLB (Translation Lookaside Buffer) | `Coprocessors/COP0/TLB/TLBState.cs` exists as a skeleton.  EE uses a software-managed 48-entry TLB.  Required for any OS-level or BIOS memory mapping. |
 | COP0 cache instructions (`CACHE`, `SYNC`) | Currently treated as unknown instructions.  Stubbing them as no-ops is acceptable for now. |
-| EE interrupt delivery | `PS2Emulator.InterruptPending` fires but does not inject a MIPS hardware interrupt into the CPU.  When Status.IE=1 and an interrupt is unmasked, the EE should take an interrupt exception (ExcCode=0). |
+| EE interrupt delivery | `PS2Emulator.Step()` now checks INTC pending + Status.IE/EXL/ERL/EIE/IM2 before each instruction and dispatches ExcCode=0 via COP0ExceptionDispatcher when all conditions are met. ✅ |
 | Floating-point edge cases | PS2 COP1 flushes denormals to zero.  This is implemented for arithmetic; audit compare and conversion instructions. |
 | Instruction coverage audit | Run the assembler over all EE instructions and verify round-trip encode→decode→disassemble. |
 
@@ -126,4 +127,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 610 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 621 (all passing).*

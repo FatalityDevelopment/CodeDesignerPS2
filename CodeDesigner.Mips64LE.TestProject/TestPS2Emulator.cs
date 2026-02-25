@@ -2,6 +2,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.CPU.COP0;
 using CodeDesigner.Mips64LE.Common.Emulator;
+using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
+using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 
 namespace CodeDesigner.Mips64LE.TestProject
 {
@@ -562,6 +564,237 @@ namespace CodeDesigner.Mips64LE.TestProject
             // Cause.BD must be set.
             uint cause = cpu.COP0.ReadRegister32(13);
             Assert.IsTrue((cause & (1u << 31)) != 0, "Cause.BD must be set for delay-slot exception");
+        }
+
+        // =====================================================================
+        // EE hardware interrupt delivery tests
+        // =====================================================================
+
+        /// <summary>
+        /// When the INTC has a pending interrupt, Status.IE=1, EXL=0, ERL=0,
+        /// EIE=1, and IM2=1, Step() must dispatch an interrupt exception
+        /// (ExcCode=0) and set PC to the exception vector instead of executing
+        /// the instruction at PC.
+        /// </summary>
+        [TestMethod]
+        public void Emulator_InterruptDelivery_TakesExceptionWhenEnabled()
+        {
+            var emu = new PS2Emulator();
+
+            // Load a NOP at address 0 so we can detect whether the instruction ran.
+            emu.LoadProgram(0x00000000, new uint[] { 0x00000000 }); // NOP
+            emu.Cpu.PC = 0x00000000;
+
+            // Configure Status: IE=1, EXL=0, ERL=0, EIE=1 (bit16), IM2=1 (bit10), BEV=0
+            // 0x00010401 = IE(0) | IM2(10) | EIE(16) = 1 | 0x400 | 0x10000
+            emu.Cpu.COP0.WriteRegister32(12, 0x00010401u);
+
+            // Raise an INTC interrupt (timer 0 = bit 9 of INTC_STAT and INTC_MASK)
+            emu.Bus.Intc.RaiseInterrupt(INTC.INT_TIMER0);
+            // Enable that bit in INTC_MASK via the register interface (write-1-to-toggle)
+            emu.Bus.Intc.WriteRegister(INTC.REG_MASK, 1u << INTC.INT_TIMER0);
+
+            emu.Step();
+
+            // Should have taken the interrupt exception vector (BEV=0 → 0x80000080)
+            Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
+                "Interrupt: PC must redirect to exception vector 0x80000080");
+
+            // Cause.ExcCode must be 0 (Interrupt)
+            uint c = emu.Cpu.COP0.ReadRegister32(13);
+            uint excCode = (c >> 2) & 0x1Fu;
+            Assert.AreEqual(0u, excCode, "Cause.ExcCode must be 0 for a hardware interrupt");
+
+            // Status.EXL must be set
+            uint s = emu.Cpu.COP0.ReadRegister32(12);
+            Assert.IsTrue((s & 2u) != 0, "Status.EXL must be set after interrupt exception");
+
+            // Cause.IP2 (bit 10) must be set to indicate the INTC source
+            Assert.IsTrue((c & 0x400u) != 0, "Cause.IP2 must be set to reflect INTC interrupt");
+        }
+
+        /// <summary>
+        /// When Status.IE=0 (global interrupts disabled) the interrupt must NOT be
+        /// delivered even though the INTC reports a pending interrupt.
+        /// </summary>
+        [TestMethod]
+        public void Emulator_InterruptDelivery_NotDeliveredWhenIEClear()
+        {
+            var emu = new PS2Emulator();
+            uint nop = 0x00000000u;
+            emu.LoadProgram(0x00000100, new[] { nop });
+            emu.Cpu.PC = 0x00000100;
+
+            // Status: IE=0, EXL=0, ERL=0, EIE=1, IM2=1, BEV=0
+            emu.Cpu.COP0.WriteRegister32(12, 0x00010400u); // IE clear
+
+            emu.Bus.Intc.RaiseInterrupt(INTC.INT_TIMER0);
+            emu.Bus.Intc.WriteRegister(INTC.REG_MASK, 1u << INTC.INT_TIMER0);
+
+            emu.Step(); // NOP must execute normally
+
+            // PC should have advanced past NOP, not jumped to exception vector
+            Assert.AreEqual(0x00000104UL, emu.Cpu.PC,
+                "With IE=0, interrupt must not be delivered; NOP must execute normally");
+        }
+
+        /// <summary>
+        /// When Status.EXL=1 (already in exception mode) the interrupt must NOT be
+        /// delivered.
+        /// </summary>
+        [TestMethod]
+        public void Emulator_InterruptDelivery_NotDeliveredWhenEXLSet()
+        {
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000200, new uint[] { 0x00000000 }); // NOP
+            emu.Cpu.PC = 0x00000200;
+
+            // Status: IE=1, EXL=1 (already in exception), EIE=1, IM2=1, BEV=0
+            emu.Cpu.COP0.WriteRegister32(12, 0x00010403u); // IE=1 | EXL=1 | IM2 | EIE
+
+            emu.Bus.Intc.RaiseInterrupt(INTC.INT_TIMER0);
+            emu.Bus.Intc.WriteRegister(INTC.REG_MASK, 1u << INTC.INT_TIMER0);
+
+            emu.Step();
+
+            Assert.AreEqual(0x00000204UL, emu.Cpu.PC,
+                "With EXL=1, interrupt must not be delivered; NOP must execute normally");
+        }
+
+        /// <summary>
+        /// When EIE (bit 16, PS2-specific interrupt gate) is clear the interrupt
+        /// must NOT be delivered even though IE=1.
+        /// </summary>
+        [TestMethod]
+        public void Emulator_InterruptDelivery_NotDeliveredWhenEIEClear()
+        {
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000300, new uint[] { 0x00000000 }); // NOP
+            emu.Cpu.PC = 0x00000300;
+
+            // Status: IE=1, EXL=0, ERL=0, EIE=0 (bit16 clear), IM2=1, BEV=0
+            emu.Cpu.COP0.WriteRegister32(12, 0x00000401u); // IE | IM2 (no EIE)
+
+            emu.Bus.Intc.RaiseInterrupt(INTC.INT_TIMER0);
+            emu.Bus.Intc.WriteRegister(INTC.REG_MASK, 1u << INTC.INT_TIMER0);
+
+            emu.Step();
+
+            Assert.AreEqual(0x00000304UL, emu.Cpu.PC,
+                "With EIE=0, interrupt must not be delivered; NOP must execute normally");
+        }
+
+        // =====================================================================
+        // DualCpuScheduler tests
+        // =====================================================================
+
+        [TestMethod]
+        public void DualCpuScheduler_Constructor_CreatesBothCpus()
+        {
+            var sched = new DualCpuScheduler();
+            Assert.IsNotNull(sched.EE,  "EE emulator must not be null");
+            Assert.IsNotNull(sched.IOP, "IOP emulator must not be null");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_Constructor_AcceptsExternalEE()
+        {
+            var ee    = new PS2Emulator();
+            var sched = new DualCpuScheduler(ee);
+            Assert.AreSame(ee, sched.EE, "Scheduler must use the supplied EE instance");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_EeAndIop_ShareSif()
+        {
+            var sched = new DualCpuScheduler();
+            // Write MSCOM from the EE side and read it from the IOP bus
+            sched.EE.Bus.Sif.WriteRegister(SIF.REG_MSCOM, 0xCAFEBABEu);
+            Assert.AreEqual(0xCAFEBABEu,
+                sched.IOP.Bus.SharedSif!.ReadRegister(SIF.REG_MSCOM),
+                "EE and IOP must share the same SIF instance");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_Reset_ClearsCounters()
+        {
+            var sched = new DualCpuScheduler();
+
+            // Load NOPs so RunSlice doesn't fault
+            uint nop = 0x00000000u;
+            for (int i = 0; i < 8; i++)
+                sched.EE.LoadProgram((uint)(i * 4), new[] { nop });
+            sched.EE.Cpu.PC = 0;
+
+            // IOP needs some code too — LoadProgram writes to IOP RAM
+            for (int i = 0; i < 4; i++)
+                sched.IOP.LoadProgram((uint)(i * 4), new[] { nop });
+            sched.IOP.State.PC = 0;
+
+            sched.RunSlice(4);
+
+            Assert.IsTrue(sched.TotalEeSteps > 0);
+            Assert.IsTrue(sched.TotalIopSteps > 0);
+
+            sched.Reset();
+
+            Assert.AreEqual(0UL, sched.TotalEeSteps,  "TotalEeSteps must be 0 after Reset");
+            Assert.AreEqual(0UL, sched.TotalIopSteps, "TotalIopSteps must be 0 after Reset");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_RunSlice_RunsProportionalSteps()
+        {
+            var sched = new DualCpuScheduler();
+
+            // Load NOPs into EE main RAM
+            uint nop = 0x00000000u;
+            for (int i = 0; i < 64; i++)
+                sched.EE.LoadProgram((uint)(i * 4), new[] { nop });
+            sched.EE.Cpu.PC = 0;
+
+            // Load NOPs into IOP RAM
+            for (int i = 0; i < 16; i++)
+                sched.IOP.LoadProgram((uint)(i * 4), new[] { nop });
+            sched.IOP.State.PC = 0;
+
+            // Run 8 EE steps → should produce 2 IOP steps (8 / 4 = 2)
+            sched.RunSlice(8);
+
+            Assert.AreEqual(8UL,  sched.TotalEeSteps,  "Must have run 8 EE steps");
+            Assert.AreEqual(2UL,  sched.TotalIopSteps, "Must have run 2 IOP steps (8/4)");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_RunSlice_AccumulatesIopFraction()
+        {
+            // Run 2 EE steps at a time (< EeToIopRatio=4).
+            // The IOP should not run until 4 EE steps have accumulated.
+            var sched = new DualCpuScheduler();
+
+            uint nop = 0x00000000u;
+            for (int i = 0; i < 64; i++)
+                sched.EE.LoadProgram((uint)(i * 4), new[] { nop });
+            sched.EE.Cpu.PC = 0;
+
+            for (int i = 0; i < 16; i++)
+                sched.IOP.LoadProgram((uint)(i * 4), new[] { nop });
+            sched.IOP.State.PC = 0;
+
+            sched.RunSlice(2); // 2 EE steps, 0 IOP steps (accumulator=2)
+            Assert.AreEqual(2UL, sched.TotalEeSteps);
+            Assert.AreEqual(0UL, sched.TotalIopSteps);
+
+            sched.RunSlice(2); // 2 more EE steps, 1 IOP step (accumulator reaches 4)
+            Assert.AreEqual(4UL, sched.TotalEeSteps);
+            Assert.AreEqual(1UL, sched.TotalIopSteps);
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_EeToIopRatio_IsFour()
+        {
+            Assert.AreEqual(4, DualCpuScheduler.EeToIopRatio,
+                "EE:IOP ratio must be 4 (147.456 MHz / 36.864 MHz)");
         }
     }
 }
