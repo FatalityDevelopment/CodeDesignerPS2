@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Numerics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Mips64LE.Common.Emulator;
@@ -2905,6 +2906,101 @@ namespace CodeDesigner.Mips64LE.TestProject
             string s = info.ToString();
             StringAssert.Contains(s, "1.60");
             StringAssert.Contains(s, "Japan");
+        }
+
+        // ── Real BIOS ROM tests ───────────────────────────────────────────────
+        // These tests load the genuine PS2 BIOS images committed to the repo and
+        // verify that BiosLoader.Validate() can scan the ROM directory and return
+        // correct version metadata.  The BIOS files live at:
+        //   CodeDesigner.Mips64LE.Common/Bios/<name>
+        // relative to the repository root.
+
+        /// <summary>
+        /// Returns the path to a BIOS file, deriving the repo root from the test
+        /// assembly's output directory (bin/Debug/net8.0).
+        /// </summary>
+        private static string RealBiosPath(string filename)
+        {
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            // Walk up four levels: net8.0 → Debug → bin → TestProject → repo root
+            string repoRoot = Path.GetFullPath(
+                Path.Combine(baseDir, "..", "..", "..", ".."));
+            return Path.Combine(repoRoot,
+                "CodeDesigner.Mips64LE.Common", "Bios", filename);
+        }
+
+        [TestMethod]
+        public void BiosLoader_RealBios_Japan_scph10000_ValidatesAndReturnsVersion()
+        {
+            string path = RealBiosPath("scph10000.bin");
+            if (!File.Exists(path))
+                Assert.Inconclusive($"BIOS file not found: {path}");
+
+            byte[] biosData = File.ReadAllBytes(path);
+            BiosInfo info = BiosLoader.Validate(biosData);
+
+            Assert.AreEqual("1.00",       info.Version, "Japan v1 version");
+            Assert.AreEqual("Japan",      info.Region,  "Japan v1 region");
+            Assert.AreEqual("2000-01-17", info.Date,    "Japan v1 build date");
+        }
+
+        [TestMethod]
+        public void BiosLoader_RealBios_USA_SCPH70012_ValidatesAndReturnsVersion()
+        {
+            string path = RealBiosPath("SCPH-70012_BIOS_V12_USA_200.bin");
+            if (!File.Exists(path))
+                Assert.Inconclusive($"BIOS file not found: {path}");
+
+            byte[] biosData = File.ReadAllBytes(path);
+            BiosInfo info = BiosLoader.Validate(biosData);
+
+            Assert.AreEqual("2.00", info.Version, "USA v2 version");
+            Assert.AreEqual("USA",  info.Region,  "USA v2 region");
+            Assert.AreEqual("2004-06-14", info.Date, "USA v2 build date");
+        }
+
+        [TestMethod]
+        public void BiosLoader_RealBios_Europe_SCPH70004_ValidatesAndReturnsVersion()
+        {
+            string path = RealBiosPath("SCPH-70004_BIOS_V12_PAL_200.BIN");
+            if (!File.Exists(path))
+                Assert.Inconclusive($"BIOS file not found: {path}");
+
+            byte[] biosData = File.ReadAllBytes(path);
+            BiosInfo info = BiosLoader.Validate(biosData);
+
+            Assert.AreEqual("2.00",   info.Version, "Europe v2 version");
+            Assert.AreEqual("Europe", info.Region,  "Europe v2 region");
+            Assert.AreEqual("2004-06-14", info.Date, "Europe v2 build date");
+        }
+
+        [TestMethod]
+        public void BiosLoader_RealBios_Load_CopiesIntoEeAndIopBuses()
+        {
+            string path = RealBiosPath("SCPH-70012_BIOS_V12_USA_200.bin");
+            if (!File.Exists(path))
+                Assert.Inconclusive($"BIOS file not found: {path}");
+
+            byte[] biosData = File.ReadAllBytes(path);
+            var emu = new PS2Emulator();
+            var iop = new IopEmulator(emu.Bus);
+
+            BiosInfo info = BiosLoader.Load(biosData, emu, iop);
+
+            Assert.AreEqual("2.00", info.Version, "Version extracted from real BIOS");
+            Assert.AreEqual("USA",  info.Region,  "Region extracted from real BIOS");
+
+            // Verify first few BIOS bytes were copied into both buses
+            for (int i = 0; i < 16; i++)
+                Assert.AreEqual(biosData[i], emu.Bus.Bios[i],
+                    $"EE bus BIOS byte mismatch at offset 0x{i:X}");
+            for (int i = 0; i < 16; i++)
+                Assert.AreEqual(biosData[i], iop.Bus.Bios[i],
+                    $"IOP bus BIOS byte mismatch at offset 0x{i:X}");
+
+            // Both CPUs must be at the power-on reset vector.
+            Assert.AreEqual(0xBFC00000UL, emu.Cpu.PC,
+                "EE PC must be at reset vector after real BIOS load");
         }
     }
 }
