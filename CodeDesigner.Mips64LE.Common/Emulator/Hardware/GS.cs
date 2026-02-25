@@ -893,9 +893,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                     return Math.Max(0, Math.Min(size - 1, coord));
                 case 2: // REGION_CLAMP
                     return Math.Max(min, Math.Min(max, coord));
-                case 3: // REGION_REPEAT: PS2 HW uses MAXU as a bitmask; MINU as a base OR.
-                    // Correct usage requires (max - min) to be a power-of-two minus one.
-                    return (coord & (max - min)) | min;
+                case 3: // REGION_REPEAT: PS2 HW applies (coord & MAXU) | MINU.
+                    // (max - min) should be a power-of-two minus one per PS2 HW spec.
+                    return (coord & max) | min;
                 default:
                     return coord & (size - 1);
             }
@@ -1439,7 +1439,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             uint dw   = (uint)((display >> 32) & 0x7FFu);
             uint dh   = (uint)((display >> 43) & 0x7FFu);
 
-            int width  = (magh + 1) > 0 ? (int)((dw + 1) / (magh + 1)) : 0;
+            int width  = (int)((dw + 1) / (magh + 1));
             int height = (int)(dh + 1);
 
             if (width <= 0 || height <= 0 || dw == 0) return (null, 0, 0);

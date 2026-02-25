@@ -140,11 +140,11 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| GS bilinear texture filtering | ⬜ | Current implementation uses nearest-neighbour only.  Many titles rely on bilinear sampling for smooth textures.  Reference: PCSX2 `pcsx2/GS/Renderers/SW/GSRasterizer.cpp`. |
-| GS FOG attribute | ⬜ | `FOG` register and per-vertex fog value in XYZF2/XYZF3 are decoded but not applied during rasterisation. |
-| GS LOCAL→HOST VRAM readback | ⬜ | `TRXDIR=1` (LOCAL→HOST) transfers pixels from VRAM back to the EE bus via `HWREG` reads.  Required for shadow maps and render-to-texture effects. |
-| GS CLAMP texture wrap modes | ⬜ | CLAMP_1/CLAMP_2 register supports REPEAT, CLAMP, REGION_CLAMP, REGION_REPEAT; only REPEAT is currently active. |
-| GS display output (NTSC/PAL timing) | ⬜ | DISPFB1/DISPLAY1 and DISPFB2/DISPLAY2 registers define the display circuit output; a raster scan loop is needed to produce a frame buffer for the host display. |
+| GS bilinear texture filtering | ✅ | TEX1_1/TEX1_2 register MMAG/MMIN bits decoded into `DrawContext.BilinearMag`/`BilinearMin`.  `SampleTextureBilinear()` implements 4-texel bilinear interpolation with per-channel blending.  `ApplyTexPoint`, `ApplyTexBary`, and `DrawSprite` dispatch to bilinear vs nearest based on `BilinearMag`.  Reference: PCSX2 `pcsx2/GS/Renderers/SW/GSRasterizer.cpp`. |
+| GS FOG attribute | ✅ | `REG_FOGCOL` (0x3D) stores the fog colour (R/G/B).  PRIM bit 11 (`FogE`) enables fog for the current primitive.  `DrawContext.FogEnable`/`FogRgb` hold the per-draw fog state.  `DrawPixel` accepts a `byte fog` parameter and applies PS2-style fog blending (lerp toward fog colour) after alpha blending.  Fog is interpolated linearly along lines and with barycentric weights across triangles; sprites use `v1.Fog`. |
+| GS LOCAL→HOST VRAM readback | ✅ | `StartTransfer(1)` sets up LOCAL→HOST readback state from BITBLTBUF/TRXPOS/TRXREG.  `ReadInternal(REG_HWREG)` dispatches to `ReadHwreg()` which packs raw VRAM pixels (per PSM) into 64-bit qwords and advances the read cursor, advancing rows when each scan line is exhausted.  Required for shadow maps and render-to-texture effects. |
+| GS CLAMP texture wrap modes | ✅ | CLAMP_1/CLAMP_2 registers fully decoded: WMS/WMT wrap modes + MINU/MAXU/MINV/MAXV region bounds stored in `DrawContext`.  `ApplyWrap()` implements all four modes: REPEAT (`& (size-1)`), CLAMP (`clamp to [0,size-1]`), REGION_CLAMP (`clamp to [min,max]`), REGION_REPEAT (`(coord & max) | min` per PS2 HW spec).  Both `SampleTexture` and `SampleTextureBilinear` use `ApplyWrap` for U and V axes. |
+| GS display output (NTSC/PAL timing) | ✅ | `GS.GetFrameBuffer(int circuit)` reads DISPFB1/DISPLAY1 (or DISPFB2/DISPLAY2) privileged registers: FBP/FBW/PSM/DBX/DBY from DISPFB; MAGH/DW/DH from DISPLAY.  Returns `(uint[]? Pixels, int Width, int Height)` — pixel array in ARGB32, width = (DW+1)/(MAGH+1), height = DH+1.  Returns `(null,0,0)` when display is not configured (DW==0). |
 
 ### 7.4 — Audio
 
@@ -192,4 +192,4 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 794 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 802 (all passing).*
