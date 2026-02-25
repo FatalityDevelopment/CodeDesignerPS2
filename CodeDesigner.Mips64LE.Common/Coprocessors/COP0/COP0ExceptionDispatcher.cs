@@ -44,6 +44,10 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
         private const uint ExceptionVectorBev0 = 0x80000080u;
         private const uint ExceptionVectorBev1 = 0xBFC00180u;
 
+        // TLB refill exception vector (used for TlbLoad/TlbStore/TlbModification when EXL=0)
+        private const uint TlbRefillVectorBev0 = 0x80000000u;
+        private const uint TlbRefillVectorBev1 = 0xBFC00200u;
+
         // COP0 register indices
         private const int StatusReg = 12;
         private const int CauseReg  = 13;
@@ -73,8 +77,11 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
         {
             uint status = cpu.COP0.ReadRegister32(StatusReg);
 
+            // Remember whether we were outside an exception before this fault.
+            bool exlWasZero = (status & StatusExl) == 0;
+
             // Only save EPC and set EXL when not already handling an exception.
-            if ((status & StatusExl) == 0)
+            if (exlWasZero)
             {
                 uint cause = cpu.COP0.ReadRegister32(CauseReg);
 
@@ -107,7 +114,19 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
             }
 
             // Select exception vector based on BEV bit in Status.
-            uint vector = (status & StatusBev) != 0 ? ExceptionVectorBev1 : ExceptionVectorBev0;
+            // TLB refill exceptions (TlbLoad, TlbStore, TlbModification) use a dedicated
+            // vector when EXL was 0 at the time of the fault.
+            bool isTlbException = code == ExceptionCode.TlbLoad
+                                || code == ExceptionCode.TlbStore
+                                || code == ExceptionCode.TlbModification;
+            bool wasBev = (status & StatusBev) != 0;
+
+            uint vector;
+            if (isTlbException && exlWasZero)
+                vector = wasBev ? TlbRefillVectorBev1 : TlbRefillVectorBev0;
+            else
+                vector = wasBev ? ExceptionVectorBev1 : ExceptionVectorBev0;
+
             cpu.PC = vector;
         }
     }

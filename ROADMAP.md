@@ -107,10 +107,10 @@ These are not phase-specific but should be addressed progressively.
 
 | Item | Notes |
 |------|-------|
-| TLB (Translation Lookaside Buffer) | `Coprocessors/COP0/TLB/TLBState.cs` exists as a skeleton.  EE uses a software-managed 48-entry TLB.  Required for any OS-level or BIOS memory mapping. |
-| COP0 cache instructions (`CACHE`, `SYNC`) | Currently treated as unknown instructions.  Stubbing them as no-ops is acceptable for now. |
-| EE interrupt delivery | `PS2Emulator.Step()` now checks INTC pending + Status.IE/EXL/ERL/EIE/IM2 before each instruction and dispatches ExcCode=0 via COP0ExceptionDispatcher when all conditions are met. ✅ |
-| Floating-point edge cases | PS2 COP1 flushes denormals to zero.  This is implemented for arithmetic; audit compare and conversion instructions. |
+| TLB (Translation Lookaside Buffer) | ✅ `TLBState` fully implemented and wired into `PS2Emulator`.  `TLBState.HasAnyValidEntry` flag enables TLB translation once the BIOS populates entries while preserving identity-mapping for unit tests.  `FetchWord()` in `PS2Emulator` consults the TLB for KUSEG addresses and raises `TlbMissException` on miss.  `COP0ExceptionDispatcher` now uses the correct TLB refill vectors (0x80000000 BEV=0 / 0xBFC00200 BEV=1) for `TlbLoad`/`TlbStore`/`TlbModification` exceptions when EXL=0. |
+| COP0 cache instructions (`CACHE`, `SYNC`) | ✅ Both instructions are registered in the assembler and disassembler.  `CACHE` calls `CacheState.PerformOperation` (all operations are no-ops as is standard in emulators); `SYNC` is a no-op memory barrier.  Neither raises an `UnknownInstruction` event. |
+| EE interrupt delivery | ✅ `PS2Emulator.Step()` now checks INTC pending + Status.IE/EXL/ERL/EIE/IM2 before each instruction and dispatches ExcCode=0 via COP0ExceptionDispatcher when all conditions are met. |
+| Floating-point edge cases | ✅ Denormal flushing now complete.  `C.EQ.S`, `C.LT.S`, and `C.LE.S` flush both `fs` and `ft` to zero when sub-normal, matching PS2 EE FPU behaviour.  Arithmetic and conversion instructions were already correct. |
 | Instruction coverage audit | Run the assembler over all EE instructions and verify round-trip encode→decode→disassemble. |
 
 ---
@@ -127,4 +127,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 652 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 662 (all passing).*
