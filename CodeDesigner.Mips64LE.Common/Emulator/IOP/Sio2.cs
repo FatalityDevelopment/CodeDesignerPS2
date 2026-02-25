@@ -122,6 +122,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// </summary>
         public PadState? Port1 { get; set; }
 
+        /// <summary>
+        /// Memory card attached to SIO2 port 0 (slot A).  When <c>null</c>,
+        /// memory-card commands on port 0 return all-0xFF (no card inserted).
+        /// </summary>
+        public MemoryCard? MemCard0 { get; set; }
+
+        /// <summary>
+        /// Memory card attached to SIO2 port 1 (slot B).  When <c>null</c>,
+        /// memory-card commands on port 1 return all-0xFF (no card inserted).
+        /// </summary>
+        public MemoryCard? MemCard1 { get; set; }
+
         // ── Events ────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -242,11 +254,33 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             for (int i = 0; i < sendLen; i++)
                 cmd[i] = _fifoIn.Count > 0 ? _fifoIn.Dequeue() : (byte)0xFFu;
 
-            // Route through the attached device (pad or nothing).
-            PadState? pad = port == 0 ? Port0 : Port1;
-            byte[] response = pad != null
-                ? pad.ProcessCommand(cmd, recvLen)
-                : BuildNoDeviceResponse(recvLen);
+            // Route to the appropriate device based on the address byte.
+            // Pads use address byte 0x01; memory cards use 0x81 (or 0x82).
+            byte addrByte = cmd.Length > 0 ? cmd[0] : (byte)0xFF;
+            byte[] response;
+
+            if (addrByte == MemoryCard.AddrSlot0 || addrByte == MemoryCard.AddrSlot1)
+            {
+                // Memory-card command: route to the card on the selected port.
+                MemoryCard? mc = port == 0 ? MemCard0 : MemCard1;
+                response = mc != null
+                    ? mc.ProcessCommand(cmd, recvLen)
+                    : BuildNoDeviceResponse(recvLen);
+
+                if (mc != null)
+                    _recv2 |= 0x0011u;
+            }
+            else
+            {
+                // Pad (or unknown) command.
+                PadState? pad = port == 0 ? Port0 : Port1;
+                response = pad != null
+                    ? pad.ProcessCommand(cmd, recvLen)
+                    : BuildNoDeviceResponse(recvLen);
+
+                if (pad != null)
+                    _recv2 |= 0x1100u;
+            }
 
             // Push response bytes into the output FIFO.
             int filled = Math.Min(response.Length, recvLen);
@@ -256,10 +290,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             // Pad with 0xFF when the response is shorter than expected.
             for (int i = filled; i < recvLen; i++)
                 _fifoOut.Enqueue(0xFF);
-
-            // Set RECV2 to indicate device present (non-zero) when a pad is connected.
-            if (pad != null)
-                _recv2 |= 0x1100u;
         }
 
         private static byte[] BuildNoDeviceResponse(int length)

@@ -1711,6 +1711,274 @@ namespace CodeDesigner.Mips64LE.TestProject
         /// <summary>
         /// Build a SEND3 descriptor word with the given port, send length, and receive length.
         /// </summary>
+        // =====================================================================
+        // MemoryCard unit tests
+        // =====================================================================
+
+        [TestMethod]
+        public void MemoryCard_CreateBlank_HasCorrectSize()
+        {
+            var mc = MemoryCard.CreateBlank();
+            byte[] data = mc.GetData();
+            Assert.AreEqual(MemoryCard.TotalFileSize, data.Length,
+                "Blank memory card must be exactly TotalFileSize bytes");
+        }
+
+        [TestMethod]
+        public void MemoryCard_CreateBlank_SuperblockContainsMagic()
+        {
+            var mc = MemoryCard.CreateBlank();
+            byte[] data = mc.GetData();
+            string magic = System.Text.Encoding.ASCII.GetString(data, 0, MemoryCard.SuperblockMagic.Length);
+            Assert.AreEqual(MemoryCard.SuperblockMagic, magic,
+                "Page 0 must begin with the PS2 memory-card superblock magic string");
+        }
+
+        [TestMethod]
+        public void MemoryCard_ConstructFromData_RejectsWrongSize()
+        {
+            Assert.ThrowsException<ArgumentException>(
+                () => new MemoryCard(new byte[1024]),
+                "Constructor must throw for wrong-sized data");
+        }
+
+        [TestMethod]
+        public void MemoryCard_ConstructFromData_ClonesInput()
+        {
+            byte[] src = new byte[MemoryCard.TotalFileSize];
+            src[0] = 0xAA;
+            var mc = new MemoryCard(src);
+            src[0] = 0xBB;   // mutate source after construction
+            byte[] copy = mc.GetData();
+            Assert.AreEqual(0xAA, copy[0], "MemoryCard must clone the input array");
+        }
+
+        [TestMethod]
+        public void MemoryCard_ReadPage_RoundTrips_WriteRead()
+        {
+            var mc = MemoryCard.CreateBlank();
+            byte[] page = new byte[MemoryCard.PageDataSize];
+            for (int i = 0; i < page.Length; i++) page[i] = (byte)(i & 0xFF);
+
+            mc.WritePage(1, page);
+
+            byte[] readBack = new byte[MemoryCard.PageDataSize];
+            mc.ReadPage(1, readBack);
+
+            for (int i = 0; i < page.Length; i++)
+                Assert.AreEqual(page[i], readBack[i], $"Page byte [{i}] must round-trip");
+        }
+
+        [TestMethod]
+        public void MemoryCard_ErasePage_FillsWithFF()
+        {
+            var mc = MemoryCard.CreateBlank();
+            byte[] page = new byte[MemoryCard.PageDataSize];
+            for (int i = 0; i < page.Length; i++) page[i] = 0x12;
+            mc.WritePage(5, page);
+
+            mc.ErasePage(5);
+
+            byte[] readBack = new byte[MemoryCard.PageDataSize];
+            mc.ReadPage(5, readBack);
+            for (int i = 0; i < readBack.Length; i++)
+                Assert.AreEqual(0xFF, readBack[i], $"Erased page byte [{i}] must be 0xFF");
+        }
+
+        [TestMethod]
+        public void MemoryCard_ProcessCommand_ResetCommand_ReturnsAck()
+        {
+            var mc = MemoryCard.CreateBlank();
+            byte[] cmd = { MemoryCard.AddrSlot0, MemoryCard.CmdReset, 0x00 };
+            byte[] resp = mc.ProcessCommand(cmd, 4);
+
+            Assert.AreEqual(0xFF, resp[0], "RESET response[0] must be 0xFF");
+            Assert.AreEqual(0x00, resp[1], "RESET response[1] must be 0x00");
+            Assert.AreEqual(MemoryCard.RespAck, resp[2], "RESET response[2] must be ACK (0x2B)");
+            Assert.AreEqual(MemoryCard.RespTerm, resp[3], "RESET response[3] must be TERM (0x47)");
+        }
+
+        [TestMethod]
+        public void MemoryCard_ProcessCommand_GetSpec_ReturnsAckAndSpecBytes()
+        {
+            var mc = MemoryCard.CreateBlank();
+            // spec set 1: geometry parameters
+            byte[] cmd  = { MemoryCard.AddrSlot0, MemoryCard.CmdGetSpec, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+            byte[] resp = mc.ProcessCommand(cmd, 14);
+
+            Assert.AreEqual(0xFF,              resp[0], "GetSpec response[0] = 0xFF");
+            Assert.AreEqual(0x00,              resp[1], "GetSpec response[1] = 0x00");
+            Assert.AreEqual(MemoryCard.RespAck, resp[2], "GetSpec response[2] = ACK");
+            Assert.AreEqual(MemoryCard.RespOk1, resp[5], "GetSpec response[5] = OK1");
+            Assert.AreEqual(MemoryCard.RespOk2, resp[6], "GetSpec response[6] = OK2");
+            // response[7] = pageDataSize/128 = 4
+            Assert.AreEqual(4, resp[7], "GetSpec spec[0] must be pageDataSize/128 = 4");
+        }
+
+        [TestMethod]
+        public void MemoryCard_ProcessCommand_ReadPage_TwoPhaseTransaction()
+        {
+            var mc = MemoryCard.CreateBlank();
+
+            // Write a known pattern into page 2.
+            byte[] writeBuf = new byte[MemoryCard.PageDataSize];
+            for (int i = 0; i < writeBuf.Length; i++) writeBuf[i] = (byte)(i ^ 0xA5);
+            mc.WritePage(2, writeBuf);
+
+            // Phase 1: send READ command header.
+            byte[] hdrCmd  = { MemoryCard.AddrSlot0, MemoryCard.CmdRead, 0x00, 0x00, 0x02, 0x5A, 0x5D };
+            byte[] hdrResp = mc.ProcessCommand(hdrCmd, 8);
+
+            Assert.AreEqual(0xFF,               hdrResp[0], "Read header[0] = 0xFF");
+            Assert.AreEqual(MemoryCard.RespAck, hdrResp[2], "Read header[2] = ACK");
+            Assert.AreEqual(0x00,               hdrResp[4], "Read header[4] = addrH echo (0x00)");
+            Assert.AreEqual(0x02,               hdrResp[5], "Read header[5] = addrL echo (0x02)");
+            Assert.AreEqual(MemoryCard.RespOk1, hdrResp[6], "Read header[6] = OK1");
+            Assert.AreEqual(MemoryCard.RespOk2, hdrResp[7], "Read header[7] = OK2");
+
+            // Phase 2: send dummy bytes; receive page data + XOR + TERM.
+            byte[] dataCmd  = new byte[514]; // 512 dummy + xor + term
+            byte[] dataResp = mc.ProcessCommand(dataCmd, 514);
+
+            for (int i = 0; i < MemoryCard.PageDataSize; i++)
+                Assert.AreEqual(writeBuf[i], dataResp[i], $"Read data byte [{i}] must match written pattern");
+            Assert.AreEqual(MemoryCard.RespTerm, dataResp[513], "Last byte of read data phase must be TERM");
+        }
+
+        [TestMethod]
+        public void MemoryCard_ProcessCommand_WritePage_TwoPhaseTransaction()
+        {
+            var mc = MemoryCard.CreateBlank();
+
+            // Phase 1: send WRITE command header.
+            byte[] hdrCmd  = { MemoryCard.AddrSlot0, MemoryCard.CmdWrite, 0x00, 0x00, 0x03, 0x5A, 0x5D };
+            byte[] hdrResp = mc.ProcessCommand(hdrCmd, 8);
+
+            Assert.AreEqual(MemoryCard.RespAck, hdrResp[2], "Write header[2] = ACK");
+            Assert.AreEqual(0x03,               hdrResp[5], "Write header[5] = addrL echo (0x03)");
+
+            // Phase 2: send page data.
+            byte[] dataCmd = new byte[514];
+            for (int i = 0; i < MemoryCard.PageDataSize; i++) dataCmd[i] = (byte)(i & 0xFF);
+            mc.ProcessCommand(dataCmd, 514);
+
+            // Verify the data was stored.
+            byte[] readBack = new byte[MemoryCard.PageDataSize];
+            mc.ReadPage(3, readBack);
+            for (int i = 0; i < MemoryCard.PageDataSize; i++)
+                Assert.AreEqual(dataCmd[i], readBack[i], $"Written byte [{i}] must persist");
+        }
+
+        [TestMethod]
+        public void MemoryCard_ProcessCommand_EraseCluster_ErasesCorrectPages()
+        {
+            var mc = MemoryCard.CreateBlank();
+
+            // Write a known pattern to pages 4 and 5 (cluster 2).
+            byte[] pat = new byte[MemoryCard.PageDataSize];
+            for (int i = 0; i < pat.Length; i++) pat[i] = 0x55;
+            mc.WritePage(4, pat);
+            mc.WritePage(5, pat);
+
+            // Send ERASE command targeting page 4 (cluster 2).
+            byte[] cmd  = { MemoryCard.AddrSlot0, MemoryCard.CmdErase, 0x00, 0x00, 0x04, 0x5A, 0x5D };
+            byte[] resp = mc.ProcessCommand(cmd, 9);
+
+            Assert.AreEqual(MemoryCard.RespAck,  resp[2], "Erase response[2] = ACK");
+            Assert.AreEqual(MemoryCard.RespTerm, resp[8], "Erase response[8] = TERM");
+
+            // Both pages in the cluster must now be 0xFF.
+            byte[] p4 = new byte[MemoryCard.PageDataSize];
+            byte[] p5 = new byte[MemoryCard.PageDataSize];
+            mc.ReadPage(4, p4);
+            mc.ReadPage(5, p5);
+            Assert.AreEqual(0xFF, p4[0],  "Page 4 byte 0 must be 0xFF after erase");
+            Assert.AreEqual(0xFF, p5[255], "Page 5 byte 255 must be 0xFF after erase");
+        }
+
+        [TestMethod]
+        public void Sio2_MemCard_NoDeviceConnected_ReturnsFF()
+        {
+            var sio2 = new Sio2();
+            // No MemCard0 assigned — expect all-0xFF response.
+            sio2.WriteRegister(0x00u, BuildSend3(port: 0, sendLen: 3, recvLen: 4));
+            sio2.WriteRegister(0x60u, MemoryCard.AddrSlot0);
+            sio2.WriteRegister(0x60u, MemoryCard.CmdReset);
+            sio2.WriteRegister(0x60u, 0x00u);
+            sio2.WriteRegister(0x68u, 0x01u); // CTRL START
+
+            uint b0 = sio2.ReadRegister(0x64u);
+            Assert.AreEqual(0xFFu, b0, "No-MC response must be 0xFF");
+        }
+
+        [TestMethod]
+        public void Sio2_MemCard0_ResetCommand_ViaFifo()
+        {
+            var sio2 = new Sio2();
+            var mc   = MemoryCard.CreateBlank();
+            sio2.MemCard0 = mc;
+
+            sio2.WriteRegister(0x00u, BuildSend3(port: 0, sendLen: 3, recvLen: 4));
+            sio2.WriteRegister(0x60u, MemoryCard.AddrSlot0);
+            sio2.WriteRegister(0x60u, MemoryCard.CmdReset);
+            sio2.WriteRegister(0x60u, 0x00u);
+            sio2.WriteRegister(0x68u, 0x01u); // CTRL START
+
+            uint b0 = sio2.ReadRegister(0x64u);
+            uint b2 = sio2.ReadRegister(0x64u);  // skip b1
+            sio2.ReadRegister(0x64u);             // skip b2 (ACK)
+            uint b3 = sio2.ReadRegister(0x64u);
+
+            Assert.AreEqual(0xFFu,                       b0, "SIO2 MC RESET response[0] = 0xFF");
+            Assert.AreEqual((uint)MemoryCard.RespTerm,   b3, "SIO2 MC RESET response[3] = TERM");
+        }
+
+        [TestMethod]
+        public void Sio2_MemCard_DoesNotInterfereWithPad()
+        {
+            var sio2 = new Sio2();
+            var pad  = new PadState();
+            var mc   = MemoryCard.CreateBlank();
+            sio2.Port0    = pad;
+            sio2.MemCard0 = mc;
+
+            // Pad poll on port 0.
+            sio2.WriteRegister(0x00u, BuildSend3(port: 0, sendLen: 2, recvLen: 9));
+            sio2.WriteRegister(0x60u, PadState.AddrPad);
+            sio2.WriteRegister(0x60u, PadState.CmdPoll);
+            sio2.WriteRegister(0x68u, 0x01u); // START
+
+            sio2.ReadRegister(0x64u); // skip leading 0xFF
+            uint devId = sio2.ReadRegister(0x64u);
+            Assert.AreEqual((uint)PadState.DeviceId, devId,
+                "Pad poll must still return DualShock2 device ID when a MC is also wired");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_MemCard0_PropertyRoundTrip()
+        {
+            var scheduler = new DualCpuScheduler();
+            var mc        = MemoryCard.CreateBlank();
+
+            scheduler.MemCard0 = mc;
+            Assert.AreSame(mc, scheduler.MemCard0, "MemCard0 property round-trip");
+            Assert.AreSame(mc, scheduler.Sio2.MemCard0, "Sio2.MemCard0 must reflect scheduler.MemCard0");
+
+            scheduler.MemCard0 = null;
+            Assert.IsNull(scheduler.MemCard0, "MemCard0 must be settable to null");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_MemCard1_PropertyRoundTrip()
+        {
+            var scheduler = new DualCpuScheduler();
+            var mc        = MemoryCard.CreateBlank();
+
+            scheduler.MemCard1 = mc;
+            Assert.AreSame(mc, scheduler.MemCard1, "MemCard1 property round-trip");
+            Assert.AreSame(mc, scheduler.Sio2.MemCard1, "Sio2.MemCard1 must reflect scheduler.MemCard1");
+        }
+
         private static uint BuildSend3(int port, int sendLen, int recvLen)
             => (uint)(port & 0x3)
              | ((uint)(sendLen & 0x1FF) << 8)
