@@ -56,6 +56,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private uint _iMask;
 
         private Sio2? _sio2;
+        private Spu2? _spu2;
 
         private const int Sio2IntcBit = 17;
 
@@ -132,6 +133,29 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private void HandleSio2TransferComplete(object? sender, EventArgs e)
             => RaiseInterrupt(Sio2IntcBit);
 
+        /// <summary>
+        /// Optional SPU2 controller.  When set:
+        /// <list type="bullet">
+        ///   <item>16-bit and 32-bit reads/writes to 0x1F900000–0x1F9007FF are
+        ///     forwarded to the SPU2 register file.</item>
+        ///   <item>IOP DMAC channel 4 (SPU1 / core 0) and channel 7 (SPU2 / core 1)
+        ///     have their <see cref="IopDmacChannel.DeviceDataConsumer"/> wired so that
+        ///     RAM→device audio DMA transfers write into
+        ///     <see cref="Spu2.AudioRam"/>.</item>
+        /// </list>
+        /// </summary>
+        public Spu2? Spu2
+        {
+            get => _spu2;
+            set
+            {
+                _spu2 = value;
+                // Wire DMAC channels 4 (SPU1 → Core 0) and 7 (SPU2 → Core 1).
+                Dmac.Channels[4].DeviceDataConsumer = value != null ? w => value.WriteDmaData(0, w) : null;
+                Dmac.Channels[7].DeviceDataConsumer = value != null ? w => value.WriteDmaData(1, w) : null;
+            }
+        }
+
         public IopMemoryBus()
         {
             for (int i = 0; i < 6; i++)
@@ -203,6 +227,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (_sio2 != null && addr >= Sio2.RegBase && addr < Sio2.RegBase + Sio2.RegSize)
                 return _sio2.ReadRegister(addr - Sio2.RegBase);
 
+            // SPU2 registers
+            if (_spu2 != null && addr >= Spu2.RegBase && addr < Spu2.RegBase + Spu2.RegSize)
+                return _spu2.ReadWord(addr - Spu2.RegBase);
+
             var (region, offset) = Map(addr);
             return ReadWordFromRegion(region, offset);
         }
@@ -269,6 +297,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 return;
             }
 
+            // SPU2 registers
+            if (_spu2 != null && addr >= Spu2.RegBase && addr < Spu2.RegBase + Spu2.RegSize)
+            {
+                _spu2.WriteWord(addr - Spu2.RegBase, value);
+                return;
+            }
+
             var (region, offset, ro) = MapWrite(addr);
             if (!ro) WriteWordToRegion(region, offset, value);
         }
@@ -282,6 +317,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             if (_sio2 != null && addr >= Sio2.RegBase && addr < Sio2.RegBase + Sio2.RegSize)
                 return (byte)_sio2.ReadRegister(addr - Sio2.RegBase);
+
+            if (_spu2 != null && addr >= Spu2.RegBase && addr < Spu2.RegBase + Spu2.RegSize)
+            {
+                // Read the 16-bit register that contains this byte, extract the relevant byte.
+                uint off     = addr - Spu2.RegBase;
+                ushort half  = _spu2.ReadHalf(off & ~1u);
+                return (off & 1u) == 0u ? (byte)half : (byte)(half >> 8);
+            }
 
             var (region, offset) = Map(addr);
             return region[offset];
@@ -298,6 +341,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (_sio2 != null && addr >= Sio2.RegBase && addr < Sio2.RegBase + Sio2.RegSize)
             {
                 _sio2.WriteRegister(addr - Sio2.RegBase, value);
+                return;
+            }
+
+            if (_spu2 != null && addr >= Spu2.RegBase && addr < Spu2.RegBase + Spu2.RegSize)
+            {
+                // Read-modify-write the containing halfword.
+                uint off    = addr - Spu2.RegBase;
+                uint hOff   = off & ~1u;
+                ushort old  = _spu2.ReadHalf(hOff);
+                ushort nov  = (off & 1u) == 0u
+                    ? (ushort)((old & 0xFF00u) | value)
+                    : (ushort)((old & 0x00FFu) | (value << 8));
+                _spu2.WriteHalf(hOff, nov);
                 return;
             }
 

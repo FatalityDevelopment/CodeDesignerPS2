@@ -56,6 +56,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// </summary>
         public Func<uint>? DeviceDataProvider { get; set; }
 
+        /// <summary>
+        /// Optional callback invoked once per word during a RAM→device burst transfer.
+        /// Receives each 32-bit word read from IOP RAM so the device can store it.
+        /// When <c>null</c>, RAM→device transfers advance MADR without forwarding data.
+        /// Set by <see cref="IopMemoryBus"/> to stream IOP RAM audio data to SPU2
+        /// on channels 4 (SPU1) and 7 (SPU2).
+        /// </summary>
+        public Action<uint>? DeviceDataConsumer { get; set; }
+
         public IopDmacChannel(int id) => ChannelId = id;
 
         // ── Register access ───────────────────────────────────────────────────
@@ -152,8 +161,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             }
             else
             {
-                // RAM→Device: consume data from RAM (advance address only).
-                addr += wordCount * 4u;
+                // RAM→Device: read from IOP RAM and forward each word to the
+                // device consumer (e.g. SPU2 audio RAM) if one is wired up.
+                for (uint w = 0; w < wordCount; w++)
+                {
+                    uint data = bus.ReadWord(addr);
+                    DeviceDataConsumer?.Invoke(data);
+                    addr += 4u;
+                }
             }
 
             _madr  = addr;
