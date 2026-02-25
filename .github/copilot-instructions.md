@@ -87,6 +87,21 @@ cd CodeDesigner.Mips64LE && dotnet run -- --server
   - `EETimer.CompareInterruptPending` / `OverflowInterruptPending` events fire when the corresponding interrupt condition is met.
 - **INTC**: `0x1000F000` = INTC_STAT (write-1-to-clear), `0x1000F010` = INTC_MASK (write-1-to-toggle).
   - Timer interrupt bits: 9 (T0), 10 (T1), 11 (T2), 12 (T3). `INTC.IsInterruptPending` is true when `STAT & MASK != 0`.
+- **DMAC**: `0x10008000–0x1000DFFF` (10 channels) + `0x1000E000–0x1000E0FF` (global D_CTRL/D_STAT/PCR/SQWC/RBSR/RBOR/STADR). Normal-mode DMA executes synchronously on CHCR STR=1 write. `PS2Emulator.DmaChannelComplete` event fires when a channel completes with its enable bit set.
+- **SIF**: `0x1000F200–0x1000F26F` (MSCOM/SMCOM/MSFLAG/SMFLAG/F240/F250/F260). Accessible via `Bus.Sif`.
+- **VIF0/VIF1**: `VifUnit` in `Emulator/Hardware/VifUnit.cs`. Supports all 14 UNPACK formats, MPG, MSCAL/MSCNT, STROW/STCOL/STMASK. VIF0 base = `0x10003800`, VIF1 base = `0x10003C00` (0x200-byte register window each). VIF0's `VuDataMem` is wired to `VU0State.DataMem`. DMAC CH0/CH1 feeds data to VIF0/VIF1 respectively.
+- **GIF**: registers at `0x10003000` (0x100-byte window): GIF_CTRL/MODE/STAT/TAG0–3/CNT/P3CNT/P3TAG. Supports full GIFtag processing: PACKED (A+D), REGLIST, IMAGE. PATH2 = VIF1.GifOutput, PATH3 = DMAC CH2 DataConsumer.
+- **GS**: `GS.cs` manages 128×64-bit internal registers + privileged registers at `0x12000000` (16-byte aligned, 32/64-bit access).
+
+### IOP Subsystem
+
+All IOP classes live in `CodeDesigner.Mips64LE.Common/Emulator/IOP/`.
+
+- **IopState / IopMemoryBus / IopEmulator**: IOP RAM = 2 MB. INTC at `0x1F801070`/`0x1F801074`, timers at `0x1F801100`, SIF mirror at `0x1D000000`. `IopEmulator` bridges into `CpuState` for instruction execution. Reset vector `0xBFC00000`.
+- **IOP DMAC**: 13 channels (0–6 at `0x1F801080+`, 7–12 at `0x1F801500+`). Registers per channel: MADR+0, BCR+4, CHCR+8 (STR=bit24). DPCR/DICR at `0x1F8010F0`/`0xF4`, DPCR2/DICR2 at `0x1F801570`/`0x74`. INTC bit 3.
+- **CDVD**: registers at `0x1F402000`. `SectorSize` = 2048, `NCMD_READ_CD` = 0x06. `DataReady` event → INTC bit 2 and DMAC ch3 `DeviceDataProvider`. ISO-9660: PVD at LBA 16, exposes `FindFile`/`ReadFile`/`ReadSectors`.
+- **SIO2**: registers at `0x1F808200` (0x80-byte window). SEND3×16 at +0x00, SEND1/SEND2 at +0x40/+0x48, FIFO_IN at +0x60, FIFO_OUT at +0x64, CTRL at +0x68, RECV1/RECV2 at +0x70/+0x74. INTC bit 17. `PadState`: DeviceId=0x73, CmdPoll=0x42.
+- **IopModuleLoader**: `Load(irxData, IopMemoryBus)` / `LoadIntoEmulator(irxData, IopEmulator)`. Validates ELF32 LE, loads PT_LOAD segments; KSEG0/KSEG1 → physical via `vaddr & 0x1FFFFFFF`.
 
 ### ELF Loader
 
