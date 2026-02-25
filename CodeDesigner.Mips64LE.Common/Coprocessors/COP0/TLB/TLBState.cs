@@ -35,6 +35,14 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
 
         public int NumEntries => NumTLBEntries;
 
+        /// <summary>
+        /// True once at least one valid TLB entry has been written.
+        /// Used by the emulator to decide whether to apply TLB translation for
+        /// KUSEG addresses (once the BIOS has populated at least one entry) or to
+        /// fall back to identity mapping (pre-boot / unit-test mode).
+        /// </summary>
+        public bool HasAnyValidEntry { get; private set; }
+
         public TLBState()
         {
             // Initialize all entries as invalid
@@ -94,6 +102,7 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
                 throw new ArgumentOutOfRangeException(nameof(index));
 
             _entries[index] = new TLBEntry(entryHi, entryLo0, entryLo1, pageMask);
+            HasAnyValidEntry = true;
         }
 
         /// <summary>
@@ -146,6 +155,7 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
             {
                 _entries[i].Valid = false;
             }
+            HasAnyValidEntry = false;
         }
 
         /// <summary>

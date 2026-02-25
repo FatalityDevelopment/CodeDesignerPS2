@@ -157,6 +157,31 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// PC is set to 0xBFC00000 – the MIPS reset vector (KSEG1 mirror of
         /// the BIOS ROM base, matching PCSX2 behaviour).
         /// </summary>
+        /// <summary>
+        /// Fetch the instruction word at the given virtual PC.
+        /// Handles KUSEG TLB translation (when the TLB has been populated by the BIOS),
+        /// KSEG0/KSEG1 fixed mapping (via the bus), and throws
+        /// <see cref="TlbMissException"/> on a KUSEG TLB miss once TLB entries exist.
+        /// </summary>
+        private uint FetchWord(uint virtualPc)
+        {
+            // KUSEG (0x00000000–0x6FFFFFFF): consult the software TLB when it has been
+            // populated (i.e. the BIOS has written at least one entry via TLBWI/TLBWR).
+            // Before any entries are written the bus identity-maps KUSEG, preserving
+            // backward-compatibility for unit tests and early-boot code.
+            if ((virtualPc & 0xC0000000u) == 0u && virtualPc < 0x70000000u
+                && Cpu.COP0.TLB.HasAnyValidEntry)
+            {
+                byte asid = (byte)(Cpu.COP0.ReadRegister64(10) & 0xFFu); // EntryHi[7:0]
+                uint? paddr = Cpu.COP0.TLB.Translate(virtualPc, asid);
+                if (paddr.HasValue)
+                    return Bus.ReadWord(paddr.Value);
+                throw new TlbMissException(virtualPc, isStore: false);
+            }
+            // KSEG0/KSEG1/scratchpad (and pre-TLB KUSEG): bus handles the translation.
+            return Bus.ReadWord(virtualPc);
+        }
+
         public void Reset()
         {
             Cpu.PC = 0xBFC00000UL;
@@ -219,8 +244,25 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             }
 
             // Fetch: translate virtual address, then read the 32-bit instruction word.
+            // For KUSEG addresses (below 0x80000000) the software-managed TLB is consulted
+            // when no fixed mapping applies.  KSEG0/KSEG1 continue to use the bus's
+            // built-in static address translation.
             uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
-            uint word = Bus.ReadWord(pc32);
+            uint word;
+            try
+            {
+                word = FetchWord(pc32);
+            }
+            catch (TlbMissException tlbFetch)
+            {
+                // Instruction-fetch TLB miss → ExcCode=TlbLoad (2).
+                Cpu.COP0.WriteRegister32(8, tlbFetch.VirtualAddress);  // BadVAddr
+                Cpu.COP0.WriteRegister64(10,
+                    (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbFetch.VirtualAddress & 0xFFFFE000u)));
+                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.TlbLoad, Cpu.PC, inDelaySlot: false);
+                InstructionCount++;
+                return;
+            }
 
             ulong pcBefore = Cpu.PC;
 
@@ -267,6 +309,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 InstructionCount++;
                 throw;
             }
+            catch (TlbMissException tlbEx)
+            {
+                // Data load/store TLB miss.  Update BadVAddr and EntryHi.VPN2, then
+                // dispatch the appropriate COP0 exception.
+                ExceptionCode tlbCode = tlbEx.IsStore ? ExceptionCode.TlbStore : ExceptionCode.TlbLoad;
+                Cpu.COP0.WriteRegister32(8, tlbEx.VirtualAddress);  // BadVAddr
+                Cpu.COP0.WriteRegister64(10,
+                    (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbEx.VirtualAddress & 0xFFFFE000u)));
+                COP0ExceptionDispatcher.Dispatch(Cpu, tlbCode, pcBefore, inDelaySlot: false);
+                InstructionCount++;
+                return;
+            }
 
             InstructionCount++;
 
@@ -297,7 +351,20 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // Branch/jump taken: execute the delay-slot instruction at pc+4
                 // before transferring to the target.
                 uint dsPc32 = (uint)((pcBefore + 4) & 0xFFFFFFFFUL);
-                uint dsWord = Bus.ReadWord(dsPc32);
+                uint dsWord;
+                try
+                {
+                    dsWord = FetchWord(dsPc32);
+                }
+                catch (TlbMissException tlbDs)
+                {
+                    Cpu.COP0.WriteRegister32(8, tlbDs.VirtualAddress);
+                    Cpu.COP0.WriteRegister64(10,
+                        (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbDs.VirtualAddress & 0xFFFFE000u)));
+                    COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.TlbLoad, pcBefore + 4, inDelaySlot: true);
+                    InstructionCount++;
+                    return;
+                }
 
                 // Restore PC to the delay-slot address before execution so that
                 // any PC-relative computation inside the delay slot is correct.

@@ -1122,5 +1122,152 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(0, eeBtnHi & (int)((PadState.BTN_CROSS >> 8) & 0xFF),
                 "Cross button must be pressed (bit=0) in EE RAM after full pipeline transfer");
         }
+
+        // =====================================================================
+        // TLB (Translation Lookaside Buffer) tests
+        // =====================================================================
+
+        [TestMethod]
+        public void TLB_WriteEntry_SetsHasAnyValidEntry()
+        {
+            var emu = new PS2Emulator();
+            Assert.IsFalse(emu.Cpu.COP0.TLB.HasAnyValidEntry, "TLB should start with no valid entries");
+
+            // Write a TLB entry (TLBWI uses COP0 reg 0=Index, 2=EntryLo0, 3=EntryLo1, 5=PageMask, 10=EntryHi)
+            emu.Cpu.COP0.TLB.WriteEntry(0, 0x00001000UL, 0x0000_0002UL, 0x0000_0002UL, 0u);
+            Assert.IsTrue(emu.Cpu.COP0.TLB.HasAnyValidEntry, "TLB should report a valid entry after WriteEntry");
+        }
+
+        [TestMethod]
+        public void TLB_InvalidateAll_ClearsHasAnyValidEntry()
+        {
+            var emu = new PS2Emulator();
+            emu.Cpu.COP0.TLB.WriteEntry(0, 0x00001000UL, 0x0000_0002UL, 0x0000_0002UL, 0u);
+            Assert.IsTrue(emu.Cpu.COP0.TLB.HasAnyValidEntry);
+
+            emu.Cpu.COP0.TLB.InvalidateAll();
+            Assert.IsFalse(emu.Cpu.COP0.TLB.HasAnyValidEntry, "InvalidateAll should clear HasAnyValidEntry");
+        }
+
+        [TestMethod]
+        public void TLB_FetchWordUsesTranslation_WhenEntryPresent()
+        {
+            // Map virtual page 0x00010000 → physical page 0x00100000 (even page).
+            // EntryHi:  VPN2 = vaddr & ~0x1FFF = 0x00010000, ASID = 0
+            // EntryLo0: PFN = 0x00100 (physical >> 12), V=1, D=1 → 0b00...0 0100 0000 0110 = pfn<<6 | V<<1 | D
+            //           PFN=0x100 → PFN<<6 = 0x4000; D(dirty)=bit2, V(valid)=bit1 → 0x4002 | 0x0004 = 0x4006
+            // EntryLo1: V=0 (odd page not mapped)
+            // PageMask: 0 → 4KB pages
+            ulong entryHi  = 0x00010000UL;  // VPN2 for virtual page 0x00010000, ASID=0
+            ulong entryLo0 = (0x100UL << 6) | 0x2; // PFN=0x100, V=1, D=0
+            ulong entryLo1 = 0;             // odd page not valid
+
+            var emu = new PS2Emulator();
+
+            // Write a recognisable instruction (ADDIU $t0,$zero,99) at the physical address.
+            // Physical page 0x100000, word offset 0 → paddr = 0x00100000
+            uint addiu = (0x09u << 26) | (0u << 21) | (8u << 16) | 99u;
+            emu.Bus.Ram[0x100000]     = (byte)(addiu);
+            emu.Bus.Ram[0x100001]     = (byte)(addiu >> 8);
+            emu.Bus.Ram[0x100002]     = (byte)(addiu >> 16);
+            emu.Bus.Ram[0x100003]     = (byte)(addiu >> 24);
+
+            // Install the TLB entry.
+            emu.Cpu.COP0.TLB.WriteEntry(0, entryHi, entryLo0, entryLo1, 0u);
+
+            // Set PC to the KUSEG virtual address that maps to physical 0x00100000.
+            emu.Cpu.PC = 0x00010000UL;
+
+            emu.Step();
+
+            Assert.AreEqual(99UL, emu.Cpu.RegsLo[8],
+                "$t0 should be 99 after executing the instruction fetched via TLB");
+            Assert.AreEqual(0x00010004UL, emu.Cpu.PC,
+                "PC should advance past the TLB-translated instruction");
+        }
+
+        [TestMethod]
+        public void TLB_FetchMiss_DispatchesTlbLoadException()
+        {
+            var emu = new PS2Emulator();
+
+            // Write one (unrelated) entry so HasAnyValidEntry = true; no entry covers 0x00020000.
+            emu.Cpu.COP0.TLB.WriteEntry(0, 0x00010000UL, (0x100UL << 6) | 0x2, 0, 0u);
+
+            // Clear BEV so the TLB refill vector is 0x80000000.
+            uint status = emu.Cpu.COP0.ReadRegister32(12);
+            status &= ~0x00400000u; // Clear BEV
+            status |=  0x00000001u; // Set IE (so EXL=0)
+            emu.Cpu.COP0.WriteRegister32(12, status);
+
+            // Point PC at an unmapped KUSEG virtual address.
+            emu.Cpu.PC = 0x00020000UL;
+
+            emu.Step(); // Should trap rather than crash
+
+            // PC must now be at the TLB refill vector (0x80000000, BEV=0).
+            Assert.AreEqual(0x80000000UL, emu.Cpu.PC,
+                "TLB fetch miss should redirect PC to TLB refill vector 0x80000000");
+
+            // BadVAddr (COP0 reg 8) must hold the faulting virtual address.
+            Assert.AreEqual(0x00020000u, emu.Cpu.COP0.ReadRegister32(8),
+                "BadVAddr (COP0 reg 8) should contain the faulting virtual address");
+
+            // Status.EXL must be set (exception level).
+            uint newStatus = emu.Cpu.COP0.ReadRegister32(12);
+            Assert.AreEqual(1u, (newStatus >> 1) & 1u, "Status.EXL must be set after TLB miss");
+        }
+
+        [TestMethod]
+        public void TLB_RefillVector_Bev0_Is_0x80000000()
+        {
+            // TLB miss with BEV=0 must use vector 0x80000000 (not 0x80000080).
+            var emu = new PS2Emulator();
+            emu.Cpu.COP0.TLB.WriteEntry(0, 0x00010000UL, (0x100UL << 6) | 0x2, 0, 0u);
+
+            uint status = emu.Cpu.COP0.ReadRegister32(12);
+            status &= ~0x00400000u; // Clear BEV
+            emu.Cpu.COP0.WriteRegister32(12, status);
+
+            emu.Cpu.PC = 0x00020000UL; // unmapped
+            emu.Step();
+
+            Assert.AreEqual(0x80000000UL, emu.Cpu.PC, "TLB refill vector (BEV=0) must be 0x80000000");
+        }
+
+        [TestMethod]
+        public void TLB_RefillVector_Bev1_Is_0xBFC00200()
+        {
+            // TLB miss with BEV=1 must use vector 0xBFC00200 (not 0xBFC00180).
+            var emu = new PS2Emulator();
+            emu.Cpu.COP0.TLB.WriteEntry(0, 0x00010000UL, (0x100UL << 6) | 0x2, 0, 0u);
+
+            // Leave BEV=1 (default after reset).
+            emu.Cpu.PC = 0x00020000UL; // unmapped
+            emu.Step();
+
+            Assert.AreEqual(0xBFC00200UL, emu.Cpu.PC, "TLB refill vector (BEV=1) must be 0xBFC00200");
+        }
+
+        [TestMethod]
+        public void TLB_NoEntries_KusegIsIdentityMapped()
+        {
+            // Without any TLB entries, KUSEG must still identity-map to physical RAM
+            // so that unit tests and pre-BIOS code work correctly.
+            uint addiu = (0x09u << 26) | (0u << 21) | (8u << 16) | 77u;
+            var emu = new PS2Emulator();
+
+            // Write instruction at physical 0x00004000.
+            emu.Bus.Ram[0x4000] = (byte)(addiu);
+            emu.Bus.Ram[0x4001] = (byte)(addiu >> 8);
+            emu.Bus.Ram[0x4002] = (byte)(addiu >> 16);
+            emu.Bus.Ram[0x4003] = (byte)(addiu >> 24);
+
+            // No TLB entries → identity mapping.
+            emu.Cpu.PC = 0x00004000UL;
+            emu.Step();
+
+            Assert.AreEqual(77UL, emu.Cpu.RegsLo[8], "$t0 should be 77 with identity-mapped KUSEG");
+        }
     }
 }

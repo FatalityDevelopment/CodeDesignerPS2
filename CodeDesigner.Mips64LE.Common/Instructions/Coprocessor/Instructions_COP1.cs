@@ -986,8 +986,10 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override void Exec(CpuState cpu, Args_R args)
         {
             // COP1 S-format: args.Rd=fs, args.Rt=ft
-            bool result = cpu.FPR[args.Rd] == cpu.FPR[args.Rt];
-            cpu.COP1.SetConditionCode(result);
+            // PS2 EE FPU flushes denormals to zero before comparison.
+            float fs = cpu.FPR[args.Rd]; if (float.IsSubnormal(fs)) fs = 0f;
+            float ft = cpu.FPR[args.Rt]; if (float.IsSubnormal(ft)) ft = 0f;
+            cpu.COP1.SetConditionCode(fs == ft);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -1034,8 +1036,10 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override void Exec(CpuState cpu, Args_R args)
         {
             // COP1 S-format: args.Rd=fs, args.Rt=ft
-            bool result = cpu.FPR[args.Rd] < cpu.FPR[args.Rt];
-            cpu.COP1.SetConditionCode(result);
+            // PS2 EE FPU flushes denormals to zero before comparison.
+            float fs = cpu.FPR[args.Rd]; if (float.IsSubnormal(fs)) fs = 0f;
+            float ft = cpu.FPR[args.Rt]; if (float.IsSubnormal(ft)) ft = 0f;
+            cpu.COP1.SetConditionCode(fs < ft);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -1082,8 +1086,10 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         public override void Exec(CpuState cpu, Args_R args)
         {
             // COP1 S-format: args.Rd=fs, args.Rt=ft
-            bool result = cpu.FPR[args.Rd] <= cpu.FPR[args.Rt];
-            cpu.COP1.SetConditionCode(result);
+            // PS2 EE FPU flushes denormals to zero before comparison.
+            float fs = cpu.FPR[args.Rd]; if (float.IsSubnormal(fs)) fs = 0f;
+            float ft = cpu.FPR[args.Rt]; if (float.IsSubnormal(ft)) ft = 0f;
+            cpu.COP1.SetConditionCode(fs <= ft);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)

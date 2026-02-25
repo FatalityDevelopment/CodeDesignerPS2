@@ -1885,5 +1885,58 @@ namespace CodeDesigner.Mips64LE.TestProject
             Exec(cpu, enc);
             AssertAnalysis(enc);
         }
+
+        // =====================================================================
+        // COP1 FP denormal flushing — compare instructions (PS2 EE behaviour)
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_C_EQ_S_DenormalFlushedToZero()
+        {
+            // On PS2 EE, a denormal input is treated as zero before comparison.
+            // Denormal value: exponent=0, mantissa!=0 → e.g. the smallest positive denormal.
+            float denormal = BitConverter.UInt32BitsToSingle(1u); // 0x00000001
+            Assert.IsTrue(float.IsSubnormal(denormal));
+
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | 0x32);
+            var cpu = MakeCpu();
+            var d = MipsDecoder.DecodeR(enc);
+            cpu.FPR[d.Rd] = denormal;  // fs = denormal → flushed to 0
+            cpu.FPR[d.Rt] = 0f;        // ft = 0
+            Exec(cpu, enc);
+            Assert.IsTrue(cpu.COP1.GetConditionCode(),
+                "C.EQ.S: denormal == 0 should set CC (denormal flushed to zero)");
+        }
+
+        [TestMethod]
+        public void Test_C_LT_S_DenormalFlushedToZero()
+        {
+            // A positive denormal is less than a positive normal, but after flushing
+            // to zero the comparison is 0 < 1.0 which is true.
+            float denormal = BitConverter.UInt32BitsToSingle(1u);
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | 0x34);
+            var cpu = MakeCpu();
+            var d = MipsDecoder.DecodeR(enc);
+            cpu.FPR[d.Rd] = denormal;  // fs = denormal → flushed to 0
+            cpu.FPR[d.Rt] = 1.0f;
+            Exec(cpu, enc);
+            Assert.IsTrue(cpu.COP1.GetConditionCode(),
+                "C.LT.S: denormal < 1.0 should be 0 < 1.0 = true after flush");
+        }
+
+        [TestMethod]
+        public void Test_C_LE_S_DenormalFlushedToZero()
+        {
+            // Both operands are denormal → both flushed to 0 → 0 <= 0 = true.
+            float denormal = BitConverter.UInt32BitsToSingle(1u);
+            uint enc = (uint)((0x11 << 26) | (0x10 << 21) | (1 << 16) | (0 << 11) | 0x36);
+            var cpu = MakeCpu();
+            var d = MipsDecoder.DecodeR(enc);
+            cpu.FPR[d.Rd] = denormal;
+            cpu.FPR[d.Rt] = denormal;
+            Exec(cpu, enc);
+            Assert.IsTrue(cpu.COP1.GetConditionCode(),
+                "C.LE.S: denormal <= denormal should be 0 <= 0 = true after flush");
+        }
     }
 }
