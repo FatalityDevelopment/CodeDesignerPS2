@@ -115,9 +115,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// Validation rules (matching PCSX2 <c>BiosThread.cpp</c>):
         /// <list type="number">
         ///   <item>Image must not be empty and must not exceed 4 MB.</item>
-        ///   <item>The ROMDIR at offset 0 must have at least one complete entry
-        ///     (16 bytes).</item>
-        ///   <item>The first entry's name must be <c>RESET</c>.</item>
+        ///   <item>A valid ROMDIR must exist somewhere in the ROM (found by scanning
+        ///     for a 16-byte-aligned entry whose name is <c>RESET</c>).  In real PS2
+        ///     BIOS images the ROMDIR does not start at offset 0; it is typically
+        ///     located around 0x2700–0x2740.</item>
         /// </list>
         /// </summary>
         /// <param name="biosData">Raw bytes of the PS2 BIOS ROM.</param>
@@ -142,32 +143,62 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     $"BIOS image is too small ({biosData.Length} bytes) to " +
                     "contain a valid ROM directory.");
 
-            // First ROMDIR entry must be "RESET".
-            string firstName = ReadRomDirName(biosData, 0);
-            if (!firstName.Equals(RomDirResetName, StringComparison.Ordinal))
+            // Scan for the ROMDIR at any 16-byte-aligned offset (PCSX2 approach).
+            // In genuine PS2 BIOS ROMs the directory is NOT at offset 0; it
+            // typically sits around 0x2700–0x2740 after the initial boot code.
+            int romDirOffset = FindRomDirOffset(biosData);
+            if (romDirOffset < 0)
                 throw new BiosLoadException(
-                    $"Invalid BIOS ROM directory: first entry is \"{firstName}\" " +
-                    $"(expected \"{RomDirResetName}\").");
+                    "Invalid BIOS ROM: no valid ROM directory (RESET entry) found.");
 
             // Walk the directory to find the ROMVER entry and compute module offsets.
-            BiosInfo info = ReadRomDir(biosData);
+            BiosInfo info = ReadRomDir(biosData, romDirOffset);
             return info;
         }
 
         // ── Private helpers ───────────────────────────────────────────────────
 
         /// <summary>
-        /// Walk the ROMDIR table and extract BIOS version/region/date from the
-        /// ROMVER module.
+        /// Scan the BIOS image at 16-byte-aligned offsets for a ROMDIR entry
+        /// whose name is <c>RESET</c>.  This matches the PCSX2 scanning strategy
+        /// because genuine PS2 BIOS ROMs place the ROMDIR directory after an
+        /// initial boot-code block (typically around offset 0x2700–0x2740) rather
+        /// than at the very beginning of the image.
         /// </summary>
-        private static BiosInfo ReadRomDir(ReadOnlySpan<byte> bios)
+        /// <returns>
+        /// The byte offset of the first ROMDIR entry if found; -1 otherwise.
+        /// </returns>
+        private static int FindRomDirOffset(ReadOnlySpan<byte> bios)
         {
-            // Module file data starts immediately after the ROMDIR table.
-            // We accumulate offsets as we walk entries (each entry's fileSize is
-            // rounded up to the next 16-byte boundary in the ROM image).
-            uint romOffset = 0;
-
             for (int i = 0; i + RomDirEntrySize <= bios.Length; i += RomDirEntrySize)
+            {
+                string name = ReadRomDirName(bios, i);
+                if (name.Equals(RomDirResetName, StringComparison.Ordinal))
+                    return i;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Walk the ROMDIR table (starting at <paramref name="romDirOffset"/>) and
+        /// extract BIOS version/region/date from the ROMVER module.
+        ///
+        /// PS2 BIOS ROM layout:
+        /// <list type="bullet">
+        ///   <item>Module <em>data</em> is packed sequentially from the <em>start</em>
+        ///     of the ROM image (offset 0), each rounded up to a 16-byte boundary.
+        ///     The first module (RESET) IS the ROMDIR table itself.</item>
+        ///   <item>The ROMDIR <em>entries</em> start at <paramref name="romDirOffset"/>
+        ///     and are read sequentially until an empty-name terminator is found.</item>
+        /// </list>
+        /// </summary>
+        private static BiosInfo ReadRomDir(ReadOnlySpan<byte> bios, int romDirOffset)
+        {
+            // Module data starts at offset 0 in the ROM image; we accumulate
+            // the data offset as we walk the directory entries.
+            uint moduleOffset = 0;
+
+            for (int i = romDirOffset; i + RomDirEntrySize <= bios.Length; i += RomDirEntrySize)
             {
                 string name     = ReadRomDirName(bios, i);
                 uint   fileSize = ReadUInt32LE(bios, i + 12);
@@ -178,19 +209,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
                 if (name.Equals(RomDirRomVerName, StringComparison.Ordinal))
                 {
-                    // The ROMDIR itself is the first module; its data starts at
-                    // romOffset in the image.  Parse the version string.
-                    if (romOffset + RomVerLength <= bios.Length && fileSize >= RomVerLength)
+                    if (moduleOffset + RomVerLength <= (uint)bios.Length && fileSize >= RomVerLength)
                     {
                         string ver = Encoding.ASCII.GetString(
-                            bios.Slice((int)romOffset, RomVerLength));
+                            bios.Slice((int)moduleOffset, RomVerLength));
                         return ParseRomVer(ver);
                     }
                     break;
                 }
 
-                // Advance by fileSize rounded up to a 16-byte boundary.
-                romOffset += (fileSize + 15u) & ~15u;
+                // Advance module data pointer by fileSize rounded to a 16-byte boundary.
+                moduleOffset += (fileSize + 15u) & ~15u;
             }
 
             // ROMVER not found or too small — return an unknown placeholder.
