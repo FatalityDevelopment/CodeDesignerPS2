@@ -1,0 +1,159 @@
+using System;
+using System.Text;
+using CodeDesigner.Mips64LE.Common.Emulator.IOP;
+
+namespace CodeDesigner.Mips64LE.Common.Emulator
+{
+    /// <summary>
+    /// Boots a PS2 game from an ISO-9660 disc image.
+    ///
+    /// The PS2 boot sequence reads <c>SYSTEM.CNF</c> from the root of the disc,
+    /// locates the <c>BOOT2</c> key whose value is the executable path in the
+    /// form <c>cdrom0:\SLUS_123.45;1</c>, then loads and executes that ELF.
+    ///
+    /// <see cref="BootFromDisc"/> performs the complete sequence:
+    ///   1. Parses <c>SYSTEM.CNF</c> via <see cref="ParseSystemCnf"/>.
+    ///   2. Reads the executable from the disc using <see cref="Cdvd"/>.
+    ///   3. Loads the ELF into the emulator via <see cref="ElfLoader.LoadIntoEmulator"/>,
+    ///      which also sets <c>cpu.PC</c> to the entry point.
+    ///
+    /// Reference: PCSX2 <c>pcsx2/CDVD/IsoFS/IsoFS.cpp</c> and
+    /// <c>pcsx2/Elfheader.cpp</c>.
+    /// </summary>
+    public static class GameLoader
+    {
+        // Key name expected in SYSTEM.CNF (case-insensitive).
+        private const string Boot2Key = "BOOT2";
+
+        // Device prefix used by the PS2 OS (e.g. "cdrom0:\").
+        private const string CdromPrefix = "cdrom0:";
+
+        /// <summary>
+        /// Parse a <c>SYSTEM.CNF</c> text and return the disc-relative path of
+        /// the boot executable.
+        ///
+        /// The value of the <c>BOOT2</c> key looks like
+        /// <c>cdrom0:\SLUS_210.40;1</c> or <c>cdrom0:/SUBDIR/GAME.ELF;1</c>.
+        /// The device prefix (<c>cdrom0:\</c> or <c>cdrom0:/</c>) is stripped so
+        /// the returned string can be passed directly to <see cref="Cdvd.FindFile"/>.
+        /// </summary>
+        /// <param name="content">Raw text content of SYSTEM.CNF.</param>
+        /// <returns>
+        /// The disc-relative path (e.g. <c>SLUS_210.40;1</c>), or <c>null</c>
+        /// when no <c>BOOT2</c> key is found.
+        /// </returns>
+        public static string? ParseSystemCnf(string content)
+        {
+            if (string.IsNullOrEmpty(content))
+                return null;
+
+            foreach (string rawLine in content.Split('\n'))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line[0] == '#')
+                    continue;
+
+                int eq = line.IndexOf('=');
+                if (eq < 0)
+                    continue;
+
+                string key = line[..eq].Trim();
+                if (!key.Equals(Boot2Key, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string value = line[(eq + 1)..].Trim();
+
+                // Strip the "cdrom0:" device prefix (if present) and any leading
+                // backslash or forward slash that follows it.
+                if (value.StartsWith(CdromPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = value[CdromPrefix.Length..].TrimStart('\\', '/');
+                }
+
+                return value.Length > 0 ? value : null;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Boot a PS2 game from a raw ISO-9660 disc image.
+        ///
+        /// The method reads <c>SYSTEM.CNF</c> from the disc, extracts the
+        /// <c>BOOT2</c> executable path, reads the ELF binary, loads its
+        /// PT_LOAD segments into the emulator's main RAM, and sets
+        /// <c>emulator.Cpu.PC</c> to the ELF entry point.
+        /// </summary>
+        /// <param name="isoData">
+        /// Raw disc image bytes (2048-byte sectors, no sub-channel data).
+        /// </param>
+        /// <param name="emulator">
+        /// The <see cref="PS2Emulator"/> whose RAM and CPU will receive the
+        /// loaded executable.
+        /// </param>
+        /// <returns>The ELF entry-point virtual address.</returns>
+        /// <exception cref="GameLoadException">
+        /// Thrown when <c>SYSTEM.CNF</c> is missing, the <c>BOOT2</c> key is
+        /// absent, the executable cannot be found, or the ELF is malformed.
+        /// </exception>
+        public static uint BootFromDisc(byte[] isoData, PS2Emulator emulator)
+        {
+            if (isoData  == null) throw new ArgumentNullException(nameof(isoData));
+            if (emulator == null) throw new ArgumentNullException(nameof(emulator));
+
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(isoData);
+
+            // ── Step 1: find and read SYSTEM.CNF ─────────────────────────────
+
+            Cdvd.IsoEntry? cnfEntry = cdvd.FindFile("SYSTEM.CNF");
+            if (cnfEntry == null)
+                throw new GameLoadException("SYSTEM.CNF not found on disc.");
+
+            byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
+            string cnfText  = Encoding.Latin1.GetString(cnfBytes);
+
+            // ── Step 2: parse BOOT2 ───────────────────────────────────────────
+
+            string? bootPath = ParseSystemCnf(cnfText);
+            if (bootPath == null)
+                throw new GameLoadException("BOOT2 entry not found in SYSTEM.CNF.");
+
+            // ── Step 3: find the executable on the disc ───────────────────────
+
+            Cdvd.IsoEntry? elfEntry = cdvd.FindFile(bootPath);
+            if (elfEntry == null)
+                throw new GameLoadException(
+                    $"Boot executable '{bootPath}' not found on disc.");
+
+            byte[] elfData = cdvd.ReadFile(elfEntry.Value);
+            if (elfData.Length == 0)
+                throw new GameLoadException(
+                    $"Boot executable '{bootPath}' is empty.");
+
+            // ── Step 4: load the ELF into the emulator ────────────────────────
+
+            try
+            {
+                return ElfLoader.LoadIntoEmulator(elfData, emulator);
+            }
+            catch (ElfLoadException ex)
+            {
+                throw new GameLoadException(
+                    $"Failed to load ELF '{bootPath}': {ex.Message}", ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Exception thrown by <see cref="GameLoader"/> when the disc or its
+    /// boot executable cannot be loaded.
+    /// </summary>
+    public sealed class GameLoadException : Exception
+    {
+        public GameLoadException(string message) : base(message) { }
+
+        public GameLoadException(string message, Exception inner)
+            : base(message, inner) { }
+    }
+}
