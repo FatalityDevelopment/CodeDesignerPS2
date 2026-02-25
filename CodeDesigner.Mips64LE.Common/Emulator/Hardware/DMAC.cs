@@ -190,12 +190,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         /// Execute any pending transfer on channel <paramref name="channelIndex"/>
         /// using <paramref name="bus"/> for memory access.  This should be called
         /// by <see cref="PS2MemoryBus"/> immediately after CHCR is written with
-        /// STR=1.
+        /// STR=1.  The current D_SQWC register value is forwarded to the channel for
+        /// use during interleave-mode transfers.
         /// </summary>
         public void ExecuteChannel(int channelIndex, PS2MemoryBus bus)
         {
             if ((uint)channelIndex >= (uint)ChannelCount) return;
-            Channels[channelIndex].Execute(bus);
+            Channels[channelIndex].Execute(bus, _sqwc);
         }
 
         // ── Internal helpers ──────────────────────────────────────────────────
