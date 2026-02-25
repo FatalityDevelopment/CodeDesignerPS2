@@ -94,8 +94,8 @@ End-to-end validation once all layers are in place.
 |------|--------|-------|
 | EE hardware interrupt delivery | ✅ | `PS2Emulator.Step()` checks INTC pending + Status.IE/EXL/ERL/EIE/IM2 before each instruction; dispatches ExcCode=0 via COP0ExceptionDispatcher; Cause.IP2 set to reflect INTC source. |
 | Dual-CPU scheduler (EE + IOP lock-step) | ✅ | `DualCpuScheduler` in `Emulator/DualCpuScheduler.cs`.  Runs EE and IOP at 4:1 cycle ratio (147.456 MHz / 36.864 MHz).  Shares SIF between EE and IOP.  `RunSlice(eeSteps)` with fractional IOP accumulator; `TickHardware()` advances both timer stacks. |
+| IOP↔EE handshake via SIF | ✅ | `SIF` now contains two 32-word (128-byte) FIFOs: SIF0 (IOP→EE) and SIF1 (EE→IOP).  EE DMAC CH5 (FIFO→RAM) drains SIF0 via new `DmacChannel.DataProvider`; EE DMAC CH6 (RAM→FIFO) fills SIF1 via `DataConsumer`.  IOP DMAC CH9 (RAM→device) fills SIF0 via `DeviceDataConsumer`; IOP DMAC CH10 (device→RAM) drains SIF1 via `DeviceDataProvider`.  Wired in `PS2Emulator` (EE side) and `DualCpuScheduler` (IOP side).  Both full-round-trip paths (EE→IOP and IOP→EE) tested. |
 | Load a real BIOS ROM and run to the BIOS splash screen | ⬜ | Requires Phases 1–4 |
-| IOP↔EE handshake via SIF | ⬜ | BIOS sends EE kernel modules to IOP over SIF; both CPUs must run concurrently |
 | Game disc loading | ⬜ | Requires Phase 5 CDVD; load an ISO, parse the `SYSTEM.CNF`, boot the game executable |
 | Controller input end-to-end | ⬜ | IOP pad protocol → SIO2 → game receives button state |
 
@@ -127,4 +127,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 621 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 633 (all passing).*

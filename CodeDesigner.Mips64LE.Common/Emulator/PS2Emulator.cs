@@ -106,6 +106,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             Bus.Dmac.Channels[2].DataConsumer = (buf, start, len) =>
                 Bus.Gif.Feed(new ReadOnlySpan<uint>(buf, start, len));
 
+            // Wire EE DMAC CH5 (SIF0, FIFO→RAM): EE receives data from IOP via SIF0 FIFO.
+            Bus.Dmac.Channels[5].DataProvider = () => Bus.Sif.ReadSif0();
+
+            // Wire EE DMAC CH6 (SIF1, RAM→FIFO): EE sends data to IOP via SIF1 FIFO.
+            Bus.Dmac.Channels[6].DataConsumer = (buf, start, len) =>
+            {
+                for (int i = start; i < start + len; i++)
+                    Bus.Sif.WriteSif1(buf[i]);
+            };
+
             // Wire timer interrupt events to INTC
             WireTimerInterrupts();
 

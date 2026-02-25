@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
 {
     /// <summary>
@@ -24,14 +26,76 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
     ///   F250   — plain write
     ///   F260   — plain write
     ///
-    /// In this emulator there is no real IOP; the registers simply hold their last
-    /// written values so BIOS probe code can read them back and the bootstrap
-    /// handshake sequence can be replayed.
+    /// In addition to the register file the SIF contains two 32-word (128-byte)
+    /// FIFOs that carry actual data between the two CPUs:
     ///
-    /// Reference: PCSX2 pcsx2/Sif.h, pcsx2/SifCmd.cpp, PS2 EE Users Manual §5.
+    ///   SIF0 FIFO — IOP→EE direction.
+    ///               IOP DMAC channel 9 pushes 32-bit words into this FIFO.
+    ///               EE  DMAC channel 5 drains it into EE main RAM.
+    ///
+    ///   SIF1 FIFO — EE→IOP direction.
+    ///               EE  DMAC channel 6 pushes 32-bit words into this FIFO.
+    ///               IOP DMAC channel 10 drains it into IOP main RAM.
+    ///
+    /// Reference: PCSX2 pcsx2/Sif.h, pcsx2/Sif0.cpp, pcsx2/Sif1.cpp,
+    ///            pcsx2/SifCmd.cpp, PS2 EE Users Manual §5.
     /// </summary>
     public sealed class SIF
     {
+        // ── FIFO capacity (matches PCSX2: 128 bytes = 32 × 32-bit words) ──────
+        public const int FifoCapacity = 32;
+
+        // ── SIF0 FIFO: IOP → EE ──────────────────────────────────────────────
+        private readonly Queue<uint> _sif0Fifo = new Queue<uint>(FifoCapacity);
+
+        // ── SIF1 FIFO: EE → IOP ──────────────────────────────────────────────
+        private readonly Queue<uint> _sif1Fifo = new Queue<uint>(FifoCapacity);
+
+        /// <summary>Number of words currently waiting in the SIF0 (IOP→EE) FIFO.</summary>
+        public int Sif0Count => _sif0Fifo.Count;
+
+        /// <summary>Number of words currently waiting in the SIF1 (EE→IOP) FIFO.</summary>
+        public int Sif1Count => _sif1Fifo.Count;
+
+        /// <summary>
+        /// Write one 32-bit word into the SIF0 FIFO (IOP→EE direction).
+        /// Called by the IOP DMAC (channel 9) when it transfers a word from IOP RAM
+        /// toward the EE.  Words beyond <see cref="FifoCapacity"/> are silently dropped
+        /// (matching hardware behaviour when the EE-side DMA is not yet armed).
+        /// </summary>
+        public void WriteSif0(uint word)
+        {
+            if (_sif0Fifo.Count < FifoCapacity)
+                _sif0Fifo.Enqueue(word);
+        }
+
+        /// <summary>
+        /// Read one 32-bit word from the SIF0 FIFO (IOP→EE direction).
+        /// Called by the EE DMAC (channel 5) when it transfers data from the FIFO
+        /// into EE main RAM.  Returns 0 when the FIFO is empty.
+        /// </summary>
+        public uint ReadSif0() =>
+            _sif0Fifo.Count > 0 ? _sif0Fifo.Dequeue() : 0u;
+
+        /// <summary>
+        /// Write one 32-bit word into the SIF1 FIFO (EE→IOP direction).
+        /// Called by the EE DMAC (channel 6) when it transfers a word from EE RAM
+        /// toward the IOP.  Words beyond <see cref="FifoCapacity"/> are silently dropped.
+        /// </summary>
+        public void WriteSif1(uint word)
+        {
+            if (_sif1Fifo.Count < FifoCapacity)
+                _sif1Fifo.Enqueue(word);
+        }
+
+        /// <summary>
+        /// Read one 32-bit word from the SIF1 FIFO (EE→IOP direction).
+        /// Called by the IOP DMAC (channel 10) when it transfers data from the FIFO
+        /// into IOP main RAM.  Returns 0 when the FIFO is empty.
+        /// </summary>
+        public uint ReadSif1() =>
+            _sif1Fifo.Count > 0 ? _sif1Fifo.Dequeue() : 0u;
+
         // ── Register offsets (byte offset from 0x1000F200) ───────────────────
         public const uint REG_MSCOM  = 0x00u;  // 0x1000F200
         public const uint REG_SMCOM  = 0x10u;  // 0x1000F210

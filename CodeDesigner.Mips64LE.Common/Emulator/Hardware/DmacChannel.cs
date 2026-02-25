@@ -62,6 +62,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         /// </summary>
         public Action<uint[], int, int>? DataConsumer { get; set; }
 
+        /// <summary>
+        /// Optional provider for data transferred from a device to RAM (DIR=1, FIFO→RAM).
+        /// When set, normal-mode transfers call this once per 32-bit word instead of
+        /// zero-filling.  Used to drain the SIF0 FIFO (EE DMAC channel 5) into EE RAM.
+        /// </summary>
+        public Func<uint>? DataProvider { get; set; }
+
         public DmacChannel(int id) => ChannelId = id;
 
         // ── Register access ───────────────────────────────────────────────────
@@ -167,11 +174,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
 
             if (DirectionToMemory)
             {
-                // FIFO→RAM: write zeros (no real FIFO data in this emulator).
+                // FIFO→RAM: read from DataProvider if wired, otherwise zero-fill.
                 for (uint q = 0; q < count; q++)
                 {
-                    bus.WriteDoubleWord(addr,     0ul);
-                    bus.WriteDoubleWord(addr + 8, 0ul);
+                    bus.WriteWord(addr,      DataProvider?.Invoke() ?? 0u);
+                    bus.WriteWord(addr + 4,  DataProvider?.Invoke() ?? 0u);
+                    bus.WriteWord(addr + 8,  DataProvider?.Invoke() ?? 0u);
+                    bus.WriteWord(addr + 12, DataProvider?.Invoke() ?? 0u);
                     addr += 16u;
                 }
             }
