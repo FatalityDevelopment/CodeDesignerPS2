@@ -71,7 +71,7 @@ Needed once both CPUs are stable enough to reach the BIOS graphics init sequence
 |-----------|----------|--------|-------|
 | **VIF0 / VIF1** (VU Interface) | High | ✅ | Memory-mapped at 0x10003800 / 0x10003C00.  Registers (STAT/FBRST/ERR/MARK/CYCLE/MODE/NUM/MASK/CODE/ITOPS/BASE/OFST/TOPS/ITOP/TOP), all UNPACK formats (S/V2/V3/V4 × 32/16/8/5-bit), MPG microprogram upload, MSCAL/MSCNT/MSCALF start events, STROW/STCOL/STMASK.  VIF0 writes directly to VU0 DataMem/MicroMem; DMAC CH0/CH1 DataConsumer feeds packets. |
 | **GIF** (Graphics Interface) | High | ✅ | Memory-mapped at 0x10003000.  Registers (GIF_CTRL/MODE/STAT/TAG0-3/CNT/P3CNT/P3TAG).  Full GIFtag parsing: PACKED (including A+D), REGLIST, and IMAGE modes.  PATH2 input from VIF1 DIRECT/DIRECTHL; PATH3 input from DMAC CH2.  PATH1 (VU1 XGKICK) entry point not yet wired — requires VU1 microprogram execution engine (see VU1 row).  GS wired via `GIF.Gs`; `PS2MemoryBus.Gif.Gs = PS2MemoryBus.Gs`; DMAC CH2 DataConsumer set in `PS2Emulator`. |
-| **GS** (Graphics Synthesizer) | High | ⬜ | Rasterizer + framebuffer.  Privileged regs at 0x12000000 (PMODE/SMODE1/2/SRFSH/SYNCH1/2/SYNCV/DISPFB1/2/DISPLAY1/2/EXTBUF/EXTDATA/EXTWRITE/BGCOLOR/CSR/IMR/BUSDIR/SIGLBLID) and 128 × 64-bit internal register bank fully implemented.  **Remaining**: primitive rasterisation, framebuffer management, texture sampling, Z-buffer. |
+| **GS** (Graphics Synthesizer) | High | ✅ | Rasterizer + framebuffer.  Privileged regs at 0x12000000 fully implemented.  4 MB VRAM with PS2 block/column addressing for PSMCT32/16/8/4 and PSMZ32/16.  Primitive rasterisation: POINT, LINE, LINESTRIP, TRIANGLE, TRISTRIP, TRIFAN, SPRITE.  Z-buffer (GEQUAL/GREATER depth test), scissor test, alpha test (AFAIL: KEEP/FB_ONLY/ZB_ONLY/RGB_ONLY), alpha blending.  Texture sampling (nearest-neighbour, MODULATE/DECAL/HIGHLIGHT/HIGHLIGHT2).  TRXDIR transfers: HOST→LOCAL (HWREG pixel writes), LOCAL→LOCAL blit, LOCAL→HOST.  XYOFFSET context support. |
 | **VU1** (Vector Unit 1, microprogram execution) | Medium | ⬜ | Full microprogram execution engine separate from the COP2 macro-mode already implemented.  VU1 has its own 16 KB micro-memory and 16 KB data memory.  Required for geometry transform. |
 | **VU0 macro-mode completeness** | Low | ✅ | COP2 instruction coverage audited; VWAITQ (rs=0x1F, no-op in macro mode) added. All instructions (VCLIPW, VDIV, VSQRT, VRSQRT, VWAITQ) implemented and tested. |
 
@@ -126,4 +126,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 562 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 571 (all passing).*
