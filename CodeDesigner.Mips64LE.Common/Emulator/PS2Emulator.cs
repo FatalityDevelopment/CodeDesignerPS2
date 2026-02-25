@@ -1,5 +1,6 @@
 using CodeDesigner.Mips64LE.Common.CPU;
 using CodeDesigner.Mips64LE.Common.CPU.COP0;
+using CodeDesigner.Mips64LE.Common.VectorUnits.VU1;
 using System;
 
 namespace CodeDesigner.Mips64LE.Common.Emulator
@@ -83,6 +84,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // into the VU0 register state that COP2 macro-mode instructions read.
             Bus.Vif0.VuDataMem  = Cpu.VU0.DataMem;
             Bus.Vif0.VuMicroMem = Cpu.VU0.MicroMem;
+
+            // Wire VIF1 to VU1 data/micro memory and handle MSCAL → run VU1 program.
+            Bus.Vif1.VuDataMem  = Cpu.VU1.DataMem;
+            Bus.Vif1.VuMicroMem = Cpu.VU1.MicroMem;
+            Bus.Vif1.MicroStart += (_, addr) =>
+            {
+                Cpu.VU1.Start((ushort)(addr * 8));  // addr in qwords → byte offset
+                VU1Executor.RunProgram(Cpu.VU1, Bus.Gif);
+            };
 
             // Wire VIF1 DIRECT/DIRECTHL output to GIF (PATH2).
             Bus.Vif1.GifOutput = Bus.Gif;
