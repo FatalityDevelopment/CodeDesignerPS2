@@ -1207,6 +1207,871 @@ namespace CodeDesigner.Mips64LE.TestProject
             Exec(cpu, enc);
             Assert.AreEqual(expected, cpu.VU0.RngState, $"VRXOR: RngState = 0x{expected:X8}");
         }
+        // =====================================================================
+        // MMI0 sub-instructions (funct=0x08, dispatched by shamt)
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_PCGTW()
+        {
+            // PCGTW $s2, $s0, $s1  (rd=18, rs=16, rt=17, shamt=0x02)
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x02 << 6 | 0x08);
+            AssertDisasm(enc, "pcgtw");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(0xFFFFFFFFU, (uint)(cpu.RegsLo[18] & 0xFFFFFFFF), "PCGTW: 10>7 -> -1");
+        }
+
+        [TestMethod]
+        public void Test_PSUBH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x05 << 6 | 0x08);
+            AssertDisasm(enc, "psubh");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(3U, cpu.RegsLo[18] & 0xFFFF, "PSUBH: 10-7=3");
+        }
+
+        [TestMethod]
+        public void Test_PMAXH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x07 << 6 | 0x08);
+            AssertDisasm(enc, "pmaxh");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(10U, cpu.RegsLo[18] & 0xFFFF, "PMAXH: max(10,7)=10");
+        }
+
+        [TestMethod]
+        public void Test_PSUBB()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x09 << 6 | 0x08);
+            AssertDisasm(enc, "psubb");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(3U, cpu.RegsLo[18] & 0xFF, "PSUBB: 10-7=3");
+        }
+
+        [TestMethod]
+        public void Test_PEXTLH()
+        {
+            // PEXTLH $s2, $s0, $s1  interleave lower 4 halfwords: H0=rt[0], H1=rs[0], H2=rt[1], H3=rs[1]
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x16 << 6 | 0x08);
+            AssertDisasm(enc, "pextlh");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(7U, cpu.RegsLo[18] & 0xFFFF, "PEXTLH: H0=rt[0]=7");
+            Assert.AreEqual(10U, (cpu.RegsLo[18] >> 16) & 0xFFFF, "PEXTLH: H1=rs[0]=10");
+        }
+
+        [TestMethod]
+        public void Test_PPACH()
+        {
+            // PPACH $s2, $s0, $s1  pack even halfwords: rd[0..3]=rt even, rd[4..7]=rs even
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x17 << 6 | 0x08);
+            AssertDisasm(enc, "ppach");
+            var cpu = MakeCpu(); // s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(7U, cpu.RegsLo[18] & 0xFFFF, "PPACH: rd[0]=rt even halfword=7");
+        }
+
+        [TestMethod]
+        public void Test_PEXTLB()
+        {
+            // PEXTLB $s2, $s0, $s1  interleave lower 8 bytes
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1A << 6 | 0x08);
+            AssertDisasm(enc, "pextlb");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(7U, cpu.RegsLo[18] & 0xFF, "PEXTLB: B0=rt[0]=7");
+            Assert.AreEqual(10U, (cpu.RegsLo[18] >> 8) & 0xFF, "PEXTLB: B1=rs[0]=10");
+        }
+
+        [TestMethod]
+        public void Test_PPACB()
+        {
+            // PPACB $s2, $s0, $s1  pack even bytes
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1B << 6 | 0x08);
+            AssertDisasm(enc, "ppacb");
+            var cpu = MakeCpu(); // s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(7U, cpu.RegsLo[18] & 0xFF, "PPACB: rd[0]=rt even byte=7");
+        }
+
+        [TestMethod]
+        public void Test_PCGTH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x06 << 6 | 0x08);
+            AssertDisasm(enc, "pcgth");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(0xFFFFU, cpu.RegsLo[18] & 0xFFFF, "PCGTH: 10>7 -> 0xFFFF");
+        }
+
+        [TestMethod]
+        public void Test_PCGTB()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x0A << 6 | 0x08);
+            AssertDisasm(enc, "pcgtb");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(0xFFU, cpu.RegsLo[18] & 0xFF, "PCGTB: 10>7 -> 0xFF");
+        }
+
+        [TestMethod]
+        public void Test_PADDSW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x10 << 6 | 0x08);
+            AssertDisasm(enc, "paddsw");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(17U, cpu.RegsLo[18] & 0xFFFFFFFF, "PADDSW: 10+7=17");
+        }
+
+        [TestMethod]
+        public void Test_PSUBSW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x11 << 6 | 0x08);
+            AssertDisasm(enc, "psubsw");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(3U, cpu.RegsLo[18] & 0xFFFFFFFF, "PSUBSW: 10-7=3");
+        }
+
+        [TestMethod]
+        public void Test_PADDSH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x14 << 6 | 0x08);
+            AssertDisasm(enc, "paddsh");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(17U, cpu.RegsLo[18] & 0xFFFF, "PADDSH: 10+7=17");
+        }
+
+        [TestMethod]
+        public void Test_PSUBSH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x15 << 6 | 0x08);
+            AssertDisasm(enc, "psubsh");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(3U, cpu.RegsLo[18] & 0xFFFF, "PSUBSH: 10-7=3");
+        }
+
+        [TestMethod]
+        public void Test_PADDSB()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x18 << 6 | 0x08);
+            AssertDisasm(enc, "paddsb");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(17U, cpu.RegsLo[18] & 0xFF, "PADDSB: 10+7=17");
+        }
+
+        [TestMethod]
+        public void Test_PSUBSB()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x19 << 6 | 0x08);
+            AssertDisasm(enc, "psubsb");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(3U, cpu.RegsLo[18] & 0xFF, "PSUBSB: 10-7=3");
+        }
+
+        [TestMethod]
+        public void Test_PEXT5()
+        {
+            // PEXT5 $s2, $s1  (rd=18, rt=17, shamt=0x1E)
+            // Set s1=1 (r=1,g=0,b=0,a=0). Expanded: r = (1<<3)|(1>>2) = 8
+            uint enc = (uint)(0x1C << 26 | 17 << 16 | 18 << 11 | 0x1E << 6 | 0x08);
+            AssertDisasm(enc, "pext5");
+            var cpu = MakeCpu(); // s1=7 -> r=7&0x1F=7, expanded=(7<<3)|(7>>2)=56|1=57
+            Exec(cpu, enc);
+            Assert.AreEqual((7U << 3) | (7U >> 2), cpu.RegsLo[18] & 0xFF, "PEXT5: R channel expanded");
+        }
+
+        [TestMethod]
+        public void Test_PPAC5()
+        {
+            // PPAC5 $s2, $s1  pack 8888 to 1555. s1=7 input: r=7>>3=0, result r=0
+            // Use s0=0x080808 (r=8,g=8,b=8): r=8>>3=1, g=8>>3=1, b=8>>3=1 -> 0x0421
+            uint enc = (uint)(0x1C << 26 | 16 << 16 | 18 << 11 | 0x1F << 6 | 0x08);
+            AssertDisasm(enc, "ppac5");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 0x00080808; // b=8,g=8,r=8
+            Exec(cpu, enc);
+            uint expected = (1u << 10) | (1u << 5) | 1u; // b=1,g=1,r=1 = 0x0421
+            Assert.AreEqual(expected, cpu.RegsLo[18] & 0xFFFF, "PPAC5: 8-8-8 packed to 1-1-1");
+        }
+
+        // =====================================================================
+        // MMI1 sub-instructions (funct=0x28, dispatched by shamt)
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_PABSH()
+        {
+            // PABSH $s2, $s0  (rd=18, rs=16, shamt=0x05)
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 18 << 11 | 0x05 << 6 | 0x28);
+            AssertDisasm(enc, "pabsh");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 0xFFF9; // lower 16 bits = -7 as signed short
+            Exec(cpu, enc);
+            Assert.AreEqual(7U, cpu.RegsLo[18] & 0xFFFF, "PABSH: abs(-7)=7");
+        }
+
+        [TestMethod]
+        public void Test_PCEQH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x06 << 6 | 0x28);
+            AssertDisasm(enc, "pceqh");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 10; cpu.RegsLo[17] = 10; // same -> 0xFFFF
+            Exec(cpu, enc);
+            Assert.AreEqual(0xFFFFU, cpu.RegsLo[18] & 0xFFFF, "PCEQH: 10==10 -> 0xFFFF");
+        }
+
+        [TestMethod]
+        public void Test_PMINH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x07 << 6 | 0x28);
+            AssertDisasm(enc, "pminh");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(7U, cpu.RegsLo[18] & 0xFFFF, "PMINH: min(10,7)=7");
+        }
+
+        [TestMethod]
+        public void Test_PCEQB()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x0A << 6 | 0x28);
+            AssertDisasm(enc, "pceqb");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 5; cpu.RegsLo[17] = 5; // same -> 0xFF
+            Exec(cpu, enc);
+            Assert.AreEqual(0xFFU, cpu.RegsLo[18] & 0xFF, "PCEQB: 5==5 -> 0xFF");
+        }
+
+        [TestMethod]
+        public void Test_PSUBUW_Normal()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x11 << 6 | 0x28);
+            AssertDisasm(enc, "psubuw");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(3U, cpu.RegsLo[18] & 0xFFFFFFFF, "PSUBUW: 10-7=3");
+        }
+
+        [TestMethod]
+        public void Test_PSUBUW_Underflow()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x11 << 6 | 0x28);
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 3; cpu.RegsLo[17] = 7; // 3-7 underflows -> 0
+            Exec(cpu, enc);
+            Assert.AreEqual(0U, cpu.RegsLo[18] & 0xFFFFFFFF, "PSUBUW: 3-7 saturates to 0");
+        }
+
+        [TestMethod]
+        public void Test_PADDUH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x14 << 6 | 0x28);
+            AssertDisasm(enc, "padduh");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(17U, cpu.RegsLo[18] & 0xFFFF, "PADDUH: 10+7=17");
+        }
+
+        [TestMethod]
+        public void Test_PSUBUH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x15 << 6 | 0x28);
+            AssertDisasm(enc, "psubuh");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(3U, cpu.RegsLo[18] & 0xFFFF, "PSUBUH: 10-7=3");
+        }
+
+        [TestMethod]
+        public void Test_PSUBUB()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x19 << 6 | 0x28);
+            AssertDisasm(enc, "psubub");
+            var cpu = MakeCpu(); // s0=10, s1=7
+            Exec(cpu, enc);
+            Assert.AreEqual(3U, cpu.RegsLo[18] & 0xFF, "PSUBUB: 10-7=3");
+        }
+
+        [TestMethod]
+        public void Test_PADSBH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x04 << 6 | 0x28);
+            AssertDisasm(enc, "padsbh");
+            var cpu = MakeCpu();
+            Exec(cpu, enc); // just verify no crash
+        }
+
+        [TestMethod]
+        public void Test_PEXTUW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x12 << 6 | 0x28);
+            AssertDisasm(enc, "pextuw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PEXTUH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x16 << 6 | 0x28);
+            AssertDisasm(enc, "pextuh");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PEXTUB()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1A << 6 | 0x28);
+            AssertDisasm(enc, "pextub");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_QFSRV()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1B << 6 | 0x28);
+            AssertDisasm(enc, "qfsrv");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        // =====================================================================
+        // MMI shift/move instructions (opcode=0x1C, own funct codes)
+        // =====================================================================
+
+        public void Test_PSRLH()
+        {
+            // PSRLH $s2, $s0, 1  (rd=18, rt=16, sa=1, funct=0x36)
+            uint enc = (uint)(0x1C << 26 | 16 << 16 | 18 << 11 | 1 << 6 | 0x36);
+            AssertDisasm(enc, "psrlh");
+            var cpu = MakeCpu(); // s0=10
+            Exec(cpu, enc);
+            Assert.AreEqual(5U, cpu.RegsLo[18] & 0xFFFF, "PSRLH: 10>>1=5");
+        }
+
+        [TestMethod]
+        public void Test_PSRAH()
+        {
+            // PSRAH $s2, $s0, 1  (rd=18, rt=16, sa=1, funct=0x37)
+            uint enc = (uint)(0x1C << 26 | 16 << 16 | 18 << 11 | 1 << 6 | 0x37);
+            AssertDisasm(enc, "psrah");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 0xFFFC; // lower 16 bits = -4 as signed short
+            Exec(cpu, enc);
+            // Arithmetic shift right: -4 >> 1 = -2 = 0xFFFE
+            Assert.AreEqual(0xFFFEU, cpu.RegsLo[18] & 0xFFFF, "PSRAH: -4>>>1=-2 (arithmetic)");
+        }
+
+        [TestMethod]
+        public void Test_PSLLW()
+        {
+            // PSLLW $s2, $s0, 1  (rd=18, rt=16, sa=1, funct=0x3C)
+            uint enc = (uint)(0x1C << 26 | 16 << 16 | 18 << 11 | 1 << 6 | 0x3C);
+            AssertDisasm(enc, "psllw");
+            var cpu = MakeCpu(); // s0=10
+            Exec(cpu, enc);
+            Assert.AreEqual(20U, cpu.RegsLo[18] & 0xFFFFFFFF, "PSLLW: 10<<1=20");
+        }
+
+        [TestMethod]
+        public void Test_PSRLW()
+        {
+            // PSRLW $s2, $s0, 1  (rd=18, rt=16, sa=1, funct=0x3E)
+            uint enc = (uint)(0x1C << 26 | 16 << 16 | 18 << 11 | 1 << 6 | 0x3E);
+            AssertDisasm(enc, "psrlw");
+            var cpu = MakeCpu(); // s0=10
+            Exec(cpu, enc);
+            Assert.AreEqual(5U, cpu.RegsLo[18] & 0xFFFFFFFF, "PSRLW: 10>>1=5");
+        }
+
+        [TestMethod]
+        public void Test_PSRAW()
+        {
+            // PSRAW $s2, $s0, 1  (rd=18, rt=16, sa=1, funct=0x3F)
+            uint enc = (uint)(0x1C << 26 | 16 << 16 | 18 << 11 | 1 << 6 | 0x3F);
+            AssertDisasm(enc, "psraw");
+            var cpu = MakeCpu(); // s0=10
+            Exec(cpu, enc);
+            Assert.AreEqual(5U, cpu.RegsLo[18] & 0xFFFFFFFF, "PSRAW: 10>>>1=5");
+        }
+
+        // =====================================================================
+        // MMI2 sub-instructions (funct=0x09, dispatched by shamt)
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_PMADDW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x00 << 6 | 0x09);
+            AssertDisasm(enc, "pmaddw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PSLLVW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x02 << 6 | 0x09);
+            AssertDisasm(enc, "psllvw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PSRLVW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x03 << 6 | 0x09);
+            AssertDisasm(enc, "psrlvw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PMSUBW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x04 << 6 | 0x09);
+            AssertDisasm(enc, "pmsubw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PINTH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x0A << 6 | 0x09);
+            AssertDisasm(enc, "pinth");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PMULTW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x0C << 6 | 0x09);
+            AssertDisasm(enc, "pmultw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PDIVW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x0D << 6 | 0x09);
+            AssertDisasm(enc, "pdivw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PMADDH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x10 << 6 | 0x09);
+            AssertDisasm(enc, "pmaddh");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PHMADH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x11 << 6 | 0x09);
+            AssertDisasm(enc, "phmadh");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        public void Test_PMSUBH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x14 << 6 | 0x09);
+            AssertDisasm(enc, "pmsubh");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PHMSBH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x15 << 6 | 0x09);
+            AssertDisasm(enc, "phmsbh");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PEXEH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1A << 6 | 0x09);
+            AssertDisasm(enc, "pexeh");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PREVH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1B << 6 | 0x09);
+            AssertDisasm(enc, "prevh");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PMULTH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1C << 6 | 0x09);
+            AssertDisasm(enc, "pmulth");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PDIVBW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1D << 6 | 0x09);
+            AssertDisasm(enc, "pdivbw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PEXEW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1E << 6 | 0x09);
+            AssertDisasm(enc, "pexew");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PROT3W()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1F << 6 | 0x09);
+            AssertDisasm(enc, "prot3w");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        // =====================================================================
+        // MMI3 sub-instructions (funct=0x29, dispatched by shamt)
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_PMADDUW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x00 << 6 | 0x29);
+            AssertDisasm(enc, "pmadduw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PSRAVW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x03 << 6 | 0x29);
+            AssertDisasm(enc, "psravw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PINTEH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x0A << 6 | 0x29);
+            AssertDisasm(enc, "pinteh");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PMULTUW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x0C << 6 | 0x29);
+            AssertDisasm(enc, "pmultuw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PDIVUW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x0D << 6 | 0x29);
+            AssertDisasm(enc, "pdivuw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PEXCH()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1A << 6 | 0x29);
+            AssertDisasm(enc, "pexch");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        [TestMethod]
+        public void Test_PEXCW()
+        {
+            uint enc = (uint)(0x1C << 26 | 16 << 21 | 17 << 16 | 18 << 11 | 0x1E << 6 | 0x29);
+            AssertDisasm(enc, "pexcw");
+            var cpu = MakeCpu();
+            Exec(cpu, enc);
+        }
+
+        // =====================================================================
+        // VU0 coprocessor transfer instructions (COP2 rs variants)
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_QMFC2()
+        {
+            // QMFC2 $s0, VF1  (rs=0x01, vft=1 in rt bits, rd=16 in rd bits)
+            // Encoding: (0x12<<26 | 0x01<<21 | vft<<16 | gpr_rd<<11)
+            uint enc = (uint)(0x12 << 26 | 0x01 << 21 | 1 << 16 | 16 << 11);
+            AssertDisasm(enc, "qmfc2");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(1, new System.Numerics.Vector4(1.0f, 2.0f, 3.0f, 4.0f));
+            Exec(cpu, enc);
+            // X and Y are packed into RegsLo[16]
+            uint xBits = System.BitConverter.SingleToUInt32Bits(1.0f);
+            uint yBits = System.BitConverter.SingleToUInt32Bits(2.0f);
+            ulong expected = (ulong)xBits | ((ulong)yBits << 32);
+            Assert.AreEqual(expected, cpu.RegsLo[16], "QMFC2: RegsLo = VF1.xy bits");
+        }
+
+        [TestMethod]
+        public void Test_CFC2()
+        {
+            // CFC2 $s0, vi16 (status register)  (rs=0x02, ctrl=16 in rt bits, rd=16 in rd bits)
+            uint enc = (uint)(0x12 << 26 | 0x02 << 21 | 16 << 16 | 16 << 11);
+            AssertDisasm(enc, "cfc2");
+            var cpu = MakeCpu();
+            cpu.VU0.StatusFlags = 0x5;
+            Exec(cpu, enc);
+            Assert.AreEqual(5UL, cpu.RegsLo[16], "CFC2: read status flags=5");
+        }
+
+        [TestMethod]
+        public void Test_QMTC2()
+        {
+            // QMTC2 VF2, $s0  (rs=0x05, rt=16 in rt bits, vfd=2 in rd bits)
+            // Encoding: (0x12<<26 | 0x05<<21 | gpr_rt<<16 | vfd<<11)
+            uint enc = (uint)(0x12 << 26 | 0x05 << 21 | 16 << 16 | 2 << 11);
+            AssertDisasm(enc, "qmtc2");
+            var cpu = MakeCpu();
+            uint xBits = System.BitConverter.SingleToUInt32Bits(5.0f);
+            cpu.RegsLo[16] = xBits; // X in low 32 bits
+            Exec(cpu, enc);
+            var v = cpu.VU0.ReadVF(2);
+            Assert.AreEqual(5.0f, v.X, 0.001f, "QMTC2: VF2.X = 5.0");
+        }
+
+        [TestMethod]
+        public void Test_CTC2()
+        {
+            // CTC2 vi16, $s0  (rs=0x06, rt=16 in rt bits, rd=16 in rd bits)
+            uint enc = (uint)(0x12 << 26 | 0x06 << 21 | 16 << 16 | 16 << 11);
+            AssertDisasm(enc, "ctc2");
+            var cpu = MakeCpu();
+            cpu.RegsLo[16] = 0xAB;
+            Exec(cpu, enc);
+            Assert.AreEqual(0xABU, cpu.VU0.StatusFlags, "CTC2: status flags=0xAB");
+        }
+
+        // =====================================================================
+        // VU0 VFTOI4, VITOF4 conversion instructions
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_VFTOI4()
+        {
+            // vftoi4 requires rs=0x10 for disassembler dispatch; source is VF[rs]=VF[16], dest is VF[rd]
+            // Encoding: (0x12<<26 | 0x10<<21 | vfd<<11 | 0x3E)
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 2 << 11 | 0x3E);
+            AssertDisasm(enc, "vftoi4");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(16, new System.Numerics.Vector4(2.0f, 0f, 0f, 0f)); // source = VF[16]
+            Exec(cpu, enc);
+            var result = cpu.VU0.ReadVF(2);
+            // 2.0 * 16 = 32 -> (int)32 = 32 -> stored as float bits = 32.0f
+            Assert.AreEqual(32.0f, result.X, 0.001f, "VFTOI4: (int)(2.0*16)=32");
+        }
+
+        [TestMethod]
+        public void Test_VITOF4()
+        {
+            // vitof4 requires rs=0x10 for disassembler dispatch; source is VF[rs]=VF[16], dest is VF[rd]
+            // Encoding: (0x12<<26 | 0x10<<21 | vfd<<11 | 0x3F)
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 2 << 11 | 0x3F);
+            AssertDisasm(enc, "vitof4");
+            var cpu = MakeCpu();
+            // Store int bits 64 into VF[16].X as the source value
+            cpu.VU0.WriteVF(16, new System.Numerics.Vector4(System.BitConverter.Int32BitsToSingle(64), 0f, 0f, 0f));
+            Exec(cpu, enc);
+            var result = cpu.VU0.ReadVF(2);
+            // 64 / 16 = 4.0
+            Assert.AreEqual(4.0f, result.X, 0.001f, "VITOF4: 64/16=4.0");
+        }
+
+        // =====================================================================
+        // VU0 Broadcast variants (COP2 SPECIAL1, rs=0x10)
+        // =====================================================================
+
+        [TestMethod]
+        public void Test_VADDBc_x()
+        {
+            // vaddx VF1, VF2, VF3  => (0x12<<26 | 0x10<<21 | vft<<16 | vfs<<11 | vfd<<6 | 0x00)
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x00);
+            AssertDisasm(enc, "vaddx");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(3f, 3f, 3f, 3f)); // x broadcast=3
+            Exec(cpu, enc);
+            var result = cpu.VU0.ReadVF(1);
+            Assert.AreEqual(5f, result.X, 0.001f, "VADDx: 2+3=5");
+        }
+
+        [TestMethod]
+        public void Test_VSUBBc_x()
+        {
+            // vsubx VF1, VF2, VF3  funct=0x04
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x04);
+            AssertDisasm(enc, "vsubx");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(5f, 5f, 5f, 5f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
+            Exec(cpu, enc);
+            var result = cpu.VU0.ReadVF(1);
+            Assert.AreEqual(2f, result.X, 0.001f, "VSUBx: 5-3=2");
+        }
+
+        [TestMethod]
+        public void Test_VMULBc_x()
+        {
+            // vmulx VF1, VF2, VF3  funct=0x08
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x08);
+            AssertDisasm(enc, "vmulx");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(4f, 4f, 4f, 4f));
+            Exec(cpu, enc);
+            var result = cpu.VU0.ReadVF(1);
+            Assert.AreEqual(12f, result.X, 0.001f, "VMULx: 3*4=12");
+        }
+
+        [TestMethod]
+        public void Test_VMADDBc_x()
+        {
+            // vmaddx VF1, VF2, VF3  funct=0x0C
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x0C);
+            AssertDisasm(enc, "vmaddx");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteACC(new System.Numerics.Vector4(1f, 1f, 1f, 1f), 0xF);
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
+            Exec(cpu, enc);
+            var result = cpu.VU0.ReadVF(1);
+            Assert.AreEqual(7f, result.X, 0.001f, "VMADDx: ACC(1) + 3*2=7");
+        }
+
+        [TestMethod]
+        public void Test_VMSUBBc_x()
+        {
+            // vmsubx VF1, VF2, VF3  funct=0x10
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x10);
+            AssertDisasm(enc, "vmsubx");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteACC(new System.Numerics.Vector4(10f, 10f, 10f, 10f), 0xF);
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
+            Exec(cpu, enc);
+            var result = cpu.VU0.ReadVF(1);
+            Assert.AreEqual(4f, result.X, 0.001f, "VMSUBx: ACC(10) - 3*2=4");
+        }
+
+        [TestMethod]
+        public void Test_VMAXBc_x()
+        {
+            // vmaxx VF1, VF2, VF3  funct=0x14
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x14);
+            AssertDisasm(enc, "vmaxx");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(5f, 5f, 5f, 5f));
+            Exec(cpu, enc);
+            var result = cpu.VU0.ReadVF(1);
+            Assert.AreEqual(5f, result.X, 0.001f, "VMAXx: max(2,5)=5");
+        }
+
+        [TestMethod]
+        public void Test_VMINBc_x()
+        {
+            // vminx VF1, VF2, VF3  funct=0x18
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 1 << 6 | 0x18);
+            AssertDisasm(enc, "vminx");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(2f, 2f, 2f, 2f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(5f, 5f, 5f, 5f));
+            Exec(cpu, enc);
+            var result = cpu.VU0.ReadVF(1);
+            Assert.AreEqual(2f, result.X, 0.001f, "VMINx: min(2,5)=2");
+        }
+
+        [TestMethod]
+        public void Test_VMULABc_x()
+        {
+            // vmulax ACC, VF2, VF3  funct=0x1C (args[0]=vfs=rd, args[1]=vft=rt, no vfd)
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 0x1C);
+            AssertDisasm(enc, "vmulax");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(4f, 4f, 4f, 4f));
+            Exec(cpu, enc);
+            Assert.AreEqual(12f, cpu.VU0.ACC.X, 0.001f, "VMULAx: ACC=3*4=12");
+        }
+
+        [TestMethod]
+        public void Test_VADDABc_x()
+        {
+            // vaddax ACC, VF2, VF3  funct=0x20 (args[0]=vfs=rd, args[1]=vft=rt)
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 0x20);
+            AssertDisasm(enc, "vaddax");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(4f, 4f, 4f, 4f));
+            Exec(cpu, enc);
+            Assert.AreEqual(7f, cpu.VU0.ACC.X, 0.001f, "VADDAx: ACC=3+4=7");
+        }
+
+        [TestMethod]
+        public void Test_VSUBABc_x()
+        {
+            // vsubax ACC, VF2, VF3  funct=0x24 (args[0]=vfs=rd, args[1]=vft=rt)
+            uint enc = (uint)(0x12 << 26 | 0x10 << 21 | 3 << 16 | 2 << 11 | 0x24);
+            AssertDisasm(enc, "vsubax");
+            var cpu = MakeCpu();
+            cpu.VU0.WriteVF(2, new System.Numerics.Vector4(10f, 10f, 10f, 10f));
+            cpu.VU0.WriteVF(3, new System.Numerics.Vector4(3f, 3f, 3f, 3f));
+            Exec(cpu, enc);
+            Assert.AreEqual(7f, cpu.VU0.ACC.X, 0.001f, "VSUBAx: ACC=10-3=7");
+        }
+
+        // =====================================================================
+        // VU0 micro-mode trigger and RNG instructions
+        // =====================================================================
+
     }
 
     // =====================================================================
@@ -1382,5 +2247,6 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(10.0f, cpu.FPR[3], 0.001f, "ADD.S: fs=f3 should be unchanged");
             Assert.AreEqual(5.0f, cpu.FPR[4], 0.001f, "ADD.S: ft=f4 should be unchanged");
         }
+
     }
 }
