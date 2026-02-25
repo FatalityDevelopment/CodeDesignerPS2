@@ -175,9 +175,39 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         ///   BreakpointException are caught and forwarded to
         ///   <see cref="COP0ExceptionDispatcher.Dispatch"/>, which saves EPC,
         ///   updates Status/Cause and redirects cpu.PC to the exception vector.
+        ///
+        /// Hardware interrupt delivery:
+        ///   Before each instruction, if the INTC reports a pending interrupt and
+        ///   the CPU is ready to accept it (IE=1, EXL=0, ERL=0, EIE=1, IM2=1) a
+        ///   hardware-interrupt exception (ExcCode=0) is dispatched via COP0 and
+        ///   the instruction fetch is skipped for that Step().
         /// </summary>
         public void Step()
         {
+            // ── Hardware interrupt check ──────────────────────────────────────
+            // Deliver a pending INTC interrupt before executing the next instruction
+            // when the CPU is ready to accept it.
+            if (Bus.Intc.IsInterruptPending)
+            {
+                // PS2 EE interrupt enable condition (PCSX2 R5900.cpp):
+                //   Status must have IE(b0)=1, EXL(b1)=0, ERL(b2)=0, EIE(b16)=1
+                //   (mask 0x10007, required value 0x10001)
+                // Additionally the INTC is wired to IP2 (bit 10 in Cause/Status):
+                //   Status.IM2 (bit 10) must also be set.
+                uint st = Cpu.COP0.ReadRegister32(12);
+                if ((st & 0x10007u) == 0x10001u && (st & 0x400u) != 0)
+                {
+                    // Set Cause.IP2 (bit 10) to reflect the pending INTC interrupt.
+                    uint cause = Cpu.COP0.ReadRegister32(13);
+                    cause |= 0x400u;
+                    Cpu.COP0.WriteRegister32(13, cause);
+
+                    COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Interrupt, Cpu.PC, inDelaySlot: false);
+                    InstructionCount++;
+                    return;
+                }
+            }
+
             // Fetch: translate virtual address, then read the 32-bit instruction word.
             uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
             uint word = Bus.ReadWord(pc32);
