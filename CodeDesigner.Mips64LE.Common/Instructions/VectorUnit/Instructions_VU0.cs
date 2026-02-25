@@ -1910,6 +1910,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.VectorUnitInstructions
             // Reconstruct the 15-bit address from Rt, Rd, Shamt fields
             uint entry = (uint)((args.Rt << 10) | (args.Rd << 5) | args.Shamt);
             cpu.VU0.Start((ushort)(entry * 8));
+            VU0Executor.RunProgram(cpu.VU0);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -1953,6 +1954,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.VectorUnitInstructions
         {
             ushort addr = cpu.VU0.ReadVI(args.Rd & 0xF);
             cpu.VU0.Start((ushort)(addr * 8));
+            VU0Executor.RunProgram(cpu.VU0);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)

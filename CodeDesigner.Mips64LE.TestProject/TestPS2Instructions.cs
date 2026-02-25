@@ -1116,10 +1116,14 @@ namespace CodeDesigner.Mips64LE.TestProject
             uint enc = (uint)(0x12 << 26 | 0x18 << 21 | 0x10 << 6);
             AssertDisasm(enc, "vcallms");
             var cpu = MakeVU0Cpu();
+            // Write a single NOP+E instruction at the target byte address (0x10 * 8 = 0x80)
+            // lower = LOI 0.0 (0x80000000), upper = NOP with E-bit (0x83800CC0)
+            int entryByte = 0x10 * 8;
+            WriteNopEInstr(cpu.VU0.MicroMem, entryByte);
             cpu.VU0.IsRunning = false;
             Exec(cpu, enc);
-            Assert.IsTrue(cpu.VU0.IsRunning, "VCALLMS: VU0 should be running");
-            Assert.AreEqual((ushort)(0x10 * 8), cpu.VU0.PC, "VCALLMS: PC should be address * 8");
+            Assert.IsFalse(cpu.VU0.IsRunning, "VCALLMS: VU0 microprogram should have completed");
+            Assert.AreEqual((ushort)(entryByte + 8), cpu.VU0.PC, "VCALLMS: PC should advance past entry instruction");
         }
 
         [TestMethod]
@@ -1130,11 +1134,31 @@ namespace CodeDesigner.Mips64LE.TestProject
             uint enc = (uint)(0x12 << 26 | 0x19 << 21 | 1 << 11);
             AssertDisasm(enc, "vcallmsr");
             var cpu = MakeVU0Cpu();
-            cpu.VU0.WriteVI(1, 0x20); // vi1 = 0x20
+            cpu.VU0.WriteVI(1, 0x20); // vi1 = 0x20, byte address = 0x20 * 8 = 0x100
+            // Write a single NOP+E instruction at the target byte address (0x20 * 8 = 0x100)
+            int entryByte = 0x20 * 8;
+            WriteNopEInstr(cpu.VU0.MicroMem, entryByte);
             cpu.VU0.IsRunning = false;
             Exec(cpu, enc);
-            Assert.IsTrue(cpu.VU0.IsRunning, "VCALLMSR: VU0 should be running");
-            Assert.AreEqual((ushort)(0x20 * 8), cpu.VU0.PC, "VCALLMSR: PC should be VI[1] * 8");
+            Assert.IsFalse(cpu.VU0.IsRunning, "VCALLMSR: VU0 microprogram should have completed");
+            Assert.AreEqual((ushort)(entryByte + 8), cpu.VU0.PC, "VCALLMSR: PC should advance past entry instruction");
+        }
+
+        /// <summary>Write a NOP+E instruction pair (8 bytes) to MicroMem at the given byte offset.</summary>
+        private static void WriteNopEInstr(byte[] mem, int byteOffset)
+        {
+            // lower = LOI 0.0 = 0x80000000
+            uint lower = 0x80000000u;
+            // upper = NOP with E-bit: opcode=0x1C (UPPER_SPECIAL), fd=0x33 (NOP), E=1
+            uint upper = 0x80000000u | (0x1Cu << 25) | (0x33u << 6);
+            mem[byteOffset + 0] = (byte)lower;
+            mem[byteOffset + 1] = (byte)(lower >> 8);
+            mem[byteOffset + 2] = (byte)(lower >> 16);
+            mem[byteOffset + 3] = (byte)(lower >> 24);
+            mem[byteOffset + 4] = (byte)upper;
+            mem[byteOffset + 5] = (byte)(upper >> 8);
+            mem[byteOffset + 6] = (byte)(upper >> 16);
+            mem[byteOffset + 7] = (byte)(upper >> 24);
         }
 
         // =====================================================================
