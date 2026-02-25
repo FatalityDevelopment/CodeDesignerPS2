@@ -1418,6 +1418,376 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(40u, ReadU32(dm, 12), "w=40 in VU0.DataMem");
         }
 
+        // =====================================================================
+        // GIF / GS tests
+        // =====================================================================
+
+        [TestMethod]
+        public void GIF_InitialState_AllZero()
+        {
+            var gif = new GIF();
+            Assert.AreEqual(0u, gif.ReadRegister(GIF.REG_CTRL),  "GIF_CTRL must initialise to 0");
+            Assert.AreEqual(0u, gif.ReadRegister(GIF.REG_MODE),  "GIF_MODE must initialise to 0");
+            Assert.AreEqual(0u, gif.ReadRegister(GIF.REG_STAT),  "GIF_STAT must initialise to 0");
+            Assert.AreEqual(0u, gif.ReadRegister(GIF.REG_CNT),   "GIF_CNT must initialise to 0");
+            Assert.AreEqual(0u, gif.ReadRegister(GIF.REG_P3CNT), "GIF_P3CNT must initialise to 0");
+        }
+
+        [TestMethod]
+        public void GIF_CTRL_Reset_ClearsState()
+        {
+            var gif = new GIF();
+            // Set MODE to a non-zero value.
+            gif.WriteRegister(GIF.REG_MODE, 0x01u); // M3R=1
+            // Writing RST=1 to CTRL should clear all state.
+            gif.WriteRegister(GIF.REG_CTRL, 0x01u); // RST bit
+            Assert.AreEqual(0u, gif.ReadRegister(GIF.REG_MODE), "MODE must be cleared by RST");
+        }
+
+        [TestMethod]
+        public void GIF_CTRL_PSE_ReflectsInStat()
+        {
+            var gif = new GIF();
+            // Write CTRL with PSE=1 (bit 3).
+            gif.WriteRegister(GIF.REG_CTRL, 0x08u);
+            Assert.AreEqual(0x08u, gif.ReadRegister(GIF.REG_STAT) & 0x08u, "STAT.PSE must mirror CTRL.PSE");
+        }
+
+        [TestMethod]
+        public void GIF_MODE_M3R_ReflectsInStat()
+        {
+            var gif = new GIF();
+            gif.WriteRegister(GIF.REG_MODE, 0x01u); // M3R=1
+            Assert.AreEqual(1u, gif.ReadRegister(GIF.REG_STAT) & 1u, "STAT.M3P must be set when MODE.M3R=1");
+        }
+
+        [TestMethod]
+        public void GIF_Packed_SingleReg_WritesGS()
+        {
+            // Build a minimal GIFtag: NLOOP=1, EOP=1, PRE=0, FLG=PACKED, NREG=1, REGS=[RGBAQ=0x01]
+            // word0: NLOOP=1, EOP=1 → 0x00008001
+            // word1: PRE=0, PRIM=0, FLG=0(PACKED), NREG=1 → NREG at bits[31:28]=1, FLG[27:26]=0
+            //   = 0x10000000
+            // word2/3: REGS = 0x00000001 (RGBAQ) in low 4 bits
+            // Data qword (RGBAQ): lo = colour = 0xAABBCCDD_EEFF0011, hi = 0
+            var gs  = new GS();
+            var gif = new GIF { Gs = gs };
+
+            uint w0 = 0x00008001u;           // NLOOP=1, EOP=1
+            uint w1 = 0x10000000u;           // NREG=1, FLG=PACKED
+            uint w2 = 0x00000001u;           // REGS[0]=0x1 (RGBAQ)
+            uint w3 = 0x00000000u;
+            // Data: RGBAQ = 0xEEFF0011_AABBCCDD (lo), hi = 0
+            uint d0 = 0xAABBCCDDu;
+            uint d1 = 0xEEFF0011u;
+            uint d2 = 0x00000000u;
+            uint d3 = 0x00000000u;
+
+            gif.Feed(new uint[] { w0, w1, w2, w3, d0, d1, d2, d3 });
+
+            ulong expected = d0 | ((ulong)d1 << 32);
+            Assert.AreEqual(expected, gs.ReadInternal(GS.REG_RGBAQ), "RGBAQ must be written by PACKED GIFtag");
+        }
+
+        [TestMethod]
+        public void GIF_Packed_PRE_WritesGS_Prim()
+        {
+            // GIFtag with PRE=1, PRIM=0x11 (triangle fan), NLOOP=1, NREG=1 (NOP), FLG=PACKED
+            var gs  = new GS();
+            var gif = new GIF { Gs = gs };
+
+            // word0: NLOOP=1, EOP=1 → 0x00008001
+            // word1: PRE=1 at bit46→bit14 of word1, PRIM=0x11 at bits[25:15], NREG=1 at bits[31:28], FLG=0
+            //   PRE=1: bit 14 of word1 = 0x00004000
+            //   PRIM=0x11: bits[25:15] = 0x11 << 15 = 0x00088000
+            //   NREG=1: bits[31:28] = 1 << 28 = 0x10000000
+            //   word1 = 0x1008C000
+            // word2: REGS[0]=0xF (NOP)
+            uint w0 = 0x00008001u;
+            uint w1 = 0x1008C000u;
+            uint w2 = 0x0000000Fu;  // REGS[0]=NOP (0xF)
+            uint w3 = 0x00000000u;
+            // Data qword: NOP → ignored
+            uint d0 = 0u; uint d1 = 0u; uint d2 = 0u; uint d3 = 0u;
+
+            gif.Feed(new uint[] { w0, w1, w2, w3, d0, d1, d2, d3 });
+
+            Assert.AreEqual(0x11ul, gs.ReadInternal(GS.REG_PRIM), "PRIM must be written when PRE=1");
+        }
+
+        [TestMethod]
+        public void GIF_Packed_AD_WritesGS_Register()
+        {
+            // Use A+D (0x0E) to write FRAME_1 (0x68) via packed GIFtag
+            var gs  = new GS();
+            var gif = new GIF { Gs = gs };
+
+            // GIFtag: NLOOP=1, EOP=1, FLG=PACKED, NREG=1, REGS[0]=0xE (A+D)
+            uint w0 = 0x00008001u;
+            uint w1 = 0x10000000u; // NREG=1, FLG=0
+            uint w2 = 0x0000000Eu; // REGS[0]=0xE (A+D)
+            uint w3 = 0x00000000u;
+            // Data qword: lo=FRAME_1 register value, hi[6:0]=dest register (0x68=FRAME_1)
+            uint d0 = 0x000023F0u; // lo bits [31:0] of FRAME_1 value (arbitrary test pattern)
+            uint d1 = 0x00000000u; // lo bits [63:32]
+            uint d2 = 0x00000068u; // hi[6:0] = 0x68 (FRAME_1 register address)
+            uint d3 = 0x00000000u;
+
+            gif.Feed(new uint[] { w0, w1, w2, w3, d0, d1, d2, d3 });
+
+            ulong expected = d0 | ((ulong)d1 << 32);
+            Assert.AreEqual(expected, gs.ReadInternal(GS.REG_FRAME_1), "A+D PACKED must write FRAME_1");
+        }
+
+        [TestMethod]
+        public void GIF_Reglist_TwoRegs_WritesGS()
+        {
+            // REGLIST GIFtag: NLOOP=1, NREG=2, REGS=[PRIM, RGBAQ], FLG=REGLIST(1)
+            var gs  = new GS();
+            var gif = new GIF { Gs = gs };
+
+            // word1: FLG=1(REGLIST) at bits[27:26], NREG=2 at bits[31:28]
+            //   = (2 << 28) | (1 << 26) = 0x24000000
+            uint w0 = 0x00008001u;  // NLOOP=1, EOP=1
+            uint w1 = 0x24000000u;  // NREG=2, FLG=REGLIST
+            uint w2 = 0x00000010u;  // REGS[0]=0x0(PRIM), REGS[1]=0x1(RGBAQ) → 0x10
+            uint w3 = 0x00000000u;
+            // One qword for the two registers: lo=PRIM value, hi=RGBAQ value
+            uint d0 = 0x00000006u;  // PRIM=6 (triangle)
+            uint d1 = 0x00000000u;
+            uint d2 = 0x80FFFFFFu; // RGBAQ low
+            uint d3 = 0x00000000u;
+
+            gif.Feed(new uint[] { w0, w1, w2, w3, d0, d1, d2, d3 });
+
+            Assert.AreEqual(6ul, gs.ReadInternal(GS.REG_PRIM),  "PRIM must be set by REGLIST");
+            Assert.AreEqual((ulong)d2 | ((ulong)d3 << 32), gs.ReadInternal(GS.REG_RGBAQ), "RGBAQ must be set by REGLIST");
+        }
+
+        [TestMethod]
+        public void GIF_Image_WritesGS_HWREG()
+        {
+            // IMAGE mode GIFtag: NLOOP=1, FLG=IMAGE(2)
+            var gs  = new GS();
+            var gif = new GIF { Gs = gs };
+
+            // word1: FLG=2(IMAGE) at bits[27:26] = 2<<26 = 0x08000000, NREG=0 (means 16 but ignored)
+            uint w0 = 0x00008001u;  // NLOOP=1
+            uint w1 = 0x08000000u;  // FLG=IMAGE
+            uint w2 = 0x00000000u;
+            uint w3 = 0x00000000u;
+            // Pixel data
+            uint d0 = 0xDEADBEEFu;
+            uint d1 = 0xCAFEBABEu;
+            uint d2 = 0x11223344u;
+            uint d3 = 0x55667788u;
+
+            gif.Feed(new uint[] { w0, w1, w2, w3, d0, d1, d2, d3 });
+
+            // The last HWREG write should be the high 64-bit half of the qword.
+            ulong expectedHi = d2 | ((ulong)d3 << 32);
+            Assert.AreEqual(expectedHi, gs.ReadInternal(GS.REG_HWREG), "IMAGE mode must write GS HWREG");
+        }
+
+        [TestMethod]
+        public void GIF_MultipleTagsInOneFeed_ProcessedSequentially()
+        {
+            // Two back-to-back GIFtags in one Feed() call.
+            var gs  = new GS();
+            var gif = new GIF { Gs = gs };
+
+            // Tag 1: write SCISSOR_1 via A+D PACKED
+            uint t1w0 = 0x00008001u; uint t1w1 = 0x10000000u;
+            uint t1w2 = 0x0000000Eu; uint t1w3 = 0u;
+            uint t1d0 = 0x00FF00FFu; uint t1d1 = 0u;
+            uint t1d2 = 0x0000005Cu; uint t1d3 = 0u; // dest=SCISSOR_1
+
+            // Tag 2: write ZBUF_1 via A+D PACKED
+            uint t2w0 = 0x00008001u; uint t2w1 = 0x10000000u;
+            uint t2w2 = 0x0000000Eu; uint t2w3 = 0u;
+            uint t2d0 = 0xDEAD0001u; uint t2d1 = 0u;
+            uint t2d2 = 0x0000006Au; uint t2d3 = 0u; // dest=ZBUF_1
+
+            gif.Feed(new uint[] {
+                t1w0, t1w1, t1w2, t1w3, t1d0, t1d1, t1d2, t1d3,
+                t2w0, t2w1, t2w2, t2w3, t2d0, t2d1, t2d2, t2d3
+            });
+
+            Assert.AreEqual((ulong)t1d0, gs.ReadInternal(GS.REG_SCISSOR_1), "SCISSOR_1 must be written by tag 1");
+            Assert.AreEqual((ulong)t2d0, gs.ReadInternal(GS.REG_ZBUF_1),    "ZBUF_1 must be written by tag 2");
+        }
+
+        [TestMethod]
+        public void GIF_NLoopZero_NoDataConsumed()
+        {
+            // GIFtag with NLOOP=0: no data qwords follow.
+            var gs  = new GS();
+            var gif = new GIF { Gs = gs };
+
+            uint w0 = 0x00008000u; // NLOOP=0, EOP=1
+            uint w1 = 0x10000000u; // NREG=1, FLG=PACKED
+            uint w2 = 0x00000001u; // REGS[0]=RGBAQ
+            uint w3 = 0u;
+
+            // No data words follow; Feed() must not throw and RGBAQ must remain 0.
+            gif.Feed(new uint[] { w0, w1, w2, w3 });
+
+            Assert.AreEqual(0ul, gs.ReadInternal(GS.REG_RGBAQ), "RGBAQ must stay 0 when NLOOP=0");
+        }
+
+        [TestMethod]
+        public void GIF_MemoryBus_RegisterReadWrite_Via_Bus()
+        {
+            var bus = new PS2MemoryBus();
+            // GIF physical base = 0x10003000
+            // Write MODE (M3R=1)
+            bus.WriteWord(0x10003010u, 0x01u);
+            Assert.AreEqual(0x01u, bus.ReadWord(0x10003010u), "GIF_MODE read-back via bus");
+
+            // STAT should reflect M3P (bit 0) when M3R=1
+            Assert.AreEqual(1u, bus.ReadWord(0x10003020u) & 1u, "GIF_STAT.M3P via bus");
+
+            // Write CTRL RST=1 to reset
+            bus.WriteWord(0x10003000u, 0x01u);
+            Assert.AreEqual(0u, bus.ReadWord(0x10003010u), "GIF_MODE must be 0 after RST");
+        }
+
+        [TestMethod]
+        public void GIF_MemoryBus_Gif_Property_Is_Wired_To_Gs()
+        {
+            // Verify that GIF.Gs is the same object as Bus.Gs
+            var bus = new PS2MemoryBus();
+            Assert.AreSame(bus.Gs, bus.Gif.Gs, "Bus.Gif.Gs must be Bus.Gs");
+        }
+
+        [TestMethod]
+        public void GS_InternalRegisters_ReadWrite()
+        {
+            var gs = new GS();
+            gs.WriteInternal(GS.REG_FRAME_1, 0xDEAD_BEEF_1234_5678ul);
+            Assert.AreEqual(0xDEAD_BEEF_1234_5678ul, gs.ReadInternal(GS.REG_FRAME_1),
+                "GS internal register FRAME_1 must round-trip");
+        }
+
+        [TestMethod]
+        public void GS_PrivilegedRegisters_PMODE_ReadWrite()
+        {
+            var gs = new GS();
+            gs.WritePriv32(GS.PRIV_PMODE,      0xABCD1234u); // low 32 bits
+            gs.WritePriv32(GS.PRIV_PMODE + 4u, 0xEEFF0011u); // high 32 bits
+            Assert.AreEqual(0xABCD1234u, gs.ReadPriv32(GS.PRIV_PMODE),
+                "PMODE low 32 bits must round-trip");
+            Assert.AreEqual(0xEEFF0011u, gs.ReadPriv32(GS.PRIV_PMODE + 4u),
+                "PMODE high 32 bits must round-trip");
+            ulong full = gs.ReadPriv64(GS.PRIV_PMODE);
+            Assert.AreEqual(0xEEFF0011_ABCD1234ul, full, "PMODE 64-bit read must combine both halves");
+        }
+
+        [TestMethod]
+        public void GS_PrivilegedRegisters_CSR_ReadWrite()
+        {
+            var gs = new GS();
+            gs.WritePriv32(GS.PRIV_CSR, 0x00000001u);
+            Assert.AreEqual(0x00000001u, gs.ReadPriv32(GS.PRIV_CSR), "GS CSR must round-trip");
+        }
+
+        [TestMethod]
+        public void MemoryBus_GsPriv_DISPFB1_ReadWrite()
+        {
+            var bus = new PS2MemoryBus();
+            // GS DISPFB1 is at 0x12000070
+            bus.WriteWord(0x12000070u, 0x12345678u);
+            Assert.AreEqual(0x12345678u, bus.ReadWord(0x12000070u), "GS DISPFB1 low 32 bits via bus");
+
+            bus.WriteWord(0x12000074u, 0xDEADBEEFu);
+            Assert.AreEqual(0xDEADBEEFu, bus.ReadWord(0x12000074u), "GS DISPFB1 high 32 bits via bus");
+        }
+
+        [TestMethod]
+        public void MemoryBus_GsPriv_CSR_ReadWrite()
+        {
+            var bus = new PS2MemoryBus();
+            // GS CSR is at 0x12001000
+            bus.WriteWord(0x12001000u, 0x00000008u); // GS CSR FLUSH bit
+            Assert.AreEqual(0x00000008u, bus.ReadWord(0x12001000u), "GS CSR via bus");
+        }
+
+        [TestMethod]
+        public void PS2Emulator_Gif_Wired_To_DmacChannel2()
+        {
+            // End-to-end: write a GIFtag+data packet to RAM, DMA it via CH2 (GIF),
+            // verify the GS register is written correctly.
+            var emu = new PS2Emulator();
+
+            uint ramBase = 0x00002000u;
+
+            // GIFtag: NLOOP=1, EOP=1, PRE=0, FLG=PACKED, NREG=1, REGS[0]=RGBAQ(0x1)
+            emu.Bus.WriteWord(ramBase + 0,  0x00008001u); // w0: NLOOP=1, EOP=1
+            emu.Bus.WriteWord(ramBase + 4,  0x10000000u); // w1: NREG=1, FLG=PACKED
+            emu.Bus.WriteWord(ramBase + 8,  0x00000001u); // w2: REGS[0]=RGBAQ
+            emu.Bus.WriteWord(ramBase + 12, 0x00000000u); // w3
+            // Data qword (RGBAQ value)
+            emu.Bus.WriteWord(ramBase + 16, 0x00FF00FFu); // lo[31:0]
+            emu.Bus.WriteWord(ramBase + 20, 0x00000080u); // lo[63:32]
+            emu.Bus.WriteWord(ramBase + 24, 0x00000000u); // hi[31:0]
+            emu.Bus.WriteWord(ramBase + 28, 0x00000000u); // hi[63:32]
+
+            // Configure DMAC CH2 (GIF): MADR=ramBase, QWC=2 (2 qwords), CHCR STR=1
+            var ch2 = emu.Bus.Dmac.Channels[2];
+            ch2.WriteRegister(DmacChannel.REG_MADR, ramBase);
+            ch2.WriteRegister(DmacChannel.REG_QWC,  2u);
+            ch2.WriteRegister(DmacChannel.REG_CHCR, 0x100u); // STR=1, DIR=0
+            emu.Bus.Dmac.ExecuteChannel(2, emu.Bus);
+
+            ulong expected = 0x00FF00FFu | ((ulong)0x00000080u << 32);
+            Assert.AreEqual(expected, emu.Bus.Gs.ReadInternal(GS.REG_RGBAQ),
+                "RGBAQ must be written by GIF via DMAC CH2");
+        }
+
+        [TestMethod]
+        public void PS2Emulator_Vif1_Direct_ForwardsToGif()
+        {
+            // End-to-end: VIF1 DIRECT command → GIF → GS register write.
+            var emu = new PS2Emulator();
+
+            // Build a VIF1 DIRECT packet containing a GIFtag+data.
+            // VIFcode for DIRECT: CMD=0x50, IMMED=1 (1 qword)
+            // Then the 1-qword payload is the GIFtag itself: NLOOP=1, FLG=PACKED, NREG=1, REGS[0]=PRIM
+            // Followed immediately by 1 data qword (PRIM value=5 = triangle strip).
+
+            // VIF packet layout: VIFcode (1 word) immediately followed by the GIF data words.
+            // The VIF processes the FIFO word-by-word; DIRECT takes the next IMMED*4 words.
+            //   word 0:    VIFcode = DIRECT, IMMED=2 (2 GIF qwords)
+            //   words 1-4: GIF qword 0 = GIFtag
+            //   words 5-8: GIF qword 1 = PRIM data
+            //   words 9-11: padding (to complete 3 DMA qwords = 12 words total)
+
+            uint ramBase = 0x00003000u;
+            // VIFcode: CMD=0x50 (DIRECT), NUM=0, IMMED=2 (2 qwords of GIF data)
+            emu.Bus.WriteWord(ramBase + 0,  0x50000002u); // VIFcode
+            // GIFtag immediately following the VIFcode (no padding)
+            // GIFtag: NLOOP=1, EOP=1, FLG=PACKED, NREG=1, REGS[0]=PRIM(0x0)
+            emu.Bus.WriteWord(ramBase + 4,  0x00008001u); // NLOOP=1, EOP=1
+            emu.Bus.WriteWord(ramBase + 8,  0x10000000u); // NREG=1, FLG=PACKED
+            emu.Bus.WriteWord(ramBase + 12, 0x00000000u); // REGS[0]=PRIM=0x0
+            emu.Bus.WriteWord(ramBase + 16, 0x00000000u); // w3
+            // PRIM data qword: value=5 (triangle strip)
+            emu.Bus.WriteWord(ramBase + 20, 0x00000005u); // lo[31:0] = 5
+            emu.Bus.WriteWord(ramBase + 24, 0u);
+            emu.Bus.WriteWord(ramBase + 28, 0u);
+            emu.Bus.WriteWord(ramBase + 32, 0u);
+
+            // DMA the 3 qwords (12 words) via CH1 (VIF1).
+            var ch1 = emu.Bus.Dmac.Channels[1];
+            ch1.WriteRegister(DmacChannel.REG_MADR, ramBase);
+            ch1.WriteRegister(DmacChannel.REG_QWC,  3u);
+            ch1.WriteRegister(DmacChannel.REG_CHCR, 0x100u);
+            emu.Bus.Dmac.ExecuteChannel(1, emu.Bus);
+
+            Assert.AreEqual(5ul, emu.Bus.Gs.ReadInternal(GS.REG_PRIM),
+                "PRIM must be written via VIF1 DIRECT → GIF → GS");
+        }
+
         // ── Private helpers ───────────────────────────────────────────────────
 
         private static uint ReadU32(byte[] mem, int offset)

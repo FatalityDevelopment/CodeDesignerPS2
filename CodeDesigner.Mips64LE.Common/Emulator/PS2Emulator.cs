@@ -84,12 +84,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             Bus.Vif0.VuDataMem  = Cpu.VU0.DataMem;
             Bus.Vif0.VuMicroMem = Cpu.VU0.MicroMem;
 
-            // Wire DMAC channels 0 (VIF0) and 1 (VIF1) so that RAM→FIFO transfers
-            // are delivered to the corresponding VIF unit's packet processor.
+            // Wire VIF1 DIRECT/DIRECTHL output to GIF (PATH2).
+            Bus.Vif1.GifOutput = Bus.Gif;
+
+            // Wire DMAC channels 0 (VIF0), 1 (VIF1), and 2 (GIF) so that RAM→FIFO
+            // transfers are delivered to the corresponding unit's packet processor.
             Bus.Dmac.Channels[0].DataConsumer = (buf, start, len) =>
                 Bus.Vif0.Feed(new ReadOnlySpan<uint>(buf, start, len));
             Bus.Dmac.Channels[1].DataConsumer = (buf, start, len) =>
                 Bus.Vif1.Feed(new ReadOnlySpan<uint>(buf, start, len));
+            Bus.Dmac.Channels[2].DataConsumer = (buf, start, len) =>
+                Bus.Gif.Feed(new ReadOnlySpan<uint>(buf, start, len));
 
             // Wire timer interrupt events to INTC
             WireTimerInterrupts();
