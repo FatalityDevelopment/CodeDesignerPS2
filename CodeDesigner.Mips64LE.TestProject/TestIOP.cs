@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
@@ -838,6 +839,84 @@ namespace CodeDesigner.Mips64LE.TestProject
             dmac.ExecuteChannel(0, bus);
 
             Assert.IsTrue(fired, "TransferComplete event must fire after burst transfer");
+        }
+
+        [TestMethod]
+        public void IopDmacChannel_LinkedListMode_TraversesNodes()
+        {
+            // SYNC=2 (linked-list): traverse GPU-style linked list
+            // Node format: [31:24]=word count, [23:0]=next node address, 0xFFFFFF=end
+            var bus  = new IopMemoryBus();
+            var dmac = new IopDmac();
+
+            uint node0 = 0x00001000u;   // first node
+            uint node1 = 0x00002000u;   // second node
+
+            // Node 0: 2 data words, next = node1
+            bus.WriteWord(node0,        (2u << 24) | node1);  // header
+            bus.WriteWord(node0 + 4u,   0xAABBCCDDu);          // data word 0
+            bus.WriteWord(node0 + 8u,   0x11223344u);          // data word 1
+
+            // Node 1: 1 data word, next = end
+            bus.WriteWord(node1,        (1u << 24) | 0x00FFFFFFu); // header (end)
+            bus.WriteWord(node1 + 4u,   0xDEADBEEFu);              // data word 0
+
+            List<uint> received = new();
+            dmac.Channels[2].DeviceDataConsumer = w => received.Add(w);
+
+            // SYNC=2 (bits [9:8]=10), DIR=0 (RAM→device), STR=1 (bit24)
+            dmac.Channels[2].WriteRegister(IopDmacChannel.REG_MADR, node0);
+            dmac.Channels[2].WriteRegister(IopDmacChannel.REG_CHCR, (1u << 24) | (2u << 8)); // STR,SYNC=2
+
+            dmac.ExecuteChannel(2, bus);
+
+            Assert.IsFalse(dmac.Channels[2].IsRunning, "STR must be cleared after linked-list DMA");
+            Assert.AreEqual(3, received.Count, "Must receive 2+1=3 data words from two nodes");
+            Assert.AreEqual(0xAABBCCDDu, received[0], "First word of node 0");
+            Assert.AreEqual(0x11223344u, received[1], "Second word of node 0");
+            Assert.AreEqual(0xDEADBEEFu, received[2], "First word of node 1");
+        }
+
+        [TestMethod]
+        public void IopDmacChannel_LinkedListMode_SingleNodeEnd()
+        {
+            // Single node with end marker (next = 0xFFFFFF) and no data words
+            var bus  = new IopMemoryBus();
+            var dmac = new IopDmac();
+
+            uint node0 = 0x00003000u;
+            bus.WriteWord(node0, (0u << 24) | 0x00FFFFFFu); // 0 data words, end marker
+
+            int callCount = 0;
+            dmac.Channels[2].DeviceDataConsumer = _ => callCount++;
+
+            dmac.Channels[2].WriteRegister(IopDmacChannel.REG_MADR, node0);
+            dmac.Channels[2].WriteRegister(IopDmacChannel.REG_CHCR, (1u << 24) | (2u << 8));
+
+            dmac.ExecuteChannel(2, bus);
+
+            Assert.IsFalse(dmac.Channels[2].IsRunning, "STR cleared");
+            Assert.AreEqual(0, callCount, "Empty single-node list must not invoke consumer");
+        }
+
+        [TestMethod]
+        public void IopDmacChannel_LinkedListMode_TransferComplete_Fires()
+        {
+            var bus  = new IopMemoryBus();
+            var dmac = new IopDmac();
+
+            uint node0 = 0x00004000u;
+            bus.WriteWord(node0, (0u << 24) | 0x00FFFFFFu); // end
+
+            bool fired = false;
+            dmac.Channels[2].TransferComplete += (_, _) => fired = true;
+
+            dmac.Channels[2].WriteRegister(IopDmacChannel.REG_MADR, node0);
+            dmac.Channels[2].WriteRegister(IopDmacChannel.REG_CHCR, (1u << 24) | (2u << 8));
+
+            dmac.ExecuteChannel(2, bus);
+
+            Assert.IsTrue(fired, "TransferComplete must fire after linked-list DMA");
         }
 
         [TestMethod]

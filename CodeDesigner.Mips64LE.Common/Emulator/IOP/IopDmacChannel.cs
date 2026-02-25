@@ -110,7 +110,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         /// <summary>
         /// Execute a burst-mode DMA transfer.  BCR[15:0] gives the word count
-        /// (0 is treated as 0x10000 words).
+        /// (0 is treated as 0x10000 words).  For linked-list mode (SYNC=2) a
+        /// GPU-style linked list is traversed: each node header is a 32-bit word
+        /// whose upper 8 bits are the data word count and lower 24 bits are the
+        /// address of the next node (0xFFFFFF = end of list).
         ///
         /// <list type="bullet">
         ///   <item><term>DIR=0 (RAM→device)</term>
@@ -121,7 +124,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         ///     data in this emulator), then advance MADR.</description></item>
         /// </list>
         ///
-        /// Slice and linked-list modes (SYNC≠0) are not yet fully implemented;
+        /// Slice mode (SYNC=1) is not yet fully implemented;
         /// the method clears STR immediately so BIOS probe loops do not spin forever.
         ///
         /// <see cref="TransferComplete"/> is raised whenever STR is cleared so
@@ -133,15 +136,20 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (!IsRunning)
                 return;
 
-            if (SyncMode != 0)
+            switch (SyncMode)
             {
-                // Slice / linked-list mode: not yet fully implemented.
-                // Clear STR to avoid busy-loops.
-                _chcr &= ~CHCR_STR;
-                TransferComplete?.Invoke(this, EventArgs.Empty);
-                return;
+                case 0: ExecuteBurst(bus);      break;
+                case 2: ExecuteLinkedList(bus); break;
+                default:
+                    // Slice mode: not yet implemented; clear STR to avoid spin-loops.
+                    _chcr &= ~CHCR_STR;
+                    TransferComplete?.Invoke(this, EventArgs.Empty);
+                    break;
             }
+        }
 
+        private void ExecuteBurst(IopMemoryBus bus)
+        {
             // Burst mode: BCR[15:0] = word count; 0 means 0x10000 words.
             uint wordCount = _bcr & 0xFFFFu;
             if (wordCount == 0) wordCount = 0x10000u;
@@ -173,6 +181,45 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             _madr  = addr;
             _bcr  &= 0xFFFF0000u; // clear the word-count half; preserve block-count
+            _chcr &= ~CHCR_STR;
+            TransferComplete?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Execute a linked-list DMA transfer (SYNC=2).
+        /// Used by IOP GPU (channel 2) and MDEC (channel 4).
+        /// Each node: bits[31:24] = data word count, bits[23:0] = address of next node.
+        /// 0xFFFFFF in the address field marks the end of the list.
+        /// Reference: PCSX2 pcsx2/IopDma.cpp.
+        /// </summary>
+        private void ExecuteLinkedList(IopMemoryBus bus)
+        {
+            const uint EndMarker = 0x00FFFFFFu;
+            uint addr = _madr;
+
+            while (true)
+            {
+                uint header    = bus.ReadWord(addr);
+                uint wordCount = (header >> 24) & 0xFFu;
+                uint nextAddr  = header & 0x00FFFFFFu;
+
+                addr += 4u; // advance past header
+
+                // Forward data words to the device consumer.
+                for (uint w = 0; w < wordCount; w++)
+                {
+                    uint data = bus.ReadWord(addr);
+                    DeviceDataConsumer?.Invoke(data);
+                    addr += 4u;
+                }
+
+                if (nextAddr == EndMarker)
+                    break;
+
+                addr = nextAddr;
+            }
+
+            _madr  = addr;
             _chcr &= ~CHCR_STR;
             TransferComplete?.Invoke(this, EventArgs.Empty);
         }

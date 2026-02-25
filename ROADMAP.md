@@ -125,9 +125,9 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| EE DMAC chain/list mode (D_CHCR.MOD=01) | ⬜ | Required by BIOS and most games; DMAC reads a linked-list of DMA tags from RAM and processes each segment in sequence.  Reference: PCSX2 `pcsx2/Dmac.cpp` `dmaChain()`. |
-| EE DMAC interleave mode (D_CHCR.MOD=10) | ⬜ | Used by a small number of titles; alternates between transfer and skip blocks.  Reference: PCSX2 `pcsx2/Dmac.cpp`. |
-| IOP DMAC linked-list mode | ⬜ | IOP channels 2 (GPU)/4 (MDEC) use GPU/MDEC linked-list DMA; currently only burst mode is implemented. |
+| EE DMAC chain/list mode (D_CHCR.MOD=01) | ✅ | `DmacChannel.ExecuteChain()` reads a linked list of DMA tags from TADR and processes each segment: REFE, CNT, NEXT, REF, REFS, CALL (ASR push), RET (ASR pop), END.  TTE transfers the tag QW to the device; TIE stops the chain on IRQ.  ASR0/ASR1 registers exposed at +0x40/+0x50.  CHCR[31:16] stores last-read tag bits.  Reference: PCSX2 `pcsx2/Dmac.cpp` `dmaChain()`. |
+| EE DMAC interleave mode (D_CHCR.MOD=10) | ✅ | `DmacChannel.ExecuteInterleave()` reads TQWC (bits [23:16]) and SQWC (bits [7:0]) from D_SQWC (forwarded from `DMAC.ExecuteChannel`), then alternates transferring TQWC quadwords and skipping SQWC quadwords until all QWC are done.  Reference: PCSX2 `pcsx2/Dmac.cpp`. |
+| IOP DMAC linked-list mode | ✅ | `IopDmacChannel.ExecuteLinkedList()` traverses GPU-style linked lists for SYNC=2: each 32-bit node header encodes word count (bits [31:24]) and next-node address (bits [23:0], 0xFFFFFF=end).  Data words forwarded to `DeviceDataConsumer`.  Reference: PCSX2 `pcsx2/IopDma.cpp`. |
 
 ### 7.2 — VU0 Micro-Mode
 
@@ -192,4 +192,4 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 751 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 781 (all passing).*

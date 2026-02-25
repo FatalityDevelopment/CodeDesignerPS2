@@ -5,26 +5,34 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
     /// <summary>
     /// Emulates one PS2 EE DMA channel (Dn).
     ///
-    /// Each channel exposes five memory-mapped 32-bit registers at its base address:
-    ///   +0x00  Dn_CHCR  — channel control (direction / mode / start)
+    /// Each channel exposes seven memory-mapped 32-bit registers at its base address:
+    ///   +0x00  Dn_CHCR  — channel control (direction / mode / start / TAG)
     ///   +0x10  Dn_MADR  — memory address register
     ///   +0x20  Dn_QWC   — quadword count (number of 16-byte units to transfer)
     ///   +0x30  Dn_TADR  — tag address register (chain-mode only)
+    ///   +0x40  Dn_ASR0  — address stack register 0 (CALL/RET, chain mode)
+    ///   +0x50  Dn_ASR1  — address stack register 1 (CALL/RET, chain mode)
     ///   +0x80  Dn_SADR  — scratchpad address register
     ///
     /// CHCR bit layout (reference: PCSX2 pcsx2/Dmac.h):
-    ///   [0]    DIR  — direction (0 = RAM→FIFO, 1 = FIFO→RAM)
-    ///   [1]    (reserved)
-    ///   [3:2]  MOD  — mode (00 = normal, 01 = chain, 10 = interleave)
-    ///   [5:4]  ASP  — address stack pointer (chain mode)
-    ///   [6]    TTE  — tag transfer enable
-    ///   [7]    TIE  — tag interrupt enable
-    ///   [8]    STR  — start/busy flag; writing 1 starts DMA; auto-cleared when done
+    ///   [0]     DIR  — direction (0 = RAM→FIFO, 1 = FIFO→RAM)
+    ///   [1]     (reserved)
+    ///   [3:2]   MOD  — mode (00 = normal, 01 = chain, 10 = interleave)
+    ///   [5:4]   ASP  — address stack pointer (chain mode, managed by hardware)
+    ///   [6]     TTE  — tag transfer enable (also send tag QW to device)
+    ///   [7]     TIE  — tag interrupt enable (stop chain when IRQ bit set in tag)
+    ///   [8]     STR  — start/busy flag; writing 1 starts DMA; auto-cleared when done
+    ///   [31:16] TAG  — upper 16 bits of last-read DMA tag (bits [31:16] of tag word 0)
     ///
-    /// Normal-mode transfers are executed synchronously by <see cref="Execute"/> when
-    /// the <see cref="DMAC"/> detects STR=1 written to CHCR.  Chain and interleave
-    /// modes are not yet implemented; they are accepted by the register write but
-    /// execute as a no-op so BIOS probe code does not hang.
+    /// Chain-mode DMA tag IDs (bits [26:24] of DMA tag word 0):
+    ///   0 (REFE) — data at ADDR; next tag = TADR+16; terminate
+    ///   1 (CNT)  — data at TADR+16; next tag = TADR+16+QWC*16
+    ///   2 (NEXT) — data at TADR+16; next tag = ADDR
+    ///   3 (REF)  — data at ADDR; next tag = TADR+16
+    ///   4 (REFS) — data at ADDR (stall); next tag = TADR+16
+    ///   5 (CALL) — data at TADR+16; push return addr to ASR[ASP], ASP++; next = ADDR
+    ///   6 (RET)  — data at TADR+16; ASP--; next = ASR[ASP] (or terminate if ASP==0)
+    ///   7 (END)  — data at TADR+16; terminate after transfer
     ///
     /// Reference: PCSX2 pcsx2/Dmac.h, pcsx2/Dmac.cpp.
     /// </summary>
@@ -35,11 +43,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         public const uint REG_MADR = 0x10u;
         public const uint REG_QWC  = 0x20u;
         public const uint REG_TADR = 0x30u;
+        public const uint REG_ASR0 = 0x40u;
+        public const uint REG_ASR1 = 0x50u;
         public const uint REG_SADR = 0x80u;
 
         // ── CHCR bit masks ────────────────────────────────────────────────────
         private const uint CHCR_DIR = 1u << 0;  // transfer direction
         private const uint CHCR_MOD = 3u << 2;  // transfer mode
+        private const uint CHCR_ASP = 3u << 4;  // address stack pointer
+        private const uint CHCR_TTE = 1u << 6;  // tag transfer enable
+        private const uint CHCR_TIE = 1u << 7;  // tag interrupt enable
         private const uint CHCR_STR = 1u << 8;  // start/busy
 
         /// <summary>0-based channel index (0 = VIF0 … 9 = SPR1).</summary>
@@ -49,14 +62,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         private uint _madr;
         private uint _qwc;
         private uint _tadr;
+        private uint _asr0;
+        private uint _asr1;
         private uint _sadr;
 
-        /// <summary>Raised when a normal-mode DMA transfer completes on this channel.</summary>
+        /// <summary>Raised when a DMA transfer completes on this channel.</summary>
         public event EventHandler? TransferComplete;
 
         /// <summary>
         /// Optional consumer for data transferred from RAM to a device (DIR=0, RAM→FIFO).
-        /// When set, normal-mode transfers read each quadword from memory and pass it to
+        /// When set, transfers read each quadword from memory and pass it to
         /// this callback as a four-element <c>uint[]</c> (little-endian, x/y/z/w order).
         /// Used to feed VIF0 and VIF1 with their packet data during DMA transfers.
         /// </summary>
@@ -64,8 +79,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
 
         /// <summary>
         /// Optional provider for data transferred from a device to RAM (DIR=1, FIFO→RAM).
-        /// When set, normal-mode transfers call this once per 32-bit word instead of
-        /// zero-filling.  Used to drain the SIF0 FIFO (EE DMAC channel 5) into EE RAM.
+        /// When set, transfers call this once per 32-bit word instead of zero-filling.
+        /// Used to drain the SIF0 FIFO (EE DMAC channel 5) into EE RAM.
         /// </summary>
         public Func<uint>? DataProvider { get; set; }
 
@@ -83,6 +98,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             REG_MADR => _madr,
             REG_QWC  => _qwc,
             REG_TADR => _tadr,
+            REG_ASR0 => _asr0,
+            REG_ASR1 => _asr1,
             REG_SADR => _sadr,
             _        => 0u
         };
@@ -100,6 +117,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 case REG_MADR: _madr = value; break;
                 case REG_QWC:  _qwc  = value; break;
                 case REG_TADR: _tadr = value; break;
+                case REG_ASR0: _asr0 = value; break;
+                case REG_ASR1: _asr1 = value; break;
                 case REG_SADR: _sadr = value; break;
             }
         }
@@ -124,54 +143,254 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         /// <summary>Tag address register (chain mode).</summary>
         public uint Tadr => _tadr;
 
+        /// <summary>Address stack register 0 (chain mode CALL/RET).</summary>
+        public uint Asr0 => _asr0;
+
+        /// <summary>Address stack register 1 (chain mode CALL/RET).</summary>
+        public uint Asr1 => _asr1;
+
         // ── Transfer execution ────────────────────────────────────────────────
 
         /// <summary>
-        /// Execute a normal-mode DMA transfer: moves <see cref="Qwc"/> quadwords
-        /// (16 bytes each) between memory and an implicit FIFO using
-        /// <paramref name="bus"/> for all memory accesses.
+        /// Execute a DMA transfer using <paramref name="bus"/> for memory access.
+        /// <paramref name="sqwc"/> is the D_SQWC global register value used by interleave mode
+        /// (bits [7:0] = skip count, bits [23:16] = transfer count per slice).
         ///
         /// <list type="bullet">
-        ///   <item><term>DIR=0 (RAM→FIFO)</term>
-        ///     <description>Advance MADR by QWC×16; data is consumed from RAM.
+        ///   <item><term>MOD=0 (normal)</term>
+        ///     <description>Moves <see cref="Qwc"/> quadwords between memory and an
+        ///     implicit FIFO.</description></item>
+        ///   <item><term>MOD=1 (chain)</term>
+        ///     <description>Reads a linked list of DMA tags from TADR and processes
+        ///     each segment until a terminating tag ID (REFE/END) or IRQ+TIE.
         ///     </description></item>
-        ///   <item><term>DIR=1 (FIFO→RAM)</term>
-        ///     <description>Zero-fill QWC×16 bytes at MADR (no real FIFO data in
-        ///     this emulator), then advance MADR.</description></item>
+        ///   <item><term>MOD=2 (interleave)</term>
+        ///     <description>Alternates between transferring TQWC quadwords and
+        ///     skipping SQWC quadwords until all <see cref="Qwc"/> quadwords are done.
+        ///     </description></item>
         /// </list>
         ///
-        /// Chain and interleave modes (MOD≠0) are not yet implemented; the method
-        /// clears STR immediately so BIOS probe loops do not spin forever.
-        ///
-        /// When the transfer completes (or STR is cleared), <see cref="TransferComplete"/>
-        /// is raised so that the parent <see cref="DMAC"/> can update D_STAT.
-        /// Does nothing when the channel is not running or QWC is 0 in normal mode.
+        /// When the transfer completes, <see cref="TransferComplete"/> is raised so that
+        /// the parent <see cref="DMAC"/> can update D_STAT.
+        /// Does nothing when the channel is not running.
         /// </summary>
-        internal void Execute(PS2MemoryBus bus)
+        internal void Execute(PS2MemoryBus bus, uint sqwc = 0u)
         {
             if (!IsRunning)
                 return;
 
-            if (Mode != 0)
+            switch (Mode)
             {
-                // Chain / interleave mode: not yet fully implemented.
-                // Clear STR to avoid busy-loops and fire completion so D_STAT is set.
-                _chcr &= ~CHCR_STR;
-                TransferComplete?.Invoke(this, EventArgs.Empty);
-                return;
+                case 0: ExecuteNormal(bus);             break;
+                case 1: ExecuteChain(bus);              break;
+                case 2: ExecuteInterleave(bus, sqwc);   break;
+                default:
+                    _chcr &= ~CHCR_STR;
+                    TransferComplete?.Invoke(this, EventArgs.Empty);
+                    break;
             }
+        }
 
-            if (_qwc == 0)
-            {
-                // Nothing to transfer; just clear STR.
-                _chcr &= ~CHCR_STR;
-                TransferComplete?.Invoke(this, EventArgs.Empty);
-                return;
-            }
+        // ── Normal mode ───────────────────────────────────────────────────────
 
+        private void ExecuteNormal(PS2MemoryBus bus)
+        {
             uint addr  = _madr;
             uint count = _qwc;
 
+            if (count == 0)
+            {
+                _chcr &= ~CHCR_STR;
+                TransferComplete?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            TransferQws(bus, addr, count, out addr);
+
+            _madr  = addr;
+            _qwc   = 0u;
+            _chcr &= ~CHCR_STR;
+            TransferComplete?.Invoke(this, EventArgs.Empty);
+        }
+
+        // ── Chain mode ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Execute a chain-mode DMA transfer.  Reads DMA tags from TADR in a loop,
+        /// processing each tag's data segment until a terminating condition is met.
+        /// Reference: PCSX2 pcsx2/Dmac.cpp.
+        /// </summary>
+        private void ExecuteChain(PS2MemoryBus bus)
+        {
+            bool terminate = false;
+
+            while (!terminate)
+            {
+                // Read the 64-bit DMA tag at TADR (stored as two 32-bit words).
+                uint tagLo = bus.ReadWord(_tadr);       // [15:0]=QWC [23:16]=PCE [26:24]=ID [27]=IRQ
+                uint tagHi = bus.ReadWord(_tadr + 4);   // [30:0]=ADDR [31]=SPR
+
+                // Store bits [31:16] of tag word 0 in CHCR.TAG (bits [31:16] of CHCR).
+                _chcr = (_chcr & 0x0000FFFFu) | (tagLo & 0xFFFF0000u);
+
+                uint qwc  = tagLo & 0x0000FFFFu;
+                uint id   = (tagLo >> 24) & 0x7u;
+                bool irq  = (tagLo & (1u << 27)) != 0;
+                uint addr = tagHi & 0x7FFFFFFFu;   // ADDR field (strip SPR bit)
+
+                uint dataAddr;
+                uint nextTadr;
+
+                switch (id)
+                {
+                    case 0: // REFE — data at ADDR; terminate after
+                        dataAddr  = addr;
+                        nextTadr  = _tadr + 16u;
+                        terminate = true;
+                        break;
+
+                    case 1: // CNT — data at TADR+16; next tag follows data
+                        dataAddr = _tadr + 16u;
+                        nextTadr = dataAddr + qwc * 16u;
+                        break;
+
+                    case 2: // NEXT — data at TADR+16; next tag at ADDR
+                        dataAddr = _tadr + 16u;
+                        nextTadr = addr;
+                        break;
+
+                    case 3: // REF — data at ADDR; next tag at TADR+16
+                    case 4: // REFS — same as REF (stall-control variant)
+                        dataAddr = addr;
+                        nextTadr = _tadr + 16u;
+                        break;
+
+                    case 5: // CALL — data at TADR+16; push return addr; jump to ADDR
+                    {
+                        dataAddr = _tadr + 16u;
+                        uint returnAddr = dataAddr + qwc * 16u;
+                        int  asp = (int)((_chcr & CHCR_ASP) >> 4);
+                        if (asp == 0) _asr0 = returnAddr;
+                        else          _asr1 = returnAddr;
+                        _chcr = (_chcr & ~CHCR_ASP) | ((uint)(asp + 1) << 4);
+                        nextTadr = addr;
+                        break;
+                    }
+
+                    case 6: // RET — data at TADR+16; pop return addr or terminate
+                    {
+                        dataAddr = _tadr + 16u;
+                        int asp = (int)((_chcr & CHCR_ASP) >> 4);
+                        if (asp > 0)
+                        {
+                            asp--;
+                            _chcr    = (_chcr & ~CHCR_ASP) | ((uint)asp << 4);
+                            nextTadr = (asp == 0) ? _asr0 : _asr1;
+                        }
+                        else
+                        {
+                            nextTadr  = _tadr + 16u;
+                            terminate = true;
+                        }
+                        break;
+                    }
+
+                    default: // 7 (END) — data at TADR+16; terminate after
+                        dataAddr  = _tadr + 16u;
+                        nextTadr  = _tadr + 16u;
+                        terminate = true;
+                        break;
+                }
+
+                // If TTE=1, send the tag quadword (all 4 words at TADR) to the device.
+                if ((_chcr & CHCR_TTE) != 0 && !DirectionToMemory && DataConsumer != null)
+                {
+                    uint[] tagQw =
+                    {
+                        tagLo,
+                        tagHi,
+                        bus.ReadWord(_tadr + 8),
+                        bus.ReadWord(_tadr + 12)
+                    };
+                    DataConsumer(tagQw, 0, 4);
+                }
+
+                // Transfer the QWC data quadwords.
+                if (qwc > 0)
+                {
+                    TransferQws(bus, dataAddr, qwc, out uint newAddr);
+                    _madr = newAddr;
+                }
+                else
+                {
+                    _madr = dataAddr;
+                }
+                _qwc   = 0u;
+                _tadr  = nextTadr;
+
+                // TIE=1: stop chain when the tag's IRQ bit is set.
+                if ((_chcr & CHCR_TIE) != 0 && irq)
+                    terminate = true;
+            }
+
+            _chcr &= ~CHCR_STR;
+            TransferComplete?.Invoke(this, EventArgs.Empty);
+        }
+
+        // ── Interleave mode ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Execute an interleave-mode DMA transfer.
+        /// Alternates between transferring TQWC quadwords and skipping SQWC quadwords
+        /// until all <see cref="Qwc"/> quadwords have been transferred.
+        /// <paramref name="sqwc"/> = D_SQWC: bits [7:0] = SQWC (skip count),
+        /// bits [23:16] = TQWC (transfer count per slice).
+        /// Reference: PCSX2 pcsx2/Dmac.cpp.
+        /// </summary>
+        private void ExecuteInterleave(PS2MemoryBus bus, uint sqwc)
+        {
+            uint sqwcCount = sqwc & 0xFFu;           // quadwords to skip per slice
+            uint tqwcCount = (sqwc >> 16) & 0xFFu;   // quadwords to transfer per slice
+
+            if (tqwcCount == 0)
+            {
+                _qwc   = 0u;
+                _chcr &= ~CHCR_STR;
+                TransferComplete?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            uint addr      = _madr;
+            uint remaining = _qwc;
+
+            while (remaining > 0)
+            {
+                uint count = remaining < tqwcCount ? remaining : tqwcCount;
+
+                TransferQws(bus, addr, count, out uint newAddr);
+                addr       = newAddr;
+                remaining -= count;
+
+                // Skip SQWC quadwords between transfer slices.
+                if (remaining > 0)
+                    addr += sqwcCount * 16u;
+            }
+
+            _madr  = addr;
+            _qwc   = 0u;
+            _chcr &= ~CHCR_STR;
+            TransferComplete?.Invoke(this, EventArgs.Empty);
+        }
+
+        // ── Shared transfer helper ────────────────────────────────────────────
+
+        /// <summary>
+        /// Transfer <paramref name="count"/> quadwords starting at <paramref name="addr"/>
+        /// using the channel's direction and DataConsumer/DataProvider callbacks.
+        /// Returns the updated address in <paramref name="newAddr"/>.
+        /// </summary>
+        private void TransferQws(PS2MemoryBus bus, uint addr, uint count, out uint newAddr)
+        {
             if (DirectionToMemory)
             {
                 // FIFO→RAM: read from DataProvider if wired, otherwise zero-fill.
@@ -187,7 +406,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             else if (DataConsumer != null)
             {
                 // RAM→FIFO with a registered device consumer (e.g. VIF):
-                // read each quadword from memory as four 32-bit words and deliver them.
+                // read each quadword from memory and deliver to the consumer.
                 uint[] qbuf = new uint[count * 4];
                 for (uint q = 0; q < count; q++)
                 {
@@ -205,10 +424,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 addr += count * 16u;
             }
 
-            _madr  = addr;
-            _qwc   = 0u;
-            _chcr &= ~CHCR_STR;
-            TransferComplete?.Invoke(this, EventArgs.Empty);
+            newAddr = addr;
         }
     }
 }
