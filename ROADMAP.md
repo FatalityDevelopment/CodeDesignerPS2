@@ -77,12 +77,12 @@ Needed once both CPUs are stable enough to reach the BIOS graphics init sequence
 
 ---
 
-## Phase 5 — Audio & Storage ⬜ NOT STARTED
+## Phase 5 — Audio & Storage ✅ COMPLETE
 
-| Component | Priority | Notes |
-|-----------|----------|-------|
-| **CDVD** (CD/DVD controller) | High | ISO-9660 disc image reader.  Exposes registers at 0x1F402000–0x1F40201F.  Required for loading game data from an ISO file.  Works with IOP CDVD DMA channel (Phase 3). |
-| **SPU2** (Sound Processing Unit 2) | Medium | 48 sound channels, ADPCM decode.  Memory-mapped at 0x1F900000.  Not required for initial game boot but needed for audio. |
+| Component | Priority | Status | Notes |
+|-----------|----------|--------|-------|
+| **CDVD** (CD/DVD controller) | High | ✅ | Implemented in Phase 3.  ISO-9660 disc image reader.  Registers at 0x1F402000–0x1F40201F.  N-command ReadCd feeds DMAC channel 3.  INTC bit 2. |
+| **SPU2** (Sound Processing Unit 2) | Medium | ✅ | 48 sound channels (2 cores × 24 voices).  Memory-mapped at 0x1F900000 (0x800-byte window).  Per-voice registers (VOLL/VOLR/PITCH/ADSR1/ADSR2/ENVX/VOLXL/VOLXR) at core_base + voice×0x10.  Per-core globals: KON/KOF (voice start/stop), TSA (transfer address), SD (DMA data port), master/effect/input/output volumes, MMIX, ATTR.  2 MB internal audio RAM.  ADPCM decoder (PS2 VAG format, 16-byte blocks, 28 samples, 5 filter modes).  IOP DMAC channel 4 (SPU1 / Core 0) and channel 7 (SPU2 / Core 1) wired via `DeviceDataConsumer` to stream audio data from IOP RAM into SPU2 audio RAM. |
 
 ---
 
@@ -126,4 +126,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 586 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 610 (all passing).*
