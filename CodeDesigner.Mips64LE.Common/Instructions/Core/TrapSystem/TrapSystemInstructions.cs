@@ -55,7 +55,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         public override uint Asm(int[] args)
         {
             uint code = args.Length > 0 ? (uint)args[0] : 0;
-            return (uint)((code << 6) | (Funct ?? 0x0C));
+            return (uint)((code << 6) | (uint)(Funct ?? 0x0C));
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
@@ -99,7 +99,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         public override uint Asm(int[] args)
         {
             uint code = args.Length > 0 ? (uint)args[0] : 0;
-            return (uint)((code << 6) | (Funct ?? 0x0D));
+            return (uint)((code << 6) | (uint)(Funct ?? 0x0D));
         }
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)

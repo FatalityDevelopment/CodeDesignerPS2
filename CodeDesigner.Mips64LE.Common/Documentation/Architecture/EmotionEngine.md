@@ -45,12 +45,15 @@
 
 | Instruction | Description |
 |-------------|-------------|
-| SLL | Shift left logical |
-| SRL | Shift right logical |
-| SRA | Shift right arithmetic |
+| SLL | Shift left logical (32-bit) |
+| SRL | Shift right logical (32-bit) |
+| SRA | Shift right arithmetic (32-bit) |
 | DSLL | Shift left logical (64-bit) |
 | DSRL | Shift right logical (64-bit) |
 | DSRA | Shift right arithmetic (64-bit) |
+| DSLL32 | Shift left logical plus 32 (64-bit, shift amount + 32) |
+| DSRL32 | Shift right logical plus 32 (64-bit, shift amount + 32) |
+| DSRA32 | Shift right arithmetic plus 32 (64-bit, shift amount + 32) |
 | SLLV | Shift left logical variable |
 | SRLV | Shift right logical variable |
 | SRAV | Shift right arithmetic variable |
@@ -77,8 +80,16 @@
 | BGTZ | Branch if greater than zero |
 | BLTZ | Branch if less than zero |
 | BGEZ | Branch if greater than or equal to zero |
-| BEQL | Branch if equal (likely) |
+| BEQL | Branch if equal (likely — nullifies delay slot when not taken) |
 | BNEL | Branch if not equal (likely) |
+| BLEZL | Branch if less than or equal to zero (likely) |
+| BGTZL | Branch if greater than zero (likely) |
+| BLTZL | Branch if less than zero (likely) |
+| BGEZL | Branch if greater than or equal to zero (likely) |
+| BGEZAL | Branch if ≥ zero and link |
+| BLTZAL | Branch if < zero and link |
+| BGEZALL | Branch if ≥ zero and link (likely) |
+| BLTZALL | Branch if < zero and link (likely) |
 | J | Jump |
 | JAL | Jump and link |
 | JR | Jump register |
@@ -124,6 +135,17 @@
 | LUI | Load upper immediate |
 | NOP | No operation |
 | SYNC | Memory synchronization |
+| EI | Enable interrupts (EE extension) |
+| DI | Disable interrupts (EE extension) |
+
+## SA Register (EE Extension)
+
+| Instruction | Description |
+|-------------|-------------|
+| MFSA | Move from SA register |
+| MTSA | Move to SA register |
+| MTSAB | Move to SA (byte shift amount) |
+| MTSAH | Move to SA (halfword shift amount) |
 
 ## Trap & System
 
@@ -137,10 +159,21 @@
 | TLTU | Trap if less than unsigned |
 | TEQ | Trap if equal |
 | TNE | Trap if not equal |
+| TGEI | Trap if greater or equal immediate |
+| TGEIU | Trap if greater or equal immediate unsigned |
+| TLTI | Trap if less than immediate |
+| TLTIU | Trap if less than immediate unsigned |
+| TEQI | Trap if equal immediate |
+| TNEI | Trap if not equal immediate |
 
 ## Notes
 
 - LQ and SQ are Emotion Engine–specific 128-bit load/store instructions
+- DSLL32, DSRL32, DSRA32 shift by `shamt + 32` bits; they share the same instruction encoding as DSLL/DSRL/DSRA but use function codes 0x3C/0x3E/0x3F
+- EI and DI are EE-specific instructions that enable/disable the master interrupt enable (COP0 Status.EIE, bit 16)
+- The SA register is used by EE-specific QFSRV and related instructions
+- MTSAB and MTSAH compute the SA value from register and immediate operands in byte and halfword units respectively
 - The EE core supports dual-issue execution with pairing restrictions
 - Branch delay slots are present and must be handled correctly
+- Branch-likely instructions (BEQL, BNEL, BLEZL, BGTZL, BLTZL, BGEZL, BGEZALL, BLTZALL) nullify the delay slot when the branch is not taken
 - This instruction set is not fully compatible with standard desktop MIPS64 CPUs

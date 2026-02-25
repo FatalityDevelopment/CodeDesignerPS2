@@ -10,7 +10,7 @@ A C# library and toolset for working with the **Sony PlayStation 2 Emotion Engin
 Mips64LE/
 ├── CodeDesigner.Mips64LE.Common/     # Core library (assembler, disassembler, instructions, emulator)
 ├── CodeDesigner.Mips64LE/           # Console application + socket server
-├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (511 tests)
+├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (751 tests)
 └── vscode/codedesigner/             # VSCode extension frontend
 ```
 
@@ -34,7 +34,7 @@ dotnet build CodeDesigner.Mips64LE.sln
 dotnet test CodeDesigner.Mips64LE.TestProject/
 ```
 
-All 511 tests should pass.
+All 751 tests should pass.
 
 ### Console Application
 
@@ -78,6 +78,16 @@ dotnet run -- --server
 | CDVD subsystem (ISO-9660) | ✅ |
 | SIO2 + DualShock 2 pad input | ✅ |
 | IOP module loader (IRX/ELF32) | ✅ |
+| SPU2 (48-voice ADPCM audio) | ✅ |
+| VIF0 / VIF1 (Vector Interface, all UNPACK formats) | ✅ |
+| GIF (Graphics Interface, PACKED/REGLIST/IMAGE) | ✅ |
+| GS (Graphics Synthesizer, rasteriser + 4 MB VRAM) | ✅ |
+| VU1 (Vector Unit 1 microprogram execution) | ✅ |
+| TLB (Translation Lookaside Buffer) | ✅ |
+| BIOS ROM loader + validation | ✅ |
+| Game disc loader (ISO-9660 + ELF boot) | ✅ |
+| Dual-CPU scheduler (EE + IOP lock-step) | ✅ |
+| Controller input end-to-end pipeline | ✅ |
 | VSCode extension frontend | ✅ |
 
 ---
@@ -238,7 +248,7 @@ All instruction semantics have been cross-referenced with [PCSX2](https://pcsx2.
 - `pcsx2/FPU.cpp` — COP1 floating-point unit
 
 ### Test Coverage
-- **511 unit tests** covering core, FPU, COP0, COP2/VU0, MMI, EE hardware, IOP, CDVD, SIO2, and IOP module loader
+- **751 unit tests** covering core, FPU, COP0, COP2/VU0, MMI, EE hardware, IOP, CDVD, SPU2, SIO2, GS/GIF/VIF, VU1, BiosLoader, GameLoader, TLB, and IOP module loader
 - Tests verify both disassembly output and execution correctness
 - Special cases: long.MinValue in DMULT, negative DIV sign-extension, ERET ERL handling
 

@@ -42,6 +42,8 @@ COP1 is still used for:
 |-------------|-------------|
 | MFC1 | Move from FPU register to GPR |
 | MTC1 | Move from GPR to FPU register |
+| DMFC1 | Move 64-bit from FPU register to GPR (upper 32 bits zero-extended) |
+| DMTC1 | Move 64-bit from GPR to FPU register (lower 32 bits used) |
 | CFC1 | Move control from FCSR to GPR |
 | CTC1 | Move control from GPR to FCSR |
 
@@ -117,6 +119,8 @@ Comparison results set the **FPU condition flag (FCC)** in FCSR, used by branch 
 |-------------|-------------|
 | LWC1 | Load word to FPU register |
 | SWC1 | Store word from FPU register |
+| LDC1 | Load doubleword to FPU register pair (lower 32 bits used) |
+| SDC1 | Store doubleword from FPU register pair (upper 32 bits zero) |
 
 ---
 

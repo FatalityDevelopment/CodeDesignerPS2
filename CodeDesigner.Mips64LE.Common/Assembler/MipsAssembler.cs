@@ -366,7 +366,7 @@ namespace CodeDesigner.Mips64LE.Common
             {
                 // Format: optional code (e.g., SYSCALL, BREAK) - code embedded in bits 25-6
                 uint code = operands.Length > 0 ? (uint)ParseImmediate(operands[0]) : 0;
-                return (uint)((code << 6) | (instr.Funct ?? 0));
+                return (uint)((code << 6) | (uint)(instr.Funct ?? 0));
             }
             else if (argNames.Length == 1 && argNames[0] == "stype")
             {
