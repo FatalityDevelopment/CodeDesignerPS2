@@ -111,7 +111,7 @@ These are not phase-specific but should be addressed progressively.
 | COP0 cache instructions (`CACHE`, `SYNC`) | ✅ Both instructions are registered in the assembler and disassembler.  `CACHE` calls `CacheState.PerformOperation` (all operations are no-ops as is standard in emulators); `SYNC` is a no-op memory barrier.  Neither raises an `UnknownInstruction` event. |
 | EE interrupt delivery | ✅ `PS2Emulator.Step()` now checks INTC pending + Status.IE/EXL/ERL/EIE/IM2 before each instruction and dispatches ExcCode=0 via COP0ExceptionDispatcher when all conditions are met. |
 | Floating-point edge cases | ✅ Denormal flushing now complete.  `C.EQ.S`, `C.LT.S`, and `C.LE.S` flush both `fs` and `ft` to zero when sub-normal, matching PS2 EE FPU behaviour.  Arithmetic and conversion instructions were already correct. |
-| Instruction coverage audit | Run the assembler over all EE instructions and verify round-trip encode→decode→disassemble. |
+| Instruction coverage audit | ✅ All 93 previously-untested EE instructions now have round-trip disassemble + execute tests: MMI0/1/2/3 sub-groups (PCGTW, PSUBH, PMAXH, PSUBB, PEXTLH, PPACH, PEXTLB, PPACB, PCGTH, PCGTB, PADDSW/H/B, PSUBSW/H/B, PEXT5, PPAC5, PABSH, PCEQH/B, PMINH, PSUBUW/H/B, PADDUH, PADSBH, PEXTUW/H/B, QFSRV, PMFHL, PMTHL, PSLLH/W, PSRLH/W, PSRAH/W, PMADDW/H, PSLLVW, PSRLVW, PMSUBW/H, PINTH, PMULTW/H, PDIVW/BW/UW, PHMADH/PHMSBH, PXOR, PEXEH/W, PREVH, PROT3W, PMADDUW, PSRAVW, PINTEH, PMULTUW, PNOR, PEXCH, PEXCW) plus VU0 (QMFC2, CFC2, QMTC2, CTC2, VFTOI4, VITOF4, all 10 broadcast-variant families VADDBc/VSUBBc/VMULBc/VMADDBc/VMSUBBc/VMAXBc/VMINBc/VMULABc/VADDABc/VSUBABc, VCALLMS, VCALLMSR, VRNEXT, VRGET, VRINIT, VRXOR). Test count: 737. |
 
 ---
 
@@ -127,4 +127,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 662 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 737 (all passing).*
