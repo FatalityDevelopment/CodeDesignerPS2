@@ -2157,4 +2157,34 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.VectorUnitInstructions
             return $"R = 0x3F800000 | ((R ^ {VU0State.GetVFRegisterName(args.Rd)}.{compNames[fsf]}) & 0x7FFFFF)";
         }
     }
+
+    // VWAITQ - Vector Wait Q Register (COP2 rs=0x1F)
+    // Stalls the EE pipeline until the VU0 Q register result (from VDIV/VSQRT/VRSQRT) is ready.
+    // In macro mode the divide/sqrt/rsqrt operations complete synchronously, so this is a NOP.
+    // Per PCSX2: VU0MI_VWAITQ — no operands; identified by opcode=0x12, rs=0x1F.
+    public sealed class VWAITQ : Instruction<Args_R>
+    {
+        public VWAITQ()
+        {
+            Opcode = 0x12; Funct = null; // rs=0x1F distinguishes this instruction
+            Name = "vwaitq";
+            ArgType = InstrArgType.R;
+            ArgNames = [];
+            Equation = "";
+            Description = "Wait for VU0 Q register to be ready (stall until VDIV/VSQRT/VRSQRT completes)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // In macro mode, VDIV/VSQRT/VRSQRT complete synchronously — Q is always ready.
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null) => Name;
+
+        public override uint Asm(int[] args)
+            => (uint)(Opcode << 26 | 0x1F << 21);
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => "Wait for Q register (NOP in macro mode)";
+    }
 }

@@ -705,6 +705,19 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
+        public void Test_VWAITQ()
+        {
+            // vwaitq: COP2 (0x12), rs=0x1F, all other bits = 0
+            uint enc = (uint)(0x12 << 26 | 0x1F << 21);
+            AssertDisasm(enc, "vwaitq");
+            // Exec: should be a no-op — Q register unchanged
+            var cpu = MakeCpu();
+            cpu.VU0.Q = 3.14f;
+            Exec(cpu, enc);
+            Assert.AreEqual(3.14f, cpu.VU0.Q, 0.001f, "VWAITQ must not modify Q register");
+        }
+
+        [TestMethod]
         public void Test_VLQ_VSQ()
         {
             AssertDisasm(unchecked((uint)(0x36 << 26)), "vlq");
