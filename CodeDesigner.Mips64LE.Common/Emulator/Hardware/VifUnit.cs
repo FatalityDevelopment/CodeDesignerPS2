@@ -127,6 +127,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         /// <summary>Target VU micro memory.  Assign <c>VU0State.MicroMem</c> for VIF0.</summary>
         public byte[] VuMicroMem { get; set; }
 
+        /// <summary>
+        /// GIF output for DIRECT/DIRECTHL commands (VIF1 only).
+        /// When set, DIRECT payload qwords are forwarded to <see cref="GIF.Feed"/>.
+        /// </summary>
+        public GIF? GifOutput { get; set; }
+
         // ── Events ────────────────────────────────────────────────────────────
 
         /// <summary>Raised when a MARK command is processed; carries the 16-bit MARK value.</summary>
@@ -329,13 +335,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                     ProcessMpg(num, imm, words, ref pos);
                     break;
 
-                case 0x50:  // DIRECT    (VIF1 only) — pass qwords to GIF PATH3
-                case 0x51:  // DIRECTHL  (VIF1 only) — same, but hold on PATH1
+                case 0x50:  // DIRECT    (VIF1 only) — pass qwords to GIF PATH2
+                case 0x51:  // DIRECTHL  (VIF1 only) — same, but holds PATH3 until complete
                 {
-                    // GIF not yet implemented; consume and discard the payload.
                     uint qwords = (imm == 0) ? 65536u : imm;
                     int  skip   = (int)(qwords * 4u);
-                    pos = Math.Min(pos + skip, words.Length);
+                    int  end    = Math.Min(pos + skip, words.Length);
+                    if (GifOutput != null)
+                        GifOutput.Feed(words.Slice(pos, end - pos));
+                    pos = end;
                     break;
                 }
 

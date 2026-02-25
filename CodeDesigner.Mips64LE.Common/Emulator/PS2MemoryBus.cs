@@ -42,6 +42,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         // Hardware I/O base addresses (physical)
         private const uint TimerBase  = 0x10000000u;  // T0 base; each timer is 0x800 apart
+        private const uint GifBase    = 0x10003000u;  // GIF registers
         private const uint Vif0Base   = 0x10003800u;  // VIF0 registers
         private const uint Vif1Base   = 0x10003C00u;  // VIF1 registers
         private const uint IntcBase   = 0x1000F000u;  // INTC_STAT / INTC_MASK
@@ -51,7 +52,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private readonly byte[] _bios       = new byte[BiosRomSize];
         private readonly byte[] _scratchpad = new byte[ScratchpadSize];
         private readonly byte[] _io         = new byte[IoRegisterSize];
-        private readonly byte[] _gsPriv     = new byte[GsPrivRegSize];
 
         /// <summary>The four EE hardware timers (T0–T3).</summary>
         public EETimer[] Timers { get; } = { new EETimer(0), new EETimer(1), new EETimer(2), new EETimer(3) };
@@ -65,17 +65,29 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// <summary>The sub-bus interface (EE ↔ IOP communication).</summary>
         public SIF Sif { get; } = new SIF();
 
+        /// <summary>GIF — Graphics Interface (physical base 0x10003000).</summary>
+        public GIF Gif { get; } = new GIF();
+
         /// <summary>VIF0 — Vector Interface for VU0 (physical base 0x10003800).</summary>
         public VifUnit Vif0 { get; } = new VifUnit(isVif1: false);
 
         /// <summary>VIF1 — Vector Interface for VU1 (physical base 0x10003C00).</summary>
         public VifUnit Vif1 { get; } = new VifUnit(isVif1: true);
 
+        /// <summary>GS — Graphics Synthesizer (privileged registers at 0x12000000).</summary>
+        public GS Gs { get; } = new GS();
+
         /// <summary>Exposes main RAM so callers can bulk-load programs.</summary>
         public byte[] Ram => _ram;
 
         /// <summary>Exposes BIOS ROM so callers can load a BIOS image.</summary>
         public byte[] Bios => _bios;
+
+        public PS2MemoryBus()
+        {
+            // Wire GIF to GS so GIFtag processing forwards register writes.
+            Gif.Gs = Gs;
+        }
 
         // -----------------------------------------------------------------------
         // Address translation
@@ -147,6 +159,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // Hardware I/O: timers and INTC
             if (paddr >= TimerBase && paddr < TimerBase + 0x2000u)
                 return ReadTimerWord(paddr);
+            if (paddr >= GifBase && paddr < GifBase + 0x100u)
+                return Gif.ReadRegister(paddr - GifBase);
             if (paddr >= Vif0Base && paddr < Vif0Base + 0x200u)
                 return Vif0.ReadRegister(paddr - Vif0Base);
             if (paddr >= Vif1Base && paddr < Vif1Base + 0x200u)
@@ -161,6 +175,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 return Dmac.Channels[chIdx].ReadRegister(chReg);
             if (DMAC.IsGlobalRegion(paddr))
                 return Dmac.ReadGlobal(paddr - 0x1000E000u);
+
+            // GS privileged registers (0x12000000–0x12001FFF)
+            if (paddr >= GsPrivBase && paddr < GsPrivBase + GsPrivRegSize)
+                return Gs.ReadPriv32(paddr - GsPrivBase);
 
             (byte[] region, uint offset) = MapPhysical(paddr);
             // Fast path if all 4 bytes fit in the same region
@@ -178,6 +196,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (paddr >= TimerBase && paddr < TimerBase + 0x2000u)
             {
                 WriteTimerWord(paddr, value);
+                return;
+            }
+            if (paddr >= GifBase && paddr < GifBase + 0x100u)
+            {
+                Gif.WriteRegister(paddr - GifBase, value);
                 return;
             }
             if (paddr >= Vif0Base && paddr < Vif0Base + 0x200u)
@@ -212,6 +235,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (DMAC.IsGlobalRegion(paddr))
             {
                 Dmac.WriteGlobal(paddr - 0x1000E000u, value);
+                return;
+            }
+
+            // GS privileged registers (0x12000000–0x12001FFF)
+            if (paddr >= GsPrivBase && paddr < GsPrivBase + GsPrivRegSize)
+            {
+                Gs.WritePriv32(paddr - GsPrivBase, value);
                 return;
             }
 
@@ -296,9 +326,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (paddr >= ScratchpadBase && paddr < ScratchpadBase + ScratchpadSize)
                 return (_scratchpad, paddr - ScratchpadBase);
 
-            if (paddr >= GsPrivBase && paddr < GsPrivBase + GsPrivRegSize)
-                return (_gsPriv, paddr - GsPrivBase);
-
             if (paddr >= IoBase && paddr < IoBase + IoRegisterSize)
                 return (_io, paddr - IoBase);
 
@@ -317,9 +344,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             if (paddr >= ScratchpadBase && paddr < ScratchpadBase + ScratchpadSize)
                 return (_scratchpad, paddr - ScratchpadBase, false);
-
-            if (paddr >= GsPrivBase && paddr < GsPrivBase + GsPrivRegSize)
-                return (_gsPriv, paddr - GsPrivBase, false);
 
             if (paddr >= IoBase && paddr < IoBase + IoRegisterSize)
                 return (_io, paddr - IoBase, false);
