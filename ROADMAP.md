@@ -133,8 +133,8 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| VU0 independent microprogram execution | ⬜ | VU0 can run programs autonomously (not just COP2 macro-mode).  Triggered by writing to the VU0 program counter via `VCALLMS`/`VCALLMSR` in a way that starts the micro-pipeline independently.  Reference: PCSX2 `pcsx2/VU0.cpp`. |
-| VU0 micro-mode interlocking with EE | ⬜ | EE must stall (via `VWAITQ` / status polling) until VU0 finishes.  VIF0 `MSCAL`/`MSCNT` already start VU0 programs synchronously; the async path needs adding. |
+| VU0 independent microprogram execution | ✅ | `VU0Executor` (`VectorUnits/VU0/VU0Executor.cs`) runs VU0 microprograms instruction-by-instruction.  Same 8-byte dual-issue encoding as VU1: lower word (memory/integer/branch) and upper word (float arithmetic).  MaxSteps=1 000 000 safety guard.  Supports all upper-word float ops (ADDbc/SUBbc/MULbc/MADDbc/MSUBbc/MAXbc/MINIbc, MULq/ADDq/SUBq/MADDq/MSUBq/MULi/ADDi/SUBi/MADDi/MSUBi, ADD/SUB/MUL/MAX/MINI/MADD/MSUB/OPMSUB/OPMULA, special: ADDA/SUBA/MADDA/MSUBA/MULA/ABS/MAXA/MINIA/ITOF0/4/12/15/FTOI0/4/12/15, CLIP), all lower-word integer/branch ops (LQ/SQ/ILW/ISW, IADDIU, IADD/ISUB/IADDI/IAND/IOR, MOVE/MR32, FCEQ/FCSET/FCAND/FCOR/FSEQ/FSSET/FSAND/FSOR/FMEQ/FMAND/FMOR, branch family B/BAL/IBEQ/IBNE/IBLTZ/IBGTZ/IBLEZ/IBGEZ, JR/JALR, LOI, EFU ops, Q-register DIV/SQRT/RSQRT, RNG RNEXT/RGET/RINIT/RXOR, WAITQ/WAITP nop).  XGKICK (0x33) is a no-op in VU0 (VU1-only feature).  Reference: PCSX2 `pcsx2/VU0.cpp`. |
+| VU0 micro-mode interlocking with EE | ✅ | VU0 microprogram execution is synchronous: `VCALLMS`/`VCALLMSR` in `Instructions_VU0.cs` call `VU0Executor.RunProgram()` immediately after `VU0.Start()`, so the EE pipeline does not resume until VU0 completes.  `VWAITQ` remains a no-op (Q-register results are always ready in the synchronous model).  VIF0 `MSCAL`/`MSCNT` now also run VU0 synchronously via the `MicroStart` event handler wired in `PS2Emulator` (mirrors the VIF1→VU1 wiring).  VIF0 `VuDataMem`/`VuMicroMem` remain wired to `VU0State.DataMem`/`MicroMem`. |
 
 ### 7.3 — Graphics Enhancements
 
@@ -192,4 +192,4 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 781 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 794 (all passing).*

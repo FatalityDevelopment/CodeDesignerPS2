@@ -6,6 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
+using CodeDesigner.Mips64LE.Common.VectorUnits.VU0;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU1;
 
 namespace CodeDesigner.Mips64LE.TestProject
@@ -3399,6 +3400,286 @@ namespace CodeDesigner.Mips64LE.TestProject
             // Both CPUs must be at the power-on reset vector.
             Assert.AreEqual(0xBFC00000UL, emu.Cpu.PC,
                 "EE PC must be at reset vector after real BIOS load");
+        }
+    }
+}
+
+// =============================================================================
+// VU0 Micro-Mode tests (Phase 7.2)
+// =============================================================================
+
+namespace CodeDesigner.Mips64LE.TestProject
+{
+    [TestClass]
+    public class TestVU0MicroMode
+    {
+        // ── Helper: write a 64-bit VU instruction pair into MicroMem ─────────
+
+        private static void WriteInstr(byte[] mem, int pcByte, uint lower, uint upper)
+        {
+            mem[pcByte + 0] = (byte)lower;
+            mem[pcByte + 1] = (byte)(lower >>  8);
+            mem[pcByte + 2] = (byte)(lower >> 16);
+            mem[pcByte + 3] = (byte)(lower >> 24);
+            mem[pcByte + 4] = (byte)upper;
+            mem[pcByte + 5] = (byte)(upper >>  8);
+            mem[pcByte + 6] = (byte)(upper >> 16);
+            mem[pcByte + 7] = (byte)(upper >> 24);
+        }
+
+        /// <summary>Encode upper word: E | opcode | dest | ft | fs | fd</summary>
+        private static uint UpperWord(bool eFlag, int opcode, int dest, int ft, int fs, int fd, int bc = 0)
+            => (eFlag ? 0x80000000u : 0u)
+             | ((uint)(opcode & 0x3F) << 25)
+             | ((uint)(dest   & 0x0F) << 21)
+             | ((uint)(ft     & 0x1F) << 16)
+             | ((uint)(fs     & 0x1F) << 11)
+             | ((uint)(fd     & 0x1F) <<  6)
+             | ((uint)(bc     & 0x03));
+
+        /// <summary>Upper NOP with optional E-bit: opcode=0x1C, funct(fd)=0x33.</summary>
+        private static uint UpperNop(bool eFlag = false)
+            => UpperWord(eFlag, 0x1C, 0, 0, 0, 0x33);
+
+        /// <summary>Lower NOP (LOI with float 0.0).</summary>
+        private static uint LowerNop() => 0x80000000u;
+
+        // =====================================================================
+
+        [TestMethod]
+        public void VU0State_DefaultMemorySizes()
+        {
+            var s = new VU0State();
+            Assert.AreEqual(4096, s.MicroMem.Length, "MicroMem must be 4 KB");
+            Assert.AreEqual(4096, s.DataMem.Length,  "DataMem  must be 4 KB");
+        }
+
+        [TestMethod]
+        public void VU0State_VF0_IsReadOnly()
+        {
+            var s = new VU0State();
+            s.WriteVF(0, new Vector4(9f, 9f, 9f, 9f), 0xF);
+            Assert.AreEqual(new Vector4(0f, 0f, 0f, 1f), s.VF[0],
+                "vf0 must remain (0,0,0,1) after write attempt");
+        }
+
+        [TestMethod]
+        public void VU0State_VI0_IsReadOnly()
+        {
+            var s = new VU0State();
+            s.WriteVI(0, 0xBEEF);
+            Assert.AreEqual(0, s.VI[0], "vi0 must remain 0 after write attempt");
+        }
+
+        [TestMethod]
+        public void VU0Executor_NopProgram_Stops()
+        {
+            var s = new VU0State();
+            WriteInstr(s.MicroMem, 0, LowerNop(), UpperNop(eFlag: true));
+            s.Start(0);
+            VU0Executor.RunProgram(s);
+            Assert.IsFalse(s.IsRunning, "VU0 must stop after E-bit instruction");
+            Assert.AreEqual(8, s.PC, "PC must advance past the single instruction");
+        }
+
+        [TestMethod]
+        public void VU0Executor_AddInstruction_AddsVectors()
+        {
+            var s = new VU0State();
+            s.VF[2] = new Vector4(1f, 2f, 3f, 4f);
+            s.VF[3] = new Vector4(10f, 20f, 30f, 40f);
+
+            // ADD.xyzw vf1 = vf2 + vf3  (opcode=0x13, dest=0xF, ft=3, fs=2, fd=1), E-bit
+            uint upper = UpperWord(eFlag: true, opcode: 0x13, dest: 0xF, ft: 3, fs: 2, fd: 1);
+            WriteInstr(s.MicroMem, 0, LowerNop(), upper);
+            s.Start(0);
+            VU0Executor.RunProgram(s);
+
+            Assert.AreEqual(11f, s.VF[1].X, 1e-5f, "ADD vf1.x");
+            Assert.AreEqual(22f, s.VF[1].Y, 1e-5f, "ADD vf1.y");
+            Assert.AreEqual(33f, s.VF[1].Z, 1e-5f, "ADD vf1.z");
+            Assert.AreEqual(44f, s.VF[1].W, 1e-5f, "ADD vf1.w");
+        }
+
+        [TestMethod]
+        public void VU0Executor_MulBroadcast_MultipliesComponent()
+        {
+            var s = new VU0State();
+            s.VF[2] = new Vector4(2f, 3f, 4f, 5f);
+            s.VF[3] = new Vector4(100f, 200f, 300f, 400f);
+
+            // MULbc.xyz vf1 = vf2 * vf3.w  (opcode=0x06, bc=3=W, dest=0x7, ft=3, fs=2, fd=1), E-bit
+            uint upper = UpperWord(eFlag: true, opcode: 0x06, dest: 0x7, ft: 3, fs: 2, fd: 1, bc: 3);
+            WriteInstr(s.MicroMem, 0, LowerNop(), upper);
+            s.Start(0);
+            VU0Executor.RunProgram(s);
+
+            Assert.AreEqual(800f,  s.VF[1].X, 1e-2f, "MULbc.x");
+            Assert.AreEqual(1200f, s.VF[1].Y, 1e-2f, "MULbc.y");
+            Assert.AreEqual(1600f, s.VF[1].Z, 1e-2f, "MULbc.z");
+            Assert.AreEqual(0f,    s.VF[1].W, 1e-5f, "MULbc dest=xyz, w unchanged");
+        }
+
+        [TestMethod]
+        public void VU0Executor_ComponentMask_OnlyWritesSelectedComponents()
+        {
+            var s = new VU0State();
+            s.VF[2] = new Vector4(1f, 2f, 3f, 4f);
+            s.VF[3] = new Vector4(10f, 20f, 30f, 40f);
+            s.VF[1] = new Vector4(99f, 99f, 99f, 99f);
+
+            // ADD.xz vf1 = vf2 + vf3  (dest=0x5), E-bit
+            uint upper = UpperWord(eFlag: true, opcode: 0x13, dest: 0x5, ft: 3, fs: 2, fd: 1);
+            WriteInstr(s.MicroMem, 0, LowerNop(), upper);
+            s.Start(0);
+            VU0Executor.RunProgram(s);
+
+            Assert.AreEqual(11f, s.VF[1].X, 1e-5f, "ADD.xz — x written");
+            Assert.AreEqual(99f, s.VF[1].Y, 1e-5f, "ADD.xz — y NOT written");
+            Assert.AreEqual(33f, s.VF[1].Z, 1e-5f, "ADD.xz — z written");
+            Assert.AreEqual(99f, s.VF[1].W, 1e-5f, "ADD.xz — w NOT written");
+        }
+
+        [TestMethod]
+        public void VU0Executor_LOI_StoresFloatImmediate()
+        {
+            var s = new VU0State();
+            float imm = 3.14f;
+            uint immBits = (uint)BitConverter.SingleToInt32Bits(imm) & 0x7FFFFFFFu;
+            uint lowerLoi = 0x80000000u | immBits;
+
+            WriteInstr(s.MicroMem, 0, lowerLoi, UpperNop(eFlag: true));
+            s.Start(0);
+            VU0Executor.RunProgram(s);
+
+            Assert.AreEqual(imm, s.I, 1e-5f, "LOI must store float immediate in I register");
+        }
+
+        [TestMethod]
+        public void VU0Executor_IBEQ_Branch_Taken()
+        {
+            var s = new VU0State();
+            s.VI[1] = 5;
+            s.VI[2] = 5;
+
+            // Instruction at offset 0: IBEQ vi2, vi1, +1  (branch forward 1 instr = +8 bytes)
+            // Lower IBEQ: opcode=0x22, ft=vi2=2, fs=vi1=1, imm11=1
+            uint lowerIbeq = (0x22u << 25) | (2u << 16) | (1u << 11) | 1u;
+            // Instruction at offset 8: SUB vf1=vf2-vf3 (should be skipped)
+            // Instruction at offset 16: ADD vf1=vf2+vf3 (E-bit, should execute)
+            s.VF[2] = new Vector4(1f, 2f, 3f, 4f);
+            s.VF[3] = new Vector4(10f, 20f, 30f, 40f);
+
+            uint upperAdd = UpperWord(eFlag: true, opcode: 0x13, dest: 0xF, ft: 3, fs: 2, fd: 1);
+            uint upperSub = UpperWord(eFlag: false, opcode: 0x17, dest: 0xF, ft: 3, fs: 2, fd: 1);
+
+            WriteInstr(s.MicroMem,  0, lowerIbeq, UpperNop(eFlag: false));
+            WriteInstr(s.MicroMem,  8, LowerNop(), upperSub);  // skipped by branch
+            WriteInstr(s.MicroMem, 16, LowerNop(), upperAdd);  // E-bit
+
+            s.Start(0);
+            VU0Executor.RunProgram(s);
+
+            // Branch taken: jumped over SUB to ADD
+            Assert.AreEqual(11f, s.VF[1].X, 1e-5f, "Branch taken: ADD result x");
+            Assert.AreEqual(22f, s.VF[1].Y, 1e-5f, "Branch taken: ADD result y");
+        }
+
+        [TestMethod]
+        public void VU0Executor_IntegerArith_IADD_ISUB()
+        {
+            var s = new VU0State();
+            s.VI[1] = 10;
+            s.VI[2] = 3;
+
+            // Two-instruction program:
+            // 0: IADD vi3 = vi1 + vi2 (lower special funct=0x30, opcode=0x1B, fd=3,fs=1,ft=2)
+            // 8: ISUB vi4 = vi1 - vi2 (lower special funct=0x31, fd=4,fs=1,ft=2), E-bit on upper
+            uint lowerIadd = (0x1Bu << 25) | (2u << 16) | (1u << 11) | (3u << 6) | 0x30u;
+            uint lowerIsub = (0x1Bu << 25) | (2u << 16) | (1u << 11) | (4u << 6) | 0x31u;
+
+            WriteInstr(s.MicroMem, 0, lowerIadd, UpperNop(eFlag: false));
+            WriteInstr(s.MicroMem, 8, lowerIsub, UpperNop(eFlag: true));
+
+            s.Start(0);
+            VU0Executor.RunProgram(s);
+
+            Assert.AreEqual(13, s.VI[3], "IADD vi3 = 10 + 3");
+            Assert.AreEqual(7,  s.VI[4], "ISUB vi4 = 10 - 3");
+        }
+
+        [TestMethod]
+        public void VU0Executor_MemoryLoadStore_SQ_LQ()
+        {
+            var s = new VU0State();
+            s.VF[2] = new Vector4(1.0f, 2.0f, 3.0f, 4.0f);
+            s.VI[1] = 0; // base address = 0
+
+            // SQ.xyzw vf2, 0(vi1)  — store vf2 to DataMem[0*16]
+            // Lower opcode=0x01 (SQ): ft=vi_base=1, fs=vf_src=2, fd=0, funct=0, dest=0xF
+            uint lowerSq = (0x01u << 25) | (0xFu << 21) | (1u << 16) | (2u << 11) | 0u;
+            // LQ.xyzw vf3, 0(vi1)  — load DataMem[0*16] into vf3
+            // Lower opcode=0x00 (LQ): ft=vf_dest=3, fs=vi_base=1, fd=0, funct=0, dest=0xF
+            uint lowerLq = (0x00u << 25) | (0xFu << 21) | (3u << 16) | (1u << 11) | 0u;
+
+            WriteInstr(s.MicroMem,  0, lowerSq, UpperNop(eFlag: false));
+            WriteInstr(s.MicroMem,  8, lowerLq, UpperNop(eFlag: true));
+
+            s.Start(0);
+            VU0Executor.RunProgram(s);
+
+            Assert.AreEqual(1.0f, s.VF[3].X, 1e-5f, "LQ vf3.x after SQ");
+            Assert.AreEqual(2.0f, s.VF[3].Y, 1e-5f, "LQ vf3.y after SQ");
+            Assert.AreEqual(3.0f, s.VF[3].Z, 1e-5f, "LQ vf3.z after SQ");
+            Assert.AreEqual(4.0f, s.VF[3].W, 1e-5f, "LQ vf3.w after SQ");
+        }
+
+        [TestMethod]
+        public void VU0Executor_ViaVcallms_RunsProgram()
+        {
+            // Simulate VCALLMS triggering VU0 micro-mode via CpuState
+            var cpu = new CodeDesigner.Mips64LE.Common.CPU.CpuState();
+
+            cpu.VU0.VF[2] = new Vector4(5f, 6f, 7f, 8f);
+            cpu.VU0.VF[3] = new Vector4(1f, 2f, 3f, 4f);
+
+            // Write a simple ADD program into VU0 MicroMem
+            uint upper = UpperWord(eFlag: true, opcode: 0x13, dest: 0xF, ft: 3, fs: 2, fd: 1);
+            WriteInstr(cpu.VU0.MicroMem, 0, LowerNop(), upper);
+
+            // Start micro-mode at offset 0 and run
+            cpu.VU0.Start(0);
+            VU0Executor.RunProgram(cpu.VU0);
+
+            Assert.IsFalse(cpu.VU0.IsRunning, "VU0 must stop after E-bit");
+            Assert.AreEqual(6f,  cpu.VU0.VF[1].X, 1e-5f, "VCALLMS result x");
+            Assert.AreEqual(8f,  cpu.VU0.VF[1].Y, 1e-5f, "VCALLMS result y");
+            Assert.AreEqual(10f, cpu.VU0.VF[1].Z, 1e-5f, "VCALLMS result z");
+            Assert.AreEqual(12f, cpu.VU0.VF[1].W, 1e-5f, "VCALLMS result w");
+        }
+
+        [TestMethod]
+        public void VU0Executor_Vif0MicroStart_TriggersExecution()
+        {
+            // Verify that PS2Emulator wires VIF0 MicroStart to run VU0 microprogram.
+            var emu = new PS2Emulator();
+
+            emu.Cpu.VU0.VF[2] = new Vector4(3f, 6f, 9f, 12f);
+            emu.Cpu.VU0.VF[3] = new Vector4(1f, 2f, 3f,  4f);
+
+            // Write a MUL program into VU0 MicroMem (entry at qword 0 = byte 0)
+            uint upper = UpperWord(eFlag: true, opcode: 0x15, dest: 0xF, ft: 3, fs: 2, fd: 1);
+            WriteInstr(emu.Cpu.VU0.MicroMem, 0, LowerNop(), upper);
+
+            // Send VIF MSCAL packet: cmd=0x14, IMMED=0 (qword address 0)
+            // VIF packet format: bits[31:24]=cmd, bits[23:16]=NUM, bits[15:0]=IMMED
+            emu.Bus.Vif0.Feed(new ReadOnlySpan<uint>(new uint[] { 0x14000000u }));
+
+            Assert.IsFalse(emu.Cpu.VU0.IsRunning, "VU0 must stop after E-bit via VIF0 MicroStart");
+            Assert.AreEqual(3f,  emu.Cpu.VU0.VF[1].X, 1e-5f, "MUL vf1.x via VIF0");
+            Assert.AreEqual(12f, emu.Cpu.VU0.VF[1].Y, 1e-5f, "MUL vf1.y via VIF0");
+            Assert.AreEqual(27f, emu.Cpu.VU0.VF[1].Z, 1e-5f, "MUL vf1.z via VIF0");
+            Assert.AreEqual(48f, emu.Cpu.VU0.VF[1].W, 1e-5f, "MUL vf1.w via VIF0");
         }
     }
 }
