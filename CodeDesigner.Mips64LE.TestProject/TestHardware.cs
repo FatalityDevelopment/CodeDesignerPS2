@@ -1788,6 +1788,270 @@ namespace CodeDesigner.Mips64LE.TestProject
                 "PRIM must be written via VIF1 DIRECT → GIF → GS");
         }
 
+        // ── GS rasterisation tests ────────────────────────────────────────────
+
+        // Helper: set up a minimal PSMCT32 framebuffer context, wide-open scissor,
+        // Z test disabled.  Returns the GS instance ready for drawing.
+        private static GS MakeGS32(uint fbPage = 0, uint fbWidth = 1)
+        {
+            var gs = new GS();
+            // FRAME_1: FBP=fbPage (bits[8:0]), FBW=fbWidth (bits[21:16]), PSM=0 (PSMCT32)
+            ulong frame = fbPage | ((ulong)fbWidth << 16);
+            gs.WriteInternal(GS.REG_FRAME_1, frame);
+            // SCISSOR_1: SCAX1=2047, SCAY1=2047 (full screen)
+            ulong sc = ((ulong)2047 << 48) | ((ulong)2047 << 16);
+            gs.WriteInternal(GS.REG_SCISSOR_1, sc);
+            // TEST_1: everything off (ZTE=0, ATE=0)
+            gs.WriteInternal(GS.REG_TEST_1, 0ul);
+            return gs;
+        }
+
+        // Compute the PSMCT32 VRAM byte address for pixel (x,y) at page fbp, width fbw.
+        private static uint Addr32(int x, int y, uint fbp = 0, uint fbw = 1)
+        {
+            int[,] bt = {
+                {  0,  1,  4,  5, 16, 17, 20, 21 },
+                {  2,  3,  6,  7, 18, 19, 22, 23 },
+                {  8,  9, 12, 13, 24, 25, 28, 29 },
+                { 10, 11, 14, 15, 26, 27, 30, 31 }
+            };
+            int[,] ct = {
+                {  0,  1,  4,  5,  8,  9, 12, 13 },
+                {  2,  3,  6,  7, 10, 11, 14, 15 },
+                { 16, 17, 20, 21, 24, 25, 28, 29 },
+                { 18, 19, 22, 23, 26, 27, 30, 31 },
+                { 32, 33, 36, 37, 40, 41, 44, 45 },
+                { 34, 35, 38, 39, 42, 43, 46, 47 },
+                { 48, 49, 52, 53, 56, 57, 60, 61 },
+                { 50, 51, 54, 55, 58, 59, 62, 63 }
+            };
+            uint pageX = (uint)x / 64u, pageY = (uint)y / 32u;
+            uint pageNum = fbp + pageY * fbw + pageX;
+            int  px = x % 64, py = y % 32;
+            uint blockNum = pageNum * 32u + (uint)bt[py / 8, px / 8];
+            int  cx = px % 8, cy = py % 8;
+            return blockNum * 256u + (uint)(ct[cy, cx] * 4);
+        }
+
+        // XYZ2 register value for pixel coords (px, py) and 32-bit Z.
+        private static ulong XYZ2(int px, int py, uint z = 0)
+            => (ulong)(uint)(px << 4) | ((ulong)(uint)(py << 4) << 16) | ((ulong)z << 32);
+
+        [TestMethod]
+        public void GS_WritePixel_PSMCT32_ReadBack()
+        {
+            var gs = new GS();
+            uint addr  = Addr32(0, 0);
+            uint color = 0xAABBCCDDu;
+            gs.WriteVram32(addr, color);
+            Assert.AreEqual(color, gs.ReadVram32(addr), "VRAM round-trip at pixel (0,0)");
+        }
+
+        [TestMethod]
+        public void GS_Point_DrawsToFramebuffer()
+        {
+            var gs = MakeGS32();
+            // PRIM = POINT (0)
+            gs.WriteInternal(GS.REG_PRIM, 0ul);
+            // Color: R=0xFF, G=0, B=0, A=0x80
+            gs.WriteInternal(GS.REG_RGBAQ, 0x80_00_00_FFul);
+            // XYZ2 at pixel (0,0), Z=0 → kicks POINT
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0, 0));
+            Assert.AreEqual(0x800000FFu, gs.ReadVram32(Addr32(0, 0)), "POINT must draw pixel (0,0)");
+        }
+
+        [TestMethod]
+        public void GS_Sprite_DrawsToFramebuffer()
+        {
+            var gs = MakeGS32();
+            gs.WriteInternal(GS.REG_PRIM, 6ul); // SPRITE
+            gs.WriteInternal(GS.REG_RGBAQ, 0x80_00_FF_00ul); // G=0xFF
+            // v0 at pixel (0,0), v1 at pixel (4,4) → draws pixels (0..3, 0..3)
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0, 0));
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(4, 4)); // kicks sprite
+            // Pixel (0,0) and (3,3) should be written
+            Assert.AreEqual(0x8000FF00u, gs.ReadVram32(Addr32(0, 0)), "SPRITE must fill pixel (0,0)");
+            Assert.AreEqual(0x8000FF00u, gs.ReadVram32(Addr32(3, 3)), "SPRITE must fill pixel (3,3)");
+            // Pixel (4,4) should NOT be written (exclusive end)
+            Assert.AreEqual(0u, gs.ReadVram32(Addr32(4, 4)), "SPRITE must not fill pixel (4,4)");
+        }
+
+        [TestMethod]
+        public void GS_Triangle_DrawsToFramebuffer()
+        {
+            var gs = MakeGS32();
+            gs.WriteInternal(GS.REG_PRIM, 3ul); // TRIANGLE, flat shading
+            gs.WriteInternal(GS.REG_RGBAQ, 0xFF_00_00_FFul); // blue = B=0xFF
+
+            // Triangle: (0,0), (16,0), (0,16) — pixel (1,1) is inside
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0,  0));
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(16, 0));
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0,  16)); // kicks triangle
+
+            uint colorAtCenter = gs.ReadVram32(Addr32(1, 1));
+            Assert.AreEqual(0xFF0000FFu, colorAtCenter,
+                "TRIANGLE must rasterise pixel (1,1) inside the triangle");
+        }
+
+        [TestMethod]
+        public void GS_ZBuffer_RejectsOlderDepth()
+        {
+            var gs = new GS();
+            // FRAME_1: fbp=0, fbw=1, PSMCT32
+            gs.WriteInternal(GS.REG_FRAME_1, 1ul << 16);
+            // ZBUF_1: zbp=1, PSM=PSMZ32, ZMSK=0
+            gs.WriteInternal(GS.REG_ZBUF_1, 1ul | ((ulong)GS.PSM_PSMZ32 << 24));
+            // SCISSOR_1: wide open
+            gs.WriteInternal(GS.REG_SCISSOR_1, ((ulong)2047 << 48) | ((ulong)2047 << 16));
+            // TEST_1: ZTE=1 (bit16), ZTST=GEQUAL (2 << 17)
+            gs.WriteInternal(GS.REG_TEST_1, (1ul << 16) | (2ul << 17));
+            gs.WriteInternal(GS.REG_PRIM, 0ul); // POINT
+
+            uint red  = 0xFF0000FFu;
+            uint blue = 0x00FF00FFu;
+            uint green= 0x0000FFFFu;
+
+            // Draw Z=200 (red) → VRAM Z starts at 0, 200>=0 passes
+            gs.WriteInternal(GS.REG_RGBAQ, red);
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0, 0, 200));
+            Assert.AreEqual(red, gs.ReadVram32(Addr32(0, 0)), "First draw (Z=200) must pass");
+
+            // Draw Z=100 (blue) → 100 < 200, GEQUAL fails → pixel rejected
+            gs.WriteInternal(GS.REG_RGBAQ, blue);
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0, 0, 100));
+            Assert.AreEqual(red, gs.ReadVram32(Addr32(0, 0)), "Second draw (Z=100) must be rejected");
+
+            // Draw Z=200 again (green) → 200 >= 200, GEQUAL passes → overwrites
+            gs.WriteInternal(GS.REG_RGBAQ, green);
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0, 0, 200));
+            Assert.AreEqual(green, gs.ReadVram32(Addr32(0, 0)), "Third draw (Z=200 again) must pass via GEQUAL");
+
+            // Draw Z=300 (red) → 300 >= 200, passes → overwrites
+            gs.WriteInternal(GS.REG_RGBAQ, red);
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0, 0, 300));
+            Assert.AreEqual(red, gs.ReadVram32(Addr32(0, 0)), "Fourth draw (Z=300) must pass");
+        }
+
+        [TestMethod]
+        public void GS_ScissorTest_ClipsPixels()
+        {
+            var gs = new GS();
+            gs.WriteInternal(GS.REG_FRAME_1, 1ul << 16); // fbw=1, PSMCT32
+            gs.WriteInternal(GS.REG_TEST_1, 0ul);        // no Z test
+            // SCISSOR_1: x=[0..3], y=[0..3]
+            ulong sc = 0ul | (3ul << 16) | (0ul << 32) | (3ul << 48);
+            gs.WriteInternal(GS.REG_SCISSOR_1, sc);
+            gs.WriteInternal(GS.REG_PRIM, 6ul); // SPRITE
+            gs.WriteInternal(GS.REG_RGBAQ, 0xFF_FF_FF_FFul);
+
+            // Draw sprite (0,0)→(8,8) — pixels 0..7 in each axis
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0, 0));
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(8, 8));
+
+            // Pixels inside scissor should be written
+            Assert.AreNotEqual(0u, gs.ReadVram32(Addr32(0, 0)), "Pixel (0,0) inside scissor must be drawn");
+            Assert.AreNotEqual(0u, gs.ReadVram32(Addr32(3, 3)), "Pixel (3,3) inside scissor must be drawn");
+            // Pixels outside scissor must be zero
+            Assert.AreEqual(0u, gs.ReadVram32(Addr32(4, 0)), "Pixel (4,0) outside scissor must NOT be drawn");
+            Assert.AreEqual(0u, gs.ReadVram32(Addr32(0, 4)), "Pixel (0,4) outside scissor must NOT be drawn");
+        }
+
+        [TestMethod]
+        public void GS_TRXDIR_HostToLocal_HWREG_WritesVRAM()
+        {
+            var gs = new GS();
+            // Use destination page 5, FBW=1, PSMCT32
+            // BITBLTBUF: DBP at bits[45:32], DBW at bits[53:48], DPSM at bits[61:56]
+            uint dbp = 5 * 32; // page 5 in block units
+            ulong blt = ((ulong)dbp << 32) | (1ul << 48) | ((ulong)GS.PSM_PSMCT32 << 56);
+            gs.WriteInternal(GS.REG_BITBLTBUF, blt);
+            // TRXPOS: DSAX=0, DSAY=0 (bits [42:32] and [58:48])
+            gs.WriteInternal(GS.REG_TRXPOS, 0ul);
+            // TRXREG: RRW=2, RRH=1 (2 pixels wide, 1 pixel tall)
+            gs.WriteInternal(GS.REG_TRXREG, 2ul | (1ul << 16));
+            // TRXDIR=0 → HOST->LOCAL
+            gs.WriteInternal(GS.REG_TRXDIR, 0ul);
+            // HWREG: two PSMCT32 pixels packed into 64 bits
+            uint pix0 = 0xAABBCCDDu;
+            uint pix1 = 0x11223344u;
+            gs.WriteInternal(GS.REG_HWREG, pix0 | ((ulong)pix1 << 32));
+
+            // Verify pixels at page 5
+            uint addr0 = Addr32(0, 0, fbp: 5, fbw: 1);
+            uint addr1 = Addr32(1, 0, fbp: 5, fbw: 1);
+            Assert.AreEqual(pix0, gs.ReadVram32(addr0), "HWREG pixel 0 must be written to VRAM");
+            Assert.AreEqual(pix1, gs.ReadVram32(addr1), "HWREG pixel 1 must be written to VRAM");
+        }
+
+        [TestMethod]
+        public void GS_TRXDIR_LocalToLocal_CopiesVRAM()
+        {
+            var gs = new GS();
+            // Write source pixels directly to VRAM at page 2
+            uint srcAddr0 = Addr32(0, 0, fbp: 2, fbw: 1);
+            uint srcAddr1 = Addr32(1, 0, fbp: 2, fbw: 1);
+            gs.WriteVram32(srcAddr0, 0xDEADBEEFu);
+            gs.WriteVram32(srcAddr1, 0xCAFEBABEu);
+
+            // BITBLTBUF: SBP=page2*32 (blocks), SBW=1, SPSM=0; DBP=page3*32, DBW=1, DPSM=0
+            uint sbp = 2 * 32u, dbp = 3 * 32u;
+            ulong blt = (ulong)sbp | (1ul << 16) | ((ulong)GS.PSM_PSMCT32 << 24)
+                      | ((ulong)dbp << 32) | (1ul << 48) | ((ulong)GS.PSM_PSMCT32 << 56);
+            gs.WriteInternal(GS.REG_BITBLTBUF, blt);
+            // TRXPOS: SSAX=0,SSAY=0, DSAX=0,DSAY=0
+            gs.WriteInternal(GS.REG_TRXPOS, 0ul);
+            // TRXREG: RRW=2, RRH=1
+            gs.WriteInternal(GS.REG_TRXREG, 2ul | (1ul << 16));
+            // TRXDIR=2 → LOCAL->LOCAL blit
+            gs.WriteInternal(GS.REG_TRXDIR, 2ul);
+
+            uint dstAddr0 = Addr32(0, 0, fbp: 3, fbw: 1);
+            uint dstAddr1 = Addr32(1, 0, fbp: 3, fbw: 1);
+            Assert.AreEqual(0xDEADBEEFu, gs.ReadVram32(dstAddr0), "L2L blit pixel 0 must be copied");
+            Assert.AreEqual(0xCAFEBABEu, gs.ReadVram32(dstAddr1), "L2L blit pixel 1 must be copied");
+        }
+
+        [TestMethod]
+        public void GS_TextureMapping_SampleFromVRAM()
+        {
+            var gs = new GS();
+            // Framebuffer at page 0, texture at page 6
+            gs.WriteInternal(GS.REG_FRAME_1, 1ul << 16);           // FBW=1, PSMCT32
+            gs.WriteInternal(GS.REG_SCISSOR_1, ((ulong)2047 << 48) | ((ulong)2047 << 16));
+            gs.WriteInternal(GS.REG_TEST_1, 0ul);
+
+            // Write a known texel at page 6, pixel (0,0)
+            uint texColor = 0x7F_40_80_C0u;
+            gs.WriteVram32(Addr32(0, 0, fbp: 6, fbw: 1), texColor);
+
+            // TEX0_1: TBP0 = page6 * 32 (block units), TBW=1, PSM=PSMCT32
+            //         TW=2 (4px wide), TH=2 (4px tall), TFX=DECAL(1)
+            uint tbp0 = 6 * 32u;
+            ulong tex0 = (ulong)tbp0                // bits[13:0]
+                       | (1ul << 14)                // TBW=1 bits[19:14]
+                       | ((ulong)GS.PSM_PSMCT32 << 20) // PSM bits[25:20]
+                       | (2ul << 26)                // TW=2 bits[29:26]
+                       | (2ul << 30)                // TH=2 bits[33:30]
+                       | (1ul << 35);               // TFX=DECAL bits[36:35]
+            gs.WriteInternal(GS.REG_TEX0_1, tex0);
+
+            // PRIM: SPRITE (6), TME=1 (bit4), FST=1 (bit8) — UV coordinates
+            gs.WriteInternal(GS.REG_PRIM, 6ul | (1ul << 4) | (1ul << 8));
+            gs.WriteInternal(GS.REG_RGBAQ, 0xFF_FF_FF_FFul); // white base (overridden by DECAL)
+
+            // v0: position (5,5), UV=(0<<4, 0<<4) = texel (0,0)
+            gs.WriteInternal(GS.REG_UV, 0ul); // U=0, V=0
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(5, 5));
+
+            // v1: position (6,6), UV=(1<<4, 1<<4) = texel (1,1)
+            gs.WriteInternal(GS.REG_UV, (1ul << 4) | ((1ul << 4) << 16)); // U=16(=1px), V=16
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(6, 6)); // kicks sprite
+
+            // The 1x1 sprite at pixel (5,5) samples texture (0,0) — DECAL returns texColor
+            Assert.AreEqual(texColor, gs.ReadVram32(Addr32(5, 5)),
+                "SPRITE with DECAL texture must output the sampled texel color");
+        }
+
         // ── Private helpers ───────────────────────────────────────────────────
 
         private static uint ReadU32(byte[] mem, int offset)

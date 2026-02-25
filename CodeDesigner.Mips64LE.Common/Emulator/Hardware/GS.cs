@@ -3,94 +3,53 @@ using System;
 namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
 {
     /// <summary>
-    /// Minimal emulation of the PS2 Graphics Synthesizer (GS).
+    /// PS2 Graphics Synthesizer (GS) – register bank + primitive rasteriser.
     ///
-    /// The GS receives rendering commands from the GIF via GIFtag data packets and
-    /// maintains a bank of 128 internal registers (each 64-bit) plus a set of
-    /// privileged configuration registers at physical address 0x12000000.
+    /// Extends the minimal register-bank implementation with:
+    ///   • 4 MB VRAM with PS2 block-based pixel addressing
+    ///   • Primitive rasterisation (POINT, LINE, LINESTRIP, TRIANGLE, TRISTRIP, TRIFAN, SPRITE)
+    ///   • Per-context scissor / alpha / Z tests and framebuffer write-mask
+    ///   • Nearest-neighbour texture sampling from VRAM
+    ///   • HOST→LOCAL and LOCAL→LOCAL VRAM transfers via TRXDIR / HWREG
     ///
-    /// Internal registers (address 0x00–0x7F) are written by the GIF in
-    /// PACKED, REGLIST, or IMAGE transfer modes.  Key ones include:
-    ///   0x00 PRIM      — primitive type and draw settings
-    ///   0x01 RGBAQ     — vertex colour (R/G/B/A/Q)
-    ///   0x02 ST        — S/T texture coordinates (float)
-    ///   0x03 UV        — U/V texture coordinates (fixed)
-    ///   0x04 XYZF2     — vertex coordinate + fog (primitive kick)
-    ///   0x05 XYZ2      — vertex coordinate (primitive kick, no fog)
-    ///   0x06 TEX0_1    — texture buffer base/settings context 1
-    ///   0x07 TEX0_2    — texture buffer base/settings context 2
-    ///   0x3F TEXFLUSH  — flush texture cache
-    ///   0x54 HWREG     — local memory write port (IMAGE mode)
-    ///   0x5C SCISSOR_1 — scissoring region context 1
-    ///   0x5D SCISSOR_2 — scissoring region context 2
-    ///   0x63 TEST_1    — pixel test settings context 1
-    ///   0x64 TEST_2    — pixel test settings context 2
-    ///   0x68 FRAME_1   — framebuffer settings context 1
-    ///   0x69 FRAME_2   — framebuffer settings context 2
-    ///   0x6A ZBUF_1    — Z-buffer settings context 1
-    ///   0x6B ZBUF_2    — Z-buffer settings context 2
-    ///   0x6C BITBLTBUF — texture transfer source/dest addresses
-    ///   0x6D TRXPOS    — texture transfer start position
-    ///   0x6E TRXREG    — texture transfer region size
-    ///   0x6F TRXDIR    — texture transfer direction (triggers start)
-    ///
-    /// Privileged registers (physical 0x12000000 + offset) control display output:
-    ///   +0x000  PMODE    — display circuit mode
-    ///   +0x010  SMODE1   — sync mode 1 (clock)
-    ///   +0x020  SMODE2   — sync mode 2 (interlace/progressive)
-    ///   +0x030  SRFSH    — DRAM refresh
-    ///   +0x040  SYNCH1   — sync horizontal 1
-    ///   +0x050  SYNCH2   — sync horizontal 2
-    ///   +0x060  SYNCV    — sync vertical
-    ///   +0x070  DISPFB1  — display framebuffer 1
-    ///   +0x080  DISPLAY1 — display 1 characteristics
-    ///   +0x090  DISPFB2  — display framebuffer 2
-    ///   +0x0A0  DISPLAY2 — display 2 characteristics
-    ///   +0x0B0  EXTBUF   — external input buffer
-    ///   +0x0C0  EXTDATA  — external input data
-    ///   +0x0D0  EXTWRITE — external input write
-    ///   +0x0E0  BGCOLOR  — background colour
-    ///   +0x1000 CSR      — GS status/control
-    ///   +0x1010 IMR      — interrupt mask
-    ///   +0x1040 BUSDIR   — bus direction
-    ///   +0x1080 SIGLBLID — signal / label ID
-    ///
-    /// Reference: PS2 EE User's Manual §7; PCSX2 pcsx2/GS/GSState.cpp.
+    /// Reference: PS2 EE User's Manual §7; PCSX2 pcsx2/GS/GSLocalMemory.cpp.
     /// </summary>
     public sealed class GS
     {
         // ── Internal register addresses ────────────────────────────────────────
-        public const byte REG_PRIM      = 0x00;
-        public const byte REG_RGBAQ     = 0x01;
-        public const byte REG_ST        = 0x02;
-        public const byte REG_UV        = 0x03;
-        public const byte REG_XYZF2     = 0x04;
-        public const byte REG_XYZ2      = 0x05;
-        public const byte REG_TEX0_1    = 0x06;
-        public const byte REG_TEX0_2    = 0x07;
-        public const byte REG_CLAMP_1   = 0x08;
-        public const byte REG_CLAMP_2   = 0x09;
-        public const byte REG_FOG       = 0x0A;
-        public const byte REG_XYZF3     = 0x0C;
-        public const byte REG_XYZ3      = 0x0D;
-        public const byte REG_AD        = 0x0E;  // A+D: address embedded in data
-        public const byte REG_NOP       = 0x0F;
-        public const byte REG_TEXFLUSH  = 0x3F;
-        public const byte REG_HWREG     = 0x54;  // local memory write port (IMAGE mode)
-        public const byte REG_SCISSOR_1 = 0x5C;
-        public const byte REG_SCISSOR_2 = 0x5D;
-        public const byte REG_ALPHA_1   = 0x5E;
-        public const byte REG_ALPHA_2   = 0x5F;
-        public const byte REG_TEST_1    = 0x63;
-        public const byte REG_TEST_2    = 0x64;
-        public const byte REG_FRAME_1   = 0x68;
-        public const byte REG_FRAME_2   = 0x69;
-        public const byte REG_ZBUF_1    = 0x6A;
-        public const byte REG_ZBUF_2    = 0x6B;
-        public const byte REG_BITBLTBUF = 0x6C;
-        public const byte REG_TRXPOS    = 0x6D;
-        public const byte REG_TRXREG    = 0x6E;
-        public const byte REG_TRXDIR    = 0x6F;
+        public const byte REG_PRIM       = 0x00;
+        public const byte REG_RGBAQ      = 0x01;
+        public const byte REG_ST         = 0x02;
+        public const byte REG_UV         = 0x03;
+        public const byte REG_XYZF2      = 0x04;
+        public const byte REG_XYZ2       = 0x05;
+        public const byte REG_TEX0_1     = 0x06;
+        public const byte REG_TEX0_2     = 0x07;
+        public const byte REG_CLAMP_1    = 0x08;
+        public const byte REG_CLAMP_2    = 0x09;
+        public const byte REG_FOG        = 0x0A;
+        public const byte REG_XYZF3      = 0x0C;
+        public const byte REG_XYZ3       = 0x0D;
+        public const byte REG_AD         = 0x0E;
+        public const byte REG_NOP        = 0x0F;
+        public const byte REG_XYOFFSET_1 = 0x18;
+        public const byte REG_XYOFFSET_2 = 0x19;
+        public const byte REG_TEXFLUSH   = 0x3F;
+        public const byte REG_HWREG      = 0x54;
+        public const byte REG_SCISSOR_1  = 0x5C;
+        public const byte REG_SCISSOR_2  = 0x5D;
+        public const byte REG_ALPHA_1    = 0x5E;
+        public const byte REG_ALPHA_2    = 0x5F;
+        public const byte REG_TEST_1     = 0x63;
+        public const byte REG_TEST_2     = 0x64;
+        public const byte REG_FRAME_1    = 0x68;
+        public const byte REG_FRAME_2    = 0x69;
+        public const byte REG_ZBUF_1     = 0x6A;
+        public const byte REG_ZBUF_2     = 0x6B;
+        public const byte REG_BITBLTBUF  = 0x6C;
+        public const byte REG_TRXPOS     = 0x6D;
+        public const byte REG_TRXREG     = 0x6E;
+        public const byte REG_TRXDIR     = 0x6F;
 
         // ── Privileged register offsets (from physical 0x12000000) ─────────────
         public const uint PRIV_PMODE    = 0x000u;
@@ -113,33 +72,973 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         public const uint PRIV_BUSDIR   = 0x1040u;
         public const uint PRIV_SIGLBLID = 0x1080u;
 
-        // ── Internal register storage (128 × 64-bit) ──────────────────────────
+        // ── Pixel storage format (PSM) constants ──────────────────────────────
+        public const int PSM_PSMCT32  = 0x00;
+        public const int PSM_PSMCT24  = 0x01;
+        public const int PSM_PSMCT16  = 0x02;
+        public const int PSM_PSMCT16S = 0x0A;
+        public const int PSM_PSMT8    = 0x13;
+        public const int PSM_PSMT4    = 0x14;
+        public const int PSM_PSMZ32   = 0x24;
+        public const int PSM_PSMZ16   = 0x26;
+        public const int PSM_PSMZ16S  = 0x27;
+
+        // ── Internal register storage (128 x 64-bit) ──────────────────────────
         private readonly ulong[] _internalRegs = new ulong[128];
 
         // ── Privileged register storage ────────────────────────────────────────
-        private ulong _pmode;
-        private ulong _smode1;
-        private ulong _smode2;
-        private ulong _srfsh;
-        private ulong _synch1;
-        private ulong _synch2;
-        private ulong _syncv;
-        private ulong _dispfb1;
-        private ulong _display1;
-        private ulong _dispfb2;
-        private ulong _display2;
-        private ulong _extbuf;
-        private ulong _extdata;
-        private ulong _extwrite;
-        private ulong _bgcolor;
-        private ulong _csr;
-        private ulong _imr;
-        private ulong _busdir;
-        private ulong _siglblid;
+        private ulong _pmode, _smode1, _smode2, _srfsh;
+        private ulong _synch1, _synch2, _syncv;
+        private ulong _dispfb1, _display1, _dispfb2, _display2;
+        private ulong _extbuf, _extdata, _extwrite, _bgcolor;
+        private ulong _csr, _imr, _busdir, _siglblid;
 
-        // ── Internal register access ──────────────────────────────────────────
+        // =======================================================================
+        #region VRAM
+        // =======================================================================
 
-        /// <summary>Read a 64-bit internal GS register by its address (0x00–0x7F).</summary>
+        private readonly byte[] _vram = new byte[4 * 1024 * 1024];
+
+        /// <summary>Read a 32-bit value from a raw VRAM byte address (little-endian).</summary>
+        public uint ReadVram32(uint addr)
+        {
+            addr &= 0x3FFFFFu;
+            return _vram[addr]
+                 | ((uint)_vram[addr + 1] << 8)
+                 | ((uint)_vram[addr + 2] << 16)
+                 | ((uint)_vram[addr + 3] << 24);
+        }
+
+        /// <summary>Write a 32-bit value to a raw VRAM byte address (little-endian).</summary>
+        public void WriteVram32(uint addr, uint value)
+        {
+            addr &= 0x3FFFFFu;
+            _vram[addr]     = (byte)value;
+            _vram[addr + 1] = (byte)(value >> 8);
+            _vram[addr + 2] = (byte)(value >> 16);
+            _vram[addr + 3] = (byte)(value >> 24);
+        }
+
+        private ushort ReadVram16(uint addr)
+        {
+            addr &= 0x3FFFFFu;
+            return (ushort)(_vram[addr] | (_vram[addr + 1] << 8));
+        }
+
+        private void WriteVram16(uint addr, ushort value)
+        {
+            addr &= 0x3FFFFFu;
+            _vram[addr]     = (byte)value;
+            _vram[addr + 1] = (byte)(value >> 8);
+        }
+
+        private byte ReadVram8(uint addr)  => _vram[addr & 0x3FFFFFu];
+        private void WriteVram8(uint addr, byte value) => _vram[addr & 0x3FFFFFu] = value;
+
+        #endregion
+
+        // =======================================================================
+        #region Pixel Addressing
+        // =======================================================================
+
+        // ── PSMCT32 / PSMZ32 ──────────────────────────────────────────────────
+        // Page=64x32 px, Block=8x8 px, 32 blocks/page, 256 bytes/block
+        private static readonly int[,] s_blockTable32 = {
+            {  0,  1,  4,  5, 16, 17, 20, 21 },
+            {  2,  3,  6,  7, 18, 19, 22, 23 },
+            {  8,  9, 12, 13, 24, 25, 28, 29 },
+            { 10, 11, 14, 15, 26, 27, 30, 31 }
+        };
+        private static readonly int[,] s_columnTable32 = {
+            {  0,  1,  4,  5,  8,  9, 12, 13 },
+            {  2,  3,  6,  7, 10, 11, 14, 15 },
+            { 16, 17, 20, 21, 24, 25, 28, 29 },
+            { 18, 19, 22, 23, 26, 27, 30, 31 },
+            { 32, 33, 36, 37, 40, 41, 44, 45 },
+            { 34, 35, 38, 39, 42, 43, 46, 47 },
+            { 48, 49, 52, 53, 56, 57, 60, 61 },
+            { 50, 51, 54, 55, 58, 59, 62, 63 }
+        };
+
+        // ── PSMCT16 / PSMCT16S / PSMZ16 / PSMZ16S ────────────────────────────
+        // Page=64x64 px, Block=16x8 px, 32 blocks/page, 256 bytes/block
+        private static readonly int[,] s_blockTable16 = {
+            {  0,  2,  8, 10 },
+            {  1,  3,  9, 11 },
+            {  4,  6, 12, 14 },
+            {  5,  7, 13, 15 },
+            { 16, 18, 24, 26 },
+            { 17, 19, 25, 27 },
+            { 20, 22, 28, 30 },
+            { 21, 23, 29, 31 }
+        };
+        // Columns 8-15 = columns 0-7 + 64 (addresses the second 128-byte bank within a block)
+        private static readonly int[,] s_columnTable16 = {
+            {  0,  1,  4,  5,  8,  9, 12, 13, 64, 65, 68, 69, 72, 73, 76, 77 },
+            {  2,  3,  6,  7, 10, 11, 14, 15, 66, 67, 70, 71, 74, 75, 78, 79 },
+            { 16, 17, 20, 21, 24, 25, 28, 29, 80, 81, 84, 85, 88, 89, 92, 93 },
+            { 18, 19, 22, 23, 26, 27, 30, 31, 82, 83, 86, 87, 90, 91, 94, 95 },
+            { 32, 33, 36, 37, 40, 41, 44, 45, 96, 97,100,101,104,105,108,109 },
+            { 34, 35, 38, 39, 42, 43, 46, 47, 98, 99,102,103,106,107,110,111 },
+            { 48, 49, 52, 53, 56, 57, 60, 61,112,113,116,117,120,121,124,125 },
+            { 50, 51, 54, 55, 58, 59, 62, 63,114,115,118,119,122,123,126,127 }
+        };
+
+        // ── PSMT8 ─────────────────────────────────────────────────────────────
+        // Page=128x64 px, Block=16x16 px, 32 blocks/page, 256 bytes/block
+        private static readonly int[,] s_blockTable8 = {
+            {  0,  1,  4,  5, 16, 17, 20, 21 },
+            {  2,  3,  6,  7, 18, 19, 22, 23 },
+            {  8,  9, 12, 13, 24, 25, 28, 29 },
+            { 10, 11, 14, 15, 26, 27, 30, 31 }
+        };
+        // cx>=8 adds 64; cy>=8 adds 128 — keeps all 256 column addresses unique per block
+        private static readonly int[,] s_columnTable8 = BuildColumnTable8();
+        private static int[,] BuildColumnTable8()
+        {
+            int[,] b = {
+                {  0,  1,  4,  5,  8,  9, 12, 13 },
+                {  2,  3,  6,  7, 10, 11, 14, 15 },
+                { 16, 17, 20, 21, 24, 25, 28, 29 },
+                { 18, 19, 22, 23, 26, 27, 30, 31 },
+                { 32, 33, 36, 37, 40, 41, 44, 45 },
+                { 34, 35, 38, 39, 42, 43, 46, 47 },
+                { 48, 49, 52, 53, 56, 57, 60, 61 },
+                { 50, 51, 54, 55, 58, 59, 62, 63 }
+            };
+            var t = new int[16, 16];
+            for (int cy = 0; cy < 16; cy++)
+                for (int cx = 0; cx < 16; cx++)
+                    t[cy, cx] = b[cy & 7, cx & 7] + (cy >= 8 ? 128 : 0) + (cx >= 8 ? 64 : 0);
+            return t;
+        }
+
+        // ── PSMT4 ─────────────────────────────────────────────────────────────
+        // Page=128x128 px, Block=32x16 px, 32 blocks/page, 256 bytes/block
+        private static readonly int[,] s_blockTable4 = {
+            {  0,  2,  8, 10 },
+            {  1,  3,  9, 11 },
+            {  4,  6, 12, 14 },
+            {  5,  7, 13, 15 },
+            { 16, 18, 24, 26 },
+            { 17, 19, 25, 27 },
+            { 20, 22, 28, 30 },
+            { 21, 23, 29, 31 }
+        };
+
+        private uint PixelAddress32(int x, int y, uint fbp, uint fbw)
+        {
+            uint pageX   = (uint)x / 64u;
+            uint pageY   = (uint)y / 32u;
+            uint pageNum = fbp + pageY * fbw + pageX;
+            int  px = x % 64, py = y % 32;
+            int  bkX = px / 8, bkY = py / 8;
+            uint blockNum = pageNum * 32u + (uint)s_blockTable32[bkY, bkX];
+            int  cx = px % 8, cy = py % 8;
+            return blockNum * 256u + (uint)(s_columnTable32[cy, cx] * 4);
+        }
+
+        private uint PixelAddress16(int x, int y, uint fbp, uint fbw)
+        {
+            uint pageX   = (uint)x / 64u;
+            uint pageY   = (uint)y / 64u;
+            uint pageNum = fbp + pageY * fbw + pageX;
+            int  px = x % 64, py = y % 64;
+            int  bkX = px / 16, bkY = py / 8;
+            uint blockNum = pageNum * 32u + (uint)s_blockTable16[bkY, bkX];
+            int  cx = px % 16, cy = py % 8;
+            return blockNum * 256u + (uint)(s_columnTable16[cy, cx] * 2);
+        }
+
+        private uint PixelAddress8(int x, int y, uint fbp, uint fbw)
+        {
+            uint ppr     = Math.Max(1u, fbw / 2u);
+            uint pageX   = (uint)x / 128u;
+            uint pageY   = (uint)y / 64u;
+            uint pageNum = fbp + pageY * ppr + pageX;
+            int  px = x % 128, py = y % 64;
+            int  bkX = px / 16, bkY = py / 16;
+            uint blockNum = pageNum * 32u + (uint)s_blockTable8[bkY, bkX];
+            int  cx = px % 16, cy = py % 16;
+            return blockNum * 256u + (uint)s_columnTable8[cy, cx];
+        }
+
+        private uint PixelAddress4(int x, int y, uint fbp, uint fbw)
+        {
+            uint ppr     = Math.Max(1u, fbw / 2u);
+            uint pageX   = (uint)x / 128u;
+            uint pageY   = (uint)y / 128u;
+            uint pageNum = fbp + pageY * ppr + pageX;
+            int  px = x % 128, py = y % 128;
+            int  bkX = px / 32, bkY = py / 16;
+            uint blockNum = pageNum * 32u + (uint)s_blockTable4[bkY, bkX];
+            int  cx = px % 32, cy = py % 16;
+            return blockNum * 256u + (uint)((cy * 32 + cx) / 2);
+        }
+
+        private uint PixelAddress(int x, int y, uint fbp, uint fbw, int psm)
+        {
+            switch (psm)
+            {
+                case PSM_PSMCT32: case PSM_PSMCT24: case PSM_PSMZ32:
+                    return PixelAddress32(x, y, fbp, fbw);
+                case PSM_PSMCT16: case PSM_PSMCT16S: case PSM_PSMZ16: case PSM_PSMZ16S:
+                    return PixelAddress16(x, y, fbp, fbw);
+                case PSM_PSMT8:
+                    return PixelAddress8(x, y, fbp, fbw);
+                case PSM_PSMT4:
+                    return PixelAddress4(x, y, fbp, fbw);
+                default:
+                    return PixelAddress32(x, y, fbp, fbw);
+            }
+        }
+
+        private static ushort Pack32To16(uint c)
+        {
+            uint r = (c & 0xFFu) >> 3;
+            uint g = ((c >> 8)  & 0xFFu) >> 3;
+            uint b = ((c >> 16) & 0xFFu) >> 3;
+            uint a = ((c >> 24) & 0xFFu) >> 7;
+            return (ushort)(r | (g << 5) | (b << 10) | (a << 15));
+        }
+
+        private static uint Expand16To32(ushort c)
+        {
+            uint r = (uint)((c & 0x1Fu) << 3);
+            uint g = (uint)(((c >> 5)  & 0x1Fu) << 3);
+            uint b = (uint)(((c >> 10) & 0x1Fu) << 3);
+            uint a = ((c >> 15) & 1u) != 0u ? 0x80u : 0u;
+            return r | (g << 8) | (b << 16) | (a << 24);
+        }
+
+        #endregion
+
+        // =======================================================================
+        #region Vertex State
+        // =======================================================================
+
+        private struct Vertex
+        {
+            public int   X, Y;      // 12.4 fixed-point (pixel = X>>4)
+            public uint  Z;
+            public uint  R, G, B, A;
+            public float S, T, Q;
+            public float U, V;      // texel coord (pre-divided by 16)
+            public byte  Fog;
+        }
+
+        private Vertex _currVertex;
+        private Vertex _v0, _v1, _v2;
+        private int    _vCount;
+        private Vertex _fanV0;
+
+        #endregion
+
+        // =======================================================================
+        #region Draw Context
+        // =======================================================================
+
+        private struct DrawContext
+        {
+            public uint Fbp, Fbw;
+            public int  Psm;
+            public uint Fbmask;
+            public uint Zbp, Zbw;
+            public int  Zpsm;
+            public bool Zmsk;
+            public int  Scax0, Scax1, Scay0, Scay1;
+            public bool Ate, Zte;
+            public int  Atst, Aref, Afail, Ztst;
+            public bool Abe;
+            public int  Ofx, Ofy;
+            public bool TME, FST;
+            public uint TBP0, TBW;
+            public int  TexPsm, TW, TH, TFX;
+        }
+
+        private DrawContext GetDrawContext(int ctxt)
+        {
+            byte frameReg   = ctxt == 0 ? REG_FRAME_1    : REG_FRAME_2;
+            byte zbufReg    = ctxt == 0 ? REG_ZBUF_1     : REG_ZBUF_2;
+            byte scissorReg = ctxt == 0 ? REG_SCISSOR_1  : REG_SCISSOR_2;
+            byte testReg    = ctxt == 0 ? REG_TEST_1     : REG_TEST_2;
+            byte xyoffReg   = ctxt == 0 ? REG_XYOFFSET_1 : REG_XYOFFSET_2;
+            byte tex0Reg    = ctxt == 0 ? REG_TEX0_1     : REG_TEX0_2;
+
+            ulong frame   = _internalRegs[frameReg];
+            ulong zbuf    = _internalRegs[zbufReg];
+            ulong scissor = _internalRegs[scissorReg];
+            ulong test    = _internalRegs[testReg];
+            ulong xyoff   = _internalRegs[xyoffReg];
+            ulong tex0    = _internalRegs[tex0Reg];
+            ulong prim    = _internalRegs[REG_PRIM];
+
+            var dc = new DrawContext();
+
+            // FRAME
+            dc.Fbp    = (uint)(frame & 0x1FFu);
+            dc.Fbw    = Math.Max(1u, (uint)((frame >> 16) & 0x3Fu));
+            dc.Psm    = (int)((frame >> 24) & 0x3Fu);
+            dc.Fbmask = (uint)(frame >> 32);
+
+            // ZBUF
+            dc.Zbp  = (uint)(zbuf & 0x1FFu);
+            dc.Zbw  = dc.Fbw;
+            dc.Zpsm = (int)((zbuf >> 24) & 0xFu);
+            dc.Zmsk = (zbuf & (1u << 31)) != 0u;
+
+            // SCISSOR
+            dc.Scax0 = (int)(scissor & 0x7FFu);
+            dc.Scax1 = (int)((scissor >> 16) & 0x7FFu);
+            dc.Scay0 = (int)((scissor >> 32) & 0x7FFu);
+            dc.Scay1 = (int)((scissor >> 48) & 0x7FFu);
+
+            // TEST
+            dc.Ate   = (test & 1u) != 0u;
+            dc.Atst  = (int)((test >> 1) & 7u);
+            dc.Aref  = (int)((test >> 4) & 0xFFu);
+            dc.Afail = (int)((test >> 12) & 3u);
+            dc.Zte   = (test & (1u << 16)) != 0u;
+            dc.Ztst  = (int)((test >> 17) & 3u);
+
+            // XYOFFSET
+            dc.Ofx = (int)(xyoff & 0xFFFFu);
+            dc.Ofy = (int)((xyoff >> 32) & 0xFFFFu);
+
+            // PRIM-derived
+            dc.Abe = (prim & (1u << 6)) != 0u;
+            dc.TME = (prim & (1u << 4)) != 0u;
+            dc.FST = (prim & (1u << 8)) != 0u;
+
+            // TEX0
+            dc.TBP0   = (uint)(tex0 & 0x3FFFu);
+            dc.TBW    = Math.Max(1u, (uint)((tex0 >> 14) & 0x3Fu));
+            dc.TexPsm = (int)((tex0 >> 20) & 0x3Fu);
+            dc.TW     = (int)((tex0 >> 26) & 0xFu);
+            dc.TH     = (int)((tex0 >> 30) & 0xFu);
+            dc.TFX    = (int)((tex0 >> 35) & 3u);
+
+            return dc;
+        }
+
+        #endregion
+
+        // =======================================================================
+        #region Pixel Read / Write
+        // =======================================================================
+
+        private uint ReadPixel(int x, int y, uint fbp, uint fbw, int psm)
+        {
+            uint addr = PixelAddress(x, y, fbp, fbw, psm);
+            switch (psm)
+            {
+                case PSM_PSMCT32: case PSM_PSMCT24: case PSM_PSMZ32:
+                    return ReadVram32(addr);
+                case PSM_PSMCT16: case PSM_PSMCT16S: case PSM_PSMZ16: case PSM_PSMZ16S:
+                    return Expand16To32(ReadVram16(addr));
+                case PSM_PSMT8:
+                    return ReadVram8(addr);
+                case PSM_PSMT4:
+                {
+                    int  nibble = (x % 32) & 1;
+                    byte bv     = ReadVram8(addr);
+                    return nibble == 0 ? (uint)(bv & 0xFu) : (uint)(bv >> 4);
+                }
+                default:
+                    return ReadVram32(addr);
+            }
+        }
+
+        private void WritePixel(int x, int y, uint color, uint fbp, uint fbw, int psm, uint fbmask)
+        {
+            uint addr = PixelAddress(x, y, fbp, fbw, psm);
+            switch (psm)
+            {
+                case PSM_PSMCT32: case PSM_PSMZ32:
+                {
+                    uint exist = ReadVram32(addr);
+                    WriteVram32(addr, (color & ~fbmask) | (exist & fbmask));
+                    break;
+                }
+                case PSM_PSMCT24:
+                {
+                    uint exist  = ReadVram32(addr);
+                    uint masked = (color & 0x00FFFFFFu & ~fbmask) | (exist & (fbmask | 0xFF000000u));
+                    WriteVram32(addr, masked);
+                    break;
+                }
+                case PSM_PSMCT16: case PSM_PSMCT16S: case PSM_PSMZ16: case PSM_PSMZ16S:
+                {
+                    ushort col16  = Pack32To16(color);
+                    ushort mask16 = Pack32To16(fbmask);
+                    ushort exist  = ReadVram16(addr);
+                    WriteVram16(addr, (ushort)((col16 & ~mask16) | (exist & mask16)));
+                    break;
+                }
+                case PSM_PSMT8:
+                    WriteVram8(addr, (byte)(color & 0xFFu));
+                    break;
+                case PSM_PSMT4:
+                {
+                    int  nibble = (x % 32) & 1;
+                    byte bv     = ReadVram8(addr);
+                    bv = nibble == 0
+                        ? (byte)((bv & 0xF0u) | (color & 0xFu))
+                        : (byte)((bv & 0x0Fu) | ((color & 0xFu) << 4));
+                    WriteVram8(addr, bv);
+                    break;
+                }
+                default:
+                {
+                    uint exist = ReadVram32(addr);
+                    WriteVram32(addr, (color & ~fbmask) | (exist & fbmask));
+                    break;
+                }
+            }
+        }
+
+        private uint ReadZ(int x, int y, uint zbp, uint zbw, int zpsm)
+        {
+            uint addr = PixelAddress(x, y, zbp, zbw, zpsm);
+            return zpsm switch
+            {
+                PSM_PSMZ32 => ReadVram32(addr),
+                PSM_PSMZ16 or PSM_PSMZ16S => ReadVram16(addr),
+                _ => ReadVram32(addr)
+            };
+        }
+
+        private void WriteZ(int x, int y, uint z, uint zbp, uint zbw, int zpsm)
+        {
+            uint addr = PixelAddress(x, y, zbp, zbw, zpsm);
+            switch (zpsm)
+            {
+                case PSM_PSMZ32:
+                    WriteVram32(addr, z);
+                    break;
+                case PSM_PSMZ16: case PSM_PSMZ16S:
+                    WriteVram16(addr, (ushort)(z & 0xFFFFu));
+                    break;
+                default:
+                    WriteVram32(addr, z);
+                    break;
+            }
+        }
+
+        #endregion
+
+        // =======================================================================
+        #region Rasterisation
+        // =======================================================================
+
+        private void DecodeXYZF(ulong value)
+        {
+            _currVertex.X   = (int)(value & 0xFFFFu);
+            _currVertex.Y   = (int)((value >> 16) & 0xFFFFu);
+            _currVertex.Z   = (uint)((value >> 32) & 0xFFFFFFu);
+            _currVertex.Fog = (byte)(value >> 56);
+        }
+
+        private void DecodeXYZ(ulong value)
+        {
+            _currVertex.X = (int)(value & 0xFFFFu);
+            _currVertex.Y = (int)((value >> 16) & 0xFFFFu);
+            _currVertex.Z = (uint)(value >> 32);
+        }
+
+        private void KickVertex(bool doKick)
+        {
+            _v2 = _v1;
+            _v1 = _v0;
+            _v0 = _currVertex;
+            _vCount++;
+
+            if (!doKick) return;
+
+            ulong primReg = _internalRegs[REG_PRIM];
+            int   ptype   = (int)(primReg & 7u);
+            int   ctxt    = (int)((primReg >> 9) & 1u);
+            DrawContext dc = GetDrawContext(ctxt);
+
+            switch (ptype)
+            {
+                case 0: // POINT
+                    DrawPoint(_v0, dc);
+                    break;
+                case 1: // LINE
+                    if (_vCount >= 2) { DrawLine(_v1, _v0, dc); _vCount = 0; }
+                    break;
+                case 2: // LINESTRIP
+                    if (_vCount >= 2) DrawLine(_v1, _v0, dc);
+                    break;
+                case 3: // TRIANGLE
+                    if (_vCount >= 3) { DrawTriangle(_v2, _v1, _v0, dc); _vCount = 0; }
+                    break;
+                case 4: // TRISTRIP
+                    if (_vCount >= 3) DrawTriangle(_v2, _v1, _v0, dc);
+                    break;
+                case 5: // TRIFAN
+                    if (_vCount == 1) _fanV0 = _v0;
+                    if (_vCount >= 3) DrawTriangle(_fanV0, _v1, _v0, dc);
+                    break;
+                case 6: // SPRITE
+                    if (_vCount >= 2) { DrawSprite(_v1, _v0, dc); _vCount = 0; }
+                    break;
+            }
+        }
+
+        private static bool TestAlpha(int a, int atst, int aref) => atst switch
+        {
+            0 => false,
+            1 => true,
+            2 => a <  aref,
+            3 => a <= aref,
+            4 => a == aref,
+            5 => a >= aref,
+            6 => a >  aref,
+            7 => a != aref,
+            _ => true
+        };
+
+        private void DrawPixel(int px, int py, uint color, uint z, DrawContext dc)
+        {
+            if (px < dc.Scax0 || px > dc.Scax1 || py < dc.Scay0 || py > dc.Scay1) return;
+
+            bool writeColor = true;
+            bool writeZ     = dc.Zte && !dc.Zmsk;
+
+            if (dc.Ate)
+            {
+                int  a    = (int)((color >> 24) & 0xFFu);
+                bool pass = TestAlpha(a, dc.Atst, dc.Aref);
+                if (!pass)
+                {
+                    switch (dc.Afail)
+                    {
+                        case 0: return;
+                        case 1: writeZ     = false; break;
+                        case 2: writeColor = false; break;
+                        case 3: color &= 0x00FFFFFFu; writeZ = false; break;
+                    }
+                }
+            }
+
+            if (dc.Zte && dc.Ztst != 1)
+            {
+                uint storedZ = ReadZ(px, py, dc.Zbp, dc.Zbw, dc.Zpsm);
+                bool zPass = dc.Ztst switch
+                {
+                    0 => false,
+                    2 => z >= storedZ,
+                    3 => z >  storedZ,
+                    _ => false
+                };
+                if (!zPass) return;
+            }
+
+            if (writeZ)
+                WriteZ(px, py, z, dc.Zbp, dc.Zbw, dc.Zpsm);
+
+            if (writeColor)
+            {
+                if (dc.Abe)
+                {
+                    uint dst = ReadPixel(px, py, dc.Fbp, dc.Fbw, dc.Psm);
+                    color = BlendPixel(color, dst);
+                }
+                WritePixel(px, py, color, dc.Fbp, dc.Fbw, dc.Psm, dc.Fbmask);
+            }
+        }
+
+        private static uint BlendPixel(uint src, uint dst)
+        {
+            uint sa = (src >> 24) & 0xFFu;
+            uint r  = ((src & 0xFFu) * sa + (dst & 0xFFu) * (255u - sa) + 127u) / 255u;
+            uint g  = (((src >> 8) & 0xFFu) * sa + ((dst >> 8) & 0xFFu) * (255u - sa) + 127u) / 255u;
+            uint b  = (((src >> 16) & 0xFFu) * sa + ((dst >> 16) & 0xFFu) * (255u - sa) + 127u) / 255u;
+            return r | (g << 8) | (b << 16) | (src & 0xFF000000u);
+        }
+
+        private void DrawPoint(Vertex v, DrawContext dc)
+        {
+            int  px    = (v.X - dc.Ofx) >> 4;
+            int  py    = (v.Y - dc.Ofy) >> 4;
+            uint color = VertexColor(v);
+            if (dc.TME) color = ApplyTexPoint(dc, v, color);
+            DrawPixel(px, py, color, v.Z, dc);
+        }
+
+        private void DrawLine(Vertex v0, Vertex v1, DrawContext dc)
+        {
+            int x0 = (v0.X - dc.Ofx) >> 4, y0 = (v0.Y - dc.Ofy) >> 4;
+            int x1 = (v1.X - dc.Ofx) >> 4, y1 = (v1.Y - dc.Ofy) >> 4;
+
+            int dx = Math.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+            int dy = -Math.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+            int err = dx + dy;
+            int steps = Math.Max(dx, -dy) + 1;
+            bool iip = (_internalRegs[REG_PRIM] & (1u << 3)) != 0u;
+
+            for (int i = 0; i < steps; i++)
+            {
+                float t     = steps > 1 ? (float)i / (steps - 1) : 0f;
+                uint  z     = LerpZ(v0.Z, v1.Z, t);
+                uint  color = iip ? LerpColor(v0, v1, t) : VertexColor(v1);
+                if (dc.TME) color = ApplyTexPoint(dc, v1, color);
+                DrawPixel(x0, y0, color, z, dc);
+                if (x0 == x1 && y0 == y1) break;
+                int e2 = 2 * err;
+                if (e2 >= dy) { err += dy; x0 += sx; }
+                if (e2 <= dx) { err += dx; y0 += sy; }
+            }
+        }
+
+        private void DrawTriangle(Vertex va, Vertex vb, Vertex vc, DrawContext dc)
+        {
+            int x0 = (va.X - dc.Ofx) >> 4, y0 = (va.Y - dc.Ofy) >> 4;
+            int x1 = (vb.X - dc.Ofx) >> 4, y1 = (vb.Y - dc.Ofy) >> 4;
+            int x2 = (vc.X - dc.Ofx) >> 4, y2 = (vc.Y - dc.Ofy) >> 4;
+
+            int area2 = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+            if (area2 == 0) return;
+
+            int minX = Math.Max(dc.Scax0, Math.Min(Math.Min(x0, x1), x2));
+            int maxX = Math.Min(dc.Scax1, Math.Max(Math.Max(x0, x1), x2));
+            int minY = Math.Max(dc.Scay0, Math.Min(Math.Min(y0, y1), y2));
+            int maxY = Math.Min(dc.Scay1, Math.Max(Math.Max(y0, y1), y2));
+            bool iip = (_internalRegs[REG_PRIM] & (1u << 3)) != 0u;
+            float invA = 1f / area2;
+
+            for (int py = minY; py <= maxY; py++)
+            {
+                for (int px = minX; px <= maxX; px++)
+                {
+                    int w0 = (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0);
+                    int w1 = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+                    int w2 = (x0 - x2) * (py - y2) - (y0 - y2) * (px - x2);
+
+                    bool inside = area2 > 0
+                        ? (w0 >= 0 && w1 >= 0 && w2 >= 0)
+                        : (w0 <= 0 && w1 <= 0 && w2 <= 0);
+                    if (!inside) continue;
+
+                    float sign = area2 > 0 ? 1f : -1f;
+                    float la   = w1 * invA * sign;
+                    float lb   = w2 * invA * sign;
+                    float lc   = 1f - la - lb;
+
+                    uint z     = (uint)Math.Max(0f, la * va.Z + lb * vb.Z + lc * vc.Z);
+                    uint color = iip ? LerpColorBary(va, vb, vc, la, lb, lc) : VertexColor(vc);
+                    if (dc.TME) color = ApplyTexBary(dc, va, vb, vc, la, lb, lc, color);
+                    DrawPixel(px, py, color, z, dc);
+                }
+            }
+        }
+
+        private void DrawSprite(Vertex v0, Vertex v1, DrawContext dc)
+        {
+            int x0 = (v0.X - dc.Ofx) >> 4;
+            int y0 = (v0.Y - dc.Ofy) >> 4;
+            int x1 = ((v1.X - dc.Ofx) >> 4) - 1;
+            int y1 = ((v1.Y - dc.Ofy) >> 4) - 1;
+
+            if (x0 > x1) { int tmp = x0; x0 = x1 + 1; x1 = tmp; }
+            if (y0 > y1) { int tmp = y0; y0 = y1 + 1; y1 = tmp; }
+
+            int minX = Math.Max(dc.Scax0, x0);
+            int maxX = Math.Min(dc.Scax1, x1);
+            int minY = Math.Max(dc.Scay0, y0);
+            int maxY = Math.Min(dc.Scay1, y1);
+
+            uint  baseColor = VertexColor(v1);
+            uint  spriteZ   = v1.Z;
+            float wInv      = (x1 > x0) ? 1f / (x1 - x0 + 1) : 1f;
+            float hInv      = (y1 > y0) ? 1f / (y1 - y0 + 1) : 1f;
+
+            for (int py = minY; py <= maxY; py++)
+            {
+                for (int px = minX; px <= maxX; px++)
+                {
+                    uint color = baseColor;
+                    if (dc.TME)
+                    {
+                        float u, v;
+                        if (dc.FST)
+                        {
+                            float tu = (px - x0) * wInv;
+                            float tv = (py - y0) * hInv;
+                            u = v0.U + (v1.U - v0.U) * tu;
+                            v = v0.V + (v1.V - v0.V) * tv;
+                        }
+                        else
+                        {
+                            float q0 = v0.Q == 0f ? 1f : v0.Q;
+                            float q1 = v1.Q == 0f ? 1f : v1.Q;
+                            float tu = (px - x0) * wInv;
+                            float tv = (py - y0) * hInv;
+                            float s  = v0.S / q0 + (v1.S / q1 - v0.S / q0) * tu;
+                            float t2 = v0.T / q0 + (v1.T / q1 - v0.T / q0) * tv;
+                            int   tw = dc.TW > 0 ? (1 << dc.TW) : 1;
+                            int   th = dc.TH > 0 ? (1 << dc.TH) : 1;
+                            u = s * tw;
+                            v = t2 * th;
+                        }
+                        uint texColor = SampleTexture(dc, u, v);
+                        color = ApplyTexFunc(dc.TFX, texColor, baseColor);
+                    }
+                    DrawPixel(px, py, color, spriteZ, dc);
+                }
+            }
+        }
+
+        private static uint VertexColor(Vertex v)
+            => v.R | (v.G << 8) | (v.B << 16) | (v.A << 24);
+
+        private static uint LerpColor(Vertex v0, Vertex v1, float t)
+        {
+            uint r = (uint)Math.Max(0, Math.Min(255, (1f - t) * v0.R + t * v1.R));
+            uint g = (uint)Math.Max(0, Math.Min(255, (1f - t) * v0.G + t * v1.G));
+            uint b = (uint)Math.Max(0, Math.Min(255, (1f - t) * v0.B + t * v1.B));
+            uint a = (uint)Math.Max(0, Math.Min(255, (1f - t) * v0.A + t * v1.A));
+            return r | (g << 8) | (b << 16) | (a << 24);
+        }
+
+        private static uint LerpColorBary(Vertex va, Vertex vb, Vertex vc, float la, float lb, float lc)
+        {
+            uint r = (uint)Math.Max(0, Math.Min(255, la * va.R + lb * vb.R + lc * vc.R));
+            uint g = (uint)Math.Max(0, Math.Min(255, la * va.G + lb * vb.G + lc * vc.G));
+            uint b = (uint)Math.Max(0, Math.Min(255, la * va.B + lb * vb.B + lc * vc.B));
+            uint a = (uint)Math.Max(0, Math.Min(255, la * va.A + lb * vb.A + lc * vc.A));
+            return r | (g << 8) | (b << 16) | (a << 24);
+        }
+
+        private static uint LerpZ(uint z0, uint z1, float t)
+            => (uint)Math.Max(0f, (1f - t) * z0 + t * z1);
+
+        #endregion
+
+        // =======================================================================
+        #region Texture Sampling
+        // =======================================================================
+
+        private uint SampleTexture(DrawContext dc, float u, float v)
+        {
+            int  tw     = dc.TW > 0 ? (1 << dc.TW) : 1;
+            int  th     = dc.TH > 0 ? (1 << dc.TH) : 1;
+            int  ui     = ((int)u) & (tw - 1);
+            int  vi     = ((int)v) & (th - 1);
+            uint texFbp = dc.TBP0 / 32u;
+            return ReadPixel(ui, vi, texFbp, dc.TBW, dc.TexPsm);
+        }
+
+        private uint ApplyTexPoint(DrawContext dc, Vertex v, uint vtxColor)
+        {
+            float u, vCoord;
+            if (dc.FST)
+            {
+                u      = v.U;
+                vCoord = v.V;
+            }
+            else
+            {
+                float q  = v.Q == 0f ? 1f : v.Q;
+                int   tw = dc.TW > 0 ? (1 << dc.TW) : 1;
+                int   th = dc.TH > 0 ? (1 << dc.TH) : 1;
+                u      = v.S / q * tw;
+                vCoord = v.T / q * th;
+            }
+            return ApplyTexFunc(dc.TFX, SampleTexture(dc, u, vCoord), vtxColor);
+        }
+
+        private uint ApplyTexBary(DrawContext dc,
+            Vertex va, Vertex vb, Vertex vc,
+            float la, float lb, float lc, uint vtxColor)
+        {
+            float u, vCoord;
+            if (dc.FST)
+            {
+                u      = la * va.U + lb * vb.U + lc * vc.U;
+                vCoord = la * va.V + lb * vb.V + lc * vc.V;
+            }
+            else
+            {
+                float qa = va.Q == 0f ? 1f : va.Q;
+                float qb = vb.Q == 0f ? 1f : vb.Q;
+                float qc = vc.Q == 0f ? 1f : vc.Q;
+                float s  = la * va.S / qa + lb * vb.S / qb + lc * vc.S / qc;
+                float t2 = la * va.T / qa + lb * vb.T / qb + lc * vc.T / qc;
+                int   tw = dc.TW > 0 ? (1 << dc.TW) : 1;
+                int   th = dc.TH > 0 ? (1 << dc.TH) : 1;
+                u      = s  * tw;
+                vCoord = t2 * th;
+            }
+            return ApplyTexFunc(dc.TFX, SampleTexture(dc, u, vCoord), vtxColor);
+        }
+
+        private static uint ApplyTexFunc(int tfx, uint tex, uint vtx)
+        {
+            switch (tfx)
+            {
+                case 0: // MODULATE: out = clamp(tex * vtx / 128)
+                {
+                    uint r = Math.Min(255u, (tex & 0xFFu) * (vtx & 0xFFu) / 128u);
+                    uint g = Math.Min(255u, ((tex >> 8) & 0xFFu) * ((vtx >> 8) & 0xFFu) / 128u);
+                    uint b = Math.Min(255u, ((tex >> 16) & 0xFFu) * ((vtx >> 16) & 0xFFu) / 128u);
+                    uint a = Math.Min(255u, ((tex >> 24) & 0xFFu) * ((vtx >> 24) & 0xFFu) / 128u);
+                    return r | (g << 8) | (b << 16) | (a << 24);
+                }
+                case 1: // DECAL
+                    return tex;
+                case 2: // HIGHLIGHT
+                {
+                    uint va = (vtx >> 24) & 0xFFu;
+                    uint r  = Math.Min(255u, (tex & 0xFFu) * (vtx & 0xFFu) / 128u + va);
+                    uint g  = Math.Min(255u, ((tex >> 8) & 0xFFu) * ((vtx >> 8) & 0xFFu) / 128u + va);
+                    uint b  = Math.Min(255u, ((tex >> 16) & 0xFFu) * ((vtx >> 16) & 0xFFu) / 128u + va);
+                    uint a  = Math.Min(255u, ((tex >> 24) & 0xFFu) * ((vtx >> 24) & 0xFFu) / 128u + va);
+                    return r | (g << 8) | (b << 16) | (a << 24);
+                }
+                default: // HIGHLIGHT2
+                {
+                    uint va = (vtx >> 24) & 0xFFu;
+                    uint r  = Math.Min(255u, (tex & 0xFFu) * (vtx & 0xFFu) / 128u + va);
+                    uint g  = Math.Min(255u, ((tex >> 8) & 0xFFu) * ((vtx >> 8) & 0xFFu) / 128u + va);
+                    uint b  = Math.Min(255u, ((tex >> 16) & 0xFFu) * ((vtx >> 16) & 0xFFu) / 128u + va);
+                    return r | (g << 8) | (b << 16) | ((tex >> 24) << 24);
+                }
+            }
+        }
+
+        #endregion
+
+        // =======================================================================
+        #region TRXDIR Transfers
+        // =======================================================================
+
+        private bool _trxActive;
+        private uint _trxDsax, _trxDsay;
+        private uint _trxRrw,  _trxRrh;
+        private uint _trxDbp,  _trxDbw;
+        private int  _trxDpsm;
+        private uint _trxCurX, _trxCurY;
+
+        private void StartTransfer(int dir)
+        {
+            _trxActive = false;
+            switch (dir)
+            {
+                case 0: // HOST->LOCAL
+                {
+                    ulong blt = _internalRegs[REG_BITBLTBUF];
+                    ulong pos = _internalRegs[REG_TRXPOS];
+                    ulong reg = _internalRegs[REG_TRXREG];
+                    _trxDbp  = (uint)((blt >> 32) & 0x3FFFu);
+                    _trxDbw  = Math.Max(1u, (uint)((blt >> 48) & 0x3Fu));
+                    _trxDpsm = (int)((blt >> 56) & 0x3Fu);
+                    _trxDsax = (uint)((pos >> 32) & 0x7FFu);
+                    _trxDsay = (uint)((pos >> 48) & 0x7FFu);
+                    _trxRrw  = (uint)(reg & 0xFFFu);
+                    _trxRrh  = (uint)((reg >> 16) & 0x7FFu);
+                    _trxCurX = _trxDsax;
+                    _trxCurY = _trxDsay;
+                    _trxActive = _trxRrw > 0u && _trxRrh > 0u;
+                    break;
+                }
+                case 2: // LOCAL->LOCAL
+                    DoLocalToLocal();
+                    break;
+            }
+        }
+
+        private void HandleHwreg(ulong value)
+        {
+            if (!_trxActive) return;
+            uint dfbp = _trxDbp / 32u;
+            int  psm  = _trxDpsm;
+            int  pixPerQword;
+            switch (psm)
+            {
+                case PSM_PSMCT32: case PSM_PSMCT24: case PSM_PSMZ32:
+                    pixPerQword = 2; break;
+                case PSM_PSMCT16: case PSM_PSMCT16S: case PSM_PSMZ16: case PSM_PSMZ16S:
+                    pixPerQword = 4; break;
+                case PSM_PSMT8:
+                    pixPerQword = 8; break;
+                case PSM_PSMT4:
+                    pixPerQword = 16; break;
+                default:
+                    pixPerQword = 2; break;
+            }
+
+            for (int i = 0; i < pixPerQword; i++)
+            {
+                if (_trxCurY >= _trxDsay + _trxRrh) { _trxActive = false; return; }
+
+                uint pixColor;
+                switch (psm)
+                {
+                    case PSM_PSMCT32: case PSM_PSMCT24: case PSM_PSMZ32:
+                        pixColor = i == 0 ? (uint)(value & 0xFFFFFFFFu) : (uint)(value >> 32);
+                        break;
+                    case PSM_PSMCT16: case PSM_PSMCT16S: case PSM_PSMZ16: case PSM_PSMZ16S:
+                        pixColor = Expand16To32((ushort)((value >> (i * 16)) & 0xFFFFu));
+                        break;
+                    case PSM_PSMT8:
+                        pixColor = (uint)((value >> (i * 8)) & 0xFFu);
+                        break;
+                    case PSM_PSMT4:
+                        pixColor = (uint)((value >> (i * 4)) & 0xFu);
+                        break;
+                    default:
+                        pixColor = i == 0 ? (uint)(value & 0xFFFFFFFFu) : (uint)(value >> 32);
+                        break;
+                }
+
+                WritePixel((int)_trxCurX, (int)_trxCurY, pixColor, dfbp, _trxDbw, psm, 0u);
+                _trxCurX++;
+                if (_trxCurX >= _trxDsax + _trxRrw)
+                {
+                    _trxCurX = _trxDsax;
+                    _trxCurY++;
+                }
+            }
+        }
+
+        private void DoLocalToLocal()
+        {
+            ulong blt  = _internalRegs[REG_BITBLTBUF];
+            ulong pos  = _internalRegs[REG_TRXPOS];
+            ulong reg  = _internalRegs[REG_TRXREG];
+            uint  sbp  = (uint)(blt & 0x3FFFu);
+            uint  sbw  = Math.Max(1u, (uint)((blt >> 16) & 0x3Fu));
+            int   spsm = (int)((blt >> 24) & 0x3Fu);
+            uint  dbp  = (uint)((blt >> 32) & 0x3FFFu);
+            uint  dbw  = Math.Max(1u, (uint)((blt >> 48) & 0x3Fu));
+            int   dpsm = (int)((blt >> 56) & 0x3Fu);
+            uint  ssax = (uint)(pos & 0x7FFu);
+            uint  ssay = (uint)((pos >> 16) & 0x7FFu);
+            uint  dsax = (uint)((pos >> 32) & 0x7FFu);
+            uint  dsay = (uint)((pos >> 48) & 0x7FFu);
+            uint  rrw  = (uint)(reg & 0xFFFu);
+            uint  rrh  = (uint)((reg >> 16) & 0x7FFu);
+            uint  sfbp = sbp / 32u;
+            uint  dfbp = dbp / 32u;
+
+            for (uint dy = 0; dy < rrh; dy++)
+                for (uint dx = 0; dx < rrw; dx++)
+                {
+                    uint pix = ReadPixel((int)(ssax + dx), (int)(ssay + dy), sfbp, sbw, spsm);
+                    WritePixel((int)(dsax + dx), (int)(dsay + dy), pix, dfbp, dbw, dpsm, 0u);
+                }
+        }
+
+        #endregion
+
+        // =======================================================================
+        #region Internal Register Access
+        // =======================================================================
+
+        /// <summary>Read a 64-bit internal GS register (0x00-0x7F).</summary>
         public ulong ReadInternal(byte addr)
         {
             if (addr >= 128) return 0ul;
@@ -147,54 +1046,123 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         }
 
         /// <summary>
-        /// Write a 64-bit internal GS register directly (REGLIST mode or IMAGE mode).
-        /// Address 0x0F (NOP) is silently ignored.
+        /// Write a 64-bit internal GS register; also drives vertex/rasterise side-effects.
         /// </summary>
         public void WriteInternal(byte addr, ulong value)
         {
             if (addr >= 128 || addr == REG_NOP) return;
             _internalRegs[addr] = value;
+
+            switch (addr)
+            {
+                case REG_PRIM:
+                    _vCount = 0;
+                    break;
+
+                case REG_RGBAQ:
+                    _currVertex.R = (uint)(value & 0xFFu);
+                    _currVertex.G = (uint)((value >> 8) & 0xFFu);
+                    _currVertex.B = (uint)((value >> 16) & 0xFFu);
+                    _currVertex.A = (uint)((value >> 24) & 0xFFu);
+                    _currVertex.Q = BitConverter.Int32BitsToSingle((int)(uint)(value >> 32));
+                    break;
+
+                case REG_ST:
+                    _currVertex.S = BitConverter.Int32BitsToSingle((int)(uint)(value & 0xFFFFFFFFu));
+                    _currVertex.T = BitConverter.Int32BitsToSingle((int)(uint)(value >> 32));
+                    break;
+
+                case REG_UV:
+                    _currVertex.U = (float)((value & 0x3FFFu) >> 4);
+                    _currVertex.V = (float)(((value >> 16) & 0x3FFFu) >> 4);
+                    break;
+
+                case REG_FOG:
+                    _currVertex.Fog = (byte)((value >> 56) & 0xFFu);
+                    break;
+
+                case REG_XYZF2:
+                    DecodeXYZF(value);
+                    KickVertex(true);
+                    break;
+
+                case REG_XYZ2:
+                    DecodeXYZ(value);
+                    KickVertex(true);
+                    break;
+
+                case REG_XYZF3:
+                    DecodeXYZF(value);
+                    KickVertex(false);
+                    break;
+
+                case REG_XYZ3:
+                    DecodeXYZ(value);
+                    KickVertex(false);
+                    break;
+
+                case REG_TRXDIR:
+                    StartTransfer((int)(value & 3u));
+                    break;
+
+                case REG_HWREG:
+                    HandleHwreg(value);
+                    break;
+            }
         }
 
         /// <summary>
-        /// Write a PACKED-mode GS register (128-bit data qword).
-        /// For A+D (0x0E) the destination register address is embedded in <paramref name="hi"/>
-        /// bits [6:0]; the 64-bit value is <paramref name="lo"/>.
-        /// All other registers: <paramref name="lo"/> is stored directly.
+        /// Write a PACKED-mode GS register (128-bit qword).
+        /// Reconstructs the canonical 64-bit register value for XYZF2/XYZ2 from
+        /// the packed 128-bit layout before forwarding to WriteInternal.
         /// </summary>
         public void WritePacked(byte regId, ulong lo, ulong hi)
         {
             if (regId == REG_AD)
             {
-                // A+D: bits [70:64] of the 128-bit qword = hi[6:0] = dest register address.
                 byte destReg = (byte)(hi & 0x7Fu);
-                if (destReg < 128 && destReg != REG_NOP)
-                    _internalRegs[destReg] = lo;
+                WriteInternal(destReg, lo);
+            }
+            else if (regId == REG_XYZF2 || regId == REG_XYZF3)
+            {
+                uint x   = (uint)(lo & 0xFFFFu);
+                uint y   = (uint)((lo >> 16) & 0xFFFFu);
+                uint z   = (uint)(hi & 0xFFFFFFu);
+                uint fog = (uint)(hi >> 56);
+                ulong val = x | ((ulong)y << 16) | ((ulong)z << 32) | ((ulong)fog << 56);
+                WriteInternal(regId, val);
+            }
+            else if (regId == REG_XYZ2 || regId == REG_XYZ3)
+            {
+                uint x = (uint)(lo & 0xFFFFu);
+                uint y = (uint)((lo >> 16) & 0xFFFFu);
+                uint z = (uint)(hi & 0xFFFFFFFFu);
+                ulong val = x | ((ulong)y << 16) | ((ulong)z << 32);
+                WriteInternal(regId, val);
             }
             else if (regId < 128 && regId != REG_NOP)
             {
-                _internalRegs[regId] = lo;
+                WriteInternal(regId, lo);
             }
         }
 
-        // ── Privileged register 32-bit bus access ─────────────────────────────
+        #endregion
 
-        /// <summary>
-        /// Read a 32-bit word from a GS privileged register.
-        /// <paramref name="offset"/> is the byte offset from the GS privileged base (0x12000000).
-        /// Each privileged register is 64-bit; the low or high 32-bit half is selected by bit 2
-        /// of the offset.
-        /// </summary>
+        // =======================================================================
+        #region Privileged Register Access
+        // =======================================================================
+
+        /// <summary>Read a 32-bit word from a GS privileged register.</summary>
         public uint ReadPriv32(uint offset)
         {
             ulong val = ReadPriv64(offset & ~0xFu);
             return (offset & 4u) == 0u ? (uint)val : (uint)(val >> 32);
         }
 
-        /// <summary>Write a 32-bit word to a GS privileged register (see <see cref="ReadPriv32"/>).</summary>
+        /// <summary>Write a 32-bit word to a GS privileged register.</summary>
         public void WritePriv32(uint offset, uint value)
         {
-            uint aligned = offset & ~0xFu;
+            uint  aligned = offset & ~0xFu;
             ulong current = ReadPriv64(aligned);
             if ((offset & 4u) == 0u)
                 current = (current & 0xFFFF_FFFF_0000_0000ul) | value;
@@ -206,7 +1174,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         /// <summary>Read a 64-bit GS privileged register by offset.</summary>
         public ulong ReadPriv64(uint offset)
         {
-            // Align to 16-byte boundary (each privileged register is at a 0x10-aligned offset).
             uint key = offset & ~0xFu;
             return key switch
             {
@@ -260,5 +1227,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 case PRIV_SIGLBLID: _siglblid = value; break;
             }
         }
+
+        #endregion
     }
 }
