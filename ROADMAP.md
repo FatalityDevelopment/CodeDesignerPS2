@@ -73,7 +73,7 @@ Needed once both CPUs are stable enough to reach the BIOS graphics init sequence
 | **GIF** (Graphics Interface) | High | ✅ | Memory-mapped at 0x10003000.  Registers (GIF_CTRL/MODE/STAT/TAG0-3/CNT/P3CNT/P3TAG).  Full GIFtag parsing: PACKED (including A+D), REGLIST, and IMAGE modes.  PATH2 input from VIF1 DIRECT/DIRECTHL; PATH3 input from DMAC CH2.  PATH1 (VU1 XGKICK) entry point not yet wired — requires VU1 microprogram execution engine (see VU1 row).  GS wired via `GIF.Gs`; `PS2MemoryBus.Gif.Gs = PS2MemoryBus.Gs`; DMAC CH2 DataConsumer set in `PS2Emulator`. |
 | **GS** (Graphics Synthesizer) | High | ⬜ | Rasterizer + framebuffer.  Privileged regs at 0x12000000 (PMODE/SMODE1/2/SRFSH/SYNCH1/2/SYNCV/DISPFB1/2/DISPLAY1/2/EXTBUF/EXTDATA/EXTWRITE/BGCOLOR/CSR/IMR/BUSDIR/SIGLBLID) and 128 × 64-bit internal register bank fully implemented.  **Remaining**: primitive rasterisation, framebuffer management, texture sampling, Z-buffer. |
 | **VU1** (Vector Unit 1, microprogram execution) | Medium | ⬜ | Full microprogram execution engine separate from the COP2 macro-mode already implemented.  VU1 has its own 16 KB micro-memory and 16 KB data memory.  Required for geometry transform. |
-| **VU0 macro-mode completeness** | Low | ⬜ | COP2 instruction coverage already strong; audit against `pcsx2/VUops.cpp` for any missing instructions (VCLIP, VDIV, VSQRT, VRSQRT, VWAITQ). |
+| **VU0 macro-mode completeness** | Low | ✅ | COP2 instruction coverage audited; VWAITQ (rs=0x1F, no-op in macro mode) added. All instructions (VCLIPW, VDIV, VSQRT, VRSQRT, VWAITQ) implemented and tested. |
 
 ---
 
@@ -126,4 +126,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 561 (all passing).*
+*Last updated: 2026-02-25.  Current test count: 562 (all passing).*

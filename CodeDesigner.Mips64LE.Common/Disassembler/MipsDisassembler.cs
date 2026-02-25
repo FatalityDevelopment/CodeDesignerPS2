@@ -391,6 +391,9 @@ namespace CodeDesigner.Mips64LE.Common
             RegisterCop(new VRINIT(), 0x1E); // funct=0x1E
             RegisterCop(new VRXOR(),  0x1E); // funct=0x1F
 
+            // VWAITQ (rs=0x1F): wait for Q register to be ready after VDIV/VSQRT/VRSQRT
+            RegisterCop(new VWAITQ(), 0x1F);
+
             // MMI direct instructions: shift and move
             RegisterR(new PMFHL());   // funct=0x30
             RegisterR(new PMTHL());   // funct=0x31
