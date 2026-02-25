@@ -74,6 +74,28 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public PadState Pad1 { get; }
 
         /// <summary>
+        /// Memory card inserted in slot A (port 0).
+        /// Assign a <see cref="MemoryCard"/> instance to enable memory-card access
+        /// on port 0; set to <c>null</c> to simulate an empty slot.
+        /// </summary>
+        public MemoryCard? MemCard0
+        {
+            get => Sio2.MemCard0;
+            set => Sio2.MemCard0 = value;
+        }
+
+        /// <summary>
+        /// Memory card inserted in slot B (port 1).
+        /// Assign a <see cref="MemoryCard"/> instance to enable memory-card access
+        /// on port 1; set to <c>null</c> to simulate an empty slot.
+        /// </summary>
+        public MemoryCard? MemCard1
+        {
+            get => Sio2.MemCard1;
+            set => Sio2.MemCard1 = value;
+        }
+
+        /// <summary>
         /// Total EE instruction steps executed since the last <see cref="Reset"/>.
         /// </summary>
         public ulong TotalEeSteps { get; private set; }
