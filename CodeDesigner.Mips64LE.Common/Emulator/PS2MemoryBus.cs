@@ -42,6 +42,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         // Hardware I/O base addresses (physical)
         private const uint TimerBase  = 0x10000000u;  // T0 base; each timer is 0x800 apart
+        private const uint Vif0Base   = 0x10003800u;  // VIF0 registers
+        private const uint Vif1Base   = 0x10003C00u;  // VIF1 registers
         private const uint IntcBase   = 0x1000F000u;  // INTC_STAT / INTC_MASK
         private const uint SifBase    = 0x1000F200u;  // SIF registers
 
@@ -62,6 +64,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         /// <summary>The sub-bus interface (EE ↔ IOP communication).</summary>
         public SIF Sif { get; } = new SIF();
+
+        /// <summary>VIF0 — Vector Interface for VU0 (physical base 0x10003800).</summary>
+        public VifUnit Vif0 { get; } = new VifUnit(isVif1: false);
+
+        /// <summary>VIF1 — Vector Interface for VU1 (physical base 0x10003C00).</summary>
+        public VifUnit Vif1 { get; } = new VifUnit(isVif1: true);
 
         /// <summary>Exposes main RAM so callers can bulk-load programs.</summary>
         public byte[] Ram => _ram;
@@ -139,6 +147,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // Hardware I/O: timers and INTC
             if (paddr >= TimerBase && paddr < TimerBase + 0x2000u)
                 return ReadTimerWord(paddr);
+            if (paddr >= Vif0Base && paddr < Vif0Base + 0x200u)
+                return Vif0.ReadRegister(paddr - Vif0Base);
+            if (paddr >= Vif1Base && paddr < Vif1Base + 0x200u)
+                return Vif1.ReadRegister(paddr - Vif1Base);
             if (paddr >= IntcBase && paddr < IntcBase + 0x20u)
                 return Intc.ReadRegister(paddr - IntcBase);
             if (paddr >= SifBase && paddr < SifBase + 0x70u)
@@ -166,6 +178,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (paddr >= TimerBase && paddr < TimerBase + 0x2000u)
             {
                 WriteTimerWord(paddr, value);
+                return;
+            }
+            if (paddr >= Vif0Base && paddr < Vif0Base + 0x200u)
+            {
+                Vif0.WriteRegister(paddr - Vif0Base, value);
+                return;
+            }
+            if (paddr >= Vif1Base && paddr < Vif1Base + 0x200u)
+            {
+                Vif1.WriteRegister(paddr - Vif1Base, value);
                 return;
             }
             if (paddr >= IntcBase && paddr < IntcBase + 0x20u)

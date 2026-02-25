@@ -63,17 +63,17 @@ The PS2's second CPU — a MIPS R3000A running at ~36.864 MHz — handles all I/
 
 ---
 
-## Phase 4 — Graphics Pipeline ⬜ NOT STARTED
+## Phase 4 — Graphics Pipeline 🔧 IN PROGRESS
 
 Needed once both CPUs are stable enough to reach the BIOS graphics init sequence.
 
-| Component | Priority | Notes |
-|-----------|----------|-------|
-| **VIF0 / VIF1** (VU Interface) | High | Feed microcode and vertex data to VU0/VU1.  Memory-mapped at 0x10003800 (VIF0) and 0x10003C00 (VIF1).  VIF unpacker (unpack V4-32, V3-32, etc.) is the most critical part. |
-| **GIF** (Graphics Interface) | High | Accepts display lists from the EE and feeds them to the GS.  Memory-mapped at 0x10003000.  Supports PATH1/PATH2/PATH3 transfer modes. |
-| **GS** (Graphics Synthesizer) | High | Rasterizer + framebuffer.  Privileged regs at 0x12000000.  Minimum viable implementation: PRIM, RGBAQ, XYZ2, XYZF2, TEX0, FRAME, ZBUF, SCISSOR, TEST. |
-| **VU1** (Vector Unit 1, microprogram execution) | Medium | Full microprogram execution engine separate from the COP2 macro-mode already implemented.  VU1 has its own 16 KB micro-memory and 16 KB data memory.  Required for geometry transform. |
-| **VU0 macro-mode completeness** | Low | COP2 instruction coverage already strong; audit against `pcsx2/VUops.cpp` for any missing instructions (VCLIP, VDIV, VSQRT, VRSQRT, VWAITQ). |
+| Component | Priority | Status | Notes |
+|-----------|----------|--------|-------|
+| **VIF0 / VIF1** (VU Interface) | High | ✅ | Memory-mapped at 0x10003800 / 0x10003C00.  Registers (STAT/FBRST/ERR/MARK/CYCLE/MODE/NUM/MASK/CODE/ITOPS/BASE/OFST/TOPS/ITOP/TOP), all UNPACK formats (S/V2/V3/V4 × 32/16/8/5-bit), MPG microprogram upload, MSCAL/MSCNT/MSCALF start events, STROW/STCOL/STMASK.  VIF0 writes directly to VU0 DataMem/MicroMem; DMAC CH0/CH1 DataConsumer feeds packets. |
+| **GIF** (Graphics Interface) | High | ⬜ | Accepts display lists from the EE and feeds them to the GS.  Memory-mapped at 0x10003000.  Supports PATH1/PATH2/PATH3 transfer modes. |
+| **GS** (Graphics Synthesizer) | High | ⬜ | Rasterizer + framebuffer.  Privileged regs at 0x12000000.  Minimum viable implementation: PRIM, RGBAQ, XYZ2, XYZF2, TEX0, FRAME, ZBUF, SCISSOR, TEST. |
+| **VU1** (Vector Unit 1, microprogram execution) | Medium | ⬜ | Full microprogram execution engine separate from the COP2 macro-mode already implemented.  VU1 has its own 16 KB micro-memory and 16 KB data memory.  Required for geometry transform. |
+| **VU0 macro-mode completeness** | Low | ⬜ | COP2 instruction coverage already strong; audit against `pcsx2/VUops.cpp` for any missing instructions (VCLIP, VDIV, VSQRT, VRSQRT, VWAITQ). |
 
 ---
 
@@ -126,4 +126,4 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-*Last updated: 2026-02-24.  Current test count: 511 (all passing).*
+*Last updated: 2026-02-24.  Current test count: 541 (all passing).*

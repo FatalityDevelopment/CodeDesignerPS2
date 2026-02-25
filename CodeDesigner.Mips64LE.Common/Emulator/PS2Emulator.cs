@@ -79,6 +79,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // handles KSEG0/KSEG1 virtual-to-physical translation.
             Cpu.Memory = Bus.Ram;
 
+            // Wire VIF0 to VU0 data/micro memory so UNPACK and MPG write directly
+            // into the VU0 register state that COP2 macro-mode instructions read.
+            Bus.Vif0.VuDataMem  = Cpu.VU0.DataMem;
+            Bus.Vif0.VuMicroMem = Cpu.VU0.MicroMem;
+
+            // Wire DMAC channels 0 (VIF0) and 1 (VIF1) so that RAM→FIFO transfers
+            // are delivered to the corresponding VIF unit's packet processor.
+            Bus.Dmac.Channels[0].DataConsumer = (buf, start, len) =>
+                Bus.Vif0.Feed(new ReadOnlySpan<uint>(buf, start, len));
+            Bus.Dmac.Channels[1].DataConsumer = (buf, start, len) =>
+                Bus.Vif1.Feed(new ReadOnlySpan<uint>(buf, start, len));
+
             // Wire timer interrupt events to INTC
             WireTimerInterrupts();
 

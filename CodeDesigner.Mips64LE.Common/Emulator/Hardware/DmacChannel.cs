@@ -54,6 +54,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         /// <summary>Raised when a normal-mode DMA transfer completes on this channel.</summary>
         public event EventHandler? TransferComplete;
 
+        /// <summary>
+        /// Optional consumer for data transferred from RAM to a device (DIR=0, RAM→FIFO).
+        /// When set, normal-mode transfers read each quadword from memory and pass it to
+        /// this callback as a four-element <c>uint[]</c> (little-endian, x/y/z/w order).
+        /// Used to feed VIF0 and VIF1 with their packet data during DMA transfers.
+        /// </summary>
+        public Action<uint[], int, int>? DataConsumer { get; set; }
+
         public DmacChannel(int id) => ChannelId = id;
 
         // ── Register access ───────────────────────────────────────────────────
@@ -167,9 +175,24 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                     addr += 16u;
                 }
             }
+            else if (DataConsumer != null)
+            {
+                // RAM→FIFO with a registered device consumer (e.g. VIF):
+                // read each quadword from memory as four 32-bit words and deliver them.
+                uint[] qbuf = new uint[count * 4];
+                for (uint q = 0; q < count; q++)
+                {
+                    qbuf[q * 4 + 0] = bus.ReadWord(addr);
+                    qbuf[q * 4 + 1] = bus.ReadWord(addr + 4);
+                    qbuf[q * 4 + 2] = bus.ReadWord(addr + 8);
+                    qbuf[q * 4 + 3] = bus.ReadWord(addr + 12);
+                    addr += 16u;
+                }
+                DataConsumer(qbuf, 0, (int)(count * 4));
+            }
             else
             {
-                // RAM→FIFO: consume from memory — advance address without writing.
+                // RAM→FIFO: no consumer registered — advance address only.
                 addr += count * 16u;
             }
 
