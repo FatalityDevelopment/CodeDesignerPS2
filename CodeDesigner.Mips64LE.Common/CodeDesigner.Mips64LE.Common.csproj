@@ -12,6 +12,7 @@
     <Folder Include="Core\Registers\" />
     <Folder Include="Emulator\Pipeline\" />
     <Folder Include="Instructions\MMI\" />
+    <Folder Include="Bios\" />
     <Folder Include="VectorUnits\VU1\" />
   </ItemGroup>
 
