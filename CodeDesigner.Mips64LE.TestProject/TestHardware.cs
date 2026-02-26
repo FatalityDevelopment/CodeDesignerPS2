@@ -1329,8 +1329,62 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void MemoryBus_Sif_F240_ReadWrite()
         {
             var bus = new PS2MemoryBus();
-            bus.WriteWord(0x1000F240u, 0x000000BFu); // typical BIOS handshake value
-            Assert.AreEqual(0x000000BFu, bus.ReadWord(0x1000F240u), "F240 read-back via bus");
+
+            // EE writes 0xBF: bits 5 (0x20) and 7 (0x80) are excluded from the OR
+            // (per PCSX2 hw.cpp: value & ~0xa0 is OR'd; bit 5 and bit 15 are W1C).
+            // F240 starts at 0, so W1C has no effect. Result: 0xBF & ~0xA0 = 0x1F.
+            bus.WriteWord(0x1000F240u, 0x000000BFu);
+            Assert.AreEqual(0x0000001Fu, bus.ReadWord(0x1000F240u), "F240: EE write ORs in non-W1C bits");
+        }
+
+        [TestMethod]
+        public void Sif_F240_IopWrite_SetsEeBit()
+        {
+            var sif = new SIF();
+
+            // IOP writes 0x10 (bit 4) → sets bit 5 (0x20) in shared F240.
+            // This is the IOP "I'm ready" signal that the EE BIOS polls.
+            sif.WriteIopRegister(SIF.REG_F240, 0x10u);
+            Assert.AreEqual(0x20u, sif.ReadRegister(SIF.REG_F240), "IOP bit 4 write must set bit 5 in F240");
+        }
+
+        [TestMethod]
+        public void Sif_F240_IopWrite_SetsEeBit15()
+        {
+            var sif = new SIF();
+
+            // IOP writes 0x40 (bit 6) → sets bit 15 (0x8000) in shared F240.
+            sif.WriteIopRegister(SIF.REG_F240, 0x40u);
+            Assert.AreEqual(0x8000u, sif.ReadRegister(SIF.REG_F240), "IOP bit 6 write must set bit 15 in F240");
+        }
+
+        [TestMethod]
+        public void Sif_F240_EeWrite_W1C_Bit5()
+        {
+            var sif = new SIF();
+
+            // Simulate IOP setting bit 5, then EE clearing it via W1C.
+            sif.WriteIopRegister(SIF.REG_F240, 0x10u);   // IOP sets bit 5
+            Assert.AreEqual(0x20u, sif.ReadRegister(SIF.REG_F240), "IOP must have set bit 5");
+            sif.WriteRegister(SIF.REG_F240, 0x20u);       // EE W1C clears bit 5
+            Assert.AreEqual(0u, sif.ReadRegister(SIF.REG_F240), "EE W1C must clear bit 5");
+        }
+
+        [TestMethod]
+        public void Sif_F240_Bootstrap_Handshake()
+        {
+            var sif = new SIF();
+
+            // Full bootstrap: EE OR-writes bit 6 (0x40, a normal OR-able bit), IOP signals back, EE acknowledges.
+            sif.WriteRegister(SIF.REG_F240, 0x40u);               // EE sets bit 6 (0x40 is OR'd in normally)
+            Assert.AreEqual(0x40u, sif.ReadRegister(SIF.REG_F240), "EE ready bits must be present");
+
+            sif.WriteIopRegister(SIF.REG_F240, 0x10u);            // IOP writes bit 4 → sets bit 5
+            uint f240 = sif.ReadRegister(SIF.REG_F240);
+            Assert.IsTrue((f240 & 0x20u) != 0, "EE must see IOP-ready bit 5 after IOP signals");
+
+            sif.WriteRegister(SIF.REG_F240, 0x20u);               // EE acknowledges (W1C bit 5)
+            Assert.AreEqual(0u, sif.ReadRegister(SIF.REG_F240) & 0x20u, "Bit 5 must be cleared after EE ack");
         }
 
         [TestMethod]

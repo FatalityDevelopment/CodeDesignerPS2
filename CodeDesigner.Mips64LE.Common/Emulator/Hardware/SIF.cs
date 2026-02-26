@@ -22,7 +22,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
     ///   SMCOM  — plain write (IOP sets this; EE reads to see IOP responses)
     ///   MSFLAG — write-1-to-set (OR); used by EE to signal the IOP
     ///   SMFLAG — write-1-to-clear (AND-NOT); used by EE to acknowledge IOP flags
-    ///   F240   — plain write (control / handshake bits)
+    ///   F240   — EE/IOP bootstrap handshake; special OR+W1C semantics (see WriteRegister/WriteIopRegister)
     ///   F250   — plain write
     ///   F260   — plain write
     ///
@@ -152,8 +152,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
 
         /// <summary>
         /// Write a 32-bit SIF register from the EE side.
-        /// MSFLAG uses write-1-to-set; SMFLAG uses write-1-to-clear; all others
-        /// store the value as-is.
+        /// MSFLAG uses write-1-to-set; SMFLAG uses write-1-to-clear.
+        /// F240 is the EE/IOP bootstrap handshake register with special semantics
+        /// (reference: PCSX2 pcsx2/Hw.cpp sifWrite32):
+        ///   • Bits 5 (0x20) and 7 (0x80) are excluded from the OR operation.
+        ///   • Bit 5 (0x20) is additionally write-1-to-clear (clears bit 5 from F240 if set in value).
+        ///   • Bit 15 (0x8000) is write-1-to-clear (clears bit 15 from F240 if set in value).
+        ///   • All remaining bits are OR'd into the register (not plain-stored).
         /// </summary>
         public void WriteRegister(uint offset, uint value)
         {
@@ -163,7 +168,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 case REG_SMCOM:  _smcom  = value;        break;
                 case REG_MSFLAG: _msflag |= value;       break;  // W1S from EE (EE signals IOP)
                 case REG_SMFLAG: _smflag &= ~value;      break;  // W1C from EE (EE acks IOP signal)
-                case REG_F240:   _f240   = value;        break;
+                case REG_F240:
+                    // W1C for bits 5 (0x20) and 15 (0x8000) from EE side.
+                    // Bits 5 (0x20) and 7 (0x80) are excluded from the OR (mask ~0xa0).
+                    if ((value & 0x0020u) != 0) _f240 &= ~0x0020u;
+                    if ((value & 0x8000u) != 0) _f240 &= ~0x8000u;
+                    _f240 |= value & ~0x00a0u;           // OR all bits except 5 and 7
+                    break;
                 case REG_F250:   _f250   = value;        break;
                 case REG_F260:   _f260   = value;        break;
             }
@@ -174,7 +185,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         /// The IOP flag semantics are the inverse of the EE:
         ///   MSFLAG (offset 0x20) → write-1-to-clear (IOP acknowledges the EE's signal)
         ///   SMFLAG (offset 0x30) → write-1-to-set   (IOP signals the EE)
-        /// All other registers use plain-write semantics, same as the EE side.
+        /// F240 has special bootstrap handshake semantics from the IOP side
+        /// (reference: PCSX2 pcsx2/IopMem.cpp SIF mirror handling):
+        ///   • Bit 4 (0x10) in the written value → SETS bit 5 (0x20) in F240.
+        ///   • Bit 6 (0x40) in the written value → SETS bit 15 (0x8000) in F240.
+        ///   • Bits 4–7 (0xF0) are consumed by the above translations; all other bits are OR'd in.
         ///
         /// Reference: PCSX2 pcsx2/Hw.cpp sifWrite32 / IopMem.cpp SIF mirror handling.
         /// </summary>
@@ -186,7 +201,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 case REG_SMCOM:  _smcom  = value;        break;
                 case REG_MSFLAG: _msflag &= ~value;      break;  // W1C from IOP (IOP acks EE signal)
                 case REG_SMFLAG: _smflag |= value;       break;  // W1S from IOP (IOP signals EE)
-                case REG_F240:   _f240   = value;        break;
+                case REG_F240:
+                    // IOP writes bit 4 (0x10) → sets bit 5 (0x20) in shared F240 (signals EE).
+                    // IOP writes bit 6 (0x40) → sets bit 15 (0x8000) in shared F240.
+                    // All other bits (excluding bits 4–7) are OR'd in.
+                    if ((value & 0x10u) != 0) _f240 |= 0x0020u;
+                    if ((value & 0x40u) != 0) _f240 |= 0x8000u;
+                    _f240 |= value & ~0x00f0u;           // OR all bits except 4–7
+                    break;
                 case REG_F250:   _f250   = value;        break;
                 case REG_F260:   _f260   = value;        break;
             }
