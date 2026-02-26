@@ -1,0 +1,32 @@
+{
+  "profiles": {
+    "Help": {
+      "commandName": "Project",
+      "commandLineArgs": "--help"
+    },
+    "Graphics Info": {
+      "commandName": "Project",
+      "commandLineArgs": "--graphics-info"
+    },
+    "Socket Server": {
+      "commandName": "Project",
+      "commandLineArgs": "--server"
+    },
+    "Run Emulator (BIOS only)": {
+      "commandName": "Project",
+      "commandLineArgs": "--run"
+    },
+    "Run Emulator (BIOS only, 10M steps)": {
+      "commandName": "Project",
+      "commandLineArgs": "--run --steps 10000000"
+    },
+    "Run SOCOM II": {
+      "commandName": "Project",
+      "commandLineArgs": "--run --disc \"C:\\Users\\tholu\\Desktop\\SOCOM II - U.S. Navy SEALs.iso\""
+    },
+    "Run SOCOM II (1M steps)": {
+      "commandName": "Project",
+      "commandLineArgs": "--run --disc \"C:\\Users\\tholu\\Desktop\\SOCOM II - U.S. Navy SEALs.iso\" --steps 1000000"
+    }
+  }
+}

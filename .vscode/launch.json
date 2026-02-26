@@ -1,0 +1,92 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Help",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "args": ["--help"],
+      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Graphics Info",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "args": ["--graphics-info"],
+      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Socket Server",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "args": ["--server"],
+      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Run Emulator (BIOS only)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "args": ["--run"],
+      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Run Emulator (BIOS only, 10M steps)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "args": ["--run", "--steps", "10000000"],
+      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Run SOCOM II",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "args": [
+        "--run",
+        "--disc",
+        "${env:USERPROFILE}\\Desktop\\SOCOM II - U.S. Navy SEALs.iso"
+      ],
+      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Run SOCOM II (1M steps)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "args": [
+        "--run",
+        "--disc",
+        "${env:USERPROFILE}\\Desktop\\SOCOM II - U.S. Navy SEALs.iso",
+        "--steps",
+        "1000000"
+      ],
+      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    }
+  ]
+}

@@ -14,4 +14,10 @@
     <Folder Include="VectorUnits\VU1\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Bios\SCPH-70012_BIOS_V12_USA_200.bin">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
