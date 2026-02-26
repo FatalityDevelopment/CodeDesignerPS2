@@ -3297,5 +3297,290 @@ namespace CodeDesigner.Mips64LE.TestProject
         {
             Assert.AreEqual(0x07, Cdvd.NCMD_READ_CDDA, "NCMD_READ_CDDA must be 0x07");
         }
+
+        // =====================================================================
+        // Phase 7.5 — DVD-Video sector types
+        // =====================================================================
+
+        [TestMethod]
+        public void Cdvd_NCMD_READ_DVD_ConstantValue()
+        {
+            Assert.AreEqual(0x08, Cdvd.NCMD_READ_DVD, "NCMD_READ_DVD must be 0x08");
+        }
+
+        [TestMethod]
+        public void Cdvd_NCMD_GET_TOC_ConstantValue()
+        {
+            Assert.AreEqual(0x09, Cdvd.NCMD_GET_TOC, "NCMD_GET_TOC must be 0x09");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadDvd_NCommand08_TriggersDataReady()
+        {
+            var cdvd    = new Cdvd();
+            var fakeIso = new byte[Cdvd.SectorSize * 20];
+            cdvd.LoadImage(fakeIso);
+
+            bool fired = false;
+            cdvd.DataReady += (_, _) => fired = true;
+
+            // Issue NCMD_READ_DVD with LBA=0, count=1
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1); // count
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_DVD);
+
+            Assert.IsTrue(fired, "DataReady event must fire after NCMD_READ_DVD");
+            Assert.AreNotEqual(0, cdvd.ReadRegister(0x08u) & 0x04,
+                "ISTAT bit 2 must be set after NCMD_READ_DVD");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadDvd_NCommand08_Returns2048BytesPerSector()
+        {
+            // Fill sector 2 with a recognisable pattern.
+            var fakeIso = new byte[Cdvd.SectorSize * 10];
+            for (int j = 0; j < Cdvd.SectorSize; j++)
+                fakeIso[2 * Cdvd.SectorSize + j] = (byte)(j & 0xFF);
+
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(fakeIso);
+
+            // Read sector 2, count = 1
+            cdvd.WriteRegister(0x00u, 2); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1);
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_DVD);
+
+            // Drain 2048 / 4 = 512 DMA words
+            for (int w = 0; w < Cdvd.SectorSize / 4; w++)
+                cdvd.ReadNextDmaWord();
+
+            // The DMA buffer should now be exhausted (next read returns 0)
+            Assert.AreEqual(0u, cdvd.ReadNextDmaWord(),
+                "Buffer must be exhausted after reading exactly SectorSize bytes via NCMD_READ_DVD");
+        }
+
+        [TestMethod]
+        public void Cdvd_GetToc_NCommand09_TriggersDataReady()
+        {
+            var cdvd    = new Cdvd();
+            var fakeIso = new byte[Cdvd.SectorSize * 32];
+            cdvd.LoadImage(fakeIso);
+
+            bool fired = false;
+            cdvd.DataReady += (_, _) => fired = true;
+
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_GET_TOC);
+
+            Assert.IsTrue(fired, "DataReady event must fire after NCMD_GET_TOC");
+        }
+
+        [TestMethod]
+        public void Cdvd_GetToc_NCommand09_ReturnsTocSizeBytes()
+        {
+            var cdvd    = new Cdvd();
+            var fakeIso = new byte[Cdvd.SectorSize * 32];
+            cdvd.LoadImage(fakeIso);
+
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_GET_TOC);
+
+            // Drain Cdvd.TocSize / 4 DMA words then verify buffer exhaustion.
+            for (int w = 0; w < Cdvd.TocSize / 4; w++)
+                cdvd.ReadNextDmaWord();
+
+            Assert.AreEqual(0u, cdvd.ReadNextDmaWord(),
+                "DMA buffer must be exhausted after reading TocSize bytes");
+        }
+
+        [TestMethod]
+        public void Cdvd_GetToc_DvdBookTypeByte_Is0x04()
+        {
+            var cdvd    = new Cdvd();
+            var fakeIso = new byte[Cdvd.SectorSize * 64];
+            cdvd.LoadImage(fakeIso);
+
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_GET_TOC);
+
+            // First DMA word encodes bytes 0–3 of the TOC (little-endian)
+            uint word0 = cdvd.ReadNextDmaWord();
+            byte bookType = (byte)(word0 & 0xFF);
+            Assert.AreEqual(0x04, bookType, "TOC byte 0 must be 0x04 (DVD-ROM book type)");
+        }
+
+        [TestMethod]
+        public void Cdvd_GetToc_NoDisc_ReturnsTocSizeZeroBytes()
+        {
+            var cdvd = new Cdvd();
+            // No image loaded — TOC should be all zeros.
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_GET_TOC);
+
+            uint word0 = cdvd.ReadNextDmaWord();
+            Assert.AreEqual(0u, word0,
+                "TOC first word must be 0 when no disc is loaded");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadCd_SectorType4_AppendsSubChannelPerSector()
+        {
+            // Sector type 4 = user data (2048) + sub-channel (16) = 2064 bytes/sector.
+            var fakeIso = new byte[Cdvd.SectorSize * 10];
+            var cdvd    = new Cdvd();
+            cdvd.LoadImage(fakeIso);
+
+            // params: LBA=0, count=1, sectorType=4
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1);  // count
+            cdvd.WriteRegister(0x00u, 4);  // sectorType = 4
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            int totalExpectedBytes = Cdvd.SectorSize + Cdvd.SubChannelSize;
+            int totalExpectedWords = totalExpectedBytes / 4;
+
+            for (int w = 0; w < totalExpectedWords; w++)
+                cdvd.ReadNextDmaWord();
+
+            Assert.AreEqual(0u, cdvd.ReadNextDmaWord(),
+                "Buffer must be exhausted after reading SectorSize + SubChannelSize bytes with sectorType=4");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadCd_SectorType4_SubQByte0_IsDataTrackCtrlAdr()
+        {
+            // Sub-Q byte 0 must be 0x41 (ctrl=4 data, adr=1 position).
+            var fakeIso = new byte[Cdvd.SectorSize * 10];
+            var cdvd    = new Cdvd();
+            cdvd.LoadImage(fakeIso);
+
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1); // count
+            cdvd.WriteRegister(0x00u, 4); // sectorType = 4
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            // Skip the 2048-byte user data (512 words)
+            for (int w = 0; w < Cdvd.SectorSize / 4; w++)
+                cdvd.ReadNextDmaWord();
+
+            // First word of sub-channel: bytes [ctrl|adr, track, index, relMin]
+            uint subQWord0 = cdvd.ReadNextDmaWord();
+            byte ctrlAdr   = (byte)(subQWord0 & 0xFF);
+            Assert.AreEqual(0x41, ctrlAdr,
+                "Sub-Q byte 0 (ctrl|adr) must be 0x41 for a data track");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadCd_SectorType4_SubQTrackAndIndexAreBcd01()
+        {
+            var fakeIso = new byte[Cdvd.SectorSize * 10];
+            var cdvd    = new Cdvd();
+            cdvd.LoadImage(fakeIso);
+
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1); // count
+            cdvd.WriteRegister(0x00u, 4); // sectorType = 4
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            for (int w = 0; w < Cdvd.SectorSize / 4; w++)
+                cdvd.ReadNextDmaWord();
+
+            uint subQWord0 = cdvd.ReadNextDmaWord();
+            byte track = (byte)((subQWord0 >> 8) & 0xFF);
+            byte index = (byte)((subQWord0 >> 16) & 0xFF);
+            Assert.AreEqual(0x01, track, "Sub-Q track must be BCD 01");
+            Assert.AreEqual(0x01, index, "Sub-Q index must be BCD 01");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadCd_SectorType4_AbsoluteMinSecFrame_MatchesLba()
+        {
+            // LBA 0 → absolute MSF = (0+150)/75/60 min, (0+150)/75%60 sec, (0+150)%75 frame
+            // abs = 150 → frame = 150%75 = 0, sec = (150/75)%60 = 2, min = 0
+            // So absMin=0x00, absSec=0x02, absFrame=0x00 (BCD encoded)
+            var fakeIso = new byte[Cdvd.SectorSize * 10];
+            var cdvd    = new Cdvd();
+            cdvd.LoadImage(fakeIso);
+
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 0); cdvd.WriteRegister(0x00u, 0);
+            cdvd.WriteRegister(0x00u, 1); // count = 1, LBA = 0
+            cdvd.WriteRegister(0x00u, 4); // sectorType = 4
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            // Skip user data (512 words)
+            for (int w = 0; w < Cdvd.SectorSize / 4; w++)
+                cdvd.ReadNextDmaWord();
+
+            // Sub-Q word 0: [ctrl|adr, track, index, relMin]
+            cdvd.ReadNextDmaWord();
+            // Sub-Q word 1: [relSec, relFrame, zero, absMin]
+            uint word1  = cdvd.ReadNextDmaWord();
+            byte absMin = (byte)((word1 >> 24) & 0xFF);
+            // Sub-Q word 2: [absSec, absFrame, zero, CRC]
+            uint word2   = cdvd.ReadNextDmaWord();
+            byte absSec  = (byte)(word2 & 0xFF);
+            byte absFrame = (byte)((word2 >> 8) & 0xFF);
+
+            Assert.AreEqual(0x00, absMin,   "absMin for LBA 0 must be BCD 0x00");
+            Assert.AreEqual(0x02, absSec,   "absSec for LBA 0 must be BCD 0x02");
+            Assert.AreEqual(0x00, absFrame, "absFrame for LBA 0 must be BCD 0x00");
+        }
+
+        [TestMethod]
+        public void Cdvd_SCommand_GetDiscType_ReturnsDiscTypeByte()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+
+            // Write S-command 0x05 (GetDiscType)
+            cdvd.WriteRegister(0x17u, 0x05);
+
+            byte result = cdvd.ReadRegister(0x0Fu); // REG_SDATA
+            Assert.AreEqual(Cdvd.DISC_PS2_DVD, result,
+                "GetDiscType S-command must return DISC_PS2_DVD");
+        }
+
+        [TestMethod]
+        public void Cdvd_SCommand_GetMedia_ReturnsDiscTypeByte()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+
+            // Write S-command 0x00 (GetMedia)
+            cdvd.WriteRegister(0x17u, 0x00);
+
+            byte result = cdvd.ReadRegister(0x0Fu); // REG_SDATA
+            Assert.AreEqual(Cdvd.DISC_PS2_DVD, result,
+                "GetMedia S-command must return DISC_PS2_DVD");
+        }
+
+        [TestMethod]
+        public void Cdvd_SCommand_GetLayerInfo_ReturnsFourZeroBytes_SingleLayer()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+
+            // Write S-command 0x12 (GetLayerInfo)
+            cdvd.WriteRegister(0x17u, 0x12);
+
+            // Expect 4 bytes of zero for a single-layer disc
+            for (int i = 0; i < 4; i++)
+                Assert.AreEqual(0, cdvd.ReadRegister(0x0Fu),
+                    $"GetLayerInfo byte {i} must be 0 for single-layer disc");
+        }
+
+        [TestMethod]
+        public void Cdvd_SCommand_NoDisc_GetDiscType_ReturnsNoDisc()
+        {
+            var cdvd = new Cdvd();
+            // No disc loaded
+            cdvd.WriteRegister(0x17u, 0x05);
+
+            byte result = cdvd.ReadRegister(0x0Fu);
+            Assert.AreEqual(Cdvd.DISC_NO_DISC, result,
+                "GetDiscType with no disc must return DISC_NO_DISC");
+        }
     }
 }

@@ -158,8 +158,8 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Memory card emulation (MEC / MC2) | ⬜ | The PS2 memory card protocol is SIO-based (IOP SIO2 port 0/1 with device IDs 0x17/0x27).  Required for save/load functionality.  Reference: PCSX2 `pcsx2/Sio.cpp`, `pcsx2/MemoryCardFile.cpp`. |
-| DVD-Video sector types | ⬜ | CDVD currently handles Mode 1 (2048-byte) data sectors.  DVD-Video discs use 2048-byte sectors with different lead-in/lead-out structure; sub-channel data emulation needed for some titles. |
+| Memory card emulation (MEC / MC2) | ✅ | `MemoryCard` in `Emulator/IOP/MemoryCard.cs`: 8 MB PS2 card (16 384 pages × 528 bytes).  SIO2 address bytes 0x81/0x82 (slot 0/1).  Stateful `ProcessCommand` handles multi-SEND3-entry transactions: header phase returns 8 framing bytes; data phase 514 bytes.  Commands: Read (0x52), Write (0x57), Erase (0x82), GetSpec (0x46), Status (0x43), Reset/Auth.  `CreateBlank()` writes superblock with magic `"Sony PS2 Memory Card Format 1.2.0.0"`.  `Sio2.MemCard0`/`MemCard1` route by address byte; `DualCpuScheduler` exposes both slots.  Reference: PCSX2 `pcsx2/SIO/Mcd/MemoryCardProtocol.cpp`. |
+| DVD-Video sector types | ✅ | N-command 0x08 (ReadDvd) reads 2048-byte DVD data sectors (no sub-channel, always cooked mode); identical sector layout to ReadCd mode 0.  N-command 0x09 (GetTOC) returns a 1024-byte TOC buffer with the DVD-ROM single-layer descriptor: book type 0x04, disc size 0xF2, start PSN 0x00030000, end PSN computed from image size.  Sub-channel Q data: when ReadCd `params[5]` (sectorType) = 4 each sector is extended by 16 bytes (12-byte sub-Q with synthesised ctrl/adr/track/index/MSF in BCD + 4 reserved bytes = 2064 bytes/sector total).  S-command handler: 0x00 GetMedia and 0x05 GetDiscType return the CRT disc-type byte; 0x12 GetLayerInfo returns a 4-byte zero layer-break PSN (single-layer disc).  Reference: PCSX2 `pcsx2/CDVD/CDVD.cpp` `cdvdDvdRead()`, `cdvdGetTOC()`, `CdRawSectorWithOC`. |
 
 ### 7.6 — CPU Accuracy
 
@@ -192,4 +192,4 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 ---
 
-*Last updated: 2026-02-26.  Current test count: 827 (all passing).*
+*Last updated: 2026-02-26.  Current test count: 843 (all passing).*
