@@ -321,6 +321,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         // Private helpers
         // -----------------------------------------------------------------------
 
+        /// <summary>
+        /// Small zero-filled dummy buffer returned for reads from reserved or
+        /// unmapped physical regions.  Writes routed here are discarded (readOnly).
+        /// This matches PCSX2 VTLB behaviour:
+        ///   [0x14000000–0x1FC00000) → reserved (ignored writes, arbitrary reads)
+        ///   [0x20000000+)           → should be BUS ERROR; we silently return 0
+        ///                             until a COP0 exception path is wired up.
+        /// </summary>
+        private static readonly byte[] _unmappedDummy = new byte[16];
+
         private (byte[] region, uint offset) MapPhysical(uint paddr)
         {
             if (paddr >= ScratchpadBase && paddr < ScratchpadBase + ScratchpadSize)
@@ -332,12 +342,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (paddr >= BiosRomBase && paddr < BiosRomBase + BiosRomSize)
                 return (_bios, paddr - BiosRomBase);
 
-            if (paddr < MainRamSize)
-                return (_ram, paddr - MainRamBase);
+            // Main RAM: 32 MB at physical 0x00000000.  The EE bus mirrors this
+            // across the full 256 MB [0x00000000–0x0FFFFFFF) RAM window
+            // (PCSX2 vtlb.cpp: "[0000 0000,1000 0000) -> Ram (mirrored ?)").
+            if (paddr < 0x10000000u)
+                return (_ram, paddr & (uint)(MainRamSize - 1));
 
-            // Unmapped address – raise a bus error (a full emulator would
-            // route this through the exception handler instead).
-            throw new InvalidOperationException($"Unmapped physical address: 0x{paddr:X8}");
+            // Reserved / unmapped physical region.
+            // PCSX2 defines [0x14000000–0x1FC00000) as reserved (ignored writes,
+            // arbitrary reads) and [0x20000000+) as BUS ERROR territory.
+            // Return a zero-filled dummy buffer so games probing unimplemented
+            // hardware registers do not crash the emulator.
+            return (_unmappedDummy, 0);
         }
 
         private (byte[] region, uint offset, bool readOnly) MapPhysicalWrite(uint paddr)
@@ -351,10 +367,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (paddr >= BiosRomBase && paddr < BiosRomBase + BiosRomSize)
                 return (_bios, 0, true); // read-only
 
-            if (paddr < MainRamSize)
-                return (_ram, paddr - MainRamBase, false);
+            // Main RAM with mirroring (matches PCSX2 RAM window).
+            if (paddr < 0x10000000u)
+                return (_ram, paddr & (uint)(MainRamSize - 1), false);
 
-            throw new InvalidOperationException($"Unmapped physical address (write): 0x{paddr:X8}");
+            // Reserved / unmapped – silently discard the write (matches PCSX2 behaviour).
+            return (_unmappedDummy, 0, true);
         }
     }
 }

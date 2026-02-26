@@ -96,10 +96,30 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
-        public void MemoryBus_Unmapped_ThrowsException()
+        public void MemoryBus_Unmapped_ReturnsZeroAndDoesNotThrow()
         {
+            // PCSX2 vtlb.cpp documents reserved/unmapped regions as returning
+            // arbitrary data for reads and silently ignoring writes.
+            // We return 0 and discard writes rather than crashing.
             var bus = new PS2MemoryBus();
-            Assert.ThrowsException<InvalidOperationException>(() => bus.ReadByte(0x50000000));
+            // Write to reserved region – must not throw
+            bus.WriteWord(0x50000000, 0xDEADBEEF);
+            // Read from reserved region – must return 0, not throw
+            Assert.AreEqual(0u, bus.ReadWord(0x50000000),
+                "Unmapped physical region should return 0 for reads");
+        }
+
+        [TestMethod]
+        public void MemoryBus_RamMirroring_WorksAcross256MbWindow()
+        {
+            // PCSX2 vtlb.cpp: "[0000 0000,1000 0000) -> Ram (mirrored ?)"
+            // A write to RAM base and a read from the mirrored alias should match.
+            var bus = new PS2MemoryBus();
+            bus.WriteWord(0x00000100, 0xCAFEBABE);
+            // The same physical address accessed via its mirror at +32MB
+            uint mirrorAddr = 0x00000100 + (uint)PS2MemoryBus.MainRamSize; // +0x2000000
+            Assert.AreEqual(0xCAFEBABEu, bus.ReadWord(mirrorAddr),
+                "Physical RAM should be mirrored across the 256 MB window");
         }
 
         // =====================================================================
