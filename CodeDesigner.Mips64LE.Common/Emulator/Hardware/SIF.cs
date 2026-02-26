@@ -151,7 +151,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         }
 
         /// <summary>
-        /// Write a 32-bit SIF register.
+        /// Write a 32-bit SIF register from the EE side.
         /// MSFLAG uses write-1-to-set; SMFLAG uses write-1-to-clear; all others
         /// store the value as-is.
         /// </summary>
@@ -161,8 +161,31 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             {
                 case REG_MSCOM:  _mscom  = value;        break;
                 case REG_SMCOM:  _smcom  = value;        break;
-                case REG_MSFLAG: _msflag |= value;       break;  // W1S
-                case REG_SMFLAG: _smflag &= ~value;      break;  // W1C
+                case REG_MSFLAG: _msflag |= value;       break;  // W1S from EE (EE signals IOP)
+                case REG_SMFLAG: _smflag &= ~value;      break;  // W1C from EE (EE acks IOP signal)
+                case REG_F240:   _f240   = value;        break;
+                case REG_F250:   _f250   = value;        break;
+                case REG_F260:   _f260   = value;        break;
+            }
+        }
+
+        /// <summary>
+        /// Write a 32-bit SIF register from the IOP side (via the 0x1D000000 mirror).
+        /// The IOP flag semantics are the inverse of the EE:
+        ///   MSFLAG (offset 0x20) → write-1-to-clear (IOP acknowledges the EE's signal)
+        ///   SMFLAG (offset 0x30) → write-1-to-set   (IOP signals the EE)
+        /// All other registers use plain-write semantics, same as the EE side.
+        ///
+        /// Reference: PCSX2 pcsx2/Hw.cpp sifWrite32 / IopMem.cpp SIF mirror handling.
+        /// </summary>
+        public void WriteIopRegister(uint offset, uint value)
+        {
+            switch (offset & 0x70u)
+            {
+                case REG_MSCOM:  _mscom  = value;        break;
+                case REG_SMCOM:  _smcom  = value;        break;
+                case REG_MSFLAG: _msflag &= ~value;      break;  // W1C from IOP (IOP acks EE signal)
+                case REG_SMFLAG: _smflag |= value;       break;  // W1S from IOP (IOP signals EE)
                 case REG_F240:   _f240   = value;        break;
                 case REG_F250:   _f250   = value;        break;
                 case REG_F260:   _f260   = value;        break;

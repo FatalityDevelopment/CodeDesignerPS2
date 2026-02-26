@@ -199,6 +199,71 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(0xAAu, bus.Bios[0], "BIOS ROM must not be writable via bus");
         }
 
+        [TestMethod]
+        public void IopMemoryBus_Kseg1BiosAddress_TranslatesToPhysicalBios()
+        {
+            // The IOP reset vector is 0xBFC00000 (KSEG1), which must translate to
+            // physical 0x1FC00000 (BIOS ROM).  Without KSEG1 translation the IOP
+            // would read 0 (NOP) instead of real BIOS instructions, causing the
+            // EE to stay in its boot-wait spin loop.
+            var bus = new IopMemoryBus();
+            // Plant a sentinel value directly in the BIOS byte array
+            bus.Bios[0x180] = 0x12;
+            bus.Bios[0x181] = 0x34;
+            bus.Bios[0x182] = 0x56;
+            bus.Bios[0x183] = 0x78;
+            // Read via the KSEG1-mapped reset vector offset (0xBFC00180 → physical 0x1FC00180)
+            uint word = bus.ReadWord(0xBFC00180u);
+            Assert.AreEqual(0x78563412u, word,
+                "KSEG1 BIOS address 0xBFC00180 must translate to physical 0x1FC00180");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_Kseg0RamAddress_ReadWrite()
+        {
+            // KSEG0 RAM: 0x80001000 → physical 0x00001000 (IOP main RAM)
+            var bus = new IopMemoryBus();
+            bus.WriteWord(0x80001000u, 0xDEADBEEFu);
+            Assert.AreEqual(0xDEADBEEFu, bus.ReadWord(0x80001000u),
+                "KSEG0 RAM address 0x80001000 must translate to physical 0x00001000");
+            Assert.AreEqual(0xDEADBEEFu, bus.ReadWord(0x00001000u),
+                "Physical 0x00001000 must reflect the same value written via KSEG0");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_SifMirror_SmFlag_IopSetsW1S()
+        {
+            // When the IOP writes to SMFLAG (IOP offset 0x30) it must W1S the
+            // SMFLAG register so the EE can see the IOP's boot-complete signal.
+            // This is the inverse of the EE's W1C (acknowledge) semantics.
+            var sif = new SIF();
+            var bus = new IopMemoryBus { SharedSif = sif };
+
+            // IOP signals EE by W1S on SMFLAG via its mirror at 0x1D000030
+            bus.WriteWord(0x1D000030u, 0x00040000u);
+            Assert.AreEqual(0x00040000u, sif.SmFlag,
+                "IOP write to SIF SMFLAG (0x1D000030) must W1S the shared SMFLAG");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_SifMirror_MsFlag_IopClearsW1C()
+        {
+            // When the IOP writes to MSFLAG (IOP offset 0x20) it must W1C the
+            // MSFLAG register, acknowledging the EE's signal.
+            var sif = new SIF();
+            var bus = new IopMemoryBus { SharedSif = sif };
+
+            // EE sets MSFLAG via the EE-side write (W1S from EE)
+            sif.WriteRegister(SIF.REG_MSFLAG, 0x000000FFu);
+            Assert.AreEqual(0x000000FFu, sif.MsFlag, "EE write must set MSFLAG bits");
+
+            // IOP acknowledges by W1C on MSFLAG via its mirror at 0x1D000020
+            bus.WriteWord(0x1D000020u, 0x0000000Fu);
+            Assert.AreEqual(0x000000F0u, sif.MsFlag,
+                "IOP write to MSFLAG (0x1D000020) must W1C: clear the acknowledged bits");
+        }
+
+
         // =====================================================================
         // IopEmulator tests
         // =====================================================================

@@ -273,11 +273,38 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if ((uint)bit < 32u) _iStat |= 1u << bit;
         }
 
+        // ── Address translation ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Translate a virtual IOP address to its physical equivalent.
+        /// The IOP (R3000A) maps KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1
+        /// (0xA0000000–0xBFFFFFFF) to physical addresses by stripping the top
+        /// 3 bits, exactly as the EE does.
+        ///
+        /// This translation is required so that accesses through the IOP's
+        /// unmapped segments — in particular the reset vector at 0xBFC00000
+        /// (KSEG1 → physical 0x1FC00000, BIOS ROM) — reach the correct memory
+        /// region.
+        ///
+        /// Reference: PCSX2 pcsx2/IopMem.cpp psxMemRead32 / psxMemWrite32.
+        /// </summary>
+        public static uint TranslateAddress(uint addr)
+        {
+            // KSEG0 (0x80000000–0x9FFFFFFF, bits[31:29]=100) and
+            // KSEG1 (0xA0000000–0xBFFFFFFF, bits[31:29]=101) both strip the
+            // top 3 bits to yield the physical address.
+            if ((addr & 0xC0000000u) == 0x80000000u)
+                return addr & 0x1FFFFFFFu;
+            return addr;
+        }
+
         // ── 32-bit read/write (main interface) ────────────────────────────────
 
         /// <summary>Read a 32-bit little-endian word from the IOP address space.</summary>
         public uint ReadWord(uint addr)
         {
+            addr = TranslateAddress(addr);
+
             // IOP INTC
             if (addr == IntcBase)      return _iStat;
             if (addr == IntcBase + 4u) return _iMask;
@@ -339,6 +366,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <summary>Write a 32-bit little-endian word to the IOP address space.</summary>
         public void WriteWord(uint addr, uint value)
         {
+            addr = TranslateAddress(addr);
+
             // IOP INTC
             if (addr == IntcBase)      { _iStat &= ~value; return; }  // W1C
             if (addr == IntcBase + 4u) { _iMask  = value;  return; }
@@ -434,6 +463,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         public byte ReadByte(uint addr)
         {
+            addr = TranslateAddress(addr);
+
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
                 return _cdvd.ReadRegister(addr - Cdvd.RegBase);
 
@@ -465,6 +496,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         public void WriteByte(uint addr, byte value)
         {
+            addr = TranslateAddress(addr);
+
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
             {
                 _cdvd.WriteRegister(addr - Cdvd.RegBase, value);
@@ -544,31 +577,26 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         // ── SIF mirror helpers ────────────────────────────────────────────────
         //
-        // The IOP's SIF mirror at 0x1D000000 maps to the same registers as the
-        // EE's SIF window at 0x1000F200, but with swapped flag semantics:
-        //   IOP offset 0x00 → SMCOM (IOP reads what EE wrote to MSCOM)
-        //   IOP offset 0x10 → MSCOM (IOP writes commands the EE reads as SMCOM)
-        //   IOP offset 0x20 → SMFLAG (IOP writes to set flags EE sees in SMFLAG)
-        //   IOP offset 0x30 → MSFLAG (IOP writes to clear flags it previously set)
-        //   IOP offset 0x40 → F240
-        //   IOP offset 0x50 → F250
-        //   IOP offset 0x60 → F260
+        // The IOP's SIF mirror at 0x1D000000 shares the same register file as the
+        // EE's SIF window at 0x1000F200.  Register offsets are identical on both
+        // sides, but the flag write semantics are inverted:
         //
-        // For simplicity we forward all IOP SIF accesses directly to the shared SIF
-        // object using IOP-side semantics.
+        //   Offset   EE write semantics      IOP write semantics
+        //   0x20     MSFLAG W1S (EE signals IOP)   MSFLAG W1C (IOP acks EE)
+        //   0x30     SMFLAG W1C (EE acks IOP)       SMFLAG W1S (IOP signals EE)
+        //
+        // Read semantics are the same on both sides.
+        //
+        // Reference: PCSX2 pcsx2/Hw.cpp sifWrite32, pcsx2/IopMem.cpp SIF mirror.
 
         private uint ReadSifMirror(uint relOffset)
         {
-            // IOP reads from the perspective of the IOP:
-            //   IOP:0x00 → same SMCOM the EE writes
-            //   IOP:0x10 → same MSCOM the IOP writes
-            // Map to EE SIF register offsets (same layout, just swapped COM roles)
             return SharedSif?.ReadRegister(relOffset) ?? 0u;
         }
 
         private void WriteSifMirror(uint relOffset, uint value)
         {
-            SharedSif?.WriteRegister(relOffset, value);
+            SharedSif?.WriteIopRegister(relOffset, value);
         }
 
         // ── Region mapping ────────────────────────────────────────────────────
