@@ -161,6 +161,29 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP1
         }
 
         /// <summary>
+        /// Record a FPU exceptional condition in FCSR.
+        /// Sets the Cause bit (bits [22:18]) and the sticky Flag bit (bits [11:7])
+        /// for the given exception.  The Cause bits are cleared at the start of each
+        /// FPU instruction by <see cref="ClearCauseBits"/>; Flag bits persist until
+        /// explicitly cleared by software (write to FCR31).
+        /// Reference: PCSX2 pcsx2/FPU.cpp FPU_OVERFLOW / FPU_DIVZERO helpers.
+        /// </summary>
+        public void RaiseFpuFlag(FpuException exception)
+        {
+            SetExceptionCause(exception, true);
+            SetExceptionFlag(exception, true);
+        }
+
+        /// <summary>
+        /// Clear the five Cause bits ([22:18]) in FCSR at the start of each FPU
+        /// operation so they reflect only the most recent instruction.
+        /// </summary>
+        public void ClearCauseBits()
+        {
+            _controlRegisters[31] &= ~(0x1Fu << 18);
+        }
+
+        /// <summary>
         /// Get exception cause bits (bits 22:18) - read-only, set by hardware
         /// </summary>
         public uint GetExceptionCause()

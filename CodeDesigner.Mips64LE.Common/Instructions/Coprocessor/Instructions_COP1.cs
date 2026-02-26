@@ -461,7 +461,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             if (float.IsSubnormal(ft)) ft = 0f;
             float result = fs + ft;
             if (float.IsSubnormal(result)) result = 0f;
-            cpu.FPR[args.Shamt] = result;
+            cpu.FPR[args.Shamt] = Ps2Fpu.HandleResult(result, cpu.COP1);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -514,7 +514,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             if (float.IsSubnormal(ft)) ft = 0f;
             float result = fs - ft;
             if (float.IsSubnormal(result)) result = 0f;
-            cpu.FPR[args.Shamt] = result;
+            cpu.FPR[args.Shamt] = Ps2Fpu.HandleResult(result, cpu.COP1);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -567,7 +567,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             if (float.IsSubnormal(ft)) ft = 0f;
             float result = fs * ft;
             if (float.IsSubnormal(result)) result = 0f;
-            cpu.FPR[args.Shamt] = result;
+            cpu.FPR[args.Shamt] = Ps2Fpu.HandleResult(result, cpu.COP1);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -620,7 +620,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             if (float.IsSubnormal(ft)) ft = 0f;
             float result = fs / ft;
             if (float.IsSubnormal(result)) result = 0f;
-            cpu.FPR[args.Shamt] = result;
+            cpu.FPR[args.Shamt] = Ps2Fpu.HandleDivResult(fs, ft, result, cpu.COP1);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -671,7 +671,7 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             if (float.IsSubnormal(fs)) fs = 0f;
             float result = MathF.Sqrt(fs);
             if (float.IsSubnormal(result)) result = 0f;
-            cpu.FPR[args.Shamt] = result;
+            cpu.FPR[args.Shamt] = Ps2Fpu.HandleSqrtResult(fs, result, cpu.COP1);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -1737,6 +1737,68 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
                 return $"{Equation} => CC={cc}, {(cc ? $"branch to 0x{target:X}" : "no branch (delay nullified)")}";
             }
             return Equation;
+        }
+    }
+
+    /// <summary>
+    /// Helper utilities for PS2 EE FPU arithmetic, matching PCSX2 FPU.cpp behaviour:
+    /// overflow/div-by-zero results are clamped to ±MAX_FLOAT and the appropriate
+    /// FCSR cause + sticky flag bits are set.
+    /// Reference: PCSX2 pcsx2/FPU.cpp FPU_OVERFLOW / FPU_DIVZERO macros.
+    /// </summary>
+    internal static class Ps2Fpu
+    {
+        /// <summary>
+        /// Clear Cause bits in FCSR, then check the result for overflow.
+        /// If <paramref name="result"/> is ±infinity, clamp it and set
+        /// Cause.Overflow + Flag.Overflow in FCSR.
+        /// </summary>
+        internal static float HandleResult(float result, COP1State fcsr)
+        {
+            fcsr.ClearCauseBits();
+            if (float.IsInfinity(result))
+            {
+                fcsr.RaiseFpuFlag(FpuException.Overflow);
+                return result > 0f ? float.MaxValue : -float.MaxValue;
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Clear Cause bits, then check for division-by-zero or overflow.
+        /// Handles the PS2 EE DIV.S behaviour: ft==0 with finite fs sets the
+        /// DivisionByZero flag; ±infinity result sets the Overflow flag.
+        /// </summary>
+        internal static float HandleDivResult(float fs, float ft, float result, COP1State fcsr)
+        {
+            fcsr.ClearCauseBits();
+            if (ft == 0f && !float.IsInfinity(fs) && !float.IsNaN(fs))
+            {
+                fcsr.RaiseFpuFlag(FpuException.DivisionByZero);
+                return fs >= 0f ? float.MaxValue : -float.MaxValue;
+            }
+            if (float.IsInfinity(result))
+            {
+                fcsr.RaiseFpuFlag(FpuException.Overflow);
+                return result > 0f ? float.MaxValue : -float.MaxValue;
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Clear Cause bits, then check for invalid operation (NaN result, e.g.
+        /// sqrt of negative).  PS2 EE does not produce NaN — the result is clamped
+        /// to MaxPositive and InvalidOperation is flagged.
+        /// </summary>
+        internal static float HandleSqrtResult(float fs, float result, COP1State fcsr)
+        {
+            fcsr.ClearCauseBits();
+            if (float.IsNaN(result))
+            {
+                fcsr.RaiseFpuFlag(FpuException.InvalidOperation);
+                return float.MaxValue;
+            }
+            return result;
         }
     }
 }

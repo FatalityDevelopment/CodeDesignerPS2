@@ -226,27 +226,49 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// </summary>
         public void Step()
         {
+            // ── COP0 Count increment + Count/Compare interrupt check ──────────
+            // Count increments once per instruction. When Count reaches Compare,
+            // IP7 (Cause bit 15) is set. This is the standard MIPS timer interrupt
+            // mechanism (reference: PCSX2 R5900.cpp cpuCountUpdate()).
+            Cpu.COP0.IncrementCount(1);
+
             // ── Hardware interrupt check ──────────────────────────────────────
             // Deliver a pending INTC interrupt before executing the next instruction
             // when the CPU is ready to accept it.
-            if (Bus.Intc.IsInterruptPending)
+            if (Bus.Intc.IsInterruptPending || Cpu.COP0.IsTimerInterruptPending)
             {
                 // PS2 EE interrupt enable condition (PCSX2 R5900.cpp):
                 //   Status must have IE(b0)=1, EXL(b1)=0, ERL(b2)=0, EIE(b16)=1
                 //   (mask 0x10007, required value 0x10001)
-                // Additionally the INTC is wired to IP2 (bit 10 in Cause/Status):
-                //   Status.IM2 (bit 10) must also be set.
                 uint st = Cpu.COP0.ReadRegister32(12);
-                if ((st & 0x10007u) == 0x10001u && (st & 0x400u) != 0)
+                if ((st & 0x10007u) == 0x10001u)
                 {
-                    // Set Cause.IP2 (bit 10) to reflect the pending INTC interrupt.
-                    uint cause = Cpu.COP0.ReadRegister32(13);
-                    cause |= 0x400u;
-                    Cpu.COP0.WriteRegister32(13, cause);
+                    bool takeInterrupt = false;
 
-                    COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Interrupt, Cpu.PC, inDelaySlot: false);
-                    InstructionCount++;
-                    return;
+                    // INTC interrupt is wired to IP2 (bit 10 in Cause/Status).
+                    // Status.IM2 (bit 10) must be set.
+                    if (Bus.Intc.IsInterruptPending && (st & 0x400u) != 0)
+                    {
+                        // Set Cause.IP2 (bit 10) to reflect the pending INTC interrupt.
+                        uint cause = Cpu.COP0.ReadRegister32(13);
+                        cause |= 0x400u;
+                        Cpu.COP0.WriteRegister32(13, cause);
+                        takeInterrupt = true;
+                    }
+
+                    // Count/Compare timer interrupt uses IP7 (bit 15 in Cause/Status).
+                    // IP7 is already set in Cause by IncrementCount(); check Status.IM7.
+                    if (Cpu.COP0.IsTimerInterruptPending && (st & 0x8000u) != 0)
+                    {
+                        takeInterrupt = true;
+                    }
+
+                    if (takeInterrupt)
+                    {
+                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Interrupt, Cpu.PC, inDelaySlot: false);
+                        InstructionCount++;
+                        return;
+                    }
                 }
             }
 
