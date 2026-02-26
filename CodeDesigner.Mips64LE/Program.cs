@@ -11,7 +11,7 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine("MIPS64 Emotion Engine - PlayStation 2 Toolkit");
             Console.WriteLine();
 
-            if (args.Length == 0 || HasFlag(args, "--help"))
+            if (HasFlag(args, "--help"))
             {
                 PrintHelp();
                 return;
