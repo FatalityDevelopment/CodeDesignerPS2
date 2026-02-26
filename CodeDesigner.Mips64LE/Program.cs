@@ -40,7 +40,7 @@ namespace CodeDesigner.Mips64LE
         /// until the user presses Ctrl+C or the optional step limit is reached.
         ///
         /// Usage:
-        ///   dotnet run -- --run --bios SCPH-70012.bin [--disc game.iso] [--steps 1000000]
+        ///   dotnet run -- --run [--bios SCPH-70012.bin] [--disc game.iso] [--steps 1000000]
         /// </summary>
         private static async Task RunEmulator(string[] args)
         {
@@ -48,12 +48,7 @@ namespace CodeDesigner.Mips64LE
             string? discPath = GetArg(args, "--disc");
             string? stepsStr = GetArg(args, "--steps");
 
-            if (biosPath == null)
-            {
-                Console.Error.WriteLine("Error: --bios <path> is required with --run.");
-                Console.Error.WriteLine("Example: dotnet run -- --run --bios SCPH-70012.bin --disc game.iso");
-                return;
-            }
+            biosPath ??= DefaultBiosPath();
 
             if (!File.Exists(biosPath))
             {
@@ -228,7 +223,7 @@ namespace CodeDesigner.Mips64LE
         private static void PrintHelp()
         {
             Console.WriteLine("Usage:");
-            Console.WriteLine("  dotnet run -- --run --bios <bios.bin> [--disc <game.iso>] [--steps N]");
+            Console.WriteLine("  dotnet run -- --run [--bios <bios.bin>] [--disc <game.iso>] [--steps N]");
             Console.WriteLine("      Run the PS2 emulator with a real BIOS (and optionally a game disc).");
             Console.WriteLine();
             Console.WriteLine("  dotnet run -- --server");
@@ -241,7 +236,8 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine("      Show this help message.");
             Console.WriteLine();
             Console.WriteLine("Options for --run:");
-            Console.WriteLine("  --bios <path>   Path to a genuine PS2 BIOS ROM (4 MB .bin file). Required.");
+            Console.WriteLine("  --bios <path>   Path to a PS2 BIOS ROM (4 MB .bin file). Optional;");
+            Console.WriteLine("                  defaults to SCPH-70012_BIOS_V12_USA_200.bin in the repo.");
             Console.WriteLine("  --disc <path>   Path to a PS2 ISO-9660 game disc image. Optional.");
             Console.WriteLine("  --steps N       Stop after N EE instruction steps (default: unlimited).");
         }
@@ -319,6 +315,19 @@ namespace CodeDesigner.Mips64LE
         }
 
         // ── Argument helpers ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// Returns the path to the bundled USA BIOS (SCPH-70012) by walking up from
+        /// the application's base directory to the repository root, mirroring the
+        /// pattern used in the test project.
+        /// </summary>
+        private static string DefaultBiosPath()
+        {
+            string baseDir  = AppContext.BaseDirectory;
+            string repoRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", ".."));
+            return Path.Combine(repoRoot,
+                "CodeDesigner.Mips64LE.Common", "Bios", "SCPH-70012_BIOS_V12_USA_200.bin");
+        }
 
         private static bool HasFlag(string[] args, string flag) =>
             args.Any(a => a.Equals(flag, StringComparison.OrdinalIgnoreCase));
