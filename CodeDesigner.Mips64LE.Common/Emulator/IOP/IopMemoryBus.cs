@@ -55,10 +55,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private uint _iStat;
         private uint _iMask;
 
-        private Sio2? _sio2;
-        private Spu2? _spu2;
+        private Sio2?           _sio2;
+        private Spu2?           _spu2;
+        private UsbController?  _usb;
+        private ILinkController? _iLink;
+        private Dev9Controller? _dev9;
 
-        private const int Sio2IntcBit = 17;
+        private const int Sio2IntcBit  = 17;
+        private const int Dev9IntcBit  = 13;
+        private const int ILinkIntcBit = 18;
+        private const int UsbIntcBit   = 22;
 
         // IOP timers T0–T5 (T0–T2 at 0x1F801100; T3–T5 at 0x1F801480)
         private readonly IopTimer[] _timers = new IopTimer[6];
@@ -156,6 +162,89 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             }
         }
 
+        /// <summary>
+        /// Optional USB OHCI controller.  When set:
+        /// <list type="bullet">
+        ///   <item>32-bit reads/writes to 0x1F801600–0x1F8016FF are forwarded
+        ///     to the USB register file.</item>
+        ///   <item>The USB <see cref="UsbController.InterruptRaised"/> event asserts IOP INTC
+        ///     bit 22 (USB interrupt).</item>
+        /// </list>
+        /// </summary>
+        public UsbController? Usb
+        {
+            get => _usb;
+            set
+            {
+                if (_usb != null)
+                    _usb.InterruptRaised -= HandleUsbInterrupt;
+                _usb = value;
+                if (_usb != null)
+                    _usb.InterruptRaised += HandleUsbInterrupt;
+            }
+        }
+
+        private void HandleUsbInterrupt(object? sender, EventArgs e)
+            => RaiseInterrupt(UsbIntcBit);
+
+        /// <summary>
+        /// Optional i.LINK (IEEE 1394 / FireWire) controller.  When set:
+        /// <list type="bullet">
+        ///   <item>32-bit reads/writes to 0x1F808400–0x1F8085FF are forwarded
+        ///     to the i.LINK register file.</item>
+        ///   <item>The i.LINK <see cref="ILinkController.InterruptRaised"/> event asserts IOP INTC
+        ///     bit 18 (i.LINK interrupt).</item>
+        /// </list>
+        /// </summary>
+        public ILinkController? ILink
+        {
+            get => _iLink;
+            set
+            {
+                if (_iLink != null)
+                    _iLink.InterruptRaised -= HandleILinkInterrupt;
+                _iLink = value;
+                if (_iLink != null)
+                    _iLink.InterruptRaised += HandleILinkInterrupt;
+            }
+        }
+
+        private void HandleILinkInterrupt(object? sender, EventArgs e)
+            => RaiseInterrupt(ILinkIntcBit);
+
+        /// <summary>
+        /// Optional DEV9 parallel-port expansion controller.  When set:
+        /// <list type="bullet">
+        ///   <item>Access to 0x1F80146E–0x1F80146F (HW_DEV9_DATA) forwards to
+        ///     <see cref="Dev9Controller.IopData"/>.</item>
+        ///   <item>Access to 0x10000000–0x1000FFFF (expansion bus) forwards to
+        ///     the SPEED ASIC register file.</item>
+        ///   <item>IOP DMAC channel 8 (DEV9 DMA) is wired to the controller.</item>
+        ///   <item>The DEV9 <see cref="Dev9Controller.InterruptRaised"/> event asserts IOP INTC
+        ///     bit 13 (DEV9 interrupt).</item>
+        /// </list>
+        /// </summary>
+        public Dev9Controller? Dev9
+        {
+            get => _dev9;
+            set
+            {
+                if (_dev9 != null)
+                    _dev9.InterruptRaised -= HandleDev9Interrupt;
+                _dev9 = value;
+                if (_dev9 != null)
+                    _dev9.InterruptRaised += HandleDev9Interrupt;
+                // Wire DMAC channel 8 (DEV9 DMA) for device↔RAM transfers.
+                Dmac.Channels[8].DeviceDataProvider  = value != null
+                    ? (() => (uint)value.ReadExpHalf(0u)) : (Func<uint>?)null;
+                Dmac.Channels[8].DeviceDataConsumer  = value != null
+                    ? (w => value.WriteExpHalf(0u, (ushort)w)) : (Action<uint>?)null;
+            }
+        }
+
+        private void HandleDev9Interrupt(object? sender, EventArgs e)
+            => RaiseInterrupt(Dev9IntcBit);
+
         public IopMemoryBus()
         {
             for (int i = 0; i < 6; i++)
@@ -231,6 +320,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (_spu2 != null && addr >= Spu2.RegBase && addr < Spu2.RegBase + Spu2.RegSize)
                 return _spu2.ReadWord(addr - Spu2.RegBase);
 
+            // USB OHCI registers (32-bit access only, per PCSX2 USBread8/16 returning 0)
+            if (_usb != null && addr >= UsbController.RegBase && addr < UsbController.RegBase + UsbController.RegSize)
+                return _usb.ReadRegister(addr - UsbController.RegBase);
+
+            // i.LINK registers
+            if (_iLink != null && addr >= ILinkController.RegBase && addr < ILinkController.RegBase + ILinkController.RegSize)
+                return _iLink.ReadRegister(addr - ILinkController.RegBase);
+
+            // DEV9 expansion bus (SPEED ASIC registers at 0x10000000–0x1000FFFF)
+            if (_dev9 != null && addr >= Dev9Controller.ExpBase && addr < Dev9Controller.ExpBase + Dev9Controller.ExpSize)
+                return _dev9.ReadExpWord(addr - Dev9Controller.ExpBase);
+
             var (region, offset) = Map(addr);
             return ReadWordFromRegion(region, offset);
         }
@@ -304,6 +405,27 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 return;
             }
 
+            // USB OHCI registers (32-bit access only, per PCSX2 USBwrite8/16 being no-ops)
+            if (_usb != null && addr >= UsbController.RegBase && addr < UsbController.RegBase + UsbController.RegSize)
+            {
+                _usb.WriteRegister(addr - UsbController.RegBase, value);
+                return;
+            }
+
+            // i.LINK registers
+            if (_iLink != null && addr >= ILinkController.RegBase && addr < ILinkController.RegBase + ILinkController.RegSize)
+            {
+                _iLink.WriteRegister(addr - ILinkController.RegBase, value);
+                return;
+            }
+
+            // DEV9 expansion bus (SPEED ASIC registers at 0x10000000–0x1000FFFF)
+            if (_dev9 != null && addr >= Dev9Controller.ExpBase && addr < Dev9Controller.ExpBase + Dev9Controller.ExpSize)
+            {
+                _dev9.WriteExpWord(addr - Dev9Controller.ExpBase, value);
+                return;
+            }
+
             var (region, offset, ro) = MapWrite(addr);
             if (!ro) WriteWordToRegion(region, offset, value);
         }
@@ -325,6 +447,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 ushort half  = _spu2.ReadHalf(off & ~1u);
                 return (off & 1u) == 0u ? (byte)half : (byte)(half >> 8);
             }
+
+            // DEV9 IOP hardware register (HW_DEV9_DATA at 0x1F80146E, 2 bytes)
+            if (_dev9 != null && addr >= Dev9Controller.IopRegBase && addr < Dev9Controller.IopRegBase + Dev9Controller.IopRegSize)
+            {
+                uint byteOff = addr - Dev9Controller.IopRegBase;
+                return byteOff == 0u ? (byte)_dev9.IopData : (byte)(_dev9.IopData >> 8);
+            }
+
+            // DEV9 expansion bus
+            if (_dev9 != null && addr >= Dev9Controller.ExpBase && addr < Dev9Controller.ExpBase + Dev9Controller.ExpSize)
+                return _dev9.ReadExpByte(addr - Dev9Controller.ExpBase);
 
             var (region, offset) = Map(addr);
             return region[offset];
@@ -354,6 +487,24 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     ? (ushort)((old & 0xFF00u) | value)
                     : (ushort)((old & 0x00FFu) | ((uint)value << 8));
                 _spu2.WriteHalf(hOff, nov);
+                return;
+            }
+
+            // DEV9 IOP hardware register (HW_DEV9_DATA at 0x1F80146E, 2 bytes)
+            if (_dev9 != null && addr >= Dev9Controller.IopRegBase && addr < Dev9Controller.IopRegBase + Dev9Controller.IopRegSize)
+            {
+                uint byteOff = addr - Dev9Controller.IopRegBase;
+                ushort cur = _dev9.IopData;
+                _dev9.IopData = byteOff == 0u
+                    ? (ushort)((cur & 0xFF00u) | value)
+                    : (ushort)((cur & 0x00FFu) | ((uint)value << 8));
+                return;
+            }
+
+            // DEV9 expansion bus
+            if (_dev9 != null && addr >= Dev9Controller.ExpBase && addr < Dev9Controller.ExpBase + Dev9Controller.ExpSize)
+            {
+                _dev9.WriteExpByte(addr - Dev9Controller.ExpBase, value);
                 return;
             }
 
