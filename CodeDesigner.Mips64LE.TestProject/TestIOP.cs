@@ -4101,5 +4101,159 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.IsFalse(raised,
                 "InterruptRaised must not fire when INTR_STAT is 0 even if mask is set");
         }
+
+        // =====================================================================
+        // IOP interrupt delivery and exception dispatch (R3000A) tests
+        // =====================================================================
+
+        [TestMethod]
+        public void IopEmulator_COP0_Sync_MTC0_UpdatesIopStateSR()
+        {
+            // MTC0 on the IOP bridge must update IopState.SR via SyncIopFromBridge.
+            var iop = new IopEmulator();
+            // addiu $8, $0, 0x401  (load 0x401 into $8 = $t0)
+            uint addiuT0 = 0x24080401u;
+            // mtc0 $8, $12 (COP0: opcode=0x10, rs=4 MTC, rt=8, rd=12)
+            // Encoding: 0x10 << 26 | 0x04 << 21 | 0x08 << 16 | 0x0C << 11
+            uint mtc0T0  = (0x10u << 26) | (0x04u << 21) | (0x08u << 16) | (0x0Cu << 11);
+            iop.LoadProgram(0x80000000u, new uint[] { addiuT0, mtc0T0 });
+            iop.State.PC = 0x80000000u;
+            iop.State.SR = 0u; // clear BEV so code runs from RAM
+
+            iop.Step(); // execute addiu
+            iop.Step(); // execute mtc0
+
+            Assert.AreEqual(0x401u, iop.State.SR & 0xFFFu,
+                "MTC0 $t0,$12 must update IopState.SR via COP0 bridge sync");
+        }
+
+        [TestMethod]
+        public void IopEmulator_Interrupt_DeliveredWhenIEcAndIP2Set()
+        {
+            // Verify IOP takes hardware interrupt when SR.IEc=1, SR.IM2=1, and INTC pending.
+            var iop = new IopEmulator();
+            // SR with IEc=1 (bit 0) and IM2=1 (bit 10), no BEV → vector 0x80000080
+            iop.State.SR    = 0x401u;   // IEc=1, IM2=1
+            iop.State.Cause = 0u;
+            iop.State.PC    = 0x80000000u;
+
+            // Write a nop to exception vector so Step() can proceed after interrupt
+            iop.LoadProgram(0x80000000u, new uint[] { 0u });
+
+            // Raise IOP INTC interrupt (sets I_STAT bit 0)
+            iop.Bus.RaiseInterrupt(0);
+            // Enable I_MASK bit 0 so IsInterruptPending = true
+            iop.Bus.WriteWord(0x1F801074u, 0x1u);
+
+            iop.Step(); // should take interrupt and dispatch to 0x80000080
+
+            Assert.AreEqual(0x80000080u, iop.State.PC, "IOP must jump to 0x80000080 on interrupt (BEV=0)");
+        }
+
+        [TestMethod]
+        public void IopEmulator_Interrupt_NotTakenWhenIEcClear()
+        {
+            // IOP must NOT take interrupt when SR.IEc=0 even if pending.
+            var iop = new IopEmulator();
+            iop.State.SR    = 0x400u;   // IM2=1 but IEc=0
+            iop.State.Cause = 0u;
+            iop.State.PC    = 0x80000000u;
+
+            iop.LoadProgram(0x80000000u, new uint[] { 0u }); // nop at PC
+
+            iop.Bus.RaiseInterrupt(0);
+            iop.Bus.WriteWord(0x1F801074u, 0x1u);
+
+            iop.Step(); // should execute nop, NOT take interrupt
+
+            Assert.AreEqual(0x80000004u, iop.State.PC, "IOP must NOT take interrupt when IEc=0");
+        }
+
+        [TestMethod]
+        public void IopEmulator_DispatchException_R3000A_StackShift()
+        {
+            // Verify that exception entry uses R3000A stack shift, not EXL.
+            // SR = IEc(0)=0, KUc(1)=1 (user mode), IEp(2)=1 (prev IE=1), KUp(3)=0
+            //    = 0b0110 = 0x6
+            var iop = new IopEmulator();
+            iop.State.SR    = 0x6u;
+            iop.State.Cause = 0u;
+            iop.State.PC    = 0x80000000u;
+
+            // Place a SYSCALL at PC to trigger exception; disable BEV so vector = 0x80000080
+            iop.State.SR &= ~IopState.SR_BEV;
+            iop.LoadProgram(0x80000000u, new uint[] { 0x0000000Cu, 0u }); // syscall, nop at vector
+            iop.LoadProgram(0x80000080u, new uint[] { 0u });
+
+            iop.Step(); // dispatch syscall exception
+
+            // After R3000A stack shift on SR=0x6: sr = (0x6 & ~0x3F) | ((0x6 & 0x0F) << 2)
+            //   = 0 | (6 << 2) = 0x18
+            Assert.AreEqual(0x18u, iop.State.SR & 0x3Fu,
+                "R3000A exception must shift IE/KU stack into bits 5-0 of SR");
+        }
+
+        [TestMethod]
+        public void IopEmulator_RFE_RestoresIEKUStack()
+        {
+            // SR bits 5-0 = 0x28 = 0b101000: KUo=1,IEo=0,KUp=1,IEp=0,KUc=0,IEc=0
+            // RFE: {IEc,KUc} ← {IEp,KUp}; {IEp,KUp} ← {IEo,KUo}
+            //   Formula: sr = (sr & ~0x0F) | ((sr & 0x3C) >> 2)
+            //          = (0x28 & ~0xF) | ((0x28 & 0x3C) >> 2)
+            //          = 0x20           | (0x28 >> 2 & 0xF)  = 0x20 | 0x0A = 0x2A
+            var iop = new IopEmulator();
+            iop.State.SR = 0x28u | IopState.SR_BEV; // BEV=1, bits 5-0 = 0x28
+            iop.State.PC = 0xBFC00000u;
+
+            // Write RFE (0x42000010) directly into the BIOS ROM byte array (read-only via WriteWord)
+            void WriteBiosLE(uint physOff, uint word)
+            {
+                byte[] b = iop.Bus.Bios;
+                b[physOff + 0] = (byte)(word & 0xFF);
+                b[physOff + 1] = (byte)((word >> 8) & 0xFF);
+                b[physOff + 2] = (byte)((word >> 16) & 0xFF);
+                b[physOff + 3] = (byte)((word >> 24) & 0xFF);
+            }
+            WriteBiosLE(0, 0x42000010u); // rfe at 0xBFC00000 → Bios[0..3]
+            WriteBiosLE(4, 0x00000000u); // nop at 0xBFC00004
+
+            iop.Step(); // execute rfe
+
+            Assert.AreEqual(0x2Au, iop.State.SR & 0x3Fu,
+                "RFE must restore IE/KU stack: IEc←IEp, KUc←KUp, IEp←IEo, KUp←KUo");
+        }
+
+        [TestMethod]
+        public void Sif_EeSignaledIop_FiredOnNewMsFlagBits()
+        {
+            var sif = new SIF();
+            int fired = 0;
+            sif.EeSignaledIop += (_, _) => fired++;
+
+            sif.WriteRegister(SIF.REG_MSFLAG, 0x1u); // new bits → fires
+            Assert.AreEqual(1, fired, "EeSignaledIop must fire when EE sets new MSFLAG bits");
+
+            sif.WriteRegister(SIF.REG_MSFLAG, 0x1u); // no new bits → no fire
+            Assert.AreEqual(1, fired, "EeSignaledIop must NOT fire when no new bits");
+
+            sif.WriteRegister(SIF.REG_MSFLAG, 0x2u); // new bit → fires again
+            Assert.AreEqual(2, fired, "EeSignaledIop must fire again for new MSFLAG bits");
+        }
+
+        [TestMethod]
+        public void IopEmulator_EeSignaledIop_RaisesIopIntcSbus()
+        {
+            var emu = new PS2Emulator();
+            var scheduler = new DualCpuScheduler(emu);
+
+            Assert.AreEqual(0u, scheduler.IOP.Bus.IStat & 0x2u,
+                "IOP INTC SBUS bit must start clear");
+
+            // EE writes to MSFLAG to signal the IOP
+            emu.Bus.Sif.WriteRegister(SIF.REG_MSFLAG, 0x00000001u);
+
+            Assert.AreNotEqual(0u, scheduler.IOP.Bus.IStat & 0x2u,
+                "IOP INTC SBUS (bit 1) must be raised when EE sets MSFLAG");
+        }
     }
 }

@@ -129,6 +129,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         public uint F240 => _f240;
 
         /// <summary>
+        /// Raised when the EE sets new bits in MSFLAG (EE→IOP notification).
+        /// The IOP bus subscribes to this to assert IOP INTC bit 1 (SBUS),
+        /// waking the IOP from any interrupt-enabled spin loop waiting for EE input.
+        /// Reference: PCSX2 pcsx2/Hw.cpp hwWrite32 SBUS_MSFLAG → iopIntcIrq(1).
+        /// </summary>
+        public event EventHandler? EeSignaledIop;
+
+        /// <summary>
         /// Raised when the IOP sets one or more new bits in SMFLAG (IOP→EE notification).
         /// The EE emulator subscribes to this to assert INTC bit 1 (SBUS), waking the EE
         /// from any interrupt-enabled spin loop that is awaiting an IOP response.
@@ -173,7 +181,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
             {
                 case REG_MSCOM:  _mscom  = value;        break;
                 case REG_SMCOM:  _smcom  = value;        break;
-                case REG_MSFLAG: _msflag |= value;       break;  // W1S from EE (EE signals IOP)
+                case REG_MSFLAG:
+                    uint prevMsFlag = _msflag;
+                    _msflag |= value;
+                    if ((value & ~prevMsFlag) != 0)     // new bits set by this write?
+                        EeSignaledIop?.Invoke(this, EventArgs.Empty);
+                    break;
                 case REG_SMFLAG: _smflag &= ~value;      break;  // W1C from EE (EE acks IOP signal)
                 case REG_F240:
                     // W1C for bits 5 (0x20) and 15 (0x8000) from EE side.

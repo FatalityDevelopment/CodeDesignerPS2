@@ -75,6 +75,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             };
             WireTimerInterrupts();
             WireDmacInterrupts();
+
+            // Wire EE→IOP SBUS interrupt: when the EE sets bits in MSFLAG to signal
+            // the IOP, raise IOP INTC bit 1 (SBUS from EE) so the IOP takes an interrupt.
+            // Reference: PCSX2 pcsx2/Hw.cpp hwWrite32 SBUS_MSFLAG → iopIntcIrq(1).
+            if (Bus.SharedSif != null)
+                Bus.SharedSif.EeSignaledIop += (_, _) => Bus.RaiseInterrupt(1);
+
             Reset();
         }
 
@@ -98,6 +105,23 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// </summary>
         public void Step()
         {
+            // ── IOP (R3000A) hardware interrupt check ─────────────────────────
+            // Keep Cause.IP2 (bit 10) in sync with IOP INTC pending state, then
+            // deliver the interrupt if IEc=1 and any masked IP bit is pending.
+            // Reference: PCSX2 pcsx2/R3000A.cpp psxTestHWInts / IopCounters.cpp iopIntcIrq
+            if (Bus.IsInterruptPending)
+                State.Cause |= 0x400u;   // IP2 — IOP INTC pending
+            else
+                State.Cause &= ~0x400u;  // clear IP2 when INTC is quiet
+
+            if ((State.SR & 0x1u) != 0                         // SR.IEc = 1 (interrupts enabled)
+                && (State.Cause & State.SR & 0xFC00u) != 0)    // any IP bit that's also masked
+            {
+                DispatchIopException(ExceptionCode.Interrupt, State.PC, inDelaySlot: false);
+                InstructionCount++;
+                return;
+            }
+
             uint pc = State.PC;
             uint word = Bus.ReadWord(pc);
 
@@ -123,21 +147,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             catch (OverflowException)
             {
                 DispatchIopException(ExceptionCode.Overflow, pc, inDelaySlot: false);
-                SyncIopFromBridge();
                 InstructionCount++;
                 return;
             }
             catch (TrapException)
             {
                 DispatchIopException(ExceptionCode.Trap, pc, inDelaySlot: false);
-                SyncIopFromBridge();
                 InstructionCount++;
                 return;
             }
             catch (SystemCallException)
             {
                 DispatchIopException(ExceptionCode.Syscall, pc, inDelaySlot: false);
-                SyncIopFromBridge();
                 InstructionCount++;
                 SyscallRaised?.Invoke(this, pc);
                 return;
@@ -145,7 +166,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             catch (BreakpointException)
             {
                 DispatchIopException(ExceptionCode.Breakpoint, pc, inDelaySlot: false);
-                SyncIopFromBridge();
                 InstructionCount++;
                 throw;
             }
@@ -190,21 +210,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     catch (OverflowException)
                     {
                         DispatchIopException(ExceptionCode.Overflow, dsPc, inDelaySlot: true);
-                        SyncIopFromBridge();
                         InstructionCount++;
                         return;
                     }
                     catch (TrapException)
                     {
                         DispatchIopException(ExceptionCode.Trap, dsPc, inDelaySlot: true);
-                        SyncIopFromBridge();
                         InstructionCount++;
                         return;
                     }
                     catch (SystemCallException)
                     {
                         DispatchIopException(ExceptionCode.Syscall, dsPc, inDelaySlot: true);
-                        SyncIopFromBridge();
                         InstructionCount++;
                         SyscallRaised?.Invoke(this, dsPc);
                         return;
@@ -212,7 +229,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     catch (BreakpointException)
                     {
                         DispatchIopException(ExceptionCode.Breakpoint, dsPc, inDelaySlot: true);
-                        SyncIopFromBridge();
                         InstructionCount++;
                         throw;
                     }
@@ -319,35 +335,37 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             uint sr    = State.SR;
             uint cause = State.Cause;
 
-            bool alreadyInException = (sr & 0x02u) != 0; // SR.EXL
+            // R3000A exception entry: push the IE/KU status stack.
+            // {IEo,KUo} ← {IEp,KUp}; {IEp,KUp} ← {IEc,KUc}; IEc=0; KUc=0
+            // (kernel mode entered, interrupts disabled at current level)
+            // Reference: PCSX2 pcsx2/R3000A.cpp psxException
+            sr = (sr & ~0x3Fu) | ((sr & 0x0Fu) << 2);
 
-            if (!alreadyInException)
+            if (inDelaySlot)
             {
-                if (inDelaySlot)
-                {
-                    State.EPC  = epc - 4u;
-                    cause |= 0x80000000u;  // Cause.BD
-                }
-                else
-                {
-                    State.EPC  = epc;
-                    cause &= ~0x80000000u;
-                }
-
-                cause = (cause & ~0x7Cu) | ((uint)code << 2);
-                State.Cause = cause;
-                sr |= 0x02u; // set EXL
-                State.SR = sr;
+                State.EPC  = epc - 4u;
+                cause |= 0x80000000u;  // Cause.BD
             }
             else
             {
-                cause = (cause & ~0x7Cu) | ((uint)code << 2);
-                State.Cause = cause;
+                State.EPC  = epc;
+                cause &= ~0x80000000u;
             }
 
-            uint vector = State.Bev ? BEV1Vector : BEV0Vector;
+            cause = (cause & ~0x7Cu) | ((uint)code << 2);
+            State.Cause = cause;
+            State.SR    = sr;
+
+            uint vector = (sr & IopState.SR_BEV) != 0 ? BEV1Vector : BEV0Vector;
             State.PC   = vector;
             _bridge.PC = vector;
+
+            // Mirror the updated COP0 state into the bridge so that the SyncIopFromBridge()
+            // call in exception-catch paths reads back the exception-entry values and does
+            // not revert State.SR/Cause/EPC to their pre-exception values.
+            _bridge.COP0.WriteRegister32(12, State.SR);
+            _bridge.COP0.WriteRegister32(13, State.Cause);
+            _bridge.COP0.WriteRegister32(14, State.EPC);
         }
 
         // ── Bridge sync helpers ───────────────────────────────────────────────
@@ -360,6 +378,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             _bridge.HI = State.HI;
             _bridge.LO = State.LO;
             _bridge.PC = State.PC;
+            // Sync IOP COP0 (SR/Cause/EPC) so MFC0/MTC0 in running code see the right values.
+            _bridge.COP0.WriteRegister32(12, State.SR);
+            _bridge.COP0.WriteRegister32(13, State.Cause);
+            _bridge.COP0.WriteRegister32(14, State.EPC);
         }
 
         private void SyncIopFromBridge()
@@ -369,6 +391,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             State.HI = (uint)(_bridge.HI & 0xFFFFFFFFu);
             State.LO = (uint)(_bridge.LO & 0xFFFFFFFFu);
             // PC is set explicitly in Step(); don't overwrite with bridge PC here
+            // Sync COP0 back: MTC0 instructions (e.g. BIOS writing SR) go to the bridge;
+            // pull them back so DispatchIopException and the interrupt check see the update.
+            State.SR    = _bridge.COP0.ReadRegister32(12);
+            State.Cause = _bridge.COP0.ReadRegister32(13);
+            State.EPC   = _bridge.COP0.ReadRegister32(14);
         }
 
         // ── Branch-likely detection (same criteria as EE emulator) ───────────
