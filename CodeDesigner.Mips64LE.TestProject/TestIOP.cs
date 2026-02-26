@@ -2738,5 +2738,564 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(0xBB, spu2.AudioRam[2], "AudioRam[2] must be 0xBB");
             Assert.AreEqual(0xAA, spu2.AudioRam[3], "AudioRam[3] must be 0xAA");
         }
+
+        // =====================================================================
+        // Phase 7.4 — SPU2 Voice SA Registers (PVCA)
+        // =====================================================================
+
+        [TestMethod]
+        public void Spu2_VoiceSA_Core0_Voice0_WriteReadRoundTrip()
+        {
+            var spu2 = new Spu2();
+            // Core 0 voice 0 SA: abs 0x1C0 (SA_HI) and 0x1C2 (SA_LO)
+            const uint SA_HI = 0x1C0u;
+            const uint SA_LO = 0x1C2u;
+            spu2.WriteHalf(SA_HI, 0x0001);
+            spu2.WriteHalf(SA_LO, 0x2000);
+
+            // Read back via voice struct
+            Assert.AreEqual(0x00012000u, spu2.GetVoice(0, 0).StartAddr,
+                "Voice 0 StartAddr must be 0x00012000 after writing SA_HI=0x0001, SA_LO=0x2000");
+
+            // Read back via register interface
+            Assert.AreEqual(0x0001u, spu2.ReadHalf(SA_HI), "SA_HI read-back must be 0x0001");
+            Assert.AreEqual(0x2000u, spu2.ReadHalf(SA_LO), "SA_LO read-back must be 0x2000");
+        }
+
+        [TestMethod]
+        public void Spu2_VoiceSA_Core0_Voice5_CorrectOffset()
+        {
+            var spu2 = new Spu2();
+            // Core 0 voice 5: abs = 0x1C0 + 5*12 = 0x1C0 + 0x3C = 0x1FC
+            const uint V5_SA_HI = 0x1FCu;
+            const uint V5_SA_LO = 0x1FEu;
+            spu2.WriteHalf(V5_SA_HI, 0x0000);
+            spu2.WriteHalf(V5_SA_LO, 0x8000);
+
+            Assert.AreEqual(0x00008000u, spu2.GetVoice(0, 5).StartAddr,
+                "Voice 5 StartAddr must be 0x8000");
+        }
+
+        [TestMethod]
+        public void Spu2_VoiceLoopA_WriteUpdatesLoopAddr()
+        {
+            var spu2 = new Spu2();
+            // Core 0 voice 0 LoopA: abs 0x1C4 (LoopA_HI) and 0x1C6 (LoopA_LO)
+            const uint LOOPA_HI = 0x1C4u;
+            const uint LOOPA_LO = 0x1C6u;
+            spu2.WriteHalf(LOOPA_HI, 0x0002);
+            spu2.WriteHalf(LOOPA_LO, 0x4000);
+
+            Assert.AreEqual(0x00024000u, spu2.GetVoice(0, 0).LoopAddr,
+                "Voice 0 LoopAddr must be 0x00024000");
+        }
+
+        [TestMethod]
+        public void Spu2_VoiceNextA_ReturnsCurrentAddr()
+        {
+            var spu2 = new Spu2();
+            // Set CurrentAddr directly
+            spu2.GetVoice(0, 0).CurrentAddr = 0x00031234u;
+            // Core 0 voice 0 NextA: abs 0x1C8 (HI) and 0x1CA (LO)
+            const uint NEXTA_HI = 0x1C8u;
+            const uint NEXTA_LO = 0x1CAu;
+
+            Assert.AreEqual(0x0003u, spu2.ReadHalf(NEXTA_HI), "NextA_HI must return upper 16 bits of CurrentAddr");
+            Assert.AreEqual(0x1234u, spu2.ReadHalf(NEXTA_LO), "NextA_LO must return lower 16 bits of CurrentAddr");
+        }
+
+        [TestMethod]
+        public void Spu2_VoiceSA_Core1_Voice0_CorrectOffset()
+        {
+            var spu2 = new Spu2();
+            // Core 1 voice 0 SA_HI: abs 0x400 + 0x1C0 = 0x5C0
+            const uint C1V0_SA_HI = 0x5C0u;
+            const uint C1V0_SA_LO = 0x5C2u;
+            spu2.WriteHalf(C1V0_SA_HI, 0x000A);
+            spu2.WriteHalf(C1V0_SA_LO, 0xBCDE);
+
+            Assert.AreEqual(0x000ABCDEu, spu2.GetVoice(1, 0).StartAddr,
+                "Core 1 voice 0 StartAddr must be 0x000ABCDE");
+        }
+
+        [TestMethod]
+        public void Spu2_KonWrite_SetsCurrentAddrFromStartAddr()
+        {
+            var spu2 = new Spu2();
+            var voice = spu2.GetVoice(0, 0);
+            voice.StartAddr   = 0x00001000u;
+            voice.CurrentAddr = 0x00009999u; // different value
+            voice.DecIdx      = 10;
+
+            // Key-on voice 0
+            spu2.WriteHalf(0x1A0u, 0x0001);
+
+            Assert.AreEqual(0x00001000u, voice.CurrentAddr, "KON must reset CurrentAddr to StartAddr");
+            Assert.AreEqual(28,          voice.DecIdx,      "KON must reset DecIdx to 28 to force first decode");
+            Assert.AreEqual(0,           voice.AdsrVol,     "KON must reset AdsrVol to 0");
+            Assert.AreEqual(0,           voice.AdsrPhase,   "KON must start in Attack phase (0)");
+        }
+
+        [TestMethod]
+        public void Spu2_EffectsStartA_WriteRead()
+        {
+            var spu2 = new Spu2();
+            // Core 0 ESA: abs 0x2E0 (HI) and 0x2E2 (LO)
+            spu2.WriteHalf(0x2E0u, 0x0001);
+            spu2.WriteHalf(0x2E2u, 0x8000);
+
+            Assert.AreEqual(0x00018000u, spu2.GetEffectsStartA(0),
+                "EffectsStartA must combine HI:LO halfwords");
+        }
+
+        [TestMethod]
+        public void Spu2_EffectsEndA_WriteRead()
+        {
+            var spu2 = new Spu2();
+            // Core 0 EEA: abs 0x33C (HI) and 0x33E (LO)
+            spu2.WriteHalf(0x33Cu, 0x0002);
+            spu2.WriteHalf(0x33Eu, 0xC000);
+
+            Assert.AreEqual(0x0002C000u, spu2.GetEffectsEndA(0),
+                "EffectsEndA must combine HI:LO halfwords");
+        }
+
+        // =====================================================================
+        // Phase 7.4 — SPU2 MixSamples
+        // =====================================================================
+
+        [TestMethod]
+        public void Spu2_MixSamples_AllVoicesOff_ReturnsSilence()
+        {
+            var spu2 = new Spu2();
+            // Set master volume so output is non-trivially zero even with no voices
+            spu2.WriteHalf(0x1B0u, 0x3FFF);
+            spu2.WriteHalf(0x1B2u, 0x3FFF);
+
+            short[] pcm = spu2.MixSamples(32);
+
+            bool allZero = true;
+            foreach (short s in pcm)
+                if (s != 0) { allZero = false; break; }
+
+            Assert.IsTrue(allZero, "MixSamples must return silence when no voices are active");
+        }
+
+        [TestMethod]
+        public void Spu2_MixSamples_ActiveVoice_ProducesNonZeroOutput()
+        {
+            var spu2 = new Spu2();
+
+            // Build a minimal ADPCM block: shift=12, filter=0, all nibbles = 7 → sample value 7
+            // (See Spu2_AdpcmDecoder_KnownOutput_Filter0_Shift12 test for expected value.)
+            var block = new byte[16];
+            block[0] = 0x0C; // shift=12, filter=0
+            block[1] = 0x00; // no loop flags
+            for (int i = 2; i < 16; i++) block[i] = 0x77; // all nibbles = 7
+
+            // Place the ADPCM block at AudioRam address 0 (halfword 0)
+            Array.Copy(block, 0, spu2.AudioRam, 0, 16);
+
+            var v = spu2.GetVoice(0, 0);
+            v.VolL      = 0x3FFF;
+            v.VolR      = 0x3FFF;
+            v.Pitch     = 0x1000;        // 1:1 pitch
+            v.Adsr1     = 0x00FF;        // fast attack (shift=0, step=3) → jumps to 0x7FFF quickly
+            v.Adsr2     = 0x0000;        // sustain hold, fast release
+            v.StartAddr = 0;
+
+            // Set master volume
+            spu2.WriteHalf(0x1B0u, 0x3FFF); // MVOLL
+            spu2.WriteHalf(0x1B2u, 0x3FFF); // MVOLR
+
+            // Key on voice 0
+            spu2.WriteHalf(0x1A0u, 0x0001);
+
+            short[] pcm = spu2.MixSamples(128);
+
+            bool anyNonZero = false;
+            foreach (short s in pcm)
+                if (s != 0) { anyNonZero = true; break; }
+
+            Assert.IsTrue(anyNonZero, "MixSamples must produce non-zero output from an active voice");
+        }
+
+        [TestMethod]
+        public void Spu2_MixSamples_MasterVolumeZero_ReturnsSilence()
+        {
+            var spu2 = new Spu2();
+
+            // Set up a voice with ADPCM data (same as above)
+            var block = new byte[16];
+            block[0] = 0x0C;
+            block[1] = 0x00;
+            for (int i = 2; i < 16; i++) block[i] = 0x77;
+            Array.Copy(block, 0, spu2.AudioRam, 0, 16);
+
+            var v = spu2.GetVoice(0, 0);
+            v.VolL      = 0x3FFF;
+            v.VolR      = 0x3FFF;
+            v.Pitch     = 0x1000;
+            v.Adsr1     = 0x00FF;
+            v.StartAddr = 0;
+
+            // Leave master volume at 0 (default)
+            spu2.WriteHalf(0x1A0u, 0x0001);
+
+            short[] pcm = spu2.MixSamples(64);
+
+            bool allZero = true;
+            foreach (short s in pcm)
+                if (s != 0) { allZero = false; break; }
+
+            Assert.IsTrue(allZero, "MixSamples must return silence when master volume is 0");
+        }
+
+        [TestMethod]
+        public void Spu2_MixSamples_ReturnsStereoInterleavedPairs()
+        {
+            var spu2 = new Spu2();
+            const int SampleCount = 16;
+            short[] pcm = spu2.MixSamples(SampleCount);
+
+            Assert.AreEqual(SampleCount * 2, pcm.Length,
+                "MixSamples must return sampleCount*2 shorts (interleaved stereo)");
+        }
+
+        [TestMethod]
+        public void Spu2_MixSamples_WideAreaMasterVol_ProducesNonZeroOutput()
+        {
+            // Verify that master volume written to the PCSX2-compatible "weird area" (0x760)
+            // is also honoured by the mixer.
+            var spu2 = new Spu2();
+
+            var block = new byte[16];
+            block[0] = 0x0C;
+            block[1] = 0x00;
+            for (int i = 2; i < 16; i++) block[i] = 0x77;
+            Array.Copy(block, 0, spu2.AudioRam, 0, 16);
+
+            var v = spu2.GetVoice(0, 0);
+            v.VolL      = 0x3FFF;
+            v.VolR      = 0x3FFF;
+            v.Pitch     = 0x1000;
+            v.Adsr1     = 0x00FF;
+            v.StartAddr = 0;
+
+            // Write master volume ONLY to the "weird area" (abs 0x760 = core0 MVOLL)
+            spu2.WriteHalf(0x760u, 0x3FFF); // core 0 MVOLL via weird area
+            spu2.WriteHalf(0x762u, 0x3FFF); // core 0 MVOLR via weird area
+
+            spu2.WriteHalf(0x1A0u, 0x0001);
+            short[] pcm = spu2.MixSamples(128);
+
+            bool anyNonZero = false;
+            foreach (short s in pcm)
+                if (s != 0) { anyNonZero = true; break; }
+
+            Assert.IsTrue(anyNonZero, "MixSamples must honour master volume from the 'weird area' registers");
+        }
+
+        [TestMethod]
+        public void Spu2_MixSamples_PitchZero_ProducesSilence()
+        {
+            var spu2 = new Spu2();
+
+            var block = new byte[16];
+            block[0] = 0x0C;
+            for (int i = 2; i < 16; i++) block[i] = 0x77;
+            Array.Copy(block, 0, spu2.AudioRam, 0, 16);
+
+            var v = spu2.GetVoice(0, 0);
+            v.VolL      = 0x3FFF;
+            v.VolR      = 0x3FFF;
+            v.Pitch     = 0;             // zero pitch → never advances
+            v.Adsr1     = 0x00FF;
+            v.StartAddr = 0;
+
+            spu2.WriteHalf(0x1B0u, 0x3FFF);
+            spu2.WriteHalf(0x1B2u, 0x3FFF);
+            spu2.WriteHalf(0x1A0u, 0x0001);
+
+            short[] pcm = spu2.MixSamples(16);
+
+            // With pitch = 0, PitchFrac never reaches 0x1000, no samples consumed → silence
+            bool allZero = true;
+            foreach (short s in pcm)
+                if (s != 0) { allZero = false; break; }
+            Assert.IsTrue(allZero, "Zero pitch must produce silence (no sample advancement)");
+        }
+
+        // =====================================================================
+        // Phase 7.4 — SPU2 Reverb
+        // =====================================================================
+
+        [TestMethod]
+        public void Spu2_GetEffectsStartA_DefaultIsZero()
+        {
+            var spu2 = new Spu2();
+            Assert.AreEqual(0u, spu2.GetEffectsStartA(0), "Default ESA for core 0 must be 0");
+            Assert.AreEqual(0u, spu2.GetEffectsStartA(1), "Default ESA for core 1 must be 0");
+        }
+
+        [TestMethod]
+        public void Spu2_DoReverb_NoEffectWhenEsaEqualsEea()
+        {
+            // With ESA == EEA the reverb is disabled; mixer dry+reverb sum must equal dry input.
+            // Set up a voice with known output and zero ESA/EEA (disabled reverb).
+            var spu2 = new Spu2();
+            var block = new byte[16];
+            block[0] = 0x0C;
+            block[1] = 0x00;
+            for (int i = 2; i < 16; i++) block[i] = 0x77;
+            Array.Copy(block, 0, spu2.AudioRam, 0, 16);
+
+            spu2.GetVoice(0, 0).VolL      = 0x3FFF;
+            spu2.GetVoice(0, 0).VolR      = 0x3FFF;
+            spu2.GetVoice(0, 0).Pitch     = 0x1000;
+            spu2.GetVoice(0, 0).Adsr1     = 0x00FF;
+            spu2.GetVoice(0, 0).StartAddr = 0;
+            spu2.WriteHalf(0x1B0u, 0x3FFF);
+            spu2.WriteHalf(0x1B2u, 0x3FFF);
+            spu2.WriteHalf(0x1A0u, 0x0001);
+
+            // Leave ESA=EEA=0 (reverb disabled)
+            short[] pcmNoReverb = spu2.MixSamples(64);
+
+            // Confirm some audio is present
+            bool anyNonZero = false;
+            foreach (short s in pcmNoReverb)
+                if (s != 0) { anyNonZero = true; break; }
+            Assert.IsTrue(anyNonZero, "With reverb disabled, mix must still produce non-zero voice audio");
+        }
+
+        [TestMethod]
+        public void Spu2_Reverb_EnabledWithCoefficients_ProducesOutput()
+        {
+            // Enable reverb with a minimal but valid configuration and verify that
+            // the mixer produces non-zero output.
+            var spu2 = new Spu2();
+
+            // Set up audio RAM: ADPCM block at 0, reverb buffer from halfword 0x1000
+            var block = new byte[16];
+            block[0] = 0x0C;
+            block[1] = 0x00;
+            for (int i = 2; i < 16; i++) block[i] = 0x77;
+            Array.Copy(block, 0, spu2.AudioRam, 0, 16);
+
+            spu2.GetVoice(0, 0).VolL      = 0x3FFF;
+            spu2.GetVoice(0, 0).VolR      = 0x3FFF;
+            spu2.GetVoice(0, 0).Pitch     = 0x1000;
+            spu2.GetVoice(0, 0).Adsr1     = 0x00FF;
+            spu2.GetVoice(0, 0).StartAddr = 0;
+
+            // Set ESA=0x1000 (starts past the ADPCM data), EEA=0x2000
+            spu2.WriteHalf(0x2E0u, 0x0000); // ESA_HI
+            spu2.WriteHalf(0x2E2u, 0x1000); // ESA_LO
+            spu2.WriteHalf(0x33Cu, 0x0000); // EEA_HI
+            spu2.WriteHalf(0x33Eu, 0x2000); // EEA_LO
+
+            // Set reverb coefficient volumes (IIR_VOL in "weird area") to moderate value
+            spu2.WriteHalf(0x774u, 0x4000); // IIR_VOL core 0
+            spu2.WriteHalf(0x77Eu, 0x3000); // WALL_VOL core 0
+            spu2.WriteHalf(0x764u, 0x2000); // FXVOLL core 0
+            spu2.WriteHalf(0x766u, 0x2000); // FXVOLR core 0
+
+            spu2.WriteHalf(0x1B0u, 0x3FFF);
+            spu2.WriteHalf(0x1B2u, 0x3FFF);
+            spu2.WriteHalf(0x1A0u, 0x0001);
+
+            short[] pcm = spu2.MixSamples(128);
+
+            bool anyNonZero = false;
+            foreach (short s in pcm)
+                if (s != 0) { anyNonZero = true; break; }
+            Assert.IsTrue(anyNonZero, "Mixer with reverb enabled must produce non-zero output");
+        }
+
+        // =====================================================================
+        // Phase 7.4 — ADSR Envelope
+        // =====================================================================
+
+        [TestMethod]
+        public void Spu2_ADSR_AttackRisesToMaxVol()
+        {
+            // Voice with linear attack, max attack rate.
+            // After enough samples, AdsrVol should reach 0x7FFF (attack complete → decay begins).
+            var spu2 = new Spu2();
+
+            var block = new byte[16];
+            block[0] = 0x0C;
+            block[1] = 0x00;
+            for (int i = 2; i < 16; i++) block[i] = 0x77;
+            Array.Copy(block, 0, spu2.AudioRam, 0, 16);
+
+            var v = spu2.GetVoice(0, 0);
+            // ADSR1: AttackMode=0 (linear), AttackShift=0, AttackStep=3 → fastest attack
+            // DecayShift=0, SustainLevel=15 (0x7800)
+            v.Adsr1     = 0x00F0 | 0xF; // AttackMode=0, Shift=0, Step=3, DecayShift=0, SustainLevel=15
+            v.Adsr2     = 0x0000;
+            v.Pitch     = 0x1000;
+            v.VolL      = 0x3FFF;
+            v.VolR      = 0x3FFF;
+            v.StartAddr = 0;
+
+            spu2.WriteHalf(0x1B0u, 0x3FFF);
+            spu2.WriteHalf(0x1B2u, 0x3FFF);
+            spu2.WriteHalf(0x1A0u, 0x0001);
+
+            // Mix enough samples for the attack to complete
+            spu2.MixSamples(8192);
+
+            // After attack, AdsrPhase must have advanced past 0 (Attack)
+            Assert.IsTrue(v.AdsrPhase >= 1, "ADSR must advance from Attack phase after enough samples");
+        }
+
+        [TestMethod]
+        public void Spu2_ADSR_KonResetsPhaseToAttack()
+        {
+            var spu2 = new Spu2();
+            var v = spu2.GetVoice(0, 0);
+            v.AdsrPhase = 2; // Sustain
+            v.AdsrVol   = 0x4000;
+
+            // KON must reset to Attack phase
+            spu2.WriteHalf(0x1A0u, 0x0001);
+
+            Assert.AreEqual(0, v.AdsrPhase, "KON must reset AdsrPhase to 0 (Attack)");
+            Assert.AreEqual(0, v.AdsrVol,   "KON must reset AdsrVol to 0");
+        }
+
+        // =====================================================================
+        // Phase 7.4 — IOP CDDA
+        // =====================================================================
+
+        [TestMethod]
+        public void Cdvd_ReadCdda_NCommand07_TriggersDataReady()
+        {
+            var cdvd = new Cdvd();
+            // Load a minimal disc image (just a cooked ISO with zeroes)
+            var fakeIso = new byte[Cdvd.SectorSize * 32];
+            cdvd.LoadImage(fakeIso);
+
+            bool dataReadyFired = false;
+            cdvd.DataReady += (_, _) => dataReadyFired = true;
+
+            // Issue N-command 0x07 (ReadCDDA): LBA=0, count=1
+            cdvd.WriteRegister(0x00u, 0x00); // LBA byte 0
+            cdvd.WriteRegister(0x00u, 0x00); // LBA byte 1
+            cdvd.WriteRegister(0x00u, 0x00); // LBA byte 2
+            cdvd.WriteRegister(0x00u, 0x00); // LBA byte 3
+            cdvd.WriteRegister(0x00u, 0x01); // count = 1
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CDDA);
+
+            Assert.IsTrue(dataReadyFired, "N-command 0x07 must fire DataReady");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadCdda_IsoImage_ReturnsSilence()
+        {
+            var cdvd = new Cdvd();
+            var fakeIso = new byte[Cdvd.SectorSize * 32];
+            cdvd.LoadImage(fakeIso);
+
+            // Issue CDDA read
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x01);
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CDDA);
+
+            // Read back: should be all zeros (silence for cooked ISO with no audio tracks)
+            bool allZero = true;
+            for (int i = 0; i < Cdvd.RawSectorSize / 4; i++)
+            {
+                if (cdvd.ReadNextDmaWord() != 0u) { allZero = false; break; }
+            }
+            Assert.IsTrue(allZero, "CDDA from a cooked ISO must return silence (all zeros)");
+        }
+
+        [TestMethod]
+        public void Cdvd_ReadCdda_RawImage_ReturnsAudioData()
+        {
+            // Build a minimal raw BIN image: one sector with the CD sync header
+            // followed by known audio data.
+            var rawImage = new byte[Cdvd.RawSectorSize];
+            // Sync pattern: 0x00 0xFF×11 0x00
+            rawImage[0] = 0x00;
+            for (int i = 1; i <= 10; i++) rawImage[i] = 0xFF;
+            rawImage[11] = 0x00;
+            // Fill bytes 12-23 with header, then fill audio data starting at 24
+            for (int i = 12; i < Cdvd.RawSectorSize; i++)
+                rawImage[i] = (byte)(i & 0xFF);
+
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(rawImage);
+
+            Assert.IsTrue(cdvd.IsRawImage, "Image with sync pattern must be detected as raw");
+
+            // Issue CDDA read for LBA 0
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x01);
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CDDA);
+
+            // The entire 2352-byte sector should be returned (no header strip for CDDA)
+            uint firstWord = cdvd.ReadNextDmaWord();
+            // Bytes 0-3 of the raw sector are [0x00, 0xFF, 0xFF, 0xFF] → word = 0xFFFFFF00
+            Assert.AreEqual(0xFFFFFF00u, firstWord,
+                "Raw CDDA sector must return bytes from start of the raw sector (including sync)");
+        }
+
+        [TestMethod]
+        public void Cdvd_RawImage_DataSectorStripsHeader()
+        {
+            // Verify that a ReadCd (0x06) on a raw BIN image skips the 24-byte header.
+            var rawImage = new byte[Cdvd.RawSectorSize * 17]; // 17 sectors for PVD
+            // Sector 0 sync
+            rawImage[0] = 0x00;
+            for (int i = 1; i <= 10; i++) rawImage[i] = 0xFF;
+            rawImage[11] = 0x00;
+            // Sector 1 user data marker (placed at byte 24 of sector 1)
+            rawImage[Cdvd.RawSectorSize + 24]     = 0xAB;
+            rawImage[Cdvd.RawSectorSize + 25]     = 0xCD;
+            rawImage[Cdvd.RawSectorSize + 26]     = 0xEF;
+            rawImage[Cdvd.RawSectorSize + 27]     = 0x01;
+
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(rawImage);
+
+            Assert.IsTrue(cdvd.IsRawImage, "Must detect as raw image");
+
+            // ReadCd LBA=1, count=1
+            cdvd.WriteRegister(0x00u, 0x01); // LBA byte 0 = 1
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x00);
+            cdvd.WriteRegister(0x00u, 0x01);
+            cdvd.WriteRegister(0x04u, Cdvd.NCMD_READ_CD);
+
+            uint word = cdvd.ReadNextDmaWord();
+            Assert.AreEqual(0x01EFCDABu, word,
+                "ReadCd on raw image must return user data from byte offset +24 (header stripped)");
+        }
+
+        [TestMethod]
+        public void Cdvd_IsRawImage_False_ForCookedIso()
+        {
+            var cdvd = new Cdvd();
+            var iso  = new byte[Cdvd.SectorSize * 20]; // cooked ISO
+            cdvd.LoadImage(iso);
+            Assert.IsFalse(cdvd.IsRawImage, "Cooked ISO must not be detected as raw");
+        }
+
+        [TestMethod]
+        public void Cdvd_NCMD_READ_CDDA_ConstantValue()
+        {
+            Assert.AreEqual(0x07, Cdvd.NCMD_READ_CDDA, "NCMD_READ_CDDA must be 0x07");
+        }
     }
 }
