@@ -4116,8 +4116,11 @@ namespace CodeDesigner.Mips64LE.TestProject
             // mtc0 $8, $12 (COP0: opcode=0x10, rs=4 MTC, rt=8, rd=12)
             // Encoding: 0x10 << 26 | 0x04 << 21 | 0x08 << 16 | 0x0C << 11
             uint mtc0T0  = (0x10u << 26) | (0x04u << 21) | (0x08u << 16) | (0x0Cu << 11);
-            iop.LoadProgram(0x80000000u, new uint[] { addiuT0, mtc0T0 });
-            iop.State.PC = 0x80000000u;
+            // LoadProgram writes directly to the physical RAM byte array (WriteWordToRam has
+            // no address translation). KSEG0 0x80000000 translates to physical 0x00000000,
+            // so pass 0 to match what the CPU fetches when PC = 0x80000000.
+            iop.LoadProgram(0x00000000u, new uint[] { addiuT0, mtc0T0 });
+            iop.State.PC = 0x80000000u; // KSEG0 virtual → physical 0
             iop.State.SR = 0u; // clear BEV so code runs from RAM
 
             iop.Step(); // execute addiu
@@ -4137,8 +4140,9 @@ namespace CodeDesigner.Mips64LE.TestProject
             iop.State.Cause = 0u;
             iop.State.PC    = 0x80000000u;
 
-            // Write a nop to exception vector so Step() can proceed after interrupt
-            iop.LoadProgram(0x80000000u, new uint[] { 0u });
+            // The interrupt check fires at the top of Step() before any instruction fetch,
+            // so the instruction at PC is never read. DispatchIopException sets PC = 0x80000080
+            // directly. No code needs to exist at the initial PC or exception vector.
 
             // Raise IOP INTC interrupt (sets I_STAT bit 0)
             iop.Bus.RaiseInterrupt(0);
@@ -4159,7 +4163,9 @@ namespace CodeDesigner.Mips64LE.TestProject
             iop.State.Cause = 0u;
             iop.State.PC    = 0x80000000u;
 
-            iop.LoadProgram(0x80000000u, new uint[] { 0u }); // nop at PC
+            // IopMemoryBus.Ram is a freshly allocated byte[] (zero-filled by .NET), so
+            // physical address 0 contains 0x00000000 = NOP. Explicitly write it to be clear.
+            iop.LoadProgram(0x00000000u, new uint[] { 0u }); // nop at physical 0 (KSEG0 0x80000000)
 
             iop.Bus.RaiseInterrupt(0);
             iop.Bus.WriteWord(0x1F801074u, 0x1u);
@@ -4180,10 +4186,11 @@ namespace CodeDesigner.Mips64LE.TestProject
             iop.State.Cause = 0u;
             iop.State.PC    = 0x80000000u;
 
-            // Place a SYSCALL at PC to trigger exception; disable BEV so vector = 0x80000080
+            // LoadProgram writes to physical RAM; KSEG0 0x80000000 → phys 0x00000000.
+            // Disable BEV so exception vector is 0x80000080 → phys 0x00000080.
             iop.State.SR &= ~IopState.SR_BEV;
-            iop.LoadProgram(0x80000000u, new uint[] { 0x0000000Cu, 0u }); // syscall, nop at vector
-            iop.LoadProgram(0x80000080u, new uint[] { 0u });
+            iop.LoadProgram(0x00000000u, new uint[] { 0x0000000Cu }); // syscall at phys 0
+            iop.LoadProgram(0x00000080u, new uint[] { 0u });           // nop at phys 0x80 (exception vector)
 
             iop.Step(); // dispatch syscall exception
 
