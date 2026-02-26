@@ -2886,10 +2886,10 @@ namespace CodeDesigner.Mips64LE.TestProject
         {
             var spu2 = new Spu2();
 
-            // Build a minimal ADPCM block: shift=12, filter=0, all nibbles = 7 → sample value 7
-            // (See Spu2_AdpcmDecoder_KnownOutput_Filter0_Shift12 test for expected value.)
+            // Build a minimal ADPCM block: shift=0, filter=0, all nibbles = 7 → sample value 28672.
+            // shift=0 gives raw = 7 << 12 = 28672, large enough to survive three >> 15 scalings.
             var block = new byte[16];
-            block[0] = 0x0C; // shift=12, filter=0
+            block[0] = 0x00; // shift=0, filter=0
             block[1] = 0x00; // no loop flags
             for (int i = 2; i < 16; i++) block[i] = 0x77; // all nibbles = 7
 
@@ -2970,7 +2970,7 @@ namespace CodeDesigner.Mips64LE.TestProject
             var spu2 = new Spu2();
 
             var block = new byte[16];
-            block[0] = 0x0C;
+            block[0] = 0x00; // shift=0 gives sample=28672, large enough to survive >> 15 chain
             block[1] = 0x00;
             for (int i = 2; i < 16; i++) block[i] = 0x77;
             Array.Copy(block, 0, spu2.AudioRam, 0, 16);
@@ -3045,7 +3045,7 @@ namespace CodeDesigner.Mips64LE.TestProject
             // Set up a voice with known output and zero ESA/EEA (disabled reverb).
             var spu2 = new Spu2();
             var block = new byte[16];
-            block[0] = 0x0C;
+            block[0] = 0x00; // shift=0 gives sample=28672, large enough to survive >> 15 chain
             block[1] = 0x00;
             for (int i = 2; i < 16; i++) block[i] = 0x77;
             Array.Copy(block, 0, spu2.AudioRam, 0, 16);
@@ -3078,7 +3078,7 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             // Set up audio RAM: ADPCM block at 0, reverb buffer from halfword 0x1000
             var block = new byte[16];
-            block[0] = 0x0C;
+            block[0] = 0x00; // shift=0 gives sample=28672, large enough to survive >> 15 chain
             block[1] = 0x00;
             for (int i = 2; i < 16; i++) block[i] = 0x77;
             Array.Copy(block, 0, spu2.AudioRam, 0, 16);
