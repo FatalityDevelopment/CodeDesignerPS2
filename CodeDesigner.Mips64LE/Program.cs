@@ -95,21 +95,22 @@ namespace CodeDesigner.Mips64LE
             if (discPath != null)
             {
                 Console.WriteLine($"Loading disc: {discPath}");
-                byte[] isoData;
                 try
                 {
-                    isoData = File.ReadAllBytes(discPath);
+                    using var isoStream = new FileStream(
+                        discPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    uint entryPoint = GameLoader.BootFromDisc(isoStream, scheduler.EE);
+                    Console.WriteLine($"Game loaded. ELF entry point: 0x{entryPoint:X8}");
                 }
-                catch (Exception ex)
+                catch (IOException ex)
                 {
                     Console.Error.WriteLine($"Error reading disc image: {ex.Message}");
                     return;
                 }
-
-                try
+                catch (UnauthorizedAccessException ex)
                 {
-                    uint entryPoint = GameLoader.BootFromDisc(isoData, scheduler.EE);
-                    Console.WriteLine($"Game loaded. ELF entry point: 0x{entryPoint:X8}");
+                    Console.Error.WriteLine($"Error reading disc image: {ex.Message}");
+                    return;
                 }
                 catch (GameLoadException ex)
                 {

@@ -77,7 +77,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         }
 
         /// <summary>
-        /// Boot a PS2 game from a raw ISO-9660 disc image.
+        /// Boot a PS2 game from a raw ISO-9660 disc image byte array.
         ///
         /// The method reads <c>SYSTEM.CNF</c> from the disc, extracts the
         /// <c>BOOT2</c> executable path, reads the ELF binary, loads its
@@ -103,7 +103,43 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             var cdvd = new Cdvd();
             cdvd.LoadImage(isoData);
+            return BootFromCdvd(cdvd, emulator);
+        }
 
+        /// <summary>
+        /// Boot a PS2 game from a seekable disc image stream.
+        ///
+        /// The stream must support seeking and remain open for the duration of
+        /// this call.  Use this overload when loading large (>2 GB) disc images
+        /// to avoid loading the entire image into memory.
+        /// </summary>
+        /// <param name="isoStream">
+        /// Seekable stream over the disc image (2048-byte cooked ISO or 2352-byte raw BIN/CUE).
+        /// </param>
+        /// <param name="emulator">
+        /// The <see cref="PS2Emulator"/> whose RAM and CPU will receive the
+        /// loaded executable.
+        /// </param>
+        /// <returns>The ELF entry-point virtual address.</returns>
+        /// <exception cref="GameLoadException">
+        /// Thrown when <c>SYSTEM.CNF</c> is missing, the <c>BOOT2</c> key is
+        /// absent, the executable cannot be found, or the ELF is malformed.
+        /// </exception>
+        public static uint BootFromDisc(Stream isoStream, PS2Emulator emulator)
+        {
+            if (isoStream == null) throw new ArgumentNullException(nameof(isoStream));
+            if (emulator  == null) throw new ArgumentNullException(nameof(emulator));
+
+            var cdvd = new Cdvd();
+            cdvd.LoadFromStream(isoStream);
+            return BootFromCdvd(cdvd, emulator);
+        }
+
+        /// <summary>
+        /// Shared boot sequence: reads SYSTEM.CNF, parses BOOT2, loads the ELF.
+        /// </summary>
+        private static uint BootFromCdvd(Cdvd cdvd, PS2Emulator emulator)
+        {
             // ── Step 1: find and read SYSTEM.CNF ─────────────────────────────
 
             Cdvd.IsoEntry? cnfEntry = cdvd.FindFile("SYSTEM.CNF");

@@ -141,8 +141,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         // ── State ─────────────────────────────────────────────────────────────
 
-        private byte[] _iso = Array.Empty<byte>();
-        private bool   _isRawImage;      // true = 2352-byte BIN/CUE format
+        private Stream? _isoStream;      // backing stream for the disc image
+        private long    _isoLength;      // total byte length of the disc image
+        private bool    _isRawImage;     // true = 2352-byte BIN/CUE format
 
         // N-command parameter buffer (written byte-by-byte to REG_DATA before NCMD)
         private readonly byte[] _nParamBuf = new byte[16];
@@ -161,7 +162,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         // ── Public properties ─────────────────────────────────────────────────
 
         /// <summary>True when a disc image is loaded.</summary>
-        public bool HasDisc => _iso.Length > 0;
+        public bool HasDisc => _isoLength > 0;
 
         /// <summary>Current disc type byte (value of the CRT register).</summary>
         public byte DiscType { get; private set; } = DISC_NO_DISC;
@@ -178,17 +179,46 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         // ── ISO image loading ─────────────────────────────────────────────────
 
         /// <summary>
-        /// Load a disc image.  The image may be a cooked ISO-9660 image (2048 bytes/sector)
-        /// or a raw BIN/CUE image (2352 bytes/sector with a 24-byte sector header).
-        /// The format is detected automatically from the sector sync pattern.
+        /// Load a disc image from a byte array.  The image may be a cooked ISO-9660
+        /// image (2048 bytes/sector) or a raw BIN/CUE image (2352 bytes/sector with a
+        /// 24-byte sector header).  The format is detected automatically from the
+        /// sector sync pattern.
         ///
         /// Pass <c>null</c> or an empty array to eject the disc.
         /// </summary>
         public void LoadImage(byte[]? iso)
         {
-            _iso              = iso ?? Array.Empty<byte>();
-            _isRawImage       = DetectRawImage(_iso);
-            DiscType          = _iso.Length > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
+            _isoStream        = iso != null && iso.Length > 0
+                                    ? new MemoryStream(iso, writable: false)
+                                    : null;
+            _isoLength        = iso?.Length ?? 0;
+            _isRawImage       = DetectRawImage();
+            DiscType          = _isoLength > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
+            _nParamPos        = 0;
+            _nIntrStat        = 0;
+            _sectorData       = Array.Empty<byte>();
+            _sectorDataOffset = 0;
+        }
+
+        /// <summary>
+        /// Load a disc image from a <see cref="Stream"/>.  The stream must support
+        /// seeking (<see cref="Stream.CanSeek"/> must be <c>true</c>) and remain open
+        /// for the lifetime of this <see cref="Cdvd"/> instance.  The format is
+        /// detected automatically from the sector sync pattern.
+        ///
+        /// Use this overload when the disc image cannot be loaded into a byte array,
+        /// for example when the image file is larger than 2 GB.
+        /// </summary>
+        public void LoadFromStream(Stream stream)
+        {
+            if (stream == null) throw new ArgumentNullException(nameof(stream));
+            if (!stream.CanSeek)
+                throw new ArgumentException("Stream must be seekable.", nameof(stream));
+
+            _isoStream        = stream;
+            _isoLength        = stream.Length;
+            _isRawImage       = DetectRawImage();
+            DiscType          = _isoLength > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
             _nParamPos        = 0;
             _nIntrStat        = 0;
             _sectorData       = Array.Empty<byte>();
@@ -198,19 +228,49 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         // ── Raw-image detection ───────────────────────────────────────────────
 
         /// <summary>
-        /// Return true when <paramref name="data"/> appears to be a raw 2352-byte-sector
+        /// Return true when the loaded disc image appears to be a raw 2352-byte-sector
         /// BIN/CUE image.  Detection uses the CD-ROM sync pattern at byte 0 of the first
         /// sector (0x00 0xFF×11 0x00).
         /// </summary>
-        private static bool DetectRawImage(byte[] data)
+        private bool DetectRawImage()
         {
-            if (data.Length < RawSectorSize) return false;
+            if (_isoStream == null || _isoLength < RawSectorSize) return false;
+
+            byte[] header = new byte[12];
+            if (ReadIsoBytes(0, header, 0, 12) < 12) return false;
 
             // CD-ROM sync header: byte 0 = 0x00, bytes 1-11 = 0xFF, byte 12 = 0x00
-            if (data[0] != 0x00 || data[11] != 0x00) return false;
+            if (header[0] != 0x00 || header[11] != 0x00) return false;
             for (int i = 1; i <= 10; i++)
-                if (data[i] != 0xFF) return false;
+                if (header[i] != 0xFF) return false;
             return true;
+        }
+
+        // ── Stream read helper ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Read up to <paramref name="count"/> bytes from the disc image at
+        /// <paramref name="offset"/> into <paramref name="buf"/> starting at
+        /// <paramref name="bufOffset"/>.  Returns the number of bytes actually read.
+        /// </summary>
+        private int ReadIsoBytes(long offset, byte[] buf, int bufOffset, int count)
+        {
+            if (_isoStream == null || offset < 0 || offset >= _isoLength)
+                return 0;
+
+            long available = _isoLength - offset;
+            int toRead = (int)Math.Min(count, available);
+            if (toRead <= 0) return 0;
+
+            _isoStream.Position = offset;
+            int read = 0;
+            while (read < toRead)
+            {
+                int n = _isoStream.Read(buf, bufOffset + read, toRead - read);
+                if (n == 0) break;
+                read += n;
+            }
+            return read;
         }
 
         // ── CDVD register I/O ─────────────────────────────────────────────────
@@ -363,8 +423,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     ? (long)(lba + i) * RawSectorSize + RawSectorHeaderSize
                     : (long)(lba + i) * SectorSize;
                 int dstOffset = (int)(i * bytesPerSector);
-                if (srcOffset >= 0 && srcOffset + SectorSize <= _iso.Length)
-                    Array.Copy(_iso, srcOffset, _sectorData, dstOffset, SectorSize);
+                if (srcOffset >= 0 && srcOffset + SectorSize <= _isoLength)
+                    ReadIsoBytes(srcOffset, _sectorData, dstOffset, SectorSize);
 
                 if (withSubQ)
                 {
@@ -388,8 +448,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 {
                     long srcOffset = (long)(lba + i) * RawSectorSize;
                     int  dstOffset = (int)(i * RawSectorSize);
-                    if (srcOffset >= 0 && srcOffset + RawSectorSize <= _iso.Length)
-                        Array.Copy(_iso, srcOffset, _sectorData, dstOffset, RawSectorSize);
+                    if (srcOffset >= 0 && srcOffset + RawSectorSize <= _isoLength)
+                        ReadIsoBytes(srcOffset, _sectorData, dstOffset, RawSectorSize);
                 }
             }
             else
@@ -452,7 +512,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             if (HasDisc)
             {
-                int numSectors = _iso.Length / (_isRawImage ? RawSectorSize : SectorSize);
+                int numSectors = (int)(_isoLength / (_isRawImage ? RawSectorSize : SectorSize));
 
                 // DVD-ROM single-layer layout.
                 toc[0] = 0x04; // book type: DVD-ROM
@@ -623,11 +683,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 return Array.Empty<byte>();
 
             long srcOffset = (long)entry.Lba * SectorSize;
-            if (srcOffset < 0 || srcOffset + (long)entry.Size > _iso.Length)
+            if (srcOffset < 0 || srcOffset + (long)entry.Size > _isoLength)
                 return Array.Empty<byte>();
 
             byte[] data = new byte[entry.Size];
-            Array.Copy(_iso, srcOffset, data, 0, entry.Size);
+            ReadIsoBytes(srcOffset, data, 0, (int)entry.Size);
             return data;
         }
 
@@ -643,10 +703,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     ? (long)(lba + i) * RawSectorSize + RawSectorHeaderSize
                     : (long)(lba + i) * SectorSize;
                 int dstOffset = bufferOffset + (int)(i * SectorSize);
-                if (srcOffset >= 0 && srcOffset + SectorSize <= _iso.Length
+                if (srcOffset >= 0 && srcOffset + SectorSize <= _isoLength
                     && dstOffset + SectorSize <= buffer.Length)
                 {
-                    Array.Copy(_iso, srcOffset, buffer, dstOffset, SectorSize);
+                    ReadIsoBytes(srcOffset, buffer, dstOffset, SectorSize);
                 }
             }
         }
@@ -662,21 +722,24 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             long pvdOffset = _isRawImage
                 ? (long)PvdLba * RawSectorSize + RawSectorHeaderSize
                 : (long)PvdLba * SectorSize;
-            if (pvdOffset + SectorSize > _iso.Length)
+            if (pvdOffset + SectorSize > _isoLength)
+                return false;
+
+            byte[] pvd = new byte[SectorSize];
+            if (ReadIsoBytes(pvdOffset, pvd, 0, SectorSize) < SectorSize)
                 return false;
 
             // Verify PVD signature: type=1, identifier="CD001", version=1
-            if (_iso[pvdOffset + 0] != 1)
+            if (pvd[0] != 1)
                 return false;
-            if (_iso[pvdOffset + 1] != 'C' || _iso[pvdOffset + 2] != 'D'
-             || _iso[pvdOffset + 3] != '0' || _iso[pvdOffset + 4] != '0'
-             || _iso[pvdOffset + 5] != '1')
+            if (pvd[1] != 'C' || pvd[2] != 'D'
+             || pvd[3] != '0' || pvd[4] != '0'
+             || pvd[5] != '1')
                 return false;
 
             // Root Directory Record at PVD byte offset 156
-            int rrBase = (int)pvdOffset + 156;
-            rootLba  = ReadU32LE(_iso, rrBase + 2);
-            rootSize = ReadU32LE(_iso, rrBase + 10);
+            rootLba  = ReadU32LE(pvd, 156 + 2);
+            rootSize = ReadU32LE(pvd, 156 + 10);
             return true;
         }
 
