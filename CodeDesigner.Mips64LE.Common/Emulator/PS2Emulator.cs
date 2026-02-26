@@ -81,6 +81,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // handles KSEG0/KSEG1 virtual-to-physical translation.
             Cpu.Memory = Bus.Ram;
 
+            // Wire the full memory bus into CpuState so that load/store
+            // instructions can route through it for KSEG0/KSEG1 address
+            // translation and hardware I/O register dispatch.
+            Cpu.Bus = Bus;
+
             // Wire VIF0 to VU0 data/micro memory so UNPACK and MPG write directly
             // into the VU0 register state that COP2 macro-mode instructions read.
             // Also handle MSCAL/MSCNT → run VU0 microprogram.

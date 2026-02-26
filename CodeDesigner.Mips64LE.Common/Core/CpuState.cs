@@ -1,5 +1,6 @@
 ﻿using CodeDesigner.Mips64LE.Common.CPU.COP0;
 using CodeDesigner.Mips64LE.Common.CPU.COP1;
+using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU0;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU1;
 using System;
@@ -31,8 +32,12 @@ namespace CodeDesigner.Mips64LE.Common.CPU
         // COP1 FPU Accumulator register (PS2 EE specific, used by ADDA.S/MADD.S/etc.)
         public float FACC { get; set; }
 
-        // Main memory
+        // Main memory (direct array, used when Bus is null)
         public byte[] Memory { get; set; } = Array.Empty<byte>();
+
+        // Memory bus – when set, all load/store instructions route through this
+        // for full virtual-address translation and I/O register dispatch.
+        public PS2MemoryBus? Bus { get; set; }
 
         // FPU registers (32 x 32-bit)
         public float[] FPR { get; } = new float[32];

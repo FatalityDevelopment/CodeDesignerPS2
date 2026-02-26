@@ -96,10 +96,30 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
-        public void MemoryBus_Unmapped_ThrowsException()
+        public void MemoryBus_Unmapped_ReturnsZeroAndDoesNotThrow()
         {
+            // PCSX2 vtlb.cpp documents reserved/unmapped regions as returning
+            // arbitrary data for reads and silently ignoring writes.
+            // We return 0 and discard writes rather than crashing.
             var bus = new PS2MemoryBus();
-            Assert.ThrowsException<InvalidOperationException>(() => bus.ReadByte(0x50000000));
+            // Write to reserved region – must not throw
+            bus.WriteWord(0x50000000, 0xDEADBEEF);
+            // Read from reserved region – must return 0, not throw
+            Assert.AreEqual(0u, bus.ReadWord(0x50000000),
+                "Unmapped physical region should return 0 for reads");
+        }
+
+        [TestMethod]
+        public void MemoryBus_RamMirroring_WorksAcross256MbWindow()
+        {
+            // PCSX2 vtlb.cpp: "[0000 0000,1000 0000) -> Ram (mirrored ?)"
+            // A write to RAM base and a read from the mirrored alias should match.
+            var bus = new PS2MemoryBus();
+            bus.WriteWord(0x00000100, 0xCAFEBABE);
+            // The same physical address accessed via its mirror at +32MB
+            uint mirrorAddr = 0x00000100 + (uint)PS2MemoryBus.MainRamSize; // +0x2000000
+            Assert.AreEqual(0xCAFEBABEu, bus.ReadWord(mirrorAddr),
+                "Physical RAM should be mirrored across the 256 MB window");
         }
 
         // =====================================================================
@@ -284,6 +304,46 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             Assert.AreEqual(0x12345678UL, emu.Cpu.RegsLo[9],
                 "LW should read back the value written by SW");
+        }
+
+        [TestMethod]
+        public void Emulator_SW_KSEG0Address_DoesNotThrow()
+        {
+            // Verify that SW to a KSEG0 virtual address (0x80001000 → physical 0x00001000)
+            // succeeds without IndexOutOfRangeException when bus is wired.
+            // sw $t0, 0($s0)  where $s0 = 0x80001000
+            uint sw = (0x2Bu << 26) | (16u << 21) | (8u << 16) | 0;
+            uint lw = (0x23u << 26) | (16u << 21) | (9u << 16) | 0;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000100, new[] { sw, lw });
+            emu.Cpu.PC        = 0x00000100;
+            emu.Cpu.RegsLo[16] = 0x80001000u; // KSEG0 → physical 0x00001000
+            emu.Cpu.RegsLo[8]  = 0xCAFEBABEu;
+
+            emu.Run(2); // Must not throw
+
+            // Physical 0x00001000 holds the written value; LW sign-extends from 32 bits
+            long expected = unchecked((int)0xCAFEBABEu);
+            Assert.AreEqual((ulong)expected, emu.Cpu.RegsLo[9],
+                "SW via KSEG0 and LW via KSEG0 should round-trip correctly");
+        }
+
+        [TestMethod]
+        public void Emulator_SW_IoAddress_DoesNotThrow()
+        {
+            // Verify that SW to an I/O register address (e.g. 0x1000F010, INTC_MASK)
+            // does not throw IndexOutOfRangeException when bus is wired.
+            // sw $t0, 0($s0)  where $s0 = 0x1000F010
+            uint sw = (0x2Bu << 26) | (16u << 21) | (8u << 16) | 0;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000200, new[] { sw });
+            emu.Cpu.PC        = 0x00000200;
+            emu.Cpu.RegsLo[16] = 0x1000F010u; // INTC_MASK register
+            emu.Cpu.RegsLo[8]  = 0x00000001u; // toggle bit 0
+
+            emu.Run(1); // Must not throw
         }
 
         // =====================================================================
