@@ -15,6 +15,14 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
         public TLBState TLB { get; }
         public CacheState Cache { get; }
 
+        // Performance Counter registers (COP0 register 25 with sel field):
+        // sel=0 = PCCR (Performance Counter Control Register)
+        // sel=1 = PCR0 (Performance Counter 0 value)
+        // sel=2 = PCR1 (Performance Counter 1 value)
+        public uint PCCR;
+        public uint PCR0;
+        public uint PCR1;
+
         public COP0State()
         {
             TLB = new TLBState();
@@ -156,8 +164,58 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
         }
 
         /// <summary>
-        /// Get register name for debugging
+        /// Read a performance counter register by sel field.
+        /// sel=0 → PCCR, sel=1 → PCR0, sel=2 → PCR1.
         /// </summary>
+        public uint ReadPerfRegister(int sel)
+        {
+            return sel switch
+            {
+                0 => PCCR,
+                1 => PCR0,
+                2 => PCR1,
+                _ => 0u
+            };
+        }
+
+        /// <summary>
+        /// Write a performance counter register by sel field.
+        /// sel=0 → PCCR, sel=1 → PCR0, sel=2 → PCR1.
+        /// </summary>
+        public void WritePerfRegister(int sel, uint value)
+        {
+            switch (sel)
+            {
+                case 0: PCCR = value; break;
+                case 1: PCR0 = value; break;
+                case 2: PCR1 = value; break;
+            }
+        }
+
+        /// <summary>
+        /// Increment the Count register by <paramref name="cycles"/> and check if it
+        /// has reached Compare.  When Count == Compare the IP7 bit (bit 15) of the
+        /// Cause register is set so that the CPU interrupt check can deliver the
+        /// COP0 timer interrupt.
+        /// Reference: PCSX2 R5900.cpp cpuCountUpdate().
+        /// </summary>
+        public void IncrementCount(uint cycles = 1)
+        {
+            uint count = ReadRegister32(9) + cycles;
+            _registers[9] = count;
+
+            if (count == ReadRegister32(11))
+            {
+                // Set IP7 (bit 15 = TI) in Cause to signal timer interrupt.
+                _registers[13] |= 0x8000u;
+            }
+        }
+
+        /// <summary>
+        /// Returns true when the Count/Compare timer interrupt (IP7, bit 15 of Cause)
+        /// is pending.  Set automatically when Count equals Compare.
+        /// </summary>
+        public bool IsTimerInterruptPending => (ReadRegister32(13) & 0x8000u) != 0;
         public static string GetRegisterName(int register)
         {
             return register switch
@@ -183,7 +241,7 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
                 22 => "Debug",
                 23 => "DEPC",
                 24 => "Perf",
-                25 => "ECC",
+                25 => "PCCR",
                 26 => "CacheErr",
                 27 => "TagLo",
                 28 => "TagHi",

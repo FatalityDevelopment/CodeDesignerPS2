@@ -165,9 +165,9 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| COP0 Performance Counters (reg 25) | ⬜ | PCSX2 implements basic performance counter emulation for the BIOS perf-monitor syscall.  Currently reg 25 reads back 0. |
-| EE COP0 Count/Compare interrupt | ⬜ | The COP0 Count register increments every cycle; when it equals Compare a timer interrupt (INTC bit 8 / IP7) is raised.  Currently Count/Compare are readable/writable but do not generate interrupts. |
-| FPU sticky exception flags (FCSR) | ⬜ | FCSR bits [17:12] (cause/enable flags for overflow, underflow, division by zero, invalid op) are written correctly by the PS2 BIOS but are not acted on during arithmetic. |
+| COP0 Performance Counters (reg 25) | ✅ | `COP0State` now stores `PCCR`/`PCR0`/`PCR1` in dedicated fields.  `ReadPerfRegister(sel)` / `WritePerfRegister(sel, value)` methods expose them (sel=0 → PCCR, sel=1 → PCR0, sel=2 → PCR1).  `MFC0`/`MTC0` instructions dispatch to perf registers when `args.Rd == 25` using the sel field extracted from `args.Funct & 0x7`.  `MFC0`/`MTC0`/`DMFC0`/`DMTC0` Funct set to `null` (wildcard) so any sel value is recognised.  `Args_R` extended with a `Funct` field; `MipsDecoder.DecodeR` populates it.  Reference: PCSX2 `pcsx2/R5900OpcodeImpl.cpp` `_MFC0` sel dispatch. |
+| EE COP0 Count/Compare interrupt | ✅ | `COP0State.IncrementCount(cycles)` increments the Count register (reg 9) and sets Cause.IP7 (bit 15) when Count reaches Compare (reg 11).  Writing to Compare still clears IP7 (existing behaviour).  `PS2Emulator.Step()` calls `IncrementCount(1)` at the top of each step, then checks for IP7 + Status.IM7 in addition to the existing INTC/IP2 check; both sources share the same interrupt-delivery path to `COP0ExceptionDispatcher`.  `COP0State.IsTimerInterruptPending` property exposes the IP7 flag.  Reference: PCSX2 `pcsx2/R5900.cpp` `cpuCountUpdate()`. |
+| FPU sticky exception flags (FCSR) | ✅ | `COP1State` gains `RaiseFpuFlag(FpuException)` (sets both cause bit [22:18] and sticky flag bit [11:7]) and `ClearCauseBits()` (clears only the cause bits so flags persist).  `Ps2Fpu` internal helper class provides `HandleResult`, `HandleDivResult`, `HandleSqrtResult` methods: each clears cause bits, detects overflow/div-by-zero/invalid, calls `RaiseFpuFlag`, and clamps ±infinity to `±float.MaxValue` per PS2 EE FPU semantics.  `ADD.S`, `SUB.S`, `MUL.S`, `DIV.S`, `SQRT.S` Exec methods updated to use the new helpers.  Reference: PCSX2 `pcsx2/FPU.cpp` `FPU_OVERFLOW` / `FPU_DIVZERO` macros. |
 | Superscalar dual-issue model | ⬜ | The EE pipeline can issue two instructions per cycle under pairing rules.  Emulation is currently single-issue; cycle-accurate timing is not modelled. |
 
 ### 7.7 — IOP Additional Peripherals
@@ -192,4 +192,4 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 ---
 
-*Last updated: 2026-02-26.  Current test count: 843 (all passing).*
+*Last updated: 2026-02-26.  Current test count: 855 (all passing).*

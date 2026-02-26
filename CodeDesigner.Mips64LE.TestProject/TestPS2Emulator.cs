@@ -1,6 +1,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.CPU.COP0;
+using CodeDesigner.Mips64LE.Common.CPU.COP1;
 using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
@@ -1268,6 +1269,249 @@ namespace CodeDesigner.Mips64LE.TestProject
             emu.Step();
 
             Assert.AreEqual(77UL, emu.Cpu.RegsLo[8], "$t0 should be 77 with identity-mapped KUSEG");
+        }
+
+        // =====================================================================
+        // Phase 7.6 — CPU Accuracy tests
+        // =====================================================================
+
+        // ── 7.6a  COP0 Performance Counters (reg 25) ─────────────────────────
+
+        [TestMethod]
+        public void COP0_PerformanceCounters_PCCR_ReadWrite()
+        {
+            // MTC0 $t0, $25 sel=0 writes PCCR; MFC0 $t1, $25 sel=0 reads it back.
+            var emu = new PS2Emulator();
+            // PCCR starts as 0.
+            Assert.AreEqual(0u, emu.Cpu.COP0.PCCR, "PCCR must start as 0");
+
+            // Write 0xDEAD to PCCR via WritePerfRegister.
+            emu.Cpu.COP0.WritePerfRegister(0, 0xDEADu);
+            Assert.AreEqual(0xDEADu, emu.Cpu.COP0.PCCR, "PCCR must reflect written value");
+            Assert.AreEqual(0xDEADu, emu.Cpu.COP0.ReadPerfRegister(0), "ReadPerfRegister(0) must return PCCR");
+        }
+
+        [TestMethod]
+        public void COP0_PerformanceCounters_PCR0_ReadWrite()
+        {
+            var emu = new PS2Emulator();
+            Assert.AreEqual(0u, emu.Cpu.COP0.PCR0, "PCR0 must start as 0");
+            emu.Cpu.COP0.WritePerfRegister(1, 0x12345678u);
+            Assert.AreEqual(0x12345678u, emu.Cpu.COP0.PCR0);
+            Assert.AreEqual(0x12345678u, emu.Cpu.COP0.ReadPerfRegister(1));
+        }
+
+        [TestMethod]
+        public void COP0_PerformanceCounters_PCR1_ReadWrite()
+        {
+            var emu = new PS2Emulator();
+            Assert.AreEqual(0u, emu.Cpu.COP0.PCR1, "PCR1 must start as 0");
+            emu.Cpu.COP0.WritePerfRegister(2, 0xABCDEF01u);
+            Assert.AreEqual(0xABCDEF01u, emu.Cpu.COP0.PCR1);
+            Assert.AreEqual(0xABCDEF01u, emu.Cpu.COP0.ReadPerfRegister(2));
+        }
+
+        [TestMethod]
+        public void COP0_PerformanceCounters_MFC0_MTC0_ViaInstruction()
+        {
+            // Encode MTC0 $t0, $25, sel=1  (write PCR0 from GPR t0)
+            // Encoding: opcode=0x10, rs=0x04(MT), rt=8(t0), rd=25, funct=1
+            // Encode MFC0 $t1, $25, sel=1  (read PCR0 into GPR t1)
+            // Encoding: opcode=0x10, rs=0x00(MF), rt=9(t1), rd=25, funct=1
+            uint mtc0_pcr0 = (0x10u << 26) | (0x04u << 21) | (8u << 16) | (25u << 11) | 1u;
+            uint mfc0_pcr0 = (0x10u << 26) | (0x00u << 21) | (9u << 16) | (25u << 11) | 1u;
+
+            var emu = new PS2Emulator();
+            emu.Cpu.RegsLo[8] = 0xCAFEBABEu; // $t0 = value to write
+            emu.Cpu.RegsLo[9] = 0u;
+
+            emu.LoadProgram(0x00001000u, [mtc0_pcr0, mfc0_pcr0]);
+            emu.Cpu.PC = 0x00001000UL;
+            emu.Step(); // MTC0
+            emu.Step(); // MFC0
+
+            Assert.AreEqual(0xCAFEBABEu, emu.Cpu.COP0.PCR0, "MTC0 must write PCR0");
+            // MFC0 sign-extends from 32-bit: 0xCAFEBABE sign-extends to 0xFFFFFFFFCAFEBABE
+            ulong expected = unchecked((ulong)(long)(int)0xCAFEBABE);
+            Assert.AreEqual(expected, emu.Cpu.RegsLo[9], "MFC0 must read PCR0 sign-extended into $t1");
+        }
+
+        // ── 7.6b  EE COP0 Count/Compare interrupt ────────────────────────────
+
+        [TestMethod]
+        public void COP0_Count_IncrementsPerStep()
+        {
+            // Count must increment once per Step() call.
+            var emu = new PS2Emulator();
+            emu.Cpu.COP0.WriteRegister32(9, 0u);  // reset Count
+            // Set Compare to a high value so no interrupt fires.
+            emu.Cpu.COP0.WriteRegister32(11, 0xFFFFFFFFu);
+
+            uint nop = 0u;
+            emu.LoadProgram(0x00000000u, [nop, nop, nop]);
+            emu.Cpu.PC = 0u;
+
+            emu.Step();
+            Assert.AreEqual(1u, emu.Cpu.COP0.ReadRegister32(9), "Count must be 1 after one Step");
+            emu.Step();
+            Assert.AreEqual(2u, emu.Cpu.COP0.ReadRegister32(9), "Count must be 2 after two Steps");
+            emu.Step();
+            Assert.AreEqual(3u, emu.Cpu.COP0.ReadRegister32(9), "Count must be 3 after three Steps");
+        }
+
+        [TestMethod]
+        public void COP0_Count_EqualsCompare_SetsIP7()
+        {
+            // When Count reaches Compare the IP7 bit (bit 15) of Cause must be set.
+            var emu = new PS2Emulator();
+            // Arrange: Count = Compare - 1 so the next Step sets Count == Compare.
+            uint compare = 5u;
+            emu.Cpu.COP0.WriteRegister32(9,  compare - 1);
+            emu.Cpu.COP0.WriteRegister32(11, compare);
+
+            uint nop = 0u;
+            emu.LoadProgram(0x00000000u, [nop]);
+            emu.Cpu.PC = 0u;
+            emu.Step();
+
+            uint cause = emu.Cpu.COP0.ReadRegister32(13);
+            Assert.IsTrue((cause & 0x8000u) != 0, "Cause.IP7 (bit 15) must be set when Count == Compare");
+            Assert.IsTrue(emu.Cpu.COP0.IsTimerInterruptPending, "IsTimerInterruptPending must be true");
+        }
+
+        [TestMethod]
+        public void COP0_WriteCompare_ClearsIP7()
+        {
+            // Writing Compare must clear the IP7 flag in Cause.
+            var emu = new PS2Emulator();
+            // Force IP7 set by setting Count == Compare.
+            emu.Cpu.COP0.WriteRegister32(9,  10u);
+            emu.Cpu.COP0.WriteRegister32(11, 11u);
+
+            uint nop = 0u;
+            emu.LoadProgram(0x00000000u, [nop]);
+            emu.Cpu.PC = 0u;
+            emu.Step(); // Count becomes 11 == Compare → IP7 set
+
+            Assert.IsTrue(emu.Cpu.COP0.IsTimerInterruptPending, "IP7 should be pending");
+
+            // Write a new Compare value — must clear IP7.
+            emu.Cpu.COP0.WriteRegister32(11, 0xFFFFFFFFu);
+            Assert.IsFalse(emu.Cpu.COP0.IsTimerInterruptPending, "Writing Compare must clear IP7");
+        }
+
+        [TestMethod]
+        public void COP0_Count_TimerInterrupt_Delivered()
+        {
+            // When Count == Compare AND Status.IE/EIE/EXL/ERL/IM7 allow it,
+            // the CPU must take the interrupt exception.
+            var emu = new PS2Emulator();
+
+            // Enable interrupts: IE=1, EIE=1, EXL=0, ERL=0, IM7 (bit 15) = 1.
+            // Status = 0x10001 | 0x8000 (IM7)
+            emu.Cpu.COP0.WriteRegister32(12, 0x18001u); // IE=1, EIE=1, IM7=1
+            // Set Compare so Count will hit it next Step.
+            emu.Cpu.COP0.WriteRegister32(9, 4u);
+            emu.Cpu.COP0.WriteRegister32(11, 5u); // Compare = 5; one Step → Count=5
+
+            uint nop = 0u;
+            emu.LoadProgram(0x00000000u, [nop]);
+            emu.Cpu.PC = 0u;
+
+            emu.Step();  // Count becomes 5, IP7 set, interrupt taken → PC → exception vector
+
+            // BEV=0 → interrupt vector is 0x80000080.
+            Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
+                "After Count/Compare interrupt, PC must jump to exception vector 0x80000080");
+        }
+
+        // ── 7.6c  FPU Sticky Exception Flags (FCSR) ──────────────────────────
+
+        [TestMethod]
+        public void FPU_ADD_Overflow_SetsFCSR()
+        {
+            // Adding two large floats overflows → Overflow cause+flag set in FCSR.
+            var emu = new PS2Emulator();
+            emu.Cpu.FPR[1] = float.MaxValue;
+            emu.Cpu.FPR[2] = float.MaxValue;
+
+            // ADD.S $f0, $f1, $f2:
+            // opcode=0x11, rs=0x10(S), rt=2(ft=$f2), rd=1(fs=$f1), shamt=0(fd=$f0), funct=0x00
+            uint addS = (0x11u << 26) | (0x10u << 21) | (2u << 16) | (1u << 11) | (0u << 6) | 0x00u;
+            emu.LoadProgram(0x00000000u, [addS]);
+            emu.Cpu.PC = 0u;
+            emu.Step();
+
+            uint fcsr = emu.Cpu.COP1.ReadControlRegister(31);
+            Assert.IsTrue((fcsr & (1u << 21)) != 0, "Cause.Overflow (bit 21) must be set");
+            Assert.IsTrue((fcsr & (1u << 10)) != 0, "Flag.Overflow (bit 10) must be set (sticky)");
+            // Result must be clamped (not infinity).
+            Assert.IsFalse(float.IsInfinity(emu.Cpu.FPR[0]), "ADD.S overflow result must be clamped, not infinity");
+        }
+
+        [TestMethod]
+        public void FPU_DIV_DivisionByZero_SetsFCSR()
+        {
+            // Dividing a finite non-zero value by zero → DivisionByZero cause+flag set.
+            var emu = new PS2Emulator();
+            emu.Cpu.FPR[1] = 1.0f;
+            emu.Cpu.FPR[2] = 0.0f;
+
+            // DIV.S $f0, $f1, $f2: funct=0x03
+            uint divS = (0x11u << 26) | (0x10u << 21) | (2u << 16) | (1u << 11) | (0u << 6) | 0x03u;
+            emu.LoadProgram(0x00000000u, [divS]);
+            emu.Cpu.PC = 0u;
+            emu.Step();
+
+            uint fcsr = emu.Cpu.COP1.ReadControlRegister(31);
+            Assert.IsTrue((fcsr & (1u << 22)) != 0, "Cause.DivisionByZero (bit 22) must be set");
+            Assert.IsTrue((fcsr & (1u << 11)) != 0, "Flag.DivisionByZero (bit 11) must be set (sticky)");
+            Assert.IsFalse(float.IsInfinity(emu.Cpu.FPR[0]), "DIV.S div-by-zero result must be clamped");
+        }
+
+        [TestMethod]
+        public void FPU_SQRT_Negative_SetsInvalidFlag()
+        {
+            // SQRT of a negative number → InvalidOperation cause+flag set.
+            var emu = new PS2Emulator();
+            emu.Cpu.FPR[1] = -4.0f;
+
+            // SQRT.S $f0, $f1: opcode=0x11, rs=0x10, rt=0, rd=1(fs), shamt=0(fd), funct=0x04
+            uint sqrtS = (0x11u << 26) | (0x10u << 21) | (0u << 16) | (1u << 11) | (0u << 6) | 0x04u;
+            emu.LoadProgram(0x00000000u, [sqrtS]);
+            emu.Cpu.PC = 0u;
+            emu.Step();
+
+            uint fcsr = emu.Cpu.COP1.ReadControlRegister(31);
+            Assert.IsTrue((fcsr & (1u << 23)) != 0, "Cause.InvalidOperation (bit 23) must be set");
+            Assert.IsTrue((fcsr & (1u << 12)) != 0, "Flag.InvalidOperation (bit 12) must be set (sticky)");
+        }
+
+        [TestMethod]
+        public void FPU_FCSR_StickyFlagPersistsAcrossInstructions()
+        {
+            // Sticky flag bits must survive subsequent normal operations.
+            var emu = new PS2Emulator();
+            emu.Cpu.FPR[1] = float.MaxValue;
+            emu.Cpu.FPR[2] = float.MaxValue;
+            emu.Cpu.FPR[3] = 1.0f;
+            emu.Cpu.FPR[4] = 2.0f;
+
+            // ADD.S $f0, $f1, $f2  (overflow, sets flag.O bit 10)
+            uint addOverflow = (0x11u << 26) | (0x10u << 21) | (2u << 16) | (1u << 11) | (0u << 6) | 0x00u;
+            // ADD.S $f5, $f3, $f4  (normal, clears cause but sticky should survive)
+            uint addNormal   = (0x11u << 26) | (0x10u << 21) | (4u << 16) | (3u << 11) | (5u << 6) | 0x00u;
+
+            emu.LoadProgram(0x00000000u, [addOverflow, addNormal]);
+            emu.Cpu.PC = 0u;
+            emu.Step(); // overflow
+            emu.Step(); // normal add
+
+            uint fcsr = emu.Cpu.COP1.ReadControlRegister(31);
+            // Cause.Overflow (bit 21) must be CLEARED (normal instruction clears cause).
+            Assert.IsTrue((fcsr & (1u << 21)) == 0, "Cause.Overflow (bit 21) must be cleared by subsequent normal op");
+            // Flag.Overflow (bit 10) must still be SET (sticky).
+            Assert.IsTrue((fcsr & (1u << 10)) != 0, "Flag.Overflow (bit 10) must persist as sticky flag");
         }
     }
 }

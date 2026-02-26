@@ -23,8 +23,9 @@ namespace CodeDesigner.Mips64LE.Common
             int rt = (int)((instruction >> 16) & 0x1F);
             int rd = (int)((instruction >> 11) & 0x1F);
             int shamt = (int)((instruction >> 6) & 0x1F);
-            
-            return new Args_R(rs, rt, rd, shamt);
+            int funct = (int)(instruction & 0x3F);
+
+            return new Args_R(rs, rt, rd, shamt, funct);
         }
 
         /// <summary>

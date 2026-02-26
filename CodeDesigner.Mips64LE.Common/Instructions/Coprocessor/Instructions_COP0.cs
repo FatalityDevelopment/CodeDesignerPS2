@@ -26,7 +26,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
         public MFC0()
         {
             Opcode = 0x10;
-            Funct = 0x00;
+            Funct = null; // sel field (bits [2:0]) varies; matched via wildcard
             Name = "mfc0";
             ArgType = InstrArgType.R;
             ArgNames = ["rt", "rd"];
@@ -36,8 +36,17 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            // Read from COP0 register (rd specifies which COP0 register)
-            uint value = cpu.COP0.ReadRegister32(args.Rd);
+            uint value;
+            if (args.Rd == 25)
+            {
+                // Performance counter registers accessed via sel field (bits [2:0]).
+                value = cpu.COP0.ReadPerfRegister(args.Funct & 0x7);
+            }
+            else
+            {
+                // Read from COP0 register (rd specifies which COP0 register)
+                value = cpu.COP0.ReadRegister32(args.Rd);
+            }
             
             // Sign-extend to 64-bit and store in GPR
             long signExtended = (int)value;
@@ -76,7 +85,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
         public MTC0()
         {
             Opcode = 0x10;
-            Funct = 0x00;
+            Funct = null; // sel field (bits [2:0]) varies; matched via wildcard
             Name = "mtc0";
             ArgType = InstrArgType.R;
             ArgNames = ["rt", "rd"];
@@ -88,7 +97,15 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
         {
             // Write lower 32 bits of GPR to COP0 register
             uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-            cpu.COP0.WriteRegister32(args.Rd, value);
+            if (args.Rd == 25)
+            {
+                // Performance counter registers accessed via sel field (bits [2:0]).
+                cpu.COP0.WritePerfRegister(args.Funct & 0x7, value);
+            }
+            else
+            {
+                cpu.COP0.WriteRegister32(args.Rd, value);
+            }
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -122,7 +139,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
         public DMFC0()
         {
             Opcode = 0x10;
-            Funct = 0x00;
+            Funct = null; // sel field (bits [2:0]) varies; matched via wildcard
             Name = "dmfc0";
             ArgType = InstrArgType.R;
             ArgNames = ["rt", "rd"];
@@ -169,7 +186,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
         public DMTC0()
         {
             Opcode = 0x10;
-            Funct = 0x00;
+            Funct = null; // sel field (bits [2:0]) varies; matched via wildcard
             Name = "dmtc0";
             ArgType = InstrArgType.R;
             ArgNames = ["rt", "rd"];
