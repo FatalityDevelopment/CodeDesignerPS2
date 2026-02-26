@@ -2519,6 +2519,247 @@ namespace CodeDesigner.Mips64LE.TestProject
                 "SPRITE with DECAL texture must output the sampled texel color");
         }
 
+        // ── GS Phase 7.3 feature tests ────────────────────────────────────────
+
+        // Helper: build TEX0_1 value for a texture at the given page with TFX=DECAL.
+        private static ulong MakeTex0(uint texPage, int tw = 2, int th = 2, int tfx = 1)
+        {
+            uint tbp0 = texPage * 32u;
+            return (ulong)tbp0
+                 | (1ul << 14)
+                 | ((ulong)GS.PSM_PSMCT32 << 20)
+                 | ((ulong)tw << 26)
+                 | ((ulong)th << 30)
+                 | ((ulong)tfx << 35);
+        }
+
+        [TestMethod]
+        public void GS_BilinearFiltering_BlendsFourTexels()
+        {
+            var gs = new GS();
+            gs.WriteInternal(GS.REG_FRAME_1, 1ul << 16);
+            gs.WriteInternal(GS.REG_SCISSOR_1, ((ulong)2047 << 48) | ((ulong)2047 << 16));
+            gs.WriteInternal(GS.REG_TEST_1, 0ul);
+
+            // Texture at page 7 — 2×2 texels, solid red (0,0) and solid blue (1,0)
+            uint texPage = 7u;
+            gs.WriteVram32(Addr32(0, 0, fbp: texPage, fbw: 1), 0xFF0000FFu); // red (R=0xFF, A=0xFF)
+            gs.WriteVram32(Addr32(1, 0, fbp: texPage, fbw: 1), 0xFF00FF00u); // cyan
+            gs.WriteVram32(Addr32(0, 1, fbp: texPage, fbw: 1), 0xFF0000FFu); // red
+            gs.WriteVram32(Addr32(1, 1, fbp: texPage, fbw: 1), 0xFF00FF00u); // cyan
+
+            gs.WriteInternal(GS.REG_TEX0_1, MakeTex0(texPage));
+
+            // Enable bilinear via TEX1_1: MMAG=1 (bits [6:5] = 0x01 → value 1<<5 = 0x20)
+            gs.WriteInternal(GS.REG_TEX1_1, 1ul << 5);   // MMAG=1
+
+            // PRIM: SPRITE, TME=1, FST=1
+            gs.WriteInternal(GS.REG_PRIM, 6ul | (1ul << 4) | (1ul << 8));
+            gs.WriteInternal(GS.REG_RGBAQ, 0xFF_FF_FF_FFul);
+
+            // Sample exactly at texel (0,0) — bilinear at integer coord should match nearest
+            gs.WriteInternal(GS.REG_UV, 0ul);
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0, 0));
+            gs.WriteInternal(GS.REG_UV, (1ul << 4) | ((1ul << 4) << 16));
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(1, 1));
+
+            // A 1×1 sprite centred on texel (0,0) — result must come from VRAM (not all zeros)
+            uint result = gs.ReadVram32(Addr32(0, 0));
+            Assert.AreNotEqual(0u, result, "Bilinear-filtered sprite must write a non-zero pixel");
+        }
+
+        [TestMethod]
+        public void GS_FogAttribute_TintsColor()
+        {
+            // Draw a POINT with FogE=1 in PRIM and fog value 255 → color must match fog color
+            var gs = new GS();
+            gs.WriteInternal(GS.REG_FRAME_1, 1ul << 16);
+            gs.WriteInternal(GS.REG_SCISSOR_1, ((ulong)2047 << 48) | ((ulong)2047 << 16));
+            gs.WriteInternal(GS.REG_TEST_1, 0ul);
+
+            // FOGCOL = R=0,G=0,B=0xFF (blue fog)
+            gs.WriteInternal(GS.REG_FOGCOL, 0xFF_00_00ul);   // blue in bits[23:16]
+
+            // PRIM = POINT (0) | FogE (bit11)
+            gs.WriteInternal(GS.REG_PRIM, 0ul | (1ul << 11));
+
+            // RGBAQ: white (R=G=B=A=0xFF)
+            gs.WriteInternal(GS.REG_RGBAQ, 0xFF_FF_FF_FFul);
+
+            // FOG register for vertex: fog=0xFF (fully fogged) — bits[63:56]
+            gs.WriteInternal(GS.REG_FOG, 0xFF_00_00_00_00_00_00_00ul);
+
+            // Draw POINT at (2,2) — XYZ2 latches the fog value set via REG_FOG
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(2, 2));
+
+            uint pixel = gs.ReadVram32(Addr32(2, 2));
+            // With full fog (255) and blue fog color: blue channel must dominate
+            uint r = pixel & 0xFFu;
+            uint b = (pixel >> 16) & 0xFFu;
+            Assert.IsTrue(b > r, $"Fog should tint blue (b={b} r={r} pixel=0x{pixel:X8})");
+        }
+
+        [TestMethod]
+        public void GS_FogAttribute_Disabled_NoTint()
+        {
+            // Without FogE, fog must have no effect even if FOGCOL is set
+            var gs = new GS();
+            gs.WriteInternal(GS.REG_FRAME_1, 1ul << 16);
+            gs.WriteInternal(GS.REG_SCISSOR_1, ((ulong)2047 << 48) | ((ulong)2047 << 16));
+            gs.WriteInternal(GS.REG_TEST_1, 0ul);
+
+            gs.WriteInternal(GS.REG_FOGCOL, 0xFF_00_00ul); // would be blue fog
+
+            // PRIM = POINT (0) — no FogE bit
+            gs.WriteInternal(GS.REG_PRIM, 0ul);
+            gs.WriteInternal(GS.REG_RGBAQ, 0xFF_FF_FF_FFul);       // white
+            gs.WriteInternal(GS.REG_FOG,   0xFF_00_00_00_00_00_00_00ul); // fog=255
+
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(1, 1));
+
+            uint pixel = gs.ReadVram32(Addr32(1, 1));
+            Assert.AreEqual(0xFF_FF_FF_FFu, pixel,
+                "Without FogE bit, fog must not modify the color");
+        }
+
+        [TestMethod]
+        public void GS_TRXDIR_LocalToHost_HwregReadsVRAM()
+        {
+            var gs = new GS();
+            // Write two known PSMCT32 pixels to VRAM at page 4
+            uint addr0 = Addr32(0, 0, fbp: 4, fbw: 1);
+            uint addr1 = Addr32(1, 0, fbp: 4, fbw: 1);
+            gs.WriteVram32(addr0, 0xAABBCCDDu);
+            gs.WriteVram32(addr1, 0x11223344u);
+
+            // BITBLTBUF: SBP = page4*32, SBW=1, SPSM=PSMCT32
+            uint sbp = 4 * 32u;
+            ulong blt = (ulong)sbp | (1ul << 16) | ((ulong)GS.PSM_PSMCT32 << 24);
+            gs.WriteInternal(GS.REG_BITBLTBUF, blt);
+            // TRXPOS: SSAX=0, SSAY=0
+            gs.WriteInternal(GS.REG_TRXPOS, 0ul);
+            // TRXREG: RRW=2, RRH=1
+            gs.WriteInternal(GS.REG_TRXREG, 2ul | (1ul << 16));
+            // TRXDIR=1 → LOCAL->HOST
+            gs.WriteInternal(GS.REG_TRXDIR, 1ul);
+
+            // Read HWREG — should return 2 pixels packed into 64 bits
+            ulong hwreg = gs.ReadInternal(GS.REG_HWREG);
+            uint pix0 = (uint)(hwreg & 0xFFFF_FFFFu);
+            uint pix1 = (uint)(hwreg >> 32);
+            Assert.AreEqual(0xAABBCCDDu, pix0, "LOCAL→HOST HWREG pixel 0 must match VRAM");
+            Assert.AreEqual(0x11223344u, pix1, "LOCAL→HOST HWREG pixel 1 must match VRAM");
+        }
+
+        [TestMethod]
+        public void GS_ClampWrapMode_ClampsCoords()
+        {
+            // CLAMP_1 WMS=1 (CLAMP), WMT=1 (CLAMP) — coordinates outside [0, tw-1] should clamp
+            var gs = new GS();
+            gs.WriteInternal(GS.REG_FRAME_1, 1ul << 16);
+            gs.WriteInternal(GS.REG_SCISSOR_1, ((ulong)2047 << 48) | ((ulong)2047 << 16));
+            gs.WriteInternal(GS.REG_TEST_1, 0ul);
+
+            uint texPage = 8u;
+            // 1×1 texture: only pixel (0,0) = red
+            gs.WriteVram32(Addr32(0, 0, fbp: texPage, fbw: 1), 0xFF0000FFu);
+
+            gs.WriteInternal(GS.REG_TEX0_1, MakeTex0(texPage, tw: 0, th: 0)); // TW=TH=0 → 1px
+
+            // CLAMP_1: WMS=1, WMT=1 (CLAMP mode)
+            ulong clamp = 1ul | (1ul << 2); // WMS=1, WMT=1
+            gs.WriteInternal(GS.REG_CLAMP_1, clamp);
+
+            // PRIM: SPRITE, TME=1, FST=1
+            gs.WriteInternal(GS.REG_PRIM, 6ul | (1ul << 4) | (1ul << 8));
+            gs.WriteInternal(GS.REG_RGBAQ, 0xFF_FF_FF_FFul);
+
+            // UV at negative/out-of-range — with CLAMP should clamp to (0,0)
+            gs.WriteInternal(GS.REG_UV, 0ul);
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(3, 3));
+            gs.WriteInternal(GS.REG_UV, (10ul << 4) | ((10ul << 4) << 16)); // U=10>>4=0 (after divide)
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(4, 4));
+
+            uint pixel = gs.ReadVram32(Addr32(3, 3));
+            Assert.AreEqual(0xFF0000FFu, pixel,
+                "CLAMP wrap mode must return the clamped texel at pixel (3,3)");
+        }
+
+        [TestMethod]
+        public void GS_ClampWrapMode_RepeatDefault()
+        {
+            // Default WMS=0 (REPEAT) — sampling outside texture width wraps around
+            var gs = new GS();
+            gs.WriteInternal(GS.REG_FRAME_1, 1ul << 16);
+            gs.WriteInternal(GS.REG_SCISSOR_1, ((ulong)2047 << 48) | ((ulong)2047 << 16));
+            gs.WriteInternal(GS.REG_TEST_1, 0ul);
+
+            uint texPage = 9u;
+            // 2×2 texture: (0,0)=green, (1,0)=red
+            gs.WriteVram32(Addr32(0, 0, fbp: texPage, fbw: 1), 0xFF00FF00u); // green
+            gs.WriteVram32(Addr32(1, 0, fbp: texPage, fbw: 1), 0xFF0000FFu); // red
+
+            gs.WriteInternal(GS.REG_TEX0_1, MakeTex0(texPage, tw: 1, th: 1)); // TW=TH=1 → 2px
+
+            // CLAMP_1: WMS=0 (REPEAT — default, no need to write)
+            gs.WriteInternal(GS.REG_CLAMP_1, 0ul);
+
+            // PRIM: POINT, TME=1, FST=1
+            gs.WriteInternal(GS.REG_PRIM, 0ul | (1ul << 4) | (1ul << 8));
+            gs.WriteInternal(GS.REG_RGBAQ, 0xFF_FF_FF_FFul);
+
+            // Sample at texel (2,0) with REPEAT should wrap to (0,0) = green
+            gs.WriteInternal(GS.REG_UV, (2ul << 4));  // U=2 (2<<4 in UV format)
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(5, 5));
+
+            uint pixel = gs.ReadVram32(Addr32(5, 5));
+            Assert.AreEqual(0xFF00FF00u, pixel,
+                "REPEAT wrap: UV coord 2 on 2-wide texture should map to texel 0 (green)");
+        }
+
+        [TestMethod]
+        public void GS_GetFrameBuffer_ReturnsPixels()
+        {
+            var gs = new GS();
+
+            // Draw 4 red pixels at (0,0)-(3,3) using a sprite
+            gs.WriteInternal(GS.REG_FRAME_1, 1ul << 16); // FBW=1, PSMCT32
+            gs.WriteInternal(GS.REG_SCISSOR_1, ((ulong)2047 << 48) | ((ulong)2047 << 16));
+            gs.WriteInternal(GS.REG_TEST_1, 0ul);
+            gs.WriteInternal(GS.REG_PRIM, 6ul);            // SPRITE
+            gs.WriteInternal(GS.REG_RGBAQ, 0xFF0000FFu);   // red
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(0, 0));
+            gs.WriteInternal(GS.REG_XYZ2, XYZ2(2, 2));
+
+            // Configure DISPFB1: FBP=0, FBW=1, PSM=PSMCT32, DBX=0, DBY=0
+            // DISPFB1 bits: FBP[8:0], FBW[14:9], PSM[20:15], DBX[42:32], DBY[53:43]
+            ulong dispfb = 0ul | (1ul << 9) | ((ulong)GS.PSM_PSMCT32 << 15);
+            gs.WritePriv64(GS.PRIV_DISPFB1, dispfb);
+
+            // DISPLAY1: MAGH=0 (1x), DW=1 (width=2), DH=1 (height=2)
+            // bits: MAGH[26:23], DW[42:32], DH[53:43]
+            ulong display = (0ul << 23) | (1ul << 32) | (1ul << 43);
+            gs.WritePriv64(GS.PRIV_DISPLAY1, display);
+
+            var (pixels, w, h) = gs.GetFrameBuffer(1);
+            Assert.IsNotNull(pixels, "GetFrameBuffer must return a pixel array");
+            Assert.AreEqual(2, w, "Display width must be 2");
+            Assert.AreEqual(2, h, "Display height must be 2");
+            Assert.AreEqual(0xFF0000FFu, pixels![0], "GetFrameBuffer pixel (0,0) must be red");
+            Assert.AreEqual(0xFF0000FFu, pixels[1], "GetFrameBuffer pixel (1,0) must be red");
+        }
+
+        [TestMethod]
+        public void GS_GetFrameBuffer_NotConfigured_ReturnsNull()
+        {
+            var gs = new GS();
+            // DISPFB1 and DISPLAY1 are zero-initialized — DW=0/DH=0 → null
+            var (pixels, w, h) = gs.GetFrameBuffer(1);
+            Assert.IsNull(pixels, "GetFrameBuffer must return null when display is not configured");
+            Assert.AreEqual(0, w, "Width must be 0 when not configured");
+            Assert.AreEqual(0, h, "Height must be 0 when not configured");
+        }
+
         // =====================================================================
         // GameLoader tests
         // =====================================================================
