@@ -10,7 +10,7 @@ A C# library and toolset for working with the **Sony PlayStation 2 Emotion Engin
 Mips64LE/
 ├── CodeDesigner.Mips64LE.Common/     # Core library (assembler, disassembler, instructions, emulator)
 ├── CodeDesigner.Mips64LE/           # Console application + socket server
-├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (751 tests)
+├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (898 tests)
 └── vscode/codedesigner/             # VSCode extension frontend
 ```
 
@@ -34,7 +34,7 @@ dotnet build CodeDesigner.Mips64LE.sln
 dotnet test CodeDesigner.Mips64LE.TestProject/
 ```
 
-All 751 tests should pass.
+All 898 tests should pass.
 
 ### Console Application
 
@@ -82,12 +82,29 @@ dotnet run -- --server
 | VIF0 / VIF1 (Vector Interface, all UNPACK formats) | ✅ |
 | GIF (Graphics Interface, PACKED/REGLIST/IMAGE) | ✅ |
 | GS (Graphics Synthesizer, rasteriser + 4 MB VRAM) | ✅ |
-| VU1 (Vector Unit 1 microprogram execution) | ✅ |
+| VU1 (Vector Unit 1 microprogram execution + XGKICK) | ✅ |
 | TLB (Translation Lookaside Buffer) | ✅ |
 | BIOS ROM loader + validation | ✅ |
 | Game disc loader (ISO-9660 + ELF boot) | ✅ |
 | Dual-CPU scheduler (EE + IOP lock-step) | ✅ |
 | Controller input end-to-end pipeline | ✅ |
+| COP0 Performance Counters (PCCR/PCR0/PCR1 at reg 25 via sel) | ✅ |
+| COP0 Count/Compare timer interrupt (IP7) | ✅ |
+| FPU FCSR cause + sticky exception flags | ✅ |
+| DMAC chain mode + interleave mode (EE) | ✅ |
+| IOP DMAC linked-list mode | ✅ |
+| VU0 micro-mode microprogram execution | ✅ |
+| GS bilinear texture filtering | ✅ |
+| GS fog blending | ✅ |
+| GS LOCAL→HOST VRAM readback | ✅ |
+| GS CLAMP/REGION_CLAMP/REGION_REPEAT wrap modes | ✅ |
+| GS display output (GetFrameBuffer) | ✅ |
+| SPU2 ADPCM mixing, ADSR envelopes, reverb | ✅ |
+| Memory card emulation (8 MB PS2 MC) | ✅ |
+| DVD-Video sector types + TOC | ✅ |
+| USB controller (OHCI, IOP INTC bit 22) | ✅ |
+| i.LINK / FireWire controller (IOP INTC bit 18) | ✅ |
+| DEV9 parallel-port expansion (IOP INTC bit 13) | ✅ |
 | VSCode extension frontend | ✅ |
 
 ---
@@ -248,7 +265,7 @@ All instruction semantics have been cross-referenced with [PCSX2](https://pcsx2.
 - `pcsx2/FPU.cpp` — COP1 floating-point unit
 
 ### Test Coverage
-- **751 unit tests** covering core, FPU, COP0, COP2/VU0, MMI, EE hardware, IOP, CDVD, SPU2, SIO2, GS/GIF/VIF, VU1, BiosLoader, GameLoader, TLB, and IOP module loader
+- **898 unit tests** covering core, FPU, COP0, COP2/VU0, MMI, EE hardware, IOP, CDVD, SPU2, SIO2, GS/GIF/VIF, VU1, BiosLoader, GameLoader, TLB, IOP module loader, memory card, USB, i.LINK, DEV9, performance counters, and FCSR flags
 - Tests verify both disassembly output and execution correctness
 - Special cases: long.MinValue in DMULT, negative DIV sign-extension, ERET ERL handling
 
@@ -256,14 +273,45 @@ All instruction semantics have been cross-referenced with [PCSX2](https://pcsx2.
 
 ## Documentation
 
-| File | Purpose |
-|------|---------|
-| `README.md` (this file) | Project overview and instruction reference |
-| `QUICKSTART.md` | Step-by-step guide to using the assembler/disassembler |
-| `ASSEMBLER_DISASSEMBLER_INTEGRATION.md` | Technical details of the assembler and disassembler |
-| `SOCKET_COMMUNICATION.md` | VSCode extension ↔ C# server protocol |
-| `ROADMAP.md` | Development roadmap tracking completed and upcoming phases |
-| `CodeDesigner.Mips64LE.Common/Documentation/` | Architecture deep-dives (EE, COP0, COP1, VU0, VU1) |
+> All documents are cross-linked below by category.  
+> Click any entry to jump directly to the relevant file.
+
+### Project Overview & Guides
+
+| Document | Description |
+|----------|-------------|
+| [README.md](README.md) | This file — project overview, full instruction set reference, and architecture summary |
+| [QUICKSTART.md](QUICKSTART.md) | Step-by-step guide: build, start server, assemble and disassemble code in VS Code |
+| [ROADMAP.md](ROADMAP.md) | Phase-by-phase development history and status tracking |
+
+### Technical Integration
+
+| Document | Description |
+|----------|-------------|
+| [ASSEMBLER_DISASSEMBLER_INTEGRATION.md](ASSEMBLER_DISASSEMBLER_INTEGRATION.md) | JSON protocol, supported commands (`ASSEMBLE`/`DISASSEMBLE`/`PING`), and C# ↔ TypeScript API reference |
+| [SOCKET_COMMUNICATION.md](SOCKET_COMMUNICATION.md) | TCP socket architecture, message framing, command/response schemas, and troubleshooting |
+
+### Architecture Deep-Dives
+
+These documents live in [`CodeDesigner.Mips64LE.Common/Documentation/Architecture/`](CodeDesigner.Mips64LE.Common/Documentation/Architecture/).
+
+| Document | Description |
+|----------|-------------|
+| [EmotionEngine.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/EmotionEngine.md) | PS2 Emotion Engine CPU overview: registers, memory system, DMA, EE-specific instruction set extensions |
+| [COP0.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/COP0.md) | System Control Coprocessor: full register table (including PCCR at reg 25 sel, ErrorEPC at reg 30), exception flow, TLB, interrupts |
+| [COP1.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/COP1.md) | Floating-Point Unit: PS2 EE single-precision-only FPU, denormal flush, FCSR sticky flags, compare encoding differences vs standard MIPS |
+| [VU0.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/VU0.md) | Vector Unit 0: macro-mode (COP2) and micro-mode instruction sets, broadcast variants, LFSR RNG, VCALLMS/VCALLMSR |
+| [VU1.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/VU1.md) | Vector Unit 1: full micro-mode instruction reference — upper/lower word ops, EFU (P register), XGKICK → GIF PATH1 |
+
+### Component README Files
+
+| Document | Description |
+|----------|-------------|
+| [CodeDesigner.Mips64LE.Common/README.md](CodeDesigner.Mips64LE.Common/README.md) | Core library overview: EE CPU architecture, vector units, FPU, memory system |
+| [CodeDesigner.Mips64LE/README.md](CodeDesigner.Mips64LE/README.md) | Console application and socket server overview |
+| [vscode/codedesigner/README.md](vscode/codedesigner/README.md) | VS Code extension user guide: setup, commands, supported instructions |
+| [vscode/codedesigner/CHANGELOG.md](vscode/codedesigner/CHANGELOG.md) | VS Code extension release history |
+| [vscode/codedesigner/vsc-extension-quickstart.md](vscode/codedesigner/vsc-extension-quickstart.md) | Extension developer quick-start: project structure, build, debug, and extend |
 
 ---
 

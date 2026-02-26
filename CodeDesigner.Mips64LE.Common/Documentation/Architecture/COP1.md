@@ -124,6 +124,22 @@ Comparison results set the **FPU condition flag (FCC)** in FCSR, used by branch 
 
 ---
 
+## FCSR — Floating-Point Control/Status Register
+
+The FCSR (FCR31) tracks both **cause bits** (set on the current operation) and **sticky flags** (set and held until cleared by software).
+
+| Bits | Field | Description |
+|------|-------|-------------|
+| [23] | FCC | FPU condition code (set by compare instructions) |
+| [22:18] | Cause | Exception cause bits (Overflow, Underflow, Inexact, DivByZero, Invalid) — cleared before each operation |
+| [11:7] | Flags | Sticky exception flags — set by `RaiseFpuFlag()`, never auto-cleared |
+| [1:0] | RM | Rounding mode (ignored on PS2 EE, always round-to-nearest) |
+
+> `CTC1` writes both Cause and Flags. `CFC1` reads the full FCSR value.  
+> `ADD.S`, `SUB.S`, `MUL.S`, `DIV.S`, and `SQRT.S` set the appropriate cause + flag bits on overflow or division-by-zero, and clamp ±∞ to ±`float.MaxValue` per PS2 EE FPU semantics.
+
+---
+
 ## Emulation Considerations
 
 - Denormal inputs and outputs must be **flushed to zero** before and after every operation.
