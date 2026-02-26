@@ -37,6 +37,29 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     ///   In raw BIN images the 2352-byte raw sector is returned as-is (16-bit
     ///   stereo PCM at 44100 Hz); in cooked ISO images silence is returned.
     ///
+    /// N-command 0x08 (ReadDvd) parameter layout (same header as ReadCd):
+    ///   Byte 0–3: LBA (little-endian uint32)
+    ///   Byte 4:   Sector count
+    ///   DVD sectors are always 2048-byte user data (no sub-channel, no raw mode).
+    ///   Reference: PCSX2 pcsx2/CDVD/CDVD.cpp cdvdDvdRead().
+    ///
+    /// N-command 0x09 (GetTOC):
+    ///   No parameters.  Returns a 1024-byte Table of Contents buffer.
+    ///   For DVD images the first 16 bytes describe layer 0 (book type, disc
+    ///   dimensions, start/end PSN).  Reference: PCSX2 cdvdGetTOC().
+    ///
+    /// Sub-channel Q data (N-command 0x06 sector type 4):
+    ///   When params[5] = 4 the response for each sector is extended by 16 bytes
+    ///   of sub-channel data: 12 bytes of synthesised sub-Q (ctrl/adr, track,
+    ///   index, relative and absolute MSF in BCD) followed by 4 reserved bytes.
+    ///   Reference: PCSX2 pcsx2/CDVD/CDVD.cpp cdvdGetSector() CdRawSectorWithOC.
+    ///
+    /// S-command support:
+    ///   0x00 GetMedia  – returns single disc-type byte.
+    ///   0x05 GetDiscType – returns disc-type byte (same as CRT register).
+    ///   0x12 GetLayerInfo – returns 4-byte layer-0 end-PSN for dual-layer DVDs
+    ///   (returns zeros for single-layer discs).
+    ///
     /// Reference: PCSX2 pcsx2/CDVD/CDVD.cpp, pcsx2/IopMem.cpp.
     /// </summary>
     public sealed class Cdvd
@@ -85,6 +108,22 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         /// <summary>ReadCDDA N-command code (read one or more CD audio sectors by LBA).</summary>
         public const byte NCMD_READ_CDDA = 0x07;
+
+        /// <summary>ReadDvd N-command code (read one or more DVD data sectors by LBA).</summary>
+        public const byte NCMD_READ_DVD  = 0x08;
+
+        /// <summary>GetTOC N-command code (returns a 1024-byte Table of Contents buffer).</summary>
+        public const byte NCMD_GET_TOC   = 0x09;
+
+        /// <summary>Size of the Table of Contents buffer returned by NCMD_GET_TOC (1024 bytes).</summary>
+        public const int TocSize = 1024;
+
+        /// <summary>
+        /// Number of sub-channel bytes appended per sector when sectorType = 4
+        /// (12-byte sub-Q followed by 4 reserved bytes = 16 total).
+        /// Reference: PCSX2 CdRawSectorWithOC mode (2352 + 16 = 2368 bytes/sector).
+        /// </summary>
+        public const int SubChannelSize = 16;
 
         // ── Disc-type constants (CRT register) ────────────────────────────────
 
@@ -265,10 +304,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 case NCMD_READ_CD:
                     if (_nParamPos >= 5)
                     {
-                        uint lba   = ReadParamU32(0);
-                        uint count = _nParamBuf[4];
+                        uint lba        = ReadParamU32(0);
+                        uint count      = _nParamBuf[4];
                         if (count == 0) count = 1;
-                        LoadSectorBuffer(lba, count);
+                        byte sectorType = _nParamPos >= 6 ? _nParamBuf[5] : (byte)0;
+                        LoadSectorBuffer(lba, count, sectorType);
                     }
                     break;
 
@@ -280,6 +320,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                         if (count == 0) count = 1;
                         LoadCddaBuffer(lba, count);
                     }
+                    break;
+
+                case NCMD_READ_DVD:
+                    // DVD sectors are always 2048-byte user data; no sector type parameter.
+                    if (_nParamPos >= 5)
+                    {
+                        uint lba   = ReadParamU32(0);
+                        uint count = _nParamBuf[4];
+                        if (count == 0) count = 1;
+                        LoadSectorBuffer(lba, count, sectorType: 0);
+                    }
+                    break;
+
+                case NCMD_GET_TOC:
+                    LoadTocBuffer();
                     break;
             }
 
@@ -293,9 +348,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     | (_nParamBuf[start + 2] << 16)
                     | (_nParamBuf[start + 3] << 24));
 
-        private void LoadSectorBuffer(uint lba, uint count)
+        private void LoadSectorBuffer(uint lba, uint count, byte sectorType = 0)
         {
-            int totalBytes    = (int)(count * SectorSize);
+            // sectorType 4 = raw sector + sub-channel (2048 user bytes + SubChannelSize per sector)
+            bool withSubQ       = sectorType == 4;
+            int  bytesPerSector = withSubQ ? SectorSize + SubChannelSize : SectorSize;
+            int  totalBytes     = (int)(count * bytesPerSector);
             _sectorData       = new byte[totalBytes];
             _sectorDataOffset = 0;
 
@@ -304,9 +362,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 long srcOffset = _isRawImage
                     ? (long)(lba + i) * RawSectorSize + RawSectorHeaderSize
                     : (long)(lba + i) * SectorSize;
-                int dstOffset = (int)(i * SectorSize);
+                int dstOffset = (int)(i * bytesPerSector);
                 if (srcOffset >= 0 && srcOffset + SectorSize <= _iso.Length)
                     Array.Copy(_iso, srcOffset, _sectorData, dstOffset, SectorSize);
+
+                if (withSubQ)
+                {
+                    byte[] subq = BuildSubQ(lba + i);
+                    Array.Copy(subq, 0, _sectorData, dstOffset + SectorSize, SubChannelSize);
+                }
             }
         }
 
@@ -340,10 +404,131 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         private void ExecuteSCommand(byte cmd)
         {
-            // Stub: S-commands (disc info, mechanical) return empty results for now.
             _sCmdOutputPos = 0;
             _sCmdOutputLen = 0;
+
+            switch (cmd)
+            {
+                case 0x00: // GetMedia — returns disc type byte
+                case 0x05: // GetDiscType — same as CRT register
+                    _sCmdOutput[0] = DiscType;
+                    _sCmdOutputLen = 1;
+                    break;
+
+                case 0x12: // GetLayerInfo — layer-break PSN for dual-layer DVDs
+                    // Single-layer disc: layer-break PSN = 0 (no second layer).
+                    _sCmdOutput[0] = 0x00;
+                    _sCmdOutput[1] = 0x00;
+                    _sCmdOutput[2] = 0x00;
+                    _sCmdOutput[3] = 0x00;
+                    _sCmdOutputLen = 4;
+                    break;
+
+                // Other S-commands (disc info, mechanical ops) return empty.
+            }
         }
+
+        // ── TOC buffer builder ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Build a 1024-byte TOC buffer for the current disc image.
+        ///
+        /// DVD TOC layout (first 16 bytes, per PS2 DVD specification):
+        /// <list type="table">
+        ///   <item><term>Byte 0</term><description>Book type / disc category (0x04 = DVD-ROM)</description></item>
+        ///   <item><term>Byte 1</term><description>Disc size / maximum data rate (0xF2 = 120 mm, 52×)</description></item>
+        ///   <item><term>Byte 2</term><description>Number of layers minus one (0 = single-layer)</description></item>
+        ///   <item><term>Byte 3</term><description>Track path / layer type (0 = parallel, read-only)</description></item>
+        ///   <item><term>Bytes 4–7</term><description>Layer 0 start PSN (big-endian; standard DVD = 0x00030000)</description></item>
+        ///   <item><term>Bytes 8–11</term><description>Layer 0 end PSN (big-endian; start + numSectors − 1)</description></item>
+        ///   <item><term>Bytes 12–15</term><description>Layer 0 end PSN in layer 0 data area (same as end for single-layer)</description></item>
+        /// </list>
+        ///
+        /// Reference: PCSX2 <c>cdvdGetTOC()</c> in <c>pcsx2/CDVD/CDVD.cpp</c>.
+        /// </summary>
+        private void LoadTocBuffer()
+        {
+            byte[] toc = new byte[TocSize];
+
+            if (HasDisc)
+            {
+                int numSectors = _iso.Length / (_isRawImage ? RawSectorSize : SectorSize);
+
+                // DVD-ROM single-layer layout.
+                toc[0] = 0x04; // book type: DVD-ROM
+                toc[1] = 0xF2; // disc size: 120 mm, max rate
+                toc[2] = 0x00; // single layer (0 = 1 layer)
+                toc[3] = 0x00; // track path: parallel / read-only
+
+                // Layer 0 start PSN = 0x00030000 (standard DVD data area offset).
+                const uint startPsn = 0x00030000u;
+                toc[4]  = (byte)((startPsn >> 24) & 0xFF);
+                toc[5]  = (byte)((startPsn >> 16) & 0xFF);
+                toc[6]  = (byte)((startPsn >> 8)  & 0xFF);
+                toc[7]  = (byte)((startPsn)        & 0xFF);
+
+                // Layer 0 end PSN = start + numSectors − 1.
+                uint endPsn = startPsn + (uint)numSectors - 1;
+                toc[8]  = (byte)(endPsn >> 24);
+                toc[9]  = (byte)(endPsn >> 16);
+                toc[10] = (byte)(endPsn >> 8);
+                toc[11] = (byte)(endPsn);
+
+                // Layer 0 end PSN in layer 0 data area (same as end for single-layer).
+                toc[12] = toc[8];
+                toc[13] = toc[9];
+                toc[14] = toc[10];
+                toc[15] = toc[11];
+            }
+
+            _sectorData       = toc;
+            _sectorDataOffset = 0;
+        }
+
+        // ── Sub-channel Q builder ──────────────────────────────────────────────
+
+        /// <summary>
+        /// Build a 16-byte sub-channel block for <paramref name="lba"/>:
+        /// 12 bytes of sub-Q data followed by 4 reserved bytes.
+        ///
+        /// Sub-Q format (per ECMA-130 / PS2 hardware spec):
+        /// <list type="table">
+        ///   <item><term>[0] ctrl|adr</term><description>0x41 = data track, ADR=1 (position)</description></item>
+        ///   <item><term>[1] track</term><description>BCD track number (always 01 for data discs)</description></item>
+        ///   <item><term>[2] index</term><description>BCD index (always 01)</description></item>
+        ///   <item><term>[3–5] relative MSF</term><description>BCD minute/second/frame from track start (0 for simplified emulation)</description></item>
+        ///   <item><term>[6] zero</term><description>0x00</description></item>
+        ///   <item><term>[7–9] absolute MSF</term><description>BCD absolute minute/second/frame (LBA + 150 lead-in offset)</description></item>
+        ///   <item><term>[10] zero</term><description>0x00</description></item>
+        ///   <item><term>[11] CRC</term><description>0x00 (ignored by emulator)</description></item>
+        ///   <item><term>[12–15] reserved</term><description>0x00 padding</description></item>
+        /// </list>
+        ///
+        /// Reference: PCSX2 <c>CdRawSectorWithOC</c> mode in <c>pcsx2/CDVD/CDVD.cpp</c>.
+        /// </summary>
+        private static byte[] BuildSubQ(uint lba)
+        {
+            // CD-ROM absolute MSF: LBA 0 corresponds to MSF 00:02:00 (150-sector lead-in).
+            uint abs      = lba + 150;
+            byte absFrame = ToBcd((int)(abs % 75));
+            byte absSec   = ToBcd((int)(abs / 75 % 60));
+            byte absMin   = ToBcd((int)(abs / 75 / 60));
+
+            byte[] subq = new byte[SubChannelSize]; // 16 bytes, zero-initialised
+            subq[0] = 0x41; // ctrl=4 (data), adr=1 (position)
+            subq[1] = 0x01; // track 01 (BCD)
+            subq[2] = 0x01; // index 01 (BCD)
+            // relative MSF [3-5] = 0 (simplified — not used by most games)
+            subq[6]  = 0x00;
+            subq[7]  = absMin;
+            subq[8]  = absSec;
+            subq[9]  = absFrame;
+            // [10] = 0x00, [11] CRC = 0x00, [12-15] reserved = 0x00
+            return subq;
+        }
+
+        /// <summary>Encode a decimal value (0–99) as a BCD byte.</summary>
+        private static byte ToBcd(int val) => (byte)((val / 10 << 4) | (val % 10));
 
         // ── ISO-9660 file-system reader ───────────────────────────────────────
 
