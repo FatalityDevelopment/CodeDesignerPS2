@@ -18,17 +18,24 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     /// <see cref="ReadNextDmaWord"/>.
     ///
     /// ISO-9660 support:
-    ///   Call <see cref="LoadImage"/> to attach a raw sector image (2048 bytes/sector,
-    ///   no sub-channel data).  <see cref="FindFile"/> walks the Primary Volume
-    ///   Descriptor tree to locate a file by path; <see cref="ReadFile(IsoEntry)"/>
-    ///   returns the file's raw bytes.
+    ///   Call <see cref="LoadImage"/> to attach a disc image.  Images may be either
+    ///   "cooked" ISO-9660 (2048 bytes/sector) or raw BIN/CUE images
+    ///   (2352 bytes/sector with a 24-byte sector header).  The format is
+    ///   auto-detected from the sync pattern in the first sector.
+    ///   <see cref="FindFile"/> walks the Primary Volume Descriptor tree to locate
+    ///   a file by path; <see cref="ReadFile(IsoEntry)"/> returns the file's raw bytes.
     ///
-    /// N-command 0x06 (ReadCd) parameter layout
-    /// (written one byte at a time to offset 0x00 before issuing the command):
+    /// N-command 0x06 (ReadCd) parameter layout:
     ///   Byte 0–3: LBA (little-endian uint32)
     ///   Byte 4:   Sector count
     ///   Byte 5:   Reserved / media type
     ///   Byte 6:   Transfer type
+    ///
+    /// N-command 0x07 (ReadCDDA) parameter layout (same as ReadCd):
+    ///   Byte 0–3: LBA (little-endian uint32)
+    ///   Byte 4:   Sector count
+    ///   In raw BIN images the 2352-byte raw sector is returned as-is (16-bit
+    ///   stereo PCM at 44100 Hz); in cooked ISO images silence is returned.
     ///
     /// Reference: PCSX2 pcsx2/CDVD/CDVD.cpp, pcsx2/IopMem.cpp.
     /// </summary>
@@ -38,6 +45,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         /// <summary>Logical sector size for ISO-9660 (2048 bytes).</summary>
         public const int SectorSize = 2048;
+
+        /// <summary>Raw sector size for BIN/CUE images (2352 bytes).</summary>
+        public const int RawSectorSize = 2352;
+
+        /// <summary>Byte offset of user data within a raw Mode-1/Mode-2 sector.</summary>
+        public const int RawSectorHeaderSize = 24;
 
         /// <summary>Logical Block Address of the Primary Volume Descriptor.</summary>
         private const int PvdLba = 16;
@@ -67,8 +80,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         // ── N-command codes ───────────────────────────────────────────────────
 
-        /// <summary>ReadCd N-command code (read one or more sectors by LBA).</summary>
-        public const byte NCMD_READ_CD = 0x06;
+        /// <summary>ReadCd N-command code (read one or more data sectors by LBA).</summary>
+        public const byte NCMD_READ_CD   = 0x06;
+
+        /// <summary>ReadCDDA N-command code (read one or more CD audio sectors by LBA).</summary>
+        public const byte NCMD_READ_CDDA = 0x07;
 
         // ── Disc-type constants (CRT register) ────────────────────────────────
 
@@ -87,6 +103,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         // ── State ─────────────────────────────────────────────────────────────
 
         private byte[] _iso = Array.Empty<byte>();
+        private bool   _isRawImage;      // true = 2352-byte BIN/CUE format
 
         // N-command parameter buffer (written byte-by-byte to REG_DATA before NCMD)
         private readonly byte[] _nParamBuf = new byte[16];
@@ -110,6 +127,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <summary>Current disc type byte (value of the CRT register).</summary>
         public byte DiscType { get; private set; } = DISC_NO_DISC;
 
+        /// <summary>True when the loaded image uses 2352-byte raw sectors (BIN/CUE format).</summary>
+        public bool IsRawImage => _isRawImage;
+
         /// <summary>
         /// Raised when an N-command completes (data is ready in the sector buffer).
         /// <see cref="IopMemoryBus"/> wires this to assert IOP INTC bit 2.
@@ -119,21 +139,39 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         // ── ISO image loading ─────────────────────────────────────────────────
 
         /// <summary>
-        /// Load a raw ISO-9660 disc image (2048-byte sectors, no sub-channel data).
+        /// Load a disc image.  The image may be a cooked ISO-9660 image (2048 bytes/sector)
+        /// or a raw BIN/CUE image (2352 bytes/sector with a 24-byte sector header).
+        /// The format is detected automatically from the sector sync pattern.
         ///
-        /// After loading, <see cref="HasDisc"/> is <c>true</c> and
-        /// <see cref="DiscType"/> returns <see cref="DISC_PS2_DVD"/>.
         /// Pass <c>null</c> or an empty array to eject the disc.
         /// </summary>
-        /// <param name="iso">Raw disc image byte array, or <c>null</c> to eject.</param>
         public void LoadImage(byte[]? iso)
         {
             _iso              = iso ?? Array.Empty<byte>();
+            _isRawImage       = DetectRawImage(_iso);
             DiscType          = _iso.Length > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
             _nParamPos        = 0;
             _nIntrStat        = 0;
             _sectorData       = Array.Empty<byte>();
             _sectorDataOffset = 0;
+        }
+
+        // ── Raw-image detection ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Return true when <paramref name="data"/> appears to be a raw 2352-byte-sector
+        /// BIN/CUE image.  Detection uses the CD-ROM sync pattern at byte 0 of the first
+        /// sector (0x00 0xFF×11 0x00).
+        /// </summary>
+        private static bool DetectRawImage(byte[] data)
+        {
+            if (data.Length < RawSectorSize) return false;
+
+            // CD-ROM sync header: byte 0 = 0x00, bytes 1-11 = 0xFF, byte 12 = 0x00
+            if (data[0] != 0x00 || data[11] != 0x00) return false;
+            for (int i = 1; i <= 10; i++)
+                if (data[i] != 0xFF) return false;
+            return true;
         }
 
         // ── CDVD register I/O ─────────────────────────────────────────────────
@@ -222,20 +260,38 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         private void ExecuteNCommand(byte cmd)
         {
-            if (cmd == NCMD_READ_CD && _nParamPos >= 5)
+            switch (cmd)
             {
-                uint lba   = (uint)( _nParamBuf[0]
-                                   | (_nParamBuf[1] << 8)
-                                   | (_nParamBuf[2] << 16)
-                                   | (_nParamBuf[3] << 24));
-                uint count = _nParamBuf[4];
-                if (count == 0) count = 1;
-                LoadSectorBuffer(lba, count);
+                case NCMD_READ_CD:
+                    if (_nParamPos >= 5)
+                    {
+                        uint lba   = ReadParamU32(0);
+                        uint count = _nParamBuf[4];
+                        if (count == 0) count = 1;
+                        LoadSectorBuffer(lba, count);
+                    }
+                    break;
+
+                case NCMD_READ_CDDA:
+                    if (_nParamPos >= 5)
+                    {
+                        uint lba   = ReadParamU32(0);
+                        uint count = _nParamBuf[4];
+                        if (count == 0) count = 1;
+                        LoadCddaBuffer(lba, count);
+                    }
+                    break;
             }
 
             _nIntrStat |= INTR_DATA_READY;
             DataReady?.Invoke(this, EventArgs.Empty);
         }
+
+        private uint ReadParamU32(int start)
+            => (uint)(_nParamBuf[start]
+                    | (_nParamBuf[start + 1] << 8)
+                    | (_nParamBuf[start + 2] << 16)
+                    | (_nParamBuf[start + 3] << 24));
 
         private void LoadSectorBuffer(uint lba, uint count)
         {
@@ -245,11 +301,38 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             for (uint i = 0; i < count; i++)
             {
-                long srcOffset = (long)(lba + i) * SectorSize;
-                int  dstOffset = (int)(i * SectorSize);
+                long srcOffset = _isRawImage
+                    ? (long)(lba + i) * RawSectorSize + RawSectorHeaderSize
+                    : (long)(lba + i) * SectorSize;
+                int dstOffset = (int)(i * SectorSize);
                 if (srcOffset >= 0 && srcOffset + SectorSize <= _iso.Length)
                     Array.Copy(_iso, srcOffset, _sectorData, dstOffset, SectorSize);
-                // else: destination bytes remain zero (buffer was initialised to 0)
+            }
+        }
+
+        private void LoadCddaBuffer(uint lba, uint count)
+        {
+            if (_isRawImage)
+            {
+                // Raw BIN/CUE: CDDA sectors are 2352 bytes of raw 16-bit stereo PCM
+                // at 44100 Hz; the entire sector is audio data (no header).
+                int totalBytes    = (int)(count * RawSectorSize);
+                _sectorData       = new byte[totalBytes];
+                _sectorDataOffset = 0;
+
+                for (uint i = 0; i < count; i++)
+                {
+                    long srcOffset = (long)(lba + i) * RawSectorSize;
+                    int  dstOffset = (int)(i * RawSectorSize);
+                    if (srcOffset >= 0 && srcOffset + RawSectorSize <= _iso.Length)
+                        Array.Copy(_iso, srcOffset, _sectorData, dstOffset, RawSectorSize);
+                }
+            }
+            else
+            {
+                // Cooked ISO-9660 has no audio tracks — return silence.
+                _sectorData       = new byte[count * RawSectorSize]; // zeroed = silence
+                _sectorDataOffset = 0;
             }
         }
 
@@ -364,18 +447,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         }
 
         /// <summary>
-        /// Copy raw sector data from the disc image into <paramref name="buffer"/>.
+        /// Copy sector user-data from the disc image into <paramref name="buffer"/>.
+        /// For raw BIN/CUE images the 24-byte sector header is stripped automatically.
         /// </summary>
-        /// <param name="lba">Starting logical block address.</param>
-        /// <param name="count">Number of sectors to read.</param>
-        /// <param name="buffer">Destination buffer (must be large enough).</param>
-        /// <param name="bufferOffset">Byte offset within <paramref name="buffer"/>.</param>
         public void ReadSectors(uint lba, uint count, byte[] buffer, int bufferOffset = 0)
         {
             for (uint i = 0; i < count; i++)
             {
-                long srcOffset = (long)(lba + i) * SectorSize;
-                int  dstOffset = bufferOffset + (int)(i * SectorSize);
+                long srcOffset = _isRawImage
+                    ? (long)(lba + i) * RawSectorSize + RawSectorHeaderSize
+                    : (long)(lba + i) * SectorSize;
+                int dstOffset = bufferOffset + (int)(i * SectorSize);
                 if (srcOffset >= 0 && srcOffset + SectorSize <= _iso.Length
                     && dstOffset + SectorSize <= buffer.Length)
                 {
@@ -391,7 +473,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             rootLba  = 0;
             rootSize = 0;
 
-            long pvdOffset = (long)PvdLba * SectorSize;
+            // For raw images the user data starts 24 bytes into each 2352-byte sector.
+            long pvdOffset = _isRawImage
+                ? (long)PvdLba * RawSectorSize + RawSectorHeaderSize
+                : (long)PvdLba * SectorSize;
             if (pvdOffset + SectorSize > _iso.Length)
                 return false;
 

@@ -150,9 +150,9 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| SPU2 audio mixing and PCM output | ⬜ | ADPCM decoding is implemented per-voice, but the 48 voices are not mixed and no PCM/WAV output is produced.  Reference: PCSX2 `pcsx2/SPU2/Mixer.cpp`. |
-| SPU2 reverb / effects processing | ⬜ | SPU2 has a 128 KB effects buffer per core; reverb algorithms defined by core effect registers are not yet implemented. |
-| IOP CDDA (CD audio) | ⬜ | CD audio tracks are not read; only data sectors are supported in the current CDVD. |
+| SPU2 audio mixing and PCM output | ✅ | All 48 voices mixed through ADSR envelopes and per-voice volumes. `MixSamples(int count)` returns interleaved 16-bit stereo PCM at 48 kHz. ADPCM decoder drives `DecBuf`/`DecIdx`/`PitchFrac` per-voice. Master volume read from both the legacy per-core registers (core+0x1B0/0x1B2) and the PCSX2-compatible "weird area" (abs 0x760+core×0x28). Per-voice PVCA address registers (SA/LoopA/NextA) wired at core+0x1C0+voice×12.  KON resets ADPCM state, ADSR, pitch counter and CurrentAddr from StartAddr.  Reference: PCSX2 `pcsx2/SPU2/Mixer.cpp`. |
+| SPU2 reverb / effects processing | ✅ | Full PS2 SPU2 reverb algorithm implemented in `DoReverb()` using the circular buffer in `AudioRam[ESA..EEA]`.  Reverb spatial parameters (APF/SAME/DIFF/COMB addresses and sizes) stored at core+0x2E4 (22 × 32-bit PREVB registers matching PCSX2 `RegTable.cpp`). IIR_VOL/COMB_VOLs/WALL_VOL/APF_VOLs/IN_COEF_L/R read from "weird area" coefficient registers. Effects Start/End Address registers at core+0x2E0 and core+0x33C. Reference: PCSX2 `pcsx2/SPU2/Reverb.cpp`. |
+| IOP CDDA (CD audio) | ✅ | N-command 0x07 (ReadCDDA) added to CDVD: reads raw 2352-byte audio sectors from BIN/CUE images or returns silence for cooked ISO-9660 images.  Raw BIN/CUE images auto-detected from CD sync pattern (0x00 0xFF×10 0x00 at offset 0).  `Cdvd.IsRawImage` exposes the format; `ReadSectors` strips the 24-byte header for data sectors on raw images. Reference: PCSX2 `pcsx2/CDVD/CDVD.cpp`. |
 
 ### 7.5 — Storage & Memory Card
 
@@ -192,4 +192,4 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 ---
 
-*Last updated: 2026-02-25.  Current test count: 802 (all passing).*
+*Last updated: 2026-02-26.  Current test count: 827 (all passing).*
