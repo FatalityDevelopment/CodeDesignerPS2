@@ -55,12 +55,13 @@ privileged CPU state and are typically used by the kernel, runtime, or emulator.
 | 19 | WatchHi | Watchpoint address (high) |
 | 22 | Debug | Debug control |
 | 23 | DEPC | Debug exception PC |
-| 24 | Perf | Performance counter |
-| 25 | ECC | Error correction control |
-| 26 | CacheErr | Cache error status |
-| 27 | TagLo | Cache tag low |
-| 28 | TagHi | Cache tag high |
-| 29 | ErrorEPC | Error exception PC |
+| 24 | Perf | Performance counter (legacy) |
+| 25 | PCCR | Performance counter control (sel=0); PCR0 (sel=1); PCR1 (sel=2) |
+| 26 | ECC | Error correction code |
+| 27 | CacheErr | Cache error status |
+| 28 | TagLo | Cache tag low |
+| 29 | TagHi | Cache tag high |
+| 30 | ErrorEPC | Error exception PC (used by ERET when ERL=1) |
 
 > ⚠️ Some registers are **EE-specific** or behave differently compared to standard MIPS CPUs.
 
@@ -101,10 +102,11 @@ Cache behavior is **critical for EE performance and correctness**.
 - COP0 behavior is **timing-sensitive**
 - Incorrect Status/Cause handling breaks games
 - TLB is fully implemented; `HasAnyValidEntry` gate preserves identity-mapping for pre-TLB unit tests
-- Count/Compare registers are used for timing and interrupts
-- `ERET` checks `ERL` first — if set it clears `ERL` and returns via `ErrorEPC` (reg 29); otherwise it clears `EXL` and returns via `EPC` (reg 14)
+- Count/Compare registers are used for timing and interrupts; `IncrementCount()` sets Cause.IP7 when Count reaches Compare; Status.IM7 gates delivery
+- `ERET` checks `ERL` first — if set it clears `ERL` and returns via `ErrorEPC` (reg **30**); otherwise it clears `EXL` and returns via `EPC` (reg 14)
 - `EI`/`DI` are EE-specific extensions encoded in the COP0 sub-opcode space; they are **not** present on standard MIPS CPUs
 - Default Status after reset is `0x00400000` (BEV=1, interrupts disabled)
+- Register 25 is used for performance counters via the `sel` field in `MFC0`/`MTC0` instructions: sel=0 → PCCR, sel=1 → PCR0, sel=2 → PCR1
 
 ---
 

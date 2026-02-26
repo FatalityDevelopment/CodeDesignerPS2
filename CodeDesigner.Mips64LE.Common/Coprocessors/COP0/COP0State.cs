@@ -242,10 +242,11 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
                 23 => "DEPC",
                 24 => "Perf",
                 25 => "PCCR",
-                26 => "CacheErr",
-                27 => "TagLo",
-                28 => "TagHi",
-                29 => "ErrorEPC",
+                26 => "ECC",
+                27 => "CacheErr",
+                28 => "TagLo",
+                29 => "TagHi",
+                30 => "ErrorEPC",
                 _ => $"COP0_{register}"
             };
         }

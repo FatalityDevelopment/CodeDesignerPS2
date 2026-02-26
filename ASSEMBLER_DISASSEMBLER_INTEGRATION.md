@@ -307,20 +307,9 @@ dotnet run --project CodeDesigner.Mips64LE/CodeDesigner.Mips64LE.csproj -- --ser
 - Check server console for error messages
 - Ensure instruction syntax is correct (see supported formats above)
 
-## Future Enhancements
-
-Potential improvements for this integration:
-
-- [ ] Batch assembly/disassembly with address offsets
-- [ ] Support for labels and symbolic addresses
-- [ ] Syntax highlighting in panels
-- [ ] Code completion in assembly panel
-- [ ] Export assembled code to binary file
-- [ ] Import binary files for disassembly
-- [ ] Real-time assembly validation as you type
-
 ## References
 
 - [MIPS Instruction Set](https://en.wikipedia.org/wiki/MIPS_architecture)
 - [MIPS64 Architecture](https://www.mips.com/products/architectures/mips64/)
 - [PlayStation 2 Emotion Engine](https://en.wikipedia.org/wiki/Emotion_Engine)
+- [PCSX2 Emulator Source Code](https://github.com/PCSX2/pcsx2)

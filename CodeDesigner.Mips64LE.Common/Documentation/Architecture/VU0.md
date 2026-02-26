@@ -6,8 +6,8 @@
 PlayStation 2 Emotion Engine.  
 It is unique in that it can operate in **two distinct modes**:
 
-- **Macro Mode** – Acts as a COP2-style coprocessor controlled by the EE CPU
-- **Micro Mode** – Executes independent microprograms, similar to VU1
+- **Macro Mode** – Acts as a COP2-style coprocessor controlled by the EE CPU via COP2 instructions
+- **Micro Mode** – Executes independent microprograms launched by `VCALLMS`/`VCALLMSR` or by VIF0 `MSCAL`/`MSCNT`
 
 VU0 is typically used for:
 - Physics calculations
@@ -19,127 +19,136 @@ VU0 is typically used for:
 
 ## VU0 Architecture
 
-- **Vector Registers:** 32 × 128-bit (`vf0–vf31`)
-- **Integer Registers:** 16 × 16-bit (`vi0–vi15`)
+- **Vector Registers:** 32 × 128-bit (`vf0–vf31`); each holds 4 × 32-bit floats (`x, y, z, w`)
+- **Integer Registers:** 16 × 16-bit (`vi0–vi15`); `vi0` is always 0
 - **Accumulator:** 1 × 128-bit (`ACC`)
-- **Pipeline:** Vector + Integer pipelines
-- **Instruction Width:** 32-bit
-- **Execution Model:** SIMD
-
-Each vector register contains **4 × 32-bit floats** (`x, y, z, w`).
+- **Q Register:** scalar result of `DIV`/`SQRT`/`RSQRT`
+- **P Register:** scalar result of EFU operations (`ESQRT`, `ERSQRT`, etc.)
+- **R Register (RNG):** 23-bit LFSR random number register, stored as `0x3F800000 | mantissa`
+- **Micro Memory:** 4 KB (VU0 microprogram storage)
+- **Data Memory:** 4 KB (shared with EE via COP2 `VLQ`/`VSQ`)
+- **Instruction Width:** 64-bit dual-issue (lower word = memory/integer/branch, upper word = float arithmetic)
+- **Execution Model:** SIMD; per-component destination masks and broadcast variants
 
 ---
 
 ## VU0 Modes
 
 ### Macro Mode
-- Controlled directly by EE CPU instructions
-- Limited instruction set
-- Used via `COP2` instructions
+- Controlled directly by EE CPU via COP2 (`rs=0x10`) instructions
+- Accessed as `VADD`, `VSUB`, `VMUL`, `VMADD`, etc. in EE assembly
+- `VWAITQ` is a no-op in macro mode (Q is always ready)
+- No `XGKICK` (VU1-only feature)
 
 ### Micro Mode
-- Executes VU microprograms
-- Independent instruction stream
-- Full VU instruction set available
+- Launched by `VCALLMS`/`VCALLMSR` EE instructions or by VIF0 `MSCAL`/`MSCNT`
+- Executes synchronously: EE pipeline waits until the microprogram completes
+- Full VU instruction set available (same encoding as VU1)
+- Reference: PCSX2 `pcsx2/VU0.cpp`
 
 ---
 
-## VU0 Vector Arithmetic Instructions
+## Macro-Mode Instructions (COP2 / EE Assembly)
+
+### Vector Arithmetic
 
 | Instruction | Description |
 |-------------|-------------|
-| ADD | Vector add |
-| SUB | Vector subtract |
-| MUL | Vector multiply |
-| MAD | Multiply and add |
-| MADD | Multiply add (accumulator) |
-| MSUB | Multiply subtract |
-| MAX | Vector max |
-| MIN | Vector min |
-| ABS | Absolute value |
-| NEG | Negate |
-| CLIP | Clipping test |
+| `VADD[bc]` | Vector add (scalar broadcast: `VADDx`, `VADDy`, `VADDz`, `VADDw`) |
+| `VSUB[bc]` | Vector subtract (broadcast variants) |
+| `VMUL[bc]` | Vector multiply (broadcast variants) |
+| `VMADD[bc]` | Multiply-add using ACC (broadcast variants) |
+| `VMSUB[bc]` | Multiply-subtract using ACC (broadcast variants) |
+| `VMAX[bc]` | Component-wise maximum (broadcast variants) |
+| `VMIN[bc]` | Component-wise minimum (broadcast variants) |
+| `VABS` | Absolute value |
+| `VOPMULA` | Outer product multiply to ACC |
+| `VOPMSUB` | Outer product multiply-subtract from ACC |
+| `VCLIPW` | Clip test against ±w |
 
----
-
-## VU0 Accumulator Instructions
+### Accumulator
 
 | Instruction | Description |
 |-------------|-------------|
-| ADDA | Add to accumulator |
-| MULA | Multiply to accumulator |
-| MADD | Multiply add using ACC |
-| MSUB | Multiply subtract using ACC |
+| `VADDA[bc]` | Add to accumulator (broadcast variants) |
+| `VSUBA[bc]` | Subtract from accumulator (broadcast variants) |
+| `VMULA[bc]` | Multiply to accumulator (broadcast variants) |
 
----
-
-## VU0 Conversion Instructions
+### Conversion
 
 | Instruction | Description |
 |-------------|-------------|
-| FTOI | Float to integer |
-| ITOF | Integer to float |
-| ITOR | Integer to reciprocal |
-| RTOI | Reciprocal to integer |
+| `VFTOI0` | Float to signed integer (multiply by 1.0) |
+| `VFTOI4` | Float to signed integer (multiply by 16.0) |
+| `VITOF0` | Signed integer to float (divide by 1.0) |
+| `VITOF4` | Signed integer to float (divide by 16.0) |
 
----
-
-## VU0 Reciprocal & Square Root
+### Q-Register (Scalar Division)
 
 | Instruction | Description |
 |-------------|-------------|
-| DIV | Vector divide |
-| RSQRT | Reciprocal square root |
-| SQRT | Square root |
-| RCP | Reciprocal |
+| `VDIV` | `Q = fs[field] / ft[field]` |
+| `VSQRT` | `Q = sqrt(ft[field])` |
+| `VRSQRT` | `Q = fs[field] / sqrt(ft[field])` |
+| `VWAITQ` | Wait for Q to be ready (no-op in macro mode) |
 
----
-
-## VU0 Integer Instructions
+### Register Transfer
 
 | Instruction | Description |
 |-------------|-------------|
-| IADD | Integer add |
-| ISUB | Integer subtract |
-| IADDI | Integer add immediate |
-| IAND | Integer AND |
-| IOR | Integer OR |
-| IBEQ | Branch if equal |
-| IBNE | Branch if not equal |
-| IBLTZ | Branch if less than zero |
-| IBGTZ | Branch if greater than zero |
+| `VMOVE` | Copy vector register |
+| `VMR32` | Rotate components: x←w, y←x, z←y, w←z |
+| `VLQ` | Load quadword (128-bit) from memory |
+| `VSQ` | Store quadword (128-bit) to memory |
+| `QMFC2` | Move 128-bit VU0 register to EE GPR pair |
+| `QMTC2` | Move EE GPR pair to 128-bit VU0 register |
+| `CFC2` | Move VU0 control register to EE GPR |
+| `CTC2` | Move EE GPR to VU0 control register |
 
----
-
-## VU0 Load & Store Instructions
+### Random Number Generator (LFSR)
 
 | Instruction | Description |
 |-------------|-------------|
-| LQ | Load quadword |
-| SQ | Store quadword |
-| ILW | Load integer word |
-| ISW | Store integer word |
+| `VRNEXT` | Advance LFSR, write result to vfd |
+| `VRGET` | Read current LFSR value to vfd |
+| `VRINIT` | Initialise LFSR from fs[field] |
+| `VRXOR` | XOR LFSR with fs[field] |
 
----
-
-## VU0 Control Instructions
+### Micro Mode Control
 
 | Instruction | Description |
 |-------------|-------------|
-| MOVE | Register move |
-| MR32 | Rotate vector components |
-| WAITQ | Wait for division result |
-| SYNC | Pipeline synchronization |
-| ERET | Return from microprogram |
+| `VCALLMS` | Start VU0 microprogram at immediate address, then execute synchronously |
+| `VCALLMSR` | Start VU0 microprogram at address in `vi15`, then execute synchronously |
+| `VNOP` | No operation |
 
 ---
 
-## Component Masks
+## Micro-Mode Instructions
 
-VU instructions can selectively operate on vector components:
+All VU1 micro-mode instructions are available in VU0 micro mode with the following exception:
 
-- `.x`, `.y`, `.z`, `.w`
-- Example:
-  ```asm
-  MUL.xyz vf1, vf2, vf3
+- **`XGKICK`** is a no-op in VU0 (VU1-only feature — feeds data to GIF PATH1)
+
+Upper-word and lower-word instruction sets are identical to VU1; see the VU1 documentation for the full micro-mode instruction reference.
+
+---
+
+## Component Masks and Broadcast
+
+VU instructions support per-component destination masks and source broadcast:
+
+- **Destination mask:** `.x`, `.y`, `.z`, `.w`, `.xy`, `.xyz`, `.xyzw`, etc.
+- **Broadcast:** `VADDx vf1, vf2, vf3` adds `vf3.x` to each component of `vf2`
+
+```asm
+VMUL.xyz  vf1, vf2, vf3        # multiply only x/y/z components
+VADDx.xyzw vf4, vf5, vf6      # add vf6.x (broadcast) to all of vf5
 ```
+
+---
+
+## Disclaimer
+
+This documentation is for **educational and research purposes only**.  
+PlayStation and Emotion Engine are trademarks of Sony Interactive Entertainment.
