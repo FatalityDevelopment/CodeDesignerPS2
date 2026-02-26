@@ -286,6 +286,46 @@ namespace CodeDesigner.Mips64LE.TestProject
                 "LW should read back the value written by SW");
         }
 
+        [TestMethod]
+        public void Emulator_SW_KSEG0Address_DoesNotThrow()
+        {
+            // Verify that SW to a KSEG0 virtual address (0x80001000 → physical 0x00001000)
+            // succeeds without IndexOutOfRangeException when bus is wired.
+            // sw $t0, 0($s0)  where $s0 = 0x80001000
+            uint sw = (0x2Bu << 26) | (16u << 21) | (8u << 16) | 0;
+            uint lw = (0x23u << 26) | (16u << 21) | (9u << 16) | 0;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000100, new[] { sw, lw });
+            emu.Cpu.PC        = 0x00000100;
+            emu.Cpu.RegsLo[16] = 0x80001000u; // KSEG0 → physical 0x00001000
+            emu.Cpu.RegsLo[8]  = 0xCAFEBABEu;
+
+            emu.Run(2); // Must not throw
+
+            // Physical 0x00001000 holds the written value; LW sign-extends from 32 bits
+            long expected = unchecked((int)0xCAFEBABEu);
+            Assert.AreEqual((ulong)expected, emu.Cpu.RegsLo[9],
+                "SW via KSEG0 and LW via KSEG0 should round-trip correctly");
+        }
+
+        [TestMethod]
+        public void Emulator_SW_IoAddress_DoesNotThrow()
+        {
+            // Verify that SW to an I/O register address (e.g. 0x1000F010, INTC_MASK)
+            // does not throw IndexOutOfRangeException when bus is wired.
+            // sw $t0, 0($s0)  where $s0 = 0x1000F010
+            uint sw = (0x2Bu << 26) | (16u << 21) | (8u << 16) | 0;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000200, new[] { sw });
+            emu.Cpu.PC        = 0x00000200;
+            emu.Cpu.RegsLo[16] = 0x1000F010u; // INTC_MASK register
+            emu.Cpu.RegsLo[8]  = 0x00000001u; // toggle bit 0
+
+            emu.Run(1); // Must not throw
+        }
+
         // =====================================================================
         // Branch delay slot tests
         // =====================================================================

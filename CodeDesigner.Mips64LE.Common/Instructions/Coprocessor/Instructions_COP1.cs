@@ -346,11 +346,17 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
             
             // Load 32-bit value from memory
-            if (addr + 3 < (ulong)cpu.Memory.Length)
+            uint bits;
+            if (cpu.Bus != null)
             {
-                uint bits = BitConverter.ToUInt32(cpu.Memory, (int)addr);
-                cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(bits);
+                bits = cpu.Bus.ReadWord((uint)addr);
             }
+            else if (addr + 3 < (ulong)cpu.Memory.Length)
+            {
+                bits = BitConverter.ToUInt32(cpu.Memory, (int)addr);
+            }
+            else return;
+            cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(bits);
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -401,9 +407,13 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
             
             // Store 32-bit value to memory
-            if (addr + 3 < (ulong)cpu.Memory.Length)
+            uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
+            if (cpu.Bus != null)
             {
-                uint bits = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
+                cpu.Bus.WriteWord((uint)addr, bits);
+            }
+            else if (addr + 3 < (ulong)cpu.Memory.Length)
+            {
                 byte[] bytes = BitConverter.GetBytes(bits);
                 Array.Copy(bytes, 0, cpu.Memory, (long)addr, 4);
             }
@@ -1583,7 +1593,14 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
-            if (addr + 7 < (ulong)cpu.Memory.Length)
+            if (cpu.Bus != null)
+            {
+                uint lo = cpu.Bus.ReadWord((uint)addr);
+                uint hi = cpu.Bus.ReadWord((uint)addr + 4);
+                cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(lo);
+                if (args.Rt + 1 < cpu.FPR.Length) cpu.FPR[args.Rt + 1] = BitConverter.UInt32BitsToSingle(hi);
+            }
+            else if (addr + 7 < (ulong)cpu.Memory.Length)
             {
                 // Load 64-bit value; store lower 32 bits in FPR[ft], upper 32 in FPR[ft+1]
                 uint lo = BitConverter.ToUInt32(cpu.Memory, (int)addr);
@@ -1624,10 +1641,15 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
             ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
-            if (addr + 7 < (ulong)cpu.Memory.Length)
+            uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
+            uint hi = args.Rt + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt + 1]) : 0;
+            if (cpu.Bus != null)
             {
-                uint lo = BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt]);
-                uint hi = args.Rt + 1 < cpu.FPR.Length ? BitConverter.SingleToUInt32Bits(cpu.FPR[args.Rt + 1]) : 0;
+                cpu.Bus.WriteWord((uint)addr, lo);
+                cpu.Bus.WriteWord((uint)addr + 4, hi);
+            }
+            else if (addr + 7 < (ulong)cpu.Memory.Length)
+            {
                 byte[] buf = new byte[8];
                 Buffer.BlockCopy(BitConverter.GetBytes(lo), 0, buf, 0, 4);
                 Buffer.BlockCopy(BitConverter.GetBytes(hi), 0, buf, 4, 4);

@@ -39,7 +39,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             
-            sbyte value = (sbyte)cpu.Memory[addr];
+            sbyte value = cpu.Bus != null
+                ? (sbyte)cpu.Bus.ReadByte(addr)
+                : (sbyte)cpu.Memory[addr];
             long signExtended = value; // Sign-extend to 64-bit
             cpu.RegsLo[args.Rt] = (ulong)signExtended;
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
@@ -92,7 +94,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             
-            byte value = cpu.Memory[addr];
+            byte value = cpu.Bus != null
+                ? cpu.Bus.ReadByte(addr)
+                : cpu.Memory[addr];
             cpu.RegsLo[args.Rt] = value; // Zero-extend to 64-bit
             cpu.RegsHi[args.Rt] = 0;
         }
@@ -145,7 +149,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             
             // Little-endian load
-            short value = (short)(cpu.Memory[addr] | (cpu.Memory[addr + 1] << 8));
+            short value = cpu.Bus != null
+                ? (short)cpu.Bus.ReadHalf(addr)
+                : (short)(cpu.Memory[addr] | (cpu.Memory[addr + 1] << 8));
             long signExtended = value; // Sign-extend to 64-bit
             cpu.RegsLo[args.Rt] = (ulong)signExtended;
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
@@ -199,7 +205,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             
             // Little-endian load
-            ushort value = (ushort)(cpu.Memory[addr] | (cpu.Memory[addr + 1] << 8));
+            ushort value = cpu.Bus != null
+                ? cpu.Bus.ReadHalf(addr)
+                : (ushort)(cpu.Memory[addr] | (cpu.Memory[addr + 1] << 8));
             cpu.RegsLo[args.Rt] = value; // Zero-extend to 64-bit
             cpu.RegsHi[args.Rt] = 0;
         }
@@ -252,7 +260,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             
             // Little-endian load
-            int value = (int)(cpu.Memory[addr] | 
+            int value = cpu.Bus != null
+                ? (int)cpu.Bus.ReadWord(addr)
+                : (int)(cpu.Memory[addr] | 
                              (cpu.Memory[addr + 1] << 8) | 
                              (cpu.Memory[addr + 2] << 16) | 
                              (cpu.Memory[addr + 3] << 24));
@@ -310,7 +320,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             
             // Little-endian load
-            uint value = (uint)(cpu.Memory[addr] | 
+            uint value = cpu.Bus != null
+                ? cpu.Bus.ReadWord(addr)
+                : (uint)(cpu.Memory[addr] | 
                                (cpu.Memory[addr + 1] << 8) | 
                                (cpu.Memory[addr + 2] << 16) | 
                                (cpu.Memory[addr + 3] << 24));
@@ -367,7 +379,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             
             // Little-endian load (64-bit)
-            ulong value = cpu.Memory[addr] |
+            ulong value = cpu.Bus != null
+                ? cpu.Bus.ReadDoubleWord(addr)
+                : cpu.Memory[addr] |
                          ((ulong)cpu.Memory[addr + 1] << 8) |
                          ((ulong)cpu.Memory[addr + 2] << 16) |
                          ((ulong)cpu.Memory[addr + 3] << 24) |
@@ -430,7 +444,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int shift = (int)((addr & 3) * 8);
             
             // Load word from aligned address
-            uint word = (uint)(cpu.Memory[alignedAddr] |
+            uint word = cpu.Bus != null
+                ? cpu.Bus.ReadWord(alignedAddr)
+                : (uint)(cpu.Memory[alignedAddr] |
                               (cpu.Memory[alignedAddr + 1] << 8) |
                               (cpu.Memory[alignedAddr + 2] << 16) |
                               (cpu.Memory[alignedAddr + 3] << 24));
@@ -496,7 +512,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int shift = (int)((3 - (addr & 3)) * 8);
             
             // Load word from aligned address
-            uint word = (uint)(cpu.Memory[alignedAddr] |
+            uint word = cpu.Bus != null
+                ? cpu.Bus.ReadWord(alignedAddr)
+                : (uint)(cpu.Memory[alignedAddr] |
                               (cpu.Memory[alignedAddr + 1] << 8) |
                               (cpu.Memory[alignedAddr + 2] << 16) |
                               (cpu.Memory[alignedAddr + 3] << 24));
@@ -562,7 +580,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int shift = (int)((addr & 7) * 8);
             
             // Load doubleword from aligned address
-            ulong dword = cpu.Memory[alignedAddr] |
+            ulong dword = cpu.Bus != null
+                ? cpu.Bus.ReadDoubleWord(alignedAddr)
+                : cpu.Memory[alignedAddr] |
                          ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
                          ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
                          ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
@@ -628,7 +648,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int shift = (int)((7 - (addr & 7)) * 8);
             
             // Load doubleword from aligned address
-            ulong dword = cpu.Memory[alignedAddr] |
+            ulong dword = cpu.Bus != null
+                ? cpu.Bus.ReadDoubleWord(alignedAddr)
+                : cpu.Memory[alignedAddr] |
                          ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
                          ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
                          ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
@@ -692,25 +714,30 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             
             // Load 128-bit value (must be 16-byte aligned on real hardware)
-            // Lower 64 bits
-            ulong lo = cpu.Memory[addr] |
-                      ((ulong)cpu.Memory[addr + 1] << 8) |
-                      ((ulong)cpu.Memory[addr + 2] << 16) |
-                      ((ulong)cpu.Memory[addr + 3] << 24) |
-                      ((ulong)cpu.Memory[addr + 4] << 32) |
-                      ((ulong)cpu.Memory[addr + 5] << 40) |
-                      ((ulong)cpu.Memory[addr + 6] << 48) |
-                      ((ulong)cpu.Memory[addr + 7] << 56);
-            
-            // Upper 64 bits
-            ulong hi = cpu.Memory[addr + 8] |
-                      ((ulong)cpu.Memory[addr + 9] << 8) |
-                      ((ulong)cpu.Memory[addr + 10] << 16) |
-                      ((ulong)cpu.Memory[addr + 11] << 24) |
-                      ((ulong)cpu.Memory[addr + 12] << 32) |
-                      ((ulong)cpu.Memory[addr + 13] << 40) |
-                      ((ulong)cpu.Memory[addr + 14] << 48) |
-                      ((ulong)cpu.Memory[addr + 15] << 56);
+            ulong lo, hi;
+            if (cpu.Bus != null)
+            {
+                cpu.Bus.ReadQuadWord(addr, out lo, out hi);
+            }
+            else
+            {
+                lo = cpu.Memory[addr] |
+                          ((ulong)cpu.Memory[addr + 1] << 8) |
+                          ((ulong)cpu.Memory[addr + 2] << 16) |
+                          ((ulong)cpu.Memory[addr + 3] << 24) |
+                          ((ulong)cpu.Memory[addr + 4] << 32) |
+                          ((ulong)cpu.Memory[addr + 5] << 40) |
+                          ((ulong)cpu.Memory[addr + 6] << 48) |
+                          ((ulong)cpu.Memory[addr + 7] << 56);
+                hi = cpu.Memory[addr + 8] |
+                          ((ulong)cpu.Memory[addr + 9] << 8) |
+                          ((ulong)cpu.Memory[addr + 10] << 16) |
+                          ((ulong)cpu.Memory[addr + 11] << 24) |
+                          ((ulong)cpu.Memory[addr + 12] << 32) |
+                          ((ulong)cpu.Memory[addr + 13] << 40) |
+                          ((ulong)cpu.Memory[addr + 14] << 48) |
+                          ((ulong)cpu.Memory[addr + 15] << 56);
+            }
             
             cpu.RegsLo[args.Rt] = lo;
             cpu.RegsHi[args.Rt] = hi;

@@ -37,7 +37,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             
             byte value = (byte)(cpu.RegsLo[args.Rt] & 0xFF);
-            cpu.Memory[addr] = value;
+            if (cpu.Bus != null)
+                cpu.Bus.WriteByte(addr, value);
+            else
+                cpu.Memory[addr] = value;
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -90,9 +93,16 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             
             ushort value = (ushort)(cpu.RegsLo[args.Rt] & 0xFFFF);
             
-            // Little-endian store
-            cpu.Memory[addr] = (byte)(value & 0xFF);
-            cpu.Memory[addr + 1] = (byte)((value >> 8) & 0xFF);
+            if (cpu.Bus != null)
+            {
+                cpu.Bus.WriteHalf(addr, value);
+            }
+            else
+            {
+                // Little-endian store
+                cpu.Memory[addr] = (byte)(value & 0xFF);
+                cpu.Memory[addr + 1] = (byte)((value >> 8) & 0xFF);
+            }
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -145,11 +155,18 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             
             uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
             
-            // Little-endian store
-            cpu.Memory[addr] = (byte)(value & 0xFF);
-            cpu.Memory[addr + 1] = (byte)((value >> 8) & 0xFF);
-            cpu.Memory[addr + 2] = (byte)((value >> 16) & 0xFF);
-            cpu.Memory[addr + 3] = (byte)((value >> 24) & 0xFF);
+            if (cpu.Bus != null)
+            {
+                cpu.Bus.WriteWord(addr, value);
+            }
+            else
+            {
+                // Little-endian store
+                cpu.Memory[addr] = (byte)(value & 0xFF);
+                cpu.Memory[addr + 1] = (byte)((value >> 8) & 0xFF);
+                cpu.Memory[addr + 2] = (byte)((value >> 16) & 0xFF);
+                cpu.Memory[addr + 3] = (byte)((value >> 24) & 0xFF);
+            }
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -202,15 +219,22 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             
             ulong value = cpu.RegsLo[args.Rt];
             
-            // Little-endian store (64-bit)
-            cpu.Memory[addr] = (byte)(value & 0xFF);
-            cpu.Memory[addr + 1] = (byte)((value >> 8) & 0xFF);
-            cpu.Memory[addr + 2] = (byte)((value >> 16) & 0xFF);
-            cpu.Memory[addr + 3] = (byte)((value >> 24) & 0xFF);
-            cpu.Memory[addr + 4] = (byte)((value >> 32) & 0xFF);
-            cpu.Memory[addr + 5] = (byte)((value >> 40) & 0xFF);
-            cpu.Memory[addr + 6] = (byte)((value >> 48) & 0xFF);
-            cpu.Memory[addr + 7] = (byte)((value >> 56) & 0xFF);
+            if (cpu.Bus != null)
+            {
+                cpu.Bus.WriteDoubleWord(addr, value);
+            }
+            else
+            {
+                // Little-endian store (64-bit)
+                cpu.Memory[addr] = (byte)(value & 0xFF);
+                cpu.Memory[addr + 1] = (byte)((value >> 8) & 0xFF);
+                cpu.Memory[addr + 2] = (byte)((value >> 16) & 0xFF);
+                cpu.Memory[addr + 3] = (byte)((value >> 24) & 0xFF);
+                cpu.Memory[addr + 4] = (byte)((value >> 32) & 0xFF);
+                cpu.Memory[addr + 5] = (byte)((value >> 40) & 0xFF);
+                cpu.Memory[addr + 6] = (byte)((value >> 48) & 0xFF);
+                cpu.Memory[addr + 7] = (byte)((value >> 56) & 0xFF);
+            }
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -261,12 +285,13 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             uint alignedAddr = addr & ~3u; // Align to 4-byte boundary
-            int shift = (int)((addr & 3) * 8);
             
             uint value = (uint)cpu.RegsLo[args.Rt];
             
             // Read existing word
-            uint existingWord = (uint)(cpu.Memory[alignedAddr] |
+            uint existingWord = cpu.Bus != null
+                ? cpu.Bus.ReadWord(alignedAddr)
+                : (uint)(cpu.Memory[alignedAddr] |
                                       (cpu.Memory[alignedAddr + 1] << 8) |
                                       (cpu.Memory[alignedAddr + 2] << 16) |
                                       (cpu.Memory[alignedAddr + 3] << 24));
@@ -277,10 +302,17 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint mask = byteOff > 0 ? (1u << (byteOff * 8)) - 1u : 0u;
             uint result = (existingWord & mask) | (value << (byteOff * 8));
             
-            cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
-            cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
-            cpu.Memory[alignedAddr + 2] = (byte)((result >> 16) & 0xFF);
-            cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
+            if (cpu.Bus != null)
+            {
+                cpu.Bus.WriteWord(alignedAddr, result);
+            }
+            else
+            {
+                cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
+                cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
+                cpu.Memory[alignedAddr + 2] = (byte)((result >> 16) & 0xFF);
+                cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
+            }
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -335,7 +367,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint value = (uint)cpu.RegsLo[args.Rt];
             
             // Read existing word
-            uint existingWord = (uint)(cpu.Memory[alignedAddr] |
+            uint existingWord = cpu.Bus != null
+                ? cpu.Bus.ReadWord(alignedAddr)
+                : (uint)(cpu.Memory[alignedAddr] |
                                       (cpu.Memory[alignedAddr + 1] << 8) |
                                       (cpu.Memory[alignedAddr + 2] << 16) |
                                       (cpu.Memory[alignedAddr + 3] << 24));
@@ -345,10 +379,17 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             uint mask = 0xFFFFFFFFu >> shift;
             uint result = (existingWord & ~mask) | (value & mask);
             
-            cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
-            cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
-            cpu.Memory[alignedAddr + 2] = (byte)((result >> 16) & 0xFF);
-            cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
+            if (cpu.Bus != null)
+            {
+                cpu.Bus.WriteWord(alignedAddr, result);
+            }
+            else
+            {
+                cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
+                cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
+                cpu.Memory[alignedAddr + 2] = (byte)((result >> 16) & 0xFF);
+                cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
+            }
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -398,12 +439,13 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             int offset = CpuHelpers.SignExtend16(args.Imm);
             uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
             uint alignedAddr = addr & ~7u; // Align to 8-byte boundary
-            int shift = (int)((addr & 7) * 8);
             
             ulong value = cpu.RegsLo[args.Rt];
             
             // Read existing doubleword
-            ulong existingDword = cpu.Memory[alignedAddr] |
+            ulong existingDword = cpu.Bus != null
+                ? cpu.Bus.ReadDoubleWord(alignedAddr)
+                : cpu.Memory[alignedAddr] |
                                  ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
                                  ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
                                  ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
@@ -418,14 +460,21 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong mask = byteOff > 0 ? (1ul << (byteOff * 8)) - 1ul : 0ul;
             ulong result = (existingDword & mask) | (value << (byteOff * 8));
             
-            cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
-            cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
-            cpu.Memory[alignedAddr + 2] = (byte)((result >> 16) & 0xFF);
-            cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
-            cpu.Memory[alignedAddr + 4] = (byte)((result >> 32) & 0xFF);
-            cpu.Memory[alignedAddr + 5] = (byte)((result >> 40) & 0xFF);
-            cpu.Memory[alignedAddr + 6] = (byte)((result >> 48) & 0xFF);
-            cpu.Memory[alignedAddr + 7] = (byte)((result >> 56) & 0xFF);
+            if (cpu.Bus != null)
+            {
+                cpu.Bus.WriteDoubleWord(alignedAddr, result);
+            }
+            else
+            {
+                cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
+                cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
+                cpu.Memory[alignedAddr + 2] = (byte)((result >> 16) & 0xFF);
+                cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
+                cpu.Memory[alignedAddr + 4] = (byte)((result >> 32) & 0xFF);
+                cpu.Memory[alignedAddr + 5] = (byte)((result >> 40) & 0xFF);
+                cpu.Memory[alignedAddr + 6] = (byte)((result >> 48) & 0xFF);
+                cpu.Memory[alignedAddr + 7] = (byte)((result >> 56) & 0xFF);
+            }
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -480,7 +529,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong value = cpu.RegsLo[args.Rt];
             
             // Read existing doubleword
-            ulong existingDword = cpu.Memory[alignedAddr] |
+            ulong existingDword = cpu.Bus != null
+                ? cpu.Bus.ReadDoubleWord(alignedAddr)
+                : cpu.Memory[alignedAddr] |
                                  ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
                                  ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
                                  ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
@@ -494,14 +545,21 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong mask = 0xFFFFFFFFFFFFFFFFul >> shift;
             ulong result = (existingDword & ~mask) | (value & mask);
             
-            cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
-            cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
-            cpu.Memory[alignedAddr + 2] = (byte)((result >> 16) & 0xFF);
-            cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
-            cpu.Memory[alignedAddr + 4] = (byte)((result >> 32) & 0xFF);
-            cpu.Memory[alignedAddr + 5] = (byte)((result >> 40) & 0xFF);
-            cpu.Memory[alignedAddr + 6] = (byte)((result >> 48) & 0xFF);
-            cpu.Memory[alignedAddr + 7] = (byte)((result >> 56) & 0xFF);
+            if (cpu.Bus != null)
+            {
+                cpu.Bus.WriteDoubleWord(alignedAddr, result);
+            }
+            else
+            {
+                cpu.Memory[alignedAddr] = (byte)(result & 0xFF);
+                cpu.Memory[alignedAddr + 1] = (byte)((result >> 8) & 0xFF);
+                cpu.Memory[alignedAddr + 2] = (byte)((result >> 16) & 0xFF);
+                cpu.Memory[alignedAddr + 3] = (byte)((result >> 24) & 0xFF);
+                cpu.Memory[alignedAddr + 4] = (byte)((result >> 32) & 0xFF);
+                cpu.Memory[alignedAddr + 5] = (byte)((result >> 40) & 0xFF);
+                cpu.Memory[alignedAddr + 6] = (byte)((result >> 48) & 0xFF);
+                cpu.Memory[alignedAddr + 7] = (byte)((result >> 56) & 0xFF);
+            }
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -555,25 +613,32 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong lo = cpu.RegsLo[args.Rt];
             ulong hi = cpu.RegsHi[args.Rt];
             
-            // Store lower 64 bits
-            cpu.Memory[addr] = (byte)(lo & 0xFF);
-            cpu.Memory[addr + 1] = (byte)((lo >> 8) & 0xFF);
-            cpu.Memory[addr + 2] = (byte)((lo >> 16) & 0xFF);
-            cpu.Memory[addr + 3] = (byte)((lo >> 24) & 0xFF);
-            cpu.Memory[addr + 4] = (byte)((lo >> 32) & 0xFF);
-            cpu.Memory[addr + 5] = (byte)((lo >> 40) & 0xFF);
-            cpu.Memory[addr + 6] = (byte)((lo >> 48) & 0xFF);
-            cpu.Memory[addr + 7] = (byte)((lo >> 56) & 0xFF);
-            
-            // Store upper 64 bits
-            cpu.Memory[addr + 8] = (byte)(hi & 0xFF);
-            cpu.Memory[addr + 9] = (byte)((hi >> 8) & 0xFF);
-            cpu.Memory[addr + 10] = (byte)((hi >> 16) & 0xFF);
-            cpu.Memory[addr + 11] = (byte)((hi >> 24) & 0xFF);
-            cpu.Memory[addr + 12] = (byte)((hi >> 32) & 0xFF);
-            cpu.Memory[addr + 13] = (byte)((hi >> 40) & 0xFF);
-            cpu.Memory[addr + 14] = (byte)((hi >> 48) & 0xFF);
-            cpu.Memory[addr + 15] = (byte)((hi >> 56) & 0xFF);
+            if (cpu.Bus != null)
+            {
+                cpu.Bus.WriteQuadWord(addr, lo, hi);
+            }
+            else
+            {
+                // Store lower 64 bits
+                cpu.Memory[addr] = (byte)(lo & 0xFF);
+                cpu.Memory[addr + 1] = (byte)((lo >> 8) & 0xFF);
+                cpu.Memory[addr + 2] = (byte)((lo >> 16) & 0xFF);
+                cpu.Memory[addr + 3] = (byte)((lo >> 24) & 0xFF);
+                cpu.Memory[addr + 4] = (byte)((lo >> 32) & 0xFF);
+                cpu.Memory[addr + 5] = (byte)((lo >> 40) & 0xFF);
+                cpu.Memory[addr + 6] = (byte)((lo >> 48) & 0xFF);
+                cpu.Memory[addr + 7] = (byte)((lo >> 56) & 0xFF);
+                
+                // Store upper 64 bits
+                cpu.Memory[addr + 8] = (byte)(hi & 0xFF);
+                cpu.Memory[addr + 9] = (byte)((hi >> 8) & 0xFF);
+                cpu.Memory[addr + 10] = (byte)((hi >> 16) & 0xFF);
+                cpu.Memory[addr + 11] = (byte)((hi >> 24) & 0xFF);
+                cpu.Memory[addr + 12] = (byte)((hi >> 32) & 0xFF);
+                cpu.Memory[addr + 13] = (byte)((hi >> 40) & 0xFF);
+                cpu.Memory[addr + 14] = (byte)((hi >> 48) & 0xFF);
+                cpu.Memory[addr + 15] = (byte)((hi >> 56) & 0xFF);
+            }
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
