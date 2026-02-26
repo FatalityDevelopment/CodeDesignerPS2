@@ -174,9 +174,9 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| USB controller (USBD.IRX) | ⬜ | IOP USB host controller at physical 0x1F801600; required for USB keyboard/mouse support. |
-| i.LINK / FireWire (IEEE 1394) | ⬜ | Used for multi-PS2 LAN play (e.g. network adapter); not required for single-player titles. |
-| IOP parallel port | ⬜ | DEV9 interface used by the official network adapter and HDD add-on; required for online-capable titles. |
+| USB controller (USBD.IRX) | ✅ | `UsbController` in `Emulator/IOP/UsbController.cs`.  OHCI-compliant register file (256-byte window at 0x1F801600).  Key OHCI registers implemented: HcRevision (R/O = 0x10 for OHCI 1.0), HcControl, HcCommandStatus, HcInterruptStatus (W1C), HcInterruptEnable, HcInterruptDisable (W/O → clears enable bits), HcHCCA, endpoint descriptor head/current pointers (control/bulk/periodic), HcFmInterval (default 0x2EDF = 11999 bit times), HcFmRemaining (R/O), HcFmNumber, HcPeriodicStart, HcRhDescriptorA (NDP=2, NOCP=1; 2 downstream ports for PS2 front panel), HcRhDescriptorB, HcRhStatus, HcRhPortStatus[0/1].  `InterruptRaised` event wired to IOP INTC bit 22.  Reference: PCSX2 `pcsx2/USB/USB.cpp`, `pcsx2/IopHw.h` (HW_USB_START). |
+| i.LINK / FireWire (IEEE 1394) | ✅ | `ILinkController` in `Emulator/IOP/ILinkController.cs`.  Register file (512-byte window at 0x1F808400).  Version register (R/O at +0x00), control register (+0x04), IntStatus (W1C, +0x08), IntMask (+0x0C).  `InterruptRaised` event wired to IOP INTC bit 18.  Reference: PCSX2 `pcsx2/IopHw.h` (HW_FW_START/HW_FW_END). |
+| IOP parallel port (DEV9) | ✅ | `Dev9Controller` in `Emulator/IOP/Dev9Controller.cs`.  Two regions: (1) 16-bit IOP hardware register at 0x1F80146E (HW_DEV9_DATA) returns 0 when no card present; (2) 64-KB SPEED ASIC expansion-bus register file at 0x10000000 (SPD_REGBASE) with SPD_R_REV_1 capabilities defaulting to `SPD_CAPS_SMAP|SPD_CAPS_ATA`, SPD_R_INTR_STAT (W1C), SPD_R_INTR_MASK.  `InterruptRaised` event wired to IOP INTC bit 13.  IOP DMAC channel 8 wired via `Dev9Controller` setter in `IopMemoryBus`.  All three controllers exposed as `IopMemoryBus.Usb`, `IopMemoryBus.ILink`, `IopMemoryBus.Dev9` properties with subscription/unsubscription lifecycle handling.  Reference: PCSX2 `pcsx2/DEV9/DEV9.h`, `pcsx2/USB/USB.cpp`, `pcsx2/IopHw.h`. |
 
 ---
 
@@ -192,4 +192,4 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 ---
 
-*Last updated: 2026-02-26.  Current test count: 855 (all passing).*
+*Last updated: 2026-02-26.  Current test count: 898 (all passing).*
