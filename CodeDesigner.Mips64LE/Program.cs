@@ -124,11 +124,21 @@ namespace CodeDesigner.Mips64LE
             }
 
             // ── Subscribe to emulator events ──────────────────────────────────
+            // Format matches PCSX2's Console.Error / BIOS_LOG output style.
             scheduler.EE.UnknownInstruction += (_, opcode) =>
-                Console.WriteLine($"[EE] Unknown instruction: 0x{opcode:X8} at PC=0x{scheduler.EE.Cpu.PC:X8}");
+            {
+                uint eepc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+                Console.WriteLine($"EE: Unknown opcode 0x{opcode:x8}  pc=0x{eepc:x8}");
+            };
 
-            scheduler.EE.SyscallRaised += (_, code) =>
-                Console.WriteLine($"[EE] SYSCALL 0x{code:X}");
+            // PCSX2 resolves the syscall name from $v1 (GPR[3] & 0xFF),
+            // logged as:  HLE bios[code]: FunctionName  (pc=0xXXXXXXXX)
+            scheduler.EE.SyscallRaised += (_, pc) =>
+            {
+                uint v1  = (uint)(scheduler.EE.Cpu.RegsLo[3] & 0xFF);
+                string fn = BiosCallName((int)v1);
+                Console.WriteLine($"EE: HLE bios[0x{v1:x}]: {fn}  (pc=0x{pc:x8})");
+            };
 
             // ── Run loop ──────────────────────────────────────────────────────
             Console.WriteLine();
@@ -150,6 +160,8 @@ namespace CodeDesigner.Mips64LE
             long      totalSteps    = 0;
             long      nextReport    = ReportEvery;
             var       startTime     = DateTime.UtcNow;
+            uint      lastEePc      = uint.MaxValue;
+            int       spinCount     = 0;
 
             try
             {
@@ -164,8 +176,34 @@ namespace CodeDesigner.Mips64LE
                     {
                         double elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
                         double mips    = elapsed > 0 ? totalSteps / elapsed / 1_000_000.0 : 0;
-                        Console.WriteLine($"[Stats] EE steps: {totalSteps:N0}  IOP steps: {scheduler.TotalIopSteps:N0}  " +
-                                          $"EE PC: 0x{scheduler.EE.Cpu.PC:X8}  Speed: {mips:F2} MIPS");
+
+                        uint eePc32 = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+                        uint iopPc  = scheduler.IOP.State.PC;
+
+                        // Track spin-loops: EE PC stuck at same address across consecutive
+                        // report intervals.  Matches PCSX2's "EE is spinning" detection.
+                        if (eePc32 == lastEePc)
+                        {
+                            spinCount++;
+                            if (spinCount == 1)
+                                Console.WriteLine($"*** EE is spinning at 0x{eePc32:x8} [{GetPcRegion(eePc32)}] ***");
+                        }
+                        else
+                        {
+                            spinCount  = 0;
+                            lastEePc   = eePc32;
+                        }
+
+                        string eeInsn = DisassembleAt(scheduler.EE.Bus, eePc32);
+
+                        // Format mirrors PCSX2's EE/IOP trace log prefix:
+                        //   (EE pc:0xbfc001a8, cycle:N) <disasm>
+                        //   (IOP pc:0xbfc00120, cycle:N)
+                        Console.WriteLine($"(EE  pc:0x{eePc32:x8} [{GetPcRegion(eePc32)}], cycle:{totalSteps:N0}) {eeInsn}");
+                        Console.WriteLine($"(IOP pc:0x{iopPc:x8} [{GetPcRegion(iopPc)}], cycle:{scheduler.TotalIopSteps:N0})");
+                        Console.WriteLine($"     ~{mips:F2} MIPS");
+                        Console.WriteLine();
+
                         nextReport += ReportEvery;
                     }
                 }
@@ -178,7 +216,9 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine();
             Console.WriteLine($"Emulator stopped after {totalSteps:N0} EE steps " +
                               $"({totalElapsed:F2}s).");
-            Console.WriteLine($"Final EE PC: 0x{scheduler.EE.Cpu.PC:X8}");
+            uint finalEePc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+            Console.WriteLine($"(EE  pc:0x{finalEePc:x8} [{GetPcRegion(finalEePc)}]) {DisassembleAt(scheduler.EE.Bus, finalEePc)}");
+            Console.WriteLine($"(IOP pc:0x{scheduler.IOP.State.PC:x8} [{GetPcRegion(scheduler.IOP.State.PC)}])");
         }
 
         // ── Socket server mode ────────────────────────────────────────────────
@@ -339,6 +379,119 @@ namespace CodeDesigner.Mips64LE
                 if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase))
                     return args[i + 1];
             return null;
+        }
+
+        // ── PCSX2-style debug helpers ─────────────────────────────────────────
+
+        /// <summary>
+        /// Returns a short region label for the given virtual address, matching
+        /// the notation used in PCSX2's memory-map comments.
+        /// </summary>
+        private static string GetPcRegion(uint vaddr)
+        {
+            uint phys = PS2MemoryBus.TranslateAddress(vaddr);
+
+            // BIOS ROM: physical 0x1FC00000–0x1FFFFFFF
+            if (phys >= 0x1FC00000u && phys < 0x20000000u)
+                return (vaddr & 0xC0000000u) == 0xA0000000u ? "KSEG1/BIOS" : "KSEG0/BIOS";
+
+            // Main RAM: physical 0x00000000–0x01FFFFFF
+            if (phys < 0x02000000u)
+                return "RAM";
+
+            // Scratchpad: physical 0x70000000–0x70003FFF
+            if (vaddr >= 0x70000000u && vaddr < 0x70004000u)
+                return "SPad";
+
+            // Hardware I/O registers
+            if (phys >= 0x10000000u && phys < 0x10010000u)
+                return "I/O";
+
+            // GS privileged registers
+            if (phys >= 0x12000000u && phys < 0x12002000u)
+                return "GS";
+
+            return "?";
+        }
+
+        /// <summary>
+        /// Safely disassemble the instruction word at <paramref name="pc"/> using
+        /// the PS2 memory bus.  Returns a placeholder on any access failure.
+        /// </summary>
+        private static string DisassembleAt(PS2MemoryBus bus, uint pc)
+        {
+            try
+            {
+                uint word = bus.ReadWord(pc);
+                return MipsDisassembler.Disassemble(word, pc);
+            }
+            catch
+            {
+                return "??";
+            }
+        }
+
+        /// <summary>
+        /// Resolve a PS2 BIOS syscall number to its function name, exactly as
+        /// PCSX2's <c>R5900::bios[]</c> table in R5900OpcodeImpl.cpp does.
+        /// The code is taken from GPR $v1 (register 3) byte 0.
+        /// </summary>
+        private static string BiosCallName(int code)
+        {
+            // Table copied verbatim from PCSX2 pcsx2/R5900OpcodeImpl.cpp
+            // R5900::bios[256].  Index = v1 & 0xFF.
+            string[] bios =
+            {
+                // 0x00
+                "RFU000_FullReset", "ResetEE",             "SetGsCrt",             "RFU003",
+                "Exit",             "RFU005",               "LoadExecPS2",          "ExecPS2",
+                "RFU008",           "RFU009",               "AddSbusIntcHandler",   "RemoveSbusIntcHandler",
+                "Interrupt2Iop",    "SetVTLBRefillHandler", "SetVCommonHandler",    "SetVInterruptHandler",
+                // 0x10
+                "AddIntcHandler",   "RemoveIntcHandler",    "AddDmacHandler",       "RemoveDmacHandler",
+                "_EnableIntc",      "_DisableIntc",         "_EnableDmac",          "_DisableDmac",
+                "_SetAlarm",        "_ReleaseAlarm",        "_iEnableIntc",         "_iDisableIntc",
+                "_iEnableDmac",     "_iDisableDmac",        "_iSetAlarm",           "_iReleaseAlarm",
+                // 0x20
+                "CreateThread",          "DeleteThread",      "StartThread",              "ExitThread",
+                "ExitDeleteThread",      "TerminateThread",   "iTerminateThread",         "DisableDispatchThread",
+                "EnableDispatchThread",  "ChangeThreadPriority", "iChangeThreadPriority", "RotateThreadReadyQueue",
+                "iRotateThreadReadyQueue","ReleaseWaitThread","iReleaseWaitThread",        "GetThreadId",
+                // 0x30
+                "ReferThreadStatus","iReferThreadStatus",   "SleepThread",          "WakeupThread",
+                "_iWakeupThread",   "CancelWakeupThread",   "iCancelWakeupThread",  "SuspendThread",
+                "iSuspendThread",   "ResumeThread",         "iResumeThread",        "JoinThread",
+                "RFU060",           "RFU061",               "EndOfHeap",            "RFU063",
+                // 0x40
+                "CreateSema",       "DeleteSema",           "SignalSema",           "iSignalSema",
+                "WaitSema",         "PollSema",             "iPollSema",            "ReferSemaStatus",
+                "iReferSemaStatus", "RFU073",               "SetOsdConfigParam",    "GetOsdConfigParam",
+                "GetGsHParam",      "GetGsVParam",          "SetGsHParam",          "SetGsVParam",
+                // 0x50
+                "RFU080_CreateEventFlag",  "RFU081_DeleteEventFlag",
+                "RFU082_SetEventFlag",     "RFU083_iSetEventFlag",
+                "RFU084_ClearEventFlag",   "RFU085_iClearEventFlag",
+                "RFU086_WaitEventFlag",    "RFU087_PollEventFlag",
+                "RFU088_iPollEventFlag",   "RFU089_ReferEventFlagStatus",
+                "RFU090_iReferEventFlagStatus", "RFU091_GetEntryAddress",
+                "EnableIntcHandler_iEnableIntcHandler",
+                "DisableIntcHandler_iDisableIntcHandler",
+                "EnableDmacHandler_iEnableDmacHandler",
+                "DisableDmacHandler_iDisableDmacHandler",
+                // 0x60
+                "KSeg0",            "EnableCache",          "DisableCache",         "GetCop0",
+                "FlushCache",       "RFU101",               "CpuConfig",            "iGetCop0",
+                "iFlushCache",      "RFU105",               "iCpuConfig",           "sceSifStopDma",
+                "SetCPUTimerHandler","SetCPUTimer",          "SetOsdConfigParam2",   "GetOsdConfigParam2",
+                // 0x70
+                "GsGetIMR_iGsGetIMR",               "GsGetIMR_iGsPutIMR",   "SetPgifHandler",               "SetVSyncFlag",
+                "RFU116",                           "print",                "sceSifDmaStat_isceSifDmaStat", "sceSifSetDma_isceSifSetDma",
+                "sceSifSetDChain_isceSifSetDChain", "sceSifSetReg",         "sceSifGetReg",                 "ExecOSD",
+                "Deci2Call",                        "PSMode",               "MachineType",                  "GetMemorySize",
+            };
+
+            int idx = code & 0xFF;
+            return idx < bios.Length ? bios[idx] : $"syscall_{idx:x2}";
         }
     }
 }
