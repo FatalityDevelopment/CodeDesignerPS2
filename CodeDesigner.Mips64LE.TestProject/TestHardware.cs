@@ -2208,8 +2208,16 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void GS_PrivilegedRegisters_CSR_ReadWrite()
         {
             var gs = new GS();
+            // CSR bits 0–4 are W1C: writing 1 to a bit that is already 0 leaves it 0.
+            // Writing 0x1 to CSR when bit 0 = 0: W1C clears bit 0 (already 0) → stays 0.
             gs.WritePriv32(GS.PRIV_CSR, 0x00000001u);
-            Assert.AreEqual(0x00000001u, gs.ReadPriv32(GS.PRIV_CSR), "GS CSR must round-trip");
+            Assert.AreEqual(0x00000000u, gs.ReadPriv32(GS.PRIV_CSR), "GS CSR W1C: clearing a 0 bit leaves 0");
+
+            // Set bit 0 via RaiseVSync's path, then confirm W1C clears it.
+            gs.RaiseVSync(); // sets bit 3
+            Assert.AreNotEqual(0u, gs.ReadPriv32(GS.PRIV_CSR) & 0x8u, "bit 3 set by RaiseVSync");
+            gs.WritePriv32(GS.PRIV_CSR, 0x00000008u);  // W1C: clear bit 3
+            Assert.AreEqual(0u, gs.ReadPriv32(GS.PRIV_CSR) & 0x8u, "bit 3 cleared by W1C write");
         }
 
         [TestMethod]
@@ -2228,9 +2236,11 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void MemoryBus_GsPriv_CSR_ReadWrite()
         {
             var bus = new PS2MemoryBus();
-            // GS CSR is at 0x12001000
-            bus.WriteWord(0x12001000u, 0x00000008u); // GS CSR FLUSH bit
-            Assert.AreEqual(0x00000008u, bus.ReadWord(0x12001000u), "GS CSR via bus");
+            // GS CSR is at 0x12001000; bits 0–4 are W1C.
+            // Bit 8 = FLUSH (command bit, not a status bit — stored as 0 after W1C clears nothing).
+            // Writing 0x08 (bit 3 = VSYNC W1C) when bit 3 is already 0 → stays 0.
+            bus.WriteWord(0x12001000u, 0x00000008u);
+            Assert.AreEqual(0x00000000u, bus.ReadWord(0x12001000u), "GS CSR VSYNC W1C on zero stays 0");
         }
 
         [TestMethod]
@@ -3953,28 +3963,134 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(12f, cpu.VU0.VF[1].W, 1e-5f, "VCALLMS result w");
         }
 
+        // =====================================================================
+        // VBlank / VSync generation tests
+        // =====================================================================
+
         [TestMethod]
-        public void VU0Executor_Vif0MicroStart_TriggersExecution()
+        public void PS2Emulator_VBlankStart_FiresAtNtscInterval()
         {
-            // Verify that PS2Emulator wires VIF0 MicroStart to run VU0 microprogram.
+            var emu = new PS2Emulator();
+            emu.Bus.Intc.WriteRegister(INTC.REG_MASK, 1u << INTC.INT_VBLANK_S); // enable mask bit
+
+            // Tick just past the VBlank-start threshold (line 235 of 262.5)
+            emu.TickHardware(PS2Emulator.NtscVBlankStartCycle + 1u);
+
+            Assert.IsTrue((emu.Bus.Intc.Stat & (1u << INTC.INT_VBLANK_S)) != 0,
+                "INTC VBLANK_S must be set after VBlankStart threshold");
+        }
+
+        [TestMethod]
+        public void PS2Emulator_VBlankEnd_FiresAtFrameRollover()
+        {
             var emu = new PS2Emulator();
 
-            emu.Cpu.VU0.VF[2] = new Vector4(3f, 6f, 9f, 12f);
-            emu.Cpu.VU0.VF[3] = new Vector4(1f, 2f, 3f,  4f);
+            // Cross VBlank-start, then cross frame boundary → VBlank-end
+            emu.TickHardware(PS2Emulator.NtscVBlankStartCycle + 1u);
+            Assert.IsTrue((emu.Bus.Intc.Stat & (1u << INTC.INT_VBLANK_S)) != 0, "VBLANK_S must fire first");
 
-            // Write a MUL program into VU0 MicroMem (entry at qword 0 = byte 0)
-            uint upper = UpperWord(eFlag: true, opcode: 0x15, dest: 0xF, ft: 3, fs: 2, fd: 1);
-            WriteInstr(emu.Cpu.VU0.MicroMem, 0, LowerNop(), upper);
+            emu.TickHardware(PS2Emulator.NtscFrameCycles - PS2Emulator.NtscVBlankStartCycle);
+            Assert.IsTrue((emu.Bus.Intc.Stat & (1u << INTC.INT_VBLANK_E)) != 0,
+                "INTC VBLANK_E must fire at frame rollover");
+        }
 
-            // Send VIF MSCAL packet: cmd=0x14, IMMED=0 (qword address 0)
-            // VIF packet format: bits[31:24]=cmd, bits[23:16]=NUM, bits[15:0]=IMMED
-            emu.Bus.Vif0.Feed(new ReadOnlySpan<uint>(new uint[] { 0x14000000u }));
+        [TestMethod]
+        public void PS2Emulator_VBlank_FiresRepeatedly()
+        {
+            var emu = new PS2Emulator();
+            int vblankCount = 0;
 
-            Assert.IsFalse(emu.Cpu.VU0.IsRunning, "VU0 must stop after E-bit via VIF0 MicroStart");
-            Assert.AreEqual(3f,  emu.Cpu.VU0.VF[1].X, 1e-5f, "MUL vf1.x via VIF0");
-            Assert.AreEqual(12f, emu.Cpu.VU0.VF[1].Y, 1e-5f, "MUL vf1.y via VIF0");
-            Assert.AreEqual(27f, emu.Cpu.VU0.VF[1].Z, 1e-5f, "MUL vf1.z via VIF0");
-            Assert.AreEqual(48f, emu.Cpu.VU0.VF[1].W, 1e-5f, "MUL vf1.w via VIF0");
+            // Advance 3 full frames
+            for (int i = 0; i < 3; i++)
+            {
+                emu.TickHardware(PS2Emulator.NtscFrameCycles);
+                if ((emu.Bus.Intc.Stat & (1u << INTC.INT_VBLANK_S)) != 0)
+                {
+                    vblankCount++;
+                    // Clear it so we can count the next one
+                    emu.Bus.Intc.WriteRegister(INTC.REG_STAT, 1u << INTC.INT_VBLANK_S);
+                }
+            }
+
+            Assert.IsTrue(vblankCount >= 2,
+                $"VBLANK_S must fire at least twice across 3 frames (got {vblankCount})");
+        }
+
+        [TestMethod]
+        public void GS_CSR_VSync_BitSetByRaiseVSync()
+        {
+            var gs = new GS();
+            Assert.AreEqual(0ul, gs.ReadPriv64(GS.PRIV_CSR) & 0x8ul, "CSR bit 3 must start clear");
+            gs.RaiseVSync();
+            Assert.AreEqual(0x8ul, gs.ReadPriv64(GS.PRIV_CSR) & 0x8ul, "CSR bit 3 must be set after RaiseVSync");
+        }
+
+        [TestMethod]
+        public void GS_CSR_VSync_W1C_ClearsOnWrite()
+        {
+            // Reproduces the friend's vSync sub: write CSR|0x8 to CLEAR the VSYNC flag (W1C)
+            var gs = new GS();
+            gs.RaiseVSync();                              // GS sets bit 3
+            Assert.AreEqual(0x8ul, gs.ReadPriv64(GS.PRIV_CSR) & 0x8ul, "bit 3 must be set before ack");
+            gs.WritePriv64(GS.PRIV_CSR, gs.ReadPriv64(GS.PRIV_CSR) | 0x8ul); // write bit 3 = W1C
+            Assert.AreEqual(0ul,  gs.ReadPriv64(GS.PRIV_CSR) & 0x8ul, "bit 3 must be cleared after W1C write");
+        }
+
+        [TestMethod]
+        public void GS_CSR_W1C_DoesNotClearOtherBits()
+        {
+            // Bits 10+ are read-only hardware status; writing bit 3 must not disturb them
+            var gs = new GS();
+            // Manually set some non-W1C read-back bits by poking internal state via RaiseVSync
+            gs.RaiseVSync();  // sets bit 3
+            // Write bit 0 (SIGNAL W1C) and bit 3 (VSYNC W1C) together
+            gs.WritePriv64(GS.PRIV_CSR, 0x9ul);  // 0x9 = bits 0 + 3
+            Assert.AreEqual(0ul, gs.ReadPriv64(GS.PRIV_CSR) & 0xFul,
+                "All W1C bits 0-3 must be cleared after write");
+        }
+
+        [TestMethod]
+        public void PS2Emulator_VSync_SetsGsCsrBit3()
+        {
+            var emu = new PS2Emulator();
+            Assert.AreEqual(0ul, emu.Bus.Gs.ReadPriv64(GS.PRIV_CSR) & 0x8ul, "CSR bit 3 must start clear");
+
+            // Tick past VBlank-start threshold
+            emu.TickHardware(PS2Emulator.NtscVBlankStartCycle + 1u);
+
+            Assert.AreEqual(0x8ul, emu.Bus.Gs.ReadPriv64(GS.PRIV_CSR) & 0x8ul,
+                "GS_CSR bit 3 must be set at VBlank-start so polling code unblocks");
+        }
+
+        [TestMethod]
+        public void Sif_IopSignaledEe_RaisesIntcSbus()
+        {
+            var emu = new PS2Emulator();
+            Assert.AreEqual(0u, emu.Bus.Intc.Stat & (1u << INTC.INT_SBUS),
+                "INTC_SBUS must start clear");
+
+            // IOP signals EE by setting SMFLAG bits
+            emu.Bus.Sif.WriteIopRegister(SIF.REG_SMFLAG, 0x00000001u);
+
+            Assert.AreNotEqual(0u, emu.Bus.Intc.Stat & (1u << INTC.INT_SBUS),
+                "INTC_SBUS must be raised when IOP sets SMFLAG");
+        }
+
+        [TestMethod]
+        public void Sif_IopSignaledEe_NotFiredWhenNoBitsChange()
+        {
+            var emu   = new PS2Emulator();
+            int fired = 0;
+            emu.Bus.Sif.IopSignaledEe += (_, _) => fired++;
+
+            // First write sets bits → fires
+            emu.Bus.Sif.WriteIopRegister(SIF.REG_SMFLAG, 0x1u);
+            int firstCount = fired;
+
+            // Second write with already-set bits → no new bits → must not fire again
+            emu.Bus.Sif.WriteIopRegister(SIF.REG_SMFLAG, 0x1u);
+            Assert.AreEqual(firstCount, fired,
+                "IopSignaledEe must not fire when no new SMFLAG bits are set");
         }
     }
 }

@@ -128,7 +128,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         /// <summary>EE/IOP bootstrap handshake register (SBUS_F240).</summary>
         public uint F240 => _f240;
 
-        // ── Register I/O ──────────────────────────────────────────────────────
+        /// <summary>
+        /// Raised when the IOP sets one or more new bits in SMFLAG (IOP→EE notification).
+        /// The EE emulator subscribes to this to assert INTC bit 1 (SBUS), waking the EE
+        /// from any interrupt-enabled spin loop that is awaiting an IOP response.
+        /// Reference: PCSX2 pcsx2/Sif.cpp SIF command delivery.
+        /// </summary>
+        public event EventHandler? IopSignaledEe;
+
 
         /// <summary>
         /// Read a 32-bit SIF register.
@@ -200,7 +207,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 case REG_MSCOM:  _mscom  = value;        break;
                 case REG_SMCOM:  _smcom  = value;        break;
                 case REG_MSFLAG: _msflag &= ~value;      break;  // W1C from IOP (IOP acks EE signal)
-                case REG_SMFLAG: _smflag |= value;       break;  // W1S from IOP (IOP signals EE)
+                case REG_SMFLAG:
+                    uint prevSmFlag = _smflag;
+                    _smflag |= value;
+                    if ((value & ~prevSmFlag) != 0)     // new bits set by this write?
+                        IopSignaledEe?.Invoke(this, EventArgs.Empty);
+                    break;
                 case REG_F240:
                     // IOP writes bit 4 (0x10) → sets bit 5 (0x20) in shared F240 (signals EE).
                     // IOP writes bit 6 (0x40) → sets bit 15 (0x8000) in shared F240.
