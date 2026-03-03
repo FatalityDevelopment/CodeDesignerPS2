@@ -197,6 +197,7 @@ namespace CodeDesigner.Mips64LE
             uint      lastIopPc     = uint.MaxValue;
             int       spinCount     = 0;
             int       iopSpinCount  = 0;
+            bool      eeLeftBios    = false;   // true once the EE PC first enters RAM
 
             try
             {
@@ -214,6 +215,20 @@ namespace CodeDesigner.Mips64LE
 
                         uint eePc32 = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
                         uint iopPc  = scheduler.IOP.State.PC;
+
+                        // Detect when the EE PC first enters RAM (leaves BIOS ROM).
+                        // Physical < 0x02000000 = EE main RAM (mapped via KSEG0/KSEG1).
+                        // This confirms the BIOS successfully loaded and jumped to the
+                        // EE kernel at 0x80001000.
+                        if (!eeLeftBios)
+                        {
+                            uint eePhys = PS2MemoryBus.TranslateAddress(eePc32);
+                            if (eePhys < 0x02000000u)
+                            {
+                                eeLeftBios = true;
+                                Console.WriteLine($"*** EE left BIOS ROM — now executing from RAM at 0x{eePc32:x8} (cycle:{totalSteps:N0}) ***");
+                            }
+                        }
 
                         // Track EE spin-loops: PC stuck at same address across consecutive
                         // report intervals.  Matches PCSX2's "EE is spinning" detection.
@@ -233,11 +248,13 @@ namespace CodeDesigner.Mips64LE
                                 uint intcSt = scheduler.EE.Bus.Intc.Stat;
                                 uint intcMk = scheduler.EE.Bus.Intc.Mask;
                                 uint eeStatus = scheduler.EE.Cpu.COP0.ReadRegister32(12);
+                                uint gifStat = scheduler.EE.Bus.ReadWord(0xB0003020u);
                                 Console.WriteLine(
                                     $"  [spin@{totalSteps:N0}] " +
                                     $"INTC STAT=0x{intcSt:x8} MASK=0x{intcMk:x8} " +
                                     $"COP0.Status=0x{eeStatus:x8} " +
-                                    $"SIF.F240=0x{scheduler.EE.Bus.Sif.F240:x8}");
+                                    $"SIF.F240=0x{scheduler.EE.Bus.Sif.F240:x8} " +
+                                    $"GIF_STAT=0x{gifStat:x8}");
                             }
                         }
                         else
@@ -251,7 +268,10 @@ namespace CodeDesigner.Mips64LE
                         {
                             iopSpinCount++;
                             if (iopSpinCount == 1)
+                            {
                                 Console.WriteLine($"*** IOP is spinning at 0x{iopPc:x8} [{GetPcRegion(iopPc)}] ***");
+                                DumpInterruptState(scheduler);
+                            }
                         }
                         else
                         {
@@ -526,6 +546,24 @@ namespace CodeDesigner.Mips64LE
             uint iopIStat = sched.IOP.Bus.IStat;
             uint iopIMask = sched.IOP.Bus.IMask;
 
+            // ── GIF_STAT (physical 0x10003020) ───────────────────────────────
+            uint gifStat = 0;
+            try { gifStat = sched.EE.Bus.ReadWord(0xB0003020u); } catch { }
+
+            // ── EE kernel at RAM 0x80001000 (physical 0x00001000) ────────────
+            // Shows whether the BIOS successfully loaded the EE kernel into RAM.
+            // If all zeros the kernel copy failed and the jr to 0x80001000 ran NOPs.
+            uint kernelWord0 = 0, kernelWord1 = 0, kernelWord2 = 0, kernelWord3 = 0;
+            try
+            {
+                kernelWord0 = sched.EE.Bus.ReadWord(0x80001000u);
+                kernelWord1 = sched.EE.Bus.ReadWord(0x80001004u);
+                kernelWord2 = sched.EE.Bus.ReadWord(0x80001008u);
+                kernelWord3 = sched.EE.Bus.ReadWord(0x8000100Cu);
+            }
+            catch { }
+            bool kernelLoaded = (kernelWord0 | kernelWord1 | kernelWord2 | kernelWord3) != 0;
+
             Console.WriteLine("=== interrupt diagnostics ===");
             Console.WriteLine(
                 $"  EE  COP0.Status: 0x{eeStatus:x8}  " +
@@ -573,6 +611,61 @@ namespace CodeDesigner.Mips64LE
             uint iopRa = sched.IOP.State.ReadReg(31);
             Console.WriteLine(
                 $"  IOP v0=0x{iopV0:x8}  a0=0x{iopA0:x8}  sp=0x{iopSp:x8}  ra=0x{iopRa:x8}");
+
+            // ── GIF_STAT ──────────────────────────────────────────────────────
+            // FQC = bits[27:24] = GIF FIFO queue count; loop exits when FQC == 0.
+            // VU1BUSY = bit 1, PSEGEND = bit 0.
+            Console.WriteLine(
+                $"  GIF_STAT: 0x{gifStat:x8}  FQC={(gifStat >> 24) & 0xF}  VU1BUSY={(gifStat >> 1) & 1}  APATH={(gifStat >> 2) & 3}");
+
+            // ── EE kernel at 0x80001000 ───────────────────────────────────────
+            // Non-zero means the BIOS kernel loader put code there; all-zero means
+            // the jr to 0x80001000 would have run NOPs (kernel load failed).
+            Console.WriteLine(
+                $"  EE RAM[0x80001000]: 0x{kernelWord0:x8} 0x{kernelWord1:x8} " +
+                $"0x{kernelWord2:x8} 0x{kernelWord3:x8}" +
+                $"  [{(kernelLoaded ? "KERNEL LOADED" : "ALL ZEROS — kernel not loaded!")}]");
+
+            // ── EE context disassembly ────────────────────────────────────────
+            // Show 4 instructions before the EE PC, the PC instruction, and 1 after,
+            // so we can immediately see which loop body the EE is stuck in.
+            uint eePc = (uint)(sched.EE.Cpu.PC & 0xFFFFFFFFUL);
+            Console.WriteLine($"  EE context around pc=0x{eePc:x8}:");
+            for (int offset = -16; offset <= 4; offset += 4)
+            {
+                uint addr = (uint)(eePc + offset);
+                string arrow = offset == 0 ? " <-- PC" : "";
+                try
+                {
+                    uint iword = sched.EE.Bus.ReadWord(addr);
+                    string dis = MipsDisassembler.Disassemble(iword, addr);
+                    Console.WriteLine($"    0x{addr:x8}: {dis}{arrow}");
+                }
+                catch
+                {
+                    Console.WriteLine($"    0x{addr:x8}: ??{arrow}");
+                }
+            }
+
+            // ── IOP context disassembly ───────────────────────────────────────
+            // Show 2 instructions before the IOP PC, the PC instruction, and 1 after.
+            uint iopPc = sched.IOP.State.PC;
+            Console.WriteLine($"  IOP context around pc=0x{iopPc:x8}:");
+            for (int offset = -8; offset <= 4; offset += 4)
+            {
+                uint addr = (uint)(iopPc + offset);
+                string arrow = offset == 0 ? " <-- PC" : "";
+                try
+                {
+                    uint iword = sched.IOP.Bus.ReadWord(addr);
+                    string dis = MipsDisassembler.Disassemble(iword, addr);
+                    Console.WriteLine($"    0x{addr:x8}: {dis}{arrow}");
+                }
+                catch
+                {
+                    Console.WriteLine($"    0x{addr:x8}: ??{arrow}");
+                }
+            }
 
             // ── CDVD state ────────────────────────────────────────────────────
             // Shows whether the BIOS has issued any disc read commands and whether
