@@ -92,28 +92,48 @@ namespace CodeDesigner.Mips64LE
             }
 
             // ── Load disc / game (optional) ───────────────────────────────────
+            // Keep a reference to the disc stream so it can be disposed after
+            // the run loop ends.  The IOP CDVD driver reads sectors on demand,
+            // so the stream must stay open for the lifetime of the emulator.
+            FileStream? isoStream = null;
             if (discPath != null)
             {
                 Console.WriteLine($"Loading disc: {discPath}");
                 try
                 {
-                    using var isoStream = new FileStream(
+                    isoStream = new FileStream(
                         discPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                    uint entryPoint = GameLoader.BootFromDisc(isoStream, scheduler.EE);
-                    Console.WriteLine($"Game loaded. ELF entry point: 0x{entryPoint:X8}");
+
+                    // Mount the disc in the IOP CDVD drive and let the BIOS boot
+                    // the game naturally from 0xBFC00000.  Do NOT load the ELF
+                    // directly: the BIOS ROM stubs at 0xBFC00480–0xBFC005EC are
+                    // permanent infinite-loop placeholders that are only safe to
+                    // hit during the brief startup window before the BIOS copies
+                    // the real kernel to RAM at 0x80000080 and clears BEV.
+                    // Loading the game ELF with CPU.PC set directly would bypass
+                    // that kernel setup and cause every SYSCALL to spin forever.
+                    // Reference: PCSX2 native-BIOS boot sequence.
+                    string bootPath = GameLoader.InsertDisc(isoStream, scheduler);
+                    if (bootPath.Length > 0)
+                        Console.WriteLine($"Disc inserted. BIOS will boot: {bootPath}");
+                    else
+                        Console.WriteLine("Disc inserted. BIOS will boot the game.");
                 }
                 catch (IOException ex)
                 {
+                    isoStream?.Dispose();
                     Console.Error.WriteLine($"Error reading disc image: {ex.Message}");
                     return;
                 }
                 catch (UnauthorizedAccessException ex)
                 {
+                    isoStream?.Dispose();
                     Console.Error.WriteLine($"Error reading disc image: {ex.Message}");
                     return;
                 }
                 catch (GameLoadException ex)
                 {
+                    isoStream?.Dispose();
                     Console.Error.WriteLine($"Error loading game: {ex.Message}");
                     return;
                 }
@@ -253,6 +273,8 @@ namespace CodeDesigner.Mips64LE
             uint finalEePc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
             Console.WriteLine($"(EE  pc:0x{finalEePc:x8} [{GetPcRegion(finalEePc)}]) {DisassembleAt(scheduler.EE.Bus, finalEePc)}");
             Console.WriteLine($"(IOP pc:0x{scheduler.IOP.State.PC:x8} [{GetPcRegion(scheduler.IOP.State.PC)}])");
+
+            isoStream?.Dispose();
         }
 
         // ── Socket server mode ────────────────────────────────────────────────
