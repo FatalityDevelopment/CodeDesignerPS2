@@ -47,6 +47,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private const uint Vif1Base   = 0x10003C00u;  // VIF1 registers
         private const uint IntcBase   = 0x1000F000u;  // INTC_STAT / INTC_MASK
         private const uint SifBase    = 0x1000F200u;  // SIF registers
+        private const uint MchRicmAddr = 0x1000F430u; // RDRAM init control
+        private const uint MchDrdAddr  = 0x1000F440u; // RDRAM data register
 
         // Mechacon disc-type register (shared IOP/EE physical address space).
         // The EE BIOS disc-detection code reads byte at 0x1F803204 via KSEG1
@@ -59,6 +61,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private readonly byte[] _scratchpad = new byte[ScratchpadSize];
         private readonly byte[] _io         = new byte[IoRegisterSize];
 
+        // RDRAM memory controller (MCH) state — emulates PS2 RDRAM init handshake.
+        // Reference: PCSX2 Hw.cpp / PS2Tek RDRAM_Init.html
+        private uint _mchRicm;          // last MCH_RICM write (bit31 always 0)
+        private int  _rdramSdevid;      // count of RDRAM devices initialised (0–2)
         /// <summary>The four EE hardware timers (T0–T3).</summary>
         public EETimer[] Timers { get; } = { new EETimer(0), new EETimer(1), new EETimer(2), new EETimer(3) };
 
@@ -196,6 +202,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (paddr >= SifBase && paddr < SifBase + 0x70u)
                 return Sif.ReadRegister(paddr - SifBase);
 
+            // MCH RDRAM controller (0x1000F430 / 0x1000F440)
+            if (paddr == MchRicmAddr) return _mchRicm;
+            if (paddr == MchDrdAddr)  return ReadMchDrd();
+
             // Hardware I/O: DMAC channels (0x10008000-0x1000DFFF) and global regs (0x1000E000-0x1000E0FF)
             if (DMAC.TryDecodeChannelAddress(paddr, out int chIdx, out uint chReg))
                 return Dmac.Channels[chIdx].ReadRegister(chReg);
@@ -250,6 +260,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 return;
             }
 
+            // MCH RDRAM controller (0x1000F430 / 0x1000F440)
+            if (paddr == MchRicmAddr)
+            {
+                // Clear bit31 (busy flag) before storing; reset sdevid on init-reset command
+                _mchRicm = value & ~0x80000000u;
+                if (value == 0) _rdramSdevid = 0;
+                return;
+            }
+            if (paddr == MchDrdAddr) return; // writes to DRD are ignored; reads are computed
+
             // Hardware I/O: DMAC channel registers — execute transfer if CHCR.STR is set.
             if (DMAC.TryDecodeChannelAddress(paddr, out int chIdx, out uint chReg))
             {
@@ -282,10 +302,37 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         }
 
         // -----------------------------------------------------------------------
-        // 64-bit little-endian
+        // MCH (RDRAM memory controller) helper
         // -----------------------------------------------------------------------
 
-        public ulong ReadDoubleWord(uint vaddr)
+        /// <summary>
+        /// Emulates MCH_DRD (0x1000F440) reads.
+        /// The returned value is derived from the last MCH_RICM command written to 0x1000F430.
+        /// When SA=0x21/SOP=0, each of the 2 PS2 RDRAM devices responds with 0x1F in turn.
+        /// Reference: PCSX2 Hw.cpp, PS2Tek RDRAM_Init.html
+        /// </summary>
+        private uint ReadMchDrd()
+        {
+            uint sop = (_mchRicm >> 6) & 0xFu;
+            uint sa  = (_mchRicm >> 16) & 0xFFFu;
+            if (sop == 0)
+            {
+                switch (sa)
+                {
+                    case 0x21:
+                        if (_rdramSdevid < 2) { _rdramSdevid++; return 0x1Fu; }
+                        return 0u;
+                    case 0x23: return 0x0D0Du;
+                    case 0x24: return 0x0090u;
+                    case 0x40: return _mchRicm & 0x1Fu;
+                }
+            }
+            return 0u;
+        }
+
+        // -----------------------------------------------------------------------
+        // 64-bit little-endian
+        // -----------------------------------------------------------------------        public ulong ReadDoubleWord(uint vaddr)
         {
             return ReadWord(vaddr) | ((ulong)ReadWord(vaddr + 4) << 32);
         }
