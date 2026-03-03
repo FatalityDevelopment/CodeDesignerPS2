@@ -20,13 +20,13 @@
       "commandName": "Project",
       "commandLineArgs": "--run --steps 10000000"
     },
-    "Run SOCOM II": {
+    "Run GameShark 2 v4": {
       "commandName": "Project",
-      "commandLineArgs": "--run --disc \"C:\\Users\\tholu\\Desktop\\SOCOM II - U.S. Navy SEALs.iso\""
+      "commandLineArgs": "--run --disc \"Isos/Gameshark 2 v4 PS2.zip\""
     },
-    "Run SOCOM II (1M steps)": {
+    "Run GameShark 2 v4 (1M steps)": {
       "commandName": "Project",
-      "commandLineArgs": "--run --disc \"C:\\Users\\tholu\\Desktop\\SOCOM II - U.S. Navy SEALs.iso\" --steps 1000000"
+      "commandLineArgs": "--run --disc \"Isos/Gameshark 2 v4 PS2.zip\" --steps 1000000"
     }
   }
 }

@@ -1,4 +1,5 @@
-﻿using CodeDesigner.Mips64LE.Common;
+﻿using System.IO.Compression;
+using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 
@@ -54,6 +55,17 @@ namespace CodeDesigner.Mips64LE
             {
                 Console.Error.WriteLine($"Error: BIOS file not found: {biosPath}");
                 return;
+            }
+
+            // ── ZIP extraction (if disc is a .zip archive) ────────────────────
+            // Extract the first ISO/BIN entry to the system temp directory.
+            // The extracted file is cached so subsequent runs skip re-extraction.
+            if (discPath != null &&
+                discPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                discPath = ExtractIsoFromZip(discPath);
+                if (discPath == null)
+                    return;
             }
 
             if (discPath != null && !File.Exists(discPath))
@@ -277,6 +289,68 @@ namespace CodeDesigner.Mips64LE
             isoStream?.Dispose();
         }
 
+        // ── ZIP extraction ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Extract the first ISO or BIN entry from a ZIP archive to the system temp
+        /// directory.  The extracted file is cached: if a file with the same name and
+        /// size already exists it is reused without re-extracting.
+        /// </summary>
+        /// <param name="zipPath">Path to the ZIP archive.</param>
+        /// <returns>
+        /// Absolute path to the extracted disc image, or <c>null</c> on failure.
+        /// </returns>
+        private static string? ExtractIsoFromZip(string zipPath)
+        {
+            Console.WriteLine($"Opening ZIP archive: {zipPath}");
+            try
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+
+                var entry = archive.Entries.FirstOrDefault(e =>
+                    e.Name.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) ||
+                    e.Name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase));
+
+                if (entry == null)
+                {
+                    Console.Error.WriteLine("Error: No ISO/BIN disc image found inside the ZIP archive.");
+                    return null;
+                }
+
+                // Sanitize the entry name to prevent path traversal attacks:
+                // use only the final filename component, never trust the full entry path.
+                string safeFileName = Path.GetFileName(entry.Name);
+                if (string.IsNullOrEmpty(safeFileName))
+                {
+                    Console.Error.WriteLine("Error: ZIP entry has no valid filename.");
+                    return null;
+                }
+
+                string tempPath = Path.Combine(Path.GetTempPath(), safeFileName);
+
+                // Reuse a cached extraction when the file is already present,
+                // has the expected uncompressed size, and the source ZIP has not
+                // been modified since the extraction was last written.
+                if (File.Exists(tempPath) &&
+                    new FileInfo(tempPath).Length == entry.Length &&
+                    File.GetLastWriteTimeUtc(tempPath) >= File.GetLastWriteTimeUtc(zipPath))
+                {
+                    Console.WriteLine($"Using cached extraction: {tempPath}");
+                    return tempPath;
+                }
+
+                Console.WriteLine($"Extracting '{safeFileName}' ({entry.Length / 1_048_576.0:F0} MB) to temp folder...");
+                entry.ExtractToFile(tempPath, overwrite: true);
+                Console.WriteLine("Extraction complete.");
+                return tempPath;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error extracting ZIP archive: {ex.Message}");
+                return null;
+            }
+        }
+
         // ── Socket server mode ────────────────────────────────────────────────
 
         private static async Task StartSocketServer()
@@ -463,6 +537,22 @@ namespace CodeDesigner.Mips64LE
                 $"  EE  INTC_STAT:   0x{intcStat:x8}  " +
                 $"INTC_MASK: 0x{intcMask:x8}  " +
                 $"pending={sched.EE.Bus.Intc.IsInterruptPending}");
+
+            // ── EE key registers (v0=$2, a0=$4, sp=$29, ra=$31) ──────────────
+            // These reveal where in the boot sequence the EE thread is blocked:
+            //   v0 = return value / syscall number
+            //   a0 = first argument to the current call
+            //   sp = stack pointer (helps identify which thread is active)
+            //   ra = return address (shows the call site that spun)
+            ulong eeV0 = (ulong)sched.EE.Cpu.RegsLo[2];
+            ulong eeA0 = (ulong)sched.EE.Cpu.RegsLo[4];
+            ulong eeSp = (ulong)sched.EE.Cpu.RegsLo[29];
+            ulong eeRa = (ulong)sched.EE.Cpu.RegsLo[31];
+            Console.WriteLine(
+                $"  EE  v0=0x{eeV0:x16}  a0=0x{eeA0:x16}");
+            Console.WriteLine(
+                $"  EE  sp=0x{eeSp:x16}  ra=0x{eeRa:x16}");
+
             Console.WriteLine(
                 $"  SIF F240:0x{sifF240:x8}  " +
                 $"MSCOM:0x{sifMsCom:x8}  SMCOM:0x{sifSmCom:x8}  " +
@@ -475,6 +565,34 @@ namespace CodeDesigner.Mips64LE
                 $"  IOP I_STAT: 0x{iopIStat:x8}  " +
                 $"I_MASK: 0x{iopIMask:x8}  " +
                 $"pending={sched.IOP.Bus.IsInterruptPending}");
+
+            // ── IOP key registers (v0=$2, a0=$4, sp=$29, ra=$31) ─────────────
+            uint iopV0 = sched.IOP.State.ReadReg(2);
+            uint iopA0 = sched.IOP.State.ReadReg(4);
+            uint iopSp = sched.IOP.State.ReadReg(29);
+            uint iopRa = sched.IOP.State.ReadReg(31);
+            Console.WriteLine(
+                $"  IOP v0=0x{iopV0:x8}  a0=0x{iopA0:x8}  sp=0x{iopSp:x8}  ra=0x{iopRa:x8}");
+
+            // ── CDVD state ────────────────────────────────────────────────────
+            // Shows whether the BIOS has issued any disc read commands and whether
+            // the CDVD interrupt has fired.  Key to diagnosing a bootloop where the
+            // BIOS stalls waiting for the disc to respond.
+            var cdvd = sched.IOP.Bus.Cdvd;
+            if (cdvd != null)
+            {
+                byte cdvdIstat  = cdvd.ReadRegister(0x08); // INTR_STAT (W1C)
+                byte cdvdStatus = cdvd.ReadRegister(0x09); // drive status
+                byte cdvdCrt    = cdvd.ReadRegister(0x0B); // current disc type
+                Console.WriteLine(
+                    $"  CDVD DiscType:0x{cdvd.DiscType:x2}  HasDisc:{cdvd.HasDisc}  " +
+                    $"ISTAT:0x{cdvdIstat:x2}  STATUS:0x{cdvdStatus:x2}  CRT:0x{cdvdCrt:x2}");
+            }
+            else
+            {
+                Console.WriteLine("  CDVD (no disc mounted)");
+            }
+
             Console.WriteLine("=============================");
         }
 
