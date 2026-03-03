@@ -57,7 +57,7 @@
       "stopAtEntry": false
     },
     {
-      "name": "Run SOCOM II",
+      "name": "Run GameShark 2 v4",
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
@@ -65,14 +65,14 @@
       "args": [
         "--run",
         "--disc",
-        "${env:USERPROFILE}\\Desktop\\SOCOM II - U.S. Navy SEALs.iso"
+        "${workspaceFolder}/CodeDesigner.Mips64LE/Isos/Gameshark 2 v4 PS2.zip"
       ],
       "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
       "console": "internalConsole",
       "stopAtEntry": false
     },
     {
-      "name": "Run SOCOM II (1M steps)",
+      "name": "Run GameShark 2 v4 (1M steps)",
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
@@ -80,7 +80,7 @@
       "args": [
         "--run",
         "--disc",
-        "${env:USERPROFILE}\\Desktop\\SOCOM II - U.S. Navy SEALs.iso",
+        "${workspaceFolder}/CodeDesigner.Mips64LE/Isos/Gameshark 2 v4 PS2.zip",
         "--steps",
         "1000000"
       ],
