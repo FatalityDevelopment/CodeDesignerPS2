@@ -206,6 +206,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // MCH RDRAM controller (0x1000F430 / 0x1000F440)
             if (paddr == MchRicmAddr) return 0u;
             if (paddr == MchDrdAddr)  return ReadMchDrd();
+            // All other MCH registers (0x1000F400–0x1000F4FF) always read as 0.
+            // Notably 0x1000F410 is written with 0x80000000 (busy bit) by the BIOS
+            // RDRAM init routine and then polled until bit31 clears.  Returning 0
+            // here emulates "operation immediately complete", matching PCSX2 HwRead.cpp.
+            if (paddr >= 0x1000F400u && paddr < 0x1000F500u) return 0u;
 
             // Hardware I/O: DMAC channels (0x10008000-0x1000DFFF) and global regs (0x1000E000-0x1000E0FF)
             if (DMAC.TryDecodeChannelAddress(paddr, out int chIdx, out uint chReg))
@@ -272,6 +277,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 return;
             }
             if (paddr == MchDrdAddr) { _mchDrd = value; return; } // store for SRP check
+            // Writes to other MCH registers (0x1000F400–0x1000F4FF) are silently
+            // discarded so the _io[] array never retains a busy-bit value that would
+            // cause subsequent reads to spin forever (matches PCSX2 HwWrite.cpp).
+            if (paddr >= 0x1000F400u && paddr < 0x1000F500u) return;
 
             // Hardware I/O: DMAC channel registers — execute transfer if CHCR.STR is set.
             if (DMAC.TryDecodeChannelAddress(paddr, out int chIdx, out uint chReg))
