@@ -92,6 +92,26 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public SIF? SharedSif { get; set; }
 
         /// <summary>
+        /// Optional reference to the EE memory bus.  When set, reads/writes to the
+        /// EE timer region (physical 0x10000000–0x10001FFF) are forwarded here so
+        /// the IOP BIOS clock-calibration loop can observe the running EE timers.
+        ///
+        /// The IOP BIOS writes the EE Timer T0 MODE register (enabling it) and then
+        /// polls T0 COUNT to measure the IOP/EE clock ratio before continuing the
+        /// SIF handshake.  Without this bridge both reads return 0 and the loop
+        /// never exits.
+        ///
+        /// Set by <see cref="DualCpuScheduler"/> at construction time.
+        /// Reference: PCSX2 pcsx2/IopMem.cpp psxMemRead32 — forwards 0xB0000000
+        /// region to the EE hardware registers.
+        /// </summary>
+        public PS2MemoryBus? EeBus { get; set; }
+
+        // Physical address range of the EE I/O timers as seen from the IOP bus.
+        private const uint EeTimerBase = 0x10000000u;
+        private const uint EeTimerSize = 0x00002000u;  // T0–T3, 0x800 each (4 × 0x800)
+
+        /// <summary>
         /// EE scratchpad shared with the IOP at physical address 0x70000000–0x70003FFF.
         ///
         /// Both the EE and IOP BIOS use the EE scratchpad area (0x70000000) as a
@@ -375,6 +395,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (_iLink != null && addr >= ILinkController.RegBase && addr < ILinkController.RegBase + ILinkController.RegSize)
                 return _iLink.ReadRegister(addr - ILinkController.RegBase);
 
+            // EE timer registers (0x10000000–0x10001FFF): bridge to the EE bus so the
+            // IOP BIOS clock-calibration loop can observe EE Timer T0 COUNT.
+            if (EeBus != null && addr >= EeTimerBase && addr < EeTimerBase + EeTimerSize)
+                return EeBus.ReadWord(0x80000000u | addr);
+
             // DEV9 expansion bus (SPEED ASIC registers at 0x10000000–0x1000FFFF)
             if (_dev9 != null && addr >= Dev9Controller.ExpBase && addr < Dev9Controller.ExpBase + Dev9Controller.ExpSize)
                 return _dev9.ReadExpWord(addr - Dev9Controller.ExpBase);
@@ -465,6 +490,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (_iLink != null && addr >= ILinkController.RegBase && addr < ILinkController.RegBase + ILinkController.RegSize)
             {
                 _iLink.WriteRegister(addr - ILinkController.RegBase, value);
+                return;
+            }
+
+            // EE timer registers (0x10000000–0x10001FFF): bridge to the EE bus.
+            // The IOP BIOS enables EE Timer T0 (writes MODE=0x83 to 0x10000010)
+            // before polling its COUNT register for clock calibration.
+            if (EeBus != null && addr >= EeTimerBase && addr < EeTimerBase + EeTimerSize)
+            {
+                EeBus.WriteWord(0x80000000u | addr, value);
                 return;
             }
 

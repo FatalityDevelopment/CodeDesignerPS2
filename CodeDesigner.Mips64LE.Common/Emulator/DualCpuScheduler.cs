@@ -131,6 +131,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // bootstrap stack and IPC handshake area on both the EE and IOP side.
             IOP.Bus.SharedScratchpad = EE.Bus.Scratchpad;
 
+            // Bridge EE timer registers (0x10000000–0x10001FFF) into the IOP bus so
+            // the IOP BIOS clock-calibration loop can observe EE Timer T0 COUNT.
+            IOP.Bus.EeBus = EE.Bus;
+
             // Wire IOP DMAC CH9 (SIF0, RAM→device): IOP sends data to EE via SIF0 FIFO.
             IOP.Bus.Dmac.Channels[9].DeviceDataConsumer  = w => EE.Bus.Sif.WriteSif0(w);
 
