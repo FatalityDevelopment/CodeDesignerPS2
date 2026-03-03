@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "build",
+        "${workspaceFolder}/CodeDesigner.Mips64LE.sln"
+      ],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "build-extension",
+      "type": "npm",
+      "script": "build",
+      "path": "vscode/",
+      "problemMatcher": "$ts-webpack-watch",
+      "isBackground": false,
+      "presentation": {
+        "reveal": "silent"
+      }
+    }
+  ]
+}
