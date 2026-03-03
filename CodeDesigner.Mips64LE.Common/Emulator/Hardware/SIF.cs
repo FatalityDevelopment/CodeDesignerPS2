@@ -111,7 +111,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         private uint _smflag;
         private uint _f240;
         private uint _f250;
-        private uint _f260;
+        // PCSX2 hwReset() initialises SBUS_F260 to 0x1D000060 (IOP SIF mirror base + 0x60).
+        // The IOP BIOS checks this value to locate its SIF register mirror.
+        // Reference: PCSX2 pcsx2/Hw.cpp hwReset() "psHu32(SBUS_F260) = 0x1D000060".
+        private uint _f260 = 0x1D000060u;
 
         /// <summary>EE-to-IOP command/message register (SBUS_MSCOM).</summary>
         public uint MsCom => _mscom;
@@ -158,7 +161,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 REG_SMCOM  => _smcom,
                 REG_MSFLAG => _msflag,
                 REG_SMFLAG => _smflag,
-                REG_F240   => _f240,
+                // PCSX2 HwRead.cpp: SBUS_F240 read always OR-in 0xF0000102 (permanent status bits).
+                // Without these the BIOS bootstrap spin loop never sees bit 8 (0x100) set and hangs.
+                // Reference: PCSX2 pcsx2/HwRead.cpp _hwRead32 case SBUS_F240.
+                REG_F240   => _f240 | 0xF0000102u,
                 REG_F250   => _f250,
                 REG_F260   => _f260,
                 _          => 0u

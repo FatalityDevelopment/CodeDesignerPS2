@@ -64,6 +64,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         // RDRAM memory controller (MCH) state — emulates PS2 RDRAM init handshake.
         // Reference: PCSX2 Hw.cpp / PS2Tek RDRAM_Init.html
         private uint _mchRicm;          // last MCH_RICM write (bit31 always 0)
+        private uint _mchDrd;           // last MCH_DRD write (used for INIT SRP check)
         private int  _rdramSdevid;      // count of RDRAM devices initialised (0–2)
         /// <summary>The four EE hardware timers (T0–T3).</summary>
         public EETimer[] Timers { get; } = { new EETimer(0), new EETimer(1), new EETimer(2), new EETimer(3) };
@@ -203,7 +204,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 return Sif.ReadRegister(paddr - SifBase);
 
             // MCH RDRAM controller (0x1000F430 / 0x1000F440)
-            if (paddr == MchRicmAddr) return _mchRicm;
+            if (paddr == MchRicmAddr) return 0u;
             if (paddr == MchDrdAddr)  return ReadMchDrd();
 
             // Hardware I/O: DMAC channels (0x10008000-0x1000DFFF) and global regs (0x1000E000-0x1000E0FF)
@@ -263,12 +264,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // MCH RDRAM controller (0x1000F430 / 0x1000F440)
             if (paddr == MchRicmAddr)
             {
-                // Clear bit31 (busy flag) before storing; reset sdevid on init-reset command
+                // Clear bit31 (busy flag) before storing; reset sdevid on INIT command (SA=0x21,
+                // SOP=1) when SIO-repeater bit (MCH_DRD bit7) is clear — matches PCSX2 HwWrite.cpp.
+                if (((value >> 16) & 0xFFFu) == 0x21 && ((value >> 6) & 0xFu) == 1 && ((_mchDrd >> 7) & 1u) == 0)
+                    _rdramSdevid = 0;
                 _mchRicm = value & ~0x80000000u;
-                if (value == 0) _rdramSdevid = 0;
                 return;
             }
-            if (paddr == MchDrdAddr) return; // writes to DRD are ignored; reads are computed
+            if (paddr == MchDrdAddr) { _mchDrd = value; return; } // store for SRP check
 
             // Hardware I/O: DMAC channel registers — execute transfer if CHCR.STR is set.
             if (DMAC.TryDecodeChannelAddress(paddr, out int chIdx, out uint chReg))
@@ -332,7 +335,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         // -----------------------------------------------------------------------
         // 64-bit little-endian
-        // -----------------------------------------------------------------------        public ulong ReadDoubleWord(uint vaddr)
+        // -----------------------------------------------------------------------
+
+        public ulong ReadDoubleWord(uint vaddr)
         {
             return ReadWord(vaddr) | ((ulong)ReadWord(vaddr + 4) << 32);
         }
