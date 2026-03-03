@@ -376,7 +376,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             // ── PC advancement and branch delay slot ──────────────────────────────
 
-            if (Cpu.PC == pcBefore)
+            if (Cpu.PC == pcBefore && !IsBranchOrJumpInstruction(word))
             {
                 // Non-branch instruction: advance PC by 4 — no delay slot.
                 Cpu.PC = pcBefore + 4;
@@ -502,6 +502,60 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     int rs = (int)(word >> 21) & 0x1F;
                     int rt = (int)(word >> 16) & 0x1F;
                     return rs == 8 && (rt == 0x02 || rt == 0x03);
+                }
+
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns true if <paramref name="word"/> is any branch or jump instruction
+        /// (including J, JAL, JR, JALR, BEQ/BNE/BLEZ/BGTZ and their -L variants,
+        /// REGIMM branches, ERET, and COP1 branches).
+        ///
+        /// Used to distinguish a jump-to-self (where the instruction sets PC to the
+        /// same value as pcBefore) from a true non-branch instruction that leaves
+        /// PC unchanged.
+        /// </summary>
+        private static bool IsBranchOrJumpInstruction(uint word)
+        {
+            int op = (int)(word >> 26) & 0x3F;
+            switch (op)
+            {
+                // J, JAL
+                case 0x02: case 0x03:
+                    return true;
+
+                // BEQ, BNE, BLEZ, BGTZ (and their -L variants 0x14-0x17)
+                case 0x04: case 0x05: case 0x06: case 0x07:
+                case 0x14: case 0x15: case 0x16: case 0x17:
+                    return true;
+
+                // REGIMM: all rt sub-codes are branches (BLTZ, BGEZ, BLTZAL, BGEZAL, *L variants)
+                case 0x01:
+                    return true;
+
+                // SPECIAL: JR (funct=8), JALR (funct=9)
+                case 0x00:
+                {
+                    int funct = (int)(word & 0x3F);
+                    return funct == 8 || funct == 9;
+                }
+
+                // COP0: ERET (rs=0x10=CO, funct=0x18)
+                case 0x10:
+                {
+                    int rs    = (int)(word >> 21) & 0x1F;
+                    int funct = (int)(word & 0x3F);
+                    return rs == 0x10 && funct == 0x18;
+                }
+
+                // COP1: branch instructions (rs=8 = BC sub-group)
+                case 0x11:
+                {
+                    int rs = (int)(word >> 21) & 0x1F;
+                    return rs == 8;
                 }
 
                 default:

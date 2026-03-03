@@ -1576,5 +1576,69 @@ namespace CodeDesigner.Mips64LE.TestProject
             // Flag.Overflow (bit 10) must still be SET (sticky).
             Assert.IsTrue((fcsr & (1u << 10)) != 0, "Flag.Overflow (bit 10) must persist as sticky flag");
         }
+
+        // ── Jump-to-self (infinite loop) regression tests ────────────────────
+
+        /// <summary>
+        /// A J instruction that targets its own address must loop indefinitely,
+        /// not fall through to the next instruction.
+        ///
+        /// Before the fix, PS2Emulator.Step() tested <c>if (cpu.PC == pcBefore)</c>
+        /// to detect non-branch instructions, which also fired when a jump targeted
+        /// its own PC, causing PC to advance by 4 instead of staying.
+        /// </summary>
+        [TestMethod]
+        public void Emulator_JumpToSelf_LoopsInPlace()
+        {
+            // Program at 0x100:
+            //   0x100: j 0x100       — jump to self (delay slot at 0x104 also executes)
+            //   0x104: nop           — delay slot
+            //   0x108: addiu $t0, $zero, 99  — must NOT be reached
+
+            // J at 0x100: imm26 = (0x100 >> 2) = 0x40.  Target = (0x104 & 0xF0000000) | (0x40 << 2) = 0x100.
+            uint j_self = (2u << 26) | 0x40u;
+            uint nop    = 0u;
+            uint addiu  = (0x09u << 26) | (0u << 21) | (8u << 16) | 99u;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000100, new[] { j_self, nop, addiu });
+            emu.Cpu.PC = 0x00000100;
+
+            // After 3 steps the CPU should still be at 0x100 (stuck in the loop).
+            // Each Step(): executes j (plus its nop delay slot) then lands back at 0x100.
+            emu.Step();
+            Assert.AreEqual(0x100UL, emu.Cpu.PC,  "After 1 step: still at 0x100");
+            Assert.AreEqual(0UL,     emu.Cpu.RegsLo[8], "addiu must not have executed");
+
+            emu.Step();
+            Assert.AreEqual(0x100UL, emu.Cpu.PC,  "After 2 steps: still at 0x100");
+
+            emu.Step();
+            Assert.AreEqual(0x100UL, emu.Cpu.PC,  "After 3 steps: still at 0x100");
+            Assert.AreEqual(0UL,     emu.Cpu.RegsLo[8], "addiu must never execute");
+        }
+
+        [TestMethod]
+        public void Emulator_BEQ_SameTarget_LoopsInPlace()
+        {
+            // BEQ $zero, $zero, 0  — offset 0 → target = PC+4+0 = PC+4. Not a self-loop.
+            // BEQ $zero, $zero, -1 — offset -1 → target = PC+4-4 = PC. Self-loop.
+            // Verify the self-loop stays in place.
+
+            // beq $zero,$zero,-1: rs=0,rt=0,offset=0xFFFF (= -1 in signed 16-bit)
+            uint beq_self = (4u << 26) | 0xFFFFu;
+            uint nop      = 0u;
+            uint addiu    = (0x09u << 26) | (0u << 21) | (8u << 16) | 99u;
+
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000200, new[] { beq_self, nop, addiu });
+            emu.Cpu.PC = 0x00000200;
+
+            emu.Step();
+            Assert.AreEqual(0x200UL, emu.Cpu.PC, "BEQ self-loop: still at 0x200 after step 1");
+            emu.Step();
+            Assert.AreEqual(0x200UL, emu.Cpu.PC, "BEQ self-loop: still at 0x200 after step 2");
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[8], "addiu must never execute");
+        }
     }
 }
