@@ -97,6 +97,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             State.Reset();
             InstructionCount = 0;
             SyncBridgeFromIop();
+            // IOP is an R3000A (PRId = 0x1F, which is < 0x59).
+            // The shared BIOS ROM at 0xBFC00000 reads COP0 PRId and uses SLTI to
+            // distinguish EE (R5900, PRId = 0x2E20 ≥ 0x59) from IOP (R3000A,
+            // PRId < 0x59) so each processor jumps to its own init path.
+            // Without this the IOP inherits the bridge's default EE PRId (0x2E20)
+            // and mistakenly runs the EE boot path at 0xBFC00800 instead of the
+            // IOP boot path at 0xBFC02000, corrupting shared hardware state and
+            // preventing the kernel from loading.
+            // Reference: PCSX2 R3000A.cpp — IOP PRID = 0x0000001F.
+            _bridge.COP0.WriteRegister32(15, 0x0000001Fu);
         }
 
         /// <summary>
