@@ -50,6 +50,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private const uint MchRicmAddr = 0x1000F430u; // RDRAM init control
         private const uint MchDrdAddr  = 0x1000F440u; // RDRAM data register
 
+        // EE sub-bus mirror of IOP RAM (0x1A000000–0x1BFFFFFF → IOP RAM).
+        // The EE kernel polls physical 0x1A000006 for IOP ready flags, and the IOP
+        // writes those flags to IOP RAM[6] during its boot sequence.
+        // The 2 MB wrap mask reflects the real IOP hardware RAM size (2 MB physical)
+        // visible on this EE sub-bus mirror — the extra 2 MB in IopRam are for the
+        // IOP BIOS stack frame and are not exposed to the EE over this path.
+        // Reference: PCSX2 vtlb.cpp / HwRead.cpp — EE 0x1A000000 sub-bus → psxM.
+        private const uint IopRamMirrorBase = 0x1A000000u;
+        private const uint IopRamMirrorEnd  = 0x1C000000u; // exclusive upper bound of this window
+        private const uint IopRamMask       = 0x001FFFFFu; // 2 MB physical IOP RAM wrap
+
         // Mechacon disc-type register (shared IOP/EE physical address space).
         // The EE BIOS disc-detection code reads byte at 0x1F803204 via KSEG1
         // (0xBF803204) to determine the disc family inserted in the drive.
@@ -105,6 +116,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public byte[] Bios => _bios;
 
         /// <summary>
+        /// Optional reference to IOP RAM, shared with the IOP bus.
+        /// When set, EE physical addresses 0x1A000000–0x1BFFFFFF are transparently
+        /// routed to this array (with a 2 MB wrap mask matching real hardware).
+        /// This is the EE sub-bus mirror of IOP RAM that the EE kernel uses for
+        /// EE↔IOP handshake: e.g. the EE polls physical 0x1A000006 until the IOP
+        /// BIOS writes a non-zero ready flag there.
+        /// Reference: PCSX2 vtlb.cpp — 0x1C000000 (and 0x1A000000 sub-bus) → psxM.
+        /// </summary>
+        public byte[]? IopRam { get; set; }
+
+        /// <summary>
         /// Exposes the EE scratchpad RAM (16 KB, physical 0x70000000–0x70003FFF).
         /// Shared with the IOP via <see cref="IopMemoryBus.SharedScratchpad"/> so that
         /// the IOP can use 0x70000000 as its bootstrap stack and IPC area, exactly as
@@ -155,6 +177,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // Mechacon disc-type register: EE BIOS disc-detection reads this byte.
             if (paddr == MecanonDiscTypeAddr)
                 return Cdvd?.DiscType ?? IOP.Cdvd.DISC_NO_DISC;
+            // IOP RAM sub-bus mirror: EE polls IOP RAM[6] for IOP ready flag.
+            if (paddr >= IopRamMirrorBase && paddr < IopRamMirrorEnd && IopRam != null)
+                return IopRam[(paddr - IopRamMirrorBase) & IopRamMask];
             (byte[] region, uint offset) = MapPhysical(paddr);
             return region[offset];
         }
@@ -162,6 +187,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public void WriteByte(uint vaddr, byte value)
         {
             uint paddr = TranslateAddress(vaddr);
+            // IOP RAM sub-bus mirror: EE writes visible to IOP RAM.
+            if (paddr >= IopRamMirrorBase && paddr < IopRamMirrorEnd && IopRam != null)
+            {
+                IopRam[(paddr - IopRamMirrorBase) & IopRamMask] = value;
+                return;
+            }
             (byte[] region, uint offset, bool ro) = MapPhysicalWrite(paddr);
             if (!ro) region[offset] = value;
         }
@@ -229,6 +260,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // GS privileged registers (0x12000000–0x12001FFF)
             if (paddr >= GsPrivBase && paddr < GsPrivBase + GsPrivRegSize)
                 return Gs.ReadPriv32(paddr - GsPrivBase);
+
+            // IOP RAM sub-bus mirror (0x1A000000–0x1BFFFFFF → IOP RAM).
+            if (paddr >= IopRamMirrorBase && paddr < IopRamMirrorEnd && IopRam != null)
+            {
+                uint off = (paddr - IopRamMirrorBase) & IopRamMask;
+                return (uint)(IopRam[off]
+                            | (IopRam[off + 1] << 8)
+                            | (IopRam[off + 2] << 16)
+                            | (IopRam[off + 3] << 24));
+            }
 
             (byte[] region, uint offset) = MapPhysical(paddr);
             // Fast path if all 4 bytes fit in the same region
@@ -308,6 +349,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (paddr >= GsPrivBase && paddr < GsPrivBase + GsPrivRegSize)
             {
                 Gs.WritePriv32(paddr - GsPrivBase, value);
+                return;
+            }
+
+            // IOP RAM sub-bus mirror (0x1A000000–0x1BFFFFFF → IOP RAM).
+            if (paddr >= IopRamMirrorBase && paddr < IopRamMirrorEnd && IopRam != null)
+            {
+                uint off = (paddr - IopRamMirrorBase) & IopRamMask;
+                IopRam[off]     = (byte)(value);
+                IopRam[off + 1] = (byte)(value >> 8);
+                IopRam[off + 2] = (byte)(value >> 16);
+                IopRam[off + 3] = (byte)(value >> 24);
                 return;
             }
 
