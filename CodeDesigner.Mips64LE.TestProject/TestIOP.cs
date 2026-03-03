@@ -112,15 +112,16 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
-        public void IopMemoryBus_IntcStat_Write1ToClear()
+        public void IopMemoryBus_IntcStat_Write0ToClear()
         {
             var bus = new IopMemoryBus();
             bus.RaiseInterrupt(2);
             bus.RaiseInterrupt(5);
             Assert.AreNotEqual(0u, bus.IStat & (1u << 2));
 
-            // W1C: clear bit 2
-            bus.WriteWord(0x1F801070u, 1u << 2);
+            // W0C (write-AND per PCSX2 psxHu32 &= value): write 0 to bit 2 to clear it,
+            // keeping bit 5 set by writing 1 there.  ~(1u << 2) = all ones except bit 2.
+            bus.WriteWord(0x1F801070u, ~(1u << 2));
             Assert.AreEqual(0u,        bus.IStat & (1u << 2), "I_STAT bit 2 must be cleared");
             Assert.AreNotEqual(0u,     bus.IStat & (1u << 5), "I_STAT bit 5 must remain set");
         }
@@ -131,6 +132,52 @@ namespace CodeDesigner.Mips64LE.TestProject
             var bus = new IopMemoryBus();
             bus.WriteWord(0x1F801074u, 0x0000001Fu);
             Assert.AreEqual(0x0000001Fu, bus.IMask, "I_MASK plain write");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_SharedScratchpad_ReadWriteCoherent()
+        {
+            // The IOP bus must map 0x70000000–0x70003FFF to SharedScratchpad when wired.
+            var scratchpad = new byte[16 * 1024]; // 16 KB
+            var bus = new IopMemoryBus { SharedScratchpad = scratchpad };
+
+            // Write via IOP bus, read back via the shared array
+            bus.WriteWord(0x70003FF0u, 0xDEADBEEFu);
+            uint fromArray = (uint)(scratchpad[0x3FF0]
+                                  | (scratchpad[0x3FF1] << 8)
+                                  | (scratchpad[0x3FF2] << 16)
+                                  | (scratchpad[0x3FF3] << 24));
+            Assert.AreEqual(0xDEADBEEFu, fromArray,
+                "IOP write to 0x70003FF0 must appear in the SharedScratchpad array");
+
+            // Write via the shared array, read back via IOP bus
+            scratchpad[0x3F90]     = 0xAA;
+            scratchpad[0x3F91]     = 0xBB;
+            scratchpad[0x3F92]     = 0xCC;
+            scratchpad[0x3F93]     = 0xDD;
+            uint fromBus = bus.ReadWord(0x70003F90u);
+            Assert.AreEqual(0xDDCCBBAAu, fromBus,
+                "IOP read from 0x70003F90 must see data written to SharedScratchpad");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_SharedScratchpad_NullDoesNotMap()
+        {
+            // When SharedScratchpad is null the region must read as 0 and writes are discarded.
+            var bus = new IopMemoryBus(); // SharedScratchpad == null
+            bus.WriteWord(0x70003FF0u, 0x12345678u);
+            Assert.AreEqual(0u, bus.ReadWord(0x70003FF0u),
+                "Without SharedScratchpad, IOP reads from 0x70000000 must return 0");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_SharedScratchpad_WiredToEEScratchpad()
+        {
+            var scheduler = new DualCpuScheduler();
+            Assert.IsNotNull(scheduler.IOP.Bus.SharedScratchpad,
+                "DualCpuScheduler must wire IOP.Bus.SharedScratchpad");
+            Assert.AreSame(scheduler.EE.Bus.Scratchpad, scheduler.IOP.Bus.SharedScratchpad,
+                "IOP.Bus.SharedScratchpad must be the same array as EE.Bus.Scratchpad");
         }
 
         [TestMethod]

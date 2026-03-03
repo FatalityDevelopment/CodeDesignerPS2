@@ -18,6 +18,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     ///   0x1F801570 – 0x1F801577  IOP DMAC global registers 2 (DPCR2 / DICR2)
     ///   0x1D000000 – 0x1D00006F  SIF registers (EE side mapped into IOP address space)
     ///   0x1FC00000 – 0x1FFFFFFF  BIOS ROM (4 MB, shared with EE, read-only from IOP)
+    ///   0x70000000 – 0x70003FFF  EE scratchpad mirror (16 KB; shared with EE bus when
+    ///                             <see cref="SharedScratchpad"/> is wired by the scheduler)
     ///
     /// SIF integration:
     ///   The IOP sees the same SIF registers as the EE, albeit with reversed
@@ -88,6 +90,24 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// to the SIF mirror region (0x1D000000) are forwarded to this object.
         /// </summary>
         public SIF? SharedSif { get; set; }
+
+        /// <summary>
+        /// EE scratchpad shared with the IOP at physical address 0x70000000–0x70003FFF.
+        ///
+        /// Both the EE and IOP BIOS use the EE scratchpad area (0x70000000) as a
+        /// bootstrap stack and IPC handshake area during the SIF initialisation
+        /// sequence.  Wiring this to <see cref="PS2MemoryBus.Scratchpad"/> allows
+        /// the IOP to read and write the same 16 KB backing store as the EE, so that
+        /// stack frames and shared boot data are coherent between the two CPUs.
+        ///
+        /// Set by <see cref="DualCpuScheduler"/> at construction time.
+        /// Reference: PCSX2 psxMem.cpp — IOP bus mirrors 0x70000000 to EE scratchpad.
+        /// </summary>
+        public byte[]? SharedScratchpad { get; set; }
+
+        // ── EE scratchpad mirror constants ────────────────────────────────────
+        private const uint EeScratchpadMirrorBase = 0x70000000u;
+        private const uint EeScratchpadMirrorSize = 0x4000u;  // 16 KB
 
         private Cdvd? _cdvd;
 
@@ -258,7 +278,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         // ── IOP INTC accessors ────────────────────────────────────────────────
 
-        /// <summary>IOP I_STAT register (interrupt status, W1C).</summary>
+        /// <summary>IOP I_STAT register (interrupt status, W0C — write 0 to clear).</summary>
         public uint IStat => _iStat;
 
         /// <summary>IOP I_MASK register (interrupt mask, plain R/W).</summary>
@@ -369,8 +389,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             addr = TranslateAddress(addr);
 
             // IOP INTC
-            if (addr == IntcBase)      { _iStat &= ~value; return; }  // W1C
-            if (addr == IntcBase + 4u) { _iMask  = value;  return; }
+            if (addr == IntcBase)      { _iStat &= value; return; }  // W0C (write-AND per PCSX2 psxHu32 &= value)
+            if (addr == IntcBase + 4u) { _iMask  = value; return; }
 
             // IOP timers T0–T2 (0x1F801100)
             if (addr >= TimerBase && addr < TimerBase + TimerBankSize)
@@ -610,6 +630,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (addr >= BiosBase && addr < BiosBase + BiosRomSize)
                 return (_bios, addr - BiosBase);
 
+            // EE scratchpad mirror: both CPUs use 0x70000000 as bootstrap stack / IPC area.
+            if (SharedScratchpad != null
+                && addr >= EeScratchpadMirrorBase
+                && addr < EeScratchpadMirrorBase + EeScratchpadMirrorSize)
+                return (SharedScratchpad, addr - EeScratchpadMirrorBase);
+
             // Unmapped — return a zero slice from scratchpad (read as 0)
             return (_scratchpad, 0u);
         }
@@ -622,6 +648,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 return (_scratchpad, addr - ScratchpadBase, false);
             if (addr >= BiosBase && addr < BiosBase + BiosRomSize)
                 return (_bios, 0, true); // ROM: read-only
+
+            // EE scratchpad mirror (writable)
+            if (SharedScratchpad != null
+                && addr >= EeScratchpadMirrorBase
+                && addr < EeScratchpadMirrorBase + EeScratchpadMirrorSize)
+                return (SharedScratchpad, addr - EeScratchpadMirrorBase, false);
 
             return (_scratchpad, 0u, true); // unmapped writes silently ignored
         }
