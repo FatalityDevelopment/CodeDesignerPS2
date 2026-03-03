@@ -70,7 +70,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             State  = new IopState();
             _bridge = new CpuState
             {
-                Memory = Bus.Ram
+                Memory = Bus.Ram,
+                IopBus = Bus
             };
             WireTimerInterrupts();
             WireDmacInterrupts();
