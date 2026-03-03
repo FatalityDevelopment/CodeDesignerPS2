@@ -393,14 +393,16 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Little-endian load (64-bit)
             ulong value = cpu.Bus != null
                 ? cpu.Bus.ReadDoubleWord(addr)
-                : cpu.Memory[addr] |
-                         ((ulong)cpu.Memory[addr + 1] << 8) |
-                         ((ulong)cpu.Memory[addr + 2] << 16) |
-                         ((ulong)cpu.Memory[addr + 3] << 24) |
-                         ((ulong)cpu.Memory[addr + 4] << 32) |
-                         ((ulong)cpu.Memory[addr + 5] << 40) |
-                         ((ulong)cpu.Memory[addr + 6] << 48) |
-                         ((ulong)cpu.Memory[addr + 7] << 56);
+                : cpu.IopBus != null
+                    ? (ulong)cpu.IopBus.ReadWord(addr) | ((ulong)cpu.IopBus.ReadWord(addr + 4) << 32)
+                    : cpu.Memory[addr] |
+                             ((ulong)cpu.Memory[addr + 1] << 8) |
+                             ((ulong)cpu.Memory[addr + 2] << 16) |
+                             ((ulong)cpu.Memory[addr + 3] << 24) |
+                             ((ulong)cpu.Memory[addr + 4] << 32) |
+                             ((ulong)cpu.Memory[addr + 5] << 40) |
+                             ((ulong)cpu.Memory[addr + 6] << 48) |
+                             ((ulong)cpu.Memory[addr + 7] << 56);
             
             cpu.RegsLo[args.Rt] = value;
             cpu.RegsHi[args.Rt] = 0;
@@ -597,14 +599,16 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Load doubleword from aligned address
             ulong dword = cpu.Bus != null
                 ? cpu.Bus.ReadDoubleWord(alignedAddr)
-                : cpu.Memory[alignedAddr] |
-                         ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
-                         ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
-                         ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
-                         ((ulong)cpu.Memory[alignedAddr + 4] << 32) |
-                         ((ulong)cpu.Memory[alignedAddr + 5] << 40) |
-                         ((ulong)cpu.Memory[alignedAddr + 6] << 48) |
-                         ((ulong)cpu.Memory[alignedAddr + 7] << 56);
+                : cpu.IopBus != null
+                    ? (ulong)cpu.IopBus.ReadWord(alignedAddr) | ((ulong)cpu.IopBus.ReadWord(alignedAddr + 4) << 32)
+                    : cpu.Memory[alignedAddr] |
+                             ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
+                             ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
+                             ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
+                             ((ulong)cpu.Memory[alignedAddr + 4] << 32) |
+                             ((ulong)cpu.Memory[alignedAddr + 5] << 40) |
+                             ((ulong)cpu.Memory[alignedAddr + 6] << 48) |
+                             ((ulong)cpu.Memory[alignedAddr + 7] << 56);
             
             // Merge with existing register value
             ulong mask = 0xFFFFFFFFFFFFFFFFul << shift;
@@ -665,14 +669,16 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Load doubleword from aligned address
             ulong dword = cpu.Bus != null
                 ? cpu.Bus.ReadDoubleWord(alignedAddr)
-                : cpu.Memory[alignedAddr] |
-                         ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
-                         ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
-                         ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
-                         ((ulong)cpu.Memory[alignedAddr + 4] << 32) |
-                         ((ulong)cpu.Memory[alignedAddr + 5] << 40) |
-                         ((ulong)cpu.Memory[alignedAddr + 6] << 48) |
-                         ((ulong)cpu.Memory[alignedAddr + 7] << 56);
+                : cpu.IopBus != null
+                    ? (ulong)cpu.IopBus.ReadWord(alignedAddr) | ((ulong)cpu.IopBus.ReadWord(alignedAddr + 4) << 32)
+                    : cpu.Memory[alignedAddr] |
+                             ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
+                             ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
+                             ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
+                             ((ulong)cpu.Memory[alignedAddr + 4] << 32) |
+                             ((ulong)cpu.Memory[alignedAddr + 5] << 40) |
+                             ((ulong)cpu.Memory[alignedAddr + 6] << 48) |
+                             ((ulong)cpu.Memory[alignedAddr + 7] << 56);
             
             // Merge with existing register value
             ulong mask = 0xFFFFFFFFFFFFFFFFul >> shift;

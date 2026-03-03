@@ -233,6 +233,11 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 cpu.Bus.WriteDoubleWord(addr, value);
             }
+            else if (cpu.IopBus != null)
+            {
+                cpu.IopBus.WriteWord(addr,     (uint)(value));
+                cpu.IopBus.WriteWord(addr + 4, (uint)(value >> 32));
+            }
             else
             {
                 // Little-endian store (64-bit)
@@ -467,14 +472,16 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Read existing doubleword
             ulong existingDword = cpu.Bus != null
                 ? cpu.Bus.ReadDoubleWord(alignedAddr)
-                : cpu.Memory[alignedAddr] |
-                                 ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
-                                 ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
-                                 ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
-                                 ((ulong)cpu.Memory[alignedAddr + 4] << 32) |
-                                 ((ulong)cpu.Memory[alignedAddr + 5] << 40) |
-                                 ((ulong)cpu.Memory[alignedAddr + 6] << 48) |
-                                 ((ulong)cpu.Memory[alignedAddr + 7] << 56);
+                : cpu.IopBus != null
+                    ? (ulong)cpu.IopBus.ReadWord(alignedAddr) | ((ulong)cpu.IopBus.ReadWord(alignedAddr + 4) << 32)
+                    : cpu.Memory[alignedAddr] |
+                                     ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
+                                     ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
+                                     ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
+                                     ((ulong)cpu.Memory[alignedAddr + 4] << 32) |
+                                     ((ulong)cpu.Memory[alignedAddr + 5] << 40) |
+                                     ((ulong)cpu.Memory[alignedAddr + 6] << 48) |
+                                     ((ulong)cpu.Memory[alignedAddr + 7] << 56);
             
             // Merge and write back
             // In LE mode: preserve lower byteOff bytes of existing dword, replace upper (8-byteOff) bytes with value shifted left
@@ -485,6 +492,11 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu.Bus != null)
             {
                 cpu.Bus.WriteDoubleWord(alignedAddr, result);
+            }
+            else if (cpu.IopBus != null)
+            {
+                cpu.IopBus.WriteWord(alignedAddr,     (uint)(result));
+                cpu.IopBus.WriteWord(alignedAddr + 4, (uint)(result >> 32));
             }
             else
             {
@@ -553,14 +565,16 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Read existing doubleword
             ulong existingDword = cpu.Bus != null
                 ? cpu.Bus.ReadDoubleWord(alignedAddr)
-                : cpu.Memory[alignedAddr] |
-                                 ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
-                                 ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
-                                 ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
-                                 ((ulong)cpu.Memory[alignedAddr + 4] << 32) |
-                                 ((ulong)cpu.Memory[alignedAddr + 5] << 40) |
-                                 ((ulong)cpu.Memory[alignedAddr + 6] << 48) |
-                                 ((ulong)cpu.Memory[alignedAddr + 7] << 56);
+                : cpu.IopBus != null
+                    ? (ulong)cpu.IopBus.ReadWord(alignedAddr) | ((ulong)cpu.IopBus.ReadWord(alignedAddr + 4) << 32)
+                    : cpu.Memory[alignedAddr] |
+                                     ((ulong)cpu.Memory[alignedAddr + 1] << 8) |
+                                     ((ulong)cpu.Memory[alignedAddr + 2] << 16) |
+                                     ((ulong)cpu.Memory[alignedAddr + 3] << 24) |
+                                     ((ulong)cpu.Memory[alignedAddr + 4] << 32) |
+                                     ((ulong)cpu.Memory[alignedAddr + 5] << 40) |
+                                     ((ulong)cpu.Memory[alignedAddr + 6] << 48) |
+                                     ((ulong)cpu.Memory[alignedAddr + 7] << 56);
             
             // Merge and write back
             // In LE mode: preserve upper (shift) bits, replace lower (byteOff+1) bytes of existing dword with value's lower bytes
@@ -570,6 +584,11 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu.Bus != null)
             {
                 cpu.Bus.WriteDoubleWord(alignedAddr, result);
+            }
+            else if (cpu.IopBus != null)
+            {
+                cpu.IopBus.WriteWord(alignedAddr,     (uint)(result));
+                cpu.IopBus.WriteWord(alignedAddr + 4, (uint)(result >> 32));
             }
             else
             {
