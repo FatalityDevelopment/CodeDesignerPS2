@@ -2211,7 +2211,8 @@ namespace CodeDesigner.Mips64LE.TestProject
             // CSR bits 0–4 are W1C: writing 1 to a bit that is already 0 leaves it 0.
             // Writing 0x1 to CSR when bit 0 = 0: W1C clears bit 0 (already 0) → stays 0.
             gs.WritePriv32(GS.PRIV_CSR, 0x00000001u);
-            Assert.AreEqual(0x00000000u, gs.ReadPriv32(GS.PRIV_CSR), "GS CSR W1C: clearing a 0 bit leaves 0");
+            // Only bits 0–4 are W1C; bits 16–31 (ID/REV) are read-only and always present.
+            Assert.AreEqual(0x00000000u, gs.ReadPriv32(GS.PRIV_CSR) & 0x1Fu, "GS CSR W1C: clearing a 0 bit leaves 0");
 
             // Set bit 0 via RaiseVSync's path, then confirm W1C clears it.
             gs.RaiseVSync(); // sets bit 3
@@ -2240,7 +2241,8 @@ namespace CodeDesigner.Mips64LE.TestProject
             // Bit 8 = FLUSH (command bit, not a status bit — stored as 0 after W1C clears nothing).
             // Writing 0x08 (bit 3 = VSYNC W1C) when bit 3 is already 0 → stays 0.
             bus.WriteWord(0x12001000u, 0x00000008u);
-            Assert.AreEqual(0x00000000u, bus.ReadWord(0x12001000u), "GS CSR VSYNC W1C on zero stays 0");
+            // Only bits 0–4 are W1C; bits 16–31 (ID/REV) are read-only and always present.
+            Assert.AreEqual(0x00000000u, bus.ReadWord(0x12001000u) & 0x1Fu, "GS CSR VSYNC W1C on zero stays 0");
         }
 
         [TestMethod]
