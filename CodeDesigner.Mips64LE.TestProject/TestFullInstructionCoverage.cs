@@ -1,6 +1,7 @@
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.CPU;
 using CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE;
+using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 
 namespace CodeDesigner.Mips64LE.TestProject
 {
@@ -1011,6 +1012,65 @@ namespace CodeDesigner.Mips64LE.TestProject
             Exec(cpu, encSd);
             Assert.AreEqual(0x78, mem[0x20], "SD: stored byte 0");
             AssertAnalysis(encSd);
+        }
+
+        [TestMethod]
+        public void Test_LD_SD_IopBus()
+        {
+            // Verify that LD/SD/LDL/LDR/SDL/SDR use IopBus when Bus is null
+            var iopBus = new IopMemoryBus();
+            // Write a known 64-bit value into IOP RAM via bus directly
+            iopBus.WriteWord(0x100, 0x04030201u);
+            iopBus.WriteWord(0x104, 0x08070605u);
+
+            var cpu = new CpuState { IopBus = iopBus };
+            cpu.RegsLo[16] = 0x100; // $s0 = base address
+
+            // LD via IopBus: load 8 bytes from 0x100
+            uint encLd = MipsEncoder.EncodeI(0x37, 16, 8, 0);
+            Exec(cpu, encLd);
+            Assert.AreEqual(0x0807060504030201UL, cpu.RegsLo[8], "LD via IopBus: loaded doubleword");
+
+            // SD via IopBus: store $t0 to 0x200
+            cpu.RegsLo[8]  = 0xDEADBEEFCAFEBABEUL;
+            cpu.RegsLo[16] = 0x200;
+            uint encSd = MipsEncoder.EncodeI(0x3F, 16, 8, 0);
+            Exec(cpu, encSd);
+            Assert.AreEqual(0xCAFEBABEu, iopBus.ReadWord(0x200), "SD via IopBus: low word stored");
+            Assert.AreEqual(0xDEADBEEFu, iopBus.ReadWord(0x204), "SD via IopBus: high word stored");
+        }
+
+        [TestMethod]
+        public void Test_SDL_SDR_IopBus()
+        {
+            // Verify that SDL/SDR use IopBus when Bus is null
+            var iopBus = new IopMemoryBus();
+            // Pre-fill aligned dword at 0x300 with 0xFF bytes
+            iopBus.WriteWord(0x300, 0xFFFFFFFFu);
+            iopBus.WriteWord(0x304, 0xFFFFFFFFu);
+
+            var cpu = new CpuState { IopBus = iopBus };
+            cpu.RegsLo[8]  = 0x0102030405060708UL; // $t0 = value to store
+            cpu.RegsLo[16] = 0x300; // $s0 = aligned address (byteOff=0)
+
+            // SDL at aligned address 0x300, byteOff=0: stores entire value (mask=0)
+            uint encSdl = MipsEncoder.EncodeI(0x2C, 16, 8, 0);
+            Exec(cpu, encSdl);
+            ulong lo = iopBus.ReadWord(0x300);
+            ulong hi = iopBus.ReadWord(0x304);
+            ulong stored = lo | (hi << 32);
+            Assert.AreEqual(0x0102030405060708UL, stored, "SDL via IopBus: full dword stored when byteOff=0");
+
+            // SDR at aligned address 0x310, byteOff=7 (addr=0x317): stores all 8 bytes
+            iopBus.WriteWord(0x310, 0xFFFFFFFFu);
+            iopBus.WriteWord(0x314, 0xFFFFFFFFu);
+            cpu.RegsLo[16] = 0x317; // byteOff=7, shift=0 → mask=0xFFFFFFFFFFFFFFFF covers all bytes
+            uint encSdr = MipsEncoder.EncodeI(0x2D, 16, 8, 0);
+            Exec(cpu, encSdr);
+            lo = iopBus.ReadWord(0x310);
+            hi = iopBus.ReadWord(0x314);
+            stored = lo | (hi << 32);
+            Assert.AreEqual(0x0102030405060708UL, stored, "SDR via IopBus: full dword stored when byteOff=7");
         }
 
         [TestMethod]
