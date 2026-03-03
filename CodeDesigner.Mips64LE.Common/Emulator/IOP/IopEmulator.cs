@@ -97,6 +97,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             State.Reset();
             InstructionCount = 0;
             SyncBridgeFromIop();
+            // IOP is an R3000A (PRId = 0x1F, which is < 0x59).
+            // The shared BIOS ROM at 0xBFC00000 reads COP0 PRId and uses SLTI to
+            // distinguish EE (R5900, PRId = 0x2E20 ≥ 0x59) from IOP (R3000A,
+            // PRId < 0x59) so each processor jumps to its own init path.
+            // Without this the IOP inherits the bridge's default EE PRId (0x2E20)
+            // and mistakenly runs the EE boot path at 0xBFC00800 instead of the
+            // IOP boot path at 0xBFC02000, corrupting shared hardware state and
+            // preventing the kernel from loading.
+            // Reference: PCSX2 R3000A.cpp — IOP PRID = 0x0000001F.
+            _bridge.COP0.WriteRegister32(15, 0x0000001Fu);
         }
 
         /// <summary>
@@ -176,7 +186,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             // using mfc0/mtc0 on reg 9 for clock-ratio measurement gets a real value.
             _bridge.COP0.IncrementCount(1);
 
-            if (_bridge.PC == pcBefore)
+            if (_bridge.PC == pcBefore && !IsBranchOrJumpInstruction(word))
             {
                 // Non-branch: just advance
                 State.PC = (uint)(pcBefore + 4u);
@@ -414,6 +424,30 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     int rt = (int)(word >> 16) & 0x1F;
                     return rt == 0x02 || rt == 0x03 || rt == 0x12 || rt == 0x13;
                 }
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns true if <paramref name="word"/> is any branch or jump instruction
+        /// (J, JAL, JR, JALR, BEQ/BNE/BLEZ/BGTZ and their -L variants, REGIMM branches).
+        /// Used to distinguish a jump-to-self from a true non-branch instruction.
+        /// </summary>
+        private static bool IsBranchOrJumpInstruction(uint word)
+        {
+            int op = (int)(word >> 26) & 0x3F;
+            switch (op)
+            {
+                case 0x02: case 0x03:  // J, JAL
+                    return true;
+                case 0x04: case 0x05: case 0x06: case 0x07:   // BEQ, BNE, BLEZ, BGTZ
+                case 0x14: case 0x15: case 0x16: case 0x17:   // BEQL, BNEL, BLEZL, BGTZL
+                    return true;
+                case 0x01:  // REGIMM: all sub-codes are branches
+                    return true;
+                case 0x00:  // SPECIAL: JR (funct=8), JALR (funct=9)
+                    return (word & 0x3F) == 8 || (word & 0x3F) == 9;
                 default:
                     return false;
             }
