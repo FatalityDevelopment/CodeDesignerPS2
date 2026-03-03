@@ -172,7 +172,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             InstructionCount++;
 
-            // ── PC advancement + branch delay slot ────────────────────────────
+            // Increment IOP COP0 Count (reg 9) each instruction so that BIOS code
+            // using mfc0/mtc0 on reg 9 for clock-ratio measurement gets a real value.
+            _bridge.COP0.IncrementCount(1);
 
             if (_bridge.PC == pcBefore)
             {
