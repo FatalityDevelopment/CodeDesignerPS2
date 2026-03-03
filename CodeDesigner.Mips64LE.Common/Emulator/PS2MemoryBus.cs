@@ -332,7 +332,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         // -----------------------------------------------------------------------
         // 64-bit little-endian
-        // -----------------------------------------------------------------------        public ulong ReadDoubleWord(uint vaddr)
+        // -----------------------------------------------------------------------
+
+        public ulong ReadDoubleWord(uint vaddr)
         {
             return ReadWord(vaddr) | ((ulong)ReadWord(vaddr + 4) << 32);
         }
