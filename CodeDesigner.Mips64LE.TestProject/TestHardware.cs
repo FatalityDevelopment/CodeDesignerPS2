@@ -1294,7 +1294,8 @@ namespace CodeDesigner.Mips64LE.TestProject
             var sif = new SIF();
             sif.WriteRegister(SIF.REG_F240, 0xBEEF0000u);
             Assert.AreEqual(0xBEEF0000u, sif.F240);
-            Assert.AreEqual(0xBEEF0000u, sif.ReadRegister(SIF.REG_F240));
+            // ReadRegister always OR-in permanent status bits 0xF0000102 (matches PCSX2 HwRead).
+            Assert.AreEqual(0xFEEF0102u, sif.ReadRegister(SIF.REG_F240));
         }
 
         [TestMethod]
@@ -1333,8 +1334,9 @@ namespace CodeDesigner.Mips64LE.TestProject
             // EE writes 0xBF: bits 5 (0x20) and 7 (0x80) are excluded from the OR
             // (per PCSX2 hw.cpp: value & ~0xa0 is OR'd; bit 5 and bit 15 are W1C).
             // F240 starts at 0, so W1C has no effect. Result: 0xBF & ~0xA0 = 0x1F.
+            // ReadRegister also OR-in permanent status bits 0xF0000102 (PCSX2 HwRead).
             bus.WriteWord(0x1000F240u, 0x000000BFu);
-            Assert.AreEqual(0x0000001Fu, bus.ReadWord(0x1000F240u), "F240: EE write ORs in non-W1C bits");
+            Assert.AreEqual(0xF000011Fu, bus.ReadWord(0x1000F240u), "F240: EE write ORs in non-W1C bits, read includes permanent status bits");
         }
 
         [TestMethod]
@@ -1344,8 +1346,9 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             // IOP writes 0x10 (bit 4) → sets bit 5 (0x20) in shared F240.
             // This is the IOP "I'm ready" signal that the EE BIOS polls.
+            // ReadRegister also OR-in permanent status bits 0xF0000102 (PCSX2 HwRead).
             sif.WriteIopRegister(SIF.REG_F240, 0x10u);
-            Assert.AreEqual(0x20u, sif.ReadRegister(SIF.REG_F240), "IOP bit 4 write must set bit 5 in F240");
+            Assert.AreEqual(0xF0000122u, sif.ReadRegister(SIF.REG_F240), "IOP bit 4 write must set bit 5 in F240");
         }
 
         [TestMethod]
@@ -1354,8 +1357,9 @@ namespace CodeDesigner.Mips64LE.TestProject
             var sif = new SIF();
 
             // IOP writes 0x40 (bit 6) → sets bit 15 (0x8000) in shared F240.
+            // ReadRegister also OR-in permanent status bits 0xF0000102 (PCSX2 HwRead).
             sif.WriteIopRegister(SIF.REG_F240, 0x40u);
-            Assert.AreEqual(0x8000u, sif.ReadRegister(SIF.REG_F240), "IOP bit 6 write must set bit 15 in F240");
+            Assert.AreEqual(0xF0008102u, sif.ReadRegister(SIF.REG_F240), "IOP bit 6 write must set bit 15 in F240");
         }
 
         [TestMethod]
@@ -1365,9 +1369,9 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             // Simulate IOP setting bit 5, then EE clearing it via W1C.
             sif.WriteIopRegister(SIF.REG_F240, 0x10u);   // IOP sets bit 5
-            Assert.AreEqual(0x20u, sif.ReadRegister(SIF.REG_F240), "IOP must have set bit 5");
+            Assert.AreEqual(0xF0000122u, sif.ReadRegister(SIF.REG_F240), "IOP must have set bit 5");
             sif.WriteRegister(SIF.REG_F240, 0x20u);       // EE W1C clears bit 5
-            Assert.AreEqual(0u, sif.ReadRegister(SIF.REG_F240), "EE W1C must clear bit 5");
+            Assert.AreEqual(0u, sif.ReadRegister(SIF.REG_F240) & 0x20u, "EE W1C must clear bit 5");
         }
 
         [TestMethod]
@@ -1377,7 +1381,7 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             // Full bootstrap: EE OR-writes bit 6 (0x40, a normal OR-able bit), IOP signals back, EE acknowledges.
             sif.WriteRegister(SIF.REG_F240, 0x40u);               // EE sets bit 6 (0x40 is OR'd in normally)
-            Assert.AreEqual(0x40u, sif.ReadRegister(SIF.REG_F240), "EE ready bits must be present");
+            Assert.AreEqual(0xF0000142u, sif.ReadRegister(SIF.REG_F240), "EE ready bits must be present");
 
             sif.WriteIopRegister(SIF.REG_F240, 0x10u);            // IOP writes bit 4 → sets bit 5
             uint f240 = sif.ReadRegister(SIF.REG_F240);
@@ -4093,6 +4097,95 @@ namespace CodeDesigner.Mips64LE.TestProject
             emu.Bus.Sif.WriteIopRegister(SIF.REG_SMFLAG, 0x1u);
             Assert.AreEqual(firstCount, fired,
                 "IopSignaledEe must not fire when no new SMFLAG bits are set");
+        }
+
+        // =====================================================================
+        // MCH RDRAM controller (0x1000F430 / 0x1000F440)
+        // =====================================================================
+
+        [TestMethod]
+        public void MCH_RICM_Read_Returns_Zero()
+        {
+            var bus = new PS2MemoryBus();
+            // Write a non-zero value to MCH_RICM
+            bus.WriteWord(0x1000F430u, 0x00210000u);
+            // PCSX2 HwRead.cpp: MCH_RICM read always returns 0 (busy flag cleared)
+            Assert.AreEqual(0u, bus.ReadWord(0x1000F430u), "MCH_RICM read must always return 0");
+        }
+
+        [TestMethod]
+        public void MCH_RICM_Write_ClearsBit31()
+        {
+            var bus = new PS2MemoryBus();
+            // Write with bit31 set — RICM stores value with bit31 cleared
+            bus.WriteWord(0x1000F430u, 0x80210000u);
+            // Read back via DRD SA=0x40 (DEVID) to check the stored value
+            bus.WriteWord(0x1000F430u, 0x00400000u);
+            uint drd = bus.ReadWord(0x1000F440u);
+            // SA=0x40: DRD returns _mchRicm & 0x1F. With value 0x00400000, lower 5 bits = 0.
+            Assert.AreEqual(0u, drd, "MCH_RICM bit31 (busy) must be cleared on store");
+        }
+
+        [TestMethod]
+        public void MCH_DRD_INIT_Returns_0x1F_For_Each_RDRAM_Device()
+        {
+            var bus = new PS2MemoryBus();
+            // INIT command: SA=0x21, SOP=0
+            bus.WriteWord(0x1000F430u, 0x00210000u);
+            uint dev0 = bus.ReadWord(0x1000F440u);
+            Assert.AreEqual(0x1Fu, dev0, "First RDRAM device must respond 0x1F");
+
+            uint dev1 = bus.ReadWord(0x1000F440u);
+            Assert.AreEqual(0x1Fu, dev1, "Second RDRAM device must respond 0x1F");
+
+            uint dev2 = bus.ReadWord(0x1000F440u);
+            Assert.AreEqual(0u, dev2, "No third device — must return 0");
+        }
+
+        [TestMethod]
+        public void MCH_DRD_CNFGA_Returns_0x0D0D()
+        {
+            var bus = new PS2MemoryBus();
+            // SA=0x23 (CNFGA), SOP=0
+            bus.WriteWord(0x1000F430u, 0x00230000u);
+            Assert.AreEqual(0x0D0Du, bus.ReadWord(0x1000F440u), "CNFGA must return 0x0D0D");
+        }
+
+        [TestMethod]
+        public void MCH_DRD_CNFGB_Returns_0x0090()
+        {
+            var bus = new PS2MemoryBus();
+            // SA=0x24 (CNFGB), SOP=0
+            bus.WriteWord(0x1000F430u, 0x00240000u);
+            Assert.AreEqual(0x0090u, bus.ReadWord(0x1000F440u), "CNFGB must return 0x0090");
+        }
+
+        [TestMethod]
+        public void MCH_RICM_INIT_Reset_Resets_Sdevid()
+        {
+            var bus = new PS2MemoryBus();
+            // SA=0x21, SOP=0: poll two devices
+            bus.WriteWord(0x1000F430u, 0x00210000u);
+            bus.ReadWord(0x1000F440u);
+            bus.ReadWord(0x1000F440u);
+            // Third poll returns 0 (no more devices)
+            Assert.AreEqual(0u, bus.ReadWord(0x1000F440u), "sdevid exhausted — must return 0");
+
+            // PCSX2 reset condition: write SA=0x21 with SOP=1 (bit6=1) and DRD bit7=0
+            // (bit6 of the value = bit6 of the low word = (value >> 6) & 0xF = 1)
+            bus.WriteWord(0x1000F430u, 0x00210040u); // SA=0x21, SOP=1 (bit6=1)
+            // Now reset should have cleared sdevid; re-poll returns 0x1F again
+            bus.WriteWord(0x1000F430u, 0x00210000u); // SA=0x21, SOP=0 to read
+            Assert.AreEqual(0x1Fu, bus.ReadWord(0x1000F440u), "sdevid must be reset after INIT command");
+        }
+
+        [TestMethod]
+        public void Sif_F260_Initialized_To_1D000060()
+        {
+            var sif = new SIF();
+            // PCSX2 hwReset() sets SBUS_F260 = 0x1D000060.
+            Assert.AreEqual(0x1D000060u, sif.ReadRegister(SIF.REG_F260),
+                "SBUS_F260 must be initialized to 0x1D000060 (PCSX2 hwReset)");
         }
     }
 }
