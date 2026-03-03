@@ -1,4 +1,5 @@
 {
+  "name": "codedesigner-workspace",
   "scripts": {
     "compile": "npm run compile --prefix codedesigner",
     "build": "npm run build --prefix codedesigner",

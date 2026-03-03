@@ -2,6 +2,18 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode/codedesigner"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/vscode/codedesigner/dist/**/*.js"
+      ],
+      "preLaunchTask": "build-extension"
+    },
+    {
       "name": "Help",
       "type": "coreclr",
       "request": "launch",
