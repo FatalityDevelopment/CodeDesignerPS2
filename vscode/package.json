@@ -1,5 +1,13 @@
 {
-  "dependencies": {
+  "scripts": {
+    "compile": "npm run compile --prefix codedesigner",
+    "build": "npm run build --prefix codedesigner",
+    "watch": "npm run watch --prefix codedesigner",
+    "package": "npm run package --prefix codedesigner",
+    "lint": "npm run lint --prefix codedesigner",
+    "install:dependencies": "npm install --prefix codedesigner"
+  },
+  "devDependencies": {
     "generator-code": "^1.11.16"
   }
 }
