@@ -126,6 +126,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             EE  = ee ?? new PS2Emulator();
             IOP = new IopEmulator(EE.Bus); // shares SIF via PS2MemoryBus.Sif
 
+            // Share the EE scratchpad with the IOP bus so that 0x70000000–0x70003FFF
+            // is coherent between both CPUs.  The real PS2 BIOS uses this region as a
+            // bootstrap stack and IPC handshake area on both the EE and IOP side.
+            IOP.Bus.SharedScratchpad = EE.Bus.Scratchpad;
+
             // Wire IOP DMAC CH9 (SIF0, RAM→device): IOP sends data to EE via SIF0 FIFO.
             IOP.Bus.Dmac.Channels[9].DeviceDataConsumer  = w => EE.Bus.Sif.WriteSif0(w);
 

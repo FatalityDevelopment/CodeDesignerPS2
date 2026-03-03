@@ -83,6 +83,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// <summary>Exposes BIOS ROM so callers can load a BIOS image.</summary>
         public byte[] Bios => _bios;
 
+        /// <summary>
+        /// Exposes the EE scratchpad RAM (16 KB, physical 0x70000000–0x70003FFF).
+        /// Shared with the IOP via <see cref="IopMemoryBus.SharedScratchpad"/> so that
+        /// the IOP can use 0x70000000 as its bootstrap stack and IPC area, exactly as
+        /// the real PS2 BIOS does during the EE–IOP SIF handshake.
+        /// Reference: PCSX2 psxMem.cpp — IOP bus maps 0x70000000 to EE scratchpad.
+        /// </summary>
+        public byte[] Scratchpad => _scratchpad;
+
         public PS2MemoryBus()
         {
             // Wire GIF to GS so GIFtag processing forwards register writes.
