@@ -24,7 +24,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
     ///   0x80000000 - 0x9FFFFFFF  (KSEG0 cached)   -> physical 0x00000000 - 0x1FFFFFFF
     ///   0xA0000000 - 0xBFFFFFFF  (KSEG1 uncached) -> physical 0x00000000 - 0x1FFFFFFF
     /// </summary>
-    public sealed class PS2MemoryBus : IMemoryBus
+    public sealed class PS2MemoryBus
     {
         // Region sizes
         public const int MainRamSize       = 32 * 1024 * 1024; // 32 MB

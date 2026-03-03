@@ -1,6 +1,7 @@
 ﻿using CodeDesigner.Mips64LE.Common.CPU.COP0;
 using CodeDesigner.Mips64LE.Common.CPU.COP1;
 using CodeDesigner.Mips64LE.Common.Emulator;
+using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU0;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU1;
 using System;
@@ -37,7 +38,11 @@ namespace CodeDesigner.Mips64LE.Common.CPU
 
         // Memory bus – when set, all load/store instructions route through this
         // for full virtual-address translation and I/O register dispatch.
-        public IMemoryBus? Bus { get; set; }
+        public PS2MemoryBus? Bus { get; set; }
+
+        // IOP memory bus – when set (IOP bridge path), load/store instructions
+        // route through this for IOP address translation and I/O dispatch.
+        public IopMemoryBus? IopBus { get; set; }
 
         // FPU registers (32 x 32-bit)
         public float[] FPR { get; } = new float[32];

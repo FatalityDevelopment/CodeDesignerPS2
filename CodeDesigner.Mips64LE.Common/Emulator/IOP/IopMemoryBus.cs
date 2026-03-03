@@ -28,7 +28,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     ///
     /// Reference: PCSX2 pcsx2/IopDma.h, pcsx2/IopMem.cpp.
     /// </summary>
-    public sealed class IopMemoryBus : IMemoryBus
+    public sealed class IopMemoryBus
     {
         // ── Region sizes ──────────────────────────────────────────────────────
         public const int RamSize       = 2 * 1024 * 1024;  // 2 MB
@@ -552,33 +552,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         {
             WriteByte(addr,     (byte)value);
             WriteByte(addr + 1, (byte)(value >> 8));
-        }
-
-        // ── 64-bit and 128-bit helpers (IMemoryBus contract) ─────────────────
-        //
-        // The IOP is a 32-bit R3000A and never executes LD/SD/LQ/SQ, but these
-        // methods are required to satisfy the IMemoryBus interface so that the
-        // shared EE instruction implementations compile without modification.
-
-        public ulong ReadDoubleWord(uint addr)
-            => ReadWord(addr) | ((ulong)ReadWord(addr + 4) << 32);
-
-        public void WriteDoubleWord(uint addr, ulong value)
-        {
-            WriteWord(addr,     (uint)value);
-            WriteWord(addr + 4, (uint)(value >> 32));
-        }
-
-        public void ReadQuadWord(uint addr, out ulong lo, out ulong hi)
-        {
-            lo = ReadDoubleWord(addr);
-            hi = ReadDoubleWord(addr + 8);
-        }
-
-        public void WriteQuadWord(uint addr, ulong lo, ulong hi)
-        {
-            WriteDoubleWord(addr,     lo);
-            WriteDoubleWord(addr + 8, hi);
         }
 
         // ── Timer helpers ─────────────────────────────────────────────────────
