@@ -230,6 +230,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // Mount the disc in the IOP CDVD drive.  This wires the data-ready
             // interrupt and the DMAC channel-3 data provider automatically.
             scheduler.IOP.Bus.Cdvd = cdvd;
+            // Also expose the disc type to the EE bus so the EE BIOS
+            // disc-detection code (which reads Mechacon at 0x1F803204 via the
+            // EE physical address space) can see the inserted disc.
+            scheduler.EE.Bus.Cdvd = cdvd;
 
             // Read SYSTEM.CNF for the boot path (informational — no ELF loading).
             try

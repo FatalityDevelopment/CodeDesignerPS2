@@ -46,6 +46,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private const uint SifMirrorBase  = 0x1D000000u;
         private const uint BiosBase       = 0x1FC00000u;
 
+        // Mechacon disc-type register: IOP BIOS reads byte at 0x1F803204 to detect
+        // the disc type.  The lower nibble of bits [7:4] encodes the disc family:
+        //   0x14 → PS2_DVD, 0x10 → PS2_CD, 0x00 → no disc.
+        // Reference: PCSX2 pcsx2/IopHw.cpp mechacon register reads.
+        private const uint MecanonDiscTypeAddr = 0x1F803204u;
+
         // Each timer bank covers 3 timers × 0x10 bytes = 0x30 bytes.
         private const uint TimerBankSize  = 0x30u;
 
@@ -522,6 +528,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public byte ReadByte(uint addr)
         {
             addr = TranslateAddress(addr);
+
+            // Mechacon disc-type register: IOP BIOS disc detection polls this byte
+            // to determine the disc family inserted in the drive.
+            if (addr == MecanonDiscTypeAddr)
+                return _cdvd?.DiscType ?? Cdvd.DISC_NO_DISC;
 
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
                 return _cdvd.ReadRegister(addr - Cdvd.RegBase);
