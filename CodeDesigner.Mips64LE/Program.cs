@@ -155,13 +155,16 @@ namespace CodeDesigner.Mips64LE
                 Console.WriteLine("\nStopping emulator...");
             };
 
-            const int SliceSize     = 256;           // EE steps per scheduler call
-            const int ReportEvery   = 1_000_000;     // print stats every N EE steps
+            const int SliceSize          = 256;           // EE steps per scheduler call
+            const int ReportEvery        = 1_000_000;     // print stats every N EE steps
+            const int SpinReportInterval = 5;             // compact spin reminder every N report periods
             long      totalSteps    = 0;
             long      nextReport    = ReportEvery;
             var       startTime     = DateTime.UtcNow;
             uint      lastEePc      = uint.MaxValue;
+            uint      lastIopPc     = uint.MaxValue;
             int       spinCount     = 0;
+            int       iopSpinCount  = 0;
 
             try
             {
@@ -180,13 +183,30 @@ namespace CodeDesigner.Mips64LE
                         uint eePc32 = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
                         uint iopPc  = scheduler.IOP.State.PC;
 
-                        // Track spin-loops: EE PC stuck at same address across consecutive
+                        // Track EE spin-loops: PC stuck at same address across consecutive
                         // report intervals.  Matches PCSX2's "EE is spinning" detection.
                         if (eePc32 == lastEePc)
                         {
                             spinCount++;
                             if (spinCount == 1)
+                            {
                                 Console.WriteLine($"*** EE is spinning at 0x{eePc32:x8} [{GetPcRegion(eePc32)}] ***");
+                                // Dump full interrupt / SIF / IOP state the first time we detect a spin
+                                // so we can see immediately why the EE is not taking the interrupt.
+                                DumpInterruptState(scheduler);
+                            }
+                            else if (spinCount % SpinReportInterval == 0)
+                            {
+                                // Compact reminder every 5M EE steps while still spinning
+                                uint intcSt = scheduler.EE.Bus.Intc.Stat;
+                                uint intcMk = scheduler.EE.Bus.Intc.Mask;
+                                uint eeStatus = scheduler.EE.Cpu.COP0.ReadRegister32(12);
+                                Console.WriteLine(
+                                    $"  [spin@{totalSteps:N0}] " +
+                                    $"INTC STAT=0x{intcSt:x8} MASK=0x{intcMk:x8} " +
+                                    $"COP0.Status=0x{eeStatus:x8} " +
+                                    $"SIF.F240=0x{scheduler.EE.Bus.Sif.F240:x8}");
+                            }
                         }
                         else
                         {
@@ -194,13 +214,27 @@ namespace CodeDesigner.Mips64LE
                             lastEePc   = eePc32;
                         }
 
-                        string eeInsn = DisassembleAt(scheduler.EE.Bus, eePc32);
+                        // Track IOP spin-loops independently.
+                        if (iopPc == lastIopPc)
+                        {
+                            iopSpinCount++;
+                            if (iopSpinCount == 1)
+                                Console.WriteLine($"*** IOP is spinning at 0x{iopPc:x8} [{GetPcRegion(iopPc)}] ***");
+                        }
+                        else
+                        {
+                            iopSpinCount = 0;
+                            lastIopPc    = iopPc;
+                        }
+
+                        string eeInsn  = DisassembleAt(scheduler.EE.Bus, eePc32);
+                        string iopInsn = DisassembleIopAt(scheduler.IOP.Bus, iopPc);
 
                         // Format mirrors PCSX2's EE/IOP trace log prefix:
                         //   (EE pc:0xbfc001a8, cycle:N) <disasm>
-                        //   (IOP pc:0xbfc00120, cycle:N)
+                        //   (IOP pc:0xbfc00120, cycle:N) <disasm>
                         Console.WriteLine($"(EE  pc:0x{eePc32:x8} [{GetPcRegion(eePc32)}], cycle:{totalSteps:N0}) {eeInsn}");
-                        Console.WriteLine($"(IOP pc:0x{iopPc:x8} [{GetPcRegion(iopPc)}], cycle:{scheduler.TotalIopSteps:N0})");
+                        Console.WriteLine($"(IOP pc:0x{iopPc:x8} [{GetPcRegion(iopPc)}], cycle:{scheduler.TotalIopSteps:N0}) {iopInsn}");
                         Console.WriteLine($"     ~{mips:F2} MIPS");
                         Console.WriteLine();
 
@@ -353,6 +387,93 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine("Reference implementations to study:");
             Console.WriteLine("  • PCSX2 pcsx2/GS/Renderers/OpenGL/GSDeviceOGL.cpp");
             Console.WriteLine("  • PCSX2 pcsx2/Frontend/MainWindow.cpp (game loop / vsync timing)");
+        }
+
+        // ── PCSX2-style interrupt diagnostics ────────────────────────────────
+
+        /// <summary>
+        /// Dump EE and IOP interrupt state in a PCSX2-style format so that the
+        /// root cause of a spin loop (EE waiting for interrupt that never arrives)
+        /// can be identified quickly.  Emits one block per call.
+        /// </summary>
+        private static void DumpInterruptState(DualCpuScheduler sched)
+        {
+            // ── EE COP0 ──────────────────────────────────────────────────────
+            uint eeStatus = sched.EE.Cpu.COP0.ReadRegister32(12);
+            uint eeCause  = sched.EE.Cpu.COP0.ReadRegister32(13);
+            bool eeIE    = (eeStatus & 0x00001u) != 0;   // global IE
+            bool eeEXL   = (eeStatus & 0x00002u) != 0;   // exception level
+            bool eeERL   = (eeStatus & 0x00004u) != 0;   // error level
+            bool eeEIE   = (eeStatus & 0x10000u) != 0;   // PS2 extended IE (must be 1)
+            bool eeIM2   = (eeStatus & 0x00400u) != 0;   // IM2 → INTC interrupt mask
+            bool eeIM7   = (eeStatus & 0x08000u) != 0;   // IM7 → timer interrupt mask
+            bool eeIP2   = (eeCause  & 0x00400u) != 0;   // IP2 (INTC pending in Cause)
+            bool eeIP7   = (eeCause  & 0x08000u) != 0;   // IP7 (timer pending in Cause)
+
+            uint intcStat = sched.EE.Bus.Intc.Stat;
+            uint intcMask = sched.EE.Bus.Intc.Mask;
+
+            // ── SIF ──────────────────────────────────────────────────────────
+            uint sifF240   = sched.EE.Bus.Sif.F240;
+            uint sifMsCom  = sched.EE.Bus.Sif.MsCom;
+            uint sifSmCom  = sched.EE.Bus.Sif.SmCom;
+            uint sifMsFlag = sched.EE.Bus.Sif.MsFlag;
+            uint sifSmFlag = sched.EE.Bus.Sif.SmFlag;
+
+            // ── IOP R3000A ───────────────────────────────────────────────────
+            uint iopSR    = sched.IOP.State.SR;
+            uint iopCause = sched.IOP.State.Cause;
+            bool iopIEc   = (iopSR    & 0x001u) != 0;   // IEc — current IE
+            bool iopBEV   = (iopSR    & 0x00400000u) != 0;  // BEV — bootstrap exception vectors
+            bool iopIM2   = (iopSR    & 0x400u) != 0;   // IM2
+            bool iopIP2   = (iopCause & 0x400u) != 0;   // IP2 (INTC pending)
+            uint iopIStat = sched.IOP.Bus.IStat;
+            uint iopIMask = sched.IOP.Bus.IMask;
+
+            Console.WriteLine("=== interrupt diagnostics ===");
+            Console.WriteLine(
+                $"  EE  COP0.Status: 0x{eeStatus:x8}  " +
+                $"IE={B(eeIE)} EXL={B(eeEXL)} ERL={B(eeERL)} EIE={B(eeEIE)} " +
+                $"IM2={B(eeIM2)} IM7={B(eeIM7)}");
+            Console.WriteLine(
+                $"  EE  COP0.Cause:  0x{eeCause:x8}  IP2={B(eeIP2)} IP7={B(eeIP7)}");
+            Console.WriteLine(
+                $"  EE  INTC_STAT:   0x{intcStat:x8}  " +
+                $"INTC_MASK: 0x{intcMask:x8}  " +
+                $"pending={sched.EE.Bus.Intc.IsInterruptPending}");
+            Console.WriteLine(
+                $"  SIF F240:0x{sifF240:x8}  " +
+                $"MSCOM:0x{sifMsCom:x8}  SMCOM:0x{sifSmCom:x8}  " +
+                $"MSFLAG:0x{sifMsFlag:x8}  SMFLAG:0x{sifSmFlag:x8}");
+            Console.WriteLine(
+                $"  IOP SR:    0x{iopSR:x8}  IEc={B(iopIEc)} BEV={B(iopBEV)} IM2={B(iopIM2)}");
+            Console.WriteLine(
+                $"  IOP Cause: 0x{iopCause:x8}  IP2={B(iopIP2)}");
+            Console.WriteLine(
+                $"  IOP I_STAT: 0x{iopIStat:x8}  " +
+                $"I_MASK: 0x{iopIMask:x8}  " +
+                $"pending={sched.IOP.Bus.IsInterruptPending}");
+            Console.WriteLine("=============================");
+        }
+
+        /// <summary>1 or 0 string for a boolean flag, matching PCSX2 log style.</summary>
+        private static string B(bool v) => v ? "1" : "0";
+
+        /// <summary>
+        /// Safely disassemble one IOP instruction from its virtual PC.
+        /// Returns a placeholder on any bus access failure.
+        /// </summary>
+        private static string DisassembleIopAt(IopMemoryBus bus, uint pc)
+        {
+            try
+            {
+                uint word = bus.ReadWord(pc);
+                return MipsDisassembler.Disassemble(word, pc);
+            }
+            catch
+            {
+                return "??";
+            }
         }
 
         // ── Argument helpers ──────────────────────────────────────────────────

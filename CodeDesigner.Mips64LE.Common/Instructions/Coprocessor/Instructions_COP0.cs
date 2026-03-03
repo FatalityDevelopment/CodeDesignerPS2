@@ -419,6 +419,42 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.COP0
         }
     }
 
+    // RFE - Return From Exception (R3000A / IOP only, funct=0x10)
+    // Restores the IE/KU status stack: {IEc,KUc} ← {IEp,KUp}; {IEp,KUp} ← {IEo,KUo}
+    // Does NOT modify PC — the caller uses a preceding JR $k0 to restore EPC.
+    // Reference: PCSX2 pcsx2/R3000A.cpp psxRFE / PS2 IOP Technical Reference.
+    public sealed class RFE : Instruction<Args_R>
+    {
+        public RFE()
+        {
+            Opcode = 0x10;
+            Funct = 0x10;
+            Name = "rfe";
+            ArgType = InstrArgType.R;
+            ArgNames = [];
+            Equation = "SR = (SR & ~0x0F) | ((SR & 0x3C) >> 2)";
+            Description = "Return from exception (R3000A) - restores IE/KU status stack";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            // Pop the IE/KU stack (reverse of exception entry):
+            //   {IEc(0),KUc(1)} ← {IEp(2),KUp(3)}; {IEp(2),KUp(3)} ← {IEo(4),KUo(5)}
+            // Reference: PCSX2 R3000A.cpp psxRFE
+            uint sr = cpu.COP0.ReadRegister32(12);
+            sr = (sr & ~0x0Fu) | ((sr & 0x3Cu) >> 2);
+            cpu.COP0.WriteRegister32(12, sr);
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null) => Name;
+
+        public override uint Asm(int[] args)
+            => (uint)(Opcode << 26 | 0x10 << 21 | (Funct ?? 0));
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+            => "Restore IE/KU stack: IEc←IEp, KUc←KUp, IEp←IEo, KUp←KUo";
+    }
+
     // TLBR - Read indexed TLB entry
     public sealed class TLBR : Instruction<Args_R>
     {

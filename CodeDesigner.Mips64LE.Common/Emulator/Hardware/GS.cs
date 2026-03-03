@@ -1406,12 +1406,32 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
                 case PRIV_EXTDATA:  _extdata  = value; break;
                 case PRIV_EXTWRITE: _extwrite = value; break;
                 case PRIV_BGCOLOR:  _bgcolor  = value; break;
-                case PRIV_CSR:      _csr      = value; break;
+                case PRIV_CSR:
+                    // Bits 0–4 (SIGNAL/FINISH/HSYNC/VSYNC/EDWINT) are write-1-to-clear.
+                    // Bits 8–9 (FLUSH/RESET) are commands — not stored in the status field.
+                    // Bits 10–15 are read-only hardware status — writes ignored.
+                    _csr &= ~(value & 0x1Ful);
+                    break;
                 case PRIV_IMR:      _imr      = value; break;
                 case PRIV_BUSDIR:   _busdir   = value; break;
                 case PRIV_SIGLBLID: _siglblid = value; break;
             }
         }
+
+        #endregion
+
+        // =======================================================================
+        #region VSync / interrupt generation
+        // =======================================================================
+
+        /// <summary>
+        /// Assert the VSYNC interrupt bit (bit 3) in GS_CSR.
+        /// Called by the emulator's VBlank generator at each vertical-sync interval.
+        /// Software detects a new VSync by polling this bit; it clears the bit
+        /// by writing a 1 back to GS_CSR bit 3 (write-1-to-clear semantics).
+        /// Reference: PS2 GS User's Manual §4.1 CSR register.
+        /// </summary>
+        public void RaiseVSync() => _csr |= 0x8ul;  // bit 3 = VSYNC
 
         #endregion
 

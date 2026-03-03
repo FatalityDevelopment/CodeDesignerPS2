@@ -1,5 +1,6 @@
 using CodeDesigner.Mips64LE.Common.CPU;
 using CodeDesigner.Mips64LE.Common.CPU.COP0;
+using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU0;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU1;
 using System;
@@ -45,6 +46,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
     {
         public CpuState Cpu  { get; }
         public PS2MemoryBus Bus { get; }
+
+        // ── VBlank / VSync timing constants (NTSC 60 Hz, 147.456 MHz EE bus) ────
+        // PS2 NTSC: 147,456,000 bus cycles per second / 60 Hz = 2,457,600 per frame.
+        // VBlank starts at scan line 235 of 262.5 (~89.6% through the frame).
+        // Reference: PCSX2 pcsx2/R5900.cpp GetVsyncFrequency / ps2/IopCounters.cpp
+        public const uint NtscFrameCycles      = 2_457_600u;
+        public const uint NtscVBlankStartCycle = 2_201_856u; // 235 × 9369 cycles/line
+
+        private uint _vSyncCycles;
+        private bool _inVBlank;
 
         /// <summary>Total instructions executed since last reset.</summary>
         public ulong InstructionCount { get; private set; }
@@ -133,6 +144,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             // Wire DMAC channel-complete events
             WireDmacEvents();
+
+            // Wire SIF IOP→EE signal to INTC SBUS interrupt (bit 1).
+            // When the IOP sets bits in SMFLAG (via WriteIopRegister), the EE must
+            // be interrupted so it can process the IOP response and exit any spin loop.
+            Bus.Sif.IopSignaledEe += (_, _) => Bus.Intc.RaiseInterrupt(INTC.INT_SBUS);
 
             Reset();
         }
@@ -536,6 +552,42 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             foreach (var timer in Bus.Timers)
                 timer.Tick(busCycles);
+
+            // ── VBlank / VSync generation (NTSC 60 Hz) ───────────────────────
+            // Accumulate EE bus cycles and fire VBlank-start and VBlank-end at the
+            // correct frame positions.
+            //
+            //  VBlank-start (INTC bit 2, GS_CSR bit 3):
+            //    Fires after 235 of 262.5 scan lines (~89.6% through the frame).
+            //    • Sets GS_CSR bit 3 so GS-CSR polling code (e.g. the vSync sub
+            //      that ORs bit 3 to clear it, then polls until it's set again)
+            //      unblocks on the next VSync.
+            //    • Raises INTC VBLANK_S so BIOS/games using INTC-based interrupt
+            //      handlers break out of their wait loops.
+            //
+            //  VBlank-end (INTC bit 3):
+            //    Fires at the start of the new active period (frame rollover).
+            uint vPrev = _vSyncCycles;
+            _vSyncCycles += busCycles;
+
+            if (!_inVBlank
+                && vPrev < NtscVBlankStartCycle
+                && _vSyncCycles >= NtscVBlankStartCycle)
+            {
+                _inVBlank = true;
+                Bus.Gs.RaiseVSync();           // GS_CSR bit 3 for polling code
+                Bus.Intc.RaiseVBlankStart();   // INTC bit 2 for interrupt-based code
+            }
+
+            if (_vSyncCycles >= NtscFrameCycles)
+            {
+                _vSyncCycles -= NtscFrameCycles;
+                if (_inVBlank)
+                {
+                    _inVBlank = false;
+                    Bus.Intc.RaiseVBlankEnd();  // INTC bit 3
+                }
+            }
 
             if (Bus.Intc.IsInterruptPending)
                 InterruptPending?.Invoke(this, Bus.Intc.Stat);

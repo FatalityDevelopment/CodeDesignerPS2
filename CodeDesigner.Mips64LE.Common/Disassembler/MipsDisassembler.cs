@@ -180,6 +180,7 @@ namespace CodeDesigner.Mips64LE.Common
             RegisterCop(new TLBWI(), 0x10);  // rs = 0x10, funct = 0x02
             RegisterCop(new TLBWR(), 0x10);  // rs = 0x10, funct = 0x06
             RegisterCop(new TLBP(), 0x10);   // rs = 0x10, funct = 0x08
+            RegisterCop(new RFE(),  0x10);   // rs = 0x10, funct = 0x10 (R3000A/IOP)
             RegisterCop(new ERET(), 0x10);   // rs = 0x10, funct = 0x18
 
             // COP1 instructions (opcode 0x11)
