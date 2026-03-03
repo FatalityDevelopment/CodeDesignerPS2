@@ -48,6 +48,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private const uint IntcBase   = 0x1000F000u;  // INTC_STAT / INTC_MASK
         private const uint SifBase    = 0x1000F200u;  // SIF registers
 
+        // Mechacon disc-type register (shared IOP/EE physical address space).
+        // The EE BIOS disc-detection code reads byte at 0x1F803204 via KSEG1
+        // (0xBF803204) to determine the disc family inserted in the drive.
+        // Reference: PCSX2 pcsx2/IopHw.cpp mechacon register reads.
+        private const uint MecanonDiscTypeAddr = 0x1F803204u;
+
         private readonly byte[] _ram        = new byte[MainRamSize];
         private readonly byte[] _bios       = new byte[BiosRomSize];
         private readonly byte[] _scratchpad = new byte[ScratchpadSize];
@@ -76,6 +82,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         /// <summary>GS — Graphics Synthesizer (privileged registers at 0x12000000).</summary>
         public GS Gs { get; } = new GS();
+
+        /// <summary>
+        /// Optional reference to the CDVD drive.  When set, byte reads from the
+        /// Mechacon disc-type register (physical 0x1F803204) return the current
+        /// disc type so the EE BIOS can detect the inserted disc — the same
+        /// register that <see cref="IopMemoryBus"/> exposes to the IOP BIOS.
+        /// </summary>
+        public IOP.Cdvd? Cdvd { get; set; }
 
         /// <summary>Exposes main RAM so callers can bulk-load programs.</summary>
         public byte[] Ram => _ram;
@@ -131,6 +145,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public byte ReadByte(uint vaddr)
         {
             uint paddr = TranslateAddress(vaddr);
+            // Mechacon disc-type register: EE BIOS disc-detection reads this byte.
+            if (paddr == MecanonDiscTypeAddr)
+                return Cdvd?.DiscType ?? IOP.Cdvd.DISC_NO_DISC;
             (byte[] region, uint offset) = MapPhysical(paddr);
             return region[offset];
         }
