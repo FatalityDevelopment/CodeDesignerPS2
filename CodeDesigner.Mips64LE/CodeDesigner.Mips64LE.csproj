@@ -26,4 +26,8 @@
     <ProjectReference Include="..\CodeDesigner.Mips64LE.Common\CodeDesigner.Mips64LE.Common.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Isos\" />
+  </ItemGroup>
+
 </Project>
