@@ -3,6 +3,7 @@ import * as fs from "fs";
 import { getNonce } from "../../helpers";
 import { getDisasmEditorHtml, DisasmEditorData } from "./disasmEditorTemplate";
 import { SocketClient } from "../../socketClient";
+import { getOutputChannel } from "../../extension";
 
 /**
  * Allowed searchable fields in a disassembled instruction row
@@ -65,8 +66,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     if (!this.socketClient || !this.socketClient.isConnected()) {
       const msg = "Socket client not available or not connected, cannot disassemble";
       console.warn(msg);
-      const vscode = require('vscode');
-      const outputChannel = vscode.window.outputChannel;
+      const outputChannel = getOutputChannel();
       if (outputChannel) {
         outputChannel.appendLine(`[WARN] ${msg}`);
       }
@@ -136,7 +136,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(`[DISASM] Failed to disassemble with backend: ${errorMsg}`);
-      const vscode = require('vscode');
       vscode.window.showErrorMessage(`Disassembly failed: ${errorMsg}`);
       // Return empty array on error
     }
