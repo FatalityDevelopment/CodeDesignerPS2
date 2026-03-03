@@ -18,7 +18,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
     ///   00 → bus clock / 2   (~37.5 MHz, use ~2 cycles per tick)
     ///   01 → bus clock / 16
     ///   10 → bus clock / 256
-    ///   11 → external (H-BLANK for T0/T1; SPU2 for T2/T3 — treated as /256 here)
+    ///   11 → external: H-BLANK for T0/T1 (NTSC ~18745 EE cycles/line), SPU2 for T2/T3
     ///
     /// Reference: PCSX2 pcsx2/IopCounters.cpp, pcsx2/R5900.cpp clock_ratio comments.
     /// </summary>
@@ -42,9 +42,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         private const uint MODE_EQUF  = 0x0400u; // [10]   equal flag (cleared on read)
         private const uint MODE_OVFF  = 0x0800u; // [11]   overflow flag (cleared on read)
 
-        // Clock dividers indexed by CLKS[1:0].  The PS2 EE bus runs at ~75 MHz;
+        // Clock dividers indexed by CLKS[1:0].  The PS2 EE bus runs at 147.456 MHz;
         // dividers below give the number of bus-clock cycles per timer increment.
-        private static readonly uint[] ClkDividers = { 2, 16, 256, 256 };
+        // CLKS=3 (H-BLANK for T0/T1): the EE CPU runs at 294.912 MHz and COP0 Count
+        // increments at the full CPU rate.  NTSC H-blank fires at 15,734 Hz, giving
+        // 294,912,000 / 15,734 ≈ 18,745 EE-CPU-cycles per H-blank.  In our emulator
+        // IncrementCount(1) runs at the same rate as TickHardware, so the divider
+        // must equal the CPU-cycle count per H-blank (18,745) for the BIOS clock-
+        // calibration loop (divu Count, 10500) to produce the expected non-zero quotient.
+        // Reference: PCSX2 R5900.cpp cpuCountUpdate, IopCounters.cpp hscanline timing.
+        private static readonly uint[] ClkDividers = { 2, 16, 256, 18745 };
 
         /// <summary>True for T0 and T1 which have a hold register.</summary>
         public bool HasHold { get; }

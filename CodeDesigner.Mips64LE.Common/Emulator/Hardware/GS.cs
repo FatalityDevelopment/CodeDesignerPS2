@@ -94,7 +94,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         private ulong _synch1, _synch2, _syncv;
         private ulong _dispfb1, _display1, _dispfb2, _display2;
         private ulong _extbuf, _extdata, _extwrite, _bgcolor;
-        private ulong _csr, _imr, _busdir, _siglblid;
+        // GS_CSR[31:24] = chip ID (0x04), GS_CSR[23:16] = chip revision (0x01).
+        // These read-only fields are tested by the BIOS during clock/display calibration.
+        // Reference: PS2 GS User's Manual §4.1; PCSX2 GSState.cpp.
+        private ulong _csr = (0x04UL << 24) | (0x01UL << 16);
+        private ulong _imr, _busdir, _siglblid;
 
         // =======================================================================
         #region VRAM
