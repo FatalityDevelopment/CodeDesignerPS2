@@ -41,7 +41,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             
             sbyte value = cpu.Bus != null
                 ? (sbyte)cpu.Bus.ReadByte(addr)
-                : (sbyte)cpu.Memory[addr];
+                : cpu.IopBus != null
+                    ? (sbyte)cpu.IopBus.ReadByte(addr)
+                    : (sbyte)cpu.Memory[addr];
             long signExtended = value; // Sign-extend to 64-bit
             cpu.RegsLo[args.Rt] = (ulong)signExtended;
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
@@ -96,7 +98,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             
             byte value = cpu.Bus != null
                 ? cpu.Bus.ReadByte(addr)
-                : cpu.Memory[addr];
+                : cpu.IopBus != null
+                    ? cpu.IopBus.ReadByte(addr)
+                    : cpu.Memory[addr];
             cpu.RegsLo[args.Rt] = value; // Zero-extend to 64-bit
             cpu.RegsHi[args.Rt] = 0;
         }
@@ -151,7 +155,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Little-endian load
             short value = cpu.Bus != null
                 ? (short)cpu.Bus.ReadHalf(addr)
-                : (short)(cpu.Memory[addr] | (cpu.Memory[addr + 1] << 8));
+                : cpu.IopBus != null
+                    ? (short)cpu.IopBus.ReadHalf(addr)
+                    : (short)(cpu.Memory[addr] | (cpu.Memory[addr + 1] << 8));
             long signExtended = value; // Sign-extend to 64-bit
             cpu.RegsLo[args.Rt] = (ulong)signExtended;
             cpu.RegsHi[args.Rt] = signExtended < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
@@ -207,7 +213,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Little-endian load
             ushort value = cpu.Bus != null
                 ? cpu.Bus.ReadHalf(addr)
-                : (ushort)(cpu.Memory[addr] | (cpu.Memory[addr + 1] << 8));
+                : cpu.IopBus != null
+                    ? cpu.IopBus.ReadHalf(addr)
+                    : (ushort)(cpu.Memory[addr] | (cpu.Memory[addr + 1] << 8));
             cpu.RegsLo[args.Rt] = value; // Zero-extend to 64-bit
             cpu.RegsHi[args.Rt] = 0;
         }
@@ -262,10 +270,12 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Little-endian load
             int value = cpu.Bus != null
                 ? (int)cpu.Bus.ReadWord(addr)
-                : (int)(cpu.Memory[addr] | 
-                             (cpu.Memory[addr + 1] << 8) | 
-                             (cpu.Memory[addr + 2] << 16) | 
-                             (cpu.Memory[addr + 3] << 24));
+                : cpu.IopBus != null
+                    ? (int)cpu.IopBus.ReadWord(addr)
+                    : (int)(cpu.Memory[addr] | 
+                                 (cpu.Memory[addr + 1] << 8) | 
+                                 (cpu.Memory[addr + 2] << 16) | 
+                                 (cpu.Memory[addr + 3] << 24));
             
             long signExtended = value; // Sign-extend to 64-bit
             cpu.RegsLo[args.Rt] = (ulong)signExtended;
@@ -322,10 +332,12 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Little-endian load
             uint value = cpu.Bus != null
                 ? cpu.Bus.ReadWord(addr)
-                : (uint)(cpu.Memory[addr] | 
-                               (cpu.Memory[addr + 1] << 8) | 
-                               (cpu.Memory[addr + 2] << 16) | 
-                               (cpu.Memory[addr + 3] << 24));
+                : cpu.IopBus != null
+                    ? cpu.IopBus.ReadWord(addr)
+                    : (uint)(cpu.Memory[addr] | 
+                                   (cpu.Memory[addr + 1] << 8) | 
+                                   (cpu.Memory[addr + 2] << 16) | 
+                                   (cpu.Memory[addr + 3] << 24));
             
             cpu.RegsLo[args.Rt] = value; // Zero-extend to 64-bit
             cpu.RegsHi[args.Rt] = 0;
@@ -446,10 +458,12 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Load word from aligned address
             uint word = cpu.Bus != null
                 ? cpu.Bus.ReadWord(alignedAddr)
-                : (uint)(cpu.Memory[alignedAddr] |
-                              (cpu.Memory[alignedAddr + 1] << 8) |
-                              (cpu.Memory[alignedAddr + 2] << 16) |
-                              (cpu.Memory[alignedAddr + 3] << 24));
+                : cpu.IopBus != null
+                    ? cpu.IopBus.ReadWord(alignedAddr)
+                    : (uint)(cpu.Memory[alignedAddr] |
+                                  (cpu.Memory[alignedAddr + 1] << 8) |
+                                  (cpu.Memory[alignedAddr + 2] << 16) |
+                                  (cpu.Memory[alignedAddr + 3] << 24));
             
             // Merge with existing register value
             uint mask = 0xFFFFFFFFu << shift;
@@ -514,11 +528,12 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Load word from aligned address
             uint word = cpu.Bus != null
                 ? cpu.Bus.ReadWord(alignedAddr)
-                : (uint)(cpu.Memory[alignedAddr] |
-                              (cpu.Memory[alignedAddr + 1] << 8) |
-                              (cpu.Memory[alignedAddr + 2] << 16) |
-                              (cpu.Memory[alignedAddr + 3] << 24));
-            
+                : cpu.IopBus != null
+                    ? cpu.IopBus.ReadWord(alignedAddr)
+                    : (uint)(cpu.Memory[alignedAddr] |
+                                  (cpu.Memory[alignedAddr + 1] << 8) |
+                                  (cpu.Memory[alignedAddr + 2] << 16) |
+                                  (cpu.Memory[alignedAddr + 3] << 24));            
             // Merge with existing register value
             uint mask = 0xFFFFFFFFu >> shift;
             uint regValue = (uint)cpu.RegsLo[args.Rt];

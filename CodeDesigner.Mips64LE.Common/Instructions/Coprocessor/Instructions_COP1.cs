@@ -351,6 +351,10 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             {
                 bits = cpu.Bus.ReadWord((uint)addr);
             }
+            else if (cpu.IopBus != null)
+            {
+                bits = cpu.IopBus.ReadWord((uint)addr);
+            }
             else if (addr + 3 < (ulong)cpu.Memory.Length)
             {
                 bits = BitConverter.ToUInt32(cpu.Memory, (int)addr);
@@ -411,6 +415,10 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             if (cpu.Bus != null)
             {
                 cpu.Bus.WriteWord((uint)addr, bits);
+            }
+            else if (cpu.IopBus != null)
+            {
+                cpu.IopBus.WriteWord((uint)addr, bits);
             }
             else if (addr + 3 < (ulong)cpu.Memory.Length)
             {
@@ -1600,6 +1608,13 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
                 cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(lo);
                 if (args.Rt + 1 < cpu.FPR.Length) cpu.FPR[args.Rt + 1] = BitConverter.UInt32BitsToSingle(hi);
             }
+            else if (cpu.IopBus != null)
+            {
+                uint lo = cpu.IopBus.ReadWord((uint)addr);
+                uint hi = cpu.IopBus.ReadWord((uint)addr + 4);
+                cpu.FPR[args.Rt] = BitConverter.UInt32BitsToSingle(lo);
+                if (args.Rt + 1 < cpu.FPR.Length) cpu.FPR[args.Rt + 1] = BitConverter.UInt32BitsToSingle(hi);
+            }
             else if (addr + 7 < (ulong)cpu.Memory.Length)
             {
                 // Load 64-bit value; store lower 32 bits in FPR[ft], upper 32 in FPR[ft+1]
@@ -1647,6 +1662,11 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.CoprocessorInstructions
             {
                 cpu.Bus.WriteWord((uint)addr, lo);
                 cpu.Bus.WriteWord((uint)addr + 4, hi);
+            }
+            else if (cpu.IopBus != null)
+            {
+                cpu.IopBus.WriteWord((uint)addr, lo);
+                cpu.IopBus.WriteWord((uint)addr + 4, hi);
             }
             else if (addr + 7 < (ulong)cpu.Memory.Length)
             {

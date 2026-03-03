@@ -39,6 +39,8 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             byte value = (byte)(cpu.RegsLo[args.Rt] & 0xFF);
             if (cpu.Bus != null)
                 cpu.Bus.WriteByte(addr, value);
+            else if (cpu.IopBus != null)
+                cpu.IopBus.WriteByte(addr, value);
             else
                 cpu.Memory[addr] = value;
         }
@@ -96,6 +98,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu.Bus != null)
             {
                 cpu.Bus.WriteHalf(addr, value);
+            }
+            else if (cpu.IopBus != null)
+            {
+                cpu.IopBus.WriteHalf(addr, value);
             }
             else
             {
@@ -158,6 +164,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu.Bus != null)
             {
                 cpu.Bus.WriteWord(addr, value);
+            }
+            else if (cpu.IopBus != null)
+            {
+                cpu.IopBus.WriteWord(addr, value);
             }
             else
             {
@@ -291,10 +301,12 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Read existing word
             uint existingWord = cpu.Bus != null
                 ? cpu.Bus.ReadWord(alignedAddr)
-                : (uint)(cpu.Memory[alignedAddr] |
-                                      (cpu.Memory[alignedAddr + 1] << 8) |
-                                      (cpu.Memory[alignedAddr + 2] << 16) |
-                                      (cpu.Memory[alignedAddr + 3] << 24));
+                : cpu.IopBus != null
+                    ? cpu.IopBus.ReadWord(alignedAddr)
+                    : (uint)(cpu.Memory[alignedAddr] |
+                                          (cpu.Memory[alignedAddr + 1] << 8) |
+                                          (cpu.Memory[alignedAddr + 2] << 16) |
+                                          (cpu.Memory[alignedAddr + 3] << 24));
             
             // Merge and write back
             // In LE mode: preserve lower byteOff bytes of existing word, replace upper (4-byteOff) bytes with rt shifted left
@@ -305,6 +317,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu.Bus != null)
             {
                 cpu.Bus.WriteWord(alignedAddr, result);
+            }
+            else if (cpu.IopBus != null)
+            {
+                cpu.IopBus.WriteWord(alignedAddr, result);
             }
             else
             {
@@ -369,10 +385,12 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             // Read existing word
             uint existingWord = cpu.Bus != null
                 ? cpu.Bus.ReadWord(alignedAddr)
-                : (uint)(cpu.Memory[alignedAddr] |
-                                      (cpu.Memory[alignedAddr + 1] << 8) |
-                                      (cpu.Memory[alignedAddr + 2] << 16) |
-                                      (cpu.Memory[alignedAddr + 3] << 24));
+                : cpu.IopBus != null
+                    ? cpu.IopBus.ReadWord(alignedAddr)
+                    : (uint)(cpu.Memory[alignedAddr] |
+                                          (cpu.Memory[alignedAddr + 1] << 8) |
+                                          (cpu.Memory[alignedAddr + 2] << 16) |
+                                          (cpu.Memory[alignedAddr + 3] << 24));
             
             // Merge and write back
             // In LE mode: preserve upper (shift) bits, replace lower (byteOff+1) bytes of existing word with rt's lower bytes
@@ -382,6 +400,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu.Bus != null)
             {
                 cpu.Bus.WriteWord(alignedAddr, result);
+            }
+            else if (cpu.IopBus != null)
+            {
+                cpu.IopBus.WriteWord(alignedAddr, result);
             }
             else
             {
