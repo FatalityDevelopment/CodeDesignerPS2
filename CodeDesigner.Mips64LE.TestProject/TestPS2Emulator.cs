@@ -514,7 +514,10 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void Emulator_COP0_SyscallBev1UsesRomVector()
         {
-            // syscall with BEV=1 (BIOS ROM exception vector)
+            // syscall with BEV=1 must jump to the EE BIOS dispatcher at 0xBFC00200.
+            // Reference: PCSX2 R5900OpcodeImpl.cpp cpuException — BEV=1 → 0xBFC00200.
+            // The SCPH-70012 BIOS confirms: 0xBFC00180 is a debug crash stub; the real
+            // EE kernel exception dispatcher lives at 0xBFC00200.
             uint syscall = 0x0000000Cu;
 
             var emu = new PS2Emulator();
@@ -528,8 +531,8 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             emu.Step();
 
-            Assert.AreEqual(0xBFC00180UL, emu.Cpu.PC,
-                "With BEV=1 the exception vector must be 0xBFC00180");
+            Assert.AreEqual(0xBFC00200UL, emu.Cpu.PC,
+                "With BEV=1 the EE exception vector must be 0xBFC00200");
         }
 
         [TestMethod]
