@@ -212,6 +212,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // here emulates "operation immediately complete", matching PCSX2 HwRead.cpp.
             if (paddr >= 0x1000F400u && paddr < 0x1000F500u) return 0u;
 
+            // RDRAM configuration readback register (0x1000F520).
+            // After the BIOS completes the MCH RDRAM init handshake it polls this
+            // register waiting for a known device-type code.  The BIOS table
+            // (BIOS ROM 0x9FC43C80) lists accepted values; 0x1201 is the standard
+            // 32 MB (2 × 16 MB RDRAM) PS2 configuration.
+            // Reference: PCSX2 HwRead.cpp — reads from this range after MCH init.
+            if (paddr == 0x1000F520u) return 0x1201u;
+
             // Hardware I/O: DMAC channels (0x10008000-0x1000DFFF) and global regs (0x1000E000-0x1000E0FF)
             if (DMAC.TryDecodeChannelAddress(paddr, out int chIdx, out uint chReg))
                 return Dmac.Channels[chIdx].ReadRegister(chReg);

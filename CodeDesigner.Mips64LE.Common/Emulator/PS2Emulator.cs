@@ -57,6 +57,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private uint _vSyncCycles;
         private bool _inVBlank;
 
+        // COP0 Count increments at half the EE CPU clock rate (PCSX2 R5900.cpp:
+        // "cpuRegs.CP0.n.Count += elapsed / 2").  We track a one-bit accumulator
+        // so that IncrementCount(1) is called every other EE instruction.
+        private int _cop0CountAccum;
+
         /// <summary>Total instructions executed since last reset.</summary>
         public ulong InstructionCount { get; private set; }
 
@@ -214,6 +219,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             Cpu.PC = 0xBFC00000UL;
             InstructionCount = 0;
+            _cop0CountAccum = 0;
 
             // $zero is always 0
             Cpu.RegsLo[0] = 0;
@@ -248,10 +254,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public void Step()
         {
             // ── COP0 Count increment + Count/Compare interrupt check ──────────
-            // Count increments once per instruction. When Count reaches Compare,
-            // IP7 (Cause bit 15) is set. This is the standard MIPS timer interrupt
-            // mechanism (reference: PCSX2 R5900.cpp cpuCountUpdate()).
-            Cpu.COP0.IncrementCount(1);
+            // Count increments at HALF the EE CPU clock rate.
+            // Reference: PCSX2 R5900.cpp  cpuRegs.CP0.n.Count += elapsed / 2.
+            // We alternate a one-bit accumulator so IncrementCount(1) fires every
+            // other Step(), correctly matching the PS2's half-rate Count behaviour
+            // and ensuring the BIOS RDRAM timing calibration measures the right value.
+            if ((_cop0CountAccum ^= 1) == 0)
+                Cpu.COP0.IncrementCount(1);
 
             // ── Hardware interrupt check ──────────────────────────────────────
             // Deliver a pending INTC interrupt before executing the next instruction
