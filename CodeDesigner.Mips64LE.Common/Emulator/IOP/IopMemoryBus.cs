@@ -102,14 +102,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// never exits.
         ///
         /// Set by <see cref="DualCpuScheduler"/> at construction time.
-        /// Reference: PCSX2 pcsx2/IopMem.cpp psxMemRead32 — forwards 0xB0000000
-        /// region to the EE hardware registers.
+        /// Reference: PCSX2 pcsx2/IopMem.cpp psxMemRead32 — the IOP accesses the EE
+        /// timer region as KSEG1 0xB0000000 which strips to physical 0x10000000; we
+        /// forward using KSEG0 (0x80000000 | paddr) so <see cref="PS2MemoryBus"/>
+        /// translates it back to the same physical address.
         /// </summary>
         public PS2MemoryBus? EeBus { get; set; }
 
         // Physical address range of the EE I/O timers as seen from the IOP bus.
+        // T0 base=+0x0000, T1=+0x0800, T2=+0x1000, T3=+0x1800; each occupies 0x800
+        // bytes → total window = 4 × 0x800 = 0x2000 bytes.
         private const uint EeTimerBase = 0x10000000u;
-        private const uint EeTimerSize = 0x00002000u;  // T0–T3, 0x800 each (4 × 0x800)
+        private const uint EeTimerSize = 0x00002000u;
 
         /// <summary>
         /// EE scratchpad shared with the IOP at physical address 0x70000000–0x70003FFF.
