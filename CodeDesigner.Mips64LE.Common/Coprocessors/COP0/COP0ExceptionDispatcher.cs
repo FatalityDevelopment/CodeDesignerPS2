@@ -36,17 +36,22 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
     ///   2. Write the exception code into Cause.ExcCode (bits 6:2).
     ///   3. Redirect cpu.PC to the appropriate exception vector:
     ///        • BEV = 0 → 0x80000080  (general exception, RAM handler)
-    ///        • BEV = 1 → 0xBFC00180  (general exception, BIOS ROM handler)
+    ///        • BEV = 1 → 0xBFC00200  (general exception, BIOS ROM handler)
+    ///
+    /// Reference: PCSX2 pcsx2/R5900OpcodeImpl.cpp cpuException — all BEV=1 exceptions
+    /// use 0xBFC00200.  The SCPH-70012 BIOS confirms: 0xBFC00180 is an IOP-style debug
+    /// crash stub; the real EE kernel dispatcher resides at 0xBFC00200.
     /// </summary>
     public static class COP0ExceptionDispatcher
     {
-        // General exception vector addresses
+        // General exception vector addresses (R5900 / PS2 EE).
+        // Reference: PCSX2 R5900OpcodeImpl.cpp cpuException.
         private const uint ExceptionVectorBev0 = 0x80000080u;
-        private const uint ExceptionVectorBev1 = 0xBFC00180u;
+        private const uint ExceptionVectorBev1 = 0xBFC00200u;  // EE BIOS dispatcher
 
         // TLB refill exception vector (used for TlbLoad/TlbStore/TlbModification when EXL=0)
         private const uint TlbRefillVectorBev0 = 0x80000000u;
-        private const uint TlbRefillVectorBev1 = 0xBFC00200u;
+        private const uint TlbRefillVectorBev1 = 0xBFC00200u;  // same as general for EE BEV=1
 
         // COP0 register indices
         private const int StatusReg = 12;

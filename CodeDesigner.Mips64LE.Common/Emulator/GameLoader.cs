@@ -17,6 +17,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
     ///   3. Loads the ELF into the emulator via <see cref="ElfLoader.LoadIntoEmulator"/>,
     ///      which also sets <c>cpu.PC</c> to the entry point.
     ///
+    /// <see cref="InsertDisc"/> is the correct method to use when a real PS2 BIOS
+    /// is present. It mounts the disc in the IOP's CDVD drive without loading the
+    /// ELF or changing the PC, so the BIOS can run from its reset vector
+    /// (0xBFC00000), initialise the kernel, and boot the game naturally — exactly
+    /// as a real PlayStation 2 does.
+    ///
     /// Reference: PCSX2 <c>pcsx2/CDVD/IsoFS/IsoFS.cpp</c> and
     /// <c>pcsx2/Elfheader.cpp</c>.
     /// </summary>
@@ -178,6 +184,71 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 throw new GameLoadException(
                     $"Failed to load ELF '{bootPath}': {ex.Message}", ex);
             }
+        }
+
+        /// <summary>
+        /// Mount a disc image in the IOP's CDVD drive so that the PS2 BIOS can
+        /// boot the game naturally from its reset vector (0xBFC00000).
+        ///
+        /// Unlike <see cref="BootFromDisc"/>, this method does <b>not</b> load
+        /// the ELF executable or change the CPU program counter.  The correct
+        /// call sequence when a real BIOS is available is:
+        /// <code>
+        ///   BiosLoader.Load(biosData, scheduler);   // resets both CPUs to 0xBFC00000
+        ///   GameLoader.InsertDisc(isoStream, scheduler);  // mounts disc in CDVD
+        ///   // … scheduler.RunSlice() loop …            // BIOS boots the game
+        /// </code>
+        ///
+        /// The disc is mounted by assigning it to
+        /// <see cref="IopMemoryBus.Cdvd"/>, which automatically wires the
+        /// CDVD data-ready interrupt and the IOP DMAC channel-3 data provider.
+        ///
+        /// Reference: PCSX2 native BIOS boot — the IOP BIOS reads SYSTEM.CNF
+        /// and the game ELF via the CDVD controller without any ELF pre-loading.
+        /// </summary>
+        /// <param name="isoStream">
+        /// Seekable stream over the disc image.  The stream is kept open for the
+        /// lifetime of the <see cref="Cdvd"/> instance; do not close it while
+        /// the emulator is running.
+        /// </param>
+        /// <param name="scheduler">
+        /// The <see cref="DualCpuScheduler"/> whose IOP will receive the disc.
+        /// </param>
+        /// <returns>
+        /// The BOOT2 executable path from <c>SYSTEM.CNF</c> (e.g.
+        /// <c>SLUS_210.40;1</c>), or an empty string if SYSTEM.CNF cannot be
+        /// read.  This value is for informational/logging purposes only.
+        /// </returns>
+        public static string InsertDisc(Stream isoStream, DualCpuScheduler scheduler)
+        {
+            if (isoStream == null) throw new ArgumentNullException(nameof(isoStream));
+            if (scheduler == null) throw new ArgumentNullException(nameof(scheduler));
+
+            var cdvd = new Cdvd();
+            cdvd.LoadFromStream(isoStream);
+
+            // Mount the disc in the IOP CDVD drive.  This wires the data-ready
+            // interrupt and the DMAC channel-3 data provider automatically.
+            scheduler.IOP.Bus.Cdvd = cdvd;
+
+            // Read SYSTEM.CNF for the boot path (informational — no ELF loading).
+            try
+            {
+                Cdvd.IsoEntry? cnfEntry = cdvd.FindFile("SYSTEM.CNF");
+                if (cnfEntry != null)
+                {
+                    byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
+                    string cnfText = Encoding.Latin1.GetString(cnfBytes);
+                    return ParseSystemCnf(cnfText) ?? string.Empty;
+                }
+            }
+            catch
+            {
+                // Informational only — if SYSTEM.CNF cannot be read here, the
+                // BIOS will deal with the error when it boots.
+            }
+
+            return string.Empty;
         }
     }
 
