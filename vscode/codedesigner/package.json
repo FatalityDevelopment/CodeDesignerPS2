@@ -82,7 +82,7 @@
           "cds"
         ],
         "extensions": [
-          "cds"
+          ".cds"
         ],
         "configuration": "./dist/language-configuration.json"
       }

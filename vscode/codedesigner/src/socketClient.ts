@@ -139,7 +139,7 @@ export class SocketClient {
                 return;
             }
 
-            this.client.write(message, 'utf8', (error) => {
+            this.client.write(message + '\n', 'utf8', (error) => {
                 if (error) {
                     console.error(`[SOCKET] Error sending message: ${error.message}`);
                     reject(error);
@@ -147,7 +147,6 @@ export class SocketClient {
                     console.log(`[SOCKET] Sent: ${message}`);
                     resolve();
                 }
-        this.messageBuffer = '';
             });
         });
     }
