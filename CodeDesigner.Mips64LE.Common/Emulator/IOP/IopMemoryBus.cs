@@ -33,7 +33,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     public sealed class IopMemoryBus
     {
         // ── Region sizes ──────────────────────────────────────────────────────
-        public const int RamSize       = 2 * 1024 * 1024;  // 2 MB
+        // PCSX2 allocates 4 MB for IOP RAM (psxM, IopMem.cpp) even though the
+        // hardware only has 2 MB.  The IOP BIOS sets its stack pointer to 0x200000
+        // (the 2 MB mark) and then uses fp=0x200000 as a frame pointer, so local
+        // variables land at addresses 0x200054–0x2001xx — just above the hardware
+        // boundary.  Using 4 MB here matches PCSX2 and lets those stack frames
+        // persist correctly without silent discard.
+        public const int RamSize       = 4 * 1024 * 1024;  // 4 MB (PCSX2 compat)
         public const int ScratchpadSize = 1024;             // 1 KB
         public const int BiosRomSize   = 4 * 1024 * 1024;  // 4 MB
 

@@ -108,7 +108,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void IopMemoryBus_RamSize_Is2MB()
         {
-            Assert.AreEqual(2 * 1024 * 1024, IopMemoryBus.RamSize);
+            Assert.AreEqual(4 * 1024 * 1024, IopMemoryBus.RamSize);
         }
 
         [TestMethod]
@@ -2409,8 +2409,8 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void IopModuleLoader_SegmentOutsideIopRam_ThrowsIopModuleLoadException()
         {
-            // Segment at physical 0x001FFFFC with memsz 8 → end at 0x00200004 > 2MB
-            const uint vaddr = 0x001FFFFCu;
+            // Segment at physical 0x003FFFFC with memsz 8 → end at 0x00400004 > 4MB
+            const uint vaddr = 0x003FFFFCu;
             byte[] segData = new byte[4];
 
             byte[] irx = BuildIrx32(vaddr, new[] {
@@ -2420,7 +2420,7 @@ namespace CodeDesigner.Mips64LE.TestProject
             var bus = new IopMemoryBus();
             Assert.ThrowsException<IopModuleLoadException>(
                 () => IopModuleLoader.Load(irx, bus),
-                "Segment extending past 2MB IOP RAM must throw IopModuleLoadException");
+                "Segment extending past 4MB IOP RAM must throw IopModuleLoadException");
         }
 
         // ── IrxSegment helper ─────────────────────────────────────────────────

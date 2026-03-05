@@ -131,6 +131,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // bootstrap stack and IPC handshake area on both the EE and IOP side.
             IOP.Bus.SharedScratchpad = EE.Bus.Scratchpad;
 
+            // Bridge IOP RAM into the EE bus (EE physical 0x1A000000–0x1BFFFFFF).
+            // The EE kernel polls physical 0x1A000006 waiting for the IOP BIOS to
+            // write its ready flag there during boot.  Sharing the same byte[] array
+            // makes all IOP writes to IOP RAM[0–1FFFFF] immediately visible to the EE.
+            // Reference: PCSX2 vtlb.cpp — sub-bus 0x1A000000 maps to psxM (IOP RAM).
+            EE.Bus.IopRam = IOP.Bus.Ram;
+
             // Bridge EE timer registers (0x10000000–0x10001FFF) into the IOP bus so
             // the IOP BIOS clock-calibration loop can observe EE Timer T0 COUNT.
             IOP.Bus.EeBus = EE.Bus;

@@ -1404,22 +1404,23 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void COP0_Count_IncrementsPerStep()
         {
-            // Count must increment once per Step() call.
+            // Count must increment once every two Step() calls (half CPU rate,
+            // matching PCSX2 R5900.cpp: Count += cycles / 2).
             var emu = new PS2Emulator();
             emu.Cpu.COP0.WriteRegister32(9, 0u);  // reset Count
             // Set Compare to a high value so no interrupt fires.
             emu.Cpu.COP0.WriteRegister32(11, 0xFFFFFFFFu);
 
             uint nop = 0u;
-            emu.LoadProgram(0x00000000u, [nop, nop, nop]);
+            emu.LoadProgram(0x00000000u, [nop, nop, nop, nop, nop, nop]);
             emu.Cpu.PC = 0u;
 
-            emu.Step();
-            Assert.AreEqual(1u, emu.Cpu.COP0.ReadRegister32(9), "Count must be 1 after one Step");
-            emu.Step();
-            Assert.AreEqual(2u, emu.Cpu.COP0.ReadRegister32(9), "Count must be 2 after two Steps");
-            emu.Step();
-            Assert.AreEqual(3u, emu.Cpu.COP0.ReadRegister32(9), "Count must be 3 after three Steps");
+            emu.Step(); emu.Step();
+            Assert.AreEqual(1u, emu.Cpu.COP0.ReadRegister32(9), "Count must be 1 after two Steps");
+            emu.Step(); emu.Step();
+            Assert.AreEqual(2u, emu.Cpu.COP0.ReadRegister32(9), "Count must be 2 after four Steps");
+            emu.Step(); emu.Step();
+            Assert.AreEqual(3u, emu.Cpu.COP0.ReadRegister32(9), "Count must be 3 after six Steps");
         }
 
         [TestMethod]
@@ -1427,15 +1428,16 @@ namespace CodeDesigner.Mips64LE.TestProject
         {
             // When Count reaches Compare the IP7 bit (bit 15) of Cause must be set.
             var emu = new PS2Emulator();
-            // Arrange: Count = Compare - 1 so the next Step sets Count == Compare.
+            // Arrange: Count = Compare - 1 so two Steps bring Count == Compare
+            // (Count increments every 2 steps at half CPU rate).
             uint compare = 5u;
             emu.Cpu.COP0.WriteRegister32(9,  compare - 1);
             emu.Cpu.COP0.WriteRegister32(11, compare);
 
             uint nop = 0u;
-            emu.LoadProgram(0x00000000u, [nop]);
+            emu.LoadProgram(0x00000000u, [nop, nop]);
             emu.Cpu.PC = 0u;
-            emu.Step();
+            emu.Step(); emu.Step(); // two steps → Count increments once → Count == Compare
 
             uint cause = emu.Cpu.COP0.ReadRegister32(13);
             Assert.IsTrue((cause & 0x8000u) != 0, "Cause.IP7 (bit 15) must be set when Count == Compare");
@@ -1447,14 +1449,14 @@ namespace CodeDesigner.Mips64LE.TestProject
         {
             // Writing Compare must clear the IP7 flag in Cause.
             var emu = new PS2Emulator();
-            // Force IP7 set by setting Count == Compare.
+            // Force IP7 set: Count = Compare - 1, then two Steps → Count == Compare.
             emu.Cpu.COP0.WriteRegister32(9,  10u);
             emu.Cpu.COP0.WriteRegister32(11, 11u);
 
             uint nop = 0u;
-            emu.LoadProgram(0x00000000u, [nop]);
+            emu.LoadProgram(0x00000000u, [nop, nop]);
             emu.Cpu.PC = 0u;
-            emu.Step(); // Count becomes 11 == Compare → IP7 set
+            emu.Step(); emu.Step(); // Count becomes 11 == Compare → IP7 set
 
             Assert.IsTrue(emu.Cpu.COP0.IsTimerInterruptPending, "IP7 should be pending");
 
@@ -1473,15 +1475,15 @@ namespace CodeDesigner.Mips64LE.TestProject
             // Enable interrupts: IE=1, EIE=1, EXL=0, ERL=0, IM7 (bit 15) = 1.
             // Status = 0x10001 | 0x8000 (IM7)
             emu.Cpu.COP0.WriteRegister32(12, 0x18001u); // IE=1, EIE=1, IM7=1
-            // Set Compare so Count will hit it next Step.
+            // Set Compare so Count will hit it after two Steps (half-rate).
             emu.Cpu.COP0.WriteRegister32(9, 4u);
-            emu.Cpu.COP0.WriteRegister32(11, 5u); // Compare = 5; one Step → Count=5
+            emu.Cpu.COP0.WriteRegister32(11, 5u); // Compare = 5; two Steps → Count=5
 
             uint nop = 0u;
-            emu.LoadProgram(0x00000000u, [nop]);
+            emu.LoadProgram(0x00000000u, [nop, nop]);
             emu.Cpu.PC = 0u;
 
-            emu.Step();  // Count becomes 5, IP7 set, interrupt taken → PC → exception vector
+            emu.Step(); emu.Step(); // Count becomes 5, IP7 set, interrupt taken → PC → exception vector
 
             // BEV=0 → interrupt vector is 0x80000080.
             Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
