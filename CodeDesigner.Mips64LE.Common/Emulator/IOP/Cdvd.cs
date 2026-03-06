@@ -96,10 +96,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private const uint REG_STATUS     = 0x09u; // Drive status
         private const uint REG_TRAY       = 0x0Au; // Tray state
         private const uint REG_CRT        = 0x0Bu; // Current disc type
-        private const uint REG_SDATA      = 0x0Fu; // S-command data output (READ)
+        private const uint REG_NDATAOUT   = 0x0Fu; // N-command data output (PCSX2 cdvdRead0F)
         private const uint REG_SCMD_EXEC  = 0x16u; // S command execute register (WRITE = cdvdWrite16 in PCSX2)
-        private const uint REG_SCMD_PARAM = 0x17u; // S command parameter byte (WRITE = cdvdWrite17; READ = SREADY)
-        private const uint REG_SSTAT      = 0x18u; // S-command status (READ)
+        private const uint REG_SCMD_PARAM = 0x17u; // S command parameter byte (WRITE = cdvdWrite17; READ = SREADY/sDataIn)
+        private const uint REG_SDATAOUT   = 0x18u; // S-command data output (READ = cdvdRead18, returns SCMDResultBuff[pos++])
 
         // ── N-command codes ───────────────────────────────────────────────────
 
@@ -331,18 +331,37 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         {
             return offset switch
             {
-                REG_NREADY => _nReady,                    // READY | MECHA_INIT | DEV9CON (0x4C)
-                REG_ISTAT  => _nIntrStat,
-                REG_STATUS => HasDisc ? (byte)0x06 : (byte)0x00, // 0x06 = paused/disc present
-                REG_TRAY   => HasDisc ? (byte)0x00 : (byte)0x01, // 0=closed, 1=open
-                REG_CRT    => DiscType,
-                REG_SDATA  => _sCmdOutputPos < _sCmdOutputLen
-                                  ? _sCmdOutput[_sCmdOutputPos++]
-                                  : (byte)0,
-                REG_SCMD_PARAM => _sReady,                 // 0x17 READ = SREADY (PCSX2 cdvdRead17 = sDataIn)
-                REG_SSTAT  => (byte)0x40,                 // S-command ready
-                _          => 0
+                REG_NREADY     => _nReady,                    // READY | MECHA_INIT | DEV9CON (0x4C)
+                REG_ISTAT      => _nIntrStat,
+                REG_STATUS     => HasDisc ? (byte)0x06 : (byte)0x00, // 0x06 = paused/disc present
+                REG_TRAY       => HasDisc ? (byte)0x00 : (byte)0x01, // 0=closed, 1=open
+                REG_CRT        => DiscType,
+                REG_NDATAOUT   => _sCmdOutputPos < _sCmdOutputLen   // 0x0F = N-cmd data out (placeholder)
+                                      ? _sCmdOutput[_sCmdOutputPos++]
+                                      : (byte)0,
+                REG_SCMD_PARAM => _sReady,                    // 0x17 READ = SREADY/sDataIn (bit6=idle, bit7=error)
+                REG_SDATAOUT   => ReadSDataByte(),            // 0x18 = cdvdRead18: SCMDResultBuff[pos++]
+                _              => 0
             };
+        }
+
+        /// <summary>
+        /// Return the next S-command result byte, tracking bit 6 of <see cref="_sReady"/>
+        /// (sDataIn) per PCSX2 cdvdRead18 semantics.
+        ///   bit 6 = 0 → result delivery in progress (cleared by ExecuteSCommand)
+        ///   bit 6 = 1 → idle / all bytes consumed (set when pos ≥ len)
+        /// </summary>
+        private byte ReadSDataByte()
+        {
+            if ((_sReady & 0x40) == 0 && _sCmdOutputPos < _sCmdOutputLen)
+            {
+                byte val = _sCmdOutput[_sCmdOutputPos++];
+                if (_sCmdOutputPos >= _sCmdOutputLen)
+                    _sReady |= 0x40; // all bytes consumed → mark idle
+                return val;
+            }
+            // Either idle already or position exhausted: return last byte (PCSX2 behaviour)
+            return _sCmdOutputPos > 0 ? _sCmdOutput[_sCmdOutputPos - 1] : (byte)0;
         }
 
         /// <summary>
@@ -576,6 +595,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
                 // Other S-commands (disc info, mechanical ops) return empty.
             }
+            // Per PCSX2 SetResultSize(): clear bit 6 of sDataIn to signal result delivery
+            // in progress. ReadSDataByte() sets it back when the last byte is consumed.
+            if (_sCmdOutputLen > 0)
+                _sReady &= 0xBF; // clear bit 6 (not idle, data available from 0x18)
+            else
+                _sReady |= 0x40; // no data → immediately idle
         }
 
         // ── TOC buffer builder ─────────────────────────────────────────────────
