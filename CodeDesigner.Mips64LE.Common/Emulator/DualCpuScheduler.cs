@@ -12,8 +12,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
     ///   IOP — 36.864 MHz (exactly 1/4 of the EE bus clock)
     ///
     /// The scheduler runs both CPUs interleaved in fixed-size "slices":
-    ///   • <see cref="EeToIopRatio"/> EE instructions per IOP instruction (default 4).
-    ///   • Hardware timers on both sides are advanced proportionally.
+    ///   • EE and IOP steps are interleaved: one IOP step for every
+    ///     <see cref="EeToIopRatio"/> EE steps, within the same slice.
+    ///   • This matches PCSX2's scheduling model and ensures IOP signals
+    ///     (e.g. SIF SMFLAG writes) are visible to the EE in the same slice.
     ///
     /// The EE and IOP communicate through the shared <see cref="SIF"/> instance
     /// inside <see cref="PS2Emulator.Bus"/>; the IOP emulator is constructed with
@@ -26,7 +28,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
     ///   // load BIOS into scheduler.EE.Bus.Bios / scheduler.IOP.Bus.Ram ...
     ///   while (running)
     ///   {
-    ///       scheduler.RunSlice();          // run one slice (default: 4 EE + 1 IOP step)
+    ///       scheduler.RunSlice();          // run one slice (interleaved: 4 EE + 1 IOP step)
     ///       scheduler.TickHardware();      // advance timers / INTC for that slice
     ///   }
     /// </code>
@@ -114,6 +116,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private int _iopAccumulator;
 
         /// <summary>
+        /// Cached IOP PC for the self-jump fast-forward check.
+        /// Persists across <see cref="RunSlice"/> calls to avoid redundant bus reads
+        /// when the IOP stays at the same idle address across many slices.
+        /// </summary>
+        private uint _cachedIopPc = uint.MaxValue;
+
+        /// <summary>
+        /// Whether the instruction at <see cref="_cachedIopPc"/> is an unconditional
+        /// jump-to-self.  Recomputed whenever <see cref="_cachedIopPc"/> changes.
+        /// </summary>
+        private bool _cachedIopSelfJump;
+
+        /// <summary>
         /// Construct a scheduler, optionally supplying a pre-configured EE emulator.
         /// The IOP is always constructed fresh and wired to the EE's SIF.
         /// </summary>
@@ -169,15 +184,23 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             EE.Reset();
             IOP.Reset();
-            TotalEeSteps   = 0;
-            TotalIopSteps  = 0;
-            _iopAccumulator = 0;
+            TotalEeSteps     = 0;
+            TotalIopSteps    = 0;
+            _iopAccumulator  = 0;
+            _cachedIopPc     = uint.MaxValue;
+            _cachedIopSelfJump = false;
         }
 
         /// <summary>
         /// Execute one scheduler "slice": run <paramref name="eeSteps"/> EE
-        /// instruction steps and a proportional number of IOP steps based on
-        /// <see cref="EeToIopRatio"/>.
+        /// instruction steps interleaved with a proportional number of IOP steps
+        /// based on <see cref="EeToIopRatio"/>.
+        ///
+        /// EE and IOP steps are interleaved (one IOP step for every
+        /// <see cref="EeToIopRatio"/> EE steps) rather than run as separate batches.
+        /// This matches PCSX2's scheduling model and ensures that IOP hardware
+        /// signals (e.g. SMFLAG writes) are visible to the EE within the same
+        /// slice, preventing SIF-handshake timing deadlocks during boot.
         ///
         /// The IOP accumulator ensures that over time the IOP always executes
         /// exactly 1/<see cref="EeToIopRatio"/> as many steps as the EE, even
@@ -196,41 +219,37 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             if (eeSteps < 1) eeSteps = 1;
 
-            // ── Run EE ───────────────────────────────────────────────────────
             for (int i = 0; i < eeSteps; i++)
-                EE.Step();
-            TotalEeSteps += (ulong)eeSteps;
-
-            // ── Run IOP (proportional) ────────────────────────────────────────
-            _iopAccumulator += eeSteps;
-            int iopSteps = _iopAccumulator / EeToIopRatio;
-            _iopAccumulator %= EeToIopRatio;
-
-            // Cache the last self-jump check so we only call ReadWord once per unique
-            // IOP PC — the vast majority of iterations stay at the same idle address.
-            uint  cachedPc        = uint.MaxValue;
-            bool  cachedSelfJump  = false;
-
-            for (int i = 0; i < iopSteps; i++)
             {
-                // Fast-forward IOP self-jump (idle) loops: when the IOP is executing
-                // a tight `j $PC` (jump-to-self) with no hardware interrupt pending,
-                // the step produces no observable state change.  Skip it to avoid
-                // millions of wasted decode/execute cycles during the IOP's idle wait.
-                // The IOP will resume normally the moment RaiseInterrupt() sets a
-                // pending bit in I_STAT (e.g. on VBlank) — IsInterruptPending will
-                // be true on the next call and we will fall through to IOP.Step().
-                uint currentPc = IOP.State.PC;
-                if (currentPc != cachedPc)
+                // ── EE step ───────────────────────────────────────────────────
+                EE.Step();
+                TotalEeSteps++;
+
+                // ── IOP step(s) (proportional, interleaved after each EE step) ─
+                _iopAccumulator++;
+                while (_iopAccumulator >= EeToIopRatio)
                 {
-                    cachedPc       = currentPc;
-                    cachedSelfJump = IsIopSelfJump(currentPc);
+                    _iopAccumulator -= EeToIopRatio;
+
+                    // Fast-forward IOP self-jump (idle) loops: when the IOP is
+                    // executing a tight `j $PC` with no hardware interrupt pending,
+                    // the step produces no observable state change.  Skip calling
+                    // IOP.Step() to avoid millions of wasted decode/execute cycles
+                    // during the IOP's idle wait.  The cache persists across calls
+                    // so we only re-read the bus when the PC actually changes.
+                    uint currentPc = IOP.State.PC;
+                    if (currentPc != _cachedIopPc)
+                    {
+                        _cachedIopPc       = currentPc;
+                        _cachedIopSelfJump = IsIopSelfJump(currentPc);
+                    }
+
+                    TotalIopSteps++;
+                    if (!IOP.Bus.IsInterruptPending && _cachedIopSelfJump)
+                        continue;  // fast-forward: count step, skip execution
+                    IOP.Step();
                 }
-                if (!IOP.Bus.IsInterruptPending && cachedSelfJump)
-                    continue;
-                IOP.Step();
             }
-            TotalIopSteps += (ulong)iopSteps;
         }
 
         /// <summary>
