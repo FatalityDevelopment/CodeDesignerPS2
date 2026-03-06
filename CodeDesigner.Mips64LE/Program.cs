@@ -190,6 +190,7 @@ namespace CodeDesigner.Mips64LE
             const int SliceSize          = 256;           // EE steps per scheduler call
             const int ReportEvery        = 1_000_000;     // print stats every N EE steps
             const int SpinReportInterval = 5;             // compact spin reminder every N report periods
+            const int MaxSpinReminders   = 3;             // max compact reminders per spin PC before silencing
             long      totalSteps    = 0;
             long      nextReport    = ReportEvery;
             var       startTime     = DateTime.UtcNow;
@@ -202,6 +203,13 @@ namespace CodeDesigner.Mips64LE
             bool      iopLeftBootZone  = false; // true once IOP PC > 0x400
             bool      eeSyscallDetected = false; // true once EE kernel begins syscall setup
             uint      lastEeRegion  = uint.MaxValue; // track EE region changes
+            // Track PCs that have already had a full DumpInterruptState to prevent repeated dumps
+            // when the EE/IOP happens to land on the same instruction across multiple report intervals
+            // (e.g. a normal loop that is not a deadlock).
+            var eeSpinDumpedPcs  = new System.Collections.Generic.HashSet<uint>();
+            var iopSpinDumpedPcs = new System.Collections.Generic.HashSet<uint>();
+            // Track compact reminder counts per spin PC so they don't repeat indefinitely.
+            var eeSpinReminderCounts = new System.Collections.Generic.Dictionary<uint, int>();
 
             // ── IOP per-step register capture ─────────────────────────────────
             // Fire once when IOP transitions from BIOS ROM into IOP RAM, and once
@@ -426,8 +434,10 @@ namespace CodeDesigner.Mips64LE
                         if (eePc32 == lastEePc)
                         {
                             spinCount++;
-                            if (spinCount == 1)
+                            if (spinCount == 1 && !eeSpinDumpedPcs.Contains(eePc32))
                             {
+                                // First time we detect a spin at this PC — dump full state once.
+                                eeSpinDumpedPcs.Add(eePc32);
                                 Console.WriteLine($"*** EE is spinning at 0x{eePc32:x8} [{GetPcRegion(eePc32)}] ***");
                                 // Dump full interrupt / SIF / IOP state the first time we detect a spin
                                 // so we can see immediately why the EE is not taking the interrupt.
@@ -435,20 +445,28 @@ namespace CodeDesigner.Mips64LE
                             }
                             else if (spinCount % SpinReportInterval == 0)
                             {
-                                // Compact reminder every 5M EE steps while still spinning
-                                uint intcSt = scheduler.EE.Bus.Intc.Stat;
-                                uint intcMk = scheduler.EE.Bus.Intc.Mask;
-                                uint eeStatus = scheduler.EE.Cpu.COP0.ReadRegister32(12);
-                                uint gifStat = 0;
-                                try { gifStat = scheduler.EE.Bus.ReadWord(0xB0003020u); } catch { }
-                                ulong eeV1 = (ulong)scheduler.EE.Cpu.RegsLo[3];
-                                ulong eeS1 = (ulong)scheduler.EE.Cpu.RegsLo[17];
-                                Console.WriteLine(
-                                    $"  [spin@{totalSteps:N0}] " +
-                                    $"INTC STAT=0x{intcSt:x8} MASK=0x{intcMk:x8} " +
-                                    $"COP0.Status=0x{eeStatus:x8} " +
-                                    $"SIF.F240=0x{scheduler.EE.Bus.Sif.F240:x8} " +
-                                    $"v1=0x{eeV1:x16} s1=0x{eeS1:x16}");
+                                // Compact reminder while still spinning — capped at MaxSpinReminders
+                                // per PC so a persistent spin does not flood the console.
+                                eeSpinReminderCounts.TryGetValue(eePc32, out int remCount);
+                                if (remCount < MaxSpinReminders)
+                                {
+                                    eeSpinReminderCounts[eePc32] = remCount + 1;
+                                    uint intcSt = scheduler.EE.Bus.Intc.Stat;
+                                    uint intcMk = scheduler.EE.Bus.Intc.Mask;
+                                    uint eeStatus = scheduler.EE.Cpu.COP0.ReadRegister32(12);
+                                    uint gifStat = 0;
+                                    try { gifStat = scheduler.EE.Bus.ReadWord(0xB0003020u); } catch { }
+                                    ulong eeV1 = (ulong)scheduler.EE.Cpu.RegsLo[3];
+                                    ulong eeS1 = (ulong)scheduler.EE.Cpu.RegsLo[17];
+                                    Console.WriteLine(
+                                        $"  [spin@{totalSteps:N0}] " +
+                                        $"INTC STAT=0x{intcSt:x8} MASK=0x{intcMk:x8} " +
+                                        $"COP0.Status=0x{eeStatus:x8} " +
+                                        $"SIF.F240=0x{scheduler.EE.Bus.Sif.F240:x8} " +
+                                        $"v1=0x{eeV1:x16} s1=0x{eeS1:x16}");
+                                    if (remCount + 1 == MaxSpinReminders)
+                                        Console.WriteLine($"  [spin@0x{eePc32:x8}] further spin reminders suppressed.");
+                                }
                             }
                         }
                         else
@@ -461,8 +479,10 @@ namespace CodeDesigner.Mips64LE
                         if (iopPc == lastIopPc)
                         {
                             iopSpinCount++;
-                            if (iopSpinCount == 1)
+                            if (iopSpinCount == 1 && !iopSpinDumpedPcs.Contains(iopPc))
                             {
+                                // First time we detect a spin at this IOP PC — dump full state once.
+                                iopSpinDumpedPcs.Add(iopPc);
                                 Console.WriteLine($"*** IOP is spinning at 0x{iopPc:x8} [{GetPcRegion(iopPc)}] ***");
                                 DumpInterruptState(scheduler);
                             }
