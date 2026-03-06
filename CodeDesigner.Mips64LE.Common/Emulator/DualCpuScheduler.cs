@@ -169,6 +169,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             Sio2 = new Sio2 { Port0 = Pad0, Port1 = Pad1 };
             IOP.Bus.Sio2 = Sio2;
 
+            // Always install a CDVD hardware object, even when no disc is inserted.
+            // The IOP BIOS polls REG_NREADY (0x1F402005) bit 3 (MECHA_INIT) during
+            // its boot sequence; if this bit is never set the BIOS times out and
+            // skips SIF initialisation, permanently disabling IOP SBUS (I_MASK bit 1).
+            // A no-disc Cdvd returns READY | MECHA_INIT | DEV9CON (0x4C), matching
+            // PCSX2 cdvdReset() → cdvdUpdateReady(CDVD_DRIVE_READY) which always
+            // includes those two always-on bits.  GameLoader.InsertDisc() replaces
+            // this with the real Cdvd when a disc image is loaded.
+            IOP.Bus.Cdvd = new Cdvd();
+
             // Wire EE VBlank events to IOP INTC so the IOP receives the same
             // vertical-sync interrupts as on real hardware.
             // Reference: PCSX2 Counters.cpp vSync0/vSync1 → psxVBlankStart/psxVBlankEnd

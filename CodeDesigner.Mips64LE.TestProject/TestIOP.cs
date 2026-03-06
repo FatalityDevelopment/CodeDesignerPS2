@@ -1284,12 +1284,16 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
-        public void Cdvd_ReadRegister_NreadyReturnsZero_WhenIdle()
+        public void Cdvd_ReadRegister_NreadyReturnsReadyWithPermanentBits_WhenIdle()
         {
             var cdvd = new Cdvd();
             cdvd.LoadImage(BuildMinimalIso("A", "b"));
-            Assert.AreEqual(0, cdvd.ReadRegister(0x05u),
-                "NREADY must return 0 (ready) when no command is pending");
+            byte nready = cdvd.ReadRegister(0x05u);
+            // PCSX2 cdvdUpdateReady() always ORs MECHA_INIT (0x08) and DEV9CON (0x04).
+            // At idle the drive is also READY (0x40).  Total = 0x4C.
+            Assert.AreEqual(0x4C, nready,
+                "NREADY must return READY|MECHA_INIT|DEV9CON (0x4C) when idle, " +
+                "matching PCSX2 cdvdUpdateReady(CDVD_DRIVE_READY)");
         }
 
         [TestMethod]

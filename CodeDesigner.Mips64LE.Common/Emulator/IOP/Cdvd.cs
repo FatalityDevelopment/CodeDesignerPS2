@@ -136,6 +136,30 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <summary>PS2 DVD-ROM disc.</summary>
         public const byte DISC_PS2_DVD = 0x14;
 
+        // ── N-command status (REG_NREADY / 0x05) bit-flags ───────────────────
+        // Reference: PS2Tek https://psi-rockin.github.io/ps2tek/#cdvdioports
+        //   bit 0: Error        bit 2: DEV9 connected   bit 3: MECHA_INIT
+        //   bit 5: Power-off    bit 6: Drive ready       bit 7: Busy
+        //
+        // PCSX2 cdvdUpdateReady() always ORs MECHA_INIT | DEV9CON into cdvd.Ready
+        // ("We don't really use the MECHA bit but Cold Fear will kick back to the
+        //  BIOS if it's not set").  The IOP BIOS polls bit 3 (MECHA_INIT) at
+        // 0xB0C4/0xB0EC; if it is never set the BIOS times out and skips SIF
+        // initialisation, leaving I_MASK bit 1 (SBUS) disabled and the IOP
+        // permanently unable to receive EE commands.
+
+        /// <summary>Drive ready, not busy: same as PCSX2 CDVD_DRIVE_READY.</summary>
+        private const byte DRIVE_READY     = 0x40;
+
+        /// <summary>Always-set MECHA_INIT flag: CDVD_DRIVE_MECHA_INIT in PCSX2.</summary>
+        private const byte DRIVE_MECHA_INIT = 0x08;
+
+        /// <summary>Always-set DEV9 connection flag: CDVD_DRIVE_DEV9CON in PCSX2.</summary>
+        private const byte DRIVE_DEV9CON   = 0x04;
+
+        /// <summary>Drive busy executing N-command: CDVD_DRIVE_BUSY in PCSX2.</summary>
+        private const byte DRIVE_BUSY      = 0x80;
+
         // ── INTR_STAT bits ────────────────────────────────────────────────────
         private const byte INTR_DATA_READY = 0x04; // bit 2: N-command data ready
 
@@ -149,6 +173,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private readonly byte[] _nParamBuf = new byte[16];
         private int  _nParamPos;
         private byte _nIntrStat;
+
+        // Current N_READY status byte (REG_NREADY, offset 0x05).
+        // Initialised to READY | MECHA_INIT | DEV9CON, matching PCSX2 cdvdReset()
+        // which calls cdvdUpdateReady(CDVD_DRIVE_READY) → always includes those bits.
+        private byte _nReady = DRIVE_READY | DRIVE_MECHA_INIT | DRIVE_DEV9CON;
+
+        // S-command ready / "sDataIn" byte (REG_SCMD READ side, offset 0x17).
+        // In PCSX2 v1.6.0 cdvdRead17() is named "SREADY" and returns cdvd.sDataIn:
+        //   cdvdReset() initialises sDataIn = 0x40 (ready)
+        //   SetResultSize() clears sDataIn &= ~0x40 while processing
+        //   after execution sDataIn |= 0x40 (done)
+        // Since our S-commands execute synchronously, _sReady stays 0x40 from the
+        // caller's perspective: the IOP polls 0x17 after issuing the S-command and
+        // always sees bit 6 = 1, so the loop at 0xAA70 exits immediately.
+        private byte _sReady = 0x40;
 
         // Sector data buffer: filled by ExecuteNCommand, consumed by ReadNextDmaWord
         private byte[] _sectorData       = Array.Empty<byte>();
@@ -196,6 +235,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             DiscType          = _isoLength > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
             _nParamPos        = 0;
             _nIntrStat        = 0;
+            _sReady           = 0x40; // PCSX2 cdvdReset() initialises sDataIn = 0x40
             _sectorData       = Array.Empty<byte>();
             _sectorDataOffset = 0;
         }
@@ -221,6 +261,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             DiscType          = _isoLength > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
             _nParamPos        = 0;
             _nIntrStat        = 0;
+            _sReady           = 0x40; // PCSX2 cdvdReset() initialises sDataIn = 0x40
             _sectorData       = Array.Empty<byte>();
             _sectorDataOffset = 0;
         }
@@ -283,7 +324,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         {
             return offset switch
             {
-                REG_NREADY => 0,                          // 0 = ready (no pending command)
+                REG_NREADY => _nReady,                    // READY | MECHA_INIT | DEV9CON (0x4C)
                 REG_ISTAT  => _nIntrStat,
                 REG_STATUS => HasDisc ? (byte)0x06 : (byte)0x00, // 0x06 = paused/disc present
                 REG_TRAY   => HasDisc ? (byte)0x00 : (byte)0x01, // 0=closed, 1=open
@@ -291,6 +332,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 REG_SDATA  => _sCmdOutputPos < _sCmdOutputLen
                                   ? _sCmdOutput[_sCmdOutputPos++]
                                   : (byte)0,
+                REG_SCMD   => _sReady,                    // 0x17 READ = SREADY (PCSX2 cdvdRead17 = sDataIn)
                 REG_SSTAT  => (byte)0x40,                 // S-command ready
                 _          => 0
             };
