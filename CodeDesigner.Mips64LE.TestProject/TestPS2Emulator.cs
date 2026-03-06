@@ -1893,6 +1893,89 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         /// <summary>
+        /// Verify the descending (offset--) variant of the bulk-fill fast-forward.
+        /// The BIOS uses an addiu offReg, offReg, -1 delay slot in a second fill pass.
+        /// This test mirrors EE_BulkFillFastForward_CompletesLoopAndFillsRam but with
+        /// the delay slot operand changed from +1 to -1, and the offset starting at
+        /// a high value so the fill covers addressable RAM.
+        /// </summary>
+        [TestMethod]
+        public void EE_BulkFillFastForward_Descending_CompletesLoopAndFillsRam()
+        {
+            // Loop body (same as ascending test but delay slot uses -1):
+            //   +0x00: addu  v0, s6, s5       ; SPECIAL rs=22 rt=21 rd=2 funct=0x21
+            //   +0x04: addiu v1, v1, -1        ; opcode=9 rs=3 rt=3 imm=0xFFFF
+            //   +0x08: sb    a0, 0(v0)         ; opcode=0x28 rs=2 rt=4 imm=0
+            //   +0x0C: slt   v0, s1, v1        ; SPECIAL rs=17 rt=3 rd=2 funct=0x2A
+            //   +0x10: nop
+            //   +0x14: bne   v0, $zero, -6     ; loop back to +0x00
+            //   +0x18: addiu s5, s5, -1        ; delay slot: offset--  ← descending
+
+            uint addu_v0_s6_s5  = (0u << 26) | (22u << 21) | (21u << 16) | (2u << 11) | 0x21u;
+            uint addiu_v1_m1    = (9u << 26)  | (3u << 21)  | (3u << 16)  | 0xFFFFu;
+            uint sb_a0_0_v0     = (0x28u << 26)| (2u << 21)  | (4u << 16)  | 0u;
+            uint slt_v0_s1_v1   = (0u << 26)  | (17u << 21) | (3u << 16)  | (2u << 11) | 0x2Au;
+            uint nop             = 0u;
+            uint bne_v0_m6      = (5u << 26)  | (2u << 21)  | (0u << 16)  | unchecked((uint)(ushort)(-6));
+            uint addiu_s5_m1    = (9u << 26)  | (21u << 21) | (21u << 16) | unchecked((uint)(ushort)(-1)); // -1
+            uint addiu_t0_77    = (9u << 26)  | (0u << 21)  | (8u << 16)  | 77u;
+
+            var emu = new PS2Emulator();
+
+            emu.Bus.WriteWord(0x80010000u, addu_v0_s6_s5);
+            emu.Bus.WriteWord(0x80010004u, addiu_v1_m1);
+            emu.Bus.WriteWord(0x80010008u, sb_a0_0_v0);
+            emu.Bus.WriteWord(0x8001000Cu, slt_v0_s1_v1);
+            emu.Bus.WriteWord(0x80010010u, nop);
+            emu.Bus.WriteWord(0x80010014u, bne_v0_m6);
+            emu.Bus.WriteWord(0x80010018u, addiu_s5_m1);
+            emu.Bus.WriteWord(0x8001001Cu, addiu_t0_77);
+
+            // Registers: offset starts at 200_010 (so first store = base + 200_010 - 1 = 200_009).
+            // After 200_000 iterations (200_010 - 10 = 200_000 remaining), offset = 10 - 1 = 9.
+            int threshold  = 10;
+            int iterations = 200_000;
+            int initialOff = threshold + iterations; // 200_010
+
+            emu.Cpu.PC = 0x80010014UL;
+            emu.Cpu.RegsLo[3]  = (ulong)(int)(threshold + iterations); // v1 = counter
+            emu.Cpu.RegsLo[17] = (ulong)(int)threshold;                // s1 = threshold
+            emu.Cpu.RegsLo[4]  = 0xCDu;                                // a0 = fill byte
+            emu.Cpu.RegsLo[21] = (ulong)(uint)(int)initialOff;         // s5 = offset
+            emu.Cpu.RegsLo[22] = 0x80000000u;                          // s6 = base
+            emu.Cpu.COP0.WriteRegister32(12, 0x00400002u);             // BEV=1, EXL=1
+
+            emu.Step();
+
+            // Counter must equal threshold.
+            Assert.AreEqual((ulong)(int)threshold, emu.Cpu.RegsLo[3],
+                "v1 (counter) should equal threshold after descending fast-forward");
+
+            // Offset decremented by iterations, then -1 from final delay slot.
+            int expectedOff = initialOff - iterations - 1;
+            Assert.AreEqual((ulong)(uint)(int)expectedOff, emu.Cpu.RegsLo[21] & 0xFFFFFFFFUL,
+                "s5 (offset) should be initialOff - iterations - 1");
+
+            // v0 (SLT result) = 0.
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[2] & 0xFFFFFFFFUL,
+                "v0 (SLT result) should be 0 after last iteration");
+
+            // PC past the BNE + delay slot.
+            Assert.AreEqual(0x8001001CUL, emu.Cpu.PC,
+                "PC should advance to instruction after BNE+delay-slot");
+
+            // The fill wrote byte 0xCD to addresses base + (initialOff-1) down to
+            // base + (initialOff - iterations).  Physical addresses: those values & 0x1FFFFFF.
+            // Spot-check a few bytes in the filled range.
+            int physFirst = (int)((0x80000000u + initialOff - iterations) & 0x1FFFFFFu);
+            int physLast  = (int)((0x80000000u + initialOff - 1) & 0x1FFFFFFu);
+            Assert.AreEqual(0xCDu, (uint)emu.Bus.Ram[physFirst],
+                "RAM[physFirst] should be 0xCD after descending fill");
+            Assert.AreEqual(0xCDu, (uint)emu.Bus.Ram[physLast],
+                "RAM[physLast] should be 0xCD after descending fill");
+        }
+
+        /// <summary>
         /// Verify that the CACHE IXIN instruction (rt=0x07) correctly invalidates
         /// the i-cache line in our interpreter.  After an instruction is cached,
         /// executing CACHE IXIN for that address, then overwriting the RAM word,

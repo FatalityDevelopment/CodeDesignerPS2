@@ -782,10 +782,15 @@ namespace CodeDesigner.Mips64LE
             uint kernelWord0 = 0, kernelWord1 = 0, kernelWord2 = 0, kernelWord3 = 0;
             try
             {
-                kernelWord0 = sched.EE.Bus.ReadWord(0x80001000u);
-                kernelWord1 = sched.EE.Bus.ReadWord(0x80001004u);
-                kernelWord2 = sched.EE.Bus.ReadWord(0x80001008u);
-                kernelWord3 = sched.EE.Bus.ReadWord(0x8000100Cu);
+                // Read directly from Bus.Ram (bypasses i-cache) to show real RAM contents.
+                var ram = sched.EE.Bus.Ram;
+                if (ram.Length > 0x100F)
+                {
+                    kernelWord0 = (uint)(ram[0x1000] | (ram[0x1001]<<8) | (ram[0x1002]<<16) | (ram[0x1003]<<24));
+                    kernelWord1 = (uint)(ram[0x1004] | (ram[0x1005]<<8) | (ram[0x1006]<<16) | (ram[0x1007]<<24));
+                    kernelWord2 = (uint)(ram[0x1008] | (ram[0x1009]<<8) | (ram[0x100A]<<16) | (ram[0x100B]<<24));
+                    kernelWord3 = (uint)(ram[0x100C] | (ram[0x100D]<<8) | (ram[0x100E]<<16) | (ram[0x100F]<<24));
+                }
             }
             catch { }
             bool kernelLoaded = (kernelWord0 | kernelWord1 | kernelWord2 | kernelWord3) != 0;
