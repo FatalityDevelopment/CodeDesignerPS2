@@ -337,14 +337,12 @@ namespace CodeDesigner.Mips64LE
                     Console.WriteLine($"  IOP 0x18C4 (lw a2,0x50(fp)): fp=0x{fp30:x8}  fp[0x50]=0x{val50:x8}(count?)  fp[0x54]=0x{val54:x8}(src?)");
                 }
 
-                // Capture the very first execution of the memmove loop body (0x2838) with big a2
-                if (pc == 0x2838u)
+                // Trace the very first entry to the I_CTRL polling function (0x4078)
+                // and capture what value is in I_CTRL at that moment.
+                if (pc == 0x4078u)
                 {
-                    uint a2 = state.ReadReg(6); uint a3 = state.ReadReg(7);
-                    if (a2 > 0x1000u)
-                    {
-                        Console.WriteLine($"  IOP 0x2838 loop body: a2=0x{a2:x8} a3=0x{a3:x8} (v0=a3+a2=0x{a3+a2:x8} dst, a1=0x{state.ReadReg(5):x8} src-base)");
-                    }
+                    uint iCtrl = scheduler.IOP.Bus.ReadWord(0x1F801078u);
+                    Console.WriteLine($"  IOP 0x4078 (I_CTRL poll): I_CTRL=0x{iCtrl:x8} a0=0x{state.ReadReg(4):x8} ra=0x{state.ReadReg(31):x8}");
                 }
             };
 
@@ -802,6 +800,7 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine(
                 $"  IOP I_STAT: 0x{iopIStat:x8}  " +
                 $"I_MASK: 0x{iopIMask:x8}  " +
+                $"I_CTRL: 0x{sched.IOP.Bus.ReadWord(0x1F801078u):x8}  " +
                 $"pending={sched.IOP.Bus.IsInterruptPending}");
 
             // ── IOP key registers (v0=$2, a0=$4, sp=$29, ra=$31) ─────────────
