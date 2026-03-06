@@ -1879,5 +1879,57 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(99UL, emu.Cpu.RegsLo[8],
                 "After CACHE IXIN: stale i-cache entry cleared, RAM word (99) fetched");
         }
+
+        /// <summary>
+        /// Verify that the i-cache loads a full 64-byte line on a miss.
+        /// When word A is fetched (cache miss), all 16 words in its 64-byte line
+        /// must be loaded.  If a store then overwrites word B (same line), the
+        /// i-cache should still serve the original word B because the line was
+        /// already populated when word A was first fetched.
+        ///
+        /// This test models the critical BIOS scenario:
+        ///   – The fill-loop delay slot at 0x80010A00 is fetched → line
+        ///     0x80010A00–0x80010A3F is loaded, caching post-loop code at 0x80010A04.
+        ///   – The bulk-fill fast-forward overwrites all of RAM with 0x20.
+        ///   – Fetching 0x80010A04 after the fill must return the ORIGINAL instruction,
+        ///     not the garbage 0x20202020, because the line was pre-populated.
+        /// </summary>
+        [TestMethod]
+        public void ICache_64ByteLineFill_CachesNeighbouringWords()
+        {
+            var emu = new PS2Emulator();
+
+            // Pick an address that is 64-byte aligned so it is word 0 of its cache line.
+            // We'll use KSEG0 0x80010A00 (mirrors the real delay-slot address).
+            uint baseAddr = 0x80010A00u;   // word 0 of its cache line
+
+            // Word at +0 (baseAddr): ADDIU $t0, $zero, 7
+            uint addiuAt0  = (9u << 26) | (0u << 21) | (8u << 16) | 7u;
+            // Word at +4 (baseAddr+4): ADDIU $t1, $zero, 99 — this is the "neighbour"
+            uint addiuAt4  = (9u << 26) | (0u << 21) | (9u << 16) | 99u;
+            uint nop = 0u;
+
+            // Write both instructions into RAM.
+            emu.Bus.WriteWord(baseAddr,     addiuAt0);
+            emu.Bus.WriteWord(baseAddr + 4, addiuAt4);
+            emu.Bus.WriteWord(baseAddr + 8, nop);   // so PC can advance after +4
+
+            // Step 1: fetch baseAddr — triggers a cache miss, loads the full 64-byte
+            // line (both addiuAt0 AND addiuAt4 are now in the cache).
+            emu.Cpu.PC = (ulong)baseAddr;
+            emu.Step();
+            Assert.AreEqual(7UL, emu.Cpu.RegsLo[8], "Step at +0: $t0 = 7");
+
+            // Step 2: overwrite RAM at baseAddr+4 with something different.
+            uint addiuAt4_new = (9u << 26) | (0u << 21) | (9u << 16) | 42u;
+            emu.Bus.WriteWord(baseAddr + 4, addiuAt4_new);
+
+            // Step 3: execute from baseAddr+4 — the cache line was already loaded on
+            // the miss at baseAddr, so the i-cache still has the ORIGINAL instruction (99).
+            emu.Cpu.PC = (ulong)(baseAddr + 4);
+            emu.Step();
+            Assert.AreEqual(99UL, emu.Cpu.RegsLo[9],
+                "Step at +4: i-cache line pre-populated, serves original neighbour (99) not overwrite (42)");
+        }
     }
 }

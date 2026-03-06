@@ -62,64 +62,68 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         // so that IncrementCount(1) is called every other EE instruction.
         private int _cop0CountAccum;
 
-        // ── Simple instruction cache (i-cache) ──────────────────────────────────
-        // The PS2 EE R5900 has a 16 KB physically-tagged i-cache that is NOT
-        // automatically invalidated by stores to the same physical address.
-        // This accurately models, e.g., the BIOS kernel-init fill loop that writes
-        // 0x20 bytes over the very instructions it is executing — on real hardware
-        // the i-cache keeps serving the original instructions; in an interpreter
-        // without an i-cache the loop overwrites itself and becomes infinite.
+        // ── Instruction cache (i-cache): 16 KB, 256 sets, 64-byte lines ────────────
+        // The R5900 has a 16 KB physically-tagged, direct-mapped i-cache with
+        // 64-byte lines (16 × 32-bit instructions per line).  This matches the
+        // hardware exactly and is critical for correctness:
         //
-        // We implement a 4096-entry direct-mapped cache (matches 16 KB / 4 bytes
-        // per instruction).  The cache is populated lazily on first fetch and is
-        // only invalidated by Reset() (simulating a hardware power-on cache flush).
-        // This is sufficient for the PS2 boot sequence and does not affect the
-        // correctness of dynamically-installed exception handlers because those
-        // handlers are installed *before* the fill loop runs and thus before their
-        // addresses are first fetched from cache.
-        private const  int  ICacheEntries  = 4096;         // 16 KB / 4 bytes
-        private const  uint ICacheIdxMask  = ICacheEntries - 1; // 0x0FFF
-        private readonly bool[] _iCacheValid = new bool[ICacheEntries];
-        private readonly uint[] _iCacheTags  = new uint[ICacheEntries]; // physPc >> 14 (tag)
-        private readonly uint[] _iCacheData  = new uint[ICacheEntries];
+        //   • On a cache miss, the ENTIRE 64-byte line is loaded from physical RAM.
+        //     When the fill-loop's delay-slot instruction (0x80010A00) is first
+        //     fetched, the hardware loads the whole line 0x80010A00-0x80010A3F,
+        //     proactively caching the post-loop code at 0x80010A04-0x80010A3C before
+        //     the fill loop has had a chance to overwrite those addresses.
+        //
+        //   • After the bulk-fill fast-forward overwrites all of RAM with 0x20, the
+        //     cached line is still valid, so 0x80010A04 is served from cache (correct
+        //     original instruction) rather than from RAM (garbage 0x20202020).
+        //
+        //   • This models PCSX2's behaviour where the JIT compiles the entire block
+        //     (including post-loop code) before the fill runs, rather than relying on
+        //     a "lazy-per-instruction" cache populated only on first use.
+        //
+        // Address decomposition (physical PC):
+        //   bits [31:14] = tag       (18 bits)
+        //   bits [13:6]  = set index (8 bits  → 256 sets)
+        //   bits [5:2]   = word-in-line offset (4 bits → 16 words)
+        //   bits [1:0]   = byte offset (always 0 for 32-bit fetches)
+        //
+        // Only KSEG0 (0x80000000–0x9FFFFFFF) fetches are cached; KSEG1
+        // (0xA0000000–0xBFFFFFFF) is the uncacheable mirror of the same
+        // physical memory, matching hardware.
+        //
+        // Reference: R5900 User's Manual §4, PCSX2 Cache.h/Cache.cpp.
+        private const int  ICacheSets       = 256;            // 256 direct-mapped sets
+        private const int  ICacheLineWords  = 16;             // 16 words × 4 B = 64 B per line
+        private readonly bool[] _iCacheValid = new bool[ICacheSets];
+        private readonly uint[] _iCacheTags  = new uint[ICacheSets];          // physPc >> 14
+        // Flat array for data: set i, word j → _iCacheData[i * ICacheLineWords + j]
+        private readonly uint[] _iCacheData  = new uint[ICacheSets * ICacheLineWords];
 
-        // Index into the cache from a physical PC: bits [13:2] (12 bits = 4096 entries).
-        private static uint ICacheIndex(uint physPc) => (physPc >> 2) & ICacheIdxMask;
+        // Line index = bits [13:6] of physical address (8 bits).
+        private static int  ICacheSetIdx(uint physPc)  => (int)((physPc >> 6) & 0xFFu);
+        // Word offset within line = bits [5:2] (4 bits, 0-15).
+        private static int  ICacheWordOff(uint physPc) => (int)((physPc >> 2) & 0xFu);
+        // Tag = bits [31:14].
+        private static uint ICacheTag(uint physPc)     => physPc >> 14;
 
-        // Tag stored per entry: upper bits of physPc that are NOT covered by the index.
-        private static uint ICacheTag(uint physPc)   => physPc >> 14;
-
-        private void ICacheClear() => Array.Clear(_iCacheValid, 0, ICacheEntries);
+        private void ICacheClear() => Array.Clear(_iCacheValid, 0, ICacheSets);
 
         /// <summary>
-        /// Invalidate all i-cache entries whose physical address falls within the
-        /// 64-byte cache line that covers <paramref name="vaddr"/>.
-        /// Called by the CACHE IXIN handler via <see cref="CPU.COP0.CacheState.ICacheInvalidateLine"/>.
+        /// Invalidate the i-cache line that covers <paramref name="vaddr"/>.
+        /// Called by the CACHE IXIN handler via
+        /// <see cref="CPU.COP0.CacheState.ICacheInvalidateLine"/>.
         ///
-        /// The R5900 i-cache has 64-byte lines (16 instructions each); IXIN
-        /// invalidates by line index (bits [13:6] of the address).  Our simplified
-        /// implementation maps one cache entry per instruction (4 bytes), so we
-        /// invalidate all 16 entries that form the corresponding line.
+        /// IXIN invalidates by line index (bits [13:6] of the address), matching
+        /// hardware and PCSX2's CACHE case 0x07.  Only KSEG0 lines are cached.
         /// </summary>
         private void ICacheInvalidateLine(uint vaddr)
         {
-            // Strip KSEG0/KSEG1 to get physical address.
-            uint physPc = ((vaddr & 0xC0000000u) == 0x80000000u)
-                          ? (vaddr & 0x1FFFFFFFu)
-                          : vaddr;
-
-            // Align to 64-byte (16-instruction) cache-line boundary.
-            uint lineBase = physPc & ~63u;
-
-            // Invalidate the 16 consecutive 4-byte entries covering this line.
-            for (uint offset = 0; offset < 64u; offset += 4u)
-            {
-                uint p   = lineBase + offset;
-                uint idx = ICacheIndex(p);
-                uint tag = ICacheTag(p);
-                if (_iCacheValid[idx] && _iCacheTags[idx] == tag)
-                    _iCacheValid[idx] = false;
-            }
+            // Only KSEG0 (0x80000000–0x9FFFFFFF) is cacheable.
+            if ((vaddr & 0xE0000000u) != 0x80000000u) return;
+            uint physPc  = vaddr & 0x1FFFFFFFu;
+            int  setIdx  = ICacheSetIdx(physPc);
+            if (_iCacheValid[setIdx] && _iCacheTags[setIdx] == ICacheTag(physPc))
+                _iCacheValid[setIdx] = false;
         }
 
         /// <summary>Total instructions executed since last reset.</summary>
@@ -286,25 +290,42 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 throw new TlbMissException(virtualPc, isStore: false);
             }
 
-            // KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1 (0xA0000000–0xBFFFFFFF) are
-            // served through the i-cache.  Bits [31:30] == 10 covers both regions.
-            if ((virtualPc & 0xC0000000u) == 0x80000000u)
+            // KSEG0 (0x80000000–0x9FFFFFFF): cacheable — goes through the i-cache.
+            // Bits [31:29] == 100 selects KSEG0.
+            if ((virtualPc & 0xE0000000u) == 0x80000000u)
             {
-                uint physPc = virtualPc & 0x1FFFFFFFu;
-                uint idx    = ICacheIndex(physPc);
-                uint tag    = ICacheTag(physPc);
-                if (_iCacheValid[idx] && _iCacheTags[idx] == tag)
-                    return _iCacheData[idx]; // cache hit — original instruction
+                uint physPc  = virtualPc & 0x1FFFFFFFu;
+                int  setIdx  = ICacheSetIdx(physPc);
+                uint tag     = ICacheTag(physPc);
 
-                // Cache miss: fetch from bus and populate the cache line.
-                uint word = Bus.ReadWord(virtualPc);
-                _iCacheValid[idx] = true;
-                _iCacheTags[idx]  = tag;
-                _iCacheData[idx]  = word;
-                return word;
+                if (!_iCacheValid[setIdx] || _iCacheTags[setIdx] != tag)
+                {
+                    // Cache miss: load the entire 64-byte line from physical RAM.
+                    // This mirrors the hardware's line-fill behaviour: when any word
+                    // in a line is first fetched, all 16 words are loaded at once.
+                    // Crucially, this loads the post-loop code (e.g. 0x80010A04)
+                    // when the delay slot at the aligned start of its line is fetched.
+                    uint lineBase = physPc & ~0x3Fu; // align to 64-byte boundary
+                    int  dataBase = setIdx * ICacheLineWords;
+                    int  ramLen   = Bus.Ram.Length;
+                    for (int i = 0; i < ICacheLineWords; i++)
+                    {
+                        uint p = lineBase + (uint)(i << 2);
+                        _iCacheData[dataBase + i] = (p + 3 < (uint)ramLen)
+                            ? (uint)(Bus.Ram[p] | (Bus.Ram[p + 1] << 8)
+                                               | (Bus.Ram[p + 2] << 16)
+                                               | (Bus.Ram[p + 3] << 24))
+                            : Bus.ReadWord(0x80000000u | p); // non-RAM KSEG0 region
+                    }
+                    _iCacheTags[setIdx]  = tag;
+                    _iCacheValid[setIdx] = true;
+                }
+
+                return _iCacheData[setIdx * ICacheLineWords + ICacheWordOff(physPc)];
             }
 
-            // Scratchpad / pre-TLB KUSEG: bus handles the translation directly.
+            // KSEG1 (0xA0000000–0xBFFFFFFF) is the non-cacheable mirror.
+            // KSEG2/3 and scratchpad / pre-TLB KUSEG: bus handles translation.
             return Bus.ReadWord(virtualPc);
         }
 
