@@ -1395,6 +1395,137 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(77UL, emu.Cpu.RegsLo[8], "$t0 should be 77 with identity-mapped KUSEG");
         }
 
+        [TestMethod]
+        public void TLB_IndexRegisterIsWritable_TlbwiUsesCorrectSlot()
+        {
+            // Bug fix: WriteRegister32(0, ...) was returning early without writing,
+            // so MTC0 to the Index register had no effect and TLBWI always wrote to
+            // entry 0.  This test verifies that after writing index 2 via COP0 reg 0,
+            // TLBWI stores the mapping in slot 2 (not slot 0).
+            var emu = new PS2Emulator();
+
+            // Map virtual page 0x00020000 → physical 0x00200000 at TLB index 2.
+            // EntryHi: VPN2 = 0x00020000, ASID=0
+            // EntryLo0: PFN = 0x200 (0x200000>>12), V=1  →  (0x200 << 6) | 0x2 = 0x8002
+            emu.Cpu.COP0.WriteRegister32(0,  2u);                     // Index = 2
+            emu.Cpu.COP0.WriteRegister64(10, 0x00020000UL);           // EntryHi
+            emu.Cpu.COP0.WriteRegister64(2,  (0x200UL << 6) | 0x2);  // EntryLo0 (V=1)
+            emu.Cpu.COP0.WriteRegister64(3,  0UL);                    // EntryLo1
+            emu.Cpu.COP0.WriteRegister32(5,  0u);                     // PageMask = 4 KB
+
+            // Execute TLBWI (CO funct 0x02)
+            uint tlbwi = (0x10u << 26) | (1u << 25) | 0x02u;
+            emu.Bus.Ram[0] = (byte)tlbwi;
+            emu.Bus.Ram[1] = (byte)(tlbwi >> 8);
+            emu.Bus.Ram[2] = (byte)(tlbwi >> 16);
+            emu.Bus.Ram[3] = (byte)(tlbwi >> 24);
+            emu.Cpu.PC = 0x80000000UL; // run from KSEG0
+            emu.Step();
+
+            // Slot 2 must now hold the entry; slot 0 must remain empty.
+            Assert.IsTrue(emu.Cpu.COP0.TLB.ReadEntry(2).Valid,  "TLBWI should write to slot 2");
+            Assert.IsFalse(emu.Cpu.COP0.TLB.ReadEntry(0).Valid, "Slot 0 must not be written by TLBWI with index=2");
+
+            // Translate virtual 0x00020000 should succeed.
+            uint? paddr = emu.Cpu.COP0.TLB.Translate(0x00020000UL, 0);
+            Assert.IsTrue(paddr.HasValue, "TLB should translate virtual 0x00020000 after TLBWI to slot 2");
+            Assert.AreEqual(0x00200000u, paddr!.Value, "Physical address should be 0x00200000");
+        }
+
+        [TestMethod]
+        public void TLB_RandomDecrements_TlbwrUsesDistinctSlots()
+        {
+            // Bug fix: UpdateRandom() was never called, so the Random register stayed
+            // at its initial value (47) and every TLBWR wrote to the same slot.
+            // This test verifies that after two Steps() the random register has moved
+            // and two distinct TLBWR calls use different TLB slots.
+            var emu = new PS2Emulator();
+
+            // Capture initial Random value.
+            uint r0 = emu.Cpu.COP0.ReadRegister32(1);
+
+            // Execute one NOP so UpdateRandom() fires.
+            emu.Bus.Ram[0] = 0; emu.Bus.Ram[1] = 0; emu.Bus.Ram[2] = 0; emu.Bus.Ram[3] = 0;
+            emu.Cpu.PC = 0x80000000UL;
+            emu.Step();
+
+            uint r1 = emu.Cpu.COP0.ReadRegister32(1);
+            Assert.AreNotEqual(r0, r1, "Random register must change after a Step()");
+        }
+
+        [TestMethod]
+        public void TLB_OddPage_TranslatesCorrectly()
+        {
+            // Bug fix: oddPage detection previously checked (virtualAddress & pairSize)
+            // instead of (virtualAddress & singlePageSize), so odd pages were silently
+            // mapped as even and the physical address was doubled.
+            // Virtual pair: [0x00030000 – 0x00031FFF] with 4 KB pages.
+            //   Even page: 0x00030000–0x00030FFF → physical 0x00300000–0x00300FFF (PFN=0x300)
+            //   Odd  page: 0x00031000–0x00031FFF → physical 0x00400000–0x00400FFF (PFN=0x400)
+            var emu = new PS2Emulator();
+            ulong entryLo0 = (0x300UL << 6) | 0x2; // even page: PFN=0x300, V=1
+            ulong entryLo1 = (0x400UL << 6) | 0x2; // odd  page: PFN=0x400, V=1
+            emu.Cpu.COP0.TLB.WriteEntry(0, 0x00030000UL, entryLo0, entryLo1, 0u);
+
+            // Even page base → physical 0x00300000
+            uint? pa0 = emu.Cpu.COP0.TLB.Translate(0x00030000UL, 0);
+            Assert.IsTrue(pa0.HasValue, "Even page should translate");
+            Assert.AreEqual(0x00300000u, pa0!.Value, "Even page physical base must be 0x00300000");
+
+            // Even page offset 0x800 → physical 0x00300800
+            uint? pa1 = emu.Cpu.COP0.TLB.Translate(0x00030800UL, 0);
+            Assert.IsTrue(pa1.HasValue, "Even page + offset should translate");
+            Assert.AreEqual(0x00300800u, pa1!.Value, "Even page + 0x800 must be 0x00300800");
+
+            // Odd page base → physical 0x00400000
+            uint? pa2 = emu.Cpu.COP0.TLB.Translate(0x00031000UL, 0);
+            Assert.IsTrue(pa2.HasValue, "Odd page should translate");
+            Assert.AreEqual(0x00400000u, pa2!.Value, "Odd page physical base must be 0x00400000");
+
+            // Odd page offset 0x400 → physical 0x00400400
+            uint? pa3 = emu.Cpu.COP0.TLB.Translate(0x00031400UL, 0);
+            Assert.IsTrue(pa3.HasValue, "Odd page + offset should translate");
+            Assert.AreEqual(0x00400400u, pa3!.Value, "Odd page + 0x400 must be 0x00400400");
+        }
+
+        [TestMethod]
+        public void TLB_LargePage_TranslatesCorrectly()
+        {
+            // Verify that a 16 KB page (PageMask=0x6000) translates virtual addresses
+            // correctly with the per-entry VPN mask.
+            // Virtual pair: [0x00040000 – 0x00047FFF] (two 16 KB pages).
+            //   Even page: 0x00040000–0x00043FFF → physical 0x00500000 (PFN=0x500)
+            //   Odd  page: 0x00044000–0x00047FFF → physical 0x00600000 (PFN=0x600)
+            // PageMask=0x6000 → pairSize=0x8000 (32 KB), singlePageSize=0x4000 (16 KB).
+            var emu = new PS2Emulator();
+            const uint pageMask16k = 0x6000u;
+            ulong entryLo0 = (0x500UL << 6) | 0x2; // even page PFN=0x500, V=1
+            ulong entryLo1 = (0x600UL << 6) | 0x2; // odd  page PFN=0x600, V=1
+            // EntryHi VPN2 for 16 KB pages: bits [63:15] of virtual address.
+            ulong entryHi = 0x00040000UL & ~(ulong)(pageMask16k | 0x1FFF); // = 0x00040000
+            emu.Cpu.COP0.TLB.WriteEntry(0, entryHi, entryLo0, entryLo1, pageMask16k);
+
+            // Even page base
+            uint? pa0 = emu.Cpu.COP0.TLB.Translate(0x00040000UL, 0);
+            Assert.IsTrue(pa0.HasValue, "16 KB even page base should translate");
+            Assert.AreEqual(0x00500000u, pa0!.Value, "16 KB even page base must be 0x00500000");
+
+            // Even page + 0x1000 offset
+            uint? pa1 = emu.Cpu.COP0.TLB.Translate(0x00041000UL, 0);
+            Assert.IsTrue(pa1.HasValue, "16 KB even page + 0x1000 should translate");
+            Assert.AreEqual(0x00501000u, pa1!.Value);
+
+            // Odd page base (0x00044000)
+            uint? pa2 = emu.Cpu.COP0.TLB.Translate(0x00044000UL, 0);
+            Assert.IsTrue(pa2.HasValue, "16 KB odd page base should translate");
+            Assert.AreEqual(0x00600000u, pa2!.Value, "16 KB odd page base must be 0x00600000");
+
+            // Odd page + 0x2000 offset
+            uint? pa3 = emu.Cpu.COP0.TLB.Translate(0x00046000UL, 0);
+            Assert.IsTrue(pa3.HasValue, "16 KB odd page + 0x2000 should translate");
+            Assert.AreEqual(0x00602000u, pa3!.Value);
+        }
+
         // =====================================================================
         // Phase 7.6 — CPU Accuracy tests
         // =====================================================================

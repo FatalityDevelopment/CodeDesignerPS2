@@ -398,6 +398,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if ((_cop0CountAccum ^= 1) == 0)
                 Cpu.COP0.IncrementCount(1);
 
+            // The Random register decrements every clock cycle, cycling from
+            // (TLBEntries-1) down to Wired.  TLBWR uses this register to select
+            // a replacement slot.  Without this decrement every TLBWR would
+            // always write to the same slot (initial value 47), causing
+            // previously-installed entries to be evicted on every TLB miss.
+            Cpu.COP0.UpdateRandom();
+
             // ── Bulk byte-fill loop fast-forward ─────────────────────────────
             // When the EE is executing a tight byte-fill loop with a large remaining
             // iteration count, collapse all remaining iterations into a single

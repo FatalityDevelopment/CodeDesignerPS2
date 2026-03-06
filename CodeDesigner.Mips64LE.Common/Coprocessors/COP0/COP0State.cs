@@ -64,10 +64,6 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
             if (register < 0 || register >= 32)
                 throw new ArgumentOutOfRangeException(nameof(register));
 
-            // Register 0 is read-only on some implementations
-            if (register == 0)
-                return; // Index register can be written
-
             // Handle special register behavior
             switch (register)
             {
