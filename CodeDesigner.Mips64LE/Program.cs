@@ -907,6 +907,57 @@ namespace CodeDesigner.Mips64LE
                 }
             }
 
+            // ── EE caller context (return address) ───────────────────────────
+            // When EE is in a small inner function called many times, show the
+            // code at $ra (the caller's context) to reveal the outer loop structure.
+            ulong eeRaForCtx = (ulong)sched.EE.Cpu.RegsLo[31];
+            uint eeRa32 = (uint)(eeRaForCtx & 0xFFFFFFFFUL);
+            if (eeRa32 >= 0x80000000u && eeRa32 < 0x90000000u && eeRa32 != eePc)
+            {
+                Console.WriteLine($"  EE caller context around ra=0x{eeRa32:x8}:");
+                for (int offset = -24; offset <= 40; offset += 4)
+                {
+                    uint addr = (uint)(eeRa32 + offset);
+                    string arrow = offset == 0 ? " <-- ra" : "";
+                    try
+                    {
+                        uint iword = sched.EE.Bus.ReadWord(addr);
+                        string dis = MipsDisassembler.Disassemble(iword, addr);
+                        Console.WriteLine($"    0x{addr:x8}: {dis}{arrow}");
+                    }
+                    catch
+                    {
+                        Console.WriteLine($"    0x{addr:x8}: ??{arrow}");
+                    }
+                }
+            }
+
+            // ── EE outer-loop context (BEQL back-target at 0x80010530) ───────
+            // Dump the start of the outer loop to understand the full copy structure.
+            DumpEeRamRegion(sched.EE.Bus, 0x80010530u, 0x80010570u, "outer-loop start");
+            // Also dump function prologue of the called copy function
+            DumpEeRamRegion(sched.EE.Bus, 0x800103B0u, 0x800103D0u, "copy-func prologue");
+            // Dump key registers for outer loop diagnosis
+            {
+                ulong s1 = (ulong)sched.EE.Cpu.RegsLo[17];
+                ulong s2 = (ulong)sched.EE.Cpu.RegsLo[18];
+                ulong s3 = (ulong)sched.EE.Cpu.RegsLo[19];
+                ulong s5 = (ulong)sched.EE.Cpu.RegsLo[21];
+                ulong s6 = (ulong)sched.EE.Cpu.RegsLo[22];
+                ulong a1 = (ulong)sched.EE.Cpu.RegsLo[5];
+                ulong a2 = (ulong)sched.EE.Cpu.RegsLo[6];
+                ulong a3 = (ulong)sched.EE.Cpu.RegsLo[7];
+                Console.WriteLine($"  EE outer-loop regs: s1=0x{s1:x16} s2=0x{s2:x16} s3=0x{s3:x16}");
+                Console.WriteLine($"  EE outer-loop regs: s5=0x{s5:x16} s6=0x{s6:x16}");
+                Console.WriteLine($"  EE inner-func regs: a1=0x{a1:x16} a2=0x{a2:x16} a3=0x{a3:x16}");
+                // Read stack value at sp+0x84 (the outer loop bound)
+                ulong sp = (ulong)sched.EE.Cpu.RegsLo[29];
+                uint sp32 = (uint)(sp & 0xFFFFFFFFUL);
+                uint stackBound = 0;
+                try { stackBound = sched.EE.Bus.ReadWord(sp32 + 0x84u); } catch { }
+                Console.WriteLine($"  EE stack[sp+0x84]=0x{stackBound:x8} (outer-loop bound)");
+            }
+
             // ── IOP context disassembly ───────────────────────────────────────
             // Show 6 instructions before the IOP PC, the PC instruction, and 7 after.
             // This wider window ensures the full loop body (e.g., 0x124–0x14c) is
@@ -962,6 +1013,28 @@ namespace CodeDesigner.Mips64LE
         private static void DumpIopRamRegion(IopMemoryBus bus, uint startAddr, uint endAddr)
         {
             Console.WriteLine($"  IOP RAM disasm 0x{startAddr:x8}–0x{endAddr:x8}:");
+            for (uint addr = startAddr; addr < endAddr; addr += 4)
+            {
+                try
+                {
+                    uint iword = bus.ReadWord(addr);
+                    string dis = MipsDisassembler.Disassemble(iword, addr);
+                    Console.WriteLine($"    0x{addr:x8}: 0x{iword:x8}  {dis}");
+                }
+                catch
+                {
+                    Console.WriteLine($"    0x{addr:x8}: ??");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Dump EE bus memory as disassembly from <paramref name="startAddr"/> to
+        /// <paramref name="endAddr"/> (exclusive).  Used to reveal loop structures.
+        /// </summary>
+        private static void DumpEeRamRegion(PS2MemoryBus bus, uint startAddr, uint endAddr, string label)
+        {
+            Console.WriteLine($"  EE RAM disasm [{label}] 0x{startAddr:x8}–0x{endAddr:x8}:");
             for (uint addr = startAddr; addr < endAddr; addr += 4)
             {
                 try
