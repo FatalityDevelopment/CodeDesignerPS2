@@ -1402,35 +1402,32 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // TranslateAddress unchanged; the physical value 0xC1xxxxxx is beyond
                 // the main RAM window so MapPhysical returns the dummy zero buffer.
                 // In that case the entire loop is a memory no-op: skip it.
+                // Exclude BIOS ROM (0x1FC00000-0x1FFFFFFF) which IS readable.
                 uint srcRaw = PS2MemoryBus.TranslateAddress((uint)curSrc);
                 uint dstRaw = PS2MemoryBus.TranslateAddress((uint)curDst);
-                if (srcRaw >= PS2MemoryBus.MainRamMirrorEnd
-                    && dstRaw >= PS2MemoryBus.MainRamMirrorEnd)
+                bool srcUnmapped = srcRaw >= PS2MemoryBus.MainRamMirrorEnd && !IsBiosRom(srcRaw);
+                bool dstUnmapped = dstRaw >= PS2MemoryBus.MainRamMirrorEnd && !IsBiosRom(dstRaw);
+                if (srcUnmapped && dstUnmapped)
                 {
-                    // Both src and dst are in unmapped physical space: all reads return 0,
-                    // all writes are silently discarded.  Fast-forward the whole loop.
-                    chunkLen  = remaining;
-                    fullSkip  = true;
+                    // Both are in unmapped physical space: reads return 0, writes discarded.
+                    chunkLen = remaining;
+                    fullSkip = true;
                 }
                 else
                     return false;
             }
-            else if (srcRem >= 0 && dstRem < 0)
-            {
-                // src is in RAM, dst is unmapped — writes discarded; reads consumed.
-                uint dstRaw = PS2MemoryBus.TranslateAddress((uint)curDst);
-                if (dstRaw < PS2MemoryBus.MainRamMirrorEnd) return false;
-                chunkLen = Math.Min(remaining, srcRem);
-                fullSkip = (chunkLen == remaining);
-            }
             else if (srcRem < 0 && dstRem >= 0)
             {
-                // src unmapped (reads return 0) — zeroing a RAM range.
+                // src TLB miss — only handle the BIOS ROM → RAM kernel-copy case.
                 uint srcRaw = PS2MemoryBus.TranslateAddress((uint)curSrc);
-                if (srcRaw < PS2MemoryBus.MainRamMirrorEnd) return false;
+                if (!IsBiosRom(srcRaw)) return false;   // anything else: let bus handle it
+                uint biosOff = srcRaw - PS2MemoryBus.BiosRomPhysBase;
                 chunkLen = Math.Min(remaining, dstRem);
+                chunkLen = Math.Min(chunkLen, (long)(Bus.Bios.Length - biosOff));
+                if (chunkLen <= 0) return false;
                 if (dstPhys + chunkLen > Bus.Ram.Length) return false;
-                Bus.Ram.AsSpan((int)dstPhys, (int)chunkLen).Clear();
+                Bus.Bios.AsSpan((int)biosOff, (int)chunkLen)
+                         .CopyTo(Bus.Ram.AsSpan((int)dstPhys, (int)chunkLen));
                 curSrc += (ulong)chunkLen;
                 curDst += (ulong)chunkLen;
                 goto commitRegisters;
@@ -1561,6 +1558,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             physAddr = 0;
             return -1L;  // no matching TLB entry
         }
+
+        /// <summary>
+        /// Returns true if <paramref name="physAddr"/> falls within the BIOS ROM
+        /// physical window (0x1FC00000–0x1FFFFFFF).
+        /// </summary>
+        private static bool IsBiosRom(uint physAddr)
+            => physAddr >= PS2MemoryBus.BiosRomPhysBase
+            && physAddr <  PS2MemoryBus.BiosRomPhysBase + PS2MemoryBus.BiosRomSize;
 
         /// <summary>
         /// Returns true if <paramref name="word"/> encodes a "branch-likely"
