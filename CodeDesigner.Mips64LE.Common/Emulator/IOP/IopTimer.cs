@@ -15,6 +15,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     ///   +0x08  TN_TARGET  — 16-bit compare target
     ///
     /// TN_MODE bits used here:
+    ///   [3]  ZRET  — reset counter to 0 on compare match
     ///   [4]  CMPE  — compare interrupt enable
     ///   [5]  OVFE  — overflow interrupt enable
     ///   [7]  CUE   — count-up enable
@@ -36,6 +37,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public const uint REG_TARGET = 0x08u;
 
         // ── TN_MODE bit masks ────────────────────────────────────────────────
+        private const uint MODE_ZRET = 0x0008u; // [3]  reset count to 0 on compare match (PCSX2 Iop_Count_ResetOnCmp)
         private const uint MODE_CMPE = 0x0010u; // [4]  compare interrupt enable
         private const uint MODE_OVFE = 0x0020u; // [5]  overflow interrupt enable
         private const uint MODE_CUE  = 0x0080u; // [7]  count-up enable
@@ -145,13 +147,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 _count = (_count + 1u) & 0xFFFFu;
 
                 // Compare match
-                if (_target != 0u && _count == _target && (_mode & MODE_CMPE) != 0)
+                if (_target != 0u && _count == _target)
                 {
-                    if ((_mode & MODE_EQUF) == 0)
+                    if ((_mode & MODE_CMPE) != 0 && (_mode & MODE_EQUF) == 0)
                     {
                         _mode |= MODE_EQUF;
                         CompareInterruptPending?.Invoke(this, EventArgs.Empty);
                     }
+                    // ZRET: reset counter to 0 on compare match so the timer fires
+                    // at the target period rather than after a full 65536-tick wrap.
+                    // Reference: PCSX2 IopCounters.h Iop_Count_ResetOnCmp (bit 3).
+                    if ((_mode & MODE_ZRET) != 0)
+                        _count = 0u;
                 }
 
                 // Overflow (counter wrapped from 0xFFFF → 0)

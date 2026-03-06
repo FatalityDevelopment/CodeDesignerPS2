@@ -4409,19 +4409,87 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
-        public void IopMemoryBus_ICtrl_ReadWriteLatch()
+        public void IopMemoryBus_ICtrl_ReadClearsRegister()
         {
-            // 0x1F801078 (I_CTRL) must behave as a simple read/write latch.
+            // 0x1F801078 (I_CTRL) uses read-and-clear + write-OR semantics per PCSX2 IopHw.cpp.
             var bus = new IopMemoryBus();
             const uint kICtrl = 0x1F801078u;
 
-            Assert.AreEqual(0u, bus.ReadWord(kICtrl), "I_CTRL must reset to 0");
+            // Initial value must be 0.
+            Assert.AreEqual(0u, bus.ICtrl, "I_CTRL must reset to 0");
 
+            // Write 1 → I_CTRL = 0 | 1 = 1 (OR semantics).
             bus.WriteWord(kICtrl, 1u);
-            Assert.AreEqual(1u, bus.ReadWord(kICtrl), "I_CTRL write 1 must read back 1");
+            Assert.AreEqual(1u, bus.ICtrl, "I_CTRL must be 1 after WriteWord(1)");
 
+            // Read must return 1 then clear the register.
+            uint readVal = bus.ReadWord(kICtrl);
+            Assert.AreEqual(1u, readVal,   "I_CTRL read must return 1");
+            Assert.AreEqual(0u, bus.ICtrl, "I_CTRL must be 0 after read-and-clear");
+
+            // Write 0 after clear has no effect (OR with 0 = 0).
             bus.WriteWord(kICtrl, 0u);
-            Assert.AreEqual(0u, bus.ReadWord(kICtrl), "I_CTRL write 0 must read back 0");
+            Assert.AreEqual(0u, bus.ICtrl, "I_CTRL write-OR with 0 must not change value");
+
+            // Write 1 again → re-enable.
+            bus.WriteWord(kICtrl, 1u);
+            Assert.AreEqual(1u, bus.ICtrl, "I_CTRL must be 1 after second WriteWord(1)");
+
+            // Non-destructive ICtrl property must not clear the register.
+            uint prop1 = bus.ICtrl;
+            uint prop2 = bus.ICtrl;
+            Assert.AreEqual(1u, prop1, "ICtrl property must return current value non-destructively");
+            Assert.AreEqual(1u, prop2, "ICtrl property must not clear the register");
+        }
+
+        [TestMethod]
+        public void IopTimer_Zret_ResetsCounterOnCompareMatch()
+        {
+            // Mode bit [3] = ZRET: counter must reset to 0 after hitting the target.
+            // Without ZRET the counter wraps after 65535; with ZRET it resets immediately.
+            var t = new IopTimer(0);
+            // CUE=1, CMPE=1, ZRET=1 → bits 7|4|3 = 0x98
+            t.WriteRegister(IopTimer.REG_MODE,   0x0098u);
+            t.WriteRegister(IopTimer.REG_TARGET,    5u);
+
+            int fires = 0;
+            t.CompareInterruptPending += (_, _) => fires++;
+
+            // First firing: count reaches 5 → EQUF set, interrupt, count reset to 0.
+            t.Tick(5u);
+            Assert.AreEqual(0u, t.Count,  "ZRET: counter must reset to 0 after compare match");
+            Assert.AreEqual(1,  fires,    "ZRET: one interrupt must have fired at target=5");
+
+            // Read TN_MODE clears EQUF so the second interrupt can fire.
+            t.ReadRegister(IopTimer.REG_MODE);
+
+            // Second period: count goes from 0 to 5 → fires again.
+            t.Tick(5u);
+            Assert.AreEqual(0u, t.Count, "ZRET: counter must reset again after second match");
+            Assert.AreEqual(2, fires,    "ZRET: second interrupt must fire at target=5");
+        }
+
+        [TestMethod]
+        public void IopTimer_NoZret_CountContinuesPastTarget()
+        {
+            // Without ZRET the counter does NOT reset on compare match — it keeps counting.
+            var t = new IopTimer(0);
+            // CUE=1, CMPE=1, ZRET=0 → bits 7|4 = 0x90
+            t.WriteRegister(IopTimer.REG_MODE,   0x0090u);
+            t.WriteRegister(IopTimer.REG_TARGET,   5u);
+
+            int fires = 0;
+            t.CompareInterruptPending += (_, _) => fires++;
+
+            // Count 0 → 5: interrupt fires.
+            t.Tick(5u);
+            Assert.AreEqual(5u, t.Count, "No ZRET: counter must NOT reset on compare match");
+            Assert.AreEqual(1,  fires,   "No ZRET: one interrupt at target=5");
+
+            // Count past target: no second interrupt while EQUF is set.
+            t.Tick(3u);
+            Assert.AreEqual(8u, t.Count, "No ZRET: counter continues past target");
+            Assert.AreEqual(1,  fires,   "No ZRET: no second interrupt while EQUF is still set");
         }
     }
 }

@@ -68,7 +68,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         // IOP INTC registers: I_STAT (offset 0), I_MASK (offset 4), I_CTRL (offset 8)
         private uint _iStat;
         private uint _iMask;
-        private uint _iCtrl;  // 0x1F801078: interrupt-controller master-enable latch (PCSX2 hw-reg)
+        // I_CTRL (0x1F801078): master-enable latch.
+        // Read is destructive (returns value, then clears to 0) per PCSX2 IopHw.cpp.
+        // Write uses OR semantics (sets bits; only a CPU read can clear the register).
+        private uint _iCtrl;
 
         private Sio2?           _sio2;
         private Spu2?           _spu2;
@@ -332,6 +335,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <summary>IOP I_MASK register (interrupt mask, plain R/W).</summary>
         public uint IMask => _iMask;
 
+        /// <summary>
+        /// IOP I_CTRL register (interrupt-controller master-enable latch), read non-destructively.
+        /// Use this for diagnostics only — CPU reads via <see cref="ReadWord"/> clear this register.
+        /// </summary>
+        public uint ICtrl => _iCtrl;
+
         /// <summary>True when any interrupt is both pending and enabled.</summary>
         public bool IsInterruptPending => (_iStat & _iMask) != 0;
 
@@ -376,7 +385,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             // IOP INTC
             if (addr == IntcBase)      return _iStat;
             if (addr == IntcBase + 4u) return _iMask;
-            if (addr == IntcBase + 8u) return _iCtrl;  // I_CTRL: simple latch, matches PCSX2 psxHu32(0x1078)
+            if (addr == IntcBase + 8u)                   // I_CTRL: read-and-clear per PCSX2 IopHw.cpp
+        {
+            uint v = _iCtrl;
+            _iCtrl = 0u;
+            return v;
+        }
 
             // IOP timers T0–T2 (0x1F801100)
             if (addr >= TimerBase && addr < TimerBase + TimerBankSize)
@@ -453,7 +467,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             // IOP INTC
             if (addr == IntcBase)      { _iStat &= value; return; }  // W0C (write-AND per PCSX2 psxHu32 &= value)
             if (addr == IntcBase + 4u) { _iMask  = value; return; }
-            if (addr == IntcBase + 8u) { _iCtrl  = value; return; }  // I_CTRL: simple latch
+            if (addr == IntcBase + 8u) { _iCtrl |= value; return; }  // I_CTRL: write-OR per PCSX2 IopHw.cpp
 
             // IOP timers T0–T2 (0x1F801100)
             if (addr >= TimerBase && addr < TimerBase + TimerBankSize)
