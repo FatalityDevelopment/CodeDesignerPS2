@@ -387,8 +387,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // call.  This turns a ~535 million-instruction BIOS init loop into a
             // microsecond operation.  See TryFastForwardByteFill for the pattern
             // detection logic and correctness analysis.
-            if ((Cpu.COP0.ReadRegister32(12) & 0x2u) != 0 // EXL=1
-                && TryFastForwardByteFill())
+            //
+            // NOTE: Also triggers when IE=0 (interrupts globally disabled) even with
+            // EXL=0, because in that case no interrupt can preempt the fill either.
+            uint st4Ff = Cpu.COP0.ReadRegister32(12);
+            bool noInterruptDuringFill = (st4Ff & 0x2u) != 0   // EXL=1
+                                       || (st4Ff & 0x1u) == 0;  // IE=0
+            if (noInterruptDuringFill && TryFastForwardByteFill())
                 return;
 
             // ── Hardware interrupt check ──────────────────────────────────────
@@ -444,6 +449,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             catch (TlbMissException tlbFetch)
             {
                 // Instruction-fetch TLB miss → ExcCode=TlbLoad (2).
+                // Dump registers to help debug why PC is in KUSEG.
+                System.Console.Error.WriteLine(
+                    $"[TLB-FETCH miss] PC=0x{pc32:x8} BadVAddr=0x{tlbFetch.VirtualAddress:x8} ic={InstructionCount} " +
+                    $"ra=0x{Cpu.RegsLo[31]:x16} sp=0x{Cpu.RegsLo[29]:x16} " +
+                    $"RAM[sp+0x10]=0x{(Cpu.RegsLo[29]+0x10 < 0x80000000u+0x2000000u ? (uint)(Bus.Ram[(Cpu.RegsLo[29]+0x10)&0x1FFFFFFu] | (Bus.Ram[((Cpu.RegsLo[29]+0x10)&0x1FFFFFFu)+1]<<8) | (Bus.Ram[((Cpu.RegsLo[29]+0x10)&0x1FFFFFFu)+2]<<16) | (Bus.Ram[((Cpu.RegsLo[29]+0x10)&0x1FFFFFFu)+3]<<24)) : 0):x8}");
                 Cpu.COP0.WriteRegister32(8, tlbFetch.VirtualAddress);  // BadVAddr
                 Cpu.COP0.WriteRegister64(10,
                     (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbFetch.VirtualAddress & 0xFFFFE000u)));
@@ -649,6 +659,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private bool TryFastForwardByteFill()
         {
             uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+            System.IO.File.AppendAllText("/tmp/fill_debug.txt", $"[TRY-FF] pc32=0x{pc32:x8}\n");
 
             // Only accelerate KSEG0/KSEG1 code (cached kernel region).
             if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
@@ -841,6 +852,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             uint startVaddr = (uint)(baseVal + offVal + 1); // first store address
             uint physStart  = PS2MemoryBus.TranslateAddress(startVaddr)
                               & (uint)(PS2MemoryBus.MainRamSize - 1);
+
+            System.IO.File.AppendAllText("/tmp/fill_debug.txt",
+                $"[FILL-FWDFWD] pc32=0x{pc32:x8} fillByte=0x{fillByte:x2} " +
+                $"startVaddr=0x{startVaddr:x8} physStart=0x{physStart:x8} remaining={remaining} " +
+                $"sp=0x{Cpu.RegsLo[29]:x16} ra=0x{Cpu.RegsLo[31]:x16} ic={InstructionCount}\n");
 
             if (remaining >= PS2MemoryBus.MainRamSize)
             {
