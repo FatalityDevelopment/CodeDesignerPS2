@@ -364,7 +364,19 @@ namespace CodeDesigner.Mips64LE
                 while (!cts.Token.IsCancellationRequested && totalSteps < maxSteps)
                 {
                     int slice = (int)Math.Min(SliceSize, maxSteps - totalSteps);
-                    scheduler.RunSlice(slice);
+                    try
+                    {
+                        scheduler.RunSlice(slice);
+                    }
+                    catch (CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE.BreakpointException)
+                    {
+                        // BREAK is dispatched through COP0 by Step() (EPC saved,
+                        // Status.EXL=1, Cause.ExcCode=Breakpoint) and then re-thrown.
+                        // In --run mode we want execution to continue from the exception
+                        // vector (already set in Cpu.PC by COP0ExceptionDispatcher).
+                        uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+                        Console.WriteLine($"[BREAK → COP0 vector 0x{bpPc:x8}, continuing]");
+                    }
                     scheduler.TickHardware((uint)slice);
                     totalSteps += slice;
 
@@ -511,16 +523,6 @@ namespace CodeDesigner.Mips64LE
                 await Task.CompletedTask; // satisfy async signature
             }
             catch (OperationCanceledException) { /* Ctrl+C */ }
-            catch (CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE.BreakpointException)
-            {
-                // BREAK is dispatched through COP0 inside Step() (EPC, Status.EXL=1,
-                // Cause.ExcCode=Breakpoint=9) and then re-thrown so that debugger-aware
-                // callers can inspect it.  In --run mode we want BIOS BREAKs to be
-                // handled like any other exception (CPU takes the COP0 vector, resumes).
-                // Step() has already updated the CPU state; just log and continue.
-                uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
-                Console.WriteLine($"[BREAK at 0x{bpPc:x8} — handled via COP0 exception vector, continuing]");
-            }
 
             double totalElapsed = (DateTime.UtcNow - startTime).TotalSeconds;
             Console.WriteLine();
