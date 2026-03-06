@@ -1220,8 +1220,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             const int MinKernelPreservation = 256 * 1024;
             byte[]? kernelSnapshot = null;
             int     kernelSnapLen  = 0;
-            long physLowL = (long)physStart - remaining + 1L;
-            if (remaining >= PS2MemoryBus.MainRamSize || physLowL < MinKernelPreservation)
+            long physLow = (long)physStart - remaining + 1L;
+            if (remaining >= PS2MemoryBus.MainRamSize || physLow < MinKernelPreservation)
             {
                 kernelSnapLen  = (int)Math.Min(
                                      Math.Max(physStart, (uint)MinKernelPreservation),
@@ -1263,7 +1263,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             //   sltRd   = 0                 (final SLT: cnt >= bound → false)
             //   PC      = pc32 + 8          (past BNEL + delay slot)
             CpuHelpers.SetReg32(Cpu, cntReg,  boundVal);
-            CpuHelpers.SetReg32(Cpu, addrReg, (int)(addrVal - (int)remaining));
+            CpuHelpers.SetReg32(Cpu, addrReg, (int)(addrVal - remaining));
             CpuHelpers.SetReg32(Cpu, sltRd,   0);
             Cpu.PC = pc32 + 8u;
 
