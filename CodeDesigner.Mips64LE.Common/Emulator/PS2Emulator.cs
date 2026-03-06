@@ -399,6 +399,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (TryFastForwardBnelByteFill())
                 return;
 
+            if (TryFastForwardByteCopy())
+                return;
+
             // ── Hardware interrupt check ──────────────────────────────────────
             // Deliver a pending INTC interrupt before executing the next instruction
             // when the CPU is ready to accept it.
@@ -1269,6 +1272,294 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             InstructionCount += (ulong)remaining;
             return true;
+        }
+
+        // ── Byte-copy loop fast-forward ──────────────────────────────────────────
+
+        /// <summary>
+        /// Detect and fast-forward a MIPS byte-copy loop of the form:
+        /// <code>
+        ///   loop:
+        ///     lbu    tmpReg,  0(srcReg)          ; load byte from source
+        ///     addiu  cntReg,  cntReg,  -1         ; count--
+        ///     addiu  srcReg,  srcReg,  +1         ; src++
+        ///     sb     tmpReg,  0(dstReg)           ; store byte to destination
+        ///     nop
+        ///     bne    cntReg,  sentReg,  loop      ; loop while cntReg != sentReg
+        ///     addiu  dstReg,  dstReg,  +1         ; delay slot: dst++
+        /// </code>
+        ///
+        /// This pattern appears in the EE kernel at 0x800103e0 immediately after
+        /// the BIOS completes its kernel-decompression fill loops and jumps into RAM.
+        /// The loop copies a large data segment (up to ~20 MB) byte-by-byte between
+        /// two TLB-mapped KSEG2 virtual addresses, which is extremely slow without
+        /// fast-forwarding.
+        ///
+        /// Because both source and destination may be in KSEG2 (virtual addresses
+        /// starting at 0xC0000000), a direct TranslateAddress call is not sufficient.
+        /// This fast-forward uses <see cref="PhysAddrAndPageRemaining"/> to resolve
+        /// each virtual page via the EE TLB (or KSEG0/1 direct mapping), then copies
+        /// data directly in physical RAM in page-aligned chunks.  If any TLB lookup
+        /// fails, the fast-forward is silently skipped so normal execution resumes.
+        /// </summary>
+        private bool TryFastForwardByteCopy()
+        {
+            // ── Step 1: PC must be in KSEG0/KSEG1 and at a BNE (opcode=5) ────
+            // Only run in KSEG0/1 — FetchWord would throw TlbMissException for
+            // TLB-mapped PCs, which the caller expects to propagate from Step().
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+            if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
+            uint bneWord = FetchWord(pc32);
+            if ((bneWord >> 26) != 5u) return false;           // BNE opcode = 5
+
+            // ── Step 2: Branch must be backward ──────────────────────────────
+            int branchOffset = (short)(bneWord & 0xFFFFu);
+            if (branchOffset >= 0) return false;
+            uint loopStart = (uint)((long)(pc32 + 4) + (long)branchOffset * 4L);
+
+            // ── Step 3: Loop body must be exactly 5 instructions ─────────────
+            int loopLen = (int)(pc32 - loopStart) / 4;
+            if (loopLen != 5) return false;
+
+            // Extract BNE register fields: rs=cntReg, rt=sentReg
+            int cntReg = (int)((bneWord >> 21) & 0x1Fu);
+            int sentReg = (int)((bneWord >> 16) & 0x1Fu);
+            if (cntReg == 0 || sentReg == cntReg) return false;
+
+            // ── Step 4: Validate delay slot — ADDIU dstReg, dstReg, +1 ──────
+            uint dsWord = FetchWord(pc32 + 4u);
+            if ((dsWord >> 26) != 9u) return false;            // ADDIU
+            int dsBase = (int)((dsWord >> 21) & 0x1Fu);
+            int dsDst  = (int)((dsWord >> 16) & 0x1Fu);
+            if (dsBase != dsDst) return false;                 // rs == rt (in-place)
+            if ((short)(dsWord & 0xFFFFu) != 1) return false; // imm == +1
+            int dstReg = dsDst;
+
+            // ── Step 5: Validate loop body instructions ───────────────────────
+            // w0: LBU tmpReg, 0(srcReg)
+            uint w0 = FetchWord(loopStart);
+            if ((w0 >> 26) != 0x24u) return false;            // LBU opcode = 0x24
+            if ((short)(w0 & 0xFFFFu) != 0) return false;     // offset must be 0
+            int srcReg  = (int)((w0 >> 21) & 0x1Fu);          // base register
+            int tmpReg  = (int)((w0 >> 16) & 0x1Fu);          // destination of LBU
+
+            // w1: ADDIU cntReg, cntReg, -1
+            uint w1 = FetchWord(loopStart + 4u);
+            if ((w1 >> 26) != 9u) return false;
+            if ((int)((w1 >> 21) & 0x1Fu) != cntReg) return false;
+            if ((int)((w1 >> 16) & 0x1Fu) != cntReg) return false;
+            if ((short)(w1 & 0xFFFFu) != -1) return false;
+
+            // w2: ADDIU srcReg, srcReg, +1
+            uint w2 = FetchWord(loopStart + 8u);
+            if ((w2 >> 26) != 9u) return false;
+            if ((int)((w2 >> 21) & 0x1Fu) != srcReg) return false;
+            if ((int)((w2 >> 16) & 0x1Fu) != srcReg) return false;
+            if ((short)(w2 & 0xFFFFu) != 1) return false;
+
+            // w3: SB tmpReg, 0(dstReg)
+            uint w3 = FetchWord(loopStart + 12u);
+            if ((w3 >> 26) != 0x28u) return false;            // SB opcode = 0x28
+            if ((int)((w3 >> 21) & 0x1Fu) != dstReg) return false;  // base = dstReg
+            if ((short)(w3 & 0xFFFFu) != 0) return false;     // offset must be 0
+            if ((int)((w3 >> 16) & 0x1Fu) != tmpReg) return false;  // data = tmpReg
+
+            // w4: NOP
+            uint w4 = FetchWord(loopStart + 16u);
+            if (w4 != 0u) return false;
+
+            // ── Step 6: Compute remaining iterations ─────────────────────────
+            // Loop exits when cntReg == sentReg.  cntReg decrements each iteration.
+            // remaining = (signed)(cntReg - sentReg) iterations left.
+            int cntVal  = (int)(Cpu.RegsLo[cntReg]  & 0xFFFFFFFFu);
+            int sentVal = (int)(Cpu.RegsLo[sentReg] & 0xFFFFFFFFu);
+            long remaining = (long)cntVal - (long)sentVal;
+            if (remaining <= BulkFillMinIterations) return false;
+
+            // ── Step 7: Translate src/dst and perform the copy ───────────────
+            byte asid = (byte)(Cpu.COP0.ReadRegister32(10) & 0xFFu);
+            ulong curSrc = Cpu.RegsLo[srcReg] & 0xFFFFFFFFUL;
+            ulong curDst = Cpu.RegsLo[dstReg] & 0xFFFFFFFFUL;
+
+            long srcRem = PhysAddrAndPageRemaining((uint)curSrc, asid, out uint srcPhys);
+            long dstRem = PhysAddrAndPageRemaining((uint)curDst, asid, out uint dstPhys);
+
+            long chunkLen;
+            bool fullSkip = false;
+
+            if (srcRem >= 0 && dstRem >= 0
+                && srcPhys + remaining <= Bus.Ram.Length
+                && dstPhys + remaining <= Bus.Ram.Length)
+            {
+                // Both addresses translated to physical RAM.  Copy one page-chunk.
+                chunkLen = Math.Min(remaining, Math.Min(srcRem, dstRem));
+            }
+            else if (srcRem < 0 && dstRem < 0)
+            {
+                // TLB lookup failed for both src and dst.  Check whether the bus
+                // maps these addresses to an unmapped region (reads return 0, writes
+                // discarded).  KSEG2 virtual addresses (0xC0000000+) pass through
+                // TranslateAddress unchanged; the physical value 0xC1xxxxxx is beyond
+                // the main RAM window so MapPhysical returns the dummy zero buffer.
+                // In that case the entire loop is a memory no-op: skip it.
+                uint srcRaw = PS2MemoryBus.TranslateAddress((uint)curSrc);
+                uint dstRaw = PS2MemoryBus.TranslateAddress((uint)curDst);
+                if (srcRaw >= PS2MemoryBus.MainRamMirrorEnd
+                    && dstRaw >= PS2MemoryBus.MainRamMirrorEnd)
+                {
+                    // Both src and dst are in unmapped physical space: all reads return 0,
+                    // all writes are silently discarded.  Fast-forward the whole loop.
+                    chunkLen  = remaining;
+                    fullSkip  = true;
+                }
+                else
+                    return false;
+            }
+            else if (srcRem >= 0 && dstRem < 0)
+            {
+                // src is in RAM, dst is unmapped — writes discarded; reads consumed.
+                uint dstRaw = PS2MemoryBus.TranslateAddress((uint)curDst);
+                if (dstRaw < PS2MemoryBus.MainRamMirrorEnd) return false;
+                chunkLen = Math.Min(remaining, srcRem);
+                fullSkip = (chunkLen == remaining);
+            }
+            else if (srcRem < 0 && dstRem >= 0)
+            {
+                // src unmapped (reads return 0) — zeroing a RAM range.
+                uint srcRaw = PS2MemoryBus.TranslateAddress((uint)curSrc);
+                if (srcRaw < PS2MemoryBus.MainRamMirrorEnd) return false;
+                chunkLen = Math.Min(remaining, dstRem);
+                if (dstPhys + chunkLen > Bus.Ram.Length) return false;
+                Bus.Ram.AsSpan((int)dstPhys, (int)chunkLen).Clear();
+                curSrc += (ulong)chunkLen;
+                curDst += (ulong)chunkLen;
+                goto commitRegisters;
+            }
+            else
+                return false;
+
+            if (!fullSkip)
+            {
+                if (srcPhys + chunkLen > Bus.Ram.Length) return false;
+                if (dstPhys + chunkLen > Bus.Ram.Length) return false;
+                Bus.Ram.AsSpan((int)srcPhys, (int)chunkLen)
+                        .CopyTo(Bus.Ram.AsSpan((int)dstPhys, (int)chunkLen));
+            }
+
+            curSrc += (ulong)chunkLen;
+            curDst += (ulong)chunkLen;
+
+            commitRegisters:
+            // ── Step 8: Update CPU registers ─────────────────────────────────
+            // Each fast-forwarded iteration: cntReg--, srcReg++, dstReg++ (delay slot).
+            long newCntVal = (long)cntVal - chunkLen;
+            CpuHelpers.SetReg32(Cpu, srcReg, (int)(uint)curSrc);
+            CpuHelpers.SetReg32(Cpu, dstReg, (int)(uint)curDst);
+
+            if (chunkLen == remaining)
+            {
+                // Full copy done — cntReg reaches sentVal, BNE not taken, exit loop.
+                CpuHelpers.SetReg32(Cpu, cntReg, sentVal);
+                if (!fullSkip)
+                {
+                    long lastR = PhysAddrAndPageRemaining((uint)(curDst - 1), asid, out uint lastPhys);
+                    if (lastR >= 0 && lastPhys < Bus.Ram.Length)
+                        CpuHelpers.SetReg32(Cpu, tmpReg, Bus.Ram[lastPhys]);
+                }
+                // For fullSkip (unmapped src), last byte read was 0 (dummy buffer).
+                // tmpReg already has the value from the last executed iteration; don't change.
+                Cpu.PC = pc32 + 8u;   // past BNE + delay slot
+            }
+            else
+            {
+                // Partial: continue loop from top of loop body.
+                CpuHelpers.SetReg32(Cpu, cntReg, (int)newCntVal);
+                Cpu.PC = loopStart;
+            }
+
+            InstructionCount += (ulong)chunkLen;
+            return true;
+        }
+
+        /// <summary>
+        /// Translate a virtual address to its physical address, handling both the
+        /// fixed KSEG0/1 mapping (strip top 3 bits) and TLB-mapped regions
+        /// (KUSEG, KSEG2, KSEG3).
+        /// </summary>
+        /// <param name="virt">32-bit virtual address.</param>
+        /// <param name="asid">Current ASID from COP0 EntryHi.</param>
+        /// <param name="physAddr">Physical address if translation succeeded; otherwise 0.</param>
+        /// <returns>
+        /// Number of bytes remaining in the current TLB/physical page starting from
+        /// <paramref name="virt"/>.  Returns -1 if translation fails (TLB miss or
+        /// page marked invalid).
+        /// </returns>
+        private long PhysAddrAndPageRemaining(uint virt, byte asid, out uint physAddr)
+        {
+            // KSEG0 (0x80000000-0x9FFFFFFF) and KSEG1 (0xA0000000-0xBFFFFFFF)
+            // both strip the top 3 bits.  Treat the entire 512 MB window as one
+            // "page" (remaining = physical RAM size from that offset).
+            if ((virt & 0xC0000000u) == 0x80000000u)
+            {
+                physAddr = virt & 0x1FFFFFFFu;
+                long rem = (long)Bus.Ram.Length - physAddr;
+                return rem > 0 ? rem : -1L;
+            }
+
+            // For all other regions, first check the bus physical mapping.
+            // PS2MemoryBus.TranslateAddress() strips KSEG0/1 bits but passes KUSEG
+            // and KSEG2 addresses through unchanged.  If the result falls in the
+            // main RAM window [0, MainRamMirrorEnd), the bus serves the access
+            // from RAM without any TLB lookup — exactly how the instruction
+            // implementations (LBU, SB, …) work.
+            uint busPhys = PS2MemoryBus.TranslateAddress(virt);
+            if (busPhys < PS2MemoryBus.MainRamMirrorEnd)
+            {
+                // Apply the same 32 MB power-of-two wrap used by MapPhysical.
+                physAddr = busPhys & (uint)(PS2MemoryBus.MainRamSize - 1);
+                long rem  = (long)Bus.Ram.Length - physAddr;
+                return rem > 0 ? rem : -1L;
+            }
+
+            // TLB-mapped region: search the 48-entry EE TLB.
+            // Sign-extend the 32-bit virtual address to 64 bits: addresses with
+            // bit 31 set (KSEG2/3: 0xC0000000–0xFFFFFFFF) are sign-extended when
+            // the kernel writes them to COP0 EntryHi via MTC0, so TLB entries for
+            // these regions are stored with the top 32 bits all set (0xFFFFFFFF…).
+            var tlb = Cpu.COP0.TLB;
+            ulong va  = (ulong)(long)(int)virt;  // sign-extend 32→64 bits
+            ulong vpn = va & 0xFFFFFFFFFFFFE000UL;
+
+            for (int i = 0; i < TLBState.NumTLBEntries; i++)
+            {
+                TLBEntry entry = tlb.ReadEntry(i);
+                if (!entry.Valid) continue;
+
+                ulong eVpn  = entry.EntryHi & 0xFFFFFFFFFFFFE000UL;
+                byte  eAsid = (byte)(entry.EntryHi & 0xFFu);
+                bool  global = ((entry.EntryLo0 & 1u) != 0) && ((entry.EntryLo1 & 1u) != 0);
+
+                // Apply the page mask to align both VPNs before comparison.
+                // PageMask covers the page-size bits, so mask them out of the VPN.
+                uint pageMask  = entry.PageMask;
+                ulong maskFull = ~(ulong)(pageMask | 0x1FFFu);
+                if ((eVpn & maskFull) != (vpn & maskFull)) continue;
+                if (!global && eAsid != asid)              continue;
+
+                uint pageSize = (pageMask | 0x1FFFu) + 1u;  // size of one page
+                bool odd = ((virt & pageSize) != 0);
+
+                ulong lo = odd ? entry.EntryLo1 : entry.EntryLo0;
+                if ((lo & 0x2u) == 0) { physAddr = 0; return -1L; } // V bit clear
+
+                ulong pfn    = (lo >> 6) & 0xFFFFFUL;
+                uint  offset = virt & (pageSize - 1u);
+                physAddr = (uint)((pfn << 12) | offset);
+                return (long)(pageSize - offset);            // bytes left in page
+            }
+
+            physAddr = 0;
+            return -1L;  // no matching TLB entry
         }
 
         /// <summary>
