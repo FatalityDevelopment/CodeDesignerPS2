@@ -8,6 +8,19 @@ using System;
 
 namespace CodeDesigner.Mips64LE.Common.CPU
 {
+    /// <summary>
+    /// Signal set by instruction <c>Exec()</c> methods to indicate a CPU-level
+    /// exception without throwing a C# exception.  The emulator checks this field
+    /// after every <c>ExecuteGeneric()</c> call and dispatches through COP0.
+    /// </summary>
+    public enum CpuExceptionSignal : byte
+    {
+        None       = 0,
+        Syscall    = 1,
+        Breakpoint = 2,
+        Trap       = 3,
+    }
+
     public sealed class CpuState
     {
         // 128-bit registers (stored as pairs of 64-bit values)
@@ -32,6 +45,11 @@ namespace CodeDesigner.Mips64LE.Common.CPU
 
         // COP1 FPU Accumulator register (PS2 EE specific, used by ADDA.S/MADD.S/etc.)
         public float FACC { get; set; }
+
+        // CPU exception signal – set by instruction Exec() instead of throwing
+        // a C# exception, then consumed by the emulator's Step() loop.
+        // Always cleared to None before each instruction is executed.
+        public CpuExceptionSignal ExceptionSignal;
 
         // Main memory (direct array, used when Bus is null)
         public byte[] Memory { get; set; } = Array.Empty<byte>();

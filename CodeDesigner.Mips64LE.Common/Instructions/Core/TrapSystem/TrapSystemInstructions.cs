@@ -32,13 +32,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            // Trigger system call exception
-            // In a full implementation, this would:
-            // 1. Save current PC to EPC (Exception Program Counter)
-            // 2. Set Cause register with exception code
-            // 3. Jump to exception handler
-            // For now, throw an exception to indicate system call
-            throw new SystemCallException($"SYSCALL with code 0x{args.Rs:X}");
+            cpu.ExceptionSignal = CpuExceptionSignal.Syscall;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -80,9 +74,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            // Trigger breakpoint exception
-            // Similar to SYSCALL but for debugging purposes
-            throw new BreakpointException($"BREAK with code 0x{args.Rs:X}");
+            cpu.ExceptionSignal = CpuExceptionSignal.Breakpoint;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -128,9 +120,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             long rt = (long)cpu.RegsLo[args.Rt];
             
             if (rs >= rt)
-            {
-                throw new TrapException($"TGE: {rs} >= {rt}");
-            }
+                cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -180,9 +170,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong rt = cpu.RegsLo[args.Rt];
             
             if (rs >= rt)
-            {
-                throw new TrapException($"TGEU: 0x{rs:X16} >= 0x{rt:X16}");
-            }
+                cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -232,9 +220,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             long rt = (long)cpu.RegsLo[args.Rt];
             
             if (rs < rt)
-            {
-                throw new TrapException($"TLT: {rs} < {rt}");
-            }
+                cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -284,9 +270,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong rt = cpu.RegsLo[args.Rt];
             
             if (rs < rt)
-            {
-                throw new TrapException($"TLTU: 0x{rs:X16} < 0x{rt:X16}");
-            }
+                cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -336,9 +320,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong rt = cpu.RegsLo[args.Rt];
             
             if (rs == rt)
-            {
-                throw new TrapException($"TEQ: 0x{rs:X16} == 0x{rt:X16}");
-            }
+                cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -388,9 +370,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             ulong rt = cpu.RegsLo[args.Rt];
             
             if (rs != rt)
-            {
-                throw new TrapException($"TNE: 0x{rs:X16} != 0x{rt:X16}");
-            }
+                cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -435,7 +415,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             int imm = CpuHelpers.SignExtend16(args.Imm);
-            if (rs >= imm) throw new TrapException($"TGEI: {rs} >= {imm}");
+            if (rs >= imm) cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -468,7 +448,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong imm = (ulong)(long)CpuHelpers.SignExtend16(args.Imm);
-            if (rs >= imm) throw new TrapException($"TGEIU: 0x{rs:X16} >= 0x{imm:X16}");
+            if (rs >= imm) cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -501,7 +481,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             int imm = CpuHelpers.SignExtend16(args.Imm);
-            if (rs < imm) throw new TrapException($"TLTI: {rs} < {imm}");
+            if (rs < imm) cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -534,7 +514,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             ulong rs = cpu.RegsLo[args.Rs];
             ulong imm = (ulong)(long)CpuHelpers.SignExtend16(args.Imm);
-            if (rs < imm) throw new TrapException($"TLTIU: 0x{rs:X16} < 0x{imm:X16}");
+            if (rs < imm) cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -567,7 +547,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             int imm = CpuHelpers.SignExtend16(args.Imm);
-            if (rs == imm) throw new TrapException($"TEQI: {rs} == {imm}");
+            if (rs == imm) cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -600,7 +580,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             int imm = CpuHelpers.SignExtend16(args.Imm);
-            if (rs != imm) throw new TrapException($"TNEI: {rs} != {imm}");
+            if (rs != imm) cpu.ExceptionSignal = CpuExceptionSignal.Trap;
         }
 
         public override string Disasm(Args_I args, uint? pc = null)

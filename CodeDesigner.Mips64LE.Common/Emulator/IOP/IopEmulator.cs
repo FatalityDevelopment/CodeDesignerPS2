@@ -164,6 +164,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             ulong pcBefore = _bridge.PC;
 
             // Execute with IOP exception routing
+            _bridge.ExceptionSignal = CpuExceptionSignal.None;
             try
             {
                 instrObj.ExecuteGeneric(_bridge, instrArgs!);
@@ -174,24 +175,25 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 InstructionCount++;
                 return;
             }
-            catch (TrapException)
+
+            if (_bridge.ExceptionSignal != CpuExceptionSignal.None)
             {
-                DispatchIopException(ExceptionCode.Trap, pc, inDelaySlot: false);
-                InstructionCount++;
-                return;
-            }
-            catch (SystemCallException)
-            {
-                DispatchIopException(ExceptionCode.Syscall, pc, inDelaySlot: false);
-                InstructionCount++;
-                SyscallRaised?.Invoke(this, pc);
-                return;
-            }
-            catch (BreakpointException)
-            {
-                DispatchIopException(ExceptionCode.Breakpoint, pc, inDelaySlot: false);
-                InstructionCount++;
-                throw;
+                switch (_bridge.ExceptionSignal)
+                {
+                    case CpuExceptionSignal.Trap:
+                        DispatchIopException(ExceptionCode.Trap, pc, inDelaySlot: false);
+                        InstructionCount++;
+                        return;
+                    case CpuExceptionSignal.Syscall:
+                        DispatchIopException(ExceptionCode.Syscall, pc, inDelaySlot: false);
+                        InstructionCount++;
+                        SyscallRaised?.Invoke(this, pc);
+                        return;
+                    case CpuExceptionSignal.Breakpoint:
+                        DispatchIopException(ExceptionCode.Breakpoint, pc, inDelaySlot: false);
+                        InstructionCount++;
+                        throw new BreakpointException("BREAK");
+                }
             }
 
             InstructionCount++;
@@ -228,6 +230,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 var (dsObj, dsArgs) = MipsDisassembler.GetInstructionObject(dsWord);
                 if (dsObj != null)
                 {
+                    _bridge.ExceptionSignal = CpuExceptionSignal.None;
                     try
                     {
                         dsObj.ExecuteGeneric(_bridge, dsArgs!);
@@ -239,24 +242,25 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                         InstructionCount++;
                         return;
                     }
-                    catch (TrapException)
+
+                    if (_bridge.ExceptionSignal != CpuExceptionSignal.None)
                     {
-                        DispatchIopException(ExceptionCode.Trap, dsPc, inDelaySlot: true);
-                        InstructionCount++;
-                        return;
-                    }
-                    catch (SystemCallException)
-                    {
-                        DispatchIopException(ExceptionCode.Syscall, dsPc, inDelaySlot: true);
-                        InstructionCount++;
-                        SyscallRaised?.Invoke(this, dsPc);
-                        return;
-                    }
-                    catch (BreakpointException)
-                    {
-                        DispatchIopException(ExceptionCode.Breakpoint, dsPc, inDelaySlot: true);
-                        InstructionCount++;
-                        throw;
+                        switch (_bridge.ExceptionSignal)
+                        {
+                            case CpuExceptionSignal.Trap:
+                                DispatchIopException(ExceptionCode.Trap, dsPc, inDelaySlot: true);
+                                InstructionCount++;
+                                return;
+                            case CpuExceptionSignal.Syscall:
+                                DispatchIopException(ExceptionCode.Syscall, dsPc, inDelaySlot: true);
+                                InstructionCount++;
+                                SyscallRaised?.Invoke(this, dsPc);
+                                return;
+                            case CpuExceptionSignal.Breakpoint:
+                                DispatchIopException(ExceptionCode.Breakpoint, dsPc, inDelaySlot: true);
+                                InstructionCount++;
+                                throw new BreakpointException("BREAK");
+                        }
                     }
                 }
                 else
