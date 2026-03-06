@@ -153,6 +153,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             Pad1 = new PadState();
             Sio2 = new Sio2 { Port0 = Pad0, Port1 = Pad1 };
             IOP.Bus.Sio2 = Sio2;
+
+            // Wire EE VBlank events to IOP INTC so the IOP receives the same
+            // vertical-sync interrupts as on real hardware.
+            // Reference: PCSX2 Counters.cpp vSync0/vSync1 → psxVBlankStart/psxVBlankEnd
+            //   → iopIntcIrq(0) (bit 0 = VBlank) and iopIntcIrq(11) (bit 11 = EvBlank).
+            EE.VBlankStarted += (_, _) => IOP.Bus.RaiseInterrupt(0);   // IOP VBlank-start (bit 0)
+            EE.VBlankEnded   += (_, _) => IOP.Bus.RaiseInterrupt(11);  // IOP EvBlank (bit 11)
         }
 
         /// <summary>
