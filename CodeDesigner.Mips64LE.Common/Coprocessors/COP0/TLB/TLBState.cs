@@ -59,21 +59,25 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
         /// <returns>Index of matching entry, or -1 if not found</returns>
         public int Probe(ulong entryHi)
         {
-            // Extract VPN (Virtual Page Number) and ASID
-            ulong vpn = entryHi & 0xFFFFFFFFFFFFE000UL; // VPN2 field
-            byte asid = (byte)(entryHi & 0xFF); // ASID field
+            byte asid = (byte)(entryHi & 0xFF);
 
             for (int i = 0; i < NumTLBEntries; i++)
             {
                 if (!_entries[i].Valid)
                     continue;
 
-                ulong entryVpn = _entries[i].EntryHi & 0xFFFFFFFFFFFFE000UL;
+                // Use the stored entry's PageMask to determine the VPN comparison mask,
+                // matching the behaviour of Translate().
+                uint pairSize  = (_entries[i].PageMask | 0x1FFF) + 1;
+                ulong vpnMask  = ~(ulong)(pairSize - 1);
+                ulong entryVpn = _entries[i].EntryHi & vpnMask;
+                ulong queryVpn = entryHi & vpnMask;
+
                 byte entryAsid = (byte)(_entries[i].EntryHi & 0xFF);
                 bool global = ((_entries[i].EntryLo0 & 0x1) != 0) && ((_entries[i].EntryLo1 & 0x1) != 0);
 
                 // Match if VPN matches and (ASID matches or entry is global)
-                if (entryVpn == vpn && (global || entryAsid == asid))
+                if (entryVpn == queryVpn && (global || entryAsid == asid))
                 {
                     return i;
                 }
@@ -111,34 +115,43 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
         /// <returns>Physical address, or null if translation fails</returns>
         public uint? Translate(ulong virtualAddress, byte asid)
         {
-            // Extract VPN2 from virtual address
-            ulong vpn = virtualAddress & 0xFFFFFFFFFFFFE000UL;
-
             for (int i = 0; i < NumTLBEntries; i++)
             {
                 if (!_entries[i].Valid)
                     continue;
 
-                ulong entryVpn = _entries[i].EntryHi & 0xFFFFFFFFFFFFE000UL;
+                // pairSize is the total virtual span covered by one TLB entry (two pages).
+                // For 4 KB pages: PageMask=0 → pairSize=0x2000 (two 4 KB pages).
+                // For 16 KB pages: PageMask=0x6000 → pairSize=0x8000, etc.
+                uint pairSize = (_entries[i].PageMask | 0x1FFF) + 1;
+
+                // VPN comparison mask: mask out bits that form the intra-pair offset.
+                // Per-entry, not fixed at 4 KB.
+                ulong vpnMask  = ~(ulong)(pairSize - 1);
+                ulong entryVpn = _entries[i].EntryHi & vpnMask;
+                ulong queryVpn = virtualAddress & vpnMask;
+
                 byte entryAsid = (byte)(_entries[i].EntryHi & 0xFF);
                 bool global = ((_entries[i].EntryLo0 & 0x1) != 0) && ((_entries[i].EntryLo1 & 0x1) != 0);
 
-                if (entryVpn == vpn && (global || entryAsid == asid))
+                if (entryVpn == queryVpn && (global || entryAsid == asid))
                 {
-                    // Determine page size from PageMask
-                    uint pageSize = (_entries[i].PageMask | 0x1FFF) + 1;
-                    bool oddPage = ((virtualAddress & pageSize) != 0);
+                    // singlePageSize is the size of one page (half the pair).
+                    // Odd-page selector: the bit just above the page offset.
+                    uint singlePageSize = pairSize >> 1;
+                    bool oddPage = ((uint)virtualAddress & singlePageSize) != 0;
 
                     ulong entryLo = oddPage ? _entries[i].EntryLo1 : _entries[i].EntryLo0;
 
-                    // Check if page is valid
-                    if ((entryLo & 0x2) == 0) // V bit
+                    // Check if page is valid (V bit = bit 1)
+                    if ((entryLo & 0x2) == 0)
                         return null;
 
-                    // Extract PFN (Physical Frame Number)
-                    ulong pfn = (entryLo >> 6) & 0xFFFFF;
-                    uint offset = (uint)(virtualAddress & (pageSize - 1));
-                    
+                    // Extract PFN (Physical Frame Number, bits [25:6]) and
+                    // the intra-page byte offset.
+                    ulong pfn    = (entryLo >> 6) & 0xFFFFF;
+                    uint  offset = (uint)(virtualAddress & (singlePageSize - 1));
+
                     return (uint)((pfn << 12) | offset);
                 }
             }
