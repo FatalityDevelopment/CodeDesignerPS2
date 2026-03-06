@@ -35,12 +35,20 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
     ///        • Set Status.EXL = 1 to enter exception mode.
     ///   2. Write the exception code into Cause.ExcCode (bits 6:2).
     ///   3. Redirect cpu.PC to the appropriate exception vector:
-    ///        • BEV = 0 → 0x80000080  (general exception, RAM handler)
-    ///        • BEV = 1 → 0xBFC00200  (general exception, BIOS ROM handler)
+    ///        • EXL was 0, BEV=0 → 0x80000080  (RAM handler, installed by kernel)
+    ///        • EXL was 0, BEV=1 → 0xBFC00200  (BIOS ROM handler)
+    ///        • EXL was already 1 (nested / double fault) → 0xBFC00200 always.
     ///
-    /// Reference: PCSX2 pcsx2/R5900OpcodeImpl.cpp cpuException — all BEV=1 exceptions
-    /// use 0xBFC00200.  The SCPH-70012 BIOS confirms: 0xBFC00180 is an IOP-style debug
-    /// crash stub; the real EE kernel dispatcher resides at 0xBFC00200.
+    /// The nested-exception escalation matches PCSX2
+    /// pcsx2/R5900OpcodeImpl.cpp cpuException:
+    ///   "if (Status.EXL || Status.BEV) vector = 0xBFC00200"
+    ///
+    /// This is critical for the BIOS boot sequence: the BEV=0 exception handler
+    /// installed at 0x80000080 begins with a BREAK instruction to dispatch
+    /// software traps via the BIOS ROM.  Without the EXL escalation the BREAK
+    /// fires again (still at 0x80000080 with EXL=1), creating an infinite loop.
+    /// With escalation the nested BREAK routes to 0xBFC00200 (BIOS ROM) which
+    /// is the correct PS2 software trap dispatcher.
     /// </summary>
     public static class COP0ExceptionDispatcher
     {
@@ -118,19 +126,40 @@ namespace CodeDesigner.Mips64LE.Common.CPU.COP0
                 cpu.COP0.WriteRegister32(CauseReg, cause);
             }
 
-            // Select exception vector based on BEV bit in Status.
-            // TLB refill exceptions (TlbLoad, TlbStore, TlbModification) use a dedicated
-            // vector when EXL was 0 at the time of the fault.
+            // Select exception vector.
+            //
+            // PCSX2 cpuException rule (R5900OpcodeImpl.cpp):
+            //   if (EXL was already 1) OR (BEV=1) → vector = 0xBFC00200
+            //   else                               → vector = 0x80000080
+            //
+            // The "EXL already 1" path is the nested-exception (double-fault) case.
+            // When the BEV=0 kernel handler at 0x80000080 starts with BREAK (the PS2
+            // BIOS software-trap convention), the resulting BREAK fires while EXL=1 and
+            // must escalate to the BIOS ROM dispatcher at 0xBFC00200, not loop back.
+            //
+            // TLB refill exceptions use a different vector only for the first-level
+            // fault (EXL was 0); double-faulting TLB exceptions also escalate.
             bool isTlbException = code == ExceptionCode.TlbLoad
                                 || code == ExceptionCode.TlbStore
                                 || code == ExceptionCode.TlbModification;
+
+            // Re-read status to get the current BEV (may have been altered above).
             bool wasBev = (status & StatusBev) != 0;
 
             uint vector;
-            if (isTlbException && exlWasZero)
+            if (!exlWasZero)
+            {
+                // Nested exception: always escalate to BIOS ROM handler.
+                vector = ExceptionVectorBev1;
+            }
+            else if (isTlbException)
+            {
                 vector = wasBev ? TlbRefillVectorBev1 : TlbRefillVectorBev0;
+            }
             else
+            {
                 vector = wasBev ? ExceptionVectorBev1 : ExceptionVectorBev0;
+            }
 
             cpu.PC = vector;
         }

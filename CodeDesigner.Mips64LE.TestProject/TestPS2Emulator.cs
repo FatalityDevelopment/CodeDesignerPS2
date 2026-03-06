@@ -630,6 +630,50 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.IsTrue((cause & (1u << 31)) != 0, "Cause.BD must be set for delay-slot exception");
         }
 
+        /// <summary>
+        /// Verify that a nested exception (EXL=1 when the exception fires) always
+        /// escalates to the BIOS ROM handler at 0xBFC00200, regardless of BEV.
+        ///
+        /// PCSX2 R5900OpcodeImpl.cpp cpuException:
+        ///   "if (Status.EXL || Status.BEV) vector = 0xBFC00200"
+        ///
+        /// This is essential for the BIOS boot sequence: the BEV=0 handler at
+        /// 0x80000080 begins with BREAK (a PS2 software-trap convention).  Without
+        /// nested-exception escalation, the BREAK at 0x80000080 fires while EXL=1
+        /// and loops back to 0x80000080 infinitely.  With escalation the BREAK
+        /// routes to 0xBFC00200 (BIOS ROM) which is the correct dispatcher.
+        /// </summary>
+        [TestMethod]
+        public void COP0Dispatcher_NestedExceptionEscalates_ToBiosRomVector()
+        {
+            var cpu = new CodeDesigner.Mips64LE.Common.CPU.CpuState();
+
+            // Set BEV=0 AND EXL=1 (already in exception mode).
+            // A new exception while EXL=1 must go to 0xBFC00200, not 0x80000080.
+            cpu.COP0.WriteRegister32(12, 0x00000002u); // BEV=0, EXL=1
+
+            COP0ExceptionDispatcher.Dispatch(cpu, ExceptionCode.Breakpoint, 0x80000080UL, inDelaySlot: false);
+
+            Assert.AreEqual(0xBFC00200UL, cpu.PC,
+                "Nested exception (EXL=1, BEV=0): must escalate to BIOS ROM vector 0xBFC00200");
+        }
+
+        /// <summary>
+        /// Verify that a first-level exception with BEV=0 goes to 0x80000080
+        /// (the EXL=1 escalation must not fire when EXL was 0 at time of fault).
+        /// </summary>
+        [TestMethod]
+        public void COP0Dispatcher_FirstLevelExceptionBev0_GoesToRamVector()
+        {
+            var cpu = new CodeDesigner.Mips64LE.Common.CPU.CpuState();
+            cpu.COP0.WriteRegister32(12, 0x00000000u); // BEV=0, EXL=0
+
+            COP0ExceptionDispatcher.Dispatch(cpu, ExceptionCode.Syscall, 0x4000UL, inDelaySlot: false);
+
+            Assert.AreEqual(0x80000080UL, cpu.PC,
+                "First-level exception with BEV=0 must use RAM vector 0x80000080");
+        }
+
         // =====================================================================
         // EE hardware interrupt delivery tests
         // =====================================================================
