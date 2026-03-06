@@ -1251,8 +1251,9 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertAsm("syscall", enc);
             AssertDisasm(enc, "syscall");
             var cpu = MakeCpu();
-            Assert.ThrowsException<SystemCallException>(() => Exec(cpu, enc),
-                "SYSCALL should throw SystemCallException");
+            Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.Syscall, cpu.ExceptionSignal,
+                "SYSCALL should set ExceptionSignal to Syscall");
             AssertAnalysis(enc);
         }
 
@@ -1263,8 +1264,9 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertAsm("break", enc);
             AssertDisasm(enc, "break");
             var cpu = MakeCpu();
-            Assert.ThrowsException<BreakpointException>(() => Exec(cpu, enc),
-                "BREAK should throw BreakpointException");
+            Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.Breakpoint, cpu.ExceptionSignal,
+                "BREAK should set ExceptionSignal to Breakpoint");
             AssertAnalysis(enc);
         }
 
@@ -1277,10 +1279,12 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertDisasm(enc, "tge");
             // s0=10 >= s1=7 => TRAP
             var cpu = MakeCpu();
-            Assert.ThrowsException<TrapException>(() => Exec(cpu, enc), "TGE should trap when s0>=s1");
+            Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.Trap, cpu.ExceptionSignal, "TGE should signal Trap when s0>=s1");
             // s0=5 < s1=7 => no trap
             cpu = MakeCpu(); cpu.RegsLo[16] = 5; cpu.RegsLo[17] = 7;
-            Exec(cpu, enc); // should not throw
+            Exec(cpu, enc); // should not signal
+            Assert.AreEqual(CpuExceptionSignal.None, cpu.ExceptionSignal, "TGE should not trap when s0<s1");
             AssertAnalysis(enc);
         }
 
@@ -1292,7 +1296,8 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertDisasm(enc, "tgeu");
             // s0=10 >= s1=7 unsigned => TRAP
             var cpu = MakeCpu();
-            Assert.ThrowsException<TrapException>(() => Exec(cpu, enc), "TGEU should trap");
+            Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.Trap, cpu.ExceptionSignal, "TGEU should signal Trap");
             AssertAnalysis(enc);
         }
 
@@ -1305,9 +1310,11 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertDisasm(enc, "tlt");
             // s0=10 > s1=7 => no trap
             var cpu = MakeCpu(); Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.None, cpu.ExceptionSignal, "TLT should not trap when s0>s1");
             // s0=5, s1=7 => 5 < 7 => trap
             cpu = MakeCpu(); cpu.RegsLo[16] = 5; cpu.RegsLo[17] = 7;
-            Assert.ThrowsException<TrapException>(() => Exec(cpu, enc), "TLT should trap when s0<s1");
+            Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.Trap, cpu.ExceptionSignal, "TLT should signal Trap when s0<s1");
             AssertAnalysis(enc);
         }
 
@@ -1319,6 +1326,7 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertDisasm(enc, "tltu");
             // s0=10 > s1=7 => no trap
             var cpu = MakeCpu(); Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.None, cpu.ExceptionSignal, "TLTU should not trap when s0>s1");
             AssertAnalysis(enc);
         }
 
@@ -1331,9 +1339,11 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertDisasm(enc, "teq");
             // s0=10 != s1=7 => no trap
             var cpu = MakeCpu(); Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.None, cpu.ExceptionSignal, "TEQ should not trap when unequal");
             // s0=7 == s1=7 => trap
             cpu = MakeCpu(); cpu.RegsLo[16] = 7;
-            Assert.ThrowsException<TrapException>(() => Exec(cpu, enc), "TEQ should trap when equal");
+            Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.Trap, cpu.ExceptionSignal, "TEQ should signal Trap when equal");
             AssertAnalysis(enc);
         }
 
@@ -1346,9 +1356,11 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertDisasm(enc, "tne");
             // s0=10 != s1=7 => trap
             var cpu = MakeCpu();
-            Assert.ThrowsException<TrapException>(() => Exec(cpu, enc), "TNE should trap when not equal");
+            Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.Trap, cpu.ExceptionSignal, "TNE should signal Trap when not equal");
             // s0=7 == s1=7 => no trap
             cpu = MakeCpu(); cpu.RegsLo[16] = 7; Exec(cpu, enc);
+            Assert.AreEqual(CpuExceptionSignal.None, cpu.ExceptionSignal, "TNE should not trap when equal");
             AssertAnalysis(enc);
         }
 

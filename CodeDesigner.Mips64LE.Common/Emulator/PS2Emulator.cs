@@ -112,6 +112,30 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         private void ICacheClear() => Array.Clear(_iCacheValid, 0, ICacheSets);
 
+        // ── TLB miss state (replaces TlbMissException throw/catch) ───────────────
+        // TryFetchWord sets _pendingTlbMissVA instead of throwing, allowing Step()
+        // to handle TLB misses without the overhead of C# exception creation.
+        private uint _pendingTlbMissVA;
+
+        /// <summary>
+        /// Handle a TLB miss: update COP0 BadVAddr/EntryHi/Context and dispatch
+        /// the appropriate COP0 exception.  Returns true so the caller can
+        /// <c>return</c> immediately after calling this helper.
+        /// </summary>
+        private bool DispatchTlbMiss(uint va, bool isStore, ulong epc, bool inDelaySlot)
+        {
+            ExceptionCode tlbCode = isStore ? ExceptionCode.TlbStore : ExceptionCode.TlbLoad;
+            Cpu.COP0.WriteRegister32(8, va);   // BadVAddr
+            Cpu.COP0.WriteRegister64(10,
+                (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(va & 0xFFFFE000u)));
+            // Context: preserve PTEBase [31:23], update BadVPN2 [22:4]
+            Cpu.COP0.WriteRegister32(4,
+                (Cpu.COP0.ReadRegister32(4) & 0xFF800000u) | ((va >> 9) & 0x007FFFF0u));
+            COP0ExceptionDispatcher.Dispatch(Cpu, tlbCode, epc, inDelaySlot);
+            InstructionCount++;
+            return true;
+        }
+
         /// <summary>
         /// Invalidate the i-cache line that covers <paramref name="vaddr"/>.
         /// Called by the CACHE IXIN handler via
@@ -282,17 +306,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// </summary>
         /// <summary>
         /// Fetch the instruction word at the given virtual PC.
-        /// Handles KUSEG TLB translation (when the TLB has been populated by the BIOS),
-        /// KSEG0/KSEG1 fixed mapping (via the bus), and throws
-        /// <see cref="TlbMissException"/> on a KUSEG TLB miss once TLB entries exist.
-        ///
-        /// For KSEG0/KSEG1 addresses the result is served through the simple i-cache
-        /// (see <see cref="_iCacheValid"/>/<see cref="_iCacheData"/>).  This prevents a
-        /// data-store loop (e.g. the BIOS kernel-init fill that writes 0x20 to all of
-        /// RAM) from corrupting the executing instructions, matching the behaviour of the
-        /// PS2's physically-tagged hardware i-cache.
+        /// Returns false (and sets <see cref="_pendingTlbMissVA"/>)
+        /// on a KUSEG TLB miss instead of throwing, avoiding C# exception overhead.
         /// </summary>
-        private uint FetchWord(uint virtualPc)
+        private bool TryFetchWord(uint virtualPc, out uint word)
         {
             // KUSEG (0x00000000–0x6FFFFFFF): consult the software TLB when it has been
             // populated (i.e. the BIOS has written at least one entry via TLBWI/TLBWR).
@@ -304,8 +321,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 byte asid = (byte)(Cpu.COP0.ReadRegister64(10) & 0xFFu); // EntryHi[7:0]
                 uint? paddr = Cpu.COP0.TLB.Translate(virtualPc, asid);
                 if (paddr.HasValue)
-                    return Bus.ReadWord(paddr.Value);
-                throw new TlbMissException(virtualPc, isStore: false);
+                {
+                    word = Bus.ReadWord(paddr.Value);
+                    return true;
+                }
+                _pendingTlbMissVA = virtualPc;
+                word = 0;
+                return false;
             }
 
             // KSEG0 (0x80000000–0x9FFFFFFF): cacheable — goes through the i-cache.
@@ -339,12 +361,25 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     _iCacheValid[setIdx] = true;
                 }
 
-                return _iCacheData[setIdx * ICacheLineWords + ICacheWordOff(physPc)];
+                word = _iCacheData[setIdx * ICacheLineWords + ICacheWordOff(physPc)];
+                return true;
             }
 
             // KSEG1 (0xA0000000–0xBFFFFFFF) is the non-cacheable mirror.
             // KSEG2/3 and scratchpad / pre-TLB KUSEG: bus handles translation.
-            return Bus.ReadWord(virtualPc);
+            word = Bus.ReadWord(virtualPc);
+            return true;
+        }
+
+        /// <summary>
+        /// Convenience wrapper used by fast-forward helpers that are guaranteed to
+        /// execute in KSEG0/KSEG1 (no TLB miss possible).  Returns 0 on a miss
+        /// (which should never occur in these contexts).
+        /// </summary>
+        private uint FetchWord(uint virtualPc)
+        {
+            TryFetchWord(virtualPc, out uint w);
+            return w;
         }
 
         public void Reset()
@@ -476,26 +511,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // built-in static address translation.
             uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
 
-            uint word;
-            try
-            {
-                word = FetchWord(pc32);
-            }
-            catch (TlbMissException tlbFetch)
+            if (!TryFetchWord(pc32, out uint word))
             {
                 // Instruction-fetch TLB miss → ExcCode=TlbLoad (2).
                 // Update BadVAddr, EntryHi.VPN2, and Context.BadVPN2 to let the
                 // TLB refill handler at 0x80000000 find the correct page-table entry.
                 // Reference: PCSX2 R5900OpcodeImpl.cpp cpuException.
-                uint tlbFetchVA = tlbFetch.VirtualAddress;
-                Cpu.COP0.WriteRegister32(8, tlbFetchVA);  // BadVAddr
-                Cpu.COP0.WriteRegister64(10,
-                    (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbFetchVA & 0xFFFFE000u)));
-                // Context: preserve PTEBase [31:23], update BadVPN2 [22:4]
-                Cpu.COP0.WriteRegister32(4,
-                    (Cpu.COP0.ReadRegister32(4) & 0xFF800000u) | ((tlbFetchVA >> 9) & 0x007FFFF0u));
-                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.TlbLoad, Cpu.PC, inDelaySlot: false);
-                InstructionCount++;
+                DispatchTlbMiss(_pendingTlbMissVA, isStore: false, Cpu.PC, inDelaySlot: false);
                 return;
             }
 
@@ -511,7 +533,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 return;
             }
 
-            // Execute with COP0 exception routing.
+            // Execute — clear the exception signal then run the instruction.
+            // Signal-raising instructions (SYSCALL, BREAK, trap variants) set
+            // cpu.ExceptionSignal instead of throwing, avoiding C# exception overhead.
+            // OverflowException is still used by checked arithmetic in ADD/SUB/ADDI.
+            Cpu.ExceptionSignal = CpuExceptionSignal.None;
             try
             {
                 instrObj.ExecuteGeneric(Cpu, instrArgs!);
@@ -522,44 +548,26 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 InstructionCount++;
                 return;
             }
-            catch (Cpu.Instructions.EE.TrapException)
+
+            // Check exception signal set by the instruction.
+            if (Cpu.ExceptionSignal != CpuExceptionSignal.None)
             {
-                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Trap, pcBefore, inDelaySlot: false);
-                InstructionCount++;
-                return;
-            }
-            catch (Cpu.Instructions.EE.SystemCallException)
-            {
-                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Syscall, pcBefore, inDelaySlot: false);
-                InstructionCount++;
-                SyscallRaised?.Invoke(this, (uint)pcBefore);
-                return;
-            }
-            catch (Cpu.Instructions.EE.BreakpointException)
-            {
-                // BREAK is routed through COP0 (EPC, Status.EXL, Cause.ExcCode=9)
-                // and then re-thrown so that debugger-aware callers (e.g. Run()) can
-                // halt execution.  All other exception types are fully consumed here.
-                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Breakpoint, pcBefore, inDelaySlot: false);
-                InstructionCount++;
-                throw;
-            }
-            catch (TlbMissException tlbEx)
-            {
-                // Data load/store TLB miss.  Update BadVAddr, EntryHi.VPN2, and
-                // Context.BadVPN2, then dispatch the appropriate COP0 exception.
-                // Reference: PCSX2 R5900OpcodeImpl.cpp cpuException.
-                ExceptionCode tlbCode = tlbEx.IsStore ? ExceptionCode.TlbStore : ExceptionCode.TlbLoad;
-                uint tlbExVA = tlbEx.VirtualAddress;
-                Cpu.COP0.WriteRegister32(8, tlbExVA);  // BadVAddr
-                Cpu.COP0.WriteRegister64(10,
-                    (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbExVA & 0xFFFFE000u)));
-                // Context: preserve PTEBase [31:23], update BadVPN2 [22:4]
-                Cpu.COP0.WriteRegister32(4,
-                    (Cpu.COP0.ReadRegister32(4) & 0xFF800000u) | ((tlbExVA >> 9) & 0x007FFFF0u));
-                COP0ExceptionDispatcher.Dispatch(Cpu, tlbCode, pcBefore, inDelaySlot: false);
-                InstructionCount++;
-                return;
+                switch (Cpu.ExceptionSignal)
+                {
+                    case CpuExceptionSignal.Syscall:
+                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Syscall, pcBefore, inDelaySlot: false);
+                        InstructionCount++;
+                        SyscallRaised?.Invoke(this, (uint)pcBefore);
+                        return;
+                    case CpuExceptionSignal.Breakpoint:
+                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Breakpoint, pcBefore, inDelaySlot: false);
+                        InstructionCount++;
+                        throw new Cpu.Instructions.EE.BreakpointException("BREAK");
+                    case CpuExceptionSignal.Trap:
+                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Trap, pcBefore, inDelaySlot: false);
+                        InstructionCount++;
+                        return;
+                }
             }
 
             InstructionCount++;
@@ -591,22 +599,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // Branch/jump taken: execute the delay-slot instruction at pc+4
                 // before transferring to the target.
                 uint dsPc32 = (uint)((pcBefore + 4) & 0xFFFFFFFFUL);
-                uint dsWord;
-                try
+                if (!TryFetchWord(dsPc32, out uint dsWord))
                 {
-                    dsWord = FetchWord(dsPc32);
-                }
-                catch (TlbMissException tlbDs)
-                {
-                    uint tlbDsVA = tlbDs.VirtualAddress;
-                    Cpu.COP0.WriteRegister32(8, tlbDsVA);
-                    Cpu.COP0.WriteRegister64(10,
-                        (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbDsVA & 0xFFFFE000u)));
-                    // Context: preserve PTEBase [31:23], update BadVPN2 [22:4]
-                    Cpu.COP0.WriteRegister32(4,
-                        (Cpu.COP0.ReadRegister32(4) & 0xFF800000u) | ((tlbDsVA >> 9) & 0x007FFFF0u));
-                    COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.TlbLoad, pcBefore + 4, inDelaySlot: true);
-                    InstructionCount++;
+                    DispatchTlbMiss(_pendingTlbMissVA, isStore: false, pcBefore + 4, inDelaySlot: true);
                     return;
                 }
 
@@ -620,6 +615,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     // Exceptions raised by a delay-slot instruction are also routed
                     // through COP0, with inDelaySlot=true so EPC points to the branch
                     // instruction (pcBefore) and Cause.BD is set.
+                    Cpu.ExceptionSignal = CpuExceptionSignal.None;
                     try
                     {
                         dsObj.ExecuteGeneric(Cpu, dsArgs!);
@@ -631,24 +627,25 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                         InstructionCount++;
                         return;
                     }
-                    catch (Cpu.Instructions.EE.TrapException)
+
+                    if (Cpu.ExceptionSignal != CpuExceptionSignal.None)
                     {
-                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Trap, pcBefore + 4, inDelaySlot: true);
-                        InstructionCount++;
-                        return;
-                    }
-                    catch (Cpu.Instructions.EE.SystemCallException)
-                    {
-                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Syscall, pcBefore + 4, inDelaySlot: true);
-                        InstructionCount++;
-                        SyscallRaised?.Invoke(this, (uint)(pcBefore + 4));
-                        return;
-                    }
-                    catch (Cpu.Instructions.EE.BreakpointException)
-                    {
-                        COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Breakpoint, pcBefore + 4, inDelaySlot: true);
-                        InstructionCount++;
-                        throw;
+                        switch (Cpu.ExceptionSignal)
+                        {
+                            case CpuExceptionSignal.Syscall:
+                                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Syscall, pcBefore + 4, inDelaySlot: true);
+                                InstructionCount++;
+                                SyscallRaised?.Invoke(this, (uint)(pcBefore + 4));
+                                return;
+                            case CpuExceptionSignal.Breakpoint:
+                                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Breakpoint, pcBefore + 4, inDelaySlot: true);
+                                InstructionCount++;
+                                throw new Cpu.Instructions.EE.BreakpointException("BREAK");
+                            case CpuExceptionSignal.Trap:
+                                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.Trap, pcBefore + 4, inDelaySlot: true);
+                                InstructionCount++;
+                                return;
+                        }
                     }
                 }
                 else
