@@ -4309,5 +4309,119 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreNotEqual(0u, scheduler.IOP.Bus.IStat & 0x2u,
                 "IOP INTC SBUS (bit 1) must be raised when EE sets MSFLAG");
         }
+
+        // ── IOP bgez / bltz sign-extension regression tests ──────────────────────
+        // Before the SyncBridgeFromIop sign-extension fix, IOP 32-bit registers
+        // holding negative values (e.g. 0xFFFFFFFF = −1) were zero-extended to
+        // 0x00000000_FFFFFFFF in the 64-bit EE bridge.  Signed branch conditions
+        // then treated −1 as +4,294,967,295 (positive), causing bgez to loop
+        // forever in the memmove backward-copy path during IOP BIOS boot.
+
+        [TestMethod]
+        public void IopEmulator_Bgez_NegativeRegister_NotTaken()
+        {
+            // bgez should NOT branch when rs holds a negative 32-bit value (−1 = 0xFFFFFFFF).
+            var bus = new IopMemoryBus();
+            var iop = new IopEmulator(bus);
+
+            // Write:   addiu a2, zero, -1   (a2 = 0xFFFFFFFF = −1 as 32-bit)
+            //          bgez a2, +1           (should NOT branch)
+            //          addiu v0, zero, 7     (fall-through: v0 = 7)
+            //          jr ra
+            //          nop
+            const uint kBase = 0x0000_1000u;
+            // addiu a2, zero, -1  →  opcode=9, rt=6, rs=0, imm=0xFFFF
+            bus.WriteWord(kBase + 0,  0x2406_FFFFu);
+            // bgez a2, +1  →  REGIMM(rt=1), rs=6, offset=1  →  jumps to kBase+12 if taken
+            bus.WriteWord(kBase + 4,  0x04C1_0001u);
+            // addiu v0, zero, 7  (fall-through = branch NOT taken)
+            bus.WriteWord(kBase + 8,  0x2402_0007u);
+            // jr ra
+            bus.WriteWord(kBase + 12, 0x03E0_0008u);
+            // nop (delay slot)
+            bus.WriteWord(kBase + 16, 0x0000_0000u);
+
+            iop.State.PC = kBase;
+            iop.State.WriteReg(31, kBase + 100u); // ra = somewhere safe
+            for (int i = 0; i < 10; i++) iop.Step();
+
+            Assert.AreEqual(7u, iop.State.ReadReg(2),
+                "bgez on −1 must NOT branch; fall-through sets v0=7");
+        }
+
+        [TestMethod]
+        public void IopEmulator_Bgez_ZeroRegister_Taken()
+        {
+            // bgez SHOULD branch when rs = 0 (≥ 0 is true for zero).
+            var bus = new IopMemoryBus();
+            var iop = new IopEmulator(bus);
+
+            const uint kBase = 0x0000_1000u;
+            // addiu a2, zero, 0   (a2 = 0)
+            bus.WriteWord(kBase + 0,  0x2406_0000u);
+            // bgez a2, +2  →  offset=2 → target = (kBase+4+4) + 2*4 = kBase+16 (jr ra)
+            //   delay slot (kBase+8 = nop) always runs; kBase+12 is skipped when taken
+            bus.WriteWord(kBase + 4,  0x04C1_0002u);
+            // nop (delay slot — always executes)
+            bus.WriteWord(kBase + 8,  0x0000_0000u);
+            // addiu v0, zero, 7   (NOT reached when branch taken)
+            bus.WriteWord(kBase + 12, 0x2402_0007u);
+            // jr ra
+            bus.WriteWord(kBase + 16, 0x03E0_0008u);
+            // nop (delay slot of jr ra)
+            bus.WriteWord(kBase + 20, 0x0000_0000u);
+
+            iop.State.PC = kBase;
+            iop.State.WriteReg(31, kBase + 100u);
+            for (int i = 0; i < 10; i++) iop.Step();
+
+            Assert.AreEqual(0u, iop.State.ReadReg(2),
+                "bgez on 0 MUST branch; v0=7 assignment skipped so v0 stays 0");
+        }
+
+        [TestMethod]
+        public void IopEmulator_Bltz_NegativeRegister_Taken()
+        {
+            // bltz SHOULD branch when rs = −1 (0xFFFFFFFF as 32-bit).
+            var bus = new IopMemoryBus();
+            var iop = new IopEmulator(bus);
+
+            const uint kBase = 0x0000_1000u;
+            // addiu a2, zero, -1   (a2 = 0xFFFFFFFF = −1)
+            bus.WriteWord(kBase + 0,  0x2406_FFFFu);
+            // bltz a2, +2  (rt=0 = BLTZ; offset=2 → target = kBase+16, skips kBase+12)
+            bus.WriteWord(kBase + 4,  0x04C0_0002u);
+            // nop (delay slot)
+            bus.WriteWord(kBase + 8,  0x0000_0000u);
+            // addiu v0, zero, 7    (NOT reached when branch taken)
+            bus.WriteWord(kBase + 12, 0x2402_0007u);
+            // jr ra
+            bus.WriteWord(kBase + 16, 0x03E0_0008u);
+            // nop
+            bus.WriteWord(kBase + 20, 0x0000_0000u);
+
+            iop.State.PC = kBase;
+            iop.State.WriteReg(31, kBase + 100u);
+            for (int i = 0; i < 10; i++) iop.Step();
+
+            Assert.AreEqual(0u, iop.State.ReadReg(2),
+                "bltz on −1 MUST branch; v0=7 assignment skipped so v0 stays 0");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_ICtrl_ReadWriteLatch()
+        {
+            // 0x1F801078 (I_CTRL) must behave as a simple read/write latch.
+            var bus = new IopMemoryBus();
+            const uint kICtrl = 0x1F801078u;
+
+            Assert.AreEqual(0u, bus.ReadWord(kICtrl), "I_CTRL must reset to 0");
+
+            bus.WriteWord(kICtrl, 1u);
+            Assert.AreEqual(1u, bus.ReadWord(kICtrl), "I_CTRL write 1 must read back 1");
+
+            bus.WriteWord(kICtrl, 0u);
+            Assert.AreEqual(0u, bus.ReadWord(kICtrl), "I_CTRL write 0 must read back 0");
+        }
     }
 }
