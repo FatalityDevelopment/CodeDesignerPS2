@@ -50,17 +50,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
-            
-            try
-            {
-                int result = checked(rs + rt);
-                CpuHelpers.SetReg32(cpu, args.Rd, result);
-            }
-            catch (OverflowException)
-            {
-                // TODO: Trigger overflow exception
-                throw;
-            }
+            // PCSX2 R5900OpcodeImpl.cpp ADD: no overflow trap (matches EE real-world behavior;
+            // no PS2 software relies on ADD overflow exceptions).
+            int result = rs + rt;
+            CpuHelpers.SetReg32(cpu, args.Rd, result);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -157,18 +150,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
-            
-            try
-            {
-                long result = checked(rs + rt);
-                cpu.RegsLo[args.Rd] = (ulong)result;
-                cpu.RegsHi[args.Rd] = result < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
-            }
-            catch (OverflowException)
-            {
-                // TODO: Trigger overflow exception
-                throw;
-            }
+            // PCSX2: no overflow trap.
+            long result = rs + rt;
+            cpu.RegsLo[args.Rd] = (ulong)result;
+            cpu.RegsHi[args.Rd] = result < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -266,17 +251,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int rt = CpuHelpers.GetReg32(cpu, args.Rt);
-            
-            try
-            {
-                int result = checked(rs - rt);
-                CpuHelpers.SetReg32(cpu, args.Rd, result);
-            }
-            catch (OverflowException)
-            {
-                // TODO: Trigger overflow exception
-                throw;
-            }
+            // PCSX2: no overflow trap.
+            int result = rs - rt;
+            CpuHelpers.SetReg32(cpu, args.Rd, result);
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -373,18 +350,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long rt = (long)cpu.RegsLo[args.Rt];
-            
-            try
-            {
-                long result = checked(rs - rt);
-                cpu.RegsLo[args.Rd] = (ulong)result;
-                cpu.RegsHi[args.Rd] = result < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
-            }
-            catch (OverflowException)
-            {
-                // TODO: Trigger overflow exception
-                throw;
-            }
+            // PCSX2: no overflow trap.
+            long result = rs - rt;
+            cpu.RegsLo[args.Rd] = (ulong)result;
+            cpu.RegsHi[args.Rd] = result < 0 ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
@@ -482,17 +451,9 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             int rs = CpuHelpers.GetReg32(cpu, args.Rs);
             int imm = CpuHelpers.SignExtend16(args.Imm);
-            
-            try
-            {
-                int result = checked(rs + imm);
-                CpuHelpers.SetReg32(cpu, args.Rt, result);
-            }
-            catch (OverflowException)
-            {
-                // TODO: Trigger overflow exception
-                throw;
-            }
+            // PCSX2 R5900OpcodeImpl.cpp ADDI: no overflow trap.
+            int result = rs + imm;
+            CpuHelpers.SetReg32(cpu, args.Rt, result);
         }
 
         public override string Disasm(Args_I args, uint? pc = null)
@@ -578,18 +539,10 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         {
             long rs = (long)cpu.RegsLo[args.Rs];
             long imm = CpuHelpers.SignExtend16(args.Imm);
-            
-            try
-            {
-                long result = checked(rs + imm);
-                cpu.RegsLo[args.Rt] = (ulong)result;
-                cpu.RegsHi[args.Rt] = 0;
-            }
-            catch (OverflowException)
-            {
-                // TODO: Trigger overflow exception
-                throw;
-            }
+            // PCSX2: no overflow trap.
+            long result = rs + imm;
+            cpu.RegsLo[args.Rt] = (ulong)result;
+            cpu.RegsHi[args.Rt] = 0;
         }
 
         public override string Disasm(Args_I args, uint? pc = null)

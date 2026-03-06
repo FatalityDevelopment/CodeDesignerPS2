@@ -538,30 +538,47 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void Emulator_COP0_OverflowDispatch()
         {
-            // ADD $t0, $t0, $t1 with values that overflow a 32-bit signed integer.
+            // PCSX2 R5900OpcodeImpl.cpp: ADD/ADDI/SUB/DSUB/ADDI/DADDI do NOT
+            // trigger arithmetic overflow exceptions.  No PS2 software relies on
+            // overflow traps; implementing them would be incorrect and would cause
+            // the BIOS fill loop's post-fill execution to route 0x20202020 garbage
+            // code through the exception handler.
+            //
+            // Verify that ADD with overflow wraps silently (no COP0 dispatch,
+            // no PC redirection, matching PCSX2 interpreter behavior).
+
             // add $t0,$t0,$t1 : opcode=0, rs=8, rt=9, rd=8, funct=0x20
             uint add = (0u << 26) | (8u << 21) | (9u << 16) | (8u << 11) | 0x20u;
+            // nop so PC can advance past the ADD
+            uint nop = 0u;
 
             var emu = new PS2Emulator();
-            emu.LoadProgram(0x00000400, new[] { add });
+            emu.LoadProgram(0x00000400, new[] { add, nop });
             emu.Cpu.PC        = 0x00000400;
             emu.Cpu.RegsLo[8] = 0x7FFFFFFFu; // INT32_MAX
-            emu.Cpu.RegsLo[9] = 1u;           // +1 → overflow
+            emu.Cpu.RegsLo[9] = 1u;           // +1 → wraps to INT32_MIN (-2147483648)
 
             // Clear BEV
             uint status = emu.Cpu.COP0.ReadRegister32(12);
             status &= ~(1u << 22);
             emu.Cpu.COP0.WriteRegister32(12, status);
 
-            emu.Step(); // Should not throw — overflow routed through COP0
+            emu.Step(); // must not throw; must not redirect PC
 
-            // Cause.ExcCode should be 12 (Overflow)
+            // PC must advance normally (no exception vector taken).
+            Assert.AreEqual(0x00000404UL, emu.Cpu.PC,
+                "ADD overflow: PC must advance to next instruction (no exception dispatch)");
+
+            // Result wraps modulo 2^32, sign-extended to 64 bits.
+            // 0x7FFFFFFF + 1 = 0x80000000 → as int32 = -2147483648
+            Assert.AreEqual(unchecked((ulong)(long)(int)0x80000000u), emu.Cpu.RegsLo[8],
+                "ADD overflow: result must wrap (modular 32-bit arithmetic, sign-extended)");
+
+            // Cause.ExcCode must NOT be Overflow (12) — no exception was dispatched.
             uint cause   = emu.Cpu.COP0.ReadRegister32(13);
             uint excCode = (cause >> 2) & 0x1Fu;
-            Assert.AreEqual(12u, excCode, "Cause.ExcCode must be 12 (Overflow)");
-
-            Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
-                "PC must be at the exception vector after overflow");
+            Assert.AreNotEqual(12u, excCode,
+                "ADD overflow: Cause.ExcCode must NOT be 12 (overflow not dispatched, matching PCSX2)");
         }
 
         [TestMethod]
