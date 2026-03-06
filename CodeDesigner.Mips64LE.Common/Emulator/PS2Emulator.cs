@@ -381,20 +381,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 Cpu.COP0.IncrementCount(1);
 
             // ── Bulk byte-fill loop fast-forward ─────────────────────────────
-            // When the EE is executing a tight byte-fill loop with EXL=1 (no
-            // interrupts can fire) and the remaining iteration count is large, we
+            // When the EE is executing a tight byte-fill loop with interrupts masked
+            // (EXL=1 or IE=0) and the remaining iteration count is large, we
             // collapse all remaining iterations into a single Array.Fill / Span.Fill
             // call.  This turns a ~535 million-instruction BIOS init loop into a
             // microsecond operation.  See TryFastForwardByteFill for the pattern
             // detection logic and correctness analysis.
-            //
-            // NOTE: Also triggers when IE=0 (interrupts globally disabled) even with
-            // EXL=0, because in that case no interrupt can preempt the fill either.
-            uint st4Ff = Cpu.COP0.ReadRegister32(12);
-            bool noInterruptDuringFill = (st4Ff & 0x2u) != 0   // EXL=1
-                                       || (st4Ff & 0x1u) == 0;  // IE=0
-            if (noInterruptDuringFill && TryFastForwardByteFill())
-                return;
+            {
+                uint st4Ff = Cpu.COP0.ReadRegister32(12);
+                if (((st4Ff & 0x2u) != 0       // EXL=1
+                     || (st4Ff & 0x1u) == 0)    // IE=0 (interrupts globally disabled)
+                    && TryFastForwardByteFill())
+                    return;
+            }
 
             // ── Hardware interrupt check ──────────────────────────────────────
             // Deliver a pending INTC interrupt before executing the next instruction
@@ -449,11 +448,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             catch (TlbMissException tlbFetch)
             {
                 // Instruction-fetch TLB miss → ExcCode=TlbLoad (2).
-                // Dump registers to help debug why PC is in KUSEG.
-                System.Console.Error.WriteLine(
-                    $"[TLB-FETCH miss] PC=0x{pc32:x8} BadVAddr=0x{tlbFetch.VirtualAddress:x8} ic={InstructionCount} " +
-                    $"ra=0x{Cpu.RegsLo[31]:x16} sp=0x{Cpu.RegsLo[29]:x16} " +
-                    $"RAM[sp+0x10]=0x{(Cpu.RegsLo[29]+0x10 < 0x80000000u+0x2000000u ? (uint)(Bus.Ram[(Cpu.RegsLo[29]+0x10)&0x1FFFFFFu] | (Bus.Ram[((Cpu.RegsLo[29]+0x10)&0x1FFFFFFu)+1]<<8) | (Bus.Ram[((Cpu.RegsLo[29]+0x10)&0x1FFFFFFu)+2]<<16) | (Bus.Ram[((Cpu.RegsLo[29]+0x10)&0x1FFFFFFu)+3]<<24)) : 0):x8}");
                 Cpu.COP0.WriteRegister32(8, tlbFetch.VirtualAddress);  // BadVAddr
                 Cpu.COP0.WriteRegister64(10,
                     (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbFetch.VirtualAddress & 0xFFFFE000u)));
@@ -659,9 +653,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private bool TryFastForwardByteFill()
         {
             uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
-            System.IO.File.AppendAllText("/tmp/fill_debug.txt", $"[TRY-FF] pc32=0x{pc32:x8}\n");
 
-            // Only accelerate KSEG0/KSEG1 code (cached kernel region).
+            // Only accelerate KSEG0/KSEG1 code (fixed-mapped kernel region).
             if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
 
             // ── Step 1: verify the BNE instruction at pc32 ──────────────────
@@ -767,29 +760,32 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             //   "naturally-populated" i-cache state that real hardware has when it
             //   reaches the fill loop.  We cover four categories:
             //
-            //   (a) Fill function epilogue  — 4 lines (256 B) starting at pc32+4.
+            //   (a) Fill function epilogue  — 8 lines (512 B) starting at pc32+4.
             //       These are the instructions executed immediately after BNE exits.
             //
-            //   (b) Direct return address   — 8 lines (512 B) around the $ra register.
+            //   (b) Direct return address   — 16 lines (1 KB) around the $ra register.
             //       After the epilogue, "jr $ra" jumps here.  Without this, the first
             //       instruction the CPU sees after returning is 0x20202020.
             //
-            //   (c) Call-stack chain        — scan 512 B of the stack ($sp) for
+            //   (c) Call-stack chain        — scan 2 KB of the stack ($sp) for
             //       word-aligned KSEG0 addresses that look like saved $ra values;
-            //       pre-fetch 4 lines around each (up to 8 candidates).  This covers
-            //       the grandcaller, great-grandcaller, etc. in the BIOS call chain.
+            //       pre-fetch 16 lines (1 KB) around each (up to 32 candidates).
+            //       This covers the entire active call chain (grandcaller, great-
+            //       grandcaller, etc.) so every function that returns after the fill
+            //       executes from the i-cache rather than from corrupted RAM.
             //
-            //   (d) BEV=0 exception handler — 16 lines (1 KB) at 0x80000080.
-            //       If a corrupted instruction after the fill triggers an exception
-            //       (e.g. arithmetic overflow from 0x20202020 reaching an uncached
-            //       address), the handler must be in cache so the CPU can recover.
+            //   (d) All callee-saved GPRs   — pre-fetch 8 lines each around any GPR
+            //       value that looks like a KSEG0 code address.  Covers cases where
+            //       a saved $ra was kept in a register instead of on the stack.
             //
-            // Categories (a)–(c) match PCSX2 JIT semantics: every block in the
-            // call chain is "compiled" (cached) before the fill runs.
-            // Category (d) is insurance against any remaining uncached address.
+            //   (e) BEV=0 exception handler — 16 lines (1 KB) at 0x80000080.
+            //       If a corrupted instruction after the fill triggers an exception,
+            //       the handler must be in cache so the CPU can recover.
+            //
+            // This matches PCSX2 JIT semantics: every block in the call chain is
+            // "compiled" (cached) before the fill runs.
 
-            // Local helpers — these are ordinary local functions (no JIT attribute
-            // needed; the compiler will inline short ones automatically).
+            // Local helpers.
 
             // Load one 64-byte KSEG0 i-cache line through FetchWord.
             // Non-KSEG0 addresses are silently ignored (they bypass the i-cache).
@@ -808,20 +804,22 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     PrefetchLine(lineBase + (uint)(li << 6));
             }
 
-            // (a) Fill function epilogue: 4 lines past the BNE / delay slot.
-            PrefetchRegion(pc32 + 4, 4);
+            // (a) Fill function epilogue: 8 lines past the BNE / delay slot.
+            PrefetchRegion(pc32 + 4, 8);
 
-            // (b) Direct return address ($ra = register 31): 8 lines (512 B).
+            // (b) Direct return address ($ra = register 31): 16 lines (1 KB).
             uint raVaddr = (uint)(Cpu.RegsLo[31] & 0xFFFFFFFFu);
-            PrefetchRegion(raVaddr, 8);
+            PrefetchRegion(raVaddr, 16);
 
-            // (c) Call-stack walk: read 512 B of stack and pre-fetch any word that
-            //     looks like a saved KSEG0 return address (word-aligned, != 0x80000000).
+            // (c) Call-stack chain: scan 2 KB of the stack for saved return addresses
+            //     and pre-fetch 16 lines (1 KB) around each (up to 32 candidates).
+            //     We check both KSEG0 (0x80xxxxxx) and KSEG1 (0xA0xxxxxx / 0xBFxxxxxx)
+            //     addresses so that BIOS ROM return addresses are also captured.
             uint spVaddr = (uint)(Cpu.RegsLo[29] & 0xFFFFFFFFu);
             uint physSp  = PS2MemoryBus.TranslateAddress(spVaddr)
                            & (uint)(PS2MemoryBus.MainRamSize - 1);
             int  nSavedRa = 0;
-            for (uint so = 0; so <= 512u && nSavedRa < 8; so += 4u)
+            for (uint so = 0; so <= 2048u && nSavedRa < 32; so += 4u)
             {
                 uint pa = physSp + so;
                 if (pa + 3 >= (uint)Bus.Ram.Length) break;
@@ -829,15 +827,24 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                                       | (Bus.Ram[pa + 1] << 8)
                                       | (Bus.Ram[pa + 2] << 16)
                                       | (Bus.Ram[pa + 3] << 24));
-                // A saved $ra is: KSEG0, word-aligned, and not the bare base address.
+                // A saved $ra candidate: KSEG0 (0x80xxxxxx), word-aligned, non-zero.
                 if ((stackWord & 0xE0000003u) == 0x80000000u && stackWord != 0x80000000u)
                 {
-                    PrefetchRegion(stackWord, 4);
+                    PrefetchRegion(stackWord, 16);
                     nSavedRa++;
                 }
             }
 
-            // (d) BEV=0 general exception handler: 16 lines (1 KB) at 0x80000080.
+            // (d) All callee-saved GPRs ($s0–$s7, $fp, plus $a0–$a3, $t0–$t9):
+            //     any register holding a KSEG0 code address is likely a saved RA.
+            for (int ri = 0; ri < 32; ri++)
+            {
+                uint gprVal = (uint)(Cpu.RegsLo[ri] & 0xFFFFFFFFu);
+                if ((gprVal & 0xE0000003u) == 0x80000000u && gprVal != 0x80000000u)
+                    PrefetchRegion(gprVal, 8);
+            }
+
+            // (e) BEV=0 general exception handler: 16 lines (1 KB) at 0x80000080.
             //     Pre-fetch unconditionally so any exception after the fill can be
             //     handled by code in the i-cache rather than RAM (which is all 0x20).
             PrefetchRegion(0x80000080u, 16);
@@ -852,11 +859,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             uint startVaddr = (uint)(baseVal + offVal + 1); // first store address
             uint physStart  = PS2MemoryBus.TranslateAddress(startVaddr)
                               & (uint)(PS2MemoryBus.MainRamSize - 1);
-
-            System.IO.File.AppendAllText("/tmp/fill_debug.txt",
-                $"[FILL-FWDFWD] pc32=0x{pc32:x8} fillByte=0x{fillByte:x2} " +
-                $"startVaddr=0x{startVaddr:x8} physStart=0x{physStart:x8} remaining={remaining} " +
-                $"sp=0x{Cpu.RegsLo[29]:x16} ra=0x{Cpu.RegsLo[31]:x16} ic={InstructionCount}\n");
 
             if (remaining >= PS2MemoryBus.MainRamSize)
             {
