@@ -98,6 +98,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public byte[] Bios => _bios;
 
         /// <summary>
+        /// When <see langword="true"/> the CPU has set COP0 SR.IsC (bit 16, "Isolate
+        /// Cache").  In this mode data-memory writes from the CPU are redirected to
+        /// the internal I-cache and must NOT modify main IOP RAM.  The BIOS uses
+        /// this during its I-cache invalidation loops; without the guard those loops
+        /// would silently wipe the IOPBOOT kernel stub that was just loaded to
+        /// physical addresses 0x30–0xF70 and leave the IOP stuck executing NOPs.
+        /// Reference: PCSX2 <c>psxMemWrite32</c> cache-isolation check.
+        /// </summary>
+        public bool IsCacheIsolated { get; set; }
+
+        /// <summary>
         /// Optional reference to the shared SIF instance.  When set, reads/writes
         /// to the SIF mirror region (0x1D000000) are forwarded to this object.
         /// </summary>
@@ -429,6 +440,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         {
             addr = TranslateAddress(addr);
 
+            // When SR.IsC=1 (Isolate Cache) the CPU routes data writes to the
+            // internal I-cache instead of main memory.  Suppress writes to
+            // physical RAM so the BIOS I-cache invalidation loops do not wipe
+            // the IOPBOOT kernel stub that has just been loaded there.
+            // Reference: PCSX2 psxMemWrite32 cache-isolation guard.
+            if (IsCacheIsolated && addr < (uint)RamSize)
+                return;
+
             // IOP INTC
             if (addr == IntcBase)      { _iStat &= value; return; }  // W0C (write-AND per PCSX2 psxHu32 &= value)
             if (addr == IntcBase + 4u) { _iMask  = value; return; }
@@ -572,6 +591,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public void WriteByte(uint addr, byte value)
         {
             addr = TranslateAddress(addr);
+
+            // SR.IsC=1: suppress RAM writes (I-cache isolation, same as WriteWord guard).
+            if (IsCacheIsolated && addr < (uint)RamSize)
+                return;
 
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
             {
