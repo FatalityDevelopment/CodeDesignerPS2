@@ -91,6 +91,37 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         private void ICacheClear() => Array.Clear(_iCacheValid, 0, ICacheEntries);
 
+        /// <summary>
+        /// Invalidate all i-cache entries whose physical address falls within the
+        /// 64-byte cache line that covers <paramref name="vaddr"/>.
+        /// Called by the CACHE IXIN handler via <see cref="CPU.COP0.CacheState.ICacheInvalidateLine"/>.
+        ///
+        /// The R5900 i-cache has 64-byte lines (16 instructions each); IXIN
+        /// invalidates by line index (bits [13:6] of the address).  Our simplified
+        /// implementation maps one cache entry per instruction (4 bytes), so we
+        /// invalidate all 16 entries that form the corresponding line.
+        /// </summary>
+        private void ICacheInvalidateLine(uint vaddr)
+        {
+            // Strip KSEG0/KSEG1 to get physical address.
+            uint physPc = ((vaddr & 0xC0000000u) == 0x80000000u)
+                          ? (vaddr & 0x1FFFFFFFu)
+                          : vaddr;
+
+            // Align to 64-byte (16-instruction) cache-line boundary.
+            uint lineBase = physPc & ~63u;
+
+            // Invalidate the 16 consecutive 4-byte entries covering this line.
+            for (uint offset = 0; offset < 64u; offset += 4u)
+            {
+                uint p   = lineBase + offset;
+                uint idx = ICacheIndex(p);
+                uint tag = ICacheTag(p);
+                if (_iCacheValid[idx] && _iCacheTags[idx] == tag)
+                    _iCacheValid[idx] = false;
+            }
+        }
+
         /// <summary>Total instructions executed since last reset.</summary>
         public ulong InstructionCount { get; private set; }
 
@@ -130,6 +161,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // instructions can route through it for KSEG0/KSEG1 address
             // translation and hardware I/O register dispatch.
             Cpu.Bus = Bus;
+
+            // Wire i-cache invalidation callbacks so the CACHE IXIN instruction
+            // actually flushes our interpreter i-cache.
+            // PCSX2 Cache.cpp case 0x07 (IXIN): "Not Implemented as we do not have
+            // instruction cache" — they rely on the JIT's page-protection SMC handler.
+            // For our pure interpreter, we implement IXIN correctly.
+            Cpu.COP0.Cache.ICacheInvalidateLine = ICacheInvalidateLine;
+            Cpu.COP0.Cache.ICacheInvalidateAll  = ICacheClear;
 
             // Wire VIF0 to VU0 data/micro memory so UNPACK and MPG write directly
             // into the VU0 register state that COP2 macro-mode instructions read.

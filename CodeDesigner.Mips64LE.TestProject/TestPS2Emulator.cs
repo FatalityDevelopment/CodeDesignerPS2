@@ -1830,5 +1830,54 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(0u, (uint)emu.Bus.Ram[200_001],
                 "RAM[200001] (one past end of fill) should remain 0");
         }
+
+        /// <summary>
+        /// Verify that the CACHE IXIN instruction (rt=0x07) correctly invalidates
+        /// the i-cache line in our interpreter.  After an instruction is cached,
+        /// executing CACHE IXIN for that address, then overwriting the RAM word,
+        /// should cause the next fetch to load the new value (not the stale cache).
+        /// </summary>
+        [TestMethod]
+        public void ICache_CacheInstructionIXIN_InvalidatesLine()
+        {
+            // Step 1: cache an ADDIU $t0, $zero, 42 at KSEG0 0x80002000.
+            uint addiu42 = (9u << 26) | (0u << 21) | (8u << 16) | 42u;
+            uint addiu99 = (9u << 26) | (0u << 21) | (8u << 16) | 99u;
+
+            var emu = new PS2Emulator();
+            emu.Bus.WriteWord(0x80002000u, addiu42);
+            emu.Bus.WriteWord(0x80002004u, 0u); // nop
+
+            emu.Cpu.PC = 0x80002000UL;
+            emu.Step();
+            Assert.AreEqual(42UL, emu.Cpu.RegsLo[8], "First execution: $t0 = 42");
+
+            // Step 2: overwrite the instruction word in RAM.
+            emu.Bus.WriteWord(0x80002000u, addiu99);
+
+            // Step 3: without IXIN the i-cache would still serve addiu42.
+            // Confirm that — i-cache is still populated.
+            emu.Cpu.PC = 0x80002000UL;
+            emu.Step();
+            Assert.AreEqual(42UL, emu.Cpu.RegsLo[8], "Before IXIN: i-cache serves original (42)");
+
+            // Step 4: encode and execute CACHE IXIN (rt=0x07) for address 0x80002000.
+            // CACHE encoding: opcode=0x2F, rs=base, rt=op, imm=offset.
+            // We'll use rs=$s0 (16) = 0x80002000, offset=0 → imm=0, rt=7.
+            emu.Cpu.RegsLo[16] = 0x80002000u; // $s0 = base address
+            //   word = (0x2F << 26) | (s0=16 << 21) | (rt=7 << 16) | 0
+            uint cacheIxin = (0x2Fu << 26) | (16u << 21) | (7u << 16) | 0u;
+            // Write the CACHE instruction at a new address, execute it.
+            emu.Bus.WriteWord(0x80003000u, cacheIxin);
+            emu.Bus.WriteWord(0x80003004u, 0u); // nop
+            emu.Cpu.PC = 0x80003000UL;
+            emu.Step(); // executes CACHE IXIN → flushes i-cache line for 0x80002000
+
+            // Step 5: fetch again from 0x80002000 — should now see addiu99 from RAM.
+            emu.Cpu.PC = 0x80002000UL;
+            emu.Step();
+            Assert.AreEqual(99UL, emu.Cpu.RegsLo[8],
+                "After CACHE IXIN: stale i-cache entry cleared, RAM word (99) fetched");
+        }
     }
 }
