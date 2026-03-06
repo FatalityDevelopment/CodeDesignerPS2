@@ -62,6 +62,35 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         // so that IncrementCount(1) is called every other EE instruction.
         private int _cop0CountAccum;
 
+        // ── Simple instruction cache (i-cache) ──────────────────────────────────
+        // The PS2 EE R5900 has a 16 KB physically-tagged i-cache that is NOT
+        // automatically invalidated by stores to the same physical address.
+        // This accurately models, e.g., the BIOS kernel-init fill loop that writes
+        // 0x20 bytes over the very instructions it is executing — on real hardware
+        // the i-cache keeps serving the original instructions; in an interpreter
+        // without an i-cache the loop overwrites itself and becomes infinite.
+        //
+        // We implement a 4096-entry direct-mapped cache (matches 16 KB / 4 bytes
+        // per instruction).  The cache is populated lazily on first fetch and is
+        // only invalidated by Reset() (simulating a hardware power-on cache flush).
+        // This is sufficient for the PS2 boot sequence and does not affect the
+        // correctness of dynamically-installed exception handlers because those
+        // handlers are installed *before* the fill loop runs and thus before their
+        // addresses are first fetched from cache.
+        private const  int  ICacheEntries  = 4096;         // 16 KB / 4 bytes
+        private const  uint ICacheIdxMask  = ICacheEntries - 1; // 0x0FFF
+        private readonly bool[] _iCacheValid = new bool[ICacheEntries];
+        private readonly uint[] _iCacheTags  = new uint[ICacheEntries]; // physPc >> 14 (tag)
+        private readonly uint[] _iCacheData  = new uint[ICacheEntries];
+
+        // Index into the cache from a physical PC: bits [13:2] (12 bits = 4096 entries).
+        private static uint ICacheIndex(uint physPc) => (physPc >> 2) & ICacheIdxMask;
+
+        // Tag stored per entry: upper bits of physPc that are NOT covered by the index.
+        private static uint ICacheTag(uint physPc)   => physPc >> 14;
+
+        private void ICacheClear() => Array.Clear(_iCacheValid, 0, ICacheEntries);
+
         /// <summary>Total instructions executed since last reset.</summary>
         public ulong InstructionCount { get; private set; }
 
@@ -195,6 +224,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// Handles KUSEG TLB translation (when the TLB has been populated by the BIOS),
         /// KSEG0/KSEG1 fixed mapping (via the bus), and throws
         /// <see cref="TlbMissException"/> on a KUSEG TLB miss once TLB entries exist.
+        ///
+        /// For KSEG0/KSEG1 addresses the result is served through the simple i-cache
+        /// (see <see cref="_iCacheValid"/>/<see cref="_iCacheData"/>).  This prevents a
+        /// data-store loop (e.g. the BIOS kernel-init fill that writes 0x20 to all of
+        /// RAM) from corrupting the executing instructions, matching the behaviour of the
+        /// PS2's physically-tagged hardware i-cache.
         /// </summary>
         private uint FetchWord(uint virtualPc)
         {
@@ -211,7 +246,26 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     return Bus.ReadWord(paddr.Value);
                 throw new TlbMissException(virtualPc, isStore: false);
             }
-            // KSEG0/KSEG1/scratchpad (and pre-TLB KUSEG): bus handles the translation.
+
+            // KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1 (0xA0000000–0xBFFFFFFF) are
+            // served through the i-cache.  Bits [31:30] == 10 covers both regions.
+            if ((virtualPc & 0xC0000000u) == 0x80000000u)
+            {
+                uint physPc = virtualPc & 0x1FFFFFFFu;
+                uint idx    = ICacheIndex(physPc);
+                uint tag    = ICacheTag(physPc);
+                if (_iCacheValid[idx] && _iCacheTags[idx] == tag)
+                    return _iCacheData[idx]; // cache hit — original instruction
+
+                // Cache miss: fetch from bus and populate the cache line.
+                uint word = Bus.ReadWord(virtualPc);
+                _iCacheValid[idx] = true;
+                _iCacheTags[idx]  = tag;
+                _iCacheData[idx]  = word;
+                return word;
+            }
+
+            // Scratchpad / pre-TLB KUSEG: bus handles the translation directly.
             return Bus.ReadWord(virtualPc);
         }
 
@@ -220,6 +274,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             Cpu.PC = 0xBFC00000UL;
             InstructionCount = 0;
             _cop0CountAccum = 0;
+
+            // Clear the i-cache so that stale entries from a previous run cannot
+            // survive a reset (matches hardware power-on i-cache flush behaviour).
+            ICacheClear();
 
             // $zero is always 0
             Cpu.RegsLo[0] = 0;
@@ -261,6 +319,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // and ensuring the BIOS RDRAM timing calibration measures the right value.
             if ((_cop0CountAccum ^= 1) == 0)
                 Cpu.COP0.IncrementCount(1);
+
+            // ── Bulk byte-fill loop fast-forward ─────────────────────────────
+            // When the EE is executing a tight byte-fill loop with EXL=1 (no
+            // interrupts can fire) and the remaining iteration count is large, we
+            // collapse all remaining iterations into a single Array.Fill / Span.Fill
+            // call.  This turns a ~535 million-instruction BIOS init loop into a
+            // microsecond operation.  See TryFastForwardByteFill for the pattern
+            // detection logic and correctness analysis.
+            if ((Cpu.COP0.ReadRegister32(12) & 0x2u) != 0 // EXL=1
+                && TryFastForwardByteFill())
+                return;
 
             // ── Hardware interrupt check ──────────────────────────────────────
             // Deliver a pending INTC interrupt before executing the next instruction
@@ -477,6 +546,184 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             }
             // else: branchTarget == pcBefore+4 (branch not taken).
             // The delay slot at pcBefore+4 will run as the next sequential Step().
+        }
+
+        // ── Bulk byte-fill loop fast-forward ────────────────────────────────────
+
+        /// <summary>
+        /// Minimum remaining iterations required before the fast-forward triggers.
+        /// Loops shorter than this threshold are cheaper to execute normally.
+        /// </summary>
+        private const long BulkFillMinIterations = 50_000L;
+
+        /// <summary>
+        /// Detect and fast-forward a MIPS tight byte-fill loop of the form:
+        /// <code>
+        ///   loop:
+        ///     addu   addrReg,  baseReg,  offReg      ; address = base + offset
+        ///     addiu  cntReg,   cntReg,  -1           ; count--
+        ///     sb     fillReg,  0(addrReg)            ; mem[address] = fill_byte
+        ///     slt    cmpReg,   thrReg,   cntReg      ; cmpReg = (threshold &lt; count)
+        ///     [nop / other non-branch]               ; optional padding
+        ///     bne    cmpReg,   $zero,   loop         ; branch back while cmpReg != 0
+        ///     addiu  offReg,   offReg,   1           ; delay slot: offset++
+        /// </code>
+        ///
+        /// This pattern appears in the PS2 BIOS kernel-init routine that fills
+        /// approximately 512 MB of virtual address space with 0x20 (space) before
+        /// reloading the kernel from ROM.  On the real PS2 the i-cache protects the
+        /// executing instructions; in the emulator without an i-cache the loop would
+        /// overwrite its own instructions after ~15 M iterations, turning the
+        /// counter-decrement into a NOP and making the loop infinite.
+        ///
+        /// When the pattern is detected and the remaining iteration count exceeds
+        /// <see cref="BulkFillMinIterations"/>, all remaining iterations are collapsed
+        /// into a single <see cref="System.Array.Fill{T}"/> call on the main RAM
+        /// (correct because the fill always wraps through the full 32 MB at least
+        /// once), the CPU registers are updated to match the post-loop state, and
+        /// the PC is advanced past the loop.
+        ///
+        /// Returns <c>true</c> if the fast-forward was applied and <see cref="Step"/>
+        /// should return immediately; <c>false</c> if the pattern was not recognised.
+        /// </summary>
+        private bool TryFastForwardByteFill()
+        {
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+
+            // Only accelerate KSEG0/KSEG1 code (cached kernel region).
+            if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
+
+            // ── Step 1: verify the BNE instruction at pc32 ──────────────────
+            // BNE format: opcode=5, rs=cmpReg, rt=$zero (0), imm=signed offset.
+            uint bneWord = Bus.ReadWord(pc32);
+            if ((bneWord >> 26) != 5u) return false;          // must be BNE
+            int bneRs = (int)((bneWord >> 21) & 0x1Fu);       // compare register
+            if (((bneWord >> 16) & 0x1Fu) != 0u) return false; // rt must be $zero
+
+            // Compute the branch target (loop start).
+            // MIPS: target = (pc32 + 4) + sign_extend(imm) × 4
+            int  branchImm = (short)(bneWord & 0xFFFFu);
+            uint loopStart = (uint)((int)(pc32 + 4u) + branchImm * 4);
+
+            // Sanity: loop start must be before pc32 and within a tight 80-byte window.
+            if (loopStart >= pc32 || pc32 - loopStart > 80u) return false;
+
+            // ── Step 2: verify the delay slot (ADDIU offReg, offReg, +1) ────
+            // We read raw from bus (not i-cache) so we get the original word even
+            // if the fill has already overwritten the delay-slot location.
+            uint dsWord = Bus.ReadWord(pc32 + 4u);
+            if ((dsWord >> 26) != 9u) return false;           // must be ADDIU
+            int dsRs = (int)((dsWord >> 21) & 0x1Fu);
+            int dsRt = (int)((dsWord >> 16) & 0x1Fu);
+            if (dsRs != dsRt) return false;                   // addiu rt, rt, imm (rs==rt)
+            if ((short)(dsWord & 0xFFFFu) != 1) return false; // imm must be +1
+            int offReg = dsRt;                                 // offset/address register
+
+            // ── Step 3: read the loop-body instructions ──────────────────────
+            // Accept 4 to 6 instructions between loopStart and pc32.
+            int loopBodyLen = (int)(pc32 - loopStart) / 4;
+            if (loopBodyLen < 4 || loopBodyLen > 6) return false;
+
+            uint w0 = Bus.ReadWord(loopStart);          // addu
+            uint w1 = Bus.ReadWord(loopStart + 4u);     // addiu -1
+            uint w2 = Bus.ReadWord(loopStart + 8u);     // sb
+            uint w3 = Bus.ReadWord(loopStart + 12u);    // slt
+
+            // w0: ADDU addrReg, baseReg, offReg  (SPECIAL funct=0x21)
+            if ((w0 >> 26) != 0u || (w0 & 0x3Fu) != 0x21u) return false;
+            int addrReg = (int)((w0 >> 11) & 0x1Fu); // rd (computed address)
+            int baseReg = (int)((w0 >> 21) & 0x1Fu); // rs (base register)
+            int w0Rt    = (int)((w0 >> 16) & 0x1Fu); // rt (offset register)
+            if (w0Rt != offReg) return false;         // addu's rt must match delay-slot rt
+
+            // w1: ADDIU cntReg, cntReg, -1  (opcode=9, rs==rt, imm=0xFFFF=-1)
+            if ((w1 >> 26) != 9u) return false;
+            int cntRs = (int)((w1 >> 21) & 0x1Fu);
+            int cntRt = (int)((w1 >> 16) & 0x1Fu);
+            if (cntRs != cntRt) return false;
+            if ((short)(w1 & 0xFFFFu) != -1) return false;
+            int cntReg = cntRt;
+
+            // w2: SB fillReg, 0(addrReg)  (opcode=0x28, rs=addrReg, imm=0)
+            if ((w2 >> 26) != 0x28u) return false;
+            if ((int)((w2 >> 21) & 0x1Fu) != addrReg) return false;
+            if ((short)(w2 & 0xFFFFu) != 0) return false; // offset must be 0
+            int fillReg = (int)((w2 >> 16) & 0x1Fu);
+
+            // w3: SLT cmpReg, thrReg, cntReg  (SPECIAL funct=0x2A)
+            if ((w3 >> 26) != 0u || (w3 & 0x3Fu) != 0x2Au) return false;
+            int sltRd = (int)((w3 >> 11) & 0x1Fu);
+            int sltRt = (int)((w3 >> 16) & 0x1Fu);
+            if (sltRd != bneRs) return false;   // SLT result must be what BNE checks
+            if (sltRt != cntReg) return false;  // SLT rt must be the counter
+            int thrReg = (int)((w3 >> 21) & 0x1Fu); // threshold register
+
+            // ── Step 4: extract register values ─────────────────────────────
+            // Treat all registers as signed 32-bit (matching 32-bit addiu semantics).
+            int cntVal  = (int)(Cpu.RegsLo[cntReg]  & 0xFFFFFFFFu);
+            int thrVal  = (int)(Cpu.RegsLo[thrReg]  & 0xFFFFFFFFu);
+            int offVal  = (int)(Cpu.RegsLo[offReg]  & 0xFFFFFFFFu);
+            int baseVal = (int)(Cpu.RegsLo[baseReg] & 0xFFFFFFFFu);
+
+            // Remaining iterations: the loop runs while cntVal > thrVal (signed 32-bit).
+            // Each iteration decrements cntVal once; exits when cntVal reaches thrVal.
+            long remaining = (long)cntVal - (long)thrVal;
+            if (remaining <= BulkFillMinIterations) return false;
+
+            // ── Step 5: perform the memory fill ─────────────────────────────
+            // The fill writes fill_byte to addresses:
+            //   (baseVal + offVal + 1), (baseVal + offVal + 2), ..., (baseVal + offVal + remaining)
+            // All translated via KSEG0/KSEG1 → physical RAM (32 MB, mirrored).
+            // When remaining >= 32 MB (typical: ~535 M ≫ 32 MB), every byte in
+            // main RAM is overwritten; a single Array.Fill covers all cases.
+            byte fillByte = (byte)(Cpu.RegsLo[fillReg] & 0xFFu);
+            uint startVaddr = (uint)(baseVal + offVal + 1); // first store address
+            uint physStart  = PS2MemoryBus.TranslateAddress(startVaddr)
+                              & (uint)(PS2MemoryBus.MainRamSize - 1);
+
+            if (remaining >= PS2MemoryBus.MainRamSize)
+            {
+                // Fill covers the entire 32 MB RAM (multiple wrap-arounds).
+                Array.Fill(Bus.Ram, fillByte);
+            }
+            else
+            {
+                uint count = (uint)remaining;
+                uint end   = physStart + count;
+                if (end <= (uint)PS2MemoryBus.MainRamSize)
+                {
+                    // Contiguous range, no wrap.
+                    Bus.Ram.AsSpan((int)physStart, (int)count).Fill(fillByte);
+                }
+                else
+                {
+                    // Range wraps around the 32 MB boundary.
+                    int firstChunk = PS2MemoryBus.MainRamSize - (int)physStart;
+                    Bus.Ram.AsSpan((int)physStart, firstChunk).Fill(fillByte);
+                    Bus.Ram.AsSpan(0, (int)(count - (uint)firstChunk)).Fill(fillByte);
+                }
+            }
+
+            // ── Step 6: update CPU registers to post-loop state ──────────────
+            // After the last iteration (BNE not taken, delay slot still fires):
+            //   cntReg = thrVal       (decremented to threshold)
+            //   offReg = offVal + remaining + 1  (+1 from the final not-taken delay slot)
+            //   addrReg: overwritten by SLT → 0 (only if addrReg == sltRd)
+            //   sltRd   = 0           (SLT result: threshold < threshold = false)
+            //   PC = pc32 + 8         (past BNE + delay slot)
+            CpuHelpers.SetReg32(Cpu, cntReg, thrVal);
+            CpuHelpers.SetReg32(Cpu, offReg, (int)(offVal + remaining + 1L));
+            CpuHelpers.SetReg32(Cpu, sltRd,  0);
+            // If addrReg and sltRd are different registers, addrReg holds the final
+            // address from the last addu (base + final offset).  Write it for accuracy.
+            if (addrReg != sltRd)
+                CpuHelpers.SetReg32(Cpu, addrReg, (int)(uint)(baseVal + (int)(offVal + remaining)));
+
+            Cpu.PC = pc32 + 8u;
+
+            // Count each collapsed iteration as one instruction for statistics.
+            InstructionCount += (ulong)remaining;
+            return true;
         }
 
         /// <summary>
