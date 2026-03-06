@@ -198,6 +198,10 @@ namespace CodeDesigner.Mips64LE
             int       spinCount     = 0;
             int       iopSpinCount  = 0;
             bool      eeLeftBios    = false;   // true once the EE PC first enters RAM
+            bool      iopBootDumped    = false; // true once IOP boot zone disasm dumped
+            bool      iopLeftBootZone  = false; // true once IOP PC > 0x400
+            bool      eeSyscallDetected = false; // true once EE kernel begins syscall setup
+            uint      lastEeRegion  = uint.MaxValue; // track EE region changes
 
             try
             {
@@ -230,6 +234,45 @@ namespace CodeDesigner.Mips64LE
                             }
                         }
 
+                        // Detect when EE moves to a significantly different code region
+                        // (top 8 bits of PC change = different 16 MB region).
+                        uint eePcRegion = eePc32 & 0xFF000000u;
+                        if (eeLeftBios && eePcRegion != lastEeRegion)
+                        {
+                            lastEeRegion = eePcRegion;
+                            string eeInsn0 = DisassembleAt(scheduler.EE.Bus, eePc32);
+                            Console.WriteLine($"*** EE moved to new region 0x{eePc32:x8} (cycle:{totalSteps:N0}) {eeInsn0} ***");
+                        }
+
+                        // Detect first time EE enters exception/syscall mode (EXL=1).
+                        if (!eeSyscallDetected && eeLeftBios)
+                        {
+                            uint eeStatus = scheduler.EE.Cpu.COP0.ReadRegister32(12);
+                            if ((eeStatus & 0x2u) != 0)  // EXL=1
+                            {
+                                eeSyscallDetected = true;
+                                Console.WriteLine($"*** EE entered exception mode (EXL=1) at 0x{eePc32:x8} (cycle:{totalSteps:N0}) COP0.Status=0x{eeStatus:x8} ***");
+                            }
+                        }
+
+                        // Dump IOP boot zone disassembly on first entry.
+                        if (!iopBootDumped && iopPc < 0x1000u && iopPc >= 0x100u)
+                        {
+                            iopBootDumped = true;
+                            Console.WriteLine($"*** IOP entered boot zone 0x{iopPc:x8} (IOP cycle:{scheduler.TotalIopSteps:N0}) — dumping boot zone disasm ***");
+                            // Dump the full IOP boot zone including the exception stub at 0x80
+                            DumpIopRamRegion(scheduler.IOP.Bus, 0x0u, 0x200u);
+                        }
+
+                        // Detect when IOP first leaves the boot zone (PC > 0x400).
+                        if (!iopLeftBootZone && iopPc > 0x400u && iopPc < 0x1FC00000u)
+                        {
+                            iopLeftBootZone = true;
+                            string iopInsn0 = DisassembleIopAt(scheduler.IOP.Bus, iopPc);
+                            Console.WriteLine($"*** IOP left boot zone — now at 0x{iopPc:x8} (IOP cycle:{scheduler.TotalIopSteps:N0}) {iopInsn0} ***");
+                            DumpInterruptState(scheduler);
+                        }
+
                         // Track EE spin-loops: PC stuck at same address across consecutive
                         // report intervals.  Matches PCSX2's "EE is spinning" detection.
                         if (eePc32 == lastEePc)
@@ -248,13 +291,16 @@ namespace CodeDesigner.Mips64LE
                                 uint intcSt = scheduler.EE.Bus.Intc.Stat;
                                 uint intcMk = scheduler.EE.Bus.Intc.Mask;
                                 uint eeStatus = scheduler.EE.Cpu.COP0.ReadRegister32(12);
-                                uint gifStat = scheduler.EE.Bus.ReadWord(0xB0003020u);
+                                uint gifStat = 0;
+                                try { gifStat = scheduler.EE.Bus.ReadWord(0xB0003020u); } catch { }
+                                ulong eeV1 = (ulong)scheduler.EE.Cpu.RegsLo[3];
+                                ulong eeS1 = (ulong)scheduler.EE.Cpu.RegsLo[17];
                                 Console.WriteLine(
                                     $"  [spin@{totalSteps:N0}] " +
                                     $"INTC STAT=0x{intcSt:x8} MASK=0x{intcMk:x8} " +
                                     $"COP0.Status=0x{eeStatus:x8} " +
                                     $"SIF.F240=0x{scheduler.EE.Bus.Sif.F240:x8} " +
-                                    $"GIF_STAT=0x{gifStat:x8}");
+                                    $"v1=0x{eeV1:x16} s1=0x{eeS1:x16}");
                             }
                         }
                         else
@@ -583,11 +629,20 @@ namespace CodeDesigner.Mips64LE
             //   sp = stack pointer (helps identify which thread is active)
             //   ra = return address (shows the call site that spun)
             ulong eeV0 = (ulong)sched.EE.Cpu.RegsLo[2];
+            ulong eeV1 = (ulong)sched.EE.Cpu.RegsLo[3];   // v1 — loop counter
             ulong eeA0 = (ulong)sched.EE.Cpu.RegsLo[4];
+            ulong eeS0 = (ulong)sched.EE.Cpu.RegsLo[16];  // s0 — BSS clear ptr
+            ulong eeS1 = (ulong)sched.EE.Cpu.RegsLo[17];  // s1 — loop limit
+            ulong eeS5 = (ulong)sched.EE.Cpu.RegsLo[21];  // s5 — memset index
+            ulong eeS6 = (ulong)sched.EE.Cpu.RegsLo[22];  // s6 — memset base
             ulong eeSp = (ulong)sched.EE.Cpu.RegsLo[29];
             ulong eeRa = (ulong)sched.EE.Cpu.RegsLo[31];
             Console.WriteLine(
-                $"  EE  v0=0x{eeV0:x16}  a0=0x{eeA0:x16}");
+                $"  EE  v0=0x{eeV0:x16}  v1=0x{eeV1:x16}  a0=0x{eeA0:x16}");
+            Console.WriteLine(
+                $"  EE  s0=0x{eeS0:x16}  s1=0x{eeS1:x16}");
+            Console.WriteLine(
+                $"  EE  s5=0x{eeS5:x16}  s6=0x{eeS6:x16}");
             Console.WriteLine(
                 $"  EE  sp=0x{eeSp:x16}  ra=0x{eeRa:x16}");
 
@@ -606,11 +661,27 @@ namespace CodeDesigner.Mips64LE
 
             // ── IOP key registers (v0=$2, a0=$4, sp=$29, ra=$31) ─────────────
             uint iopV0 = sched.IOP.State.ReadReg(2);
+            uint iopV1 = sched.IOP.State.ReadReg(3);
             uint iopA0 = sched.IOP.State.ReadReg(4);
+            uint iopFp = sched.IOP.State.ReadReg(30);  // fp = $30
             uint iopSp = sched.IOP.State.ReadReg(29);
             uint iopRa = sched.IOP.State.ReadReg(31);
             Console.WriteLine(
-                $"  IOP v0=0x{iopV0:x8}  a0=0x{iopA0:x8}  sp=0x{iopSp:x8}  ra=0x{iopRa:x8}");
+                $"  IOP v0=0x{iopV0:x8}  v1=0x{iopV1:x8}  a0=0x{iopA0:x8}");
+            Console.WriteLine(
+                $"  IOP fp=0x{iopFp:x8}  sp=0x{iopSp:x8}  ra=0x{iopRa:x8}");
+
+            // Dump the IOP loop flag at fp+0x58 (= IOP RAM[fp+0x58]) which the
+            // boot loop at 0x124 polls.  Non-zero means the IOP is waiting.
+            if (iopFp != 0 && iopFp < (uint)IopMemoryBus.RamSize)
+            {
+                uint iopLoopFlagAddr = iopFp + 0x58u;
+                uint iopLoopFlag = 0;
+                try { iopLoopFlag = sched.IOP.Bus.ReadWord(iopLoopFlagAddr); } catch { }
+                Console.WriteLine(
+                    $"  IOP RAM[fp+0x58=0x{iopLoopFlagAddr:x8}] = 0x{iopLoopFlag:x8}  " +
+                    $"(boot loop exits when this is 0)");
+            }
 
             // ── GIF_STAT ──────────────────────────────────────────────────────
             // FQC = bits[27:24] = GIF FIFO queue count; loop exits when FQC == 0.
@@ -627,11 +698,11 @@ namespace CodeDesigner.Mips64LE
                 $"  [{(kernelLoaded ? "KERNEL LOADED" : "ALL ZEROS — kernel not loaded!")}]");
 
             // ── EE context disassembly ────────────────────────────────────────
-            // Show 4 instructions before the EE PC, the PC instruction, and 1 after,
+            // Show 6 instructions before the EE PC, the PC instruction, and 4 after,
             // so we can immediately see which loop body the EE is stuck in.
             uint eePc = (uint)(sched.EE.Cpu.PC & 0xFFFFFFFFUL);
             Console.WriteLine($"  EE context around pc=0x{eePc:x8}:");
-            for (int offset = -16; offset <= 4; offset += 4)
+            for (int offset = -24; offset <= 16; offset += 4)
             {
                 uint addr = (uint)(eePc + offset);
                 string arrow = offset == 0 ? " <-- PC" : "";
@@ -648,10 +719,12 @@ namespace CodeDesigner.Mips64LE
             }
 
             // ── IOP context disassembly ───────────────────────────────────────
-            // Show 2 instructions before the IOP PC, the PC instruction, and 1 after.
+            // Show 6 instructions before the IOP PC, the PC instruction, and 7 after.
+            // This wider window ensures the full loop body (e.g., 0x124–0x14c) is
+            // visible regardless of which instruction the PC is currently at.
             uint iopPc = sched.IOP.State.PC;
             Console.WriteLine($"  IOP context around pc=0x{iopPc:x8}:");
-            for (int offset = -8; offset <= 4; offset += 4)
+            for (int offset = -24; offset <= 28; offset += 4)
             {
                 uint addr = (uint)(iopPc + offset);
                 string arrow = offset == 0 ? " <-- PC" : "";
@@ -691,6 +764,29 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>1 or 0 string for a boolean flag, matching PCSX2 log style.</summary>
         private static string B(bool v) => v ? "1" : "0";
+
+        /// <summary>
+        /// Dump IOP RAM as disassembly from <paramref name="startAddr"/> to
+        /// <paramref name="endAddr"/> (exclusive).  Used to reveal the full structure of
+        /// IOP boot-zone loops.
+        /// </summary>
+        private static void DumpIopRamRegion(IopMemoryBus bus, uint startAddr, uint endAddr)
+        {
+            Console.WriteLine($"  IOP RAM disasm 0x{startAddr:x8}–0x{endAddr:x8}:");
+            for (uint addr = startAddr; addr < endAddr; addr += 4)
+            {
+                try
+                {
+                    uint iword = bus.ReadWord(addr);
+                    string dis = MipsDisassembler.Disassemble(iword, addr);
+                    Console.WriteLine($"    0x{addr:x8}: 0x{iword:x8}  {dis}");
+                }
+                catch
+                {
+                    Console.WriteLine($"    0x{addr:x8}: ??");
+                }
+            }
+        }
 
         /// <summary>
         /// Safely disassemble one IOP instruction from its virtual PC.
