@@ -563,7 +563,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         ///     addu   addrReg,  baseReg,  offReg      ; address = base + offset
         ///     addiu  cntReg,   cntReg,  -1           ; count--
         ///     sb     fillReg,  0(addrReg)            ; mem[address] = fill_byte
-        ///     slt    cmpReg,   thrReg,   cntReg      ; cmpReg = (threshold &lt; count)
+        ///     slt    cmpReg,   thrReg,   cntReg      ; cmpReg = (threshold < count)
         ///     [nop / other non-branch]               ; optional padding
         ///     bne    cmpReg,   $zero,   loop         ; branch back while cmpReg != 0
         ///     addiu  offReg,   offReg,   1           ; delay slot: offset++

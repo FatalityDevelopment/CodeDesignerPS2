@@ -1655,8 +1655,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void ICache_ProtectsExecutingCode_FromStoreOverwrite()
         {
             // Place an ADDIU $t0, $zero, 42 at KSEG0 address 0x80001000.
-            //   encoding: opcode=9, rs=0, rt=8, imm=42 → 0x24080042 (big-endian)
-            //   in little-endian memory: bytes [0x42, 0x00, 0x08, 0x24]
+            //   encoding: opcode=9, rs=0, rt=8, imm=42 → 0x2408002A
             uint addiu42 = (9u << 26) | (0u << 21) | (8u << 16) | 42u; // 0x2408002A
 
             var emu = new PS2Emulator();
@@ -1812,11 +1811,24 @@ namespace CodeDesigner.Mips64LE.TestProject
                 "PC should advance to instruction after BNE+delay-slot");
 
             // Main RAM must be filled with 0xAB.
-            // Check a sample: physical addresses 0x000001 through 0x0001FF.
-            bool allFilled = true;
-            for (int i = 1; i <= 255 && allFilled; i++)
-                allFilled = emu.Bus.Ram[i] == 0xABu;
-            Assert.IsTrue(allFilled, "RAM bytes should all be 0xAB after fast-forward fill");
+            // Verify a representative spread: first 256 bytes, the midpoint at
+            // offset ~100 000, and the last few bytes written near offset 200 001.
+            // (The fill covers all 32 MB so any physical address should be 0xAB.)
+            for (int i = 1; i <= 255; i++)
+                Assert.AreEqual(0xABu, (uint)emu.Bus.Ram[i],
+                    $"RAM[{i}] should be 0xAB after fast-forward fill");
+
+            // Check near the midpoint of the fill range (physical byte ~100 001).
+            Assert.AreEqual(0xABu, (uint)emu.Bus.Ram[100_001],
+                "RAM[100001] should be 0xAB after fast-forward fill");
+
+            // Check near the end of the 200 000-iteration fill (last physical byte written = 200 000).
+            Assert.AreEqual(0xABu, (uint)emu.Bus.Ram[200_000],
+                "RAM[200000] (last byte written) should be 0xAB after fast-forward fill");
+
+            // Byte just beyond the fill range must be untouched (still 0).
+            Assert.AreEqual(0u, (uint)emu.Bus.Ram[200_001],
+                "RAM[200001] (one past end of fill) should remain 0");
         }
     }
 }
