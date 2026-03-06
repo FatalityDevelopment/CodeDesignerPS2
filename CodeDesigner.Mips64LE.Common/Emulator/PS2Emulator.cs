@@ -730,7 +730,35 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             long remaining = (long)cntVal - (long)thrVal;
             if (remaining <= BulkFillMinIterations) return false;
 
-            // ── Step 5: perform the memory fill ─────────────────────────────
+            // ── Step 5: pre-populate i-cache for post-loop instructions ────────
+            // The fast-forward bypasses Step()'s normal branch/delay-slot path,
+            // so the delay slot at pc32+4 and the post-loop instructions at pc32+8
+            // are never fetched through FetchWord() during the loop.  Without
+            // explicit pre-fetching they would be loaded AFTER the fill has
+            // overwritten them — yielding garbage 0x20202020 instructions.
+            //
+            // Solution (mirrors real hardware): fetch the delay-slot and
+            // post-loop instruction lines through FetchWord() NOW, before the
+            // RAM is modified.  A 64-byte cache line fetch loads all 16
+            // surrounding words at once, typically covering a full function
+            // epilogue (jr $ra + nop + stack restore).
+            //
+            // We pre-fetch 4 consecutive cache lines starting at the delay slot
+            // (256 bytes of post-loop code) — enough for any BIOS epilogue.
+            if ((pc32 & 0xE0000000u) == 0x80000000u) // only for KSEG0 (cached)
+            {
+                for (uint prefetchOff = 4u; prefetchOff < 4u + 256u; prefetchOff += 64u)
+                {
+                    // The 64-byte line fetch is triggered by any word within that line.
+                    // Using the first word of each 64-byte block avoids fetching the
+                    // same line twice (line start = (pc32 + prefetchOff) & ~0x3F).
+                    uint prefetchPc = (pc32 + prefetchOff) & ~0x3Fu; // 64-byte aligned
+                    if ((prefetchPc & 0xE0000000u) == 0x80000000u)   // still KSEG0
+                        FetchWord(prefetchPc);
+                }
+            }
+
+            // ── Step 6: perform the memory fill ─────────────────────────────
             // The fill writes fill_byte to addresses:
             //   (baseVal + offVal + 1), (baseVal + offVal + 2), ..., (baseVal + offVal + remaining)
             // All translated via KSEG0/KSEG1 → physical RAM (32 MB, mirrored).
@@ -764,7 +792,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 }
             }
 
-            // ── Step 6: update CPU registers to post-loop state ──────────────
+            // ── Step 7: update CPU registers to post-loop state ──────────────
             // After the last iteration (BNE not taken, delay slot still fires):
             //   cntReg = thrVal       (decremented to threshold)
             //   offReg = offVal + remaining + 1  (+1 from the final not-taken delay slot)
