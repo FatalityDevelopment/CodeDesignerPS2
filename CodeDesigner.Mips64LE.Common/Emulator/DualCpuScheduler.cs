@@ -206,9 +206,58 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             int iopSteps = _iopAccumulator / EeToIopRatio;
             _iopAccumulator %= EeToIopRatio;
 
+            // Cache the last self-jump check so we only call ReadWord once per unique
+            // IOP PC — the vast majority of iterations stay at the same idle address.
+            uint  cachedPc        = uint.MaxValue;
+            bool  cachedSelfJump  = false;
+
             for (int i = 0; i < iopSteps; i++)
+            {
+                // Fast-forward IOP self-jump (idle) loops: when the IOP is executing
+                // a tight `j $PC` (jump-to-self) with no hardware interrupt pending,
+                // the step produces no observable state change.  Skip it to avoid
+                // millions of wasted decode/execute cycles during the IOP's idle wait.
+                // The IOP will resume normally the moment RaiseInterrupt() sets a
+                // pending bit in I_STAT (e.g. on VBlank) — IsInterruptPending will
+                // be true on the next call and we will fall through to IOP.Step().
+                uint currentPc = IOP.State.PC;
+                if (currentPc != cachedPc)
+                {
+                    cachedPc       = currentPc;
+                    cachedSelfJump = IsIopSelfJump(currentPc);
+                }
+                if (!IOP.Bus.IsInterruptPending && cachedSelfJump)
+                    continue;
                 IOP.Step();
+            }
             TotalIopSteps += (ulong)iopSteps;
+        }
+
+        /// <summary>
+        /// Returns <c>true</c> if the IOP instruction at <paramref name="pc"/> is
+        /// an unconditional jump back to itself (<c>j $PC</c>).
+        /// Used by <see cref="RunSlice"/> to fast-forward IOP idle loops.
+        /// </summary>
+        private bool IsIopSelfJump(uint pc)
+        {
+            uint word;
+            try
+            {
+                word = IOP.Bus.ReadWord(pc);
+            }
+            catch (Exception)
+            {
+                // Any bus error (unmapped address, etc.) means this is not a safe
+                // self-jump candidate; fall back to normal execution.
+                return false;
+            }
+
+            // J opcode = 2 (bits 31:26)
+            if ((word >> 26) != 2u) return false;
+
+            // Effective target = PC[31:28] | instr[25:0] << 2
+            uint target = (pc & 0xF0000000u) | ((word & 0x03FFFFFFu) << 2);
+            return target == pc;
         }
 
         /// <summary>

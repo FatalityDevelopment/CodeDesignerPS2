@@ -484,9 +484,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             catch (TlbMissException tlbFetch)
             {
                 // Instruction-fetch TLB miss → ExcCode=TlbLoad (2).
-                Cpu.COP0.WriteRegister32(8, tlbFetch.VirtualAddress);  // BadVAddr
+                // Update BadVAddr, EntryHi.VPN2, and Context.BadVPN2 to let the
+                // TLB refill handler at 0x80000000 find the correct page-table entry.
+                // Reference: PCSX2 R5900OpcodeImpl.cpp cpuException.
+                uint tlbFetchVA = tlbFetch.VirtualAddress;
+                Cpu.COP0.WriteRegister32(8, tlbFetchVA);  // BadVAddr
                 Cpu.COP0.WriteRegister64(10,
-                    (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbFetch.VirtualAddress & 0xFFFFE000u)));
+                    (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbFetchVA & 0xFFFFE000u)));
+                // Context: preserve PTEBase [31:23], update BadVPN2 [22:4]
+                Cpu.COP0.WriteRegister32(4,
+                    (Cpu.COP0.ReadRegister32(4) & 0xFF800000u) | ((tlbFetchVA >> 9) & 0x007FFFF0u));
                 COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.TlbLoad, Cpu.PC, inDelaySlot: false);
                 InstructionCount++;
                 return;
@@ -539,12 +546,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             }
             catch (TlbMissException tlbEx)
             {
-                // Data load/store TLB miss.  Update BadVAddr and EntryHi.VPN2, then
-                // dispatch the appropriate COP0 exception.
+                // Data load/store TLB miss.  Update BadVAddr, EntryHi.VPN2, and
+                // Context.BadVPN2, then dispatch the appropriate COP0 exception.
+                // Reference: PCSX2 R5900OpcodeImpl.cpp cpuException.
                 ExceptionCode tlbCode = tlbEx.IsStore ? ExceptionCode.TlbStore : ExceptionCode.TlbLoad;
-                Cpu.COP0.WriteRegister32(8, tlbEx.VirtualAddress);  // BadVAddr
+                uint tlbExVA = tlbEx.VirtualAddress;
+                Cpu.COP0.WriteRegister32(8, tlbExVA);  // BadVAddr
                 Cpu.COP0.WriteRegister64(10,
-                    (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbEx.VirtualAddress & 0xFFFFE000u)));
+                    (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbExVA & 0xFFFFE000u)));
+                // Context: preserve PTEBase [31:23], update BadVPN2 [22:4]
+                Cpu.COP0.WriteRegister32(4,
+                    (Cpu.COP0.ReadRegister32(4) & 0xFF800000u) | ((tlbExVA >> 9) & 0x007FFFF0u));
                 COP0ExceptionDispatcher.Dispatch(Cpu, tlbCode, pcBefore, inDelaySlot: false);
                 InstructionCount++;
                 return;
@@ -586,9 +598,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 }
                 catch (TlbMissException tlbDs)
                 {
-                    Cpu.COP0.WriteRegister32(8, tlbDs.VirtualAddress);
+                    uint tlbDsVA = tlbDs.VirtualAddress;
+                    Cpu.COP0.WriteRegister32(8, tlbDsVA);
                     Cpu.COP0.WriteRegister64(10,
-                        (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbDs.VirtualAddress & 0xFFFFE000u)));
+                        (Cpu.COP0.ReadRegister64(10) & 0xFFu) | ((ulong)(tlbDsVA & 0xFFFFE000u)));
+                    // Context: preserve PTEBase [31:23], update BadVPN2 [22:4]
+                    Cpu.COP0.WriteRegister32(4,
+                        (Cpu.COP0.ReadRegister32(4) & 0xFF800000u) | ((tlbDsVA >> 9) & 0x007FFFF0u));
                     COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.TlbLoad, pcBefore + 4, inDelaySlot: true);
                     InstructionCount++;
                     return;
