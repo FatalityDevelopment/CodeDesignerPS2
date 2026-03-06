@@ -114,7 +114,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         // ── TLB miss state (replaces TlbMissException throw/catch) ───────────────
         // TryFetchWord sets _pendingTlbMissVA instead of throwing, allowing Step()
-        // to handle TLB misses without the overhead of C# exception creation.
+        // to handle instruction-fetch TLB misses (both the primary PC fetch and the
+        // delay-slot fetch for taken branches) without C# exception creation overhead.
         private uint _pendingTlbMissVA;
 
         /// <summary>
@@ -372,9 +373,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         }
 
         /// <summary>
-        /// Convenience wrapper used by fast-forward helpers that are guaranteed to
-        /// execute in KSEG0/KSEG1 (no TLB miss possible).  Returns 0 on a miss
-        /// (which should never occur in these contexts).
+        /// Convenience wrapper around <see cref="TryFetchWord"/> used exclusively by
+        /// the fast-forward helpers (<see cref="TryFastForwardByteFill"/>,
+        /// <see cref="TryFastForwardBnelByteFill"/>, and the i-cache pre-fetch in
+        /// <see cref="ICachePreFetchLine"/>).  All of these helpers guard themselves
+        /// with an <c>(pc32 &amp; 0xC0000000) == 0x80000000</c> check, ensuring that only
+        /// KSEG0/KSEG1 addresses are ever passed here.  Neither KSEG region uses the
+        /// software TLB, so a TLB miss is structurally impossible and the bool return
+        /// value of <see cref="TryFetchWord"/> is safely discarded.
         /// </summary>
         private uint FetchWord(uint virtualPc)
         {
