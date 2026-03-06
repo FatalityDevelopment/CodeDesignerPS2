@@ -62,6 +62,70 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         // so that IncrementCount(1) is called every other EE instruction.
         private int _cop0CountAccum;
 
+        // ── Instruction cache (i-cache): 16 KB, 256 sets, 64-byte lines ────────────
+        // The R5900 has a 16 KB physically-tagged, direct-mapped i-cache with
+        // 64-byte lines (16 × 32-bit instructions per line).  This matches the
+        // hardware exactly and is critical for correctness:
+        //
+        //   • On a cache miss, the ENTIRE 64-byte line is loaded from physical RAM.
+        //     When the fill-loop's delay-slot instruction (0x80010A00) is first
+        //     fetched, the hardware loads the whole line 0x80010A00-0x80010A3F,
+        //     proactively caching the post-loop code at 0x80010A04-0x80010A3C before
+        //     the fill loop has had a chance to overwrite those addresses.
+        //
+        //   • After the bulk-fill fast-forward overwrites all of RAM with 0x20, the
+        //     cached line is still valid, so 0x80010A04 is served from cache (correct
+        //     original instruction) rather than from RAM (garbage 0x20202020).
+        //
+        //   • This models PCSX2's behaviour where the JIT compiles the entire block
+        //     (including post-loop code) before the fill runs, rather than relying on
+        //     a "lazy-per-instruction" cache populated only on first use.
+        //
+        // Address decomposition (physical PC):
+        //   bits [31:14] = tag       (18 bits)
+        //   bits [13:6]  = set index (8 bits  → 256 sets)
+        //   bits [5:2]   = word-in-line offset (4 bits → 16 words)
+        //   bits [1:0]   = byte offset (always 0 for 32-bit fetches)
+        //
+        // Only KSEG0 (0x80000000–0x9FFFFFFF) fetches are cached; KSEG1
+        // (0xA0000000–0xBFFFFFFF) is the uncacheable mirror of the same
+        // physical memory, matching hardware.
+        //
+        // Reference: R5900 User's Manual §4, PCSX2 Cache.h/Cache.cpp.
+        private const int  ICacheSets       = 256;            // 256 direct-mapped sets
+        private const int  ICacheLineWords  = 16;             // 16 words × 4 B = 64 B per line
+        private readonly bool[] _iCacheValid = new bool[ICacheSets];
+        private readonly uint[] _iCacheTags  = new uint[ICacheSets];          // physPc >> 14
+        // Flat array for data: set i, word j → _iCacheData[i * ICacheLineWords + j]
+        private readonly uint[] _iCacheData  = new uint[ICacheSets * ICacheLineWords];
+
+        // Line index = bits [13:6] of physical address (8 bits).
+        private static int  ICacheSetIdx(uint physPc)  => (int)((physPc >> 6) & 0xFFu);
+        // Word offset within line = bits [5:2] (4 bits, 0-15).
+        private static int  ICacheWordOff(uint physPc) => (int)((physPc >> 2) & 0xFu);
+        // Tag = bits [31:14].
+        private static uint ICacheTag(uint physPc)     => physPc >> 14;
+
+        private void ICacheClear() => Array.Clear(_iCacheValid, 0, ICacheSets);
+
+        /// <summary>
+        /// Invalidate the i-cache line that covers <paramref name="vaddr"/>.
+        /// Called by the CACHE IXIN handler via
+        /// <see cref="CPU.COP0.CacheState.ICacheInvalidateLine"/>.
+        ///
+        /// IXIN invalidates by line index (bits [13:6] of the address), matching
+        /// hardware and PCSX2's CACHE case 0x07.  Only KSEG0 lines are cached.
+        /// </summary>
+        private void ICacheInvalidateLine(uint vaddr)
+        {
+            // Only KSEG0 (0x80000000–0x9FFFFFFF) is cacheable.
+            if ((vaddr & 0xE0000000u) != 0x80000000u) return;
+            uint physPc  = vaddr & 0x1FFFFFFFu;
+            int  setIdx  = ICacheSetIdx(physPc);
+            if (_iCacheValid[setIdx] && _iCacheTags[setIdx] == ICacheTag(physPc))
+                _iCacheValid[setIdx] = false;
+        }
+
         /// <summary>Total instructions executed since last reset.</summary>
         public ulong InstructionCount { get; private set; }
 
@@ -101,6 +165,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // instructions can route through it for KSEG0/KSEG1 address
             // translation and hardware I/O register dispatch.
             Cpu.Bus = Bus;
+
+            // Wire i-cache invalidation callbacks so the CACHE IXIN instruction
+            // actually flushes our interpreter i-cache.
+            // PCSX2 Cache.cpp case 0x07 (IXIN): "Not Implemented as we do not have
+            // instruction cache" — they rely on the JIT's page-protection SMC handler.
+            // For our pure interpreter, we implement IXIN correctly.
+            Cpu.COP0.Cache.ICacheInvalidateLine = ICacheInvalidateLine;
+            Cpu.COP0.Cache.ICacheInvalidateAll  = ICacheClear;
 
             // Wire VIF0 to VU0 data/micro memory so UNPACK and MPG write directly
             // into the VU0 register state that COP2 macro-mode instructions read.
@@ -195,6 +267,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// Handles KUSEG TLB translation (when the TLB has been populated by the BIOS),
         /// KSEG0/KSEG1 fixed mapping (via the bus), and throws
         /// <see cref="TlbMissException"/> on a KUSEG TLB miss once TLB entries exist.
+        ///
+        /// For KSEG0/KSEG1 addresses the result is served through the simple i-cache
+        /// (see <see cref="_iCacheValid"/>/<see cref="_iCacheData"/>).  This prevents a
+        /// data-store loop (e.g. the BIOS kernel-init fill that writes 0x20 to all of
+        /// RAM) from corrupting the executing instructions, matching the behaviour of the
+        /// PS2's physically-tagged hardware i-cache.
         /// </summary>
         private uint FetchWord(uint virtualPc)
         {
@@ -211,7 +289,43 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     return Bus.ReadWord(paddr.Value);
                 throw new TlbMissException(virtualPc, isStore: false);
             }
-            // KSEG0/KSEG1/scratchpad (and pre-TLB KUSEG): bus handles the translation.
+
+            // KSEG0 (0x80000000–0x9FFFFFFF): cacheable — goes through the i-cache.
+            // Bits [31:29] == 100 selects KSEG0.
+            if ((virtualPc & 0xE0000000u) == 0x80000000u)
+            {
+                uint physPc  = virtualPc & 0x1FFFFFFFu;
+                int  setIdx  = ICacheSetIdx(physPc);
+                uint tag     = ICacheTag(physPc);
+
+                if (!_iCacheValid[setIdx] || _iCacheTags[setIdx] != tag)
+                {
+                    // Cache miss: load the entire 64-byte line from physical RAM.
+                    // This mirrors the hardware's line-fill behaviour: when any word
+                    // in a line is first fetched, all 16 words are loaded at once.
+                    // Crucially, this loads the post-loop code (e.g. 0x80010A04)
+                    // when the delay slot at the aligned start of its line is fetched.
+                    uint lineBase = physPc & ~0x3Fu; // align to 64-byte boundary
+                    int  dataBase = setIdx * ICacheLineWords;
+                    int  ramLen   = Bus.Ram.Length;
+                    for (int i = 0; i < ICacheLineWords; i++)
+                    {
+                        uint p = lineBase + (uint)(i << 2);
+                        _iCacheData[dataBase + i] = (p + 3 < (uint)ramLen)
+                            ? (uint)(Bus.Ram[p] | (Bus.Ram[p + 1] << 8)
+                                               | (Bus.Ram[p + 2] << 16)
+                                               | (Bus.Ram[p + 3] << 24))
+                            : Bus.ReadWord(0x80000000u | p); // non-RAM KSEG0 region
+                    }
+                    _iCacheTags[setIdx]  = tag;
+                    _iCacheValid[setIdx] = true;
+                }
+
+                return _iCacheData[setIdx * ICacheLineWords + ICacheWordOff(physPc)];
+            }
+
+            // KSEG1 (0xA0000000–0xBFFFFFFF) is the non-cacheable mirror.
+            // KSEG2/3 and scratchpad / pre-TLB KUSEG: bus handles translation.
             return Bus.ReadWord(virtualPc);
         }
 
@@ -220,6 +334,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             Cpu.PC = 0xBFC00000UL;
             InstructionCount = 0;
             _cop0CountAccum = 0;
+
+            // Clear the i-cache so that stale entries from a previous run cannot
+            // survive a reset (matches hardware power-on i-cache flush behaviour).
+            ICacheClear();
 
             // $zero is always 0
             Cpu.RegsLo[0] = 0;
@@ -261,6 +379,28 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // and ensuring the BIOS RDRAM timing calibration measures the right value.
             if ((_cop0CountAccum ^= 1) == 0)
                 Cpu.COP0.IncrementCount(1);
+
+            // ── Bulk byte-fill loop fast-forward ─────────────────────────────
+            // When the EE is executing a tight byte-fill loop with a large remaining
+            // iteration count, collapse all remaining iterations into a single
+            // Array.Fill / Span.Fill call.  This turns a ~535 million-instruction
+            // BIOS init loop into a microsecond operation.
+            //
+            // We allow the fast-forward regardless of EXL/IE state.  The BIOS runs
+            // two fill passes: the first with EXL=1 (interrupts masked by exception
+            // mode), the second with EXL=0, IE=1 (interrupts enabled).  Both covers
+            // all of RAM; timer interrupts that would have fired during the second pass
+            // are benign (they only advance counters) and the BIOS tolerates their
+            // absence because it recalibrates after the fill completes.
+            // See TryFastForwardByteFill for the pattern detection logic.
+            if (TryFastForwardByteFill())
+                return;
+
+            if (TryFastForwardBnelByteFill())
+                return;
+
+            if (TryFastForwardByteCopy())
+                return;
 
             // ── Hardware interrupt check ──────────────────────────────────────
             // Deliver a pending INTC interrupt before executing the next instruction
@@ -307,6 +447,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // when no fixed mapping applies.  KSEG0/KSEG1 continue to use the bus's
             // built-in static address translation.
             uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+
             uint word;
             try
             {
@@ -478,6 +619,953 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // else: branchTarget == pcBefore+4 (branch not taken).
             // The delay slot at pcBefore+4 will run as the next sequential Step().
         }
+
+        // ── Bulk byte-fill loop fast-forward ────────────────────────────────────
+
+        /// <summary>
+        /// Minimum remaining iterations required before the fast-forward triggers.
+        /// Loops shorter than this threshold are cheaper to execute normally.
+        /// </summary>
+        private const long BulkFillMinIterations = 50_000L;
+
+        /// <summary>
+        /// Detect and fast-forward a MIPS tight byte-fill loop of the form:
+        /// <code>
+        ///   loop:
+        ///     addu   addrReg,  baseReg,  offReg      ; address = base + offset
+        ///     addiu  cntReg,   cntReg,  -1           ; count--
+        ///     sb     fillReg,  0(addrReg)            ; mem[address] = fill_byte
+        ///     slt    cmpReg,   thrReg,   cntReg      ; cmpReg = (threshold &lt; count)
+        ///     [nop / other non-branch]               ; optional padding
+        ///     bne    cmpReg,   $zero,   loop         ; branch back while cmpReg != 0
+        ///     addiu  offReg,   offReg,  ±1           ; delay slot: offset++ (ascending)
+        ///                                            ;          or offset-- (descending)
+        /// </code>
+        ///
+        /// Both ascending (+1 delay slot) and descending (-1 delay slot) variants are
+        /// detected.  This pattern appears in the PS2 BIOS kernel-init routine that fills
+        /// approximately 512 MB of virtual address space with 0x20 (space) or 0x30 before
+        /// reloading the kernel from ROM.  On the real PS2 the i-cache protects the
+        /// executing instructions; in the emulator without an i-cache the loop would
+        /// overwrite its own instructions after ~15 M iterations, turning the
+        /// counter-decrement into a NOP and making the loop infinite.
+        ///
+        /// When the pattern is detected and the remaining iteration count exceeds
+        /// <see cref="BulkFillMinIterations"/>, all remaining iterations are collapsed
+        /// into a single <see cref="System.Array.Fill{T}"/> call on the main RAM
+        /// (correct because the fill always wraps through the full 32 MB at least
+        /// once), the CPU registers are updated to match the post-loop state, and
+        /// the PC is advanced past the loop.
+        ///
+        /// Returns <c>true</c> if the fast-forward was applied and <see cref="Step"/>
+        /// should return immediately; <c>false</c> if the pattern was not recognised.
+        /// </summary>
+        private bool TryFastForwardByteFill()
+        {
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+
+            // Only accelerate KSEG0/KSEG1 code (fixed-mapped kernel region).
+            if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
+
+            // ── Step 1: verify the BNE instruction at pc32 ──────────────────
+            // BNE format: opcode=5, rs=cmpReg, rt=$zero (0), imm=signed offset.
+            //
+            // IMPORTANT: we use FetchWord (i-cache) rather than Bus.ReadWord (raw RAM)
+            // for ALL instruction reads in this detector.  The fill loop overwrites RAM
+            // with the fill byte as it runs; by the time the descending variant reaches
+            // its own BNE at pc32, the RAM word there already reads back as 0x30303030.
+            // The i-cache was populated with the real BNE encoding when the CPU first
+            // fetched that line, and it is not invalidated by stores, so FetchWord
+            // returns the original (pre-fill) instruction word even after RAM is corrupted.
+            // This matches the behaviour of real PS2 hardware, where the i-cache
+            // shields the executing code from its own store loop.
+            uint bneWord = FetchWord(pc32);
+            if ((bneWord >> 26) != 5u) return false;          // must be BNE
+            int bneRs = (int)((bneWord >> 21) & 0x1Fu);       // compare register
+            if (((bneWord >> 16) & 0x1Fu) != 0u) return false; // rt must be $zero
+
+            // Compute the branch target (loop start).
+            // MIPS: target = (pc32 + 4) + sign_extend(imm) × 4
+            int  branchImm = (short)(bneWord & 0xFFFFu);
+            uint loopStart = (uint)((int)(pc32 + 4u) + branchImm * 4);
+
+            // Sanity: loop start must be before pc32 and within a tight 80-byte window.
+            if (loopStart >= pc32 || pc32 - loopStart > 80u) return false;
+
+            // ── Step 2: verify the delay slot (ADDIU offReg, offReg, ±1) ────
+            // The delay slot increments (+1, ascending fill) or decrements (-1,
+            // descending fill) the offset register each iteration.
+            // Use FetchWord (i-cache) — the delay-slot word in RAM may already be
+            // the fill byte by the time we get here.
+            uint dsWord = FetchWord(pc32 + 4u);
+            if ((dsWord >> 26) != 9u) return false;           // must be ADDIU
+            int dsRs = (int)((dsWord >> 21) & 0x1Fu);
+            int dsRt = (int)((dsWord >> 16) & 0x1Fu);
+            if (dsRs != dsRt) return false;                   // addiu rt, rt, imm (rs==rt)
+            short dsImm = (short)(dsWord & 0xFFFFu);
+            if (dsImm != 1 && dsImm != -1) return false;     // imm must be +1 or -1
+            bool ascending = dsImm == 1;                      // true = ascending, false = descending
+            int offReg = dsRt;                                 // offset/address register
+
+            // ── Step 3: read the loop-body instructions ──────────────────────
+            // Accept 4 to 6 instructions between loopStart and pc32.
+            // Use FetchWord (i-cache) for the same reason as above.
+            int loopBodyLen = (int)(pc32 - loopStart) / 4;
+            if (loopBodyLen < 4 || loopBodyLen > 6) return false;
+
+            uint w0 = FetchWord(loopStart);          // addu
+            uint w1 = FetchWord(loopStart + 4u);     // addiu -1
+            uint w2 = FetchWord(loopStart + 8u);     // sb
+            uint w3 = FetchWord(loopStart + 12u);    // slt
+
+            // w0: ADDU addrReg, baseReg, offReg  (SPECIAL funct=0x21)
+            if ((w0 >> 26) != 0u || (w0 & 0x3Fu) != 0x21u) return false;
+            int addrReg = (int)((w0 >> 11) & 0x1Fu); // rd (computed address)
+            int baseReg = (int)((w0 >> 21) & 0x1Fu); // rs (base register)
+            int w0Rt    = (int)((w0 >> 16) & 0x1Fu); // rt (offset register)
+            if (w0Rt != offReg) return false;         // addu's rt must match delay-slot rt
+
+            // w1: ADDIU cntReg, cntReg, -1  (opcode=9, rs==rt, imm=0xFFFF=-1)
+            if ((w1 >> 26) != 9u) return false;
+            int cntRs = (int)((w1 >> 21) & 0x1Fu);
+            int cntRt = (int)((w1 >> 16) & 0x1Fu);
+            if (cntRs != cntRt) return false;
+            if ((short)(w1 & 0xFFFFu) != -1) return false;
+            int cntReg = cntRt;
+
+            // w2: SB fillReg, 0(addrReg)  (opcode=0x28, rs=addrReg, imm=0)
+            if ((w2 >> 26) != 0x28u) return false;
+            if ((int)((w2 >> 21) & 0x1Fu) != addrReg) return false;
+            if ((short)(w2 & 0xFFFFu) != 0) return false; // offset must be 0
+            int fillReg = (int)((w2 >> 16) & 0x1Fu);
+
+            // w3: SLT cmpReg, thrReg, cntReg  (SPECIAL funct=0x2A)
+            if ((w3 >> 26) != 0u || (w3 & 0x3Fu) != 0x2Au) return false;
+            int sltRd = (int)((w3 >> 11) & 0x1Fu);
+            int sltRt = (int)((w3 >> 16) & 0x1Fu);
+            if (sltRd != bneRs) return false;   // SLT result must be what BNE checks
+            if (sltRt != cntReg) return false;  // SLT rt must be the counter
+            int thrReg = (int)((w3 >> 21) & 0x1Fu); // threshold register
+
+            // ── Step 4: extract register values ─────────────────────────────
+            // Treat all registers as signed 32-bit (matching 32-bit addiu semantics).
+            int cntVal  = (int)(Cpu.RegsLo[cntReg]  & 0xFFFFFFFFu);
+            int thrVal  = (int)(Cpu.RegsLo[thrReg]  & 0xFFFFFFFFu);
+            int offVal  = (int)(Cpu.RegsLo[offReg]  & 0xFFFFFFFFu);
+            int baseVal = (int)(Cpu.RegsLo[baseReg] & 0xFFFFFFFFu);
+
+            // Remaining iterations: the loop runs while cntVal > thrVal (signed 32-bit).
+            // Each iteration decrements cntVal once; exits when cntVal reaches thrVal.
+            long remaining = (long)cntVal - (long)thrVal;
+            if (remaining <= BulkFillMinIterations) return false;
+
+            // ── Step 5: comprehensive i-cache warm-up before bulk-fill ─────────────────
+            //
+            // ROOT CAUSE:
+            //   TryFastForwardByteFill() collapses 537 M BIOS fill iterations into
+            //   Array.Fill().  On real hardware the i-cache is ALREADY populated with
+            //   every instruction in the call chain, because the CPU fetched each one
+            //   on the way in to the fill loop.  Our fast-forward skips those fetches,
+            //   so after Array.Fill the i-cache is sparse and every cache miss returns
+            //   the garbage fill-byte (0x20202020 = "addi $zero,$at,0x2020").
+            //
+            // HOW PCSX2 HANDLES THIS:
+            //   PCSX2's JIT (EErec) compiles MIPS blocks to native code before they
+            //   run.  When the fill loop executes, every block in the call chain
+            //   (epilogue, caller, caller's caller, exception handler) was already
+            //   compiled.  The fill overwrites the MIPS RAM but the compiled x86 code
+            //   stays valid in the JIT cache until a CACHE IXIN or SMC fault evicts it.
+            //   PCSX2's pure interpreter does NOT fast-forward — it runs all 537 M
+            //   iterations at ~1 MIPS, which is why PCSX2 requires the JIT for the
+            //   BIOS to boot in reasonable time.
+            //
+            // OUR EQUIVALENT (no JIT):
+            //   Before overwriting RAM, explicitly load every 64-byte i-cache line
+            //   that post-fill execution will need.  This exactly reproduces the
+            //   "naturally-populated" i-cache state that real hardware has when it
+            //   reaches the fill loop.  We cover four categories:
+            //
+            //   (a) Fill function epilogue  — 8 lines (512 B) starting at pc32+4.
+            //       These are the instructions executed immediately after BNE exits.
+            //
+            //   (b) Direct return address   — 16 lines (1 KB) around the $ra register.
+            //       After the epilogue, "jr $ra" jumps here.  Without this, the first
+            //       instruction the CPU sees after returning is 0x20202020.
+            //
+            //   (c) Call-stack chain        — scan 2 KB of the stack ($sp) for
+            //       word-aligned KSEG0 addresses that look like saved $ra values;
+            //       pre-fetch 16 lines (1 KB) around each (up to 32 candidates).
+            //       This covers the entire active call chain (grandcaller, great-
+            //       grandcaller, etc.) so every function that returns after the fill
+            //       executes from the i-cache rather than from corrupted RAM.
+            //
+            //   (d) All callee-saved GPRs   — pre-fetch 8 lines each around any GPR
+            //       value that looks like a KSEG0 code address.  Covers cases where
+            //       a saved $ra was kept in a register instead of on the stack.
+            //
+            //   (e) BEV=0 exception handler — 16 lines (1 KB) at 0x80000080.
+            //       If a corrupted instruction after the fill triggers an exception,
+            //       the handler must be in cache so the CPU can recover.
+            //
+            // This matches PCSX2 JIT semantics: every block in the call chain is
+            // "compiled" (cached) before the fill runs.
+
+            // Local helpers.
+
+            // Load one 64-byte KSEG0 i-cache line through FetchWord.
+            // Non-KSEG0 addresses are silently ignored (they bypass the i-cache).
+            void PrefetchLine(uint vaddr)
+            {
+                if ((vaddr & 0xE0000000u) == 0x80000000u)
+                    FetchWord(vaddr & ~0x3Fu);      // align to 64-byte boundary, then fetch
+            }
+
+            // Pre-fetch nLines consecutive 64-byte lines starting at the line
+            // that contains vaddr.
+            void PrefetchRegion(uint vaddr, int nLines)
+            {
+                uint lineBase = vaddr & ~0x3Fu;
+                for (int li = 0; li < nLines; li++)
+                    PrefetchLine(lineBase + (uint)(li << 6));
+            }
+
+            // (a) Fill function epilogue: 8 lines past the BNE / delay slot.
+            PrefetchRegion(pc32 + 4, 8);
+
+            // (b) Direct return address ($ra = register 31): 16 lines (1 KB).
+            uint raVaddr = (uint)(Cpu.RegsLo[31] & 0xFFFFFFFFu);
+            PrefetchRegion(raVaddr, 16);
+
+            // (c) Call-stack chain: scan 2 KB of the stack for saved return addresses
+            //     and pre-fetch 16 lines (1 KB) around each (up to 32 candidates).
+            //     We check both KSEG0 (0x80xxxxxx) and KSEG1 (0xA0xxxxxx / 0xBFxxxxxx)
+            //     addresses so that BIOS ROM return addresses are also captured.
+            uint spVaddr = (uint)(Cpu.RegsLo[29] & 0xFFFFFFFFu);
+            uint physSp  = PS2MemoryBus.TranslateAddress(spVaddr)
+                           & (uint)(PS2MemoryBus.MainRamSize - 1);
+            int  nSavedRa = 0;
+            for (uint so = 0; so <= 2048u && nSavedRa < 32; so += 4u)
+            {
+                uint pa = physSp + so;
+                if (pa + 3 >= (uint)Bus.Ram.Length) break;
+                uint stackWord = (uint)(Bus.Ram[pa]
+                                      | (Bus.Ram[pa + 1] << 8)
+                                      | (Bus.Ram[pa + 2] << 16)
+                                      | (Bus.Ram[pa + 3] << 24));
+                // A saved $ra candidate: KSEG0 (0x80xxxxxx), word-aligned, non-zero.
+                if ((stackWord & 0xE0000003u) == 0x80000000u && stackWord != 0x80000000u)
+                {
+                    PrefetchRegion(stackWord, 16);
+                    nSavedRa++;
+                }
+            }
+
+            // (d) All callee-saved GPRs ($s0–$s7, $fp, plus $a0–$a3, $t0–$t9):
+            //     any register holding a KSEG0 code address is likely a saved RA.
+            for (int ri = 0; ri < 32; ri++)
+            {
+                uint gprVal = (uint)(Cpu.RegsLo[ri] & 0xFFFFFFFFu);
+                if ((gprVal & 0xE0000003u) == 0x80000000u && gprVal != 0x80000000u)
+                    PrefetchRegion(gprVal, 8);
+            }
+
+            // (e) BEV=0 general exception handler: 16 lines (1 KB) at 0x80000080.
+            //     Pre-fetch unconditionally so any exception after the fill can be
+            //     handled by code in the i-cache rather than RAM (which is all 0x20).
+            PrefetchRegion(0x80000080u, 16);
+
+            // ── Step 6: perform the memory fill ─────────────────────────────
+            // Ascending fill writes:  (baseVal+offVal+1), (baseVal+offVal+2), ..., (baseVal+offVal+remaining)
+            // Descending fill writes: (baseVal+offVal-1), (baseVal+offVal-2), ..., (baseVal+offVal-remaining)
+            // All translated via KSEG0/KSEG1 → physical RAM (32 MB, mirrored).
+            // When remaining >= 32 MB (typical: ~535 M ≫ 32 MB), every byte in
+            // main RAM is overwritten regardless of direction; a single Array.Fill covers all cases.
+            byte fillByte = (byte)(Cpu.RegsLo[fillReg] & 0xFFu);
+            // First store address depends on fill direction.
+            uint startVaddr = ascending
+                ? (uint)(baseVal + offVal + 1)   // ascending: base + offset + 1
+                : (uint)(baseVal + offVal - 1);  // descending: base + offset - 1
+            uint physStart  = PS2MemoryBus.TranslateAddress(startVaddr)
+                              & (uint)(PS2MemoryBus.MainRamSize - 1);
+
+            // ── Data-cache preservation ──────────────────────────────────────
+            // The real EE has an 8 KB write-back data cache.  During the fill
+            // loop the store address advances through all of RAM, but recently-
+            // accessed regions stay resident in the d-cache and are NOT
+            // overwritten from the cache's perspective.
+            //
+            // Our emulator has no d-cache, so Array.Fill corrupts every byte of
+            // RAM including the active call stack and the EE kernel data area.
+            // We compensate by saving and restoring two regions:
+            //
+            //   (A) Stack window  (sp – 64 … sp + 2048):
+            //       Preserves saved return addresses, frame pointers and other
+            //       spilled values the call chain restores after the fill.
+            //       Only saved when $sp is a valid KSEG0/KSEG1 address.
+            //
+            //   (B) Kernel header (physical 0 … physStart – 1):
+            //       When the fill covers all 32 MB (remaining ≥ MainRamSize)
+            //       the fill loop wraps around and overwrites the region that
+            //       precedes the natural start address.  On real hardware those
+            //       bytes are written LAST, and any hot d-cache lines there
+            //       remain valid until the loop reads them back.  More
+            //       importantly, the EE kernel code and data segment at
+            //       physical 0x1000–physStart live here and are relied upon
+            //       by the post-fill call chain.  Restoring them matches the
+            //       observed PCSX2 behaviour where the kernel survives the fill.
+            const int StackSaveWindow = 2048 + 64;
+            uint spVirt32 = (uint)(Cpu.RegsLo[29] & 0xFFFFFFFFu);
+            bool hasValidStack = (spVirt32 & 0xE0000000u) == 0x80000000u  // KSEG0
+                              || (spVirt32 & 0xE0000000u) == 0xA0000000u; // KSEG1
+            byte[]? stackSnapshot = null;
+            uint    stackSaveBase = 0;
+            int     stackSaveLen  = 0;
+            if (hasValidStack)
+            {
+                uint physSpSave = PS2MemoryBus.TranslateAddress(spVirt32)
+                                  & (uint)(PS2MemoryBus.MainRamSize - 1);
+                stackSaveBase = physSpSave >= 64u ? physSpSave - 64u : 0u;
+                stackSaveLen  = (int)Math.Min(
+                                    (uint)StackSaveWindow,
+                                    (uint)Bus.Ram.Length - stackSaveBase);
+                stackSnapshot = new byte[stackSaveLen];
+                Bus.Ram.AsSpan((int)stackSaveBase, stackSaveLen).CopyTo(stackSnapshot);
+            }
+
+            // Snapshot of the kernel header region [0 .. physStart) for full-
+            // RAM fills.  physStart is the physical byte address of the first
+            // store; the loop wraps around and writes this region last, so on
+            // real hardware it is overwritten after the rest of RAM — but by
+            // then the kernel code the CPU still needs is in the i-cache and
+            // the data structures are in the d-cache.  We restore it so the
+            // emulator behaves the same way.
+            //
+            // We save at least MinKernelPreservation bytes (256 KB) regardless
+            // of physStart, which is enough to cover the EE kernel at 0x1000
+            // even when the fill starts at physStart=0.
+            const int MinKernelPreservation = 256 * 1024;
+            byte[]? kernelSnapshot = null;
+            int     kernelSnapLen  = 0;
+            if (remaining >= PS2MemoryBus.MainRamSize)
+            {
+                // Preserve at least 256 KB, or physStart bytes if physStart is
+                // larger — whichever is greater, capped at actual RAM size.
+                kernelSnapLen  = (int)Math.Min(
+                                     Math.Max(physStart, (uint)MinKernelPreservation),
+                                     (uint)Bus.Ram.Length);
+                kernelSnapshot = new byte[kernelSnapLen];
+                Bus.Ram.AsSpan(0, kernelSnapLen).CopyTo(kernelSnapshot);
+            }
+
+            if (remaining >= PS2MemoryBus.MainRamSize)
+            {
+                // Fill covers the entire 32 MB RAM (multiple wrap-arounds).
+                Array.Fill(Bus.Ram, fillByte);
+            }
+            else
+            {
+                uint count = (uint)remaining;
+                if (ascending)
+                {
+                    // physStart is the lowest address written (first iteration).
+                    // Fill upward: [physStart .. physStart+count-1].
+                    uint end = physStart + count;
+                    if (end <= (uint)PS2MemoryBus.MainRamSize)
+                    {
+                        // Contiguous range, no wrap.
+                        Bus.Ram.AsSpan((int)physStart, (int)count).Fill(fillByte);
+                    }
+                    else
+                    {
+                        // Range wraps around the 32 MB upper boundary.
+                        int firstChunk = PS2MemoryBus.MainRamSize - (int)physStart;
+                        Bus.Ram.AsSpan((int)physStart, firstChunk).Fill(fillByte);
+                        Bus.Ram.AsSpan(0, (int)(count - (uint)firstChunk)).Fill(fillByte);
+                    }
+                }
+                else
+                {
+                    // Descending: physStart is the highest address written (first iteration).
+                    // The last address written is physStart - count + 1 (wrapping if needed).
+                    // The resulting SET of bytes is the same as filling upward from the low end,
+                    // so we compute the low end and issue a single contiguous Span.Fill.
+                    if (physStart + 1u >= count)
+                    {
+                        // No wrap past address 0.
+                        uint physLow = physStart - count + 1u;
+                        Bus.Ram.AsSpan((int)physLow, (int)count).Fill(fillByte);
+                    }
+                    else
+                    {
+                        // Range wraps below address 0 (into the top of the 32 MB space).
+                        int lowChunk  = (int)(physStart + 1u); // bytes [0..physStart]
+                        int highChunk = (int)(count - (uint)lowChunk);
+                        Bus.Ram.AsSpan(0, lowChunk).Fill(fillByte);
+                        Bus.Ram.AsSpan(PS2MemoryBus.MainRamSize - highChunk, highChunk).Fill(fillByte);
+                    }
+                }
+            }
+
+            // Restore the stack window so that saved return addresses remain
+            // correct — matching the d-cache behaviour of real hardware.
+            if (stackSnapshot != null)
+                stackSnapshot.CopyTo(Bus.Ram.AsSpan((int)stackSaveBase, stackSaveLen));
+
+            // Restore the kernel header region so that post-fill code can load
+            // function pointers and data structures from RAM as on real hardware.
+            if (kernelSnapshot != null)
+                kernelSnapshot.CopyTo(Bus.Ram.AsSpan(0, kernelSnapLen));
+
+            // ── Step 7: update CPU registers to post-loop state ──────────────
+            // After the last iteration (BNE not taken, delay slot still fires):
+            //   cntReg = thrVal
+            //   offReg = offVal + remaining + 1  (ascending: +1 from final delay slot)
+            //           or offVal - remaining - 1  (descending: -1 from final delay slot)
+            //   addrReg: overwritten by SLT → 0 (only if addrReg == sltRd)
+            //   sltRd   = 0           (SLT result: threshold < threshold = false)
+            //   PC = pc32 + 8         (past BNE + delay slot)
+            long finalOffDelta = ascending ? (remaining + 1L) : -(remaining + 1L);
+            CpuHelpers.SetReg32(Cpu, cntReg, thrVal);
+            CpuHelpers.SetReg32(Cpu, offReg, (int)(offVal + finalOffDelta));
+            CpuHelpers.SetReg32(Cpu, sltRd,  0);
+            // If addrReg and sltRd are different registers, addrReg holds the final
+            // address from the last addu (base + final offset).  Write it for accuracy.
+            if (addrReg != sltRd)
+            {
+                long finalOff = ascending ? (long)(offVal + remaining) : (long)(offVal - remaining);
+                CpuHelpers.SetReg32(Cpu, addrReg, (int)(uint)(baseVal + (int)finalOff));
+            }
+
+            Cpu.PC = pc32 + 8u;
+
+            // Count each collapsed iteration as one instruction for statistics.
+            InstructionCount += (ulong)remaining;
+            return true;
+        }
+
+
+        /// <summary>
+        /// Attempts to fast-forward a BIOS BNEL byte-fill loop that uses an ascending
+        /// counter and a stack-loaded bound.  The recognised pattern is:
+        /// <code>
+        ///   loop:
+        ///     addiu  cntReg,   cntReg,   +1           ; cnt++
+        ///     sb     fillReg,  0(addrReg)             ; mem[addrReg] = fill_byte
+        ///     lw     tmpReg,   spImm($sp)             ; tmpReg = bound (from stack)
+        ///     slt    cmpReg,   cntReg,  tmpReg        ; cmpReg = (cnt &lt; bound)
+        ///     [optional nop]
+        ///     bnel   cmpReg,   $zero,   loop          ; loop while cmpReg != 0
+        ///     addiu  addrReg,  addrReg, -1            ; delay slot: addr-- (nullified when not taken)
+        /// </code>
+        ///
+        /// BNEL nullifies the delay slot when the branch is not taken (final iteration),
+        /// so addrReg decrements <c>remaining</c> times total (once per taken branch),
+        /// unlike BNE which always fires its delay slot.
+        ///
+        /// This pattern appears in the PS2 BIOS after the main ASCII-fill loop and fills
+        /// the kernel data area with 0x30.  The fill range overlaps the EE kernel at
+        /// physical 0x1000; the kernel is preserved via snapshot save/restore exactly as
+        /// in <see cref="TryFastForwardByteFill"/>.
+        /// </summary>
+        private bool TryFastForwardBnelByteFill()
+        {
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+
+            // Only accelerate KSEG0/KSEG1 code (fixed-mapped kernel region).
+            if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
+
+            // ── Step 1: verify BNEL instruction at pc32 ───────────────────────
+            // BNEL opcode = 0x15, rs = cmpReg, rt = $zero, imm = signed offset.
+            // Uses FetchWord (i-cache) so that RAM corruption by previous fill
+            // iterations does not interfere with pattern detection.
+            uint bnelWord = FetchWord(pc32);
+            if ((bnelWord >> 26) != 0x15u) return false;          // must be BNEL
+            int bneRs = (int)((bnelWord >> 21) & 0x1Fu);
+            if (((bnelWord >> 16) & 0x1Fu) != 0u) return false;   // rt must be $zero
+
+            int  branchImm = (short)(bnelWord & 0xFFFFu);
+            uint loopStart = (uint)((int)(pc32 + 4u) + branchImm * 4);
+            if (loopStart >= pc32 || pc32 - loopStart > 80u) return false;
+
+            // ── Step 2: verify delay slot (ADDIU addrReg, addrReg, -1) ────────
+            // BNEL nullifies this on the last (non-taken) iteration.
+            uint dsWord = FetchWord(pc32 + 4u);
+            if ((dsWord >> 26) != 9u) return false;             // must be ADDIU
+            int dsRs = (int)((dsWord >> 21) & 0x1Fu);
+            int dsRt = (int)((dsWord >> 16) & 0x1Fu);
+            if (dsRs != dsRt) return false;                     // rs == rt
+            if ((short)(dsWord & 0xFFFFu) != -1) return false; // imm must be -1
+            int addrReg = dsRt;
+
+            // ── Step 3: read and validate loop body (4–6 instructions) ────────
+            int loopBodyLen = (int)(pc32 - loopStart) / 4;
+            if (loopBodyLen < 4 || loopBodyLen > 6) return false;
+
+            uint w0 = FetchWord(loopStart);
+            uint w1 = FetchWord(loopStart + 4u);
+            uint w2 = FetchWord(loopStart + 8u);
+            uint w3 = FetchWord(loopStart + 12u);
+
+            // w0: ADDIU cntReg, cntReg, +1  (opcode=9, rs==rt, imm=+1)
+            if ((w0 >> 26) != 9u) return false;
+            int w0Rs = (int)((w0 >> 21) & 0x1Fu);
+            int w0Rt = (int)((w0 >> 16) & 0x1Fu);
+            if (w0Rs != w0Rt) return false;
+            if ((short)(w0 & 0xFFFFu) != 1) return false;
+            int cntReg = w0Rt;
+
+            // w1: SB fillReg, 0(addrReg)  (opcode=0x28, base=addrReg, imm=0)
+            if ((w1 >> 26) != 0x28u) return false;
+            if ((int)((w1 >> 21) & 0x1Fu) != addrReg) return false;
+            if ((short)(w1 & 0xFFFFu) != 0) return false;
+            int fillReg = (int)((w1 >> 16) & 0x1Fu);
+
+            // w2: LW boundTmpReg, spImm($sp)  (opcode=0x23, base=$sp=29)
+            if ((w2 >> 26) != 0x23u) return false;
+            if ((int)((w2 >> 21) & 0x1Fu) != 29) return false; // base must be $sp
+            int  boundTmpReg = (int)((w2 >> 16) & 0x1Fu);
+            short spImm      = (short)(w2 & 0xFFFFu);
+
+            // w3: SLT cmpReg, cntReg, boundTmpReg  (SPECIAL funct=0x2A)
+            if ((w3 >> 26) != 0u || (w3 & 0x3Fu) != 0x2Au) return false;
+            int sltRd = (int)((w3 >> 11) & 0x1Fu);
+            if ((int)((w3 >> 21) & 0x1Fu) != cntReg)      return false; // rs = cntReg
+            if ((int)((w3 >> 16) & 0x1Fu) != boundTmpReg) return false; // rt = boundTmpReg
+            if (sltRd != bneRs) return false; // SLT result must be what BNEL checks
+
+            // ── Step 4: extract values and compute remaining iterations ────────
+            int cntVal  = (int)(Cpu.RegsLo[cntReg]  & 0xFFFFFFFFu);
+            int addrVal = (int)(Cpu.RegsLo[addrReg] & 0xFFFFFFFFu);
+
+            // Load bound from the stack (same address the LW reads each iteration).
+            uint spVal      = (uint)(Cpu.RegsLo[29] & 0xFFFFFFFFu);
+            uint boundVaddr = (uint)((int)spVal + spImm);
+            int  boundVal   = (int)Bus.ReadWord(boundVaddr);
+
+            // Remaining: loop runs while (cntVal < boundVal) after body increments cntVal.
+            // At pc32, the body has just run (cntVal already incremented for this iteration).
+            long remaining = (long)boundVal - (long)cntVal;
+            if (remaining <= BulkFillMinIterations) return false;
+
+            // ── Step 5: comprehensive i-cache warm-up before bulk-fill ─────────
+            // Same logic as TryFastForwardByteFill: pre-load every cache line that
+            // post-fill execution will need, including the BNEL loop body itself.
+            void PrefetchLine(uint vaddr)
+            {
+                if ((vaddr & 0xE0000000u) == 0x80000000u)
+                    FetchWord(vaddr & ~0x3Fu);
+            }
+            void PrefetchRegion(uint vaddr, int nLines)
+            {
+                uint lineBase = vaddr & ~0x3Fu;
+                for (int li = 0; li < nLines; li++)
+                    PrefetchLine(lineBase + (uint)(li << 6));
+            }
+
+            PrefetchRegion(loopStart, 2);         // loop body (covers loopStart through pc32+4)
+            PrefetchRegion(pc32 + 4, 8);          // epilogue past BNEL + delay slot
+            PrefetchRegion((uint)(Cpu.RegsLo[31] & 0xFFFFFFFFu), 16); // $ra
+            uint physSp2 = PS2MemoryBus.TranslateAddress((uint)(Cpu.RegsLo[29] & 0xFFFFFFFFu))
+                           & (uint)(PS2MemoryBus.MainRamSize - 1);
+            int nSavedRa2 = 0;
+            for (uint so = 0u; so <= 2048u && nSavedRa2 < 32; so += 4u)
+            {
+                uint pa = physSp2 + so;
+                if (pa + 3u >= (uint)Bus.Ram.Length) break;
+                uint sw = (uint)(Bus.Ram[pa] | (Bus.Ram[pa+1]<<8)
+                                             | (Bus.Ram[pa+2]<<16)
+                                             | (Bus.Ram[pa+3]<<24));
+                if ((sw & 0xE0000003u) == 0x80000000u && sw != 0x80000000u)
+                { PrefetchRegion(sw, 16); nSavedRa2++; }
+            }
+            for (int ri = 0; ri < 32; ri++)
+            {
+                uint gv = (uint)(Cpu.RegsLo[ri] & 0xFFFFFFFFu);
+                if ((gv & 0xE0000003u) == 0x80000000u && gv != 0x80000000u)
+                    PrefetchRegion(gv, 8);
+            }
+            PrefetchRegion(0x80000080u, 16); // BEV=0 exception handler
+
+            // ── Step 6: perform the fill with stack/kernel snapshot save/restore ─
+            // From pc32, the remaining 'remaining' taken BNELs each:
+            //   - fire the delay slot (addrReg--)
+            //   - execute the body: cntReg++; SB at addrReg; LW bound; SLT
+            // So the stores go to addrVal-1, addrVal-2, ..., addrVal-remaining.
+            // (addrVal was already stored to by the current iteration's SB before pc32.)
+            byte fillByte = (byte)(Cpu.RegsLo[fillReg] & 0xFFu);
+            // physStart = physical address of the first store from pc32 (= addrVal-1).
+            uint physStart = PS2MemoryBus.TranslateAddress((uint)(addrVal - 1))
+                             & (uint)(PS2MemoryBus.MainRamSize - 1);
+
+            // Stack snapshot.
+            const int StackSaveWindow = 2048 + 64;
+            uint spVirt32 = (uint)(Cpu.RegsLo[29] & 0xFFFFFFFFu);
+            bool hasValidStack = (spVirt32 & 0xE0000000u) == 0x80000000u
+                              || (spVirt32 & 0xE0000000u) == 0xA0000000u;
+            byte[]? stackSnapshot = null;
+            uint    stackSaveBase = 0;
+            int     stackSaveLen  = 0;
+            if (hasValidStack)
+            {
+                uint physSpSave = PS2MemoryBus.TranslateAddress(spVirt32)
+                                  & (uint)(PS2MemoryBus.MainRamSize - 1);
+                stackSaveBase = physSpSave >= 64u ? physSpSave - 64u : 0u;
+                stackSaveLen  = (int)Math.Min(
+                                    (uint)StackSaveWindow,
+                                    (uint)Bus.Ram.Length - stackSaveBase);
+                stackSnapshot = new byte[stackSaveLen];
+                Bus.Ram.AsSpan((int)stackSaveBase, stackSaveLen).CopyTo(stackSnapshot);
+            }
+
+            // Kernel snapshot: the BNEL fill descends from addrVal-1 potentially into
+            // the EE kernel area (physical < 256 KB).  Save a snapshot so the kernel
+            // survives the fill, matching the real EE's d-cache behaviour.
+            const int MinKernelPreservation = 256 * 1024;
+            byte[]? kernelSnapshot = null;
+            int     kernelSnapLen  = 0;
+            long physLow = (long)physStart - remaining + 1L;
+            if (remaining >= PS2MemoryBus.MainRamSize || physLow < MinKernelPreservation)
+            {
+                kernelSnapLen  = (int)Math.Min(
+                                     Math.Max(physStart, (uint)MinKernelPreservation),
+                                     (uint)Bus.Ram.Length);
+                kernelSnapshot = new byte[kernelSnapLen];
+                Bus.Ram.AsSpan(0, kernelSnapLen).CopyTo(kernelSnapshot);
+            }
+
+            // Execute the fill: descending from physStart for 'remaining' bytes.
+            {
+                uint count = (uint)remaining;
+                if (remaining >= PS2MemoryBus.MainRamSize)
+                {
+                    Array.Fill(Bus.Ram, fillByte);
+                }
+                else if (physStart + 1u >= count)
+                {
+                    Bus.Ram.AsSpan((int)(physStart - count + 1u), (int)count).Fill(fillByte);
+                }
+                else
+                {
+                    int lowChunk  = (int)(physStart + 1u);
+                    int highChunk = (int)(count - (uint)lowChunk);
+                    Bus.Ram.AsSpan(0, lowChunk).Fill(fillByte);
+                    Bus.Ram.AsSpan(PS2MemoryBus.MainRamSize - highChunk, highChunk).Fill(fillByte);
+                }
+            }
+
+            if (stackSnapshot != null)
+                stackSnapshot.CopyTo(Bus.Ram.AsSpan((int)stackSaveBase, stackSaveLen));
+            if (kernelSnapshot != null)
+                kernelSnapshot.CopyTo(Bus.Ram.AsSpan(0, kernelSnapLen));
+
+            // ── Step 7: update CPU registers to post-loop state ──────────────
+            // BNEL semantics: delay slot fires for every taken branch ('remaining' times),
+            // and is nullified for the single not-taken exit.
+            //   cntReg  = boundVal          (incremented 'remaining' more times in body)
+            //   addrReg = addrVal - remaining  (decremented 'remaining' times by delay slot)
+            //   sltRd   = 0                 (final SLT: cnt >= bound → false)
+            //   PC      = pc32 + 8          (past BNEL + delay slot)
+            CpuHelpers.SetReg32(Cpu, cntReg,  boundVal);
+            CpuHelpers.SetReg32(Cpu, addrReg, (int)(addrVal - remaining));
+            CpuHelpers.SetReg32(Cpu, sltRd,   0);
+            Cpu.PC = pc32 + 8u;
+
+            InstructionCount += (ulong)remaining;
+            return true;
+        }
+
+        // ── Byte-copy loop fast-forward ──────────────────────────────────────────
+
+        /// <summary>
+        /// Detect and fast-forward a MIPS byte-copy loop of the form:
+        /// <code>
+        ///   loop:
+        ///     lbu    tmpReg,  0(srcReg)          ; load byte from source
+        ///     addiu  cntReg,  cntReg,  -1         ; count--
+        ///     addiu  srcReg,  srcReg,  +1         ; src++
+        ///     sb     tmpReg,  0(dstReg)           ; store byte to destination
+        ///     nop
+        ///     bne    cntReg,  sentReg,  loop      ; loop while cntReg != sentReg
+        ///     addiu  dstReg,  dstReg,  +1         ; delay slot: dst++
+        /// </code>
+        ///
+        /// This pattern appears in the EE kernel at 0x800103e0 immediately after
+        /// the BIOS completes its kernel-decompression fill loops and jumps into RAM.
+        /// The loop copies a large data segment (up to ~20 MB) byte-by-byte between
+        /// two TLB-mapped KSEG2 virtual addresses, which is extremely slow without
+        /// fast-forwarding.
+        ///
+        /// Because both source and destination may be in KSEG2 (virtual addresses
+        /// starting at 0xC0000000), a direct TranslateAddress call is not sufficient.
+        /// This fast-forward uses <see cref="PhysAddrAndPageRemaining"/> to resolve
+        /// each virtual page via the EE TLB (or KSEG0/1 direct mapping), then copies
+        /// data directly in physical RAM in page-aligned chunks.  If any TLB lookup
+        /// fails, the fast-forward is silently skipped so normal execution resumes.
+        /// </summary>
+        private bool TryFastForwardByteCopy()
+        {
+            // ── Step 1: PC must be in KSEG0/KSEG1 and at a BNE (opcode=5) ────
+            // Only run in KSEG0/1 — FetchWord would throw TlbMissException for
+            // TLB-mapped PCs, which the caller expects to propagate from Step().
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+            if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
+            uint bneWord = FetchWord(pc32);
+            if ((bneWord >> 26) != 5u) return false;           // BNE opcode = 5
+
+            // ── Step 2: Branch must be backward ──────────────────────────────
+            int branchOffset = (short)(bneWord & 0xFFFFu);
+            if (branchOffset >= 0) return false;
+            uint loopStart = (uint)((long)(pc32 + 4) + (long)branchOffset * 4L);
+
+            // ── Step 3: Loop body must be exactly 5 instructions ─────────────
+            int loopLen = (int)(pc32 - loopStart) / 4;
+            if (loopLen != 5) return false;
+
+            // Extract BNE register fields: rs=cntReg, rt=sentReg
+            int cntReg = (int)((bneWord >> 21) & 0x1Fu);
+            int sentReg = (int)((bneWord >> 16) & 0x1Fu);
+            if (cntReg == 0 || sentReg == cntReg) return false;
+
+            // ── Step 4: Validate delay slot — ADDIU dstReg, dstReg, +1 ──────
+            uint dsWord = FetchWord(pc32 + 4u);
+            if ((dsWord >> 26) != 9u) return false;            // ADDIU
+            int dsBase = (int)((dsWord >> 21) & 0x1Fu);
+            int dsDst  = (int)((dsWord >> 16) & 0x1Fu);
+            if (dsBase != dsDst) return false;                 // rs == rt (in-place)
+            if ((short)(dsWord & 0xFFFFu) != 1) return false; // imm == +1
+            int dstReg = dsDst;
+
+            // ── Step 5: Validate loop body instructions ───────────────────────
+            // w0: LBU tmpReg, 0(srcReg)
+            uint w0 = FetchWord(loopStart);
+            if ((w0 >> 26) != 0x24u) return false;            // LBU opcode = 0x24
+            if ((short)(w0 & 0xFFFFu) != 0) return false;     // offset must be 0
+            int srcReg  = (int)((w0 >> 21) & 0x1Fu);          // base register
+            int tmpReg  = (int)((w0 >> 16) & 0x1Fu);          // destination of LBU
+
+            // w1: ADDIU cntReg, cntReg, -1
+            uint w1 = FetchWord(loopStart + 4u);
+            if ((w1 >> 26) != 9u) return false;
+            if ((int)((w1 >> 21) & 0x1Fu) != cntReg) return false;
+            if ((int)((w1 >> 16) & 0x1Fu) != cntReg) return false;
+            if ((short)(w1 & 0xFFFFu) != -1) return false;
+
+            // w2: ADDIU srcReg, srcReg, +1
+            uint w2 = FetchWord(loopStart + 8u);
+            if ((w2 >> 26) != 9u) return false;
+            if ((int)((w2 >> 21) & 0x1Fu) != srcReg) return false;
+            if ((int)((w2 >> 16) & 0x1Fu) != srcReg) return false;
+            if ((short)(w2 & 0xFFFFu) != 1) return false;
+
+            // w3: SB tmpReg, 0(dstReg)
+            uint w3 = FetchWord(loopStart + 12u);
+            if ((w3 >> 26) != 0x28u) return false;            // SB opcode = 0x28
+            if ((int)((w3 >> 21) & 0x1Fu) != dstReg) return false;  // base = dstReg
+            if ((short)(w3 & 0xFFFFu) != 0) return false;     // offset must be 0
+            if ((int)((w3 >> 16) & 0x1Fu) != tmpReg) return false;  // data = tmpReg
+
+            // w4: NOP
+            uint w4 = FetchWord(loopStart + 16u);
+            if (w4 != 0u) return false;
+
+            // ── Step 6: Compute remaining iterations ─────────────────────────
+            // Loop exits when cntReg == sentReg.  cntReg decrements each iteration.
+            // remaining = (signed)(cntReg - sentReg) iterations left.
+            int cntVal  = (int)(Cpu.RegsLo[cntReg]  & 0xFFFFFFFFu);
+            int sentVal = (int)(Cpu.RegsLo[sentReg] & 0xFFFFFFFFu);
+            long remaining = (long)cntVal - (long)sentVal;
+            if (remaining <= BulkFillMinIterations) return false;
+
+            // ── Step 7: Translate src/dst and perform the copy ───────────────
+            byte asid = (byte)(Cpu.COP0.ReadRegister32(10) & 0xFFu);
+            ulong curSrc = Cpu.RegsLo[srcReg] & 0xFFFFFFFFUL;
+            ulong curDst = Cpu.RegsLo[dstReg] & 0xFFFFFFFFUL;
+
+            long srcRem = PhysAddrAndPageRemaining((uint)curSrc, asid, out uint srcPhys);
+            long dstRem = PhysAddrAndPageRemaining((uint)curDst, asid, out uint dstPhys);
+
+            long chunkLen;
+            bool fullSkip = false;
+
+            if (srcRem >= 0 && dstRem >= 0
+                && srcPhys + remaining <= Bus.Ram.Length
+                && dstPhys + remaining <= Bus.Ram.Length)
+            {
+                // Both addresses translated to physical RAM.  Copy one page-chunk.
+                chunkLen = Math.Min(remaining, Math.Min(srcRem, dstRem));
+            }
+            else if (srcRem < 0 && dstRem < 0)
+            {
+                // TLB lookup failed for both src and dst.  Check whether the bus
+                // maps these addresses to an unmapped region (reads return 0, writes
+                // discarded).  KSEG2 virtual addresses (0xC0000000+) pass through
+                // TranslateAddress unchanged; the physical value 0xC1xxxxxx is beyond
+                // the main RAM window so MapPhysical returns the dummy zero buffer.
+                // In that case the entire loop is a memory no-op: skip it.
+                // Exclude BIOS ROM (0x1FC00000-0x1FFFFFFF) which IS readable.
+                uint srcRaw = PS2MemoryBus.TranslateAddress((uint)curSrc);
+                uint dstRaw = PS2MemoryBus.TranslateAddress((uint)curDst);
+                bool srcUnmapped = srcRaw >= PS2MemoryBus.MainRamMirrorEnd && !IsBiosRom(srcRaw);
+                bool dstUnmapped = dstRaw >= PS2MemoryBus.MainRamMirrorEnd && !IsBiosRom(dstRaw);
+                if (srcUnmapped && dstUnmapped)
+                {
+                    // Both are in unmapped physical space: reads return 0, writes discarded.
+                    chunkLen = remaining;
+                    fullSkip = true;
+                }
+                else
+                    return false;
+            }
+            else if (srcRem < 0 && dstRem >= 0)
+            {
+                // src TLB miss — only handle the BIOS ROM → RAM kernel-copy case.
+                uint srcRaw = PS2MemoryBus.TranslateAddress((uint)curSrc);
+                if (!IsBiosRom(srcRaw)) return false;   // anything else: let bus handle it
+                uint biosOff = srcRaw - PS2MemoryBus.BiosRomPhysBase;
+                chunkLen = Math.Min(remaining, dstRem);
+                chunkLen = Math.Min(chunkLen, (long)(Bus.Bios.Length - biosOff));
+                if (chunkLen <= 0) return false;
+                if (dstPhys + chunkLen > Bus.Ram.Length) return false;
+                Bus.Bios.AsSpan((int)biosOff, (int)chunkLen)
+                         .CopyTo(Bus.Ram.AsSpan((int)dstPhys, (int)chunkLen));
+                curSrc += (ulong)chunkLen;
+                curDst += (ulong)chunkLen;
+                goto commitRegisters;
+            }
+            else
+                return false;
+
+            if (!fullSkip)
+            {
+                if (srcPhys + chunkLen > Bus.Ram.Length) return false;
+                if (dstPhys + chunkLen > Bus.Ram.Length) return false;
+                Bus.Ram.AsSpan((int)srcPhys, (int)chunkLen)
+                        .CopyTo(Bus.Ram.AsSpan((int)dstPhys, (int)chunkLen));
+            }
+
+            curSrc += (ulong)chunkLen;
+            curDst += (ulong)chunkLen;
+
+            commitRegisters:
+            // ── Step 8: Update CPU registers ─────────────────────────────────
+            // Each fast-forwarded iteration: cntReg--, srcReg++, dstReg++ (delay slot).
+            long newCntVal = (long)cntVal - chunkLen;
+            CpuHelpers.SetReg32(Cpu, srcReg, (int)(uint)curSrc);
+            CpuHelpers.SetReg32(Cpu, dstReg, (int)(uint)curDst);
+
+            if (chunkLen == remaining)
+            {
+                // Full copy done — cntReg reaches sentVal, BNE not taken, exit loop.
+                CpuHelpers.SetReg32(Cpu, cntReg, sentVal);
+                if (!fullSkip)
+                {
+                    long lastR = PhysAddrAndPageRemaining((uint)(curDst - 1), asid, out uint lastPhys);
+                    if (lastR >= 0 && lastPhys < Bus.Ram.Length)
+                        CpuHelpers.SetReg32(Cpu, tmpReg, Bus.Ram[lastPhys]);
+                }
+                // For fullSkip (unmapped src), last byte read was 0 (dummy buffer).
+                // tmpReg already has the value from the last executed iteration; don't change.
+                Cpu.PC = pc32 + 8u;   // past BNE + delay slot
+            }
+            else
+            {
+                // Partial: continue loop from top of loop body.
+                CpuHelpers.SetReg32(Cpu, cntReg, (int)newCntVal);
+                Cpu.PC = loopStart;
+            }
+
+            InstructionCount += (ulong)chunkLen;
+            return true;
+        }
+
+        /// <summary>
+        /// Translate a virtual address to its physical address, handling both the
+        /// fixed KSEG0/1 mapping (strip top 3 bits) and TLB-mapped regions
+        /// (KUSEG, KSEG2, KSEG3).
+        /// </summary>
+        /// <param name="virt">32-bit virtual address.</param>
+        /// <param name="asid">Current ASID from COP0 EntryHi.</param>
+        /// <param name="physAddr">Physical address if translation succeeded; otherwise 0.</param>
+        /// <returns>
+        /// Number of bytes remaining in the current TLB/physical page starting from
+        /// <paramref name="virt"/>.  Returns -1 if translation fails (TLB miss or
+        /// page marked invalid).
+        /// </returns>
+        private long PhysAddrAndPageRemaining(uint virt, byte asid, out uint physAddr)
+        {
+            // KSEG0 (0x80000000-0x9FFFFFFF) and KSEG1 (0xA0000000-0xBFFFFFFF)
+            // both strip the top 3 bits.  Treat the entire 512 MB window as one
+            // "page" (remaining = physical RAM size from that offset).
+            if ((virt & 0xC0000000u) == 0x80000000u)
+            {
+                physAddr = virt & 0x1FFFFFFFu;
+                long rem = (long)Bus.Ram.Length - physAddr;
+                return rem > 0 ? rem : -1L;
+            }
+
+            // For all other regions, first check the bus physical mapping.
+            // PS2MemoryBus.TranslateAddress() strips KSEG0/1 bits but passes KUSEG
+            // and KSEG2 addresses through unchanged.  If the result falls in the
+            // main RAM window [0, MainRamMirrorEnd), the bus serves the access
+            // from RAM without any TLB lookup — exactly how the instruction
+            // implementations (LBU, SB, …) work.
+            uint busPhys = PS2MemoryBus.TranslateAddress(virt);
+            if (busPhys < PS2MemoryBus.MainRamMirrorEnd)
+            {
+                // Apply the same 32 MB power-of-two wrap used by MapPhysical.
+                physAddr = busPhys & (uint)(PS2MemoryBus.MainRamSize - 1);
+                long rem  = (long)Bus.Ram.Length - physAddr;
+                return rem > 0 ? rem : -1L;
+            }
+
+            // TLB-mapped region: search the 48-entry EE TLB.
+            // Sign-extend the 32-bit virtual address to 64 bits: addresses with
+            // bit 31 set (KSEG2/3: 0xC0000000–0xFFFFFFFF) are sign-extended when
+            // the kernel writes them to COP0 EntryHi via MTC0, so TLB entries for
+            // these regions are stored with the top 32 bits all set (0xFFFFFFFF…).
+            var tlb = Cpu.COP0.TLB;
+            ulong va  = (ulong)(long)(int)virt;  // sign-extend 32→64 bits
+            ulong vpn = va & 0xFFFFFFFFFFFFE000UL;
+
+            for (int i = 0; i < TLBState.NumTLBEntries; i++)
+            {
+                TLBEntry entry = tlb.ReadEntry(i);
+                if (!entry.Valid) continue;
+
+                ulong eVpn  = entry.EntryHi & 0xFFFFFFFFFFFFE000UL;
+                byte  eAsid = (byte)(entry.EntryHi & 0xFFu);
+                bool  global = ((entry.EntryLo0 & 1u) != 0) && ((entry.EntryLo1 & 1u) != 0);
+
+                // Apply the page mask to align both VPNs before comparison.
+                // PageMask covers the page-size bits, so mask them out of the VPN.
+                uint pageMask  = entry.PageMask;
+                ulong maskFull = ~(ulong)(pageMask | 0x1FFFu);
+                if ((eVpn & maskFull) != (vpn & maskFull)) continue;
+                if (!global && eAsid != asid)              continue;
+
+                uint pageSize = (pageMask | 0x1FFFu) + 1u;  // size of one page
+                bool odd = ((virt & pageSize) != 0);
+
+                ulong lo = odd ? entry.EntryLo1 : entry.EntryLo0;
+                if ((lo & 0x2u) == 0) { physAddr = 0; return -1L; } // V bit clear
+
+                ulong pfn    = (lo >> 6) & 0xFFFFFUL;
+                uint  offset = virt & (pageSize - 1u);
+                physAddr = (uint)((pfn << 12) | offset);
+                return (long)(pageSize - offset);            // bytes left in page
+            }
+
+            physAddr = 0;
+            return -1L;  // no matching TLB entry
+        }
+
+        /// <summary>
+        /// Returns true if <paramref name="physAddr"/> falls within the BIOS ROM
+        /// physical window (0x1FC00000–0x1FFFFFFF).
+        /// </summary>
+        private static bool IsBiosRom(uint physAddr)
+            => physAddr >= PS2MemoryBus.BiosRomPhysBase
+            && physAddr <  PS2MemoryBus.BiosRomPhysBase + PS2MemoryBus.BiosRomSize;
 
         /// <summary>
         /// Returns true if <paramref name="word"/> encodes a "branch-likely"

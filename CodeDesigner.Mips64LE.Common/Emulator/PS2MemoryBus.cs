@@ -33,6 +33,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public const int IoRegisterSize    = 64 * 1024;         // 64 KB
         public const int GsPrivRegSize     =  8 * 1024;         //  8 KB
 
+        /// <summary>
+        /// Upper limit of the mirrored main RAM window.
+        /// Physical addresses in [0x00000000, MainRamMirrorEnd) are served from the
+        /// 32 MB RAM array (with power-of-two wrap-around mirror).  Any address at or
+        /// above this threshold falls into the I/O or reserved region.
+        /// </summary>
+        public const uint MainRamMirrorEnd = 0x10000000u;
+
+        /// <summary>Physical base address of the BIOS ROM window.</summary>
+        public const uint BiosRomPhysBase  = 0x1FC00000u;
+
         // Physical base addresses
         private const uint MainRamBase    = 0x00000000u;
         private const uint BiosRomBase    = 0x1FC00000u;

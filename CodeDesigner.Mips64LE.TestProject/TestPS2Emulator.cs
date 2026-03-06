@@ -538,30 +538,47 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void Emulator_COP0_OverflowDispatch()
         {
-            // ADD $t0, $t0, $t1 with values that overflow a 32-bit signed integer.
+            // PCSX2 R5900OpcodeImpl.cpp: ADD/ADDI/SUB/DSUB/ADDI/DADDI do NOT
+            // trigger arithmetic overflow exceptions.  No PS2 software relies on
+            // overflow traps; implementing them would be incorrect and would cause
+            // the BIOS fill loop's post-fill execution to route 0x20202020 garbage
+            // code through the exception handler.
+            //
+            // Verify that ADD with overflow wraps silently (no COP0 dispatch,
+            // no PC redirection, matching PCSX2 interpreter behavior).
+
             // add $t0,$t0,$t1 : opcode=0, rs=8, rt=9, rd=8, funct=0x20
             uint add = (0u << 26) | (8u << 21) | (9u << 16) | (8u << 11) | 0x20u;
+            // nop so PC can advance past the ADD
+            uint nop = 0u;
 
             var emu = new PS2Emulator();
-            emu.LoadProgram(0x00000400, new[] { add });
+            emu.LoadProgram(0x00000400, new[] { add, nop });
             emu.Cpu.PC        = 0x00000400;
             emu.Cpu.RegsLo[8] = 0x7FFFFFFFu; // INT32_MAX
-            emu.Cpu.RegsLo[9] = 1u;           // +1 → overflow
+            emu.Cpu.RegsLo[9] = 1u;           // +1 → wraps to INT32_MIN (-2147483648)
 
             // Clear BEV
             uint status = emu.Cpu.COP0.ReadRegister32(12);
             status &= ~(1u << 22);
             emu.Cpu.COP0.WriteRegister32(12, status);
 
-            emu.Step(); // Should not throw — overflow routed through COP0
+            emu.Step(); // must not throw; must not redirect PC
 
-            // Cause.ExcCode should be 12 (Overflow)
+            // PC must advance normally (no exception vector taken).
+            Assert.AreEqual(0x00000404UL, emu.Cpu.PC,
+                "ADD overflow: PC must advance to next instruction (no exception dispatch)");
+
+            // Result wraps modulo 2^32, sign-extended to 64 bits.
+            // 0x7FFFFFFF + 1 = 0x80000000 → as int32 = -2147483648
+            Assert.AreEqual(unchecked((ulong)(long)(int)0x80000000u), emu.Cpu.RegsLo[8],
+                "ADD overflow: result must wrap (modular 32-bit arithmetic, sign-extended)");
+
+            // Cause.ExcCode must NOT be Overflow (12) — no exception was dispatched.
             uint cause   = emu.Cpu.COP0.ReadRegister32(13);
             uint excCode = (cause >> 2) & 0x1Fu;
-            Assert.AreEqual(12u, excCode, "Cause.ExcCode must be 12 (Overflow)");
-
-            Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
-                "PC must be at the exception vector after overflow");
+            Assert.AreNotEqual(12u, excCode,
+                "ADD overflow: Cause.ExcCode must NOT be 12 (overflow not dispatched, matching PCSX2)");
         }
 
         [TestMethod]
@@ -628,6 +645,50 @@ namespace CodeDesigner.Mips64LE.TestProject
             // Cause.BD must be set.
             uint cause = cpu.COP0.ReadRegister32(13);
             Assert.IsTrue((cause & (1u << 31)) != 0, "Cause.BD must be set for delay-slot exception");
+        }
+
+        /// <summary>
+        /// Verify that a nested exception (EXL=1 when the exception fires) always
+        /// escalates to the BIOS ROM handler at 0xBFC00200, regardless of BEV.
+        ///
+        /// PCSX2 R5900OpcodeImpl.cpp cpuException:
+        ///   "if (Status.EXL || Status.BEV) vector = 0xBFC00200"
+        ///
+        /// This is essential for the BIOS boot sequence: the BEV=0 handler at
+        /// 0x80000080 begins with BREAK (a PS2 software-trap convention).  Without
+        /// nested-exception escalation, the BREAK at 0x80000080 fires while EXL=1
+        /// and loops back to 0x80000080 infinitely.  With escalation the BREAK
+        /// routes to 0xBFC00200 (BIOS ROM) which is the correct dispatcher.
+        /// </summary>
+        [TestMethod]
+        public void COP0Dispatcher_NestedExceptionEscalates_ToBiosRomVector()
+        {
+            var cpu = new CodeDesigner.Mips64LE.Common.CPU.CpuState();
+
+            // Set BEV=0 AND EXL=1 (already in exception mode).
+            // A new exception while EXL=1 must go to 0xBFC00200, not 0x80000080.
+            cpu.COP0.WriteRegister32(12, 0x00000002u); // BEV=0, EXL=1
+
+            COP0ExceptionDispatcher.Dispatch(cpu, ExceptionCode.Breakpoint, 0x80000080UL, inDelaySlot: false);
+
+            Assert.AreEqual(0xBFC00200UL, cpu.PC,
+                "Nested exception (EXL=1, BEV=0): must escalate to BIOS ROM vector 0xBFC00200");
+        }
+
+        /// <summary>
+        /// Verify that a first-level exception with BEV=0 goes to 0x80000080
+        /// (the EXL=1 escalation must not fire when EXL was 0 at time of fault).
+        /// </summary>
+        [TestMethod]
+        public void COP0Dispatcher_FirstLevelExceptionBev0_GoesToRamVector()
+        {
+            var cpu = new CodeDesigner.Mips64LE.Common.CPU.CpuState();
+            cpu.COP0.WriteRegister32(12, 0x00000000u); // BEV=0, EXL=0
+
+            COP0ExceptionDispatcher.Dispatch(cpu, ExceptionCode.Syscall, 0x4000UL, inDelaySlot: false);
+
+            Assert.AreEqual(0x80000080UL, cpu.PC,
+                "First-level exception with BEV=0 must use RAM vector 0x80000080");
         }
 
         // =====================================================================
@@ -1641,6 +1702,486 @@ namespace CodeDesigner.Mips64LE.TestProject
             emu.Step();
             Assert.AreEqual(0x200UL, emu.Cpu.PC, "BEQ self-loop: still at 0x200 after step 2");
             Assert.AreEqual(0UL, emu.Cpu.RegsLo[8], "addiu must never execute");
+        }
+
+        // ── I-cache and bulk-fill fast-forward tests ─────────────────────────
+
+        /// <summary>
+        /// Verify that the i-cache protects an executing instruction from being
+        /// overwritten by a data store in KSEG0.  The instruction is fetched once
+        /// (populating the cache), then the same physical RAM location is written
+        /// with a different word; subsequent fetches must still return the original.
+        /// </summary>
+        [TestMethod]
+        public void ICache_ProtectsExecutingCode_FromStoreOverwrite()
+        {
+            // Place an ADDIU $t0, $zero, 42 at KSEG0 address 0x80001000.
+            //   encoding: opcode=9, rs=0, rt=8, imm=42 → 0x2408002A
+            uint addiu42 = (9u << 26) | (0u << 21) | (8u << 16) | 42u; // 0x2408002A
+
+            var emu = new PS2Emulator();
+            emu.Cpu.PC = 0x80001000UL; // KSEG0
+
+            // Write the instruction into RAM (physical 0x00001000 = KSEG0 - top bits).
+            emu.Bus.WriteWord(0x80001000u, addiu42);
+            // Write a NOP after it so PC advances and we can step again.
+            emu.Bus.WriteWord(0x80001004u, 0u); // nop
+
+            // Step 1: fetch and execute addiu42 at 0x80001000 — caches it.
+            emu.Step();
+            Assert.AreEqual(42UL, emu.Cpu.RegsLo[8], "First execution: $t0 should be 42");
+
+            // Now overwrite the RAM word at 0x80001000 with a different instruction
+            // (ADDIU $t0, $zero, 99).  The i-cache should shield subsequent fetches.
+            uint addiu99 = (9u << 26) | (0u << 21) | (8u << 16) | 99u;
+            emu.Bus.WriteWord(0x80001000u, addiu99);
+
+            // Reset PC back to 0x80001000 and step again.
+            emu.Cpu.PC = 0x80001000UL;
+            emu.Step();
+
+            // The i-cache must return the ORIGINAL instruction (42), not the overwrite (99).
+            Assert.AreEqual(42UL, emu.Cpu.RegsLo[8],
+                "Second execution: i-cache should return original instruction, not store overwrite");
+        }
+
+        /// <summary>
+        /// Verify that Reset() clears the i-cache so that stale entries from a
+        /// previous run cannot survive into the next run.
+        /// </summary>
+        [TestMethod]
+        public void ICache_ClearedByReset()
+        {
+            uint addiu42 = (9u << 26) | (0u << 21) | (8u << 16) | 42u;
+            uint addiu99 = (9u << 26) | (0u << 21) | (8u << 16) | 99u;
+            uint nop     = 0u;
+
+            var emu = new PS2Emulator();
+            emu.Cpu.PC = 0x80001000UL;
+            emu.Bus.WriteWord(0x80001000u, addiu42);
+            emu.Bus.WriteWord(0x80001004u, nop);
+
+            // Execute once to populate the cache.
+            emu.Step();
+            Assert.AreEqual(42UL, emu.Cpu.RegsLo[8]);
+
+            // Overwrite the instruction in RAM and call Reset() to flush cache.
+            emu.Bus.WriteWord(0x80001000u, addiu99);
+            emu.Reset();
+
+            // Set PC manually (Reset() sets PC to BIOS vector, not our test address).
+            emu.Cpu.PC = 0x80001000UL;
+            emu.Step();
+
+            // After Reset() the cache is empty; the new instruction should be seen.
+            Assert.AreEqual(99UL, emu.Cpu.RegsLo[8],
+                "After Reset() the overwritten instruction (99) should be fetched from RAM");
+        }
+
+        /// <summary>
+        /// Verify the bulk byte-fill fast-forward (TryFastForwardByteFill).
+        /// Sets up a tight sb-loop in KSEG0 with EXL=1 and confirms that after
+        /// one Step() call the loop is collapsed: RAM is filled, registers reflect
+        /// the post-loop state, and the PC is advanced past the loop.
+        /// </summary>
+        [TestMethod]
+        public void EE_BulkFillFastForward_CompletesLoopAndFillsRam()
+        {
+            // ── Build the loop ──────────────────────────────────────────────
+            // Registers used (MIPS ABI names → indices):
+            //   v0 = 2  (addrReg: computed address = base + offset)
+            //   v1 = 3  (cntReg:  iteration counter, decrements each loop)
+            //   a0 = 4  (fillReg: byte to store = 0xAB)
+            //   s1 = 17 (thrReg:  loop exits when cntReg <= s1)
+            //   s5 = 21 (offReg:  address offset, incremented each iteration)
+            //   s6 = 22 (baseReg: fixed base address)
+            //
+            // Loop body (7 instructions at KSEG0 base 0x80010000):
+            //   +0x00: addu  v0, s6, s5       ; SPECIAL rs=22 rt=21 rd=2 funct=0x21
+            //   +0x04: addiu v1, v1, -1        ; opcode=9 rs=3 rt=3 imm=0xFFFF
+            //   +0x08: sb    a0, 0(v0)         ; opcode=0x28 rs=2 rt=4 imm=0
+            //   +0x0C: slt   v0, s1, v1        ; SPECIAL rs=17 rt=3 rd=2 funct=0x2A
+            //   +0x10: nop                     ; 0x00000000
+            //   +0x14: bne   v0, $zero, -6     ; opcode=5 rs=2 rt=0 imm=-6 (target=+0x00)
+            //   +0x18: addiu s5, s5, 1         ; delay slot: opcode=9 rs=21 rt=21 imm=1
+
+            // Encode instructions:
+            uint addu_v0_s6_s5 = (0u << 26) | (22u << 21) | (21u << 16) | (2u << 11) | 0x21u;
+            uint addiu_v1_m1   = (9u << 26)  | (3u << 21)  | (3u << 16)  | 0xFFFFu;
+            uint sb_a0_0_v0    = (0x28u << 26)| (2u << 21)  | (4u << 16)  | 0u;
+            uint slt_v0_s1_v1  = (0u << 26)  | (17u << 21) | (3u << 16)  | (2u << 11) | 0x2Au;
+            uint nop            = 0u;
+            // BNE v0, $zero, -6: target = (pc+4) + (-6)*4 = pc+4-24 = pc-20.
+            // PC of BNE = 0x80010014.  target = 0x80010014 - 20 = 0x80010000. ✓
+            uint bne_v0_m6     = (5u << 26)  | (2u << 21)  | (0u << 16)  | unchecked((uint)(ushort)(-6));
+            uint addiu_s5_p1   = (9u << 26)  | (21u << 21) | (21u << 16) | 1u;
+            // Instruction after the loop (must be reachable at PC+8 = 0x8001001C).
+            uint addiu_t0_77   = (9u << 26)  | (0u << 21)  | (8u << 16)  | 77u;
+
+            var emu = new PS2Emulator();
+
+            // Load loop at KSEG0 0x80010000.
+            emu.Bus.WriteWord(0x80010000u, addu_v0_s6_s5);
+            emu.Bus.WriteWord(0x80010004u, addiu_v1_m1);
+            emu.Bus.WriteWord(0x80010008u, sb_a0_0_v0);
+            emu.Bus.WriteWord(0x8001000Cu, slt_v0_s1_v1);
+            emu.Bus.WriteWord(0x80010010u, nop);
+            emu.Bus.WriteWord(0x80010014u, bne_v0_m6);
+            emu.Bus.WriteWord(0x80010018u, addiu_s5_p1);
+            emu.Bus.WriteWord(0x8001001Cu, addiu_t0_77);
+
+            // ── Set up register state ──────────────────────────────────────
+            // We place PC at the BNE instruction (the fast-forward detects from there).
+            // v1 (counter) = threshold + 200_000 so there are 200_000 iterations left.
+            // s1 (threshold) = 10.
+            int threshold = 10;
+            int iterations = 200_000; // well above BulkFillMinIterations (50_000)
+            int initialCnt = threshold + iterations; // v1 = 200_010
+
+            emu.Cpu.PC = 0x80010014UL; // PC at the BNE
+            emu.Cpu.RegsLo[3]  = (ulong)(int)initialCnt; // v1 = counter
+            emu.Cpu.RegsLo[17] = (ulong)(int)threshold;   // s1 = threshold
+            emu.Cpu.RegsLo[4]  = 0xABu;                   // a0 = fill byte
+            emu.Cpu.RegsLo[21] = 0u;                       // s5 = offset = 0
+            emu.Cpu.RegsLo[22] = 0x80000000u;              // s6 = base (KSEG0 origin)
+
+            // Set COP0 Status with EXL=1 so the fast-forward fires.
+            // Use a status that also has BEV=1 so we don't need a BEV=0 handler.
+            // mask 0x10007 | EXL bit (bit1): status = 0x40000002 (BEV=1, EXL=1)
+            emu.Cpu.COP0.WriteRegister32(12, 0x00400002u); // BEV=1, EXL=1
+
+            // ── Execute one Step() ────────────────────────────────────────
+            emu.Step();
+
+            // ── Assert post-loop state ────────────────────────────────────
+            // Counter (v1) should equal the threshold.
+            Assert.AreEqual((ulong)(int)threshold, emu.Cpu.RegsLo[3],
+                "v1 (counter) should equal threshold after fast-forward");
+
+            // Offset (s5) = 0 + iterations + 1  (iterations stores + 1 final delay-slot ++).
+            int expectedOffset = iterations + 1;
+            Assert.AreEqual((ulong)(uint)(int)expectedOffset, emu.Cpu.RegsLo[21] & 0xFFFFFFFFUL,
+                "s5 (offset) should be initialOffset + iterations + 1");
+
+            // v0 (compare result from last SLT) = 0.
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[2] & 0xFFFFFFFFUL,
+                "v0 (SLT result) should be 0 after last iteration");
+
+            // PC should be at BNE + 8 (past the delay slot).
+            Assert.AreEqual(0x8001001CUL, emu.Cpu.PC,
+                "PC should advance to instruction after BNE+delay-slot");
+
+            // Main RAM must be filled with 0xAB.
+            // Verify a representative spread: first 256 bytes, the midpoint at
+            // offset ~100 000, and the last few bytes written near offset 200 001.
+            // (The fill covers all 32 MB so any physical address should be 0xAB.)
+            for (int i = 1; i <= 255; i++)
+                Assert.AreEqual(0xABu, (uint)emu.Bus.Ram[i],
+                    $"RAM[{i}] should be 0xAB after fast-forward fill");
+
+            // Check near the midpoint of the fill range (physical byte ~100 001).
+            Assert.AreEqual(0xABu, (uint)emu.Bus.Ram[100_001],
+                "RAM[100001] should be 0xAB after fast-forward fill");
+
+            // Check near the end of the 200 000-iteration fill (last physical byte written = 200 000).
+            Assert.AreEqual(0xABu, (uint)emu.Bus.Ram[200_000],
+                "RAM[200000] (last byte written) should be 0xAB after fast-forward fill");
+
+            // Byte just beyond the fill range must be untouched (still 0).
+            Assert.AreEqual(0u, (uint)emu.Bus.Ram[200_001],
+                "RAM[200001] (one past end of fill) should remain 0");
+        }
+
+        /// <summary>
+        /// Verify the descending (offset--) variant of the bulk-fill fast-forward.
+        /// The BIOS uses an addiu offReg, offReg, -1 delay slot in a second fill pass.
+        /// This test mirrors EE_BulkFillFastForward_CompletesLoopAndFillsRam but with
+        /// the delay slot operand changed from +1 to -1, and the offset starting at
+        /// a high value so the fill covers addressable RAM.
+        /// </summary>
+        [TestMethod]
+        public void EE_BulkFillFastForward_Descending_CompletesLoopAndFillsRam()
+        {
+            // Loop body (same as ascending test but delay slot uses -1):
+            //   +0x00: addu  v0, s6, s5       ; SPECIAL rs=22 rt=21 rd=2 funct=0x21
+            //   +0x04: addiu v1, v1, -1        ; opcode=9 rs=3 rt=3 imm=0xFFFF
+            //   +0x08: sb    a0, 0(v0)         ; opcode=0x28 rs=2 rt=4 imm=0
+            //   +0x0C: slt   v0, s1, v1        ; SPECIAL rs=17 rt=3 rd=2 funct=0x2A
+            //   +0x10: nop
+            //   +0x14: bne   v0, $zero, -6     ; loop back to +0x00
+            //   +0x18: addiu s5, s5, -1        ; delay slot: offset--  ← descending
+
+            uint addu_v0_s6_s5  = (0u << 26) | (22u << 21) | (21u << 16) | (2u << 11) | 0x21u;
+            uint addiu_v1_m1    = (9u << 26)  | (3u << 21)  | (3u << 16)  | 0xFFFFu;
+            uint sb_a0_0_v0     = (0x28u << 26)| (2u << 21)  | (4u << 16)  | 0u;
+            uint slt_v0_s1_v1   = (0u << 26)  | (17u << 21) | (3u << 16)  | (2u << 11) | 0x2Au;
+            uint nop             = 0u;
+            uint bne_v0_m6      = (5u << 26)  | (2u << 21)  | (0u << 16)  | unchecked((uint)(ushort)(-6));
+            uint addiu_s5_m1    = (9u << 26)  | (21u << 21) | (21u << 16) | unchecked((uint)(ushort)(-1)); // -1
+            uint addiu_t0_77    = (9u << 26)  | (0u << 21)  | (8u << 16)  | 77u;
+
+            var emu = new PS2Emulator();
+
+            emu.Bus.WriteWord(0x80010000u, addu_v0_s6_s5);
+            emu.Bus.WriteWord(0x80010004u, addiu_v1_m1);
+            emu.Bus.WriteWord(0x80010008u, sb_a0_0_v0);
+            emu.Bus.WriteWord(0x8001000Cu, slt_v0_s1_v1);
+            emu.Bus.WriteWord(0x80010010u, nop);
+            emu.Bus.WriteWord(0x80010014u, bne_v0_m6);
+            emu.Bus.WriteWord(0x80010018u, addiu_s5_m1);
+            emu.Bus.WriteWord(0x8001001Cu, addiu_t0_77);
+
+            // Registers: offset starts at 200_010 (so first store = base + 200_010 - 1 = 200_009).
+            // After 200_000 iterations (200_010 - 10 = 200_000 remaining), offset = 10 - 1 = 9.
+            int threshold  = 10;
+            int iterations = 200_000;
+            int initialOff = threshold + iterations; // 200_010
+
+            emu.Cpu.PC = 0x80010014UL;
+            emu.Cpu.RegsLo[3]  = (ulong)(int)(threshold + iterations); // v1 = counter
+            emu.Cpu.RegsLo[17] = (ulong)(int)threshold;                // s1 = threshold
+            emu.Cpu.RegsLo[4]  = 0xCDu;                                // a0 = fill byte
+            emu.Cpu.RegsLo[21] = (ulong)(uint)(int)initialOff;         // s5 = offset
+            emu.Cpu.RegsLo[22] = 0x80000000u;                          // s6 = base
+            emu.Cpu.COP0.WriteRegister32(12, 0x00400002u);             // BEV=1, EXL=1
+
+            emu.Step();
+
+            // Counter must equal threshold.
+            Assert.AreEqual((ulong)(int)threshold, emu.Cpu.RegsLo[3],
+                "v1 (counter) should equal threshold after descending fast-forward");
+
+            // Offset decremented by iterations, then -1 from final delay slot.
+            int expectedOff = initialOff - iterations - 1;
+            Assert.AreEqual((ulong)(uint)(int)expectedOff, emu.Cpu.RegsLo[21] & 0xFFFFFFFFUL,
+                "s5 (offset) should be initialOff - iterations - 1");
+
+            // v0 (SLT result) = 0.
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[2] & 0xFFFFFFFFUL,
+                "v0 (SLT result) should be 0 after last iteration");
+
+            // PC past the BNE + delay slot.
+            Assert.AreEqual(0x8001001CUL, emu.Cpu.PC,
+                "PC should advance to instruction after BNE+delay-slot");
+
+            // The fill wrote byte 0xCD to addresses base + (initialOff-1) down to
+            // base + (initialOff - iterations).  Physical addresses: those values & 0x1FFFFFF.
+            // Spot-check a few bytes in the filled range.
+            int physFirst = (int)((0x80000000u + initialOff - iterations) & 0x1FFFFFFu);
+            int physLast  = (int)((0x80000000u + initialOff - 1) & 0x1FFFFFFu);
+            Assert.AreEqual(0xCDu, (uint)emu.Bus.Ram[physFirst],
+                "RAM[physFirst] should be 0xCD after descending fill");
+            Assert.AreEqual(0xCDu, (uint)emu.Bus.Ram[physLast],
+                "RAM[physLast] should be 0xCD after descending fill");
+        }
+
+        /// <summary>
+        /// Verify that the CACHE IXIN instruction (rt=0x07) correctly invalidates
+        /// the i-cache line in our interpreter.  After an instruction is cached,
+        /// executing CACHE IXIN for that address, then overwriting the RAM word,
+        /// should cause the next fetch to load the new value (not the stale cache).
+        /// </summary>
+        [TestMethod]
+        public void ICache_CacheInstructionIXIN_InvalidatesLine()
+        {
+            // Step 1: cache an ADDIU $t0, $zero, 42 at KSEG0 0x80002000.
+            uint addiu42 = (9u << 26) | (0u << 21) | (8u << 16) | 42u;
+            uint addiu99 = (9u << 26) | (0u << 21) | (8u << 16) | 99u;
+
+            var emu = new PS2Emulator();
+            emu.Bus.WriteWord(0x80002000u, addiu42);
+            emu.Bus.WriteWord(0x80002004u, 0u); // nop
+
+            emu.Cpu.PC = 0x80002000UL;
+            emu.Step();
+            Assert.AreEqual(42UL, emu.Cpu.RegsLo[8], "First execution: $t0 = 42");
+
+            // Step 2: overwrite the instruction word in RAM.
+            emu.Bus.WriteWord(0x80002000u, addiu99);
+
+            // Step 3: without IXIN the i-cache would still serve addiu42.
+            // Confirm that — i-cache is still populated.
+            emu.Cpu.PC = 0x80002000UL;
+            emu.Step();
+            Assert.AreEqual(42UL, emu.Cpu.RegsLo[8], "Before IXIN: i-cache serves original (42)");
+
+            // Step 4: encode and execute CACHE IXIN (rt=0x07) for address 0x80002000.
+            // CACHE encoding: opcode=0x2F, rs=base, rt=op, imm=offset.
+            // We'll use rs=$s0 (16) = 0x80002000, offset=0 → imm=0, rt=7.
+            emu.Cpu.RegsLo[16] = 0x80002000u; // $s0 = base address
+            //   word = (0x2F << 26) | (s0=16 << 21) | (rt=7 << 16) | 0
+            uint cacheIxin = (0x2Fu << 26) | (16u << 21) | (7u << 16) | 0u;
+            // Write the CACHE instruction at a new address, execute it.
+            emu.Bus.WriteWord(0x80003000u, cacheIxin);
+            emu.Bus.WriteWord(0x80003004u, 0u); // nop
+            emu.Cpu.PC = 0x80003000UL;
+            emu.Step(); // executes CACHE IXIN → flushes i-cache line for 0x80002000
+
+            // Step 5: fetch again from 0x80002000 — should now see addiu99 from RAM.
+            emu.Cpu.PC = 0x80002000UL;
+            emu.Step();
+            Assert.AreEqual(99UL, emu.Cpu.RegsLo[8],
+                "After CACHE IXIN: stale i-cache entry cleared, RAM word (99) fetched");
+        }
+
+        /// <summary>
+        /// Verify that the i-cache loads a full 64-byte line on a miss.
+        /// When word A is fetched (cache miss), all 16 words in its 64-byte line
+        /// must be loaded.  If a store then overwrites word B (same line), the
+        /// i-cache should still serve the original word B because the line was
+        /// already populated when word A was first fetched.
+        ///
+        /// This test models the critical BIOS scenario:
+        ///   – The fill-loop delay slot at 0x80010A00 is fetched → line
+        ///     0x80010A00–0x80010A3F is loaded, caching post-loop code at 0x80010A04.
+        ///   – The bulk-fill fast-forward overwrites all of RAM with 0x20.
+        ///   – Fetching 0x80010A04 after the fill must return the ORIGINAL instruction,
+        ///     not the garbage 0x20202020, because the line was pre-populated.
+        /// </summary>
+        [TestMethod]
+        public void ICache_64ByteLineFill_CachesNeighbouringWords()
+        {
+            var emu = new PS2Emulator();
+
+            // Pick an address that is 64-byte aligned so it is word 0 of its cache line.
+            // We'll use KSEG0 0x80010A00 (mirrors the real delay-slot address).
+            uint baseAddr = 0x80010A00u;   // word 0 of its cache line
+
+            // Word at +0 (baseAddr): ADDIU $t0, $zero, 7
+            uint addiuAt0  = (9u << 26) | (0u << 21) | (8u << 16) | 7u;
+            // Word at +4 (baseAddr+4): ADDIU $t1, $zero, 99 — this is the "neighbour"
+            uint addiuAt4  = (9u << 26) | (0u << 21) | (9u << 16) | 99u;
+            uint nop = 0u;
+
+            // Write both instructions into RAM.
+            emu.Bus.WriteWord(baseAddr,     addiuAt0);
+            emu.Bus.WriteWord(baseAddr + 4, addiuAt4);
+            emu.Bus.WriteWord(baseAddr + 8, nop);   // so PC can advance after +4
+
+            // Step 1: fetch baseAddr — triggers a cache miss, loads the full 64-byte
+            // line (both addiuAt0 AND addiuAt4 are now in the cache).
+            emu.Cpu.PC = (ulong)baseAddr;
+            emu.Step();
+            Assert.AreEqual(7UL, emu.Cpu.RegsLo[8], "Step at +0: $t0 = 7");
+
+            // Step 2: overwrite RAM at baseAddr+4 with something different.
+            uint addiuAt4_new = (9u << 26) | (0u << 21) | (9u << 16) | 42u;
+            emu.Bus.WriteWord(baseAddr + 4, addiuAt4_new);
+
+            // Step 3: execute from baseAddr+4 — the cache line was already loaded on
+            // the miss at baseAddr, so the i-cache still has the ORIGINAL instruction (99).
+            emu.Cpu.PC = (ulong)(baseAddr + 4);
+            emu.Step();
+            Assert.AreEqual(99UL, emu.Cpu.RegsLo[9],
+                "Step at +4: i-cache line pre-populated, serves original neighbour (99) not overwrite (42)");
+        }
+
+        /// <summary>
+        /// Verify that TryFastForwardByteFill() pre-fetches the call-chain ($ra and
+        /// saved stack $ra values) before wiping RAM.
+        ///
+        /// Scenario modelled after the real BIOS boot sequence:
+        ///   1. A "caller" function places code at address C (KSEG0).
+        ///   2. The fill function runs at address F (KSEG0).  Fill function epilogue
+        ///      is at F+8 (inside the 4-line epilogue window).
+        ///   3. After fast-forward (Array.Fill), all RAM is overwritten.
+        ///   4. The fill epilogue runs from i-cache, restores $ra, and does jr $ra.
+        ///   5. The caller's code at C must be served from i-cache — not from the
+        ///      overwritten RAM (which would return 0x20202020).
+        ///
+        /// This test artificially exercises that path by:
+        ///   - Writing a "caller return" instruction (ADDIU $t0, $zero, 77) at a
+        ///     KSEG0 address that is far from the fast-forward PC.
+        ///   - Setting $ra to that address.
+        ///   - Running the fast-forward (which must pre-fetch the $ra address).
+        ///   - After the fast-forward RAM is wiped; fetching $ra address must still
+        ///     return the original instruction (77), not 0x20202020 (42).
+        /// </summary>
+        [TestMethod]
+        public void FastForward_PreFetchesRaBeforeFill_CallerSurvivesFill()
+        {
+            // ── Set up the fill loop pattern ──────────────────────────────────
+            // The fill loop must be at a KSEG0 address and match TryFastForwardByteFill
+            // detection.  We use 0x80010000 as the loop start.
+            //
+            // Loop body at 0x80010000:
+            //   addu  $t5, $zero, $t0   ; addrReg = $t5, baseReg=$zero, offReg=$t0
+            //   addiu $t1, $t1, -1      ; cntReg decrement
+            //   sb    $t2, 0($t5)       ; store fill byte
+            //   slt   $t3, $t4, $t1     ; cmpReg = slt(thrReg, cntReg)
+            //   bne   $t3, $zero, -4    ; branch back (imm = -4 → loop start)
+            //   addiu $t0, $t0, 1       ; delay slot: offset++
+            uint loopStart = 0x80010000u;
+            var emu = new PS2Emulator();
+
+            // addu $t5, $zero, $t0  (SPECIAL, funct=0x21, rd=$t5=13, rs=$zero=0, rt=$t0=8)
+            uint w0 = (0u << 26) | (0u << 21) | (8u << 16) | (13u << 11) | 0x21u;
+            // addiu $t1, $t1, -1  (opcode=9, rs=rt=$t1=9, imm=-1=0xFFFF)
+            uint w1 = (9u << 26) | (9u << 21) | (9u << 16) | 0xFFFFu;
+            // sb $t2, 0($t5)  (opcode=0x28, rs=$t5=13, rt=$t2=10, imm=0)
+            uint w2 = (0x28u << 26) | (13u << 21) | (10u << 16) | 0u;
+            // slt $t3, $t4, $t1  (SPECIAL, funct=0x2A, rd=$t3=11, rs=$t4=12, rt=$t1=9)
+            uint w3 = (0u << 26) | (12u << 21) | (9u << 16) | (11u << 11) | 0x2Au;
+            // bne $t3, $zero, loopStart  (opcode=5, rs=$t3=11, rt=0)
+            // target=loopStart=0x80010000, BNE at 0x80010010:
+            //   imm = (loopStart - (pc+4)) / 4 = (0x80010000 - 0x80010014) / 4 = -5
+            uint w4 = (5u << 26) | (11u << 21) | (0u << 16) | unchecked((uint)(ushort)-5);
+            // addiu $t0, $t0, 1  (opcode=9, rs=rt=$t0=8, imm=1)
+            uint w5 = (9u << 26) | (8u << 21) | (8u << 16) | 1u;
+
+            emu.Bus.WriteWord(loopStart,       w0);
+            emu.Bus.WriteWord(loopStart + 4,   w1);
+            emu.Bus.WriteWord(loopStart + 8,   w2);
+            emu.Bus.WriteWord(loopStart + 12,  w3);
+            emu.Bus.WriteWord(loopStart + 16,  w4); // BNE — pc32 for fast-forward
+            emu.Bus.WriteWord(loopStart + 20,  w5); // delay slot
+
+            // ── Caller code at a remote KSEG0 address ─────────────────────────
+            // Place a recognisable instruction far from the loop (different 64-byte line
+            // and not within 256 B of the BNE).  $ra will point here.
+            uint callerAddr = 0x80050000u;  // 256 KB away from loop
+            uint addiuCallerRet = (9u << 26) | (0u << 21) | (8u << 16) | 77u; // addiu $t0,$zero,77
+            uint nop = 0u;
+            emu.Bus.WriteWord(callerAddr,     addiuCallerRet);
+            emu.Bus.WriteWord(callerAddr + 4, nop);
+
+            // ── Registers ─────────────────────────────────────────────────────
+            // $t0 (8) = offset register = 0 (first byte address = base + 0 + 1)
+            // $t1 (9) = counter = 200000 (→ remaining = 200000 - 0 > BulkFillMinIterations)
+            // $t2 (10) = fill byte = 0x55
+            // $t3 (11) = cmpReg (SLT result, will be recomputed)
+            // $t4 (12) = threshold = 0  (thrReg, loop exits when cnt reaches 0)
+            // $t5 (13) = addrReg (computed each iter)
+            // $sp (29) = arbitrary (not used in this test)
+            // $ra (31) = caller return address → callerAddr
+            emu.Cpu.RegsLo[8]  = 0;           // $t0 = offset
+            emu.Cpu.RegsLo[9]  = 200_000;     // $t1 = counter
+            emu.Cpu.RegsLo[10] = 0x55;        // $t2 = fill byte
+            emu.Cpu.RegsLo[11] = 1;           // $t3 = cmpReg (slt != 0 → loop continues)
+            emu.Cpu.RegsLo[12] = 0;           // $t4 = threshold
+            emu.Cpu.RegsLo[29] = 0x80040000u; // $sp = some stack (nothing useful on it)
+            emu.Cpu.RegsLo[31] = callerAddr;  // $ra → caller code
+
+            // Mark the loop as executing within EXL=1 so TryFastForwardByteFill fires.
+            uint status = emu.Cpu.COP0.ReadRegister32(12);
+            emu.Cpu.COP0.WriteRegister32(12, status | 0x2u); // set EXL
+
+            // ── Run from the BNE ──────────────────────────────────────────────
+            emu.Cpu.PC = loopStart + 16; // BNE
+            emu.Step(); // triggers fast-forward; pre-fetches callerAddr; Array.Fill(0x55)
+
+            // Confirm fast-forward ran: counter = threshold and fill byte is in RAM.
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[9],  "Counter must reach threshold (0) after fast-forward");
+            Assert.AreEqual(0x55u, (uint)emu.Bus.Ram[1], "RAM[1] must be filled with 0x55");
+
+            // ── Key assertion: fetch callerAddr from i-cache ───────────────────
+            // callerAddr is now 0x55555555... in RAM (it was inside the fill range).
+            // But TryFastForwardByteFill pre-fetched $ra BEFORE the fill, so the
+            // i-cache line for callerAddr should hold the ORIGINAL addiu instruction.
+            emu.Cpu.PC = (ulong)callerAddr;
+            emu.Step();
+            Assert.AreEqual(77UL, emu.Cpu.RegsLo[8],
+                "After bulk fill: $ra pre-fetch kept caller instruction (77) in i-cache; RAM overwrite (0x55) not seen");
         }
     }
 }
