@@ -62,6 +62,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         // so that IncrementCount(1) is called every other EE instruction.
         private int _cop0CountAccum;
 
+        // Temporary debug tracing for byte-copy fast-forward diagnosis.
+        private int _byteCopyDebugCount;
+        private int _byteCopyLargeDebugCount;
+
         // ── Instruction cache (i-cache): 16 KB, 256 sets, 64-byte lines ────────────
         // The R5900 has a 16 KB physically-tagged, direct-mapped i-cache with
         // 64-byte lines (16 × 32-bit instructions per line).  This matches the
@@ -1312,61 +1316,65 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             uint bneWord = FetchWord(pc32);
             if ((bneWord >> 26) != 5u) return false;           // BNE opcode = 5
 
+            // Temporary debug: trace first 5 calls at 0x800103F4 (the byte-copy BNE)
+            bool dbg = (pc32 == 0x800103F4u && _byteCopyDebugCount < 5);
+            if (dbg) _byteCopyDebugCount++;
+
             // ── Step 2: Branch must be backward ──────────────────────────────
             int branchOffset = (short)(bneWord & 0xFFFFu);
-            if (branchOffset >= 0) return false;
+            if (branchOffset >= 0) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL branchOffset={branchOffset}>=0"); return false; }
             uint loopStart = (uint)((long)(pc32 + 4) + (long)branchOffset * 4L);
 
             // ── Step 3: Loop body must be exactly 5 instructions ─────────────
             int loopLen = (int)(pc32 - loopStart) / 4;
-            if (loopLen != 5) return false;
+            if (loopLen != 5) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL loopLen={loopLen}!=5 loopStart=0x{loopStart:x8}"); return false; }
 
             // Extract BNE register fields: rs=cntReg, rt=sentReg
             int cntReg = (int)((bneWord >> 21) & 0x1Fu);
             int sentReg = (int)((bneWord >> 16) & 0x1Fu);
-            if (cntReg == 0 || sentReg == cntReg) return false;
+            if (cntReg == 0 || sentReg == cntReg) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL cntReg={cntReg} sentReg={sentReg}"); return false; }
 
             // ── Step 4: Validate delay slot — ADDIU dstReg, dstReg, +1 ──────
             uint dsWord = FetchWord(pc32 + 4u);
-            if ((dsWord >> 26) != 9u) return false;            // ADDIU
+            if ((dsWord >> 26) != 9u) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL dsWord opcode={(dsWord>>26)} 0x{dsWord:x8}"); return false; }            // ADDIU
             int dsBase = (int)((dsWord >> 21) & 0x1Fu);
             int dsDst  = (int)((dsWord >> 16) & 0x1Fu);
-            if (dsBase != dsDst) return false;                 // rs == rt (in-place)
-            if ((short)(dsWord & 0xFFFFu) != 1) return false; // imm == +1
+            if (dsBase != dsDst) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL dsBase={dsBase}!=dsDst={dsDst}"); return false; }                 // rs == rt (in-place)
+            if ((short)(dsWord & 0xFFFFu) != 1) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL ds imm={(short)(dsWord&0xFFFF)} 0x{dsWord:x8}"); return false; } // imm == +1
             int dstReg = dsDst;
 
             // ── Step 5: Validate loop body instructions ───────────────────────
             // w0: LBU tmpReg, 0(srcReg)
             uint w0 = FetchWord(loopStart);
-            if ((w0 >> 26) != 0x24u) return false;            // LBU opcode = 0x24
-            if ((short)(w0 & 0xFFFFu) != 0) return false;     // offset must be 0
+            if ((w0 >> 26) != 0x24u) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w0 opcode={(w0>>26)} 0x{w0:x8}"); return false; }            // LBU opcode = 0x24
+            if ((short)(w0 & 0xFFFFu) != 0) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w0 offset={(short)(w0&0xFFFF)}"); return false; }     // offset must be 0
             int srcReg  = (int)((w0 >> 21) & 0x1Fu);          // base register
             int tmpReg  = (int)((w0 >> 16) & 0x1Fu);          // destination of LBU
 
             // w1: ADDIU cntReg, cntReg, -1
             uint w1 = FetchWord(loopStart + 4u);
-            if ((w1 >> 26) != 9u) return false;
-            if ((int)((w1 >> 21) & 0x1Fu) != cntReg) return false;
-            if ((int)((w1 >> 16) & 0x1Fu) != cntReg) return false;
-            if ((short)(w1 & 0xFFFFu) != -1) return false;
+            if ((w1 >> 26) != 9u) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w1 opcode 0x{w1:x8}"); return false; }
+            if ((int)((w1 >> 21) & 0x1Fu) != cntReg) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w1 rs={(w1>>21)&0x1F}!=cntReg={cntReg} 0x{w1:x8}"); return false; }
+            if ((int)((w1 >> 16) & 0x1Fu) != cntReg) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w1 rt={(w1>>16)&0x1F}!=cntReg={cntReg} 0x{w1:x8}"); return false; }
+            if ((short)(w1 & 0xFFFFu) != -1) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w1 imm={(short)(w1&0xFFFF)} 0x{w1:x8}"); return false; }
 
             // w2: ADDIU srcReg, srcReg, +1
             uint w2 = FetchWord(loopStart + 8u);
-            if ((w2 >> 26) != 9u) return false;
-            if ((int)((w2 >> 21) & 0x1Fu) != srcReg) return false;
-            if ((int)((w2 >> 16) & 0x1Fu) != srcReg) return false;
-            if ((short)(w2 & 0xFFFFu) != 1) return false;
+            if ((w2 >> 26) != 9u) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w2 opcode 0x{w2:x8}"); return false; }
+            if ((int)((w2 >> 21) & 0x1Fu) != srcReg) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w2 rs={(w2>>21)&0x1F}!=srcReg={srcReg} 0x{w2:x8}"); return false; }
+            if ((int)((w2 >> 16) & 0x1Fu) != srcReg) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w2 rt={(w2>>16)&0x1F}!=srcReg={srcReg} 0x{w2:x8}"); return false; }
+            if ((short)(w2 & 0xFFFFu) != 1) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w2 imm={(short)(w2&0xFFFF)} 0x{w2:x8}"); return false; }
 
             // w3: SB tmpReg, 0(dstReg)
             uint w3 = FetchWord(loopStart + 12u);
-            if ((w3 >> 26) != 0x28u) return false;            // SB opcode = 0x28
-            if ((int)((w3 >> 21) & 0x1Fu) != dstReg) return false;  // base = dstReg
-            if ((short)(w3 & 0xFFFFu) != 0) return false;     // offset must be 0
-            if ((int)((w3 >> 16) & 0x1Fu) != tmpReg) return false;  // data = tmpReg
+            if ((w3 >> 26) != 0x28u) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w3 opcode={(w3>>26)} 0x{w3:x8}"); return false; }            // SB opcode = 0x28
+            if ((int)((w3 >> 21) & 0x1Fu) != dstReg) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w3 base={(w3>>21)&0x1F}!=dstReg={dstReg} 0x{w3:x8}"); return false; }  // base = dstReg
+            if ((short)(w3 & 0xFFFFu) != 0) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w3 offset={(short)(w3&0xFFFF)}"); return false; }     // offset must be 0
+            if ((int)((w3 >> 16) & 0x1Fu) != tmpReg) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w3 data={(w3>>16)&0x1F}!=tmpReg={tmpReg} 0x{w3:x8}"); return false; }  // data = tmpReg
 
             // w4: NOP
             uint w4 = FetchWord(loopStart + 16u);
-            if (w4 != 0u) return false;
+            if (w4 != 0u) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL w4=0x{w4:x8} (not NOP)"); return false; }
 
             // ── Step 6: Compute remaining iterations ─────────────────────────
             // Loop exits when cntReg == sentReg.  cntReg decrements each iteration.
@@ -1374,7 +1382,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             int cntVal  = (int)(Cpu.RegsLo[cntReg]  & 0xFFFFFFFFu);
             int sentVal = (int)(Cpu.RegsLo[sentReg] & 0xFFFFFFFFu);
             long remaining = (long)cntVal - (long)sentVal;
-            if (remaining <= BulkFillMinIterations) return false;
+            if (remaining <= BulkFillMinIterations) { if (dbg) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}] FAIL remaining={remaining}<=min cntVal={cntVal} sentVal={sentVal}"); return false; }
+
+            // Also trace the first large-remaining case
+            bool dbgLarge = (pc32 == 0x800103F4u && remaining > BulkFillMinIterations && _byteCopyLargeDebugCount < 3);
+            if (dbgLarge) _byteCopyLargeDebugCount++;
+
+            if (dbg || dbgLarge) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}/{_byteCopyLargeDebugCount}] PASS all checks: pc=0x{pc32:x8} remaining={remaining} cntReg={cntReg} sentReg={sentReg} srcReg={srcReg} dstReg={dstReg} tmpReg={tmpReg}");
 
             // ── Step 7: Translate src/dst and perform the copy ───────────────
             byte asid = (byte)(Cpu.COP0.ReadRegister32(10) & 0xFFu);
@@ -1384,14 +1398,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             long srcRem = PhysAddrAndPageRemaining((uint)curSrc, asid, out uint srcPhys);
             long dstRem = PhysAddrAndPageRemaining((uint)curDst, asid, out uint dstPhys);
 
-            long chunkLen;
+            if (dbg || dbgLarge) Console.WriteLine($"[ByteCopy dbg#{_byteCopyDebugCount}/{_byteCopyLargeDebugCount}] srcReg={srcReg} curSrc=0x{curSrc:x8} srcRem={srcRem} srcPhys=0x{srcPhys:x8}; dstReg={dstReg} curDst=0x{curDst:x8} dstRem={dstRem} dstPhys=0x{dstPhys:x8}");
+
+            long chunkLen = 0;
             bool fullSkip = false;
 
-            if (srcRem >= 0 && dstRem >= 0
-                && srcPhys + remaining <= Bus.Ram.Length
-                && dstPhys + remaining <= Bus.Ram.Length)
+            if (srcRem >= 0 && dstRem >= 0)
             {
                 // Both addresses translated to physical RAM.  Copy one page-chunk.
+                // chunkLen is bounded by srcRem/dstRem (bytes remaining in the current
+                // physical page from each pointer), so it never exceeds the RAM array
+                // even when 'remaining' is larger than the space left in RAM from
+                // srcPhys or dstPhys.  The excess iterations are handled on the next
+                // TryFastForwardByteCopy call (partial-copy path below).
                 chunkLen = Math.Min(remaining, Math.Min(srcRem, dstRem));
             }
             else if (srcRem < 0 && dstRem < 0)
@@ -1416,24 +1435,56 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 else
                     return false;
             }
+            else if (srcRem >= 0 && dstRem < 0)
+            {
+                // Source in physical RAM, dst TLB miss.
+                // If dst translates to unmapped physical space (bus silently discards
+                // writes), the copy is a no-op from memory's perspective.
+                uint dstRaw = PS2MemoryBus.TranslateAddress((uint)curDst);
+                if (dstRaw >= PS2MemoryBus.MainRamMirrorEnd && !IsBiosRom(dstRaw))
+                {
+                    chunkLen = remaining;
+                    fullSkip = true;
+                }
+                else
+                    return false;
+            }
             else if (srcRem < 0 && dstRem >= 0)
             {
-                // src TLB miss — only handle the BIOS ROM → RAM kernel-copy case.
+                // src TLB miss.
                 uint srcRaw = PS2MemoryBus.TranslateAddress((uint)curSrc);
-                if (!IsBiosRom(srcRaw)) return false;   // anything else: let bus handle it
-                uint biosOff = srcRaw - PS2MemoryBus.BiosRomPhysBase;
-                chunkLen = Math.Min(remaining, dstRem);
-                chunkLen = Math.Min(chunkLen, (long)(Bus.Bios.Length - biosOff));
-                if (chunkLen <= 0) return false;
-                if (dstPhys + chunkLen > Bus.Ram.Length) return false;
-                Bus.Bios.AsSpan((int)biosOff, (int)chunkLen)
-                         .CopyTo(Bus.Ram.AsSpan((int)dstPhys, (int)chunkLen));
-                curSrc += (ulong)chunkLen;
-                curDst += (ulong)chunkLen;
-                goto commitRegisters;
+                if (IsBiosRom(srcRaw))
+                {
+                    // BIOS ROM → RAM kernel-copy path.
+                    uint biosOff = srcRaw - PS2MemoryBus.BiosRomPhysBase;
+                    chunkLen = Math.Min(remaining, dstRem);
+                    chunkLen = Math.Min(chunkLen, (long)(Bus.Bios.Length - biosOff));
+                    if (chunkLen <= 0) return false;
+                    if (dstPhys + chunkLen > Bus.Ram.Length) return false;
+                    Bus.Bios.AsSpan((int)biosOff, (int)chunkLen)
+                             .CopyTo(Bus.Ram.AsSpan((int)dstPhys, (int)chunkLen));
+                    curSrc += (ulong)chunkLen;
+                    curDst += (ulong)chunkLen;
+                    goto commitRegisters;
+                }
+                else if (srcRaw >= PS2MemoryBus.MainRamMirrorEnd)
+                {
+                    // Unmapped src: the bus dummy buffer returns 0 for every read,
+                    // which would make this a zero-fill of the dst RAM region.
+                    // However, for large copies the dst virtual address wraps around
+                    // via the bus's 32 MB mirror mask (vaddr & 0x01FFFFFF), which
+                    // would overwrite kernel code at physical 0x00000000 when the
+                    // virtual address crosses the 32 MB boundary.  On real hardware
+                    // the TLB would map these large virtual addresses to non-existent
+                    // physical pages (writes discarded).  To match that behaviour and
+                    // avoid corrupting in-flight kernel code, treat the full copy as
+                    // a skip: advance all pointers/counter without touching RAM.
+                    chunkLen = remaining;
+                    fullSkip = true;
+                }
+                else
+                    return false;  // src is in RAM but TLB-mapped (should not happen for fast-forward)
             }
-            else
-                return false;
 
             if (!fullSkip)
             {
