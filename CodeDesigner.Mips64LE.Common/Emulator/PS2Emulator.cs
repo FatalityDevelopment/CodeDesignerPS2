@@ -129,6 +129,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// <summary>Total instructions executed since last reset.</summary>
         public ulong InstructionCount { get; private set; }
 
+        private bool _dbgDecompFirstFire = true;
+        private bool _dbgFill2FirstFire = true;
+
+        /// <summary>Debug: incremented each Step() for watchpoint tracing.</summary>
+        [System.ThreadStatic]
+        public static ulong DbgStepCount;
         /// <summary>Raised when the CPU encounters an unrecognised instruction word.</summary>
         public event EventHandler<uint>? UnknownInstruction;
 
@@ -371,6 +377,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// </summary>
         public void Step()
         {
+            DbgStepCount++;
             // ── COP0 Count increment + Count/Compare interrupt check ──────────
             // Count increments at HALF the EE CPU clock rate.
             // Reference: PCSX2 R5900.cpp  cpuRegs.CP0.n.Count += elapsed / 2.
@@ -441,6 +448,32 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // when no fixed mapping applies.  KSEG0/KSEG1 continue to use the bus's
             // built-in static address translation.
             uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+
+            // Debug: when entering the decompressor loop, dump key registers.
+            if (pc32 == 0x80010870u && _dbgDecompFirstFire)
+            {
+                _dbgDecompFirstFire = false;
+                uint a1 = (uint)(Cpu.RegsLo[5] & 0xFFFFFFFFu);  // $a1
+                uint s0 = (uint)(Cpu.RegsLo[16] & 0xFFFFFFFFu); // $s0
+                uint s2 = (uint)(Cpu.RegsLo[18] & 0xFFFFFFFFu); // $s2
+                System.Console.Error.WriteLine($"[DECOMP] first fire at step={DbgStepCount}: $a1=0x{a1:x8} $s0=0x{s0:x8} $s2=0x{s2:x8}");
+                uint physA1 = PS2MemoryBus.TranslateAddress(a1);
+                System.Console.Error.WriteLine($"[DECOMP] $a1 phys=0x{physA1:x8}  RAM[physA1]=0x{(physA1 < Bus.Ram.Length ? Bus.Ram[physA1] : 0xff):x2}  BiosRom={physA1 >= 0x1FC00000u}");
+                System.Console.Error.WriteLine($"[DECOMP] table[0..3]: 0x{Bus.ReadWord(a1):x8} 0x{Bus.ReadWord(a1+4):x8}");
+            }
+
+            // Debug: trace first visit to second fill loop start (0x800108B4)
+            if (pc32 == 0x800108B4u && _dbgFill2FirstFire)
+            {
+                _dbgFill2FirstFire = false;
+                uint p108C4raw = (pc32 >= 0x800108B4u && 0x108C4u < (uint)Bus.Ram.Length) ? Bus.Ram[0x108C4] : 0u;
+                System.Console.Error.WriteLine($"[FILL2] first visit at step={DbgStepCount} RAM[0x108C4]=0x{p108C4raw:x2} icacheSet35valid={_iCacheValid[(0x108C4/64)&0xFF]}");
+                System.Console.Error.Write("[FILL2] instructions 0x800108A8..0x800108F0: ");
+                for (uint _fa = 0x800108A8u; _fa <= 0x800108F0u; _fa += 4u)
+                    System.Console.Error.Write($"0x{FetchWord(_fa):x8} ");
+                System.Console.Error.WriteLine();
+            }
+
             uint word;
             try
             {
@@ -662,7 +695,20 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             // ── Step 1: verify the BNE instruction at pc32 ──────────────────
             // BNE format: opcode=5, rs=cmpReg, rt=$zero (0), imm=signed offset.
-            uint bneWord = Bus.ReadWord(pc32);
+            //
+            // IMPORTANT: we use FetchWord (i-cache) rather than Bus.ReadWord (raw RAM)
+            // for ALL instruction reads in this detector.  The fill loop overwrites RAM
+            // with the fill byte as it runs; by the time the descending variant reaches
+            // its own BNE at pc32, the RAM word there already reads back as 0x30303030.
+            // The i-cache was populated with the real BNE encoding when the CPU first
+
+            // Debug: temporarily trace all BNE hits that have a nearby backward target.
+            bool _dbgTrace = (pc32 >= 0x80010850u && pc32 <= 0x800108F0u);
+            // fetched that line, and it is not invalidated by stores, so FetchWord
+            // returns the original (pre-fill) instruction word even after RAM is corrupted.
+            // This matches the behaviour of real PS2 hardware, where the i-cache
+            // shields the executing code from its own store loop.
+            uint bneWord = FetchWord(pc32);
             if ((bneWord >> 26) != 5u) return false;          // must be BNE
             int bneRs = (int)((bneWord >> 21) & 0x1Fu);       // compare register
             if (((bneWord >> 16) & 0x1Fu) != 0u) return false; // rt must be $zero
@@ -676,11 +722,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (loopStart >= pc32 || pc32 - loopStart > 80u) return false;
 
             // ── Step 2: verify the delay slot (ADDIU offReg, offReg, ±1) ────
-            // We read raw from bus (not i-cache) so we get the original word even
-            // if the fill has already overwritten the delay-slot location.
             // The delay slot increments (+1, ascending fill) or decrements (-1,
             // descending fill) the offset register each iteration.
-            uint dsWord = Bus.ReadWord(pc32 + 4u);
+            // Use FetchWord (i-cache) — the delay-slot word in RAM may already be
+            // the fill byte by the time we get here.
+            uint dsWord = FetchWord(pc32 + 4u);
+            if (_dbgTrace) {
+                int _lbl = (int)(pc32 - loopStart) / 4;
+                System.Console.Error.Write($"[FF] pc=0x{pc32:x8} BNE rs={bneRs} loopStart=0x{loopStart:x8} len={_lbl} ds=0x{dsWord:x8} body: ");
+                for (int _di = 0; _di < _lbl && _di < 12; _di++)
+                    System.Console.Error.Write($"0x{FetchWord(loopStart+(uint)(_di*4)):x8} ");
+                System.Console.Error.WriteLine();
+            }
             if ((dsWord >> 26) != 9u) return false;           // must be ADDIU
             int dsRs = (int)((dsWord >> 21) & 0x1Fu);
             int dsRt = (int)((dsWord >> 16) & 0x1Fu);
@@ -692,13 +745,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             // ── Step 3: read the loop-body instructions ──────────────────────
             // Accept 4 to 6 instructions between loopStart and pc32.
+            // Use FetchWord (i-cache) for the same reason as above.
             int loopBodyLen = (int)(pc32 - loopStart) / 4;
+            if (_dbgTrace) {
+                System.Console.Error.Write($"[FF] loopBodyLen={loopBodyLen} body: ");
+                for (int _di = 0; _di < loopBodyLen && _di < 12; _di++)
+                    System.Console.Error.Write($"0x{FetchWord(loopStart+(uint)(_di*4)):x8} ");
+                System.Console.Error.WriteLine();
+            }
             if (loopBodyLen < 4 || loopBodyLen > 6) return false;
 
-            uint w0 = Bus.ReadWord(loopStart);          // addu
-            uint w1 = Bus.ReadWord(loopStart + 4u);     // addiu -1
-            uint w2 = Bus.ReadWord(loopStart + 8u);     // sb
-            uint w3 = Bus.ReadWord(loopStart + 12u);    // slt
+            uint w0 = FetchWord(loopStart);          // addu
+            uint w1 = FetchWord(loopStart + 4u);     // addiu -1
+            uint w2 = FetchWord(loopStart + 8u);     // sb
+            uint w3 = FetchWord(loopStart + 12u);    // slt
+            if (_dbgTrace) System.Console.Error.WriteLine($"[FF] w0=0x{w0:x8} w1=0x{w1:x8} w2=0x{w2:x8} w3=0x{w3:x8} loopBodyLen={loopBodyLen}");
 
             // w0: ADDU addrReg, baseReg, offReg  (SPECIAL funct=0x21)
             if ((w0 >> 26) != 0u || (w0 & 0x3Fu) != 0x21u) return false;
@@ -813,6 +874,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             // (a) Fill function epilogue: 8 lines past the BNE / delay slot.
             PrefetchRegion(pc32 + 4, 8);
+
+            // Debug: print $ra and check if 0x800108C4 is covered.
+            uint _dbgRa = (uint)(Cpu.RegsLo[31] & 0xFFFFFFFFu);
+            System.Console.Error.WriteLine($"[PREFETCH] ascending fill at pc=0x{pc32:x8} ra=0x{_dbgRa:x8} sp=0x{(uint)(Cpu.RegsLo[29]&0xFFFFFFFFu):x8}");
 
             // (b) Direct return address ($ra = register 31): 16 lines (1 KB).
             uint raVaddr = (uint)(Cpu.RegsLo[31] & 0xFFFFFFFFu);

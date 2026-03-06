@@ -187,6 +187,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public void WriteByte(uint vaddr, byte value)
         {
             uint paddr = TranslateAddress(vaddr);
+            // Debug watchpoint: trace what writes to physical 0x108C0-0x108CF (the stuck PC area)
+            if (paddr >= 0x108C0u && paddr <= 0x108CFu && PS2Emulator.DbgStepCount > 0)
+                System.Console.Error.WriteLine($"[WP] SB vaddr=0x{vaddr:x8} paddr=0x{paddr:x8} val=0x{value:x2} step={PS2Emulator.DbgStepCount}");
             // IOP RAM sub-bus mirror: EE writes visible to IOP RAM.
             if (paddr >= IopRamMirrorBase && paddr < IopRamMirrorEnd && IopRam != null)
             {
