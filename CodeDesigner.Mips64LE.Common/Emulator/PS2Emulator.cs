@@ -860,6 +860,31 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             uint physStart  = PS2MemoryBus.TranslateAddress(startVaddr)
                               & (uint)(PS2MemoryBus.MainRamSize - 1);
 
+            // ── Data-cache preservation ──────────────────────────────────────
+            // The real EE has an 8 KB write-back data cache.  During the fill
+            // loop the store address advances through all of RAM, but the stack
+            // region (sp ± 2 KB) stays resident in the d-cache and is NOT
+            // overwritten from the cache's perspective.  When the function
+            // epilogue later executes "ld $ra, N($sp)", the d-cache serves the
+            // original saved return address, not the fill byte.
+            //
+            // Our emulator has no d-cache, so Array.Fill corrupts the stack.
+            // We compensate by saving and restoring the active stack window
+            // (sp – 64 … sp + 2048) around the bulk fill.  The window is small
+            // enough to be harmless for any fill that actually covers all of RAM,
+            // and wide enough to hold the entire BIOS call chain at the time of
+            // the fill (empirically ≈ 384 bytes on the second fill pass).
+            const int StackSaveWindow = 2048 + 64;
+            uint physSpSave = PS2MemoryBus.TranslateAddress(
+                                  (uint)(Cpu.RegsLo[29] & 0xFFFFFFFFu))
+                              & (uint)(PS2MemoryBus.MainRamSize - 1);
+            uint stackSaveBase = physSpSave >= 64u ? physSpSave - 64u : 0u;
+            int  stackSaveLen  = (int)Math.Min(
+                                     (uint)StackSaveWindow,
+                                     (uint)Bus.Ram.Length - stackSaveBase);
+            byte[] stackSnapshot = new byte[stackSaveLen];
+            Bus.Ram.AsSpan((int)stackSaveBase, stackSaveLen).CopyTo(stackSnapshot);
+
             if (remaining >= PS2MemoryBus.MainRamSize)
             {
                 // Fill covers the entire 32 MB RAM (multiple wrap-arounds).
@@ -882,6 +907,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     Bus.Ram.AsSpan(0, (int)(count - (uint)firstChunk)).Fill(fillByte);
                 }
             }
+
+            // Restore the stack window so that saved return addresses remain
+            // correct — matching the d-cache behaviour of real hardware.
+            stackSnapshot.CopyTo(Bus.Ram.AsSpan((int)stackSaveBase, stackSaveLen));
 
             // ── Step 7: update CPU registers to post-loop state ──────────────
             // After the last iteration (BNE not taken, delay slot still fires):
