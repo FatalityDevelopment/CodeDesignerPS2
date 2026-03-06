@@ -211,6 +211,7 @@ namespace CodeDesigner.Mips64LE
             uint      iopRamFirstPc      = uint.MaxValue;
             bool      iopRamEntryDumped  = false;
             int       iopMemmoveCallCount = 0;
+            int       iopICtrlPollCount   = 0;   // suppress spam after first N prints
             var       iopSeenPcs         = new System.Collections.Generic.HashSet<uint>();
             scheduler.IOP.StepHook = state =>
             {
@@ -337,12 +338,16 @@ namespace CodeDesigner.Mips64LE
                     Console.WriteLine($"  IOP 0x18C4 (lw a2,0x50(fp)): fp=0x{fp30:x8}  fp[0x50]=0x{val50:x8}(count?)  fp[0x54]=0x{val54:x8}(src?)");
                 }
 
-                // Trace the very first entry to the I_CTRL polling function (0x4078)
-                // and capture what value is in I_CTRL at that moment.
-                if (pc == 0x4078u)
+                // Trace the very first entries to the I_CTRL polling function (0x4078) and
+                // capture what value is in I_CTRL at that moment.  Limit to 10 prints to
+                // avoid flooding the console once the interrupt handler runs at normal rate.
+                if (pc == 0x4078u && iopICtrlPollCount < 10)
                 {
-                    uint iCtrl = scheduler.IOP.Bus.ReadWord(0x1F801078u);
-                    Console.WriteLine($"  IOP 0x4078 (I_CTRL poll): I_CTRL=0x{iCtrl:x8} a0=0x{state.ReadReg(4):x8} ra=0x{state.ReadReg(31):x8}");
+                    iopICtrlPollCount++;
+                    uint iCtrl = scheduler.IOP.Bus.ICtrl;  // non-destructive read via property
+                    Console.WriteLine($"  IOP 0x4078 (I_CTRL poll #{iopICtrlPollCount}): I_CTRL=0x{iCtrl:x8} a0=0x{state.ReadReg(4):x8} ra=0x{state.ReadReg(31):x8}");
+                    if (iopICtrlPollCount == 10)
+                        Console.WriteLine("  IOP 0x4078: further I_CTRL poll traces suppressed.");
                 }
             };
 
@@ -800,7 +805,7 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine(
                 $"  IOP I_STAT: 0x{iopIStat:x8}  " +
                 $"I_MASK: 0x{iopIMask:x8}  " +
-                $"I_CTRL: 0x{sched.IOP.Bus.ReadWord(0x1F801078u):x8}  " +
+                $"I_CTRL: 0x{sched.IOP.Bus.ICtrl:x8}  " +
                 $"pending={sched.IOP.Bus.IsInterruptPending}");
 
             // ── IOP key registers (v0=$2, a0=$4, sp=$29, ra=$31) ─────────────
