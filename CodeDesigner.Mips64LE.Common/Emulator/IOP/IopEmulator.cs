@@ -408,6 +408,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             State.SR    = _bridge.COP0.ReadRegister32(12);
             State.Cause = _bridge.COP0.ReadRegister32(13);
             State.EPC   = _bridge.COP0.ReadRegister32(14);
+            // SR bit 16 = IsC (Isolate Cache): when set the CPU routes data writes
+            // to the I-cache instead of main memory.  Propagate to the bus so that
+            // WriteByte/WriteWord suppress RAM writes during I-cache flush loops.
+            Bus.IsCacheIsolated = (State.SR & 0x10000u) != 0;
         }
 
         // ── Branch-likely detection (same criteria as EE emulator) ───────────
