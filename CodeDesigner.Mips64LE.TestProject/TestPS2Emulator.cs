@@ -1931,5 +1931,113 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(99UL, emu.Cpu.RegsLo[9],
                 "Step at +4: i-cache line pre-populated, serves original neighbour (99) not overwrite (42)");
         }
+
+        /// <summary>
+        /// Verify that TryFastForwardByteFill() pre-fetches the call-chain ($ra and
+        /// saved stack $ra values) before wiping RAM.
+        ///
+        /// Scenario modelled after the real BIOS boot sequence:
+        ///   1. A "caller" function places code at address C (KSEG0).
+        ///   2. The fill function runs at address F (KSEG0).  Fill function epilogue
+        ///      is at F+8 (inside the 4-line epilogue window).
+        ///   3. After fast-forward (Array.Fill), all RAM is overwritten.
+        ///   4. The fill epilogue runs from i-cache, restores $ra, and does jr $ra.
+        ///   5. The caller's code at C must be served from i-cache — not from the
+        ///      overwritten RAM (which would return 0x20202020).
+        ///
+        /// This test artificially exercises that path by:
+        ///   - Writing a "caller return" instruction (ADDIU $t0, $zero, 77) at a
+        ///     KSEG0 address that is far from the fast-forward PC.
+        ///   - Setting $ra to that address.
+        ///   - Running the fast-forward (which must pre-fetch the $ra address).
+        ///   - After the fast-forward RAM is wiped; fetching $ra address must still
+        ///     return the original instruction (77), not 0x20202020 (42).
+        /// </summary>
+        [TestMethod]
+        public void FastForward_PreFetchesRaBeforeFill_CallerSurvivesFill()
+        {
+            // ── Set up the fill loop pattern ──────────────────────────────────
+            // The fill loop must be at a KSEG0 address and match TryFastForwardByteFill
+            // detection.  We use 0x80010000 as the loop start.
+            //
+            // Loop body at 0x80010000:
+            //   addu  $t5, $zero, $t0   ; addrReg = $t5, baseReg=$zero, offReg=$t0
+            //   addiu $t1, $t1, -1      ; cntReg decrement
+            //   sb    $t2, 0($t5)       ; store fill byte
+            //   slt   $t3, $t4, $t1     ; cmpReg = slt(thrReg, cntReg)
+            //   bne   $t3, $zero, -4    ; branch back (imm = -4 → loop start)
+            //   addiu $t0, $t0, 1       ; delay slot: offset++
+            uint loopStart = 0x80010000u;
+            var emu = new PS2Emulator();
+
+            // addu $t5, $zero, $t0  (SPECIAL, funct=0x21, rd=$t5=13, rs=$zero=0, rt=$t0=8)
+            uint w0 = (0u << 26) | (0u << 21) | (8u << 16) | (13u << 11) | 0x21u;
+            // addiu $t1, $t1, -1  (opcode=9, rs=rt=$t1=9, imm=-1=0xFFFF)
+            uint w1 = (9u << 26) | (9u << 21) | (9u << 16) | 0xFFFFu;
+            // sb $t2, 0($t5)  (opcode=0x28, rs=$t5=13, rt=$t2=10, imm=0)
+            uint w2 = (0x28u << 26) | (13u << 21) | (10u << 16) | 0u;
+            // slt $t3, $t4, $t1  (SPECIAL, funct=0x2A, rd=$t3=11, rs=$t4=12, rt=$t1=9)
+            uint w3 = (0u << 26) | (12u << 21) | (9u << 16) | (11u << 11) | 0x2Au;
+            // bne $t3, $zero, loopStart  (opcode=5, rs=$t3=11, rt=0)
+            // target=loopStart=0x80010000, BNE at 0x80010010:
+            //   imm = (loopStart - (pc+4)) / 4 = (0x80010000 - 0x80010014) / 4 = -5
+            uint w4 = (5u << 26) | (11u << 21) | (0u << 16) | unchecked((uint)(ushort)-5);
+            // addiu $t0, $t0, 1  (opcode=9, rs=rt=$t0=8, imm=1)
+            uint w5 = (9u << 26) | (8u << 21) | (8u << 16) | 1u;
+
+            emu.Bus.WriteWord(loopStart,       w0);
+            emu.Bus.WriteWord(loopStart + 4,   w1);
+            emu.Bus.WriteWord(loopStart + 8,   w2);
+            emu.Bus.WriteWord(loopStart + 12,  w3);
+            emu.Bus.WriteWord(loopStart + 16,  w4); // BNE — pc32 for fast-forward
+            emu.Bus.WriteWord(loopStart + 20,  w5); // delay slot
+
+            // ── Caller code at a remote KSEG0 address ─────────────────────────
+            // Place a recognisable instruction far from the loop (different 64-byte line
+            // and not within 256 B of the BNE).  $ra will point here.
+            uint callerAddr = 0x80050000u;  // 256 KB away from loop
+            uint addiuCallerRet = (9u << 26) | (0u << 21) | (8u << 16) | 77u; // addiu $t0,$zero,77
+            uint nop = 0u;
+            emu.Bus.WriteWord(callerAddr,     addiuCallerRet);
+            emu.Bus.WriteWord(callerAddr + 4, nop);
+
+            // ── Registers ─────────────────────────────────────────────────────
+            // $t0 (8) = offset register = 0 (first byte address = base + 0 + 1)
+            // $t1 (9) = counter = 200000 (→ remaining = 200000 - 0 > BulkFillMinIterations)
+            // $t2 (10) = fill byte = 0x55
+            // $t3 (11) = cmpReg (SLT result, will be recomputed)
+            // $t4 (12) = threshold = 0  (thrReg, loop exits when cnt reaches 0)
+            // $t5 (13) = addrReg (computed each iter)
+            // $sp (29) = arbitrary (not used in this test)
+            // $ra (31) = caller return address → callerAddr
+            emu.Cpu.RegsLo[8]  = 0;           // $t0 = offset
+            emu.Cpu.RegsLo[9]  = 200_000;     // $t1 = counter
+            emu.Cpu.RegsLo[10] = 0x55;        // $t2 = fill byte
+            emu.Cpu.RegsLo[11] = 1;           // $t3 = cmpReg (slt != 0 → loop continues)
+            emu.Cpu.RegsLo[12] = 0;           // $t4 = threshold
+            emu.Cpu.RegsLo[29] = 0x80040000u; // $sp = some stack (nothing useful on it)
+            emu.Cpu.RegsLo[31] = callerAddr;  // $ra → caller code
+
+            // Mark the loop as executing within EXL=1 so TryFastForwardByteFill fires.
+            uint status = emu.Cpu.COP0.ReadRegister32(12);
+            emu.Cpu.COP0.WriteRegister32(12, status | 0x2u); // set EXL
+
+            // ── Run from the BNE ──────────────────────────────────────────────
+            emu.Cpu.PC = loopStart + 16; // BNE
+            emu.Step(); // triggers fast-forward; pre-fetches callerAddr; Array.Fill(0x55)
+
+            // Confirm fast-forward ran: counter = threshold and fill byte is in RAM.
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[9],  "Counter must reach threshold (0) after fast-forward");
+            Assert.AreEqual(0x55u, (uint)emu.Bus.Ram[1], "RAM[1] must be filled with 0x55");
+
+            // ── Key assertion: fetch callerAddr from i-cache ───────────────────
+            // callerAddr is now 0x55555555... in RAM (it was inside the fill range).
+            // But TryFastForwardByteFill pre-fetched $ra BEFORE the fill, so the
+            // i-cache line for callerAddr should hold the ORIGINAL addiu instruction.
+            emu.Cpu.PC = (ulong)callerAddr;
+            emu.Step();
+            Assert.AreEqual(77UL, emu.Cpu.RegsLo[8],
+                "After bulk fill: $ra pre-fetch kept caller instruction (77) in i-cache; RAM overwrite (0x55) not seen");
+        }
     }
 }

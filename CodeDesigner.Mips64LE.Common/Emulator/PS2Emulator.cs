@@ -730,33 +730,106 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             long remaining = (long)cntVal - (long)thrVal;
             if (remaining <= BulkFillMinIterations) return false;
 
-            // ── Step 5: pre-populate i-cache for post-loop instructions ────────
-            // The fast-forward bypasses Step()'s normal branch/delay-slot path,
-            // so the delay slot at pc32+4 and the post-loop instructions at pc32+8
-            // are never fetched through FetchWord() during the loop.  Without
-            // explicit pre-fetching they would be loaded AFTER the fill has
-            // overwritten them — yielding garbage 0x20202020 instructions.
+            // ── Step 5: comprehensive i-cache warm-up before bulk-fill ─────────────────
             //
-            // Solution (mirrors real hardware): fetch the delay-slot and
-            // post-loop instruction lines through FetchWord() NOW, before the
-            // RAM is modified.  A 64-byte cache line fetch loads all 16
-            // surrounding words at once, typically covering a full function
-            // epilogue (jr $ra + nop + stack restore).
+            // ROOT CAUSE:
+            //   TryFastForwardByteFill() collapses 537 M BIOS fill iterations into
+            //   Array.Fill().  On real hardware the i-cache is ALREADY populated with
+            //   every instruction in the call chain, because the CPU fetched each one
+            //   on the way in to the fill loop.  Our fast-forward skips those fetches,
+            //   so after Array.Fill the i-cache is sparse and every cache miss returns
+            //   the garbage fill-byte (0x20202020 = "addi $zero,$at,0x2020").
             //
-            // We pre-fetch 4 consecutive cache lines starting at the delay slot
-            // (256 bytes of post-loop code) — enough for any BIOS epilogue.
-            if ((pc32 & 0xE0000000u) == 0x80000000u) // only for KSEG0 (cached)
+            // HOW PCSX2 HANDLES THIS:
+            //   PCSX2's JIT (EErec) compiles MIPS blocks to native code before they
+            //   run.  When the fill loop executes, every block in the call chain
+            //   (epilogue, caller, caller's caller, exception handler) was already
+            //   compiled.  The fill overwrites the MIPS RAM but the compiled x86 code
+            //   stays valid in the JIT cache until a CACHE IXIN or SMC fault evicts it.
+            //   PCSX2's pure interpreter does NOT fast-forward — it runs all 537 M
+            //   iterations at ~1 MIPS, which is why PCSX2 requires the JIT for the
+            //   BIOS to boot in reasonable time.
+            //
+            // OUR EQUIVALENT (no JIT):
+            //   Before overwriting RAM, explicitly load every 64-byte i-cache line
+            //   that post-fill execution will need.  This exactly reproduces the
+            //   "naturally-populated" i-cache state that real hardware has when it
+            //   reaches the fill loop.  We cover four categories:
+            //
+            //   (a) Fill function epilogue  — 4 lines (256 B) starting at pc32+4.
+            //       These are the instructions executed immediately after BNE exits.
+            //
+            //   (b) Direct return address   — 8 lines (512 B) around the $ra register.
+            //       After the epilogue, "jr $ra" jumps here.  Without this, the first
+            //       instruction the CPU sees after returning is 0x20202020.
+            //
+            //   (c) Call-stack chain        — scan 512 B of the stack ($sp) for
+            //       word-aligned KSEG0 addresses that look like saved $ra values;
+            //       pre-fetch 4 lines around each (up to 8 candidates).  This covers
+            //       the grandcaller, great-grandcaller, etc. in the BIOS call chain.
+            //
+            //   (d) BEV=0 exception handler — 16 lines (1 KB) at 0x80000080.
+            //       If a corrupted instruction after the fill triggers an exception
+            //       (e.g. arithmetic overflow from 0x20202020 reaching an uncached
+            //       address), the handler must be in cache so the CPU can recover.
+            //
+            // Categories (a)–(c) match PCSX2 JIT semantics: every block in the
+            // call chain is "compiled" (cached) before the fill runs.
+            // Category (d) is insurance against any remaining uncached address.
+
+            // Local helpers — these are ordinary local functions (no JIT attribute
+            // needed; the compiler will inline short ones automatically).
+
+            // Load one 64-byte KSEG0 i-cache line through FetchWord.
+            // Non-KSEG0 addresses are silently ignored (they bypass the i-cache).
+            void PrefetchLine(uint vaddr)
             {
-                for (uint prefetchOff = 4u; prefetchOff < 4u + 256u; prefetchOff += 64u)
+                if ((vaddr & 0xE0000000u) == 0x80000000u)
+                    FetchWord(vaddr & ~0x3Fu);      // align to 64-byte boundary, then fetch
+            }
+
+            // Pre-fetch nLines consecutive 64-byte lines starting at the line
+            // that contains vaddr.
+            void PrefetchRegion(uint vaddr, int nLines)
+            {
+                uint lineBase = vaddr & ~0x3Fu;
+                for (int li = 0; li < nLines; li++)
+                    PrefetchLine(lineBase + (uint)(li << 6));
+            }
+
+            // (a) Fill function epilogue: 4 lines past the BNE / delay slot.
+            PrefetchRegion(pc32 + 4, 4);
+
+            // (b) Direct return address ($ra = register 31): 8 lines (512 B).
+            uint raVaddr = (uint)(Cpu.RegsLo[31] & 0xFFFFFFFFu);
+            PrefetchRegion(raVaddr, 8);
+
+            // (c) Call-stack walk: read 512 B of stack and pre-fetch any word that
+            //     looks like a saved KSEG0 return address (word-aligned, != 0x80000000).
+            uint spVaddr = (uint)(Cpu.RegsLo[29] & 0xFFFFFFFFu);
+            uint physSp  = PS2MemoryBus.TranslateAddress(spVaddr)
+                           & (uint)(PS2MemoryBus.MainRamSize - 1);
+            int  nSavedRa = 0;
+            for (uint so = 0; so <= 512u && nSavedRa < 8; so += 4u)
+            {
+                uint pa = physSp + so;
+                if (pa + 3 >= (uint)Bus.Ram.Length) break;
+                uint stackWord = (uint)(Bus.Ram[pa]
+                                      | (Bus.Ram[pa + 1] << 8)
+                                      | (Bus.Ram[pa + 2] << 16)
+                                      | (Bus.Ram[pa + 3] << 24));
+                // A saved $ra is: KSEG0, word-aligned, and not the bare base address.
+                if ((stackWord & 0xE0000003u) == 0x80000000u && stackWord != 0x80000000u)
                 {
-                    // The 64-byte line fetch is triggered by any word within that line.
-                    // Using the first word of each 64-byte block avoids fetching the
-                    // same line twice (line start = (pc32 + prefetchOff) & ~0x3F).
-                    uint prefetchPc = (pc32 + prefetchOff) & ~0x3Fu; // 64-byte aligned
-                    if ((prefetchPc & 0xE0000000u) == 0x80000000u)   // still KSEG0
-                        FetchWord(prefetchPc);
+                    PrefetchRegion(stackWord, 4);
+                    nSavedRa++;
                 }
             }
+
+            // (d) BEV=0 general exception handler: 16 lines (1 KB) at 0x80000080.
+            //     Pre-fetch unconditionally so any exception after the fill can be
+            //     handled by code in the i-cache rather than RAM (which is all 0x20).
+            PrefetchRegion(0x80000080u, 16);
 
             // ── Step 6: perform the memory fill ─────────────────────────────
             // The fill writes fill_byte to addresses:
