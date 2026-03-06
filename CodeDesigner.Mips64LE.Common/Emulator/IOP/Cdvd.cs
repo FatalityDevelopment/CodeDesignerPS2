@@ -87,19 +87,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public const uint RegSize = 0x20u;
 
         // Byte offsets within the register window
-        private const uint REG_DATA    = 0x00u; // N-command parameter write port
-        private const uint REG_NCMD    = 0x04u; // N command register
-        private const uint REG_NREADY  = 0x05u; // N ready/busy (0 = ready)
-        private const uint REG_NDOUT   = 0x06u; // N data out (status responses)
-        private const uint REG_BREAK   = 0x07u; // Break / cancel
-        private const uint REG_ISTAT   = 0x08u; // Interrupt status (W1C)
-        private const uint REG_STATUS  = 0x09u; // Drive status
-        private const uint REG_TRAY    = 0x0Au; // Tray state
-        private const uint REG_CRT     = 0x0Bu; // Current disc type
-        private const uint REG_SDATA   = 0x0Fu; // S-command data output
-        private const uint REG_SCMD    = 0x17u; // S command register
-        private const uint REG_SSTAT   = 0x18u; // S-command status
-        private const uint REG_SPARAM  = 0x1Fu; // S-command parameter
+        private const uint REG_DATA       = 0x00u; // N-command parameter write port
+        private const uint REG_NCMD       = 0x04u; // N command register
+        private const uint REG_NREADY     = 0x05u; // N ready/busy (0 = ready)
+        private const uint REG_NDOUT      = 0x06u; // N data out (status responses)
+        private const uint REG_BREAK      = 0x07u; // Break / cancel
+        private const uint REG_ISTAT      = 0x08u; // Interrupt status (W1C)
+        private const uint REG_STATUS     = 0x09u; // Drive status
+        private const uint REG_TRAY       = 0x0Au; // Tray state
+        private const uint REG_CRT        = 0x0Bu; // Current disc type
+        private const uint REG_SDATA      = 0x0Fu; // S-command data output (READ)
+        private const uint REG_SCMD_EXEC  = 0x16u; // S command execute register (WRITE = cdvdWrite16 in PCSX2)
+        private const uint REG_SCMD_PARAM = 0x17u; // S command parameter byte (WRITE = cdvdWrite17; READ = SREADY)
+        private const uint REG_SSTAT      = 0x18u; // S-command status (READ)
 
         // ── N-command codes ───────────────────────────────────────────────────
 
@@ -174,6 +174,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private int  _nParamPos;
         private byte _nIntrStat;
 
+        // S-command parameter buffer (written byte-by-byte to REG_SCMD_PARAM before
+        // REG_SCMD_EXEC).  Mirrors PCSX2's cdvdWrite17 / SCMDParamBuff[].
+        private readonly byte[] _sCmdParamBuf = new byte[16];
+        private int _sCmdParamPos;
+
         // Current N_READY status byte (REG_NREADY, offset 0x05).
         // Initialised to READY | MECHA_INIT | DEV9CON, matching PCSX2 cdvdReset()
         // which calls cdvdUpdateReady(CDVD_DRIVE_READY) → always includes those bits.
@@ -235,6 +240,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             DiscType          = _isoLength > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
             _nParamPos        = 0;
             _nIntrStat        = 0;
+            _sCmdParamPos     = 0;
             _sReady           = 0x40; // PCSX2 cdvdReset() initialises sDataIn = 0x40
             _sectorData       = Array.Empty<byte>();
             _sectorDataOffset = 0;
@@ -261,6 +267,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             DiscType          = _isoLength > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
             _nParamPos        = 0;
             _nIntrStat        = 0;
+            _sCmdParamPos     = 0;
             _sReady           = 0x40; // PCSX2 cdvdReset() initialises sDataIn = 0x40
             _sectorData       = Array.Empty<byte>();
             _sectorDataOffset = 0;
@@ -332,7 +339,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 REG_SDATA  => _sCmdOutputPos < _sCmdOutputLen
                                   ? _sCmdOutput[_sCmdOutputPos++]
                                   : (byte)0,
-                REG_SCMD   => _sReady,                    // 0x17 READ = SREADY (PCSX2 cdvdRead17 = sDataIn)
+                REG_SCMD_PARAM => _sReady,                 // 0x17 READ = SREADY (PCSX2 cdvdRead17 = sDataIn)
                 REG_SSTAT  => (byte)0x40,                 // S-command ready
                 _          => 0
             };
@@ -369,8 +376,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     _nIntrStat &= (byte)~value;
                     break;
 
-                case REG_SCMD:
+                case REG_SCMD_EXEC:
+                    // Execute the S-command using accumulated parameters (cdvdWrite16 in PCSX2).
+                    // After execution the parameter position resets, matching PCSX2 behaviour.
                     ExecuteSCommand(value);
+                    _sCmdParamPos = 0;
+                    break;
+
+                case REG_SCMD_PARAM:
+                    // Accumulate S-command parameter byte (cdvdWrite17 "SDATAIN" in PCSX2).
+                    if (_sCmdParamPos < _sCmdParamBuf.Length)
+                        _sCmdParamBuf[_sCmdParamPos++] = value;
                     break;
             }
         }
@@ -517,6 +533,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     _sCmdOutputLen = 1;
                     break;
 
+                case 0x03: // GetMechaVersion — returns 4-byte mechacon version
+                    // PCSX2 reads from BIOS.mec file or creates {0x03, 0x06, 0x02, 0x00}.
+                    _sCmdOutput[0] = 0x03;
+                    _sCmdOutput[1] = 0x06;
+                    _sCmdOutput[2] = 0x02;
+                    _sCmdOutput[3] = 0x00;
+                    _sCmdOutputLen = 4;
+                    break;
+
                 case 0x12: // GetLayerInfo — layer-break PSN for dual-layer DVDs
                     // Single-layer disc: layer-break PSN = 0 (no second layer).
                     _sCmdOutput[0] = 0x00;
@@ -524,6 +549,29 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     _sCmdOutput[2] = 0x00;
                     _sCmdOutput[3] = 0x00;
                     _sCmdOutputLen = 4;
+                    break;
+
+                case 0x40: // CdOpenConfig — returns 1 status byte (0 = OK)
+                    // Parameters (3 bytes from _sCmdParamBuf): readWrite, offset, numBlocks.
+                    // We accept all config open requests and return success.
+                    _sCmdOutput[0] = 0x00; // 0 = complete / success
+                    _sCmdOutputLen = 1;
+                    break;
+
+                case 0x41: // CdReadConfig — returns 16 bytes of NVM config data
+                    // PCSX2 reads from BIOS.nvm; we return all-zero (default region settings).
+                    for (int i = 0; i < 16; i++) _sCmdOutput[i] = 0x00;
+                    _sCmdOutputLen = 16;
+                    break;
+
+                case 0x42: // CdCloseConfig — returns 1 status byte (0 = OK)
+                    _sCmdOutput[0] = 0x00;
+                    _sCmdOutputLen = 1;
+                    break;
+
+                case 0x47: // GetModelNumber — returns 8 bytes model string (all zero ok)
+                    for (int i = 0; i < 8; i++) _sCmdOutput[i] = 0x00;
+                    _sCmdOutputLen = 8;
                     break;
 
                 // Other S-commands (disc info, mechanical ops) return empty.

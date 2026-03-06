@@ -3650,8 +3650,8 @@ namespace CodeDesigner.Mips64LE.TestProject
             var cdvd = new Cdvd();
             cdvd.LoadImage(BuildMinimalIso("A", "b"));
 
-            // Write S-command 0x05 (GetDiscType)
-            cdvd.WriteRegister(0x17u, 0x05);
+            // Write S-command 0x05 (GetDiscType) to the execute register (0x16).
+            cdvd.WriteRegister(0x16u, 0x05);
 
             byte result = cdvd.ReadRegister(0x0Fu); // REG_SDATA
             Assert.AreEqual(Cdvd.DISC_PS2_DVD, result,
@@ -3664,8 +3664,8 @@ namespace CodeDesigner.Mips64LE.TestProject
             var cdvd = new Cdvd();
             cdvd.LoadImage(BuildMinimalIso("A", "b"));
 
-            // Write S-command 0x00 (GetMedia)
-            cdvd.WriteRegister(0x17u, 0x00);
+            // Write S-command 0x00 (GetMedia) to the execute register (0x16).
+            cdvd.WriteRegister(0x16u, 0x00);
 
             byte result = cdvd.ReadRegister(0x0Fu); // REG_SDATA
             Assert.AreEqual(Cdvd.DISC_PS2_DVD, result,
@@ -3678,8 +3678,8 @@ namespace CodeDesigner.Mips64LE.TestProject
             var cdvd = new Cdvd();
             cdvd.LoadImage(BuildMinimalIso("A", "b"));
 
-            // Write S-command 0x12 (GetLayerInfo)
-            cdvd.WriteRegister(0x17u, 0x12);
+            // Write S-command 0x12 (GetLayerInfo) to the execute register (0x16).
+            cdvd.WriteRegister(0x16u, 0x12);
 
             // Expect 4 bytes of zero for a single-layer disc
             for (int i = 0; i < 4; i++)
@@ -3692,11 +3692,71 @@ namespace CodeDesigner.Mips64LE.TestProject
         {
             var cdvd = new Cdvd();
             // No disc loaded
-            cdvd.WriteRegister(0x17u, 0x05);
+            cdvd.WriteRegister(0x16u, 0x05);
 
             byte result = cdvd.ReadRegister(0x0Fu);
             Assert.AreEqual(Cdvd.DISC_NO_DISC, result,
                 "GetDiscType with no disc must return DISC_NO_DISC");
+        }
+
+        [TestMethod]
+        public void Cdvd_SCommand_GetMechaVersion_ReturnsFourBytes()
+        {
+            var cdvd = new Cdvd();
+            // Execute S-command 0x03 (GetMechaVersion) — no parameters.
+            cdvd.WriteRegister(0x16u, 0x03);
+
+            byte b0 = cdvd.ReadRegister(0x0Fu);
+            byte b1 = cdvd.ReadRegister(0x0Fu);
+            byte b2 = cdvd.ReadRegister(0x0Fu);
+            byte b3 = cdvd.ReadRegister(0x0Fu);
+            Assert.AreEqual(0x03, b0, "GetMechaVersion byte 0 must be 0x03");
+            Assert.AreEqual(0x06, b1, "GetMechaVersion byte 1 must be 0x06");
+            Assert.AreEqual(0x02, b2, "GetMechaVersion byte 2 must be 0x02");
+            Assert.AreEqual(0x00, b3, "GetMechaVersion byte 3 must be 0x00");
+        }
+
+        [TestMethod]
+        public void Cdvd_SCommand_CdReadConfig_ReturnsSixteenZeroBytes()
+        {
+            var cdvd = new Cdvd();
+            // CdOpenConfig first (3 params: readWrite=0, offset=0, numBlocks=1)
+            cdvd.WriteRegister(0x17u, 0x00); // param: readWrite = 0 (read)
+            cdvd.WriteRegister(0x17u, 0x00); // param: offset    = 0
+            cdvd.WriteRegister(0x17u, 0x01); // param: numBlocks = 1
+            cdvd.WriteRegister(0x16u, 0x40); // execute CdOpenConfig
+            Assert.AreEqual(0x00u, cdvd.ReadRegister(0x0Fu), "CdOpenConfig must return 0 (success)");
+
+            // CdReadConfig — no parameters, returns 16 bytes of config data.
+            cdvd.WriteRegister(0x16u, 0x41);
+            for (int i = 0; i < 16; i++)
+                Assert.AreEqual(0, cdvd.ReadRegister(0x0Fu),
+                    $"CdReadConfig byte {i} must be 0 (default NVRAM)");
+
+            // CdCloseConfig — no parameters, returns 1 byte.
+            cdvd.WriteRegister(0x16u, 0x42);
+            Assert.AreEqual(0x00u, cdvd.ReadRegister(0x0Fu), "CdCloseConfig must return 0 (success)");
+        }
+
+        [TestMethod]
+        public void Cdvd_SCommand_ParamRegister_AccumulatesBytes_NotExec()
+        {
+            var cdvd = new Cdvd();
+            cdvd.LoadImage(BuildMinimalIso("A", "b"));
+
+            // Writing to 0x17 (SCMD_PARAM) should accumulate parameters,
+            // NOT execute an S-command.  SREADY (0x17 READ) must still return 0x40.
+            cdvd.WriteRegister(0x17u, 0x00); // param byte only
+            cdvd.WriteRegister(0x17u, 0x00);
+            cdvd.WriteRegister(0x17u, 0x01);
+
+            // SREADY must still be 0x40 — no command executed yet.
+            Assert.AreEqual(0x40u, cdvd.ReadRegister(0x17u),
+                "Writing to 0x17 (SCMD_PARAM) must not execute a command; SREADY remains 0x40");
+
+            // Now execute CdOpenConfig using accumulated params.
+            cdvd.WriteRegister(0x16u, 0x40);
+            Assert.AreEqual(0x00u, cdvd.ReadRegister(0x0Fu), "CdOpenConfig must return 0 after correct param sequence");
         }
 
         // =====================================================================
