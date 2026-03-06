@@ -65,9 +65,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private readonly byte[] _scratchpad = new byte[ScratchpadSize];
         private readonly byte[] _bios       = new byte[BiosRomSize];
 
-        // IOP INTC registers: I_STAT (offset 0) and I_MASK (offset 4)
+        // IOP INTC registers: I_STAT (offset 0), I_MASK (offset 4), I_CTRL (offset 8)
         private uint _iStat;
         private uint _iMask;
+        private uint _iCtrl;  // 0x1F801078: interrupt-controller master-enable latch (PCSX2 hw-reg)
 
         private Sio2?           _sio2;
         private Spu2?           _spu2;
@@ -375,6 +376,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             // IOP INTC
             if (addr == IntcBase)      return _iStat;
             if (addr == IntcBase + 4u) return _iMask;
+            if (addr == IntcBase + 8u) return _iCtrl;  // I_CTRL: simple latch, matches PCSX2 psxHu32(0x1078)
 
             // IOP timers T0–T2 (0x1F801100)
             if (addr >= TimerBase && addr < TimerBase + TimerBankSize)
@@ -451,6 +453,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             // IOP INTC
             if (addr == IntcBase)      { _iStat &= value; return; }  // W0C (write-AND per PCSX2 psxHu32 &= value)
             if (addr == IntcBase + 4u) { _iMask  = value; return; }
+            if (addr == IntcBase + 8u) { _iCtrl  = value; return; }  // I_CTRL: simple latch
 
             // IOP timers T0–T2 (0x1F801100)
             if (addr >= TimerBase && addr < TimerBase + TimerBankSize)

@@ -203,6 +203,149 @@ namespace CodeDesigner.Mips64LE
             bool      eeSyscallDetected = false; // true once EE kernel begins syscall setup
             uint      lastEeRegion  = uint.MaxValue; // track EE region changes
 
+            // ── IOP per-step register capture ─────────────────────────────────
+            // Fire once when IOP transitions from BIOS ROM into IOP RAM, and once
+            // for every unique IOP RAM PC in the first 5 MB of IOP RAM that we
+            // haven't seen before — giving us a call-trace of the early boot.
+            // Also dump ALL 32 GPRs whenever the memmove entry (0x2820) is hit.
+            uint      iopRamFirstPc      = uint.MaxValue;
+            bool      iopRamEntryDumped  = false;
+            int       iopMemmoveCallCount = 0;
+            var       iopSeenPcs         = new System.Collections.Generic.HashSet<uint>();
+            scheduler.IOP.StepHook = state =>
+            {
+                uint pc = state.PC;
+
+                // Capture register state once when IOP first leaves BIOS ROM
+                if (!iopRamEntryDumped && pc < 0x1FC00000u && pc >= 0x800u)
+                {
+                    iopRamEntryDumped = true;
+                    iopRamFirstPc     = pc;
+                    Console.WriteLine($"*** IOP first entered IOP RAM at PC=0x{pc:x8} — dumping all 32 GPRs ***");
+                    DumpAllIopRegs(state);
+                }
+
+                // Trace unique IOP RAM PCs (first 128 KB) during early boot to build
+                // a call-flow trace; stop tracing once we've logged 64 distinct PCs.
+                if (iopRamEntryDumped && iopMemmoveCallCount == 0
+                    && pc < 0x20000u && iopSeenPcs.Count < 64 && iopSeenPcs.Add(pc))
+                {
+                    string[] rn = {"zero","at","v0","v1","a0","a1","a2","a3",
+                                    "t0","t1","t2","t3","t4","t5","t6","t7",
+                                    "s0","s1","s2","s3","s4","s5","s6","s7",
+                                    "t8","t9","k0","k1","gp","sp","fp","ra"};
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append($"  IOP trace PC=0x{pc:x8}  ");
+                    for (int ri = 0; ri < 32; ri++)
+                        if (state.ReadReg(ri) != 0)
+                            sb.Append($"{rn[ri]}=0x{state.ReadReg(ri):x8} ");
+                    Console.WriteLine(sb.ToString());
+                }
+
+                // Full register dump at every memmove entry (IOP RAM 0x2820), first 20 calls
+                if (pc == 0x2820u && iopMemmoveCallCount < 20)
+                {
+                    iopMemmoveCallCount++;
+                    uint a2 = state.ReadReg(6);
+                    // Print compact one-liner for small counts, full dump for large/suspicious counts
+                    if (a2 > 0x1000u)
+                    {
+                        Console.WriteLine($"*** IOP memmove call #{iopMemmoveCallCount} (LARGE COUNT!) PC=0x2820 ***");
+                        DumpAllIopRegs(state);
+                    }
+                    else
+                    {
+                        Console.WriteLine(
+                            $"  IOP memmove call #{iopMemmoveCallCount}: a0=0x{state.ReadReg(4):x8} a1=0x{state.ReadReg(5):x8}" +
+                            $" a2=0x{a2:x8} a3=0x{state.ReadReg(7):x8} ra=0x{state.ReadReg(31):x8}");
+                    }
+                    // On the first memmove call, also dump IOP RAM around the call site,
+                    // the memmove function, and scan all IOP RAM for other jal-to-memmove sites.
+                    if (iopMemmoveCallCount == 1)
+                    {
+                        Console.WriteLine("  IOP RAM 0x1820-0x18FC (wide context around both call sites):");
+                        for (uint addr = 0x1820u; addr <= 0x18FCu; addr += 4)
+                        {
+                            uint iw = 0;
+                            try { iw = scheduler.IOP.Bus.ReadWord(addr); } catch { }
+                            string dis = MipsDisassembler.Disassemble(iw, addr);
+                            string mark = (addr == 0x18A4u || addr == 0x18E8u) ? " ← jal memmove" :
+                                          (addr == 0x18A8u || addr == 0x18ECu) ? " ← delay slot" : "";
+                            Console.WriteLine($"    IOP RAM[0x{addr:x4}] = 0x{iw:x8}  {dis}{mark}");
+                        }
+                        Console.WriteLine("  IOP RAM 0x2800-0x2870:");
+                        for (uint addr = 0x2800u; addr <= 0x2870u; addr += 4)
+                        {
+                            uint iw = 0;
+                            try { iw = scheduler.IOP.Bus.ReadWord(addr); } catch { }
+                            string dis = MipsDisassembler.Disassemble(iw, addr);
+                            Console.WriteLine($"    IOP RAM[0x{addr:x4}] = 0x{iw:x8}  {dis}");
+                        }
+                        // Scan all IOP RAM (up to workspace boundary 0x20000) for jal to memmove
+                        Console.WriteLine("  Scanning IOP RAM 0x800-0x20000 for ALL jal targets 0x2810/0x2820:");
+                        for (uint scanAddr = 0x800u; scanAddr < 0x20000u; scanAddr += 4)
+                        {
+                            try
+                            {
+                                uint iw = scheduler.IOP.Bus.ReadWord(scanAddr);
+                                if (iw == 0x0C000A04u || iw == 0x0C000A08u)
+                                {
+                                    string dis = MipsDisassembler.Disassemble(iw, scanAddr);
+                                    Console.WriteLine($"    IOP RAM[0x{scanAddr:x4}] = 0x{iw:x8}  {dis}  ← jal to memmove");
+                                    for (uint ctx = scanAddr > 8u ? scanAddr-8u : 0u; ctx <= scanAddr+8u; ctx += 4)
+                                    {
+                                        if (ctx == scanAddr) continue;
+                                        try { uint ciw = scheduler.IOP.Bus.ReadWord(ctx);
+                                              Console.WriteLine($"      ctx[0x{ctx:x4}] = 0x{ciw:x8}  {MipsDisassembler.Disassemble(ciw, ctx)}"); }
+                                        catch { }
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
+                // Capture ALL calls to 0x2810 with full details (no count cap)
+                if (pc == 0x2810u)
+                {
+                    uint a0 = state.ReadReg(4); uint a1 = state.ReadReg(5);
+                    uint a2 = state.ReadReg(6); uint a3 = state.ReadReg(7);
+                    uint ra31 = state.ReadReg(31);
+                    if (a2 > 0x1000u)
+                    {
+                        Console.WriteLine($"*** IOP 0x2810 call (LARGE COUNT a2=0x{a2:x8}) a0=0x{a0:x8} a1=0x{a1:x8} a3=0x{a3:x8} ra=0x{ra31:x8} ***");
+                        DumpAllIopRegs(state);
+                    }
+                    else
+                    {
+                        Console.WriteLine(
+                            $"  IOP 0x2810 call: a0=0x{a0:x8} a1=0x{a1:x8}" +
+                            $" a2=0x{a2:x8} a3=0x{a3:x8} ra=0x{ra31:x8}");
+                    }
+                }
+
+                // Trace the load of fp[0x50] (potential export count) at 0x18C4
+                // This is the lw a2,0x50(fp) instruction that feeds the second memmove call.
+                if (pc == 0x18C4u)
+                {
+                    uint fp30 = state.ReadReg(30);
+                    uint val50 = 0;
+                    try { val50 = scheduler.IOP.Bus.ReadWord(fp30 + 0x50u); } catch { }
+                    uint val54 = 0;
+                    try { val54 = scheduler.IOP.Bus.ReadWord(fp30 + 0x54u); } catch { }
+                    Console.WriteLine($"  IOP 0x18C4 (lw a2,0x50(fp)): fp=0x{fp30:x8}  fp[0x50]=0x{val50:x8}(count?)  fp[0x54]=0x{val54:x8}(src?)");
+                }
+
+                // Trace the very first entry to the I_CTRL polling function (0x4078)
+                // and capture what value is in I_CTRL at that moment.
+                if (pc == 0x4078u)
+                {
+                    uint iCtrl = scheduler.IOP.Bus.ReadWord(0x1F801078u);
+                    Console.WriteLine($"  IOP 0x4078 (I_CTRL poll): I_CTRL=0x{iCtrl:x8} a0=0x{state.ReadReg(4):x8} ra=0x{state.ReadReg(31):x8}");
+                }
+            };
+
             try
             {
                 while (!cts.Token.IsCancellationRequested && totalSteps < maxSteps)
@@ -657,19 +800,23 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine(
                 $"  IOP I_STAT: 0x{iopIStat:x8}  " +
                 $"I_MASK: 0x{iopIMask:x8}  " +
+                $"I_CTRL: 0x{sched.IOP.Bus.ReadWord(0x1F801078u):x8}  " +
                 $"pending={sched.IOP.Bus.IsInterruptPending}");
 
             // ── IOP key registers (v0=$2, a0=$4, sp=$29, ra=$31) ─────────────
             uint iopV0 = sched.IOP.State.ReadReg(2);
             uint iopV1 = sched.IOP.State.ReadReg(3);
             uint iopA0 = sched.IOP.State.ReadReg(4);
+            uint iopA1 = sched.IOP.State.ReadReg(5);
+            uint iopA2 = sched.IOP.State.ReadReg(6);
+            uint iopA3 = sched.IOP.State.ReadReg(7);
             uint iopFp = sched.IOP.State.ReadReg(30);  // fp = $30
             uint iopSp = sched.IOP.State.ReadReg(29);
             uint iopRa = sched.IOP.State.ReadReg(31);
             Console.WriteLine(
-                $"  IOP v0=0x{iopV0:x8}  v1=0x{iopV1:x8}  a0=0x{iopA0:x8}");
+                $"  IOP v0=0x{iopV0:x8}  v1=0x{iopV1:x8}  a0=0x{iopA0:x8}  a1=0x{iopA1:x8}");
             Console.WriteLine(
-                $"  IOP fp=0x{iopFp:x8}  sp=0x{iopSp:x8}  ra=0x{iopRa:x8}");
+                $"  IOP a2=0x{iopA2:x8}  a3=0x{iopA3:x8}  fp=0x{iopFp:x8}  sp=0x{iopSp:x8}  ra=0x{iopRa:x8}");
 
             // Dump the IOP loop flag at fp+0x58 (= IOP RAM[fp+0x58]) which the
             // boot loop at 0x124 polls.  Non-zero means the IOP is waiting.
@@ -787,6 +934,28 @@ namespace CodeDesigner.Mips64LE
                 }
             }
         }
+
+        /// <summary>
+        /// Print all 32 IOP general-purpose registers in a compact 4-column layout.
+        /// </summary>
+        private static void DumpAllIopRegs(CodeDesigner.Mips64LE.Common.Emulator.IOP.IopState state)
+        {
+            string[] rn = {"zero","at  ","v0  ","v1  ","a0  ","a1  ","a2  ","a3  ",
+                            "t0  ","t1  ","t2  ","t3  ","t4  ","t5  ","t6  ","t7  ",
+                            "s0  ","s1  ","s2  ","s3  ","s4  ","s5  ","s6  ","s7  ",
+                            "t8  ","t9  ","k0  ","k1  ","gp  ","sp  ","fp  ","ra  "};
+            for (int i = 0; i < 32; i += 4)
+            {
+                Console.WriteLine(
+                    $"  ${i:D2} {rn[i]}=0x{state.ReadReg(i):x8}  " +
+                    $"${i+1:D2} {rn[i+1]}=0x{state.ReadReg(i+1):x8}  " +
+                    $"${i+2:D2} {rn[i+2]}=0x{state.ReadReg(i+2):x8}  " +
+                    $"${i+3:D2} {rn[i+3]}=0x{state.ReadReg(i+3):x8}");
+            }
+            Console.WriteLine($"  HI=0x{state.HI:x8}  LO=0x{state.LO:x8}  PC=0x{state.PC:x8}  SR=0x{state.SR:x8}");
+        }
+
+
 
         /// <summary>
         /// Safely disassemble one IOP instruction from its virtual PC.

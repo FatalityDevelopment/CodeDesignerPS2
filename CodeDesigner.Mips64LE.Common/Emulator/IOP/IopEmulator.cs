@@ -57,6 +57,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// </summary>
         public event EventHandler<uint>? InterruptPending;
 
+        /// <summary>
+        /// Optional callback invoked after every IOP instruction step.
+        /// Receives the current <see cref="IopState"/> (PC already advanced to
+        /// the next instruction).  Useful for per-step debugging / tracing.
+        /// </summary>
+        public Action<IopState>? StepHook { get; set; }
+
         // ── Bridge CpuState used for instruction execution ────────────────────
         //
         // We create one bridge CpuState and reuse it for every instruction.
@@ -112,8 +119,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <summary>
         /// Execute one R3000A instruction at the current PC, honouring branch
         /// delay slots and routing SYSCALL/BREAK through the IOP COP0 dispatcher.
+        /// If <see cref="StepHook"/> is set, it is called after every completed step.
         /// </summary>
         public void Step()
+        {
+            StepCore();
+            StepHook?.Invoke(State);
+        }
+
+        private void StepCore()
         {
             // ── IOP (R3000A) hardware interrupt check ─────────────────────────
             // Keep Cause.IP2 (bit 10) in sync with IOP INTC pending state, then
@@ -384,11 +398,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         private void SyncBridgeFromIop()
         {
+            // IOP (R3000A) is a 32-bit processor.  Its registers hold 32-bit values
+            // that must be SIGN-EXTENDED to 64 bits when loaded into the 64-bit EE
+            // bridge CpuState.  Without sign-extension, negative 32-bit values such
+            // as 0xFFFFFFFF (= −1) appear as large positive 64-bit numbers in the
+            // bridge, causing signed branch conditions (bgez, bltz, blez, bgtz, slt
+            // etc.) to misbehave — the canonical symptom is an infinite backward-
+            // copy loop inside memmove at IOP boot (bgez loops forever because −1
+            // appears as +4 294 967 295, which satisfies the "≥ 0" condition).
             for (int i = 1; i < 32; i++)
-                _bridge.RegsLo[i] = State.ReadReg(i);
+                _bridge.RegsLo[i] = (ulong)(long)(int)State.ReadReg(i);
             _bridge.RegsLo[0] = 0;
-            _bridge.HI = State.HI;
-            _bridge.LO = State.LO;
+            _bridge.HI = (ulong)(long)(int)State.HI;
+            _bridge.LO = (ulong)(long)(int)State.LO;
             _bridge.PC = State.PC;
             // Sync IOP COP0 (SR/Cause/EPC) so MFC0/MTC0 in running code see the right values.
             _bridge.COP0.WriteRegister32(12, State.SR);
