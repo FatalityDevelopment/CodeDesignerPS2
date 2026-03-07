@@ -400,6 +400,46 @@ namespace CodeDesigner.Mips64LE
                     Console.WriteLine($"  [EnableInterrupt] a0={a0en} (bit=0x{1u << (int)(a0en & 31):X}) ra=0x{raEn:X8}  I_MASK_before=0x{scheduler.IOP.Bus.IMask:X8}");
                 }
 
+                // One-shot: trace unique IOP PCs in the CDVDman range 0xA800-0xB500
+                // to show the complete CDVDman execution path after S-commands finish.
+                if (pc >= 0x0000A800u && pc <= 0x0000B500u && !iopSeenPcs.Contains(pc | 0x80000000u))
+                {
+                    iopSeenPcs.Add(pc | 0x80000000u);
+                    uint iStat = scheduler.IOP.Bus.IStat;
+                    uint iMask = scheduler.IOP.Bus.IMask;
+                    string iSel = $"I_MASK=0x{iMask:X5} I_STAT=0x{iStat:X5}";
+                    Console.WriteLine($"  [CDVDman] PC=0x{pc:X8}  a0=0x{state.ReadReg(4):X8} a1=0x{state.ReadReg(5):X8} v0=0x{state.ReadReg(2):X8} ra=0x{state.ReadReg(31):X8}  {iSel}");
+                    // Dump disasm when we first reach 0xAB30 (CDVDman is fully loaded by then)
+                    if (pc == 0x0000AB30u && !iopSeenPcs.Contains(0xAB308000u))
+                    {
+                        iopSeenPcs.Add(0xAB308000u);
+                        Console.WriteLine("  CDVDman loaded code dump [0xAA80-0xAD60]:");
+                        for (uint da = 0x0000AA80u; da < 0x0000AD64u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                string mark = (da == pc) ? " <-- PC" : "";
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                        // Also dump 0xB000-0xB280 (CDVDman init main function)
+                        Console.WriteLine("  CDVDman init main [0xAFC0-0xB280]:");
+                        for (uint da = 0x0000AFC0u; da < 0x0000B284u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                    }
+                }
+
                 // Trace when ra = 0x0000bc6c (the call at 0x0000bc68 leading to WaitSema-Y)
                 // Fires on any instruction where ra has been set to this specific return address.
                 if (state.ReadReg(31) == 0x0000bc6cu && !iopSeenPcs.Contains(0xBC6CB86Cu))

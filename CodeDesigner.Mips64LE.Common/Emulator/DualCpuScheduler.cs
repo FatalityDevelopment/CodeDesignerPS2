@@ -180,6 +180,24 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     EE.Bus.Sif.WriteSif1(data[i]);
             };
 
+            // Wire the IOP SIF mirror (0x1D000000) to the shared SIF object so that
+            // IOP writes to SMFLAG (offset 0x30) and MSFLAG (offset 0x20) are visible
+            // to the EE and vice-versa.  Without this, IOP SIFMAN's SMFLAG writes are
+            // silently discarded and the EE never receives the IOP-ready signal,
+            // permanently stalling the EE-IOP SIF handshake.
+            // Reference: PCSX2 pcsx2/IopMem.cpp SIF mirror at 0x1D000000.
+            IOP.Bus.SharedSif = EE.Bus.Sif;
+
+            // When IOP writes new bits to SMFLAG (IOP→EE signal), raise SBUS interrupt
+            // on the EE so it wakes up from its SIF handshake poll loop.
+            // Reference: PCSX2 pcsx2/Hw.cpp sifWriteEEa() triggers EE INTC SBUS (bit 2).
+            EE.Bus.Sif.IopSignaledEe += (_, _) => EE.Bus.Intc.RaiseInterrupt(2); // EE SBUS bit 2
+
+            // When EE writes new bits to MSFLAG (EE→IOP signal), raise SBUS interrupt
+            // on the IOP so SIFMAN wakes up from its poll loop and processes the EE signal.
+            // Reference: PCSX2 pcsx2/Hw.cpp hwWrite32 SBUS_MSFLAG → iopIntcIrq(1).
+            EE.Bus.Sif.EeSignaledIop += (_, _) => IOP.Bus.RaiseInterrupt(1); // IOP SBUS bit 1
+
             // Wire SIO2 and pad states so IOP software can poll controllers.
             Pad0 = new PadState();
             Pad1 = new PadState();
