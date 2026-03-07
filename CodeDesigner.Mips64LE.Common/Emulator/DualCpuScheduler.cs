@@ -365,32 +365,54 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // Additionally, the IOP timer ISR at ~0x4C60 immediately overwrites
             // I_MASK with a constant value (0x0001080D) that clears bit 1 after
             // every timer tick.  A single one-shot write is therefore not enough;
-            // we must re-assert both I_MASK bit 1 and I_STAT bit 1 on every slice
-            // until SMFLAG bit 30 is set (either by the IOP itself or by the
-            // fallback injection below).
+            // we must re-assert I_MASK bit 1 on every slice from the moment
+            // SIFMAN starts its F240 handshake until boot is complete.  We also
+            // re-assert I_STAT bit 1 (the synthetic SBUS wake) until SmFlag bit 30
+            // is set so SIFMAN's WaitIntr(SBUS) can return.
             //
             // This matches PCSX2's persistent WaitIntr ROM-patch behavior
             // (IopBios.cpp — WaitIntr hook continuously enables I_MASK bit).
             //
-            // Conditions to start keeping the SBUS interrupt alive:
-            //   • SIFMAN has completed the F240 handshake (SMFLAG bits 16–18)
-            //   • EE has sent its ready signal (MSFLAG bit 16 set)
+            // Start condition (earliest trigger):
+            //   • SIFMAN has written SmFlag bit 16 (the IOP-SIF-init flag it sets
+            //     at the very beginning of its F240 handshake), indicating the IOP
+            //     SIFMAN module has started.  Triggering at this early point lets
+            //     the keep-alive be in place before SIFMAN calls WaitIntr(SBUS).
             //
-            // Stop condition: SMFLAG bit 30 is set (IOP is done with SIF init).
+            // Fallback start condition:
+            //   • If SmFlag bit 16 is never set (e.g. SIFMAN failed to load or
+            //     CDVDman is holding up the module chain), force-activate after
+            //     5 000 000 IOP steps so the SMFLAG injection below can still fire.
+            //
+            // I_MASK bit 1 is kept enabled indefinitely after the patch activates
+            // (not just until SmFlag bit 30) so that SIFCMD can continue to receive
+            // EE SBUS signals even after SIF initialisation is complete.  Without
+            // this, the timer ISR clears bit 1 after every tick and the IOP is
+            // permanently unable to receive EE commands — causing the IOP to stay
+            // at the kernel idle loop (0x0000ae94) while the EE waits at 0x8000fb18.
             if (!_sifmanSbusPatched
-                && (EE.Bus.Sif.SmFlag & 0x00070000u) == 0x00070000u
-                && (EE.Bus.Sif.MsFlag & 0x00010000u) != 0u)
+                && ((EE.Bus.Sif.SmFlag & 0x00010000u) != 0u         // SmFlag bit 16: SIFMAN started
+                    || TotalIopSteps >= 5_000_000UL))                // fallback: 5 M IOP steps
             {
                 _sifmanSbusPatched      = true;
                 _sifmanPatchedAtIopStep = TotalIopSteps;
+                if ((EE.Bus.Sif.SmFlag & 0x00010000u) == 0u)
+                    Console.WriteLine($"[SBUS PATCH] Fallback-activated at IOP step {TotalIopSteps:N0} (SmFlag=0x{EE.Bus.Sif.SmFlag:X8})");
             }
 
-            if (_sifmanSbusPatched && (EE.Bus.Sif.SmFlag & 0x40000000u) == 0u)
+            if (_sifmanSbusPatched)
             {
-                // Re-assert the SBUS interrupt every slice so the timer ISR
-                // cannot permanently suppress it.
-                IOP.Bus.RaiseInterrupt(1);
+                // Keep I_MASK bit 1 (SBUS) enabled so the timer ISR cannot
+                // permanently suppress EE→IOP SBUS signals.  This must persist
+                // past SmFlag bit 30 (SIF init complete) so SIFCMD continues to
+                // receive EE SIF commands throughout the game boot.
                 IOP.Bus.EnableInterruptMask(1);
+
+                // While SIFMAN's WaitIntr(SBUS) is still active (SmFlag bit 30
+                // not yet set), also synthetically assert I_STAT bit 1 so the
+                // WaitIntr semaphore is woken in spite of any timer-ISR races.
+                if ((EE.Bus.Sif.SmFlag & 0x40000000u) == 0u)
+                    IOP.Bus.RaiseInterrupt(1);
             }
 
             // ── Fallback: SMFLAG bit-30 (SIF_STAT_SIFINIT) injection ─────────
