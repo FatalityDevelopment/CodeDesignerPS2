@@ -1942,33 +1942,54 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// </summary>
         private void TryRepairEeKernelSifData()
         {
+            // Only act when the EE is in the module-install / SIF handshake area.
+            // Range widened to 0x80012540 (function entry) so the repair fires before
+            // the inner loop re-sets per-module state via 0x8000EC00.
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+            if (pc32 < 0x80012540u || pc32 > 0x80012800u)
+                return;
+
+            // ── Step 1: fast O(1) patch of specific known-critical fields ─────────
+            // These run on every EE step in range so they catch fills that reoccur
+            // after a prior repair (e.g. the BIOS re-runs a fill loop after an early
+            // exit triggered by the SMFLAG fallback).
+            //
+            // Fields and why they matter:
+            //   0x23FC8 – SIF receive-buffer pointer checked at 0x8000FC78 / 0x8000FE88
+            //   0x23FCC – SIF receive state checked at 0x8000FD58
+            //   0x23FD0 – SIF receive-buffer address passed to 0x8000FBA8
+            //   0x23FD4 – SIF0 pending-packet counter: THE KEY FIELD.  If non-zero,
+            //             0x8000FDE8 enters the "wait for EE DMAC CH5" path instead of
+            //             the SBUS-interrupt path, and loops forever when CH5 never
+            //             completes (IOP hasn't sent a response yet).
+            //   0x24100/0x24108/0x24114 – per-module state words checked in the loop
+            //   0x242F8 – module-list pointer checked in the inner loop
+            //   0x24124 – outer-loop exit flag (module count); fill keeps it non-zero
+            bool patchedAny = false;
+            patchedAny |= PatchWordIfFill(0x23FC8u);
+            patchedAny |= PatchWordIfFill(0x23FCCu);
+            patchedAny |= PatchWordIfFill(0x23FD0u);
+            patchedAny |= PatchWordIfFill(0x23FD4u);
+            patchedAny |= PatchWordIfFill(0x24100u);
+            patchedAny |= PatchWordIfFill(0x24108u);
+            patchedAny |= PatchWordIfFill(0x24114u);
+            patchedAny |= PatchWordIfFill(0x242F8u);
+            patchedAny |= PatchWordIfFill(0x24124u);
+
+            // ── Step 2: full-area scan (one-shot per fill occurrence) ─────────────
+            // If any specific field carried fill pattern, reset the one-shot guard so
+            // the full scan runs again.  This handles subsequent fill occurrences after
+            // a prior repair (the flag was set by the previous scan but the BIOS fill
+            // loop has re-corrupted the region).
+            if (patchedAny)
+                _eeKernelSifDataFixed = false;
+
             if (_eeKernelSifDataFixed)
                 return;
 
-            // Only act when the EE is in the SIF handshake area.
-            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
-            if (pc32 < 0x80012600u || pc32 > 0x80012800u)
-                return;
-
-            // Check the sentinel field (physical 0x23FD4 = virtual 0x800023FD4 in KSEG0).
-            const uint SentinelPhys = 0x23FD4u;
-            if (SentinelPhys + 3u >= (uint)Bus.Ram.Length)
-                return;
-
-            uint sentinel = (uint)(Bus.Ram[SentinelPhys]
-                                 | (Bus.Ram[SentinelPhys + 1] << 8)
-                                 | (Bus.Ram[SentinelPhys + 2] << 16)
-                                 | (Bus.Ram[SentinelPhys + 3] << 24));
-            if (sentinel != 0x20202020u)
-            {
-                // Kernel already zeroed the data (TLB worked or data was written legitimately).
-                _eeKernelSifDataFixed = true;
-                return;
-            }
-
-            // Zero every 4-byte aligned word in the kernel data area that still holds the
-            // exact fill-pattern 0x20202020.  Words written legitimately by the BIOS or
-            // kernel to non-zero values are left untouched.
+            // Scan the entire kernel data window and zero every word that is still the
+            // exact fill-pattern 0x20202020.  Words written legitimately (non-fill) are
+            // left untouched.  This handles unknown fields beyond the nine listed above.
             const int KernelDataStart = 0x20000;
             const int KernelDataEnd   = 0x60000;
             for (int pa = KernelDataStart; pa < KernelDataEnd && pa + 3 < Bus.Ram.Length; pa += 4)
@@ -1986,6 +2007,25 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             }
 
             _eeKernelSifDataFixed = true;
+        }
+
+        /// <summary>
+        /// Zeroes a 4-byte little-endian word at <paramref name="physAddr"/> in EE RAM
+        /// if and only if it holds the exact BIOS bulk-fill pattern 0x20202020.
+        /// Returns <see langword="true"/> when a patch was applied.
+        /// </summary>
+        private bool PatchWordIfFill(uint physAddr)
+        {
+            if (physAddr + 3u >= (uint)Bus.Ram.Length) return false;
+            if (Bus.Ram[physAddr]     != 0x20
+             || Bus.Ram[physAddr + 1] != 0x20
+             || Bus.Ram[physAddr + 2] != 0x20
+             || Bus.Ram[physAddr + 3] != 0x20) return false;
+            Bus.Ram[physAddr]     = 0;
+            Bus.Ram[physAddr + 1] = 0;
+            Bus.Ram[physAddr + 2] = 0;
+            Bus.Ram[physAddr + 3] = 0;
+            return true;
         }
 
 
