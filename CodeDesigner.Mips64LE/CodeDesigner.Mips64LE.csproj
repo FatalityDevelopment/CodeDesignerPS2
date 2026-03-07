@@ -30,4 +30,10 @@
     <Folder Include="Isos\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Isos\Gameshark 2 v4 PS2.zip">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
