@@ -2580,5 +2580,147 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(0UL, emu.Cpu.RegsLo[V0],
                 "v0 must be 0 (null) after fast-forward");
         }
+
+        /// <summary>
+        /// Verify TryFastForwardBiosPuts detects Pattern B: the pointer advance
+        /// (addiu s0, s0, 1) is in the JALR delay slot rather than the BNEL
+        /// delay slot.  The BNEL delay slot contains daddu a0, v0, zero to set
+        /// up the next putchar argument.
+        ///
+        /// Pattern B loop:
+        ///   loop_start:
+        ///     lui   v1, ...
+        ///     lw    v1, offset(v1)
+        ///     jalr  v1
+        ///     addiu s0, s0, 1      ; delay slot of jalr: advance pointer
+        ///     lb    v0, 0(s0)      ; load next char (from advanced position)
+        ///     bnel  v0, $zero, loop_start
+        ///     daddu a0, v0, zero   ; delay slot of bnel: set arg for next call
+        /// </summary>
+        [TestMethod]
+        public void EE_BiosPuts_FastForward_PatternB_JalrDelaySlotAdvance()
+        {
+            const int V0 = 2;
+            const int V1 = 3;
+            const int S0 = 16;
+            const int A0 = 4;
+            const uint loopBase = 0x80023000u;
+
+            uint lui_v1      = (0x0Fu << 26) | (0u << 21) | ((uint)V1 << 16) | 0x8001u;
+            uint lw_v1       = (0x23u << 26) | ((uint)V1 << 21) | ((uint)V1 << 16)
+                               | (uint)(ushort)0x5958;
+            // jalr v1
+            uint jalr_v1     = (0u << 26) | ((uint)V1 << 21) | (0u << 16)
+                               | (31u << 11) | 0x09u;
+            // addiu s0, s0, 1  — delay slot of jalr (Pattern B: pointer advance here)
+            uint addiu_s0_p1 = (0x09u << 26) | ((uint)S0 << 21) | ((uint)S0 << 16) | 1u;
+            // lb v0, 0(s0)
+            uint lb_v0_s0    = (0x20u << 26) | ((uint)S0 << 21) | ((uint)V0 << 16) | 0u;
+            // bnel v0, $zero, loopBase  (offset = -6 → target = (bnel+4) + (-6)*4 = loopBase)
+            uint bnel_v0     = (0x15u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | unchecked((uint)(ushort)(-6));
+            // daddu a0, v0, zero  — delay slot of bnel (Pattern B: argument setup here)
+            uint daddu_a0_v0 = (0u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | ((uint)A0 << 11) | 0x2Du;
+
+            var emu = new PS2Emulator();
+            emu.Bus.WriteWord(loopBase + 0x00u, lui_v1);
+            emu.Bus.WriteWord(loopBase + 0x04u, lw_v1);
+            emu.Bus.WriteWord(loopBase + 0x08u, jalr_v1);
+            emu.Bus.WriteWord(loopBase + 0x0Cu, addiu_s0_p1);  // JALR delay slot: s0++
+            emu.Bus.WriteWord(loopBase + 0x10u, lb_v0_s0);
+            emu.Bus.WriteWord(loopBase + 0x14u, bnel_v0);      // PC starts here
+            emu.Bus.WriteWord(loopBase + 0x18u, daddu_a0_v0);  // BNEL delay slot: move char
+
+            // Place a test string in RAM (long enough to trigger fast-forward).
+            const uint strBase = 0x80004000u;
+            const string msg   = "Pattern B test!"; // 15 characters + null (> BiosPutsMinLen=8)
+            for (int i = 0; i < msg.Length; i++)
+                emu.Bus.WriteByte(strBase + (uint)i, (byte)msg[i]);
+            emu.Bus.WriteByte(strBase + (uint)msg.Length, 0);
+
+            // At BNEL: s0 already points to current char (incremented by jalr delay slot),
+            // v0 = char at s0.
+            emu.Cpu.PC         = loopBase + 0x14u;
+            emu.Cpu.RegsLo[S0] = strBase;              // s0 → start of string
+            emu.Cpu.RegsLo[V0] = (byte)msg[0];         // v0 = first char
+
+            emu.Step();
+
+            Assert.AreEqual(loopBase + 0x1Cu, (uint)(emu.Cpu.PC & 0xFFFFFFFFUL),
+                "PC must advance past BNEL + delay slot after Pattern B fast-forward");
+            Assert.AreEqual(strBase + (uint)msg.Length, (uint)(emu.Cpu.RegsLo[S0] & 0xFFFFFFFFUL),
+                "s0 must point to the null terminator after Pattern B fast-forward");
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[V0],
+                "v0 must be 0 (null terminator) after Pattern B fast-forward");
+        }
+
+        /// <summary>
+        /// Verify TryFastForwardBiosPuts correctly scans strings stored in BIOS ROM
+        /// (physical address range 0x1FC00000–0x1FFFFFFF), i.e. when the string
+        /// pointer refers to a KSEG1 BIOS ROM virtual address (0xBFCxxxxx).
+        ///
+        /// The old code applied a MainRamSize mask to the physical address, which
+        /// silently wrapped BIOS ROM addresses into a wrong RAM offset (e.g.
+        /// 0x1FC12345 → 0x1C12345 in RAM), causing the scan to read garbage and
+        /// return len=0 (no fast-forward).
+        /// </summary>
+        [TestMethod]
+        public void EE_BiosPuts_FastForward_BiosRomString()
+        {
+            const int V0 = 2;
+            const int V1 = 3;
+            const int S0 = 16;
+            const int A0 = 4;
+            const uint loopBase = 0x80024000u;
+
+            uint lui_v1      = (0x0Fu << 26) | (0u << 21) | ((uint)V1 << 16) | 0x8001u;
+            uint lw_v1       = (0x23u << 26) | ((uint)V1 << 21) | ((uint)V1 << 16)
+                               | (uint)(ushort)0x5958;
+            uint jalr_v1     = (0u << 26) | ((uint)V1 << 21) | (0u << 16)
+                               | (31u << 11) | 0x09u;
+            uint daddu_a0_v0 = (0u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | ((uint)A0 << 11) | 0x2Du;
+            uint lb_v0_s0    = (0x20u << 26) | ((uint)S0 << 21) | ((uint)V0 << 16) | 0u;
+            uint bnel_v0     = (0x15u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | unchecked((uint)(ushort)(-6));
+            uint addiu_s0_p1 = (0x09u << 26) | ((uint)S0 << 21) | ((uint)S0 << 16) | 1u;
+
+            var emu = new PS2Emulator();
+            emu.Bus.WriteWord(loopBase + 0x00u, lui_v1);
+            emu.Bus.WriteWord(loopBase + 0x04u, lw_v1);
+            emu.Bus.WriteWord(loopBase + 0x08u, jalr_v1);
+            emu.Bus.WriteWord(loopBase + 0x0Cu, daddu_a0_v0);
+            emu.Bus.WriteWord(loopBase + 0x10u, lb_v0_s0);
+            emu.Bus.WriteWord(loopBase + 0x14u, bnel_v0);
+            emu.Bus.WriteWord(loopBase + 0x18u, addiu_s0_p1);
+
+            // Place the string in BIOS ROM (physical 0x1FC10000 → virtual KSEG1 0xBFC10000).
+            const uint biosRomPhys   = 0x1FC10000u;
+            const uint biosRomVirt   = 0xBFC10000u;   // KSEG1 mirror of 0x1FC10000
+            const string msg         = "BIOS ROM puts!"; // 14 chars, > BiosPutsMinLen
+            for (int i = 0; i < msg.Length; i++)
+                emu.Bus.Bios[biosRomPhys - 0x1FC00000u + (uint)i] = (byte)msg[i];
+            emu.Bus.Bios[biosRomPhys - 0x1FC00000u + (uint)msg.Length] = 0; // null terminator
+
+            // Ensure main RAM at the (wrongly wrapped) offset 0x1C10000 has a 0 byte so
+            // that the old buggy code would produce len=0 and skip the fast-forward.
+            // (RAM is zero-initialised, so no explicit write needed — just document intent.)
+
+            emu.Cpu.PC         = loopBase + 0x14u;
+            emu.Cpu.RegsLo[S0] = biosRomVirt;          // s0 → BIOS ROM string (KSEG1)
+            emu.Cpu.RegsLo[V0] = (byte)msg[0];
+
+            emu.Step();
+
+            // Fast-forward must advance s0 to the null terminator in BIOS ROM virtual space.
+            uint expectedPtr = biosRomVirt + (uint)msg.Length;
+            Assert.AreEqual(loopBase + 0x1Cu, (uint)(emu.Cpu.PC & 0xFFFFFFFFUL),
+                "PC must advance past BNEL + delay slot when string is in BIOS ROM");
+            Assert.AreEqual(expectedPtr, (uint)(emu.Cpu.RegsLo[S0] & 0xFFFFFFFFUL),
+                "s0 must point to the null terminator in BIOS ROM after fast-forward");
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[V0],
+                "v0 must be 0 (null) after BIOS ROM string fast-forward");
+        }
     }
 }
