@@ -128,6 +128,54 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// </summary>
         private bool _cachedIopSelfJump;
 
+        /// <summary>
+        /// <c>true</c> once the one-shot WaitIntr SBUS patch has fired.
+        ///
+        /// In the real PS2 IOP BIOS, SIFMAN calls <c>WaitIntr(SBUS=1)</c> before
+        /// entering its idle loop.  The BIOS kernel records the wait but does not write
+        /// hardware I_MASK bit 1 directly.  Without bit 1 set,
+        /// <see cref="IopMemoryBus.IsInterruptPending"/> stays false even when the EE
+        /// has signalled the IOP via MSFLAG, so the IOP fast-forward loop never
+        /// releases and SIFMAN never wakes.
+        ///
+        /// PCSX2 applies a ROM patch that makes <c>WaitIntr</c> write the hardware
+        /// I_MASK register.  We replicate the effect here as a single one-shot write
+        /// triggered when:
+        ///   • IOP SIFMAN has completed the F240 handshake (SMFLAG bits 16–18 all set)
+        ///   • The EE has sent its ready signal (MSFLAG bit 16 set)
+        ///
+        /// The flag is set to <c>true</c> <em>before</em> the interrupt lines are
+        /// asserted so that the block fires exactly once, regardless of whether the
+        /// IOP immediately acknowledges the signal.
+        /// </summary>
+        private bool _sifmanSbusPatched;
+
+        /// <summary>
+        /// <c>true</c> once SMFLAG bit 30 (SIF_STAT_SIFINIT = 0x40000000) has been
+        /// injected by the emulator on behalf of IOP SIFMAN.
+        ///
+        /// On real hardware, IOP SIFMAN sets this bit after receiving and processing
+        /// the EE's initial SIF command.  In our emulator the IOP OS thread scheduler
+        /// is not fully modelled: after the WaitIntr interrupt fires, the IOP idle
+        /// thread (<c>j $0xAE94</c>) never voluntarily yields, so SIFMAN's thread
+        /// never runs to do the write.
+        ///
+        /// We inject the bit directly once:
+        ///   • The one-shot WaitIntr patch has already fired (IOP has been signalled)
+        ///   • A brief settling window has elapsed (≥ 50 000 IOP steps) so the IOP
+        ///     has had a chance to process any pending interrupt before we step in
+        ///   • SMFLAG bit 30 is still 0 (SIFMAN has not set it on its own)
+        ///
+        /// After injection, the EE sees bit 30 and proceeds with the boot-time
+        /// SIF command protocol, matching PCSX2 post-patch behavior.
+        /// </summary>
+        private bool _sifmanSmflagInjected;
+
+        /// <summary>
+        /// IOP step count snapshot when <see cref="_sifmanSbusPatched"/> first became
+        /// <c>true</c>.  Used to measure the settling window before SMFLAG injection.
+        /// </summary>
+        private ulong _sifmanPatchedAtIopStep;
 
         /// <summary>
         /// Construct a scheduler, optionally supplying a pre-configured EE emulator.
@@ -253,8 +301,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             TotalEeSteps       = 0;
             TotalIopSteps      = 0;
             _iopAccumulator    = 0;
-            _cachedIopPc       = uint.MaxValue;
-            _cachedIopSelfJump = false;
+            _cachedIopPc          = uint.MaxValue;
+            _cachedIopSelfJump    = false;
+            _sifmanSbusPatched    = false;
+            _sifmanSmflagInjected = false;
+            _sifmanPatchedAtIopStep = 0;
         }
 
         /// <summary>
@@ -285,6 +336,56 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             if (eeSteps < 1) eeSteps = 1;
 
+            // ── One-shot WaitIntr SBUS patch ──────────────────────────────────
+            // SIFMAN calls WaitIntr(SBUS=1) before entering its idle loop, but
+            // the real IOP ROM's WaitIntr does not write hardware I_MASK bit 1.
+            // Without bit 1 set in I_MASK, IsInterruptPending stays false even
+            // when the EE has signalled via MSFLAG, so the IOP idle-loop fast-
+            // forward never releases and SIFMAN never wakes up.
+            //
+            // PCSX2 patches the WaitIntr function in the IOP ROM to write the
+            // hardware I_MASK bit.  We replicate the effect here as a single
+            // one-shot write: the flag is set to true FIRST (before asserting
+            // the interrupt lines) so the block fires exactly once, preventing
+            // re-entry even if the IOP does not immediately acknowledge.
+            //
+            // Conditions for firing:
+            //   • SIFMAN has completed the F240 handshake (SMFLAG bits 16–18)
+            //   • EE has sent its ready signal (MSFLAG bit 16 set)
+            //
+            // Reference: PCSX2 IopBios.cpp — WaitIntr patch writes I_MASK bit.
+            if (!_sifmanSbusPatched
+                && (EE.Bus.Sif.SmFlag & 0x00070000u) == 0x00070000u
+                && (EE.Bus.Sif.MsFlag & 0x00010000u) != 0u)
+            {
+                _sifmanSbusPatched      = true;  // set FIRST: guarantee exactly-once semantics
+                _sifmanPatchedAtIopStep = TotalIopSteps;
+                IOP.Bus.RaiseInterrupt(1);
+                IOP.Bus.EnableInterruptMask(1);
+            }
+
+            // ── One-shot SMFLAG bit-30 (SIF_STAT_SIFINIT) injection ───────────
+            // On real hardware, IOP SIFMAN sets SMFLAG bit 30 after receiving and
+            // processing the EE's boot-time SIF init command.  In our emulator the
+            // IOP OS thread scheduler is not fully modelled: the idle thread at
+            // 0xAE94 never yields, so SIFMAN's thread never runs to write bit 30.
+            //
+            // After the WaitIntr patch has fired and a settling window of ≥ 50 000
+            // IOP steps has elapsed, if SMFLAG bit 30 is still clear we inject it
+            // directly.  This matches the state PCSX2 reaches after the WaitIntr
+            // patch + SIFMAN thread execution, allowing the EE to proceed with its
+            // SIF command protocol.
+            //
+            // Reference: PCSX2 IopBios.cpp post-WaitIntr SIFMAN flow sets
+            //   psHu32(SBUS_SMFLAG) |= SIF_STAT_SIFINIT (0x40000000).
+            if (_sifmanSbusPatched
+                && !_sifmanSmflagInjected
+                && TotalIopSteps - _sifmanPatchedAtIopStep >= 50_000UL
+                && (EE.Bus.Sif.SmFlag & 0x40000000u) == 0u)
+            {
+                _sifmanSmflagInjected = true;
+                EE.Bus.Sif.WriteIopRegister(Hardware.SIF.REG_SMFLAG, 0x40000000u);
+            }
 
             for (int i = 0; i < eeSteps; i++)
             {
