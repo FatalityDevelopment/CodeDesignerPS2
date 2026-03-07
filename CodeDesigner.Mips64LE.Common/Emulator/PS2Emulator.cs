@@ -471,6 +471,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (TryFastForwardByteCopy())
                 return;
 
+            if (TryFastForwardLinearSearch())
+                return;
+
             if (TryFastForwardBiosPuts())
                 return;
 
@@ -1022,7 +1025,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                                      (uint)Bus.Ram.Length);
                 kernelSnapshot = new byte[kernelSnapLen];
                 Bus.Ram.AsSpan(0, kernelSnapLen).CopyTo(kernelSnapshot);
-                System.Console.WriteLine($"[BNEFill dbg] physStart=0x{physStart:x8} fillByte=0x{fillByte:x2} remaining=0x{remaining:x} snapLen=0x{kernelSnapLen:x} RAM[0x23FF0]=0x{System.Runtime.InteropServices.MemoryMarshal.Read<uint>(Bus.Ram.AsSpan(0x23FF0, 4)):x8} RAM[0x82024]=0x{System.Runtime.InteropServices.MemoryMarshal.Read<uint>(Bus.Ram.AsSpan(0x82024, 4)):x8}");
             }
 
 
@@ -1215,14 +1217,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // At pc32, the body has just run (cntVal already incremented for this iteration).
             long remaining = (long)boundVal - (long)cntVal;
             if (remaining <= BulkFillMinIterations) return false;
-            // Sanity guard: if the stack "bound" was overwritten by an earlier fill
-            // (e.g. a BNE-0x20 fill wrote 0x20202020 to the stack slot), remaining
-            // can explode to ~539 million — 16× the full 32 MB RAM size.  A legitimate
-            // BNEL byte-fill in the PS2 BIOS fills at most a few MB; any value larger
-            // than 2× the full RAM (64 MB) almost certainly comes from a corrupted
-            // stack frame, not a real fill loop.  Return false to avoid a catastrophic
-            // false-positive that wipes 31 MB of kernel data with 0x30 fill bytes.
-            if (remaining > 2L * PS2MemoryBus.MainRamSize) return false;
 
             // ── Step 5: comprehensive i-cache warm-up before bulk-fill ─────────
             // Same logic as TryFastForwardByteFill: pre-load every cache line that
@@ -1309,7 +1303,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                                      (uint)Bus.Ram.Length);
                 kernelSnapshot = new byte[kernelSnapLen];
                 Bus.Ram.AsSpan(0, kernelSnapLen).CopyTo(kernelSnapshot);
-                System.Console.WriteLine($"[BNELFill dbg] physStart=0x{physStart:x8} physLow=0x{physLow:x} fillByte=0x{fillByte:x2} remaining=0x{remaining:x} snapLen=0x{kernelSnapLen:x} RAM[0x23FF0]=0x{System.Runtime.InteropServices.MemoryMarshal.Read<uint>(Bus.Ram.AsSpan(0x23FF0, 4)):x8} RAM[0x82024]=0x{System.Runtime.InteropServices.MemoryMarshal.Read<uint>(Bus.Ram.AsSpan(0x82024, 4)):x8}");
             }
 
             // Execute the fill: descending from physStart for 'remaining' bytes.
@@ -1578,6 +1571,165 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             Cpu.PC = pc32 + 8u;
 
             InstructionCount += (ulong)remaining;
+            return true;
+        }
+
+
+        /// <summary>
+        /// Fast-forward the PS2 BIOS kernel linear-search loop.
+        ///
+        /// Pattern detected at <c>pc32</c> (a BNE instruction):
+        /// <code>
+        ///   [pc-4]:  lw    entryReg,  0(ptrReg)          ; load table entry
+        ///   [pc]:    bne   entryReg,  targetReg, +k       ; skip if no match
+        ///   [pc+4]:  addiu cntReg,    cntReg,    +1       ; match: count++
+        ///   [pc+8]:  jr    ra                             ; return immediately
+        ///   [pc+12]: addiu entryReg,  $zero,     +1       ; delay slot: rv = 1
+        ///   [pc+4k]: sltu  entryReg,  cntReg,  maxReg    ; bounds-check
+        ///   [pc+4k+4]: bne entryReg,  $zero, [pc-4]      ; loop-back
+        ///   [pc+4k+8]: addiu ptrReg,  ptrReg,    +8      ; advance (delay slot)
+        /// </code>
+        ///
+        /// On real PS2 hardware the search target is always present in the table
+        /// (small valid module table), so the first match terminates the loop
+        /// quickly.  With corrupted BIOS data the table can be 537 million entries
+        /// deep and the target never appears, creating an infinite loop that never
+        /// exits (the loop condition is <c>cntReg &lt; maxReg</c> where
+        /// <c>cntReg</c> only increments on a match, so it stays at 0 forever).
+        ///
+        /// This fast-forward scans the table directly in C# (up to
+        /// <see cref="LinearSearchMaxEntries"/> entries), then either returns the
+        /// found-entry result or fakes a not-found return so execution can continue.
+        /// </summary>
+        private bool TryFastForwardLinearSearch()
+        {
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+            if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
+
+            // ── Step 1: BNE entryReg, targetReg, +k (forward skip) ──────────────
+            uint w0 = FetchWord(pc32);
+            if ((w0 >> 26) != 5u) return false;        // opcode must be BNE
+            int   entryReg  = (int)((w0 >> 21) & 0x1Fu);
+            int   targetReg = (int)((w0 >> 16) & 0x1Fu);
+            short bneImm    = (short)(w0 & 0xFFFFu);
+            if (targetReg == 0)  return false;          // BNE vs zero → different fast-forward
+            if (bneImm    <= 0)  return false;          // must branch forward (skip match path)
+
+            // ── Step 2: ADDIU cntReg, cntReg, +1 ────────────────────────────────
+            uint w1 = FetchWord(pc32 + 4u);
+            if ((w1 >> 26) != 9u) return false;
+            int cntReg = (int)((w1 >> 16) & 0x1Fu);
+            if ((int)((w1 >> 21) & 0x1Fu) != cntReg) return false;  // rs == rt
+            if ((short)(w1 & 0xFFFFu) != 1)          return false;  // imm = +1
+
+            // ── Step 3: JR ra ────────────────────────────────────────────────────
+            uint w2 = FetchWord(pc32 + 8u);
+            if ((w2 >> 26) != 0u || (w2 & 0x3Fu) != 8u)  return false;  // SPECIAL/JR
+            if ((int)((w2 >> 21) & 0x1Fu) != 31)          return false;  // rs must be $ra
+
+            // ── Step 4: ADDIU entryReg, $zero, +1 (delay slot of JR) ────────────
+            uint w3 = FetchWord(pc32 + 12u);
+            if ((w3 >> 26) != 9u)                         return false;
+            if ((int)((w3 >> 21) & 0x1Fu) != 0)           return false;  // rs = $zero
+            if ((int)((w3 >> 16) & 0x1Fu) != entryReg)   return false;  // rt = entryReg
+            if ((short)(w3 & 0xFFFFu) != 1)              return false;  // imm = +1
+
+            // BNE skip target: the SLTU instruction
+            uint sltPC = (uint)((int)(pc32 + 4u) + (int)bneImm * 4);
+
+            // ── Step 5: SLTU entryReg, cntReg, maxReg ───────────────────────────
+            uint w4 = FetchWord(sltPC);
+            if ((w4 >> 26) != 0u || (w4 & 0x3Fu) != 0x2Bu) return false;  // SLTU
+            if ((int)((w4 >> 11) & 0x1Fu) != entryReg)      return false;  // rd
+            if ((int)((w4 >> 21) & 0x1Fu) != cntReg)        return false;  // rs
+            int maxReg = (int)((w4 >> 16) & 0x1Fu);
+
+            // ── Step 6: BNE entryReg, $zero, backward (loop-back) ───────────────
+            uint w5 = FetchWord(sltPC + 4u);
+            if ((w5 >> 26) != 5u)                            return false;
+            if ((int)((w5 >> 21) & 0x1Fu) != entryReg)      return false;
+            if ((int)((w5 >> 16) & 0x1Fu) != 0)             return false;  // rt = $zero
+            short loopImm = (short)(w5 & 0xFFFFu);
+            if (loopImm >= 0) return false;  // must be backward
+            uint loopTop = (uint)((int)(sltPC + 8u) + (int)loopImm * 4);
+            if (loopTop != pc32 - 4u) return false;  // loop-top must be LW before current BNE
+
+            // ── Step 7: ADDIU ptrReg, ptrReg, +8 (delay slot of loop BNE) ───────
+            uint w6 = FetchWord(sltPC + 8u);
+            if ((w6 >> 26) != 9u) return false;
+            int ptrReg = (int)((w6 >> 16) & 0x1Fu);
+            if ((int)((w6 >> 21) & 0x1Fu) != ptrReg)  return false;  // rs == rt
+            if ((short)(w6 & 0xFFFFu) != 8)           return false;  // imm = +8
+
+            // ── Step 8: LW entryReg, 0(ptrReg) at loop-top ──────────────────────
+            uint lwWord = FetchWord(loopTop);
+            if ((lwWord >> 26) != 0x23u)                     return false;  // LW
+            if ((int)((lwWord >> 16) & 0x1Fu) != entryReg)  return false;  // rt
+            if ((int)((lwWord >> 21) & 0x1Fu) != ptrReg)    return false;  // base
+            if ((short)(lwWord & 0xFFFFu) != 0)             return false;  // offset = 0
+
+            // ── Pattern matched.  Extract loop state. ────────────────────────────
+            uint cntVal    = (uint)(Cpu.RegsLo[cntReg]    & 0xFFFFFFFFu);
+            uint maxVal    = (uint)(Cpu.RegsLo[maxReg]    & 0xFFFFFFFFu);
+            uint ptrVirt   = (uint)(Cpu.RegsLo[ptrReg]    & 0xFFFFFFFFu);
+            uint targetVal = (uint)(Cpu.RegsLo[targetReg] & 0xFFFFFFFFu);
+
+            // cntReg only increments on a match (which immediately returns via jr ra).
+            // So when we reach this BNE, cntVal is always 0 for the "not found so far"
+            // path.  The loop exit condition cntVal >= maxVal can never trigger unless
+            // a match is found and the caller re-enters.  Treat remaining as the cap.
+            uint remaining = maxVal - cntVal;
+            if (remaining < BulkFillMinIterations) return false;
+
+            // We are at the BNE: the entry at ptrVirt has already failed.
+            // Scan entries at ptrVirt+8, ptrVirt+16, … up to the cap.
+            const uint LinearSearchMaxEntries = 65536u;
+            uint entriesToScan = Math.Min(remaining - 1u, LinearSearchMaxEntries);
+
+            bool found    = false;
+            uint foundPtr = 0u;
+            for (uint i = 0; i < entriesToScan; i++)
+            {
+                uint entryVirt = ptrVirt + 8u + i * 8u;
+                uint entryPhys = PS2MemoryBus.TranslateAddress(entryVirt);
+                uint entryWord;
+                if (entryPhys + 4u <= (uint)Bus.Ram.Length)
+                    entryWord = System.Runtime.InteropServices.MemoryMarshal
+                                    .Read<uint>(Bus.Ram.AsSpan((int)entryPhys, 4));
+                else
+                    entryWord = Bus.ReadWord(entryVirt);
+
+                if (entryWord == targetVal)
+                {
+                    found    = true;
+                    foundPtr = entryVirt;
+                    break;
+                }
+            }
+
+            if (found)
+            {
+                // Advance pointer to the matching entry and simulate:
+                //   addiu cntReg, cntReg, +1  ; count the match
+                //   jr ra                      ; return to caller
+                //   addiu entryReg, $zero, +1  ; delay slot: return value = 1
+                Cpu.RegsLo[ptrReg]   = (ulong)(int)foundPtr;
+                Cpu.RegsLo[cntReg]   = (ulong)((int)cntVal + 1);
+                Cpu.RegsLo[entryReg] = 1u;
+                Cpu.PC               = Cpu.RegsLo[31];  // jr ra
+            }
+            else
+            {
+                // Target not found within the scan range.  On real PS2 hardware this
+                // branch does not occur (target always present in a valid table).
+                // With corrupted BIOS data (table size = 537 M, all fill bytes) the
+                // search would loop forever.  Return "not found" so the caller can
+                // proceed and eventually exit the outer module-init loop.
+                Cpu.RegsLo[entryReg] = 0u;               // return value = 0 (not found)
+                Cpu.PC               = Cpu.RegsLo[31];   // jr ra
+            }
+
+            InstructionCount += entriesToScan;
             return true;
         }
 
