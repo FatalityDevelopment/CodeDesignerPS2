@@ -993,29 +993,36 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // the fill still see the pre-fill (d-cached) values.  Without a d-cache
             // simulation this emulator would clobber that data.
             //
-            // We compensate by saving a snapshot of the first 256 KB (the EE
-            // kernel header + data area) whenever:
+            // We compensate by saving a snapshot of the first 1 MB (the EE
+            // kernel header + module table + data area) whenever:
             //   (a) The fill covers the entire 32 MB (wraps around and writes
             //       the region [0 .. physStart) last), OR
             //   (b) The fill is partial but starts within the kernel area
-            //       (physStart < 256 KB).  In this case the fill overwrites data
+            //       (physStart < 1 MB).  In this case the fill overwrites data
             //       that the kernel was actively using and that would survive in
             //       the real d-cache.
             //
+            // 1 MB is chosen to cover the EE kernel module-descriptor table
+            // which starts at physical 0x40000 (just past the old 256 KB limit).
+            // Without preserving that region the null terminator of the table is
+            // wiped out by the fill loop, causing the outer module-init loop at
+            // 0x80010530 to run indefinitely.
+            //
             // After the bulk fill we restore this snapshot so that subsequent
             // kernel reads see the d-cached (pre-fill) values.
-            const int MinKernelPreservation = 256 * 1024;
+            const int MinKernelPreservation = 1 * 1024 * 1024;
             byte[]? kernelSnapshot = null;
             int     kernelSnapLen  = 0;
             if (remaining >= PS2MemoryBus.MainRamSize)
             {
-                // Full fill: preserve at least 256 KB, or physStart bytes if
+                // Full fill: preserve at least 1 MB, or physStart bytes if
                 // physStart is larger — whichever is greater, capped at RAM size.
                 kernelSnapLen  = (int)Math.Min(
                                      Math.Max(physStart, (uint)MinKernelPreservation),
                                      (uint)Bus.Ram.Length);
                 kernelSnapshot = new byte[kernelSnapLen];
                 Bus.Ram.AsSpan(0, kernelSnapLen).CopyTo(kernelSnapshot);
+                System.Console.WriteLine($"[BNEFill dbg] physStart=0x{physStart:x8} fillByte=0x{fillByte:x2} remaining=0x{remaining:x} snapLen=0x{kernelSnapLen:x} RAM[0x23FF0]=0x{System.Runtime.InteropServices.MemoryMarshal.Read<uint>(Bus.Ram.AsSpan(0x23FF0, 4)):x8} RAM[0x82024]=0x{System.Runtime.InteropServices.MemoryMarshal.Read<uint>(Bus.Ram.AsSpan(0x82024, 4)):x8}");
             }
 
 
@@ -1208,6 +1215,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // At pc32, the body has just run (cntVal already incremented for this iteration).
             long remaining = (long)boundVal - (long)cntVal;
             if (remaining <= BulkFillMinIterations) return false;
+            // Sanity guard: if the stack "bound" was overwritten by an earlier fill
+            // (e.g. a BNE-0x20 fill wrote 0x20202020 to the stack slot), remaining
+            // can explode to ~539 million — 16× the full 32 MB RAM size.  A legitimate
+            // BNEL byte-fill in the PS2 BIOS fills at most a few MB; any value larger
+            // than 2× the full RAM (64 MB) almost certainly comes from a corrupted
+            // stack frame, not a real fill loop.  Return false to avoid a catastrophic
+            // false-positive that wipes 31 MB of kernel data with 0x30 fill bytes.
+            if (remaining > 2L * PS2MemoryBus.MainRamSize) return false;
 
             // ── Step 5: comprehensive i-cache warm-up before bulk-fill ─────────
             // Same logic as TryFastForwardByteFill: pre-load every cache line that
@@ -1280,9 +1295,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             }
 
             // Kernel snapshot: the BNEL fill descends from addrVal-1 potentially into
-            // the EE kernel area (physical < 256 KB).  Save a snapshot so the kernel
-            // survives the fill, matching the real EE's d-cache behaviour.
-            const int MinKernelPreservation = 256 * 1024;
+            // the EE kernel area (physical < 1 MB).  Save a snapshot so the kernel
+            // module table (starting at physical 0x40000) and other kernel data
+            // survive the fill, matching the real EE's d-cache behaviour.
+            const int MinKernelPreservation = 1 * 1024 * 1024;
             byte[]? kernelSnapshot = null;
             int     kernelSnapLen  = 0;
             long physLow = (long)physStart - remaining + 1L;
@@ -1293,6 +1309,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                                      (uint)Bus.Ram.Length);
                 kernelSnapshot = new byte[kernelSnapLen];
                 Bus.Ram.AsSpan(0, kernelSnapLen).CopyTo(kernelSnapshot);
+                System.Console.WriteLine($"[BNELFill dbg] physStart=0x{physStart:x8} physLow=0x{physLow:x} fillByte=0x{fillByte:x2} remaining=0x{remaining:x} snapLen=0x{kernelSnapLen:x} RAM[0x23FF0]=0x{System.Runtime.InteropServices.MemoryMarshal.Read<uint>(Bus.Ram.AsSpan(0x23FF0, 4)):x8} RAM[0x82024]=0x{System.Runtime.InteropServices.MemoryMarshal.Read<uint>(Bus.Ram.AsSpan(0x82024, 4)):x8}");
             }
 
             // Execute the fill: descending from physStart for 'remaining' bytes.
@@ -1507,7 +1524,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             uint physStartQ = PS2MemoryBus.TranslateAddress((uint)((int)addrVal + sqImm))
                               & (uint)(PS2MemoryBus.MainRamSize - 1);
 
-            const int MinKernelPreservationQ = 256 * 1024;
+            const int MinKernelPreservationQ = 1 * 1024 * 1024;
             byte[]? kernelSnapshotQ = null;
             int     kernelSnapLenQ  = 0;
             long totalBytes = remaining * 16L;
@@ -1877,17 +1894,56 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (loopStart >= pc32) return false;
             uint loopBodyLen = (pc32 - loopStart) / 4u;                // # instructions before BNEL
 
-            // ── Step 3: Delay slot — ADDIU ptrReg, ptrReg, +1 ───────────────
-            // The pointer-advance MUST be in the BNEL delay slot (Pattern A).
-            // Allowing the advance to be in the JALR delay slot instead (Pattern B)
-            // is too permissive and causes false positives with non-string loops.
+            // ── Step 3: Delay slot — pointer advance detection ───────────────
+            // Two loop variants are in use by the PS2 BIOS puts implementation:
+            //
+            //   Pattern A — ADDIU ptrReg, ptrReg, +1 in the BNEL delay slot.
+            //     (classic null-terminated string walk, pointer advanced after null check)
+            //
+            //   Pattern B — LB argReg, 0(ptrReg) in the BNEL delay slot, with
+            //     ADDIU ptrReg, ptrReg, +1 inside the loop body (typically the
+            //     JALR delay slot).  The loop pre-loads the next character as the
+            //     argument for the upcoming putchar call.
+            //
+            // In both patterns the pointer still advances exactly +1 per iteration
+            // and the fast-forward logic (steps 6–8) is identical.  Pattern B is
+            // distinguished from arbitrary LB-in-delay-slot loops by requiring that
+            // an in-place ADDIU ptrReg++ exists somewhere in the loop body.
             uint dsWord = FetchWord(pc32 + 4u);
-            if ((dsWord >> 26) != 9u) return false;                    // ADDIU opcode = 9
-            int dsRs = (int)((dsWord >> 21) & 0x1Fu);
-            int dsRt = (int)((dsWord >> 16) & 0x1Fu);
-            if (dsRs != dsRt) return false;                            // rs == rt (in-place)
-            if ((short)(dsWord & 0xFFFFu) != 1) return false;         // imm must be +1
-            int ptrReg = dsRt;                                         // string pointer register
+            int ptrReg;
+            if ((dsWord >> 26) == 9u)
+            {
+                // Pattern A: ADDIU ptrReg, ptrReg, +1 in the BNEL delay slot.
+                int dsRs = (int)((dsWord >> 21) & 0x1Fu);
+                int dsRt = (int)((dsWord >> 16) & 0x1Fu);
+                if (dsRs != dsRt) return false;                        // rs == rt (in-place)
+                if ((short)(dsWord & 0xFFFFu) != 1) return false;     // imm must be +1
+                ptrReg = dsRt;
+            }
+            else if ((dsWord >> 26) == 0x20u)
+            {
+                // Pattern B: LB argReg, 0(ptrReg) in the BNEL delay slot.
+                // The base register of the LB is the pointer register.
+                if ((short)(dsWord & 0xFFFFu) != 0) return false;     // LB offset must be 0
+                ptrReg = (int)((dsWord >> 21) & 0x1Fu);               // base = ptrReg
+                // Verify ADDIU ptrReg, ptrReg, +1 is present in the loop body.
+                // This guards against false-positives on non-string LB loops.
+                bool foundAddiu = false;
+                for (uint off = 0u; off < loopBodyLen; off++)
+                {
+                    uint w = FetchWord(loopStart + off * 4u);
+                    if ((w >> 26) == 9u                                // ADDIU
+                        && (int)((w >> 21) & 0x1Fu) == ptrReg         // rs = ptrReg
+                        && (int)((w >> 16) & 0x1Fu) == ptrReg         // rt = ptrReg
+                        && (short)(w & 0xFFFFu) == 1)                 // imm = +1
+                    { foundAddiu = true; break; }
+                }
+                if (!foundAddiu) return false;
+            }
+            else
+            {
+                return false;
+            }
 
             // ── Step 4: Loop body must contain a function call (JALR or JAL) ─
             // This distinguishes the serial putchar loop from simpler byte-scan loops.

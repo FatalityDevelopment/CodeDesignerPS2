@@ -1009,6 +1009,28 @@ namespace CodeDesigner.Mips64LE
                 uint stackBound = 0;
                 try { stackBound = sched.EE.Bus.ReadWord(sp32 + 0x84u); } catch { }
                 Console.WriteLine($"  EE stack[sp+0x84]=0x{stackBound:x8} (outer-loop bound)");
+
+                // ── Kernel data probes ──────────────────────────────────────────
+                // Dump memory at the three key addresses referenced by the module
+                // scan loop to help diagnose fill-corruption vs. correct init:
+                //   0x80023FF0 — scan-count field in kernel module descriptor
+                //   0x800242C8 — inner scan table (first 4 entries × 8 bytes)
+                //   outer module table entry pointed to by s2
+                static uint SafeRead(PS2MemoryBus bus, uint va)
+                {
+                    uint pa = PS2MemoryBus.TranslateAddress(va) & (uint)(PS2MemoryBus.MainRamSize - 1);
+                    return pa + 4 <= (uint)bus.Ram.Length
+                        ? System.Runtime.InteropServices.MemoryMarshal.Read<uint>(bus.Ram.AsSpan((int)pa, 4))
+                        : 0xDEADBEEFu;
+                }
+                uint scanCount   = SafeRead(sched.EE.Bus, 0x80023FF0u);
+                uint tbl0        = SafeRead(sched.EE.Bus, 0x800242C8u);
+                uint tbl1        = SafeRead(sched.EE.Bus, 0x800242D0u);
+                uint tbl2        = SafeRead(sched.EE.Bus, 0x800242D8u);
+                uint modEntry    = SafeRead(sched.EE.Bus, (uint)(s2 & 0xFFFFFFFFUL));
+                Console.WriteLine($"  RAM[0x80023FF0] = 0x{scanCount:x8}  (module scan count; correct if small integer)");
+                Console.WriteLine($"  RAM[0x800242C8..D8] = 0x{tbl0:x8} 0x{tbl1:x8} 0x{tbl2:x8}  (inner scan table entries)");
+                Console.WriteLine($"  RAM[s2=0x{(uint)(s2 & 0xFFFFFFFFUL):x8}] = 0x{modEntry:x8}  (outer module tag)");
             }
 
             // ── IOP context disassembly ───────────────────────────────────────
