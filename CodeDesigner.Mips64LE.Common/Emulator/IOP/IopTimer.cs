@@ -14,20 +14,27 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     ///   +0x04  TN_MODE    — mode/control register
     ///   +0x08  TN_TARGET  — 16-bit compare target
     ///
-    /// TN_MODE bits used here:
-    ///   [3]  ZRET  — reset counter to 0 on compare match
-    ///   [4]  CMPE  — compare interrupt enable
-    ///   [5]  OVFE  — overflow interrupt enable
-    ///   [7]  CUE   — count-up enable
-    ///   [8]  ALT   — alternate clock source (T2: sysclock÷8; T3–T5: external)
-    ///   [10] EQUF  — compare-match flag (cleared on TN_MODE read)
-    ///   [11] OVFF  — overflow flag     (cleared on TN_MODE read)
+    /// TN_MODE bits (PS1/IOP hardware spec, no$psx.de docs):
+    ///   [0-1] CLKS — clock selection (0=system clock, see bit 8)
+    ///   [2]   GATE — gate enable
+    ///   [3]   ZRET — reset counter to 0 on compare match
+    ///   [4]   CMPE — compare interrupt enable (IRQ when COUNT = TARGET)
+    ///   [5]   OVFE — overflow interrupt enable (IRQ when COUNT = 0xFFFF)
+    ///   [6]   IRQR — IRQ repeat mode (0=one-shot, 1=fire repeatedly)
+    ///   [7]   IRQT — IRQ toggle mode (0=pulse, 1=toggle EQUF on each IRQ)
+    ///   [8]   ALT  — alternate clock source (T2: sysclock÷8; T3–T5: external)
+    ///   [10]  EQUF — compare-match flag (cleared on TN_MODE read)
+    ///   [11]  OVFF — overflow flag     (cleared on TN_MODE read)
+    ///
+    /// IMPORTANT: There is NO count-up enable bit in the PS1/IOP timer.
+    /// The timer ALWAYS counts from its selected clock source (PCSX2-verified).
+    /// The former MODE_CUE (bit 7) guard has been removed; bit 7 is IRQT.
     ///
     /// INTC bits wired by <see cref="IopEmulator"/>:
     ///   T0 → I_STAT bit 4,  T1 → bit 5,  T2 → bit 6
     ///   T3 → I_STAT bit 14, T4 → bit 15, T5 → bit 16
     ///
-    /// Reference: PCSX2 pcsx2/IopCounters.cpp, pcsx2/IopCounters.h.
+    /// Reference: PCSX2 pcsx2/IopCounters.cpp, pcsx2/IopCounters.h; no$psx.de timer docs.
     /// </summary>
     public sealed class IopTimer
     {
@@ -40,7 +47,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private const uint MODE_ZRET = 0x0008u; // [3]  reset count to 0 on compare match (PCSX2 Iop_Count_ResetOnCmp)
         private const uint MODE_CMPE = 0x0010u; // [4]  compare interrupt enable
         private const uint MODE_OVFE = 0x0020u; // [5]  overflow interrupt enable
-        private const uint MODE_CUE  = 0x0080u; // [7]  count-up enable
+        private const uint MODE_IRQR = 0x0040u; // [6]  IRQ repeat mode (0=one-shot, 1=fire on every match)
         private const uint MODE_ALT  = 0x0100u; // [8]  alternate clock source
         private const uint MODE_EQUF = 0x0400u; // [10] compare flag (cleared-on-read)
         private const uint MODE_OVFF = 0x0800u; // [11] overflow flag  (cleared-on-read)
@@ -127,12 +134,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// Advance the timer by <paramref name="sysclockCycles"/> IOP sysclock cycles.
         /// Fires <see cref="CompareInterruptPending"/> and/or
         /// <see cref="OverflowInterruptPending"/> when conditions are met.
+        ///
+        /// The IOP timer hardware has no count-enable bit: the timer ALWAYS counts
+        /// from its selected clock source (system clock or alternate).  The former
+        /// MODE_CUE (bit 7) guard is removed; bit 7 is the IRQ toggle mode (IRQT),
+        /// not a count-enable.  Reference: no$psx.de timer documentation.
         /// </summary>
         public void Tick(uint sysclockCycles)
         {
-            if ((_mode & MODE_CUE) == 0)
-                return;
-
             uint div = (_mode & MODE_ALT) != 0 ? AltDivider : NormalDividers[Index];
 
             _cycleAccum += sysclockCycles;
@@ -149,10 +158,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 // Compare match
                 if (_target != 0u && _count == _target)
                 {
-                    if ((_mode & MODE_CMPE) != 0 && (_mode & MODE_EQUF) == 0)
+                    if ((_mode & MODE_CMPE) != 0)
                     {
-                        _mode |= MODE_EQUF;
-                        CompareInterruptPending?.Invoke(this, EventArgs.Empty);
+                        // In repeat mode (IRQR=1) the interrupt fires on every match.
+                        // In one-shot mode (IRQR=0) fire only when EQUF is clear.
+                        if ((_mode & MODE_IRQR) != 0 || (_mode & MODE_EQUF) == 0)
+                        {
+                            _mode |= MODE_EQUF;
+                            CompareInterruptPending?.Invoke(this, EventArgs.Empty);
+                        }
                     }
                     // ZRET: reset counter to 0 on compare match so the timer fires
                     // at the target period rather than after a full 65536-tick wrap.
@@ -164,7 +178,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 // Overflow (counter wrapped from 0xFFFF → 0)
                 if (_count == 0u && (_mode & MODE_OVFE) != 0)
                 {
-                    if ((_mode & MODE_OVFF) == 0)
+                    // In repeat mode fire on every overflow; one-shot only when OVFF clear.
+                    if ((_mode & MODE_IRQR) != 0 || (_mode & MODE_OVFF) == 0)
                     {
                         _mode |= MODE_OVFF;
                         OverflowInterruptPending?.Invoke(this, EventArgs.Empty);
@@ -184,7 +199,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <summary>Current raw target value (16-bit).</summary>
         public uint Target => _target & 0xFFFFu;
 
-        /// <summary>True when count-up enable (CUE) bit is set.</summary>
-        public bool IsEnabled => (_mode & MODE_CUE) != 0;
+        /// <summary>
+        /// True when compare or overflow interrupts are enabled (CMPE or OVFE bits set).
+        /// The IOP timer always counts; this property reflects whether it can generate interrupts.
+        /// </summary>
+        public bool IsEnabled => (_mode & (MODE_CMPE | MODE_OVFE)) != 0;
     }
 }
