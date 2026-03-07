@@ -66,6 +66,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private int _byteCopyDebugCount;
         private int _byteCopyLargeDebugCount;
 
+        // One-shot flag: set after TryRepairEeKernelSifData() has run once.
+        // The repair patches kernel data fields that were corrupted by the BIOS
+        // bulk-fill loop and never restored because the kernel zeroing pass uses
+        // TLB-mapped virtual addresses that the fast-forward cannot resolve.
+        private bool _eeKernelSifDataFixed;
+
         // ── Instruction cache (i-cache): 16 KB, 256 sets, 64-byte lines ────────────
         // The R5900 has a 16 KB physically-tagged, direct-mapped i-cache with
         // 64-byte lines (16 × 32-bit instructions per line).  This matches the
@@ -479,6 +485,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             if (TryFastForwardBiosPuts())
                 return;
+
+            TryRepairEeKernelSifData();
 
             // ── Hardware interrupt check ──────────────────────────────────────
             // Deliver a pending INTC interrupt before executing the next instruction
@@ -1896,8 +1904,91 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// <summary>Minimum bound value before the module-install loop is fast-forwarded.</summary>
         private const uint ModuleInstallBoundThreshold = 65536u;
 
+        /// <summary>
+        /// One-shot repair of EE kernel data fields that are stuck at the BIOS fill-pattern
+        /// (0x20202020) because the kernel's TLB-mapped zeroing pass cannot be fast-forwarded.
+        ///
+        /// Background
+        /// ----------
+        /// The BIOS bulk-fill loop at 0x800109FC writes 0x20 over the entire 32 MB of EE RAM
+        /// (physical 0x00000000–0x01FFFFFF), including the kernel data area at physical
+        /// 0x20000–0x5FFFF.  After decompressing the kernel into RAM the BIOS runs a zeroing
+        /// pass over this region using TLB-mapped virtual addresses (KSEG2, 0xC0000000+).
+        /// Our <see cref="TryFastForwardByteCopy"/> fast-forward cannot resolve those virtual
+        /// addresses and marks the entire copy as a no-op (fullSkip), so the fill-pattern
+        /// persists in physical RAM.
+        ///
+        /// Effect
+        /// ------
+        /// Key SIFMAN fields loaded by the EE kernel poll loop at 0x80012670 include:
+        ///   physical 0x23FD4  — SIF0 pending-packet counter (should be 0 after init)
+        ///   physical 0x242F8  — module-list pointer field   (should be 0 after init)
+        ///   physical 0x24100  — per-module state word       (should be 0 after init)
+        ///   physical 0x24124  — outer-loop exit flag        (should be 0 after init)
+        ///
+        /// With these stuck at 0x20202020 the EE spins forever, never advancing the SIF
+        /// handshake, leaving the IOP trapped at its idle self-jump 0x0000ae94.
+        ///
+        /// Fix
+        /// ---
+        /// When the EE first enters the handshake loop (PC in 0x80012600–0x80012800) and
+        /// the sentinel field at physical 0x23FD4 still holds the fill-pattern, we scan
+        /// the entire kernel data window (physical 0x20000–0x5FFFF) and zero every 4-byte
+        /// aligned word that still holds exactly 0x20202020.  This matches what the real
+        /// kernel zeroing pass would have done, without touching any word that the BIOS or
+        /// kernel has legitimately written.
+        ///
+        /// The flag <see cref="_eeKernelSifDataFixed"/> ensures this runs exactly once.
+        /// </summary>
+        private void TryRepairEeKernelSifData()
+        {
+            if (_eeKernelSifDataFixed)
+                return;
 
-        /// <code>
+            // Only act when the EE is in the SIF handshake area.
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+            if (pc32 < 0x80012600u || pc32 > 0x80012800u)
+                return;
+
+            // Check the sentinel field (physical 0x23FD4 = virtual 0x800023FD4 in KSEG0).
+            const uint SentinelPhys = 0x23FD4u;
+            if (SentinelPhys + 3u >= (uint)Bus.Ram.Length)
+                return;
+
+            uint sentinel = (uint)(Bus.Ram[SentinelPhys]
+                                 | (Bus.Ram[SentinelPhys + 1] << 8)
+                                 | (Bus.Ram[SentinelPhys + 2] << 16)
+                                 | (Bus.Ram[SentinelPhys + 3] << 24));
+            if (sentinel != 0x20202020u)
+            {
+                // Kernel already zeroed the data (TLB worked or data was written legitimately).
+                _eeKernelSifDataFixed = true;
+                return;
+            }
+
+            // Zero every 4-byte aligned word in the kernel data area that still holds the
+            // exact fill-pattern 0x20202020.  Words written legitimately by the BIOS or
+            // kernel to non-zero values are left untouched.
+            const int KernelDataStart = 0x20000;
+            const int KernelDataEnd   = 0x60000;
+            for (int pa = KernelDataStart; pa < KernelDataEnd && pa + 3 < Bus.Ram.Length; pa += 4)
+            {
+                if (Bus.Ram[pa]     == 0x20
+                 && Bus.Ram[pa + 1] == 0x20
+                 && Bus.Ram[pa + 2] == 0x20
+                 && Bus.Ram[pa + 3] == 0x20)
+                {
+                    Bus.Ram[pa]     = 0;
+                    Bus.Ram[pa + 1] = 0;
+                    Bus.Ram[pa + 2] = 0;
+                    Bus.Ram[pa + 3] = 0;
+                }
+            }
+
+            _eeKernelSifDataFixed = true;
+        }
+
+
         ///   loop:
         ///     lbu    tmpReg,  0(srcReg)          ; load byte from source
         ///     addiu  cntReg,  cntReg,  -1         ; count--

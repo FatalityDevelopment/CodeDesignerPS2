@@ -152,6 +152,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             uint pc = State.PC;
             uint word = Bus.ReadWord(pc);
+            Bus.DebugCurrentPc = pc;  // for I_MASK write traces
 
             // Sync bridge GPRs from IOP state before decoding
             SyncBridgeFromIop();

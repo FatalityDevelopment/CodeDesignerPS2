@@ -390,6 +390,192 @@ namespace CodeDesigner.Mips64LE
                     uint s0 = state.ReadReg(16);
                     uint s1 = state.ReadReg(17);
                     Console.WriteLine($"  *** IOP first hit WaitSema loop (0x16C3C): s0=0x{s0:x8} s1=0x{s1:x8} I_CTRL=0x{iCtrlW:x8} I_STAT=0x{iStatW:x8} I_MASK=0x{iMaskW:x8} SR=0x{state.SR:x8} ***");
+                    // Also dump the region around 0x16C3C and the WaitIntr/WaitSema called after
+                    foreach (var (dumpStart, dumpEnd, label) in new (uint, uint, string)[]
+                    {
+                        (0x00016C00u, 0x00016D70u, "16C00-16D70"),
+                        (0x000108C0u, 0x000108F0u, "108C0-108F0"),
+                        (0x00017778u, 0x000177A0u, "17778-177A0"),
+                        (0x000178D8u, 0x00017900u, "178D8-17900"),
+                        (0x00016ABCu, 0x00016AECu, "16ABC-16AEC"),
+                    })
+                    {
+                        Console.WriteLine($"  IOP RAM disasm [{label}]:");
+                        for (uint da = dumpStart; da < dumpEnd; da += 4)
+                        {
+                            try
+                            {
+                                uint iw3 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis3 = MipsDisassembler.Disassemble(iw3, da);
+                                string mark3 = (da == pc) ? " <-- PC" : "";
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw3:X8}  {dis3}{mark3}");
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
+                // Trace ALL unique IOP PCs in the module range 0x10000-0x1FFFF
+                // to map the complete SIFMAN execution path after the 0x16C3C loop.
+                if (pc >= 0x00010000u && pc <= 0x0001FFFFu && !iopSeenPcs.Contains(pc ^ 0x55AA0000u))
+                {
+                    iopSeenPcs.Add(pc ^ 0x55AA0000u);
+                    uint iStatT = scheduler.IOP.Bus.IStat;
+                    uint iMaskT = scheduler.IOP.Bus.IMask;
+                    uint a0T = state.ReadReg(4);
+                    uint raT = state.ReadReg(31);
+                    Console.WriteLine($"  [SIFMAN-module] PC=0x{pc:X8}  a0=0x{a0T:X8} ra=0x{raT:X8}  I_MASK=0x{iMaskT:X5} I_STAT=0x{iStatT:X5}");
+                }
+
+                // Trace all calls to EnableInterrupt (0x00004188) to see what bits are enabled and from where
+                if (pc == 0x00004188u)
+                {
+                    uint a0en = state.ReadReg(4);
+                    uint raEn = state.ReadReg(31);
+                    Console.WriteLine($"  [EnableInterrupt] a0={a0en} (bit=0x{1u << (int)(a0en & 31):X}) ra=0x{raEn:X8}  I_MASK_before=0x{scheduler.IOP.Bus.IMask:X8}");
+                }
+
+                // One-shot: trace unique IOP PCs in the CDVDman range 0xA800-0xB500
+                // to show the complete CDVDman execution path after S-commands finish.
+                if (pc >= 0x0000A800u && pc <= 0x0000B500u && !iopSeenPcs.Contains(pc | 0x80000000u))
+                {
+                    iopSeenPcs.Add(pc | 0x80000000u);
+                    uint iStat = scheduler.IOP.Bus.IStat;
+                    uint iMask = scheduler.IOP.Bus.IMask;
+                    string iSel = $"I_MASK=0x{iMask:X5} I_STAT=0x{iStat:X5}";
+                    Console.WriteLine($"  [CDVDman] PC=0x{pc:X8}  a0=0x{state.ReadReg(4):X8} a1=0x{state.ReadReg(5):X8} v0=0x{state.ReadReg(2):X8} ra=0x{state.ReadReg(31):X8}  {iSel}");
+                    // Dump disasm when we first reach 0xAB30 (CDVDman is fully loaded by then)
+                    if (pc == 0x0000AB30u && !iopSeenPcs.Contains(0xAB308000u))
+                    {
+                        iopSeenPcs.Add(0xAB308000u);
+                        Console.WriteLine("  CDVDman loaded code dump [0xAA80-0xAD60]:");
+                        for (uint da = 0x0000AA80u; da < 0x0000AD64u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                string mark = (da == pc) ? " <-- PC" : "";
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                        // Also dump 0xB000-0xB280 (CDVDman init main function)
+                        Console.WriteLine("  CDVDman init main [0xAFC0-0xB280]:");
+                        for (uint da = 0x0000AFC0u; da < 0x0000B284u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                    }
+                }
+
+                // Trace when ra = 0x0000bc6c (the call at 0x0000bc68 leading to WaitSema-Y)
+                // Fires on any instruction where ra has been set to this specific return address.
+                if (state.ReadReg(31) == 0x0000bc6cu && !iopSeenPcs.Contains(0xBC6CB86Cu))
+                {
+                    iopSeenPcs.Add(0xBC6CB86Cu);
+                    Console.WriteLine($"  *** ra==0x0000bc6c detected at PC=0x{pc:x8} (about to call WaitSema-Y) ***");
+                    Console.WriteLine($"      I_MASK=0x{scheduler.IOP.Bus.IMask:X8}  I_STAT=0x{scheduler.IOP.Bus.IStat:X8}  a0=0x{state.ReadReg(4):X8}");
+                    Console.WriteLine("      IOP RAM disasm [0x0000bb80-0x0000bd00]:");
+                    for (uint da = 0x0000bb80u; da < 0x0000bd04u; da += 4)
+                    {
+                        try
+                        {
+                            uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                            string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                            string mark = (da == pc) ? " <-- PC" : "";
+                            Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                        }
+                        catch { /* bus read may fail for unmapped/unloaded IOP RAM regions */ }
+                    }
+                }
+
+                // One-shot: dump IOP RAM around 0x0000bc60 (the second WaitSema area)
+                // when the IOP first visits any address in that region.
+                if (pc >= 0x0000bba0u && pc <= 0x0000bce0u && !iopSeenPcs.Contains(0xBBBBBBBBu))
+                {
+                    iopSeenPcs.Add(0xBBBBBBBBu);
+                    Console.WriteLine($"  *** IOP first entered WaitSema-Y region at PC=0x{pc:x8} ***");
+                    Console.WriteLine($"      I_MASK=0x{scheduler.IOP.Bus.IMask:X8}  I_STAT=0x{scheduler.IOP.Bus.IStat:X8}  a0=0x{state.ReadReg(4):X8}  ra=0x{state.ReadReg(31):X8}");
+                    Console.WriteLine("      IOP RAM disasm [0x0000bb80-0x0000bcf0]:");
+                    for (uint da = 0x0000bb80u; da < 0x0000bcf4u; da += 4)
+                    {
+                        try
+                        {
+                            uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                            string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                            string mark = (da == pc) ? " <-- PC" : "";
+                            Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                        }
+                        catch { /* skip unloaded address */ }
+                    }
+                }
+
+                // One-shot: dump IOP RAM around the VBlank-init area to find SBUS enable
+                if (pc >= 0x000120A0u && pc <= 0x000120F0u && !iopSeenPcs.Contains(0x12005555u))
+                {
+                    iopSeenPcs.Add(0x12005555u);
+                    Console.WriteLine($"  *** IOP first entered VBlank-init area at PC=0x{pc:x8} ***");
+                    Console.WriteLine("      IOP RAM disasm [0x00011FC0-0x00012140]:");
+                    for (uint da = 0x00011FC0u; da < 0x00012144u; da += 4)
+                    {
+                        try
+                        {
+                            uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                            string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                            string mark = (da == pc) ? " <-- PC" : "";
+                            Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                        }
+                        catch { /* skip unloaded address */ }
+                    }
+                }
+
+                // One-shot: dump IOP RAM around 0x00004190-0x00004270 (I_MASK init function at 0x41DC)
+                if (pc >= 0x00004190u && pc <= 0x00004270u && !iopSeenPcs.Contains(0x41414141u))
+                {
+                    iopSeenPcs.Add(0x41414141u);
+                    Console.WriteLine($"  *** IOP first entered I_MASK-init region at PC=0x{pc:x8} ***");
+                    Console.WriteLine($"      I_MASK=0x{scheduler.IOP.Bus.IMask:X8}  I_STAT=0x{scheduler.IOP.Bus.IStat:X8}");
+                    Console.WriteLine("      IOP RAM disasm [0x00004170-0x00004280]:");
+                    for (uint da = 0x00004170u; da < 0x00004284u; da += 4)
+                    {
+                        try
+                        {
+                            uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                            string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                            string mark = (da == pc) ? " <-- PC" : "";
+                            Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                        }
+                        catch { /* skip unloaded address */ }
+                    }
+
+                    // Also scan all IOP RAM for jal 0x4188 instructions (0x0C001062)
+                    Console.WriteLine("  Scanning IOP RAM for all jal 0x4188 calls:");
+                    const uint jalEnableIntr = 0x0C001062u; // jal 0x00004188
+                    for (uint sa = 0u; sa < 0x80000u; sa += 4)
+                    {
+                        try
+                        {
+                            uint iws = scheduler.IOP.Bus.ReadWord(sa);
+                            if (iws == jalEnableIntr)
+                            {
+                                // Print the instruction 2 before (usually "addiu a0, ...")
+                                uint prev1 = 0, prev2 = 0;
+                                try { prev2 = scheduler.IOP.Bus.ReadWord(sa - 8); } catch { /* skip */ }
+                                try { prev1 = scheduler.IOP.Bus.ReadWord(sa - 4); } catch { /* skip */ }
+                                uint next1 = 0;
+                                try { next1 = scheduler.IOP.Bus.ReadWord(sa + 4); } catch { /* skip */ }
+                                Console.WriteLine($"    jal 0x4188 at 0x{sa:X8}: prev2={MipsDisassembler.Disassemble(prev2, sa-8)}  prev={MipsDisassembler.Disassemble(prev1, sa-4)}  delay={MipsDisassembler.Disassemble(next1, sa+4)}");
+                            }
+                        }
+                        catch { /* skip unloaded IOP RAM region */ }
+                    }
                 }
             };
 
@@ -990,6 +1176,24 @@ namespace CodeDesigner.Mips64LE
             DumpEeRamRegion(sched.EE.Bus, 0x80010530u, 0x80010570u, "outer-loop start");
             // Also dump function prologue of the called copy function
             DumpEeRamRegion(sched.EE.Bus, 0x800103B0u, 0x800103D0u, "copy-func prologue");
+            // Dump the SIF/SMFLAG processing loop (FAC8 → FBB0 → FBC0)
+            DumpEeRamRegion(sched.EE.Bus, 0x8000FAC8u, 0x8000FC00u, "SMFLAG-reader");
+            // Dump the EE EELOAD/SIF command region
+            DumpEeRamRegion(sched.EE.Bus, 0x8000FC00u, 0x8000FF00u, "SIF-cmd-region");
+            DumpEeRamRegion(sched.EE.Bus, 0x80012500u, 0x80012800u, "EELOAD-region");
+            // Dump SIF data structure key fields
+            try
+            {
+                uint sifFC8 = sched.EE.Bus.ReadWord(0x80023FC8u);
+                uint sifFD0 = sched.EE.Bus.ReadWord(0x80023FD0u);
+                uint sifFD4 = sched.EE.Bus.ReadWord(0x80023FD4u);
+                uint sifFD8 = sched.EE.Bus.ReadWord(0x80023FD8u);
+                uint sifFCC = sched.EE.Bus.ReadWord(0x80023FCCu);
+                uint sif4124 = sched.EE.Bus.ReadWord(0x80024124u);
+                Console.WriteLine($"  EE SIF struct: [3FC8]={sifFC8:X8} [3FCC]={sifFCC:X8} [3FD0]={sifFD0:X8} [3FD4]={sifFD4:X8} [3FD8]={sifFD8:X8}");
+                Console.WriteLine($"  EE SIF struct: [4124]={sif4124:X8} (loop cond)");
+            }
+            catch { }
             // Dump key registers for outer loop diagnosis
             {
                 ulong s1 = (ulong)sched.EE.Cpu.RegsLo[17];

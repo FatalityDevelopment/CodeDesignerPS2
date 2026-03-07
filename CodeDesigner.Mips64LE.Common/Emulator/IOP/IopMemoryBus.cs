@@ -102,6 +102,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public byte[] Bios => _bios;
 
         /// <summary>
+        /// Set by IopEmulator before each instruction so I_MASK write traces can
+        /// report which PC caused the change. Debug-only field.
+        /// </summary>
+        internal uint DebugCurrentPc { get; set; }
+
+        /// <summary>
         /// When <see langword="true"/> the CPU has set COP0 SR.IsC (bit 16, "Isolate
         /// Cache").  In this mode data-memory writes from the CPU are redirected to
         /// the internal I-cache and must NOT modify main IOP RAM.  The BIOS uses
@@ -350,6 +356,26 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if ((uint)bit < 32u) _iStat |= 1u << bit;
         }
 
+        /// <summary>
+        /// Enable an IOP interrupt mask bit directly (sets the corresponding I_MASK bit).
+        ///
+        /// In the real PS2 IOP BIOS, certain <c>WaitIntr</c> calls do not write the hardware
+        /// I_MASK register directly; they only update internal kernel tables.  This method
+        /// is called by <see cref="DualCpuScheduler"/> once SIFMAN has completed its F240
+        /// handshake and is known to be waiting for the SBUS interrupt (bit 1), replicating
+        /// the ROM patch that PCSX2 applies to make SIFMAN's <c>WaitIntr(SBUS)</c> work.
+        ///
+        /// Reference: PCSX2 pcsx2/IopBios.cpp — WaitIntr hook enables I_MASK hardware bit.
+        /// </summary>
+        public void EnableInterruptMask(int bit)
+        {
+            if ((uint)bit >= 32u) return;
+            uint prev = _iMask;
+            _iMask |= 1u << bit;
+            if (_iMask != prev)
+                Console.WriteLine($"[IOP I_MASK PATCH] 0x{prev:X8} → 0x{_iMask:X8}  (bit {bit} enabled by scheduler patch)");
+        }
+
         // ── Address translation ───────────────────────────────────────────────
 
         /// <summary>
@@ -466,7 +492,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             // IOP INTC
             if (addr == IntcBase)      { _iStat &= value; return; }  // W0C (write-AND per PCSX2 psxHu32 &= value)
-            if (addr == IntcBase + 4u) { _iMask  = value; return; }
+            if (addr == IntcBase + 4u)
+            {
+                uint prev = _iMask;
+                _iMask = value;
+                // Trace ALL I_MASK changes to help diagnose SBUS (bit 1) initialization.
+                if (_iMask != prev)
+                    Console.WriteLine($"[IOP I_MASK] 0x{prev:X8} → 0x{_iMask:X8}  (diff: {(_iMask ^ prev):X8})  PC=0x{DebugCurrentPc:X8}");
+                return;
+            }
             if (addr == IntcBase + 8u) { _iCtrl |= value; return; }  // I_CTRL: write-OR per PCSX2 IopHw.cpp
 
             // IOP timers T0–T2 (0x1F801100)
@@ -488,7 +522,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             {
                 Dmac.Channels[chIdx].WriteRegister(chReg, value);
                 if (chReg == IopDmacChannel.REG_CHCR && Dmac.Channels[chIdx].IsRunning)
-                    Dmac.ExecuteChannel(chIdx, this);
+                {
+                    // CH10 = SIF1 receive (EE→IOP direction).  In the real PS2, the IOP
+                    // DMAC stalls CH10 until the EE fills the SIF1 FIFO.  Emulate this
+                    // by deferring execution when the FIFO is empty: STR stays set so
+                    // DualCpuScheduler can trigger the channel once EE CH6 delivers data.
+                    // Only applies when a real SIF is wired; unit-test scenarios without
+                    // a SharedSif run immediately (zero-fill, matching old behaviour).
+                    // Reference: PCSX2 pcsx2/Sif1.cpp psxDma10 — checks sif1.data.size != 0.
+                    bool sif1Empty = chIdx == 10
+                        && SharedSif != null
+                        && SharedSif.Sif1Count == 0;
+
+                    if (!sif1Empty)
+                        Dmac.ExecuteChannel(chIdx, this);
+                }
                 return;
             }
 
@@ -510,6 +558,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
             {
                 uint off = addr - Cdvd.RegBase;
+                Console.WriteLine($"[CDVD Write] addr=0x{addr:X8} (off={off}) val=0x{value:X8}  PC=0x{DebugCurrentPc:X8}");
                 _cdvd.WriteRegister(off,     (byte)value);
                 _cdvd.WriteRegister(off + 1, (byte)(value >> 8));
                 _cdvd.WriteRegister(off + 2, (byte)(value >> 16));
@@ -615,6 +664,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
             {
+                Console.WriteLine($"[CDVD WriteByte] addr=0x{addr:X8} (off={addr - Cdvd.RegBase}) val=0x{value:X2}  PC=0x{DebugCurrentPc:X8}");
                 _cdvd.WriteRegister(addr - Cdvd.RegBase, value);
                 return;
             }
