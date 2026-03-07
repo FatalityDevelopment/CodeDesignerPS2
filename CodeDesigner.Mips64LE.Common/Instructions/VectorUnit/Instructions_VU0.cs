@@ -1249,25 +1249,33 @@ namespace CodeDesigner.Mips64LE.Common.Instructions.VectorUnitInstructions
 
         public override void Exec(CpuState cpu, Args_R args)
         {
-            // Read control register (simplified: return status flags for known regs)
-            uint val = args.Rt switch {
+            // MIPS CFC2 encoding: bits[20:16] = rt (GPR destination),
+            //                     bits[15:11] = fs/rd (COP2 source register).
+            // args.Rt = bits[20:16] = GPR destination.
+            // args.Rd = bits[15:11] = COP2 control register index.
+            if (args.Rt == 0) return; // writes to $zero are no-ops
+            uint val = args.Rd switch {
+                <= 15 when args.Rd >= 0 => (uint)cpu.VU0.VI[args.Rd],  // VI0–VI15
                 16 => cpu.VU0.StatusFlags,
                 17 => cpu.VU0.MACFlags,
                 18 => cpu.VU0.ClipFlags,
+                // Register 29 = VPU-STAT: bit 0 = VU0 busy, bit 2 = VU1 busy.
+                // VU1 is not emulated, so only report VU0 state.
+                29 => cpu.VU0.IsRunning ? 1u : 0u,
                 _ => 0
             };
-            cpu.RegsLo[args.Rd] = (ulong)(int)val; // sign-extend 32-bit
-            cpu.RegsHi[args.Rd] = val > 0x7FFFFFFF ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
+            cpu.RegsLo[args.Rt] = (ulong)(int)val; // sign-extend 32-bit to 64-bit
+            cpu.RegsHi[args.Rt] = val > 0x7FFFFFFFu ? 0xFFFFFFFFFFFFFFFFUL : 0UL;
         }
 
         public override string Disasm(Args_R args, uint? pc = null)
-            => $"{Name} {CpuHelpers.RegName(args.Rd)}, vi{args.Rt}";
+            => $"{Name} {CpuHelpers.RegName(args.Rt)}, vi{args.Rd}";
 
         public override uint Asm(int[] args)
-            => (uint)(0x12 << 26 | 0x02 << 21 | args[1] << 16 | args[0] << 11);
+            => (uint)(0x12 << 26 | 0x02 << 21 | args[0] << 16 | args[1] << 11);
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
-            => Equation.Replace("rt", CpuHelpers.RegName(args.Rd)).Replace("ctrl", $"vi{args.Rt}");
+            => Equation.Replace("rt", CpuHelpers.RegName(args.Rt)).Replace("ctrl", $"vi{args.Rd}");
     }
 
     // QMTC2 - Quadword Move To COP2 (COP2 rs=0x05, opcode=0x12)
