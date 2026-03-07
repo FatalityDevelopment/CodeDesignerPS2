@@ -1176,6 +1176,8 @@ namespace CodeDesigner.Mips64LE
             DumpEeRamRegion(sched.EE.Bus, 0x80010530u, 0x80010570u, "outer-loop start");
             // Also dump function prologue of the called copy function
             DumpEeRamRegion(sched.EE.Bus, 0x800103B0u, 0x800103D0u, "copy-func prologue");
+            // Dump the SIF/SMFLAG processing loop (EE stuck here waiting for SMFLAG)
+            DumpEeRamRegion(sched.EE.Bus, 0x8000FAC8u, 0x8000FBB0u, "SMFLAG-reader");
             // Dump key registers for outer loop diagnosis
             {
                 ulong s1 = (ulong)sched.EE.Cpu.RegsLo[17];

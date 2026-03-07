@@ -128,20 +128,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// </summary>
         private bool _cachedIopSelfJump;
 
-        /// <summary>
-        /// <c>true</c> once the one-time SBUS I_MASK patch has been applied.
-        ///
-        /// In the real PS2 IOP BIOS, SIFMAN calls <c>WaitIntr(SBUS)</c> before entering
-        /// its idle loop.  The BIOS kernel records the wait but does not write hardware
-        /// I_MASK bit 1 directly.  Without bit 1 set, <see cref="IopMemoryBus.IsInterruptPending"/>
-        /// stays false even when EE has signalled the IOP via MSFLAG, so the IOP
-        /// fast-forward loop never releases and SIFMAN never wakes.
-        ///
-        /// PCSX2 applies a ROM patch that makes <c>WaitIntr</c> write the hardware
-        /// I_MASK register.  We replicate the effect here as a one-shot patch triggered
-        /// by SIFMAN's completion of the F240 handshake (SMFLAG bits 16–18 set).
-        /// </summary>
-        private bool _sifmanSbusPatched;
 
         /// <summary>
         /// Construct a scheduler, optionally supplying a pre-configured EE emulator.
@@ -269,7 +255,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             _iopAccumulator    = 0;
             _cachedIopPc       = uint.MaxValue;
             _cachedIopSelfJump = false;
-            _sifmanSbusPatched = false;
         }
 
         /// <summary>
@@ -300,43 +285,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             if (eeSteps < 1) eeSteps = 1;
 
-            // ── IOP SBUS interrupt keep-alive patch ───────────────────────────
-            // SIFMAN calls WaitIntr(SBUS=1) before entering its kernel idle loop,
-            // but the real IOP ROM's WaitIntr implementation does not write hardware
-            // I_MASK bit 1.  Without bit 1 set, IsInterruptPending stays false so
-            // the IOP fast-forward loop never releases and SIFMAN never wakes up.
-            //
-            // The IOP BIOS interrupt handler DOES fire when we enable bit 1, but it
-            // clears both I_STAT bit 1 and I_MASK bit 1 without waking SIFMAN if no
-            // ISR is registered for SBUS (because WaitIntr is thread-based, not ISR).
-            // We therefore re-assert both bits every slice until the IOP (SIFMAN)
-            // actually processes the EE's ready signal by clearing MSFLAG bit 16.
-            //
-            // Conditions:
-            //   • SIFMAN has completed the F240 handshake (SMFLAG bits 16–18 all set)
-            //   • EE has sent its ready signal (MSFLAG bit 16 still set — not yet acked)
-            //   • I_STAT bit 1 is clear (interrupt was consumed but SIFMAN not woken)
-            //
-            // Reference: PCSX2 IopBios.cpp — WaitIntr patch writes I_MASK hardware bit.
-            if (!_sifmanSbusPatched
-                && (EE.Bus.Sif.SmFlag  & 0x00070000u) == 0x00070000u
-                && (EE.Bus.Sif.MsFlag  & 0x00010000u) != 0u)
-            {
-                // Re-assert I_STAT and I_MASK bit 1 if the interrupt has been consumed
-                // but the IOP side hasn't cleared MSFLAG yet.
-                if ((IOP.Bus.IStat & 0x2u) == 0u)
-                    IOP.Bus.RaiseInterrupt(1);
-                if ((IOP.Bus.IMask & 0x2u) == 0u)
-                    IOP.Bus.EnableInterruptMask(1);
-            }
-
-            // Mark as patched once SIFMAN clears MSFLAG bit 16 (acked EE's signal).
-            if (!_sifmanSbusPatched
-                && (EE.Bus.Sif.MsFlag & 0x00010000u) == 0u
-                && (EE.Bus.Sif.SmFlag & 0x00070000u) == 0x00070000u)
-            {
-                _sifmanSbusPatched = true;
-            }
 
             for (int i = 0; i < eeSteps; i++)
             {
