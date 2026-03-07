@@ -1828,9 +1828,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// the string pointer, calls the serial putchar function via a function pointer,
         /// and advances the pointer.  The loop exits when the loaded byte is zero.
         ///
-        /// Two loop patterns are recognised:
-        ///
-        /// Pattern A — pointer advances in the BNEL delay slot:
+        /// Pattern detected (BNEL variant, the form used by the PS2 BIOS):
         /// <code>
         ///   loop_start:
         ///     lui    funcPtrHi, ...                ; load function-pointer upper
@@ -1840,18 +1838,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         ///     lb     charReg, 0(ptrReg)            ; load next character from string
         ///     bnel   charReg, $zero, loop_start    ; loop while charReg != 0
         ///     addiu  ptrReg, ptrReg, 1             ; delay slot: advance pointer
-        /// </code>
-        ///
-        /// Pattern B — pointer advances in the JALR delay slot (some BIOS builds):
-        /// <code>
-        ///   loop_start:
-        ///     lui    funcPtrHi, ...                ; load function-pointer upper
-        ///     lw     funcPtrReg, offset(funcPtrHi) ; load function pointer
-        ///     jalr   funcPtrReg                    ; call putchar(a0)
-        ///     addiu  ptrReg, ptrReg, 1             ; delay slot: advance pointer
-        ///     lb     charReg, 0(ptrReg)            ; load next character from string
-        ///     bnel   charReg, $zero, loop_start    ; loop while charReg != 0
-        ///     daddu  a0, charReg, zero             ; delay slot: set next putchar arg
         /// </code>
         ///
         /// When detected and the remaining string length exceeds
@@ -1891,67 +1877,33 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (loopStart >= pc32) return false;
             uint loopBodyLen = (pc32 - loopStart) / 4u;                // # instructions before BNEL
 
-            // ── Step 3: Locate the pointer-advance instruction ────────────────
-            // Pattern A: ADDIU ptrReg, ptrReg, +1 is the BNEL delay slot.
-            // Pattern B: ADDIU ptrReg, ptrReg, +1 is the delay slot of the
-            //            JALR/JAL inside the loop body; the BNEL delay slot instead
-            //            contains a move instruction (e.g. daddu a0, charReg, zero)
-            //            to pass the just-loaded character as the argument to the
-            //            next putchar call.
-            int ptrReg = -1;
+            // ── Step 3: Delay slot — ADDIU ptrReg, ptrReg, +1 ───────────────
+            // The pointer-advance MUST be in the BNEL delay slot (Pattern A).
+            // Allowing the advance to be in the JALR delay slot instead (Pattern B)
+            // is too permissive and causes false positives with non-string loops.
+            uint dsWord = FetchWord(pc32 + 4u);
+            if ((dsWord >> 26) != 9u) return false;                    // ADDIU opcode = 9
+            int dsRs = (int)((dsWord >> 21) & 0x1Fu);
+            int dsRt = (int)((dsWord >> 16) & 0x1Fu);
+            if (dsRs != dsRt) return false;                            // rs == rt (in-place)
+            if ((short)(dsWord & 0xFFFFu) != 1) return false;         // imm must be +1
+            int ptrReg = dsRt;                                         // string pointer register
 
-            // Try Pattern A first: check the BNEL delay slot.
-            {
-                uint dsWord = FetchWord(pc32 + 4u);
-                if ((dsWord >> 26) == 9u)                              // ADDIU opcode = 9
-                {
-                    int dsRs = (int)((dsWord >> 21) & 0x1Fu);
-                    int dsRt = (int)((dsWord >> 16) & 0x1Fu);
-                    if (dsRs == dsRt && (short)(dsWord & 0xFFFFu) == 1)
-                        ptrReg = dsRt;
-                }
-            }
-
-            // ── Step 4: Loop body must contain a function call (JALR or JAL) ──
-            // Also try Pattern B: if ptrReg is not yet known, inspect the delay
-            // slot of the first JALR/JAL found in the loop body.
+            // ── Step 4: Loop body must contain a function call (JALR or JAL) ─
+            // This distinguishes the serial putchar loop from simpler byte-scan loops.
             bool hasCall = false;
             for (uint off = 0u; off < loopBodyLen - 1u; off++)        // skip the LB (last instr)
             {
                 uint w     = FetchWord(loopStart + off * 4u);
                 uint op    = w >> 26;
                 uint funct = w & 0x3Fu;
-                bool isJalr = (op == 0u && funct == 0x09u);
-                bool isJal  = (op == 0x03u);
-                if (isJalr || isJal)
+                if (op == 0x03u || (op == 0u && funct == 0x09u))      // JAL or JALR
                 {
                     hasCall = true;
-                    // Pattern B: check the delay slot of this JALR/JAL.
-                    if (ptrReg < 0)
-                    {
-                        uint dsOff = loopStart + (off + 1u) * 4u;
-                        if (dsOff < pc32)                              // delay slot inside loop body
-                        {
-                            uint jalDs = FetchWord(dsOff);
-                            if ((jalDs >> 26) == 9u)                   // ADDIU
-                            {
-                                int rs = (int)((jalDs >> 21) & 0x1Fu);
-                                int rt = (int)((jalDs >> 16) & 0x1Fu);
-                                if (rs == rt && (short)(jalDs & 0xFFFFu) == 1)
-                                {
-                                    ptrReg = rt;
-                                    Console.Write($"[BiosPuts] Pattern B match at pc=0x{pc32:x8} loopStart=0x{loopStart:x8} ptrReg=${ptrReg} charReg=${charReg} body:");
-                                    for (uint di = 0u; di < loopBodyLen + 2u; di++)
-                                        Console.Write($" 0x{FetchWord(loopStart + di * 4u):x8}");
-                                    Console.WriteLine();
-                                }
-                            }
-                        }
-                    }
                     break;
                 }
             }
-            if (!hasCall || ptrReg < 0) return false;
+            if (!hasCall) return false;
 
             // ── Step 5: Instruction immediately before BNEL — LB charReg, 0(ptrReg) ─
             if (pc32 < 4u) return false;
@@ -2012,12 +1964,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             //   charReg → 0            (null byte that ended the loop)
             //   PC → pc32 + 8         (past BNEL + delay slot; delay slot nullified)
             uint newPtr = ptrVal + (uint)len;
-            Console.Write($"[BiosPuts] ff: ptrVal=0x{ptrVal:x8} len={len} s={System.Text.Encoding.ASCII.GetString(strRegion, (int)strOffset, Math.Min(len, 60)).Replace("\n","\\n")}  regs before: s0=0x{Cpu.RegsLo[16]:x16} v0=0x{Cpu.RegsLo[2]:x16} a0=0x{Cpu.RegsLo[4]:x16}");
             // Sign-extend to 64 bits the same way ADDIU would (PS2 EE is MIPS64).
             Cpu.RegsLo[ptrReg] = (ulong)(long)(int)newPtr;
             Cpu.RegsLo[charReg] = 0uL;
             Cpu.PC = pc32 + 8u;    // past BNEL + delay slot; pointer increment is included in ptrReg advance above
-            Console.WriteLine($"  regs after: s0=0x{Cpu.RegsLo[16]:x16} v0=0x{Cpu.RegsLo[2]:x16} a0=0x{Cpu.RegsLo[4]:x16}");
 
             // Count the skipped iterations so InstructionCount stays consistent.
             InstructionCount += (ulong)len;
