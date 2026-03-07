@@ -968,7 +968,7 @@ namespace CodeDesigner.Mips64LE
             if (eeRa32 >= 0x80000000u && eeRa32 < 0x90000000u && eeRa32 != eePc)
             {
                 Console.WriteLine($"  EE caller context around ra=0x{eeRa32:x8}:");
-                for (int offset = -24; offset <= 40; offset += 4)
+                for (int offset = -24; offset <= 96; offset += 4)
                 {
                     uint addr = (uint)(eeRa32 + offset);
                     string arrow = offset == 0 ? " <-- ra" : "";
@@ -995,20 +995,40 @@ namespace CodeDesigner.Mips64LE
                 ulong s1 = (ulong)sched.EE.Cpu.RegsLo[17];
                 ulong s2 = (ulong)sched.EE.Cpu.RegsLo[18];
                 ulong s3 = (ulong)sched.EE.Cpu.RegsLo[19];
+                ulong s4 = (ulong)sched.EE.Cpu.RegsLo[20];
                 ulong s5 = (ulong)sched.EE.Cpu.RegsLo[21];
                 ulong s6 = (ulong)sched.EE.Cpu.RegsLo[22];
                 ulong a1 = (ulong)sched.EE.Cpu.RegsLo[5];
                 ulong a2 = (ulong)sched.EE.Cpu.RegsLo[6];
                 ulong a3 = (ulong)sched.EE.Cpu.RegsLo[7];
                 Console.WriteLine($"  EE outer-loop regs: s1=0x{s1:x16} s2=0x{s2:x16} s3=0x{s3:x16}");
-                Console.WriteLine($"  EE outer-loop regs: s5=0x{s5:x16} s6=0x{s6:x16}");
+                Console.WriteLine($"  EE outer-loop regs: s4=0x{s4:x16} s5=0x{s5:x16} s6=0x{s6:x16}");
                 Console.WriteLine($"  EE inner-func regs: a1=0x{a1:x16} a2=0x{a2:x16} a3=0x{a3:x16}");
-                // Read stack value at sp+0x84 (the outer loop bound)
+                // Read stack values to understand outer loop bound
                 ulong sp = (ulong)sched.EE.Cpu.RegsLo[29];
                 uint sp32 = (uint)(sp & 0xFFFFFFFFUL);
-                uint stackBound = 0;
-                try { stackBound = sched.EE.Bus.ReadWord(sp32 + 0x84u); } catch { }
-                Console.WriteLine($"  EE stack[sp+0x84]=0x{stackBound:x8} (outer-loop bound)");
+                uint stackBound = 0, stackBound0 = 0, stackBound1 = 0, stackBound2 = 0;
+                try { stackBound  = sched.EE.Bus.ReadWord(sp32 + 0x84u); } catch { }
+                try { stackBound0 = sched.EE.Bus.ReadWord(sp32 + 0x7Cu); } catch { }
+                try { stackBound1 = sched.EE.Bus.ReadWord(sp32 + 0x80u); } catch { }
+                try { stackBound2 = sched.EE.Bus.ReadWord(sp32 + 0x88u); } catch { }
+                Console.WriteLine($"  EE stack[sp+0x7C]=0x{stackBound0:x8} [sp+0x80]=0x{stackBound1:x8} [sp+0x84]=0x{stackBound:x8} [sp+0x88]=0x{stackBound2:x8}");
+                // Dump RAM around s2 (module table ptr) to see what the table looks like
+                uint s2_32 = (uint)(s2 & 0xFFFFFFFFUL);
+                if (s2_32 >= 0x80000000u && s2_32 < 0x90000000u)
+                {
+                    Console.WriteLine($"  EE RAM at s2=0x{s2_32:x8} (module table):");
+                    for (int i = -4; i <= 12; i++)
+                    {
+                        uint addr = (uint)(s2_32 + i * 4);
+                        try
+                        {
+                            uint val = sched.EE.Bus.ReadWord(addr);
+                            Console.WriteLine($"    [0x{addr:x8}] = 0x{val:x8}");
+                        }
+                        catch { }
+                    }
+                }
             }
 
             // ── IOP context disassembly ───────────────────────────────────────
