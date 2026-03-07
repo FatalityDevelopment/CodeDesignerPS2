@@ -4244,7 +4244,8 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void IopEmulator_Interrupt_DeliveredWhenIEcAndIP2Set()
         {
-            // Verify IOP takes hardware interrupt when SR.IEc=1, SR.IM2=1, and INTC pending.
+            // Verify IOP takes hardware interrupt when I_CTRL=1, SR.IEc=1, SR.IM2=1, and INTC pending.
+            // Matches PCSX2 iopEventTest: checks HW_ICTRL != 0 before dispatching.
             var iop = new IopEmulator();
             // SR with IEc=1 (bit 0) and IM2=1 (bit 10), no BEV → vector 0x80000080
             iop.State.SR    = 0x401u;   // IEc=1, IM2=1
@@ -4259,6 +4260,8 @@ namespace CodeDesigner.Mips64LE.TestProject
             iop.Bus.RaiseInterrupt(0);
             // Enable I_MASK bit 0 so IsInterruptPending = true
             iop.Bus.WriteWord(0x1F801074u, 0x1u);
+            // Enable I_CTRL (master interrupt enable) — required per PCSX2 iopEventTest
+            iop.Bus.WriteWord(0x1F801078u, 0x1u);
 
             iop.Step(); // should take interrupt and dispatch to 0x80000080
 
@@ -4280,10 +4283,33 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             iop.Bus.RaiseInterrupt(0);
             iop.Bus.WriteWord(0x1F801074u, 0x1u);
+            iop.Bus.WriteWord(0x1F801078u, 0x1u); // I_CTRL=1 (enabled)
 
             iop.Step(); // should execute nop, NOT take interrupt
 
             Assert.AreEqual(0x80000004u, iop.State.PC, "IOP must NOT take interrupt when IEc=0");
+        }
+
+        [TestMethod]
+        public void IopEmulator_Interrupt_NotTakenWhenICtrlClear()
+        {
+            // IOP must NOT take interrupt when I_CTRL=0 (master disable), even if SR and INTC
+            // are fully enabled.  Matches PCSX2 iopEventTest: HW_ICTRL != 0 guard.
+            var iop = new IopEmulator();
+            iop.State.SR    = 0x401u;   // IEc=1, IM2=1
+            iop.State.Cause = 0u;
+            iop.State.PC    = 0x80000000u;
+
+            iop.LoadProgram(0x00000000u, new uint[] { 0u }); // nop at physical 0 (KSEG0 0x80000000)
+
+            iop.Bus.RaiseInterrupt(0);
+            iop.Bus.WriteWord(0x1F801074u, 0x1u);
+            // I_CTRL intentionally left at 0 (reset default) — interrupt must be suppressed
+
+            iop.Step(); // should execute nop, NOT take interrupt
+
+            Assert.AreEqual(0x80000004u, iop.State.PC,
+                "IOP must NOT take interrupt when I_CTRL=0 (master interrupt disable)");
         }
 
         [TestMethod]
