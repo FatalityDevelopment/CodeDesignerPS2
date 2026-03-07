@@ -17,6 +17,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
     ///     0x10008000 - 0x1000DFFF  DMAC channel registers (10 channels)
     ///     0x1000E000 - 0x1000E0FF  DMAC global registers (D_CTRL/D_STAT/…)
     ///     0x1000F000 - 0x1000F01F  INTC (interrupt controller)
+    ///     0x1000F100 - 0x1000F1FF  SBUS serial UART (reads return 0, writes discarded)
     ///     0x1000F200 - 0x1000F26F  SIF (sub-bus interface)
     ///   0x12000000 - 0x12001FFF  GS privileged registers
     ///
@@ -60,6 +61,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private const uint SifBase    = 0x1000F200u;  // SIF registers
         private const uint MchRicmAddr = 0x1000F430u; // RDRAM init control
         private const uint MchDrdAddr  = 0x1000F440u; // RDRAM data register
+
+        // EE SBUS serial UART registers (0x1000F100–0x1000F1FF).
+        // These control the EE-side serial transmitter/receiver used by the BIOS for debug output.
+        // SBUS_F130 (0x1000F130) is the TX-status register; the BIOS polls it waiting for the
+        // TX-busy bit (bits 15:12 == 0x8) to clear before writing each byte to SBUS_F180.
+        // We model the serial port as always-ready (TX completes instantly) by returning 0 for
+        // all reads in this range.  Writes are discarded so that BIOS initialisation values
+        // (which may include a TX-busy bit) do not persist in the _io[] array and cause the
+        // poll loop to spin indefinitely.
+        // Reference: PCSX2 HwRead.cpp SBUS_F130 = psHu32(SBUS_F130) (0 at reset).
+        private const uint SbusSerialBase = 0x1000F100u;
+        private const uint SbusSerialEnd  = 0x1000F200u; // exclusive upper bound
 
         // EE sub-bus mirror of IOP RAM (0x1A000000–0x1BFFFFFF → IOP RAM).
         // The EE kernel polls physical 0x1A000006 for IOP ready flags, and the IOP
@@ -242,6 +255,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 return Vif1.ReadRegister(paddr - Vif1Base);
             if (paddr >= IntcBase && paddr < IntcBase + 0x20u)
                 return Intc.ReadRegister(paddr - IntcBase);
+            // SBUS serial UART registers (0x1000F100-0x1000F1FF): always return 0.
+            // SBUS_F130 is the TX-status register; returning 0 signals "TX ready" so the
+            // BIOS poll loop exits immediately instead of spinning on a stale init value.
+            if (paddr >= SbusSerialBase && paddr < SbusSerialEnd) return 0u;
             if (paddr >= SifBase && paddr < SifBase + 0x70u)
                 return Sif.ReadRegister(paddr - SifBase);
 
@@ -320,6 +337,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 Intc.WriteRegister(paddr - IntcBase, value);
                 return;
             }
+            // SBUS serial UART registers (0x1000F100-0x1000F1FF): discard writes.
+            // Prevents BIOS serial-port init values (e.g. TX-busy control bits) from
+            // persisting in the _io[] array where they would cause the TX-status poll
+            // loop (BIOS putchar at SBUS_F130) to spin indefinitely.
+            if (paddr >= SbusSerialBase && paddr < SbusSerialEnd) return;
             if (paddr >= SifBase && paddr < SifBase + 0x70u)
             {
                 Sif.WriteRegister(paddr - SifBase, value);
