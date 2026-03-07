@@ -87,19 +87,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public const uint RegSize = 0x20u;
 
         // Byte offsets within the register window
-        private const uint REG_DATA    = 0x00u; // N-command parameter write port
-        private const uint REG_NCMD    = 0x04u; // N command register
-        private const uint REG_NREADY  = 0x05u; // N ready/busy (0 = ready)
-        private const uint REG_NDOUT   = 0x06u; // N data out (status responses)
-        private const uint REG_BREAK   = 0x07u; // Break / cancel
-        private const uint REG_ISTAT   = 0x08u; // Interrupt status (W1C)
-        private const uint REG_STATUS  = 0x09u; // Drive status
-        private const uint REG_TRAY    = 0x0Au; // Tray state
-        private const uint REG_CRT     = 0x0Bu; // Current disc type
-        private const uint REG_SDATA   = 0x0Fu; // S-command data output
-        private const uint REG_SCMD    = 0x17u; // S command register
-        private const uint REG_SSTAT   = 0x18u; // S-command status
-        private const uint REG_SPARAM  = 0x1Fu; // S-command parameter
+        private const uint REG_DATA       = 0x00u; // N-command parameter write port
+        private const uint REG_NCMD       = 0x04u; // N command register
+        private const uint REG_NREADY     = 0x05u; // N ready/busy (0 = ready)
+        private const uint REG_NDOUT      = 0x06u; // N data out (status responses)
+        private const uint REG_BREAK      = 0x07u; // Break / cancel
+        private const uint REG_ISTAT      = 0x08u; // Interrupt status (W1C)
+        private const uint REG_STATUS     = 0x09u; // Drive status
+        private const uint REG_TRAY       = 0x0Au; // Tray state
+        private const uint REG_CRT        = 0x0Bu; // Current disc type
+        private const uint REG_NDATAOUT   = 0x0Fu; // N-command data output (PCSX2 cdvdRead0F)
+        private const uint REG_SCMD_EXEC  = 0x16u; // S command execute register (WRITE = cdvdWrite16 in PCSX2)
+        private const uint REG_SCMD_PARAM = 0x17u; // S command parameter byte (WRITE = cdvdWrite17; READ = SREADY/sDataIn)
+        private const uint REG_SDATAOUT   = 0x18u; // S-command data output (READ = cdvdRead18, returns SCMDResultBuff[pos++])
 
         // ── N-command codes ───────────────────────────────────────────────────
 
@@ -136,6 +136,30 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <summary>PS2 DVD-ROM disc.</summary>
         public const byte DISC_PS2_DVD = 0x14;
 
+        // ── N-command status (REG_NREADY / 0x05) bit-flags ───────────────────
+        // Reference: PS2Tek https://psi-rockin.github.io/ps2tek/#cdvdioports
+        //   bit 0: Error        bit 2: DEV9 connected   bit 3: MECHA_INIT
+        //   bit 5: Power-off    bit 6: Drive ready       bit 7: Busy
+        //
+        // PCSX2 cdvdUpdateReady() always ORs MECHA_INIT | DEV9CON into cdvd.Ready
+        // ("We don't really use the MECHA bit but Cold Fear will kick back to the
+        //  BIOS if it's not set").  The IOP BIOS polls bit 3 (MECHA_INIT) at
+        // 0xB0C4/0xB0EC; if it is never set the BIOS times out and skips SIF
+        // initialisation, leaving I_MASK bit 1 (SBUS) disabled and the IOP
+        // permanently unable to receive EE commands.
+
+        /// <summary>Drive ready, not busy: same as PCSX2 CDVD_DRIVE_READY.</summary>
+        private const byte DRIVE_READY     = 0x40;
+
+        /// <summary>Always-set MECHA_INIT flag: CDVD_DRIVE_MECHA_INIT in PCSX2.</summary>
+        private const byte DRIVE_MECHA_INIT = 0x08;
+
+        /// <summary>Always-set DEV9 connection flag: CDVD_DRIVE_DEV9CON in PCSX2.</summary>
+        private const byte DRIVE_DEV9CON   = 0x04;
+
+        /// <summary>Drive busy executing N-command: CDVD_DRIVE_BUSY in PCSX2.</summary>
+        private const byte DRIVE_BUSY      = 0x80;
+
         // ── INTR_STAT bits ────────────────────────────────────────────────────
         private const byte INTR_DATA_READY = 0x04; // bit 2: N-command data ready
 
@@ -149,6 +173,26 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         private readonly byte[] _nParamBuf = new byte[16];
         private int  _nParamPos;
         private byte _nIntrStat;
+
+        // S-command parameter buffer (written byte-by-byte to REG_SCMD_PARAM before
+        // REG_SCMD_EXEC).  Mirrors PCSX2's cdvdWrite17 / SCMDParamBuff[].
+        private readonly byte[] _sCmdParamBuf = new byte[16];
+        private int _sCmdParamPos;
+
+        // Current N_READY status byte (REG_NREADY, offset 0x05).
+        // Initialised to READY | MECHA_INIT | DEV9CON, matching PCSX2 cdvdReset()
+        // which calls cdvdUpdateReady(CDVD_DRIVE_READY) → always includes those bits.
+        private byte _nReady = DRIVE_READY | DRIVE_MECHA_INIT | DRIVE_DEV9CON;
+
+        // S-command ready / "sDataIn" byte (REG_SCMD READ side, offset 0x17).
+        // In PCSX2 v1.6.0 cdvdRead17() is named "SREADY" and returns cdvd.sDataIn:
+        //   cdvdReset() initialises sDataIn = 0x40 (ready)
+        //   SetResultSize() clears sDataIn &= ~0x40 while processing
+        //   after execution sDataIn |= 0x40 (done)
+        // Since our S-commands execute synchronously, _sReady stays 0x40 from the
+        // caller's perspective: the IOP polls 0x17 after issuing the S-command and
+        // always sees bit 6 = 1, so the loop at 0xAA70 exits immediately.
+        private byte _sReady = 0x40;
 
         // Sector data buffer: filled by ExecuteNCommand, consumed by ReadNextDmaWord
         private byte[] _sectorData       = Array.Empty<byte>();
@@ -196,6 +240,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             DiscType          = _isoLength > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
             _nParamPos        = 0;
             _nIntrStat        = 0;
+            _sCmdParamPos     = 0;
+            _sReady           = 0x40; // PCSX2 cdvdReset() initialises sDataIn = 0x40
             _sectorData       = Array.Empty<byte>();
             _sectorDataOffset = 0;
         }
@@ -221,6 +267,8 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             DiscType          = _isoLength > 0 ? DISC_PS2_DVD : DISC_NO_DISC;
             _nParamPos        = 0;
             _nIntrStat        = 0;
+            _sCmdParamPos     = 0;
+            _sReady           = 0x40; // PCSX2 cdvdReset() initialises sDataIn = 0x40
             _sectorData       = Array.Empty<byte>();
             _sectorDataOffset = 0;
         }
@@ -283,17 +331,37 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         {
             return offset switch
             {
-                REG_NREADY => 0,                          // 0 = ready (no pending command)
-                REG_ISTAT  => _nIntrStat,
-                REG_STATUS => HasDisc ? (byte)0x06 : (byte)0x00, // 0x06 = paused/disc present
-                REG_TRAY   => HasDisc ? (byte)0x00 : (byte)0x01, // 0=closed, 1=open
-                REG_CRT    => DiscType,
-                REG_SDATA  => _sCmdOutputPos < _sCmdOutputLen
-                                  ? _sCmdOutput[_sCmdOutputPos++]
-                                  : (byte)0,
-                REG_SSTAT  => (byte)0x40,                 // S-command ready
-                _          => 0
+                REG_NREADY     => _nReady,                    // READY | MECHA_INIT | DEV9CON (0x4C)
+                REG_ISTAT      => _nIntrStat,
+                REG_STATUS     => HasDisc ? (byte)0x06 : (byte)0x00, // 0x06 = paused/disc present
+                REG_TRAY       => HasDisc ? (byte)0x00 : (byte)0x01, // 0=closed, 1=open
+                REG_CRT        => DiscType,
+                REG_NDATAOUT   => _sCmdOutputPos < _sCmdOutputLen   // 0x0F = N-cmd data out (placeholder)
+                                      ? _sCmdOutput[_sCmdOutputPos++]
+                                      : (byte)0,
+                REG_SCMD_PARAM => _sReady,                    // 0x17 READ = SREADY/sDataIn (bit6=idle, bit7=error)
+                REG_SDATAOUT   => ReadSDataByte(),            // 0x18 = cdvdRead18: SCMDResultBuff[pos++]
+                _              => 0
             };
+        }
+
+        /// <summary>
+        /// Return the next S-command result byte, tracking bit 6 of <see cref="_sReady"/>
+        /// (sDataIn) per PCSX2 cdvdRead18 semantics.
+        ///   bit 6 = 0 → result delivery in progress (cleared by ExecuteSCommand)
+        ///   bit 6 = 1 → idle / all bytes consumed (set when pos ≥ len)
+        /// </summary>
+        private byte ReadSDataByte()
+        {
+            if ((_sReady & 0x40) == 0 && _sCmdOutputPos < _sCmdOutputLen)
+            {
+                byte val = _sCmdOutput[_sCmdOutputPos++];
+                if (_sCmdOutputPos >= _sCmdOutputLen)
+                    _sReady |= 0x40; // all bytes consumed → mark idle
+                return val;
+            }
+            // Either idle already or position exhausted: return last byte (PCSX2 behaviour)
+            return _sCmdOutputPos > 0 ? _sCmdOutput[_sCmdOutputPos - 1] : (byte)0;
         }
 
         /// <summary>
@@ -327,8 +395,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     _nIntrStat &= (byte)~value;
                     break;
 
-                case REG_SCMD:
+                case REG_SCMD_EXEC:
+                    // Execute the S-command using accumulated parameters (cdvdWrite16 in PCSX2).
+                    // After execution the parameter position resets, matching PCSX2 behaviour.
                     ExecuteSCommand(value);
+                    _sCmdParamPos = 0;
+                    break;
+
+                case REG_SCMD_PARAM:
+                    // Accumulate S-command parameter byte (cdvdWrite17 "SDATAIN" in PCSX2).
+                    if (_sCmdParamPos < _sCmdParamBuf.Length)
+                        _sCmdParamBuf[_sCmdParamPos++] = value;
                     break;
             }
         }
@@ -475,6 +552,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     _sCmdOutputLen = 1;
                     break;
 
+                case 0x03: // GetMechaVersion — returns 4-byte mechacon version
+                    // PCSX2 reads from BIOS.mec file or creates {0x03, 0x06, 0x02, 0x00}.
+                    _sCmdOutput[0] = 0x03;
+                    _sCmdOutput[1] = 0x06;
+                    _sCmdOutput[2] = 0x02;
+                    _sCmdOutput[3] = 0x00;
+                    _sCmdOutputLen = 4;
+                    break;
+
                 case 0x12: // GetLayerInfo — layer-break PSN for dual-layer DVDs
                     // Single-layer disc: layer-break PSN = 0 (no second layer).
                     _sCmdOutput[0] = 0x00;
@@ -484,8 +570,37 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     _sCmdOutputLen = 4;
                     break;
 
+                case 0x40: // CdOpenConfig — returns 1 status byte (0 = OK)
+                    // Parameters (3 bytes from _sCmdParamBuf): readWrite, offset, numBlocks.
+                    // We accept all config open requests and return success.
+                    _sCmdOutput[0] = 0x00; // 0 = complete / success
+                    _sCmdOutputLen = 1;
+                    break;
+
+                case 0x41: // CdReadConfig — returns 16 bytes of NVM config data
+                    // PCSX2 reads from BIOS.nvm; we return all-zero (default region settings).
+                    for (int i = 0; i < 16; i++) _sCmdOutput[i] = 0x00;
+                    _sCmdOutputLen = 16;
+                    break;
+
+                case 0x42: // CdCloseConfig — returns 1 status byte (0 = OK)
+                    _sCmdOutput[0] = 0x00;
+                    _sCmdOutputLen = 1;
+                    break;
+
+                case 0x47: // GetModelNumber — returns 8 bytes model string (all zero ok)
+                    for (int i = 0; i < 8; i++) _sCmdOutput[i] = 0x00;
+                    _sCmdOutputLen = 8;
+                    break;
+
                 // Other S-commands (disc info, mechanical ops) return empty.
             }
+            // Per PCSX2 SetResultSize(): clear bit 6 of sDataIn to signal result delivery
+            // in progress. ReadSDataByte() sets it back when the last byte is consumed.
+            if (_sCmdOutputLen > 0)
+                _sReady &= 0xBF; // clear bit 6 (not idle, data available from 0x18)
+            else
+                _sReady |= 0x40; // no data → immediately idle
         }
 
         // ── TOC buffer builder ─────────────────────────────────────────────────

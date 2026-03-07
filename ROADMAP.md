@@ -57,7 +57,7 @@ The PS2's second CPU — a MIPS R3000A running at ~36.864 MHz — handles all I/
 | `IopEmulator` — Step() with delay slots + COP0 | ✅ | `Emulator/IOP/IopEmulator.cs` | Reuses EE instruction objects via bridge CpuState |
 | IOP timers T0–T5 (full tick logic) | ✅ | `Emulator/IOP/IopTimer.cs`, `IopMemoryBus.cs`, `IopEmulator.cs` | T0–T2 at 0x1F801100, T3–T5 at 0x1F801480; 16-bit counters, compare/overflow events, INTC bits 4–6/14–16 |
 | IOP DMA controller (IopDmac) | ✅ | `Emulator/IOP/IopDmac.cs`, `IopDmacChannel.cs` | 13 channels (MDECin…cdrom); burst mode; DPCR/DICR/DPCR2/DICR2; INTC bit 3 |
-| CDVD subsystem | ✅ | `Emulator/IOP/Cdvd.cs`, `IopMemoryBus.cs`, `IopDmacChannel.cs` | ISO-9660 reader; registers at 0x1F402000–0x1F40201F; N-command ReadCd feeds DMAC channel 3; INTC bit 2 |
+| CDVD subsystem | ✅ | `Emulator/IOP/Cdvd.cs`, `IopMemoryBus.cs`, `IopDmacChannel.cs` | ISO-9660 reader; registers at 0x1F402000–0x1F40201F; N-command ReadCd feeds DMAC channel 3; INTC bit 2.  S-command result bytes delivered from `REG_SDATAOUT` (register offset 0x18) per PCSX2 `cdvdRead18` semantics; `sDataIn` bit 6 clears on result delivery and sets when all bytes are consumed (`SetResultSize`).  IOP boot counter now correctly reaches 0 and the IOP completes its full initialisation sequence. |
 | Pad/controller input | ✅ | `Emulator/IOP/Sio2.cs`, `Emulator/IOP/PadState.cs`, `IopMemoryBus.cs` | SIO2 at 0x1F808200; SEND3/FIFO_IN/FIFO_OUT/CTRL/RECV registers; DualShock 2 poll (cmd 0x42); INTC bit 17 |
 | IOP module loader | ✅ | `Emulator/IOP/IopModuleLoader.cs` | Loads ELF32 MIPS R3000A IRX modules into IOP RAM; KSEG0/KSEG1 address translation; entry-point return |
 
@@ -95,7 +95,7 @@ End-to-end validation once all layers are in place.
 | EE hardware interrupt delivery | ✅ | `PS2Emulator.Step()` checks INTC pending + Status.IE/EXL/ERL/EIE/IM2 before each instruction; dispatches ExcCode=0 via COP0ExceptionDispatcher; Cause.IP2 set to reflect INTC source. |
 | Dual-CPU scheduler (EE + IOP lock-step) | ✅ | `DualCpuScheduler` in `Emulator/DualCpuScheduler.cs`.  Runs EE and IOP at 4:1 cycle ratio (147.456 MHz / 36.864 MHz).  Shares SIF between EE and IOP.  `RunSlice(eeSteps)` with fractional IOP accumulator; `TickHardware()` advances both timer stacks. |
 | IOP↔EE handshake via SIF | ✅ | `SIF` now contains two 32-word (128-byte) FIFOs: SIF0 (IOP→EE) and SIF1 (EE→IOP).  EE DMAC CH5 (FIFO→RAM) drains SIF0 via new `DmacChannel.DataProvider`; EE DMAC CH6 (RAM→FIFO) fills SIF1 via `DataConsumer`.  IOP DMAC CH9 (RAM→device) fills SIF0 via `DeviceDataConsumer`; IOP DMAC CH10 (device→RAM) drains SIF1 via `DeviceDataProvider`.  Wired in `PS2Emulator` (EE side) and `DualCpuScheduler` (IOP side).  Both full-round-trip paths (EE→IOP and IOP→EE) tested. |
-| Load a real BIOS ROM and run to the BIOS splash screen | ✅ | `Emulator/BiosLoader.cs`.  `BiosLoader.Validate()` checks that the ROM contains a valid ROMDIR by scanning for a `RESET` entry at 16-byte-aligned offsets (matching PCSX2 `BiosThread.cpp` — real PS2 BIOS ROMs place the ROMDIR around offset 0x2700–0x2740, not at offset 0).  Extracts firmware version/region/date from the `ROMVER` module; module data offsets are accumulated from ROM offset 0 as per PS2 ROM layout.  `BiosLoader.Load(biosData, scheduler)` copies the ROM into both `EE.Bus.Bios` and `IOP.Bus.Bios` and resets both CPUs to the power-on vector (PC = 0xBFC00000).  `BiosLoader.Load(biosData, eeEmulator, iopEmulator)` provides an overload for use without the scheduler.  `BiosInfo` carries the decoded version (e.g. `"1.00"`), region (`"Japan"` / `"USA"` / `"Europe"` / `"China"` / `"HK/Asia"`), and ISO-8601 build date.  `BiosLoadException` thrown on empty image, image > 4 MB, or no valid ROMDIR found.  Validated against three genuine PS2 ROM images (`scph10000.bin` Japan v1.00, `SCPH-70012` USA v2.00, `SCPH-70004` Europe v2.00).  Reference: PCSX2 `pcsx2/BiosThread.cpp`. |
+| Load a real BIOS ROM and run to the BIOS splash screen | ✅ | `Emulator/BiosLoader.cs`.  `BiosLoader.Validate()` checks that the ROM contains a valid ROMDIR by scanning for a `RESET` entry at 16-byte-aligned offsets (matching PCSX2 `BiosThread.cpp` — real PS2 BIOS ROMs place the ROMDIR around offset 0x2700–0x2740, not at offset 0).  Extracts firmware version/region/date from the `ROMVER` module; module data offsets are accumulated from ROM offset 0 as per PS2 ROM layout.  `BiosLoader.Load(biosData, scheduler)` copies the ROM into both `EE.Bus.Bios` and `IOP.Bus.Bios` and resets both CPUs to the power-on vector (PC = 0xBFC00000).  `BiosLoader.Load(biosData, eeEmulator, iopEmulator)` provides an overload for use without the scheduler.  `BiosInfo` carries the decoded version (e.g. `"1.00"`), region (`"Japan"` / `"USA"` / `"Europe"` / `"China"` / `"HK/Asia"`), and ISO-8601 build date.  `BiosLoadException` thrown on empty image, image > 4 MB, or no valid ROMDIR found.  Validated against three genuine PS2 ROM images (`scph10000.bin` Japan v1.00, `SCPH-70012` USA v2.00, `SCPH-70004` Europe v2.00).  Reference: PCSX2 `pcsx2/BiosThread.cpp`.  Both the EE and IOP now successfully complete their BIOS initialisation sequence: the IOP sets SMFLAG = `0x70000` (SIFINIT\|CMDINIT\|BOOTEND) and the EE kernel advances through thread/scheduler setup to the game-loading stage. |
 | Game disc loading | ✅ | `Emulator/GameLoader.cs`.  `GameLoader.ParseSystemCnf()` extracts the `BOOT2` path from `SYSTEM.CNF`; `GameLoader.BootFromDisc(isoData, emulator)` reads the disc via `Cdvd`, parses `SYSTEM.CNF`, loads the ELF via `ElfLoader.LoadIntoEmulator`, and sets `cpu.PC` to the entry point.  `GameLoadException` thrown on any failure. |
 | Controller input end-to-end | ✅ | `DualCpuScheduler` exposes `Sio2`, `Pad0`, `Pad1`; `PollPads()` writes DualShock 2 poll responses to IOP RAM buffers; full pipeline tested: button press → `PollPads` → IOP RAM → IOP DMAC CH9 → SIF0 FIFO → EE DMAC CH5 → EE RAM |
 
@@ -115,7 +115,7 @@ These are not phase-specific but should be addressed progressively.
 
 ---
 
-## Phase 7 — Accuracy & Advanced Features ⬜
+## Phase 7 — Accuracy & Advanced Features 🔧 MOSTLY COMPLETE
 
 These items represent the next tier of accuracy and feature-completeness needed
 for running a wider range of commercial PS2 titles correctly.  Each is identified
@@ -180,9 +180,20 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 ---
 
+## Phase 8 — EE Kernel and Game Boot 🔧 IN PROGRESS
+
+The EE and IOP both complete their BIOS initialisation sequences.  The next frontier
+is ensuring the EE kernel fully sets up its thread scheduler and SIF2 infrastructure
+so the BIOS can hand control to the game.
+
+| Item | Status | Notes |
+|------|--------|-------|
+| IOP completes BIOS init (SMFLAG = SIFINIT\|CMDINIT\|BOOTEND) | ✅ | CDVD `REG_SDATAOUT` (0x18) fix: S-command result bytes are now delivered one-at-a-time, matching PCSX2 `cdvdRead18`.  `sDataIn` bit 6 clears on result delivery and sets when the last byte is read.  IOP boot counter reaches 0 and IOP enters its idle VBlank-driven loop. |
+| EE kernel thread scheduler initialisation | 🔧 | EE advances from 0x80005F10 through to 0x80014300+ saving and restoring exception context (`sq`/`ld` of all GPRs into the kernel context block at `k1`).  Interrupts are re-enabled when the thread-scheduler prologue completes. |
+| EE bulk-fill fast-forward (BNE variant) | ✅ | `TryFastForwardByteFill()` collapses the BIOS 535 M-iteration RAM fill into a single `Array.Fill`.  Kernel snapshot preservation is now restricted to full-RAM fills only; partial fills no longer incorrectly restore the fill region. |
+| EE–IOP SIF rendezvous (EE reads SMFLAG = 0x70000) | 🔧 | EE polls SMFLAG via `lw → andi → bne` at 0x800119F0–F8.  Once EE reads the IOP-set flag and acknowledges it via SMFLAG W1C, the kernel proceeds to load the game ELF.  Remaining blocker: EE interrupt handler setup at 0x80013F00–80014300 must complete with `IE=1, EIE=1` so the scheduler can service VBlank. |
 
 
-| Source | URL |
 |--------|-----|
 | PCSX2 source — EE core | `pcsx2/R5900OpcodeImpl.cpp`, `R5900OpcodeTables.cpp` |
 | PCSX2 source — IOP | `pcsx2/R3000A.cpp`, `IopDma.cpp`, `IopMem.cpp` |
@@ -192,4 +203,4 @@ by comparing this emulator's behaviour with PCSX2's reference implementation.
 
 ---
 
-*Last updated: 2026-02-26.  Current test count: 898 (all passing).*
+*Last updated: 2026-03-07.  Current test count: 960 (all passing).*

@@ -202,6 +202,7 @@ namespace CodeDesigner.Mips64LE
             bool      iopBootDumped    = false; // true once IOP boot zone disasm dumped
             bool      iopLeftBootZone  = false; // true once IOP PC > 0x400
             bool      eeSyscallDetected = false; // true once EE kernel begins syscall setup
+            bool      eeInterruptsEnabled = false; // true once EE IE+EIE both 1 for first time
             uint      lastEeRegion  = uint.MaxValue; // track EE region changes
             // Track PCs that have already had a full DumpInterruptState to prevent repeated dumps
             // when the EE/IOP happens to land on the same instruction across multiple report intervals
@@ -420,6 +421,18 @@ namespace CodeDesigner.Mips64LE
                             {
                                 eeSyscallDetected = true;
                                 Console.WriteLine($"*** EE entered exception mode (EXL=1) at 0x{eePc32:x8} (cycle:{totalSteps:N0}) COP0.Status=0x{eeStatus:x8} ***");
+                            }
+                        }
+
+                        // Detect when EE re-enables interrupts (IE=1, EIE=1, EXL=0, ERL=0).
+                        if (!eeInterruptsEnabled && eeLeftBios)
+                        {
+                            uint eeStatus = scheduler.EE.Cpu.COP0.ReadRegister32(12);
+                            if ((eeStatus & 0x10007u) == 0x10001u)  // IE=1, EXL=0, ERL=0, EIE=1
+                            {
+                                eeInterruptsEnabled = true;
+                                Console.WriteLine($"*** EE interrupts ENABLED (IE=1,EIE=1) at 0x{eePc32:x8} (cycle:{totalSteps:N0}) Status=0x{eeStatus:x8} ***");
+                                DumpInterruptState(scheduler);
                             }
                         }
 
