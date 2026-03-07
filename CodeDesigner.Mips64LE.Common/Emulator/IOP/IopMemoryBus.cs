@@ -102,6 +102,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         public byte[] Bios => _bios;
 
         /// <summary>
+        /// Set by IopEmulator before each instruction so I_MASK write traces can
+        /// report which PC caused the change. Debug-only field.
+        /// </summary>
+        internal uint DebugCurrentPc { get; set; }
+
+        /// <summary>
         /// When <see langword="true"/> the CPU has set COP0 SR.IsC (bit 16, "Isolate
         /// Cache").  In this mode data-memory writes from the CPU are redirected to
         /// the internal I-cache and must NOT modify main IOP RAM.  The BIOS uses
@@ -466,7 +472,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             // IOP INTC
             if (addr == IntcBase)      { _iStat &= value; return; }  // W0C (write-AND per PCSX2 psxHu32 &= value)
-            if (addr == IntcBase + 4u) { _iMask  = value; return; }
+            if (addr == IntcBase + 4u)
+            {
+                uint prev = _iMask;
+                _iMask = value;
+                // Trace ALL I_MASK changes to help diagnose SBUS (bit 1) initialization.
+                if (_iMask != prev)
+                    Console.WriteLine($"[IOP I_MASK] 0x{prev:X8} → 0x{_iMask:X8}  (diff: {(_iMask ^ prev):X8})  PC=0x{DebugCurrentPc:X8}");
+                return;
+            }
             if (addr == IntcBase + 8u) { _iCtrl |= value; return; }  // I_CTRL: write-OR per PCSX2 IopHw.cpp
 
             // IOP timers T0–T2 (0x1F801100)
@@ -510,6 +524,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
             {
                 uint off = addr - Cdvd.RegBase;
+                Console.WriteLine($"[CDVD Write] addr=0x{addr:X8} (off={off}) val=0x{value:X8}  PC=0x{DebugCurrentPc:X8}");
                 _cdvd.WriteRegister(off,     (byte)value);
                 _cdvd.WriteRegister(off + 1, (byte)(value >> 8));
                 _cdvd.WriteRegister(off + 2, (byte)(value >> 16));
@@ -615,6 +630,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
             {
+                Console.WriteLine($"[CDVD WriteByte] addr=0x{addr:X8} (off={addr - Cdvd.RegBase}) val=0x{value:X2}  PC=0x{DebugCurrentPc:X8}");
                 _cdvd.WriteRegister(addr - Cdvd.RegBase, value);
                 return;
             }

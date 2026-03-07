@@ -163,6 +163,23 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // Wire IOP DMAC CH10 (SIF1, device→RAM): IOP receives data from EE via SIF1 FIFO.
             IOP.Bus.Dmac.Channels[10].DeviceDataProvider = () => EE.Bus.Sif.ReadSif1();
 
+            // Wire EE DMAC CH5 (SIF0, FIFO→RAM): EE receives data from IOP via SIF0 FIFO.
+            // Without this, CH5 zero-fills EE RAM instead of draining real IOP→EE data,
+            // causing SIFMAN's pending-packet counter to remain non-zero forever.
+            // Reference: PCSX2 pcsx2/Dmac.cpp sif0Interrupt / sifRead.
+            EE.Bus.Dmac.Channels[5].DataProvider = () => EE.Bus.Sif.ReadSif0();
+
+            // Wire EE DMAC CH6 (SIF1, RAM→FIFO): EE sends commands to IOP via SIF1 FIFO.
+            // Without this, EE→IOP command packets are silently discarded, preventing
+            // SIFMAN from completing the SIF handshake and the IOP from advancing past
+            // its idle self-jump at 0x0000ae94.
+            // Reference: PCSX2 pcsx2/Dmac.cpp sif1Interrupt / sifWrite.
+            EE.Bus.Dmac.Channels[6].DataConsumer = (data, off, len) =>
+            {
+                for (int i = off; i < off + len; i++)
+                    EE.Bus.Sif.WriteSif1(data[i]);
+            };
+
             // Wire SIO2 and pad states so IOP software can poll controllers.
             Pad0 = new PadState();
             Pad1 = new PadState();

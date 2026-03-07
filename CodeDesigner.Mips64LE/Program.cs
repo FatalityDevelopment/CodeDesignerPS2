@@ -391,6 +391,117 @@ namespace CodeDesigner.Mips64LE
                     uint s1 = state.ReadReg(17);
                     Console.WriteLine($"  *** IOP first hit WaitSema loop (0x16C3C): s0=0x{s0:x8} s1=0x{s1:x8} I_CTRL=0x{iCtrlW:x8} I_STAT=0x{iStatW:x8} I_MASK=0x{iMaskW:x8} SR=0x{state.SR:x8} ***");
                 }
+
+                // Trace all calls to EnableInterrupt (0x00004188) to see what bits are enabled and from where
+                if (pc == 0x00004188u)
+                {
+                    uint a0en = state.ReadReg(4);
+                    uint raEn = state.ReadReg(31);
+                    Console.WriteLine($"  [EnableInterrupt] a0={a0en} (bit=0x{1u << (int)(a0en & 31):X}) ra=0x{raEn:X8}  I_MASK_before=0x{scheduler.IOP.Bus.IMask:X8}");
+                }
+
+                // Trace when ra = 0x0000bc6c (the call at 0x0000bc68 leading to WaitSema-Y)
+                // Fires on any instruction where ra has been set to this specific return address.
+                if (state.ReadReg(31) == 0x0000bc6cu && !iopSeenPcs.Contains(0xBC6CB86Cu))
+                {
+                    iopSeenPcs.Add(0xBC6CB86Cu);
+                    Console.WriteLine($"  *** ra==0x0000bc6c detected at PC=0x{pc:x8} (about to call WaitSema-Y) ***");
+                    Console.WriteLine($"      I_MASK=0x{scheduler.IOP.Bus.IMask:X8}  I_STAT=0x{scheduler.IOP.Bus.IStat:X8}  a0=0x{state.ReadReg(4):X8}");
+                    Console.WriteLine("      IOP RAM disasm [0x0000bb80-0x0000bd00]:");
+                    for (uint da = 0x0000bb80u; da < 0x0000bd04u; da += 4)
+                    {
+                        try
+                        {
+                            uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                            string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                            string mark = (da == pc) ? " <-- PC" : "";
+                            Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                        }
+                        catch { }
+                    }
+                }
+
+                // One-shot: dump IOP RAM around 0x0000bc60 (the second WaitSema area)
+                // when the IOP first visits any address in that region.
+                if (pc >= 0x0000bba0u && pc <= 0x0000bce0u && !iopSeenPcs.Contains(0xBBBBBBBBu))
+                {
+                    iopSeenPcs.Add(0xBBBBBBBBu);
+                    Console.WriteLine($"  *** IOP first entered WaitSema-Y region at PC=0x{pc:x8} ***");
+                    Console.WriteLine($"      I_MASK=0x{scheduler.IOP.Bus.IMask:X8}  I_STAT=0x{scheduler.IOP.Bus.IStat:X8}  a0=0x{state.ReadReg(4):X8}  ra=0x{state.ReadReg(31):X8}");
+                    Console.WriteLine("      IOP RAM disasm [0x0000bb80-0x0000bcf0]:");
+                    for (uint da = 0x0000bb80u; da < 0x0000bcf4u; da += 4)
+                    {
+                        try
+                        {
+                            uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                            string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                            string mark = (da == pc) ? " <-- PC" : "";
+                            Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                        }
+                        catch { }
+                    }
+                }
+
+                // One-shot: dump IOP RAM around the VBlank-init area to find SBUS enable
+                if (pc >= 0x000120A0u && pc <= 0x000120F0u && !iopSeenPcs.Contains(0x12005555u))
+                {
+                    iopSeenPcs.Add(0x12005555u);
+                    Console.WriteLine($"  *** IOP first entered VBlank-init area at PC=0x{pc:x8} ***");
+                    Console.WriteLine("      IOP RAM disasm [0x00011FC0-0x00012140]:");
+                    for (uint da = 0x00011FC0u; da < 0x00012144u; da += 4)
+                    {
+                        try
+                        {
+                            uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                            string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                            string mark = (da == pc) ? " <-- PC" : "";
+                            Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                        }
+                        catch { }
+                    }
+                }
+
+                // One-shot: dump IOP RAM around 0x00004190-0x00004270 (I_MASK init function at 0x41DC)
+                if (pc >= 0x00004190u && pc <= 0x00004270u && !iopSeenPcs.Contains(0x41414141u))
+                {
+                    iopSeenPcs.Add(0x41414141u);
+                    Console.WriteLine($"  *** IOP first entered I_MASK-init region at PC=0x{pc:x8} ***");
+                    Console.WriteLine($"      I_MASK=0x{scheduler.IOP.Bus.IMask:X8}  I_STAT=0x{scheduler.IOP.Bus.IStat:X8}");
+                    Console.WriteLine("      IOP RAM disasm [0x00004170-0x00004280]:");
+                    for (uint da = 0x00004170u; da < 0x00004284u; da += 4)
+                    {
+                        try
+                        {
+                            uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                            string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                            string mark = (da == pc) ? " <-- PC" : "";
+                            Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                        }
+                        catch { }
+                    }
+
+                    // Also scan all IOP RAM for jal 0x4188 instructions (0x0C001062)
+                    Console.WriteLine("  Scanning IOP RAM for all jal 0x4188 calls:");
+                    const uint jalEnableIntr = 0x0C001062u; // jal 0x00004188
+                    for (uint sa = 0u; sa < 0x80000u; sa += 4)
+                    {
+                        try
+                        {
+                            uint iws = scheduler.IOP.Bus.ReadWord(sa);
+                            if (iws == jalEnableIntr)
+                            {
+                                // Print the instruction 2 before (usually "addiu a0, ...")
+                                uint prev1 = 0, prev2 = 0;
+                                try { prev2 = scheduler.IOP.Bus.ReadWord(sa - 8); } catch {}
+                                try { prev1 = scheduler.IOP.Bus.ReadWord(sa - 4); } catch {}
+                                uint next1 = 0;
+                                try { next1 = scheduler.IOP.Bus.ReadWord(sa + 4); } catch {}
+                                Console.WriteLine($"    jal 0x4188 at 0x{sa:X8}: prev2={MipsDisassembler.Disassemble(prev2, sa-8)}  prev={MipsDisassembler.Disassemble(prev1, sa-4)}  delay={MipsDisassembler.Disassemble(next1, sa+4)}");
+                            }
+                        }
+                        catch { }
+                    }
+                }
             };
 
             try
