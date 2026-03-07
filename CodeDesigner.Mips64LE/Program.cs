@@ -390,6 +390,41 @@ namespace CodeDesigner.Mips64LE
                     uint s0 = state.ReadReg(16);
                     uint s1 = state.ReadReg(17);
                     Console.WriteLine($"  *** IOP first hit WaitSema loop (0x16C3C): s0=0x{s0:x8} s1=0x{s1:x8} I_CTRL=0x{iCtrlW:x8} I_STAT=0x{iStatW:x8} I_MASK=0x{iMaskW:x8} SR=0x{state.SR:x8} ***");
+                    // Also dump the region around 0x16C3C and the WaitIntr/WaitSema called after
+                    foreach (var (dumpStart, dumpEnd, label) in new (uint, uint, string)[]
+                    {
+                        (0x00016C00u, 0x00016D70u, "16C00-16D70"),
+                        (0x000108C0u, 0x000108F0u, "108C0-108F0"),
+                        (0x00017778u, 0x000177A0u, "17778-177A0"),
+                        (0x000178D8u, 0x00017900u, "178D8-17900"),
+                        (0x00016ABCu, 0x00016AECu, "16ABC-16AEC"),
+                    })
+                    {
+                        Console.WriteLine($"  IOP RAM disasm [{label}]:");
+                        for (uint da = dumpStart; da < dumpEnd; da += 4)
+                        {
+                            try
+                            {
+                                uint iw3 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis3 = MipsDisassembler.Disassemble(iw3, da);
+                                string mark3 = (da == pc) ? " <-- PC" : "";
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw3:X8}  {dis3}{mark3}");
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
+                // Trace ALL unique IOP PCs in the module range 0x10000-0x1FFFF
+                // to map the complete SIFMAN execution path after the 0x16C3C loop.
+                if (pc >= 0x00010000u && pc <= 0x0001FFFFu && !iopSeenPcs.Contains(pc ^ 0x55AA0000u))
+                {
+                    iopSeenPcs.Add(pc ^ 0x55AA0000u);
+                    uint iStatT = scheduler.IOP.Bus.IStat;
+                    uint iMaskT = scheduler.IOP.Bus.IMask;
+                    uint a0T = state.ReadReg(4);
+                    uint raT = state.ReadReg(31);
+                    Console.WriteLine($"  [SIFMAN-module] PC=0x{pc:X8}  a0=0x{a0T:X8} ra=0x{raT:X8}  I_MASK=0x{iMaskT:X5} I_STAT=0x{iStatT:X5}");
                 }
 
                 // Trace all calls to EnableInterrupt (0x00004188) to see what bits are enabled and from where
