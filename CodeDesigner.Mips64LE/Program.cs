@@ -1176,8 +1176,24 @@ namespace CodeDesigner.Mips64LE
             DumpEeRamRegion(sched.EE.Bus, 0x80010530u, 0x80010570u, "outer-loop start");
             // Also dump function prologue of the called copy function
             DumpEeRamRegion(sched.EE.Bus, 0x800103B0u, 0x800103D0u, "copy-func prologue");
-            // Dump the SIF/SMFLAG processing loop (EE stuck here waiting for SMFLAG)
-            DumpEeRamRegion(sched.EE.Bus, 0x8000FAC8u, 0x8000FBB0u, "SMFLAG-reader");
+            // Dump the SIF/SMFLAG processing loop (FAC8 → FBB0 → FBC0)
+            DumpEeRamRegion(sched.EE.Bus, 0x8000FAC8u, 0x8000FC00u, "SMFLAG-reader");
+            // Dump the EE EELOAD/SIF command region
+            DumpEeRamRegion(sched.EE.Bus, 0x8000FC00u, 0x8000FF00u, "SIF-cmd-region");
+            DumpEeRamRegion(sched.EE.Bus, 0x80012500u, 0x80012800u, "EELOAD-region");
+            // Dump SIF data structure key fields
+            try
+            {
+                uint sifFC8 = sched.EE.Bus.ReadWord(0x80023FC8u);
+                uint sifFD0 = sched.EE.Bus.ReadWord(0x80023FD0u);
+                uint sifFD4 = sched.EE.Bus.ReadWord(0x80023FD4u);
+                uint sifFD8 = sched.EE.Bus.ReadWord(0x80023FD8u);
+                uint sifFCC = sched.EE.Bus.ReadWord(0x80023FCCu);
+                uint sif4124 = sched.EE.Bus.ReadWord(0x80024124u);
+                Console.WriteLine($"  EE SIF struct: [3FC8]={sifFC8:X8} [3FCC]={sifFCC:X8} [3FD0]={sifFD0:X8} [3FD4]={sifFD4:X8} [3FD8]={sifFD8:X8}");
+                Console.WriteLine($"  EE SIF struct: [4124]={sif4124:X8} (loop cond)");
+            }
+            catch { }
             // Dump key registers for outer loop diagnosis
             {
                 ulong s1 = (ulong)sched.EE.Cpu.RegsLo[17];
