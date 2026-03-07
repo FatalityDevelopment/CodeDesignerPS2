@@ -1828,16 +1828,30 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// the string pointer, calls the serial putchar function via a function pointer,
         /// and advances the pointer.  The loop exits when the loaded byte is zero.
         ///
-        /// Pattern detected (BNEL variant, the form used by the PS2 BIOS):
+        /// Two loop patterns are recognised:
+        ///
+        /// Pattern A — pointer advances in the BNEL delay slot:
         /// <code>
         ///   loop_start:
         ///     lui    funcPtrHi, ...                ; load function-pointer upper
         ///     lw     funcPtrReg, offset(funcPtrHi) ; load function pointer
         ///     jalr   funcPtrReg                    ; call putchar(charReg)
-        ///     [delay slot: charReg = current byte] ; e.g. daddu a0, v0, zero
+        ///     daddu  a0, charReg, zero             ; delay slot: set up argument
         ///     lb     charReg, 0(ptrReg)            ; load next character from string
         ///     bnel   charReg, $zero, loop_start    ; loop while charReg != 0
         ///     addiu  ptrReg, ptrReg, 1             ; delay slot: advance pointer
+        /// </code>
+        ///
+        /// Pattern B — pointer advances in the JALR delay slot (some BIOS builds):
+        /// <code>
+        ///   loop_start:
+        ///     lui    funcPtrHi, ...                ; load function-pointer upper
+        ///     lw     funcPtrReg, offset(funcPtrHi) ; load function pointer
+        ///     jalr   funcPtrReg                    ; call putchar(a0)
+        ///     addiu  ptrReg, ptrReg, 1             ; delay slot: advance pointer
+        ///     lb     charReg, 0(ptrReg)            ; load next character from string
+        ///     bnel   charReg, $zero, loop_start    ; loop while charReg != 0
+        ///     daddu  a0, charReg, zero             ; delay slot: set next putchar arg
         /// </code>
         ///
         /// When detected and the remaining string length exceeds
@@ -1848,6 +1862,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// TX data register), which our emulator does not use for display.  SBUS_F130
         /// (TX status) is always read as 0, so the inner TX-ready poll loop exits
         /// immediately regardless.
+        ///
+        /// Strings may reside in either main RAM or BIOS ROM; both regions are
+        /// scanned correctly.
         ///
         /// Returns <c>true</c> if the fast-forward was applied and
         /// <see cref="Step"/> should return immediately.
@@ -1874,16 +1891,63 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (loopStart >= pc32) return false;
             uint loopBodyLen = (pc32 - loopStart) / 4u;                // # instructions before BNEL
 
-            // ── Step 3: Delay slot — ADDIU ptrReg, ptrReg, +1 ───────────────
-            uint dsWord = FetchWord(pc32 + 4u);
-            if ((dsWord >> 26) != 9u) return false;                    // ADDIU opcode = 9
-            int dsRs = (int)((dsWord >> 21) & 0x1Fu);
-            int dsRt = (int)((dsWord >> 16) & 0x1Fu);
-            if (dsRs != dsRt) return false;                            // rs == rt (in-place)
-            if ((short)(dsWord & 0xFFFFu) != 1) return false;         // imm must be +1
-            int ptrReg = dsRt;                                         // string pointer register
+            // ── Step 3: Locate the pointer-advance instruction ────────────────
+            // Pattern A: ADDIU ptrReg, ptrReg, +1 is the BNEL delay slot.
+            // Pattern B: ADDIU ptrReg, ptrReg, +1 is the delay slot of the
+            //            JALR/JAL inside the loop body; the BNEL delay slot instead
+            //            contains a move instruction (e.g. daddu a0, charReg, zero)
+            //            to pass the just-loaded character as the argument to the
+            //            next putchar call.
+            int ptrReg = -1;
 
-            // ── Step 4: Instruction immediately before BNEL — LB charReg, 0(ptrReg) ─
+            // Try Pattern A first: check the BNEL delay slot.
+            {
+                uint dsWord = FetchWord(pc32 + 4u);
+                if ((dsWord >> 26) == 9u)                              // ADDIU opcode = 9
+                {
+                    int dsRs = (int)((dsWord >> 21) & 0x1Fu);
+                    int dsRt = (int)((dsWord >> 16) & 0x1Fu);
+                    if (dsRs == dsRt && (short)(dsWord & 0xFFFFu) == 1)
+                        ptrReg = dsRt;
+                }
+            }
+
+            // ── Step 4: Loop body must contain a function call (JALR or JAL) ──
+            // Also try Pattern B: if ptrReg is not yet known, inspect the delay
+            // slot of the first JALR/JAL found in the loop body.
+            bool hasCall = false;
+            for (uint off = 0u; off < loopBodyLen - 1u; off++)        // skip the LB (last instr)
+            {
+                uint w     = FetchWord(loopStart + off * 4u);
+                uint op    = w >> 26;
+                uint funct = w & 0x3Fu;
+                bool isJalr = (op == 0u && funct == 0x09u);
+                bool isJal  = (op == 0x03u);
+                if (isJalr || isJal)
+                {
+                    hasCall = true;
+                    // Pattern B: check the delay slot of this JALR/JAL.
+                    if (ptrReg < 0)
+                    {
+                        uint dsOff = loopStart + (off + 1u) * 4u;
+                        if (dsOff < pc32)                              // delay slot inside loop body
+                        {
+                            uint jalDs = FetchWord(dsOff);
+                            if ((jalDs >> 26) == 9u)                   // ADDIU
+                            {
+                                int rs = (int)((jalDs >> 21) & 0x1Fu);
+                                int rt = (int)((jalDs >> 16) & 0x1Fu);
+                                if (rs == rt && (short)(jalDs & 0xFFFFu) == 1)
+                                    ptrReg = rt;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+            if (!hasCall || ptrReg < 0) return false;
+
+            // ── Step 5: Instruction immediately before BNEL — LB charReg, 0(ptrReg) ─
             if (pc32 < 4u) return false;
             uint lbWord = FetchWord(pc32 - 4u);
             if ((lbWord >> 26) != 0x20u) return false;                // LB opcode = 0x20
@@ -1891,38 +1955,44 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if ((int)((lbWord >> 16) & 0x1Fu) != charReg) return false; // dest = charReg
             if ((short)(lbWord & 0xFFFFu) != 0) return false;         // offset must be 0
 
-            // ── Step 5: Loop body must contain a function call (JALR or JAL) ─
-            // This distinguishes the serial putchar loop from simpler byte-scan loops.
-            bool hasCall = false;
-            for (uint off = 0u; off < loopBodyLen - 1u; off++)        // skip the LB (last instr)
-            {
-                uint w = FetchWord(loopStart + off * 4u);
-                uint op    = w >> 26;
-                uint funct = w & 0x3Fu;
-                if (op == 0x03u || (op == 0u && funct == 0x09u))      // JAL or JALR
-                {
-                    hasCall = true;
-                    break;
-                }
-            }
-            if (!hasCall) return false;
-
-            // ── Step 6: Read the string pointer and validate address ──────────
+            // ── Step 6: Read the string pointer and determine its memory region ─
             uint ptrVal = (uint)(Cpu.RegsLo[ptrReg] & 0xFFFFFFFFu);
 
-            // The pointer must be in KSEG0 or KSEG1 (kernel virtual RAM).
+            // The pointer must be in KSEG0 or KSEG1 (kernel virtual memory).
             if ((ptrVal & 0x80000000u) == 0u) return false;
-            uint physPtr = PS2MemoryBus.TranslateAddress(ptrVal) & (uint)(PS2MemoryBus.MainRamSize - 1);
-            if (physPtr >= (uint)Bus.Ram.Length) return false;
+            uint physAddr = PS2MemoryBus.TranslateAddress(ptrVal);
+
+            // Select the backing byte array for the scan.  Strings may live in
+            // main RAM (physical 0x00000000–0x0FFFFFFF) or in BIOS ROM
+            // (physical 0x1FC00000–0x1FFFFFFF).  The old code used a blanket
+            // "(& MainRamSize-1)" mask that silently wrapped ROM addresses into
+            // a wrong RAM offset, producing an empty or garbage scan result.
+            byte[] strRegion;
+            uint   strOffset;
+            if (physAddr < 0x10000000u)
+            {
+                strOffset = physAddr & (uint)(PS2MemoryBus.MainRamSize - 1);  // mirror wrap
+                strRegion = Bus.Ram;
+            }
+            else if (physAddr >= PS2MemoryBus.BiosRomPhysBase
+                     && physAddr < PS2MemoryBus.BiosRomPhysBase + (uint)PS2MemoryBus.BiosRomSize)
+            {
+                strOffset = physAddr - PS2MemoryBus.BiosRomPhysBase;
+                strRegion = Bus.Bios;
+            }
+            else
+            {
+                return false;  // unknown region — do not fast-forward
+            }
+            if (strOffset >= (uint)strRegion.Length) return false;
 
             // ── Step 7: Measure string length ────────────────────────────────
-            // Count non-null bytes starting from physPtr up to a safety cap.
+            // Count non-null bytes starting from strOffset up to a safety cap.
             const int MaxScan = 1_000_000;
             int len = 0;
-            uint scanBase = physPtr;
-            while (scanBase + (uint)len < (uint)Bus.Ram.Length
+            while (strOffset + (uint)len < (uint)strRegion.Length
                    && len < MaxScan
-                   && Bus.Ram[scanBase + (uint)len] != 0)
+                   && strRegion[strOffset + (uint)len] != 0)
             {
                 len++;
             }
