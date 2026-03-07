@@ -1014,16 +1014,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 kernelSnapshot = new byte[kernelSnapLen];
                 Bus.Ram.AsSpan(0, kernelSnapLen).CopyTo(kernelSnapshot);
             }
-            else if (physStart < (uint)MinKernelPreservation)
-            {
-                // Partial fill that starts inside the kernel area.  The fill will
-                // overwrite kernel data that the CPU was actively reading (and that
-                // would be protected by the real d-cache).  Preserve 256 KB so that
-                // post-fill kernel reads see the pre-fill values.
-                kernelSnapLen  = (int)Math.Min((uint)MinKernelPreservation, (uint)Bus.Ram.Length);
-                kernelSnapshot = new byte[kernelSnapLen];
-                Bus.Ram.AsSpan(0, kernelSnapLen).CopyTo(kernelSnapshot);
-            }
+
 
             if (remaining >= PS2MemoryBus.MainRamSize)
             {
