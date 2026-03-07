@@ -10,7 +10,7 @@ A C# library and toolset for working with the **Sony PlayStation 2 Emotion Engin
 Mips64LE/
 ├── CodeDesigner.Mips64LE.Common/     # Core library (assembler, disassembler, instructions, emulator)
 ├── CodeDesigner.Mips64LE/           # Console application + socket server
-├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (898 tests)
+├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (960 tests)
 └── vscode/codedesigner/             # VSCode extension frontend
 ```
 
@@ -34,7 +34,7 @@ dotnet build CodeDesigner.Mips64LE.sln
 dotnet test CodeDesigner.Mips64LE.TestProject/
 ```
 
-All 898 tests should pass.
+All 960 tests should pass.
 
 ### Console Application
 
@@ -265,7 +265,7 @@ All instruction semantics have been cross-referenced with [PCSX2](https://pcsx2.
 - `pcsx2/FPU.cpp` — COP1 floating-point unit
 
 ### Test Coverage
-- **898 unit tests** covering core, FPU, COP0, COP2/VU0, MMI, EE hardware, IOP, CDVD, SPU2, SIO2, GS/GIF/VIF, VU1, BiosLoader, GameLoader, TLB, IOP module loader, memory card, USB, i.LINK, DEV9, performance counters, and FCSR flags
+- **960 unit tests** covering core, FPU, COP0, COP2/VU0, MMI, EE hardware, IOP, CDVD, SPU2, SIO2, GS/GIF/VIF, VU1, BiosLoader, GameLoader, TLB, IOP module loader, memory card, USB, i.LINK, DEV9, performance counters, and FCSR flags
 - Tests verify both disassembly output and execution correctness
 - Special cases: long.MinValue in DMULT, negative DIV sign-extension, ERET ERL handling
 
