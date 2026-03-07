@@ -471,6 +471,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (TryFastForwardByteCopy())
                 return;
 
+            if (TryFastForwardLinearSearch())
+                return;
+
+            if (TryFastForwardModuleInstallLoop())
+                return;
+
             if (TryFastForwardBiosPuts())
                 return;
 
@@ -993,23 +999,31 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // the fill still see the pre-fill (d-cached) values.  Without a d-cache
             // simulation this emulator would clobber that data.
             //
-            // We compensate by saving a snapshot of the first 256 KB (the EE
-            // kernel header + data area) whenever:
+            // We compensate by saving a snapshot of the first 1 MB (the EE
+            // kernel header + module table + data area) whenever:
             //   (a) The fill covers the entire 32 MB (wraps around and writes
             //       the region [0 .. physStart) last), OR
-            //   (b) The fill is partial but starts within the kernel area
-            //       (physStart < 256 KB).  In this case the fill overwrites data
-            //       that the kernel was actively using and that would survive in
-            //       the real d-cache.
+            //   (b) The fill is partial but its range overlaps the kernel area
+            //       (physical [0, 1 MB)), meaning physStart < 1 MB for ascending
+            //       fills; the fill starts inside the kernel area and the
+            //       module-count field at 0x242E0 would otherwise be clobbered
+            //       by fill bytes, causing the module-init loop to iterate 537 M
+            //       times.
+            //
+            // 1 MB is chosen to cover the EE kernel module-descriptor table
+            // which starts at physical 0x40000 (just past the old 256 KB limit).
+            // Without preserving that region the null terminator of the table is
+            // wiped out by the fill loop, causing the outer module-init loop at
+            // 0x80010530 to run indefinitely.
             //
             // After the bulk fill we restore this snapshot so that subsequent
             // kernel reads see the d-cached (pre-fill) values.
-            const int MinKernelPreservation = 256 * 1024;
+            const int MinKernelPreservation = 1 * 1024 * 1024;
             byte[]? kernelSnapshot = null;
             int     kernelSnapLen  = 0;
             if (remaining >= PS2MemoryBus.MainRamSize)
             {
-                // Full fill: preserve at least 256 KB, or physStart bytes if
+                // Full fill: preserve at least 1 MB, or physStart bytes if
                 // physStart is larger — whichever is greater, capped at RAM size.
                 kernelSnapLen  = (int)Math.Min(
                                      Math.Max(physStart, (uint)MinKernelPreservation),
@@ -1280,9 +1294,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             }
 
             // Kernel snapshot: the BNEL fill descends from addrVal-1 potentially into
-            // the EE kernel area (physical < 256 KB).  Save a snapshot so the kernel
-            // survives the fill, matching the real EE's d-cache behaviour.
-            const int MinKernelPreservation = 256 * 1024;
+            // the EE kernel area (physical < 1 MB).  Save a snapshot so the kernel
+            // module table (starting at physical 0x40000) and other kernel data
+            // survive the fill, matching the real EE's d-cache behaviour.
+            const int MinKernelPreservation = 1 * 1024 * 1024;
             byte[]? kernelSnapshot = null;
             int     kernelSnapLen  = 0;
             long physLow = (long)physStart - remaining + 1L;
@@ -1507,7 +1522,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             uint physStartQ = PS2MemoryBus.TranslateAddress((uint)((int)addrVal + sqImm))
                               & (uint)(PS2MemoryBus.MainRamSize - 1);
 
-            const int MinKernelPreservationQ = 256 * 1024;
+            // Debug: track physical 0x242E0
+
+            const int MinKernelPreservationQ = 1 * 1024 * 1024;
             byte[]? kernelSnapshotQ = null;
             int     kernelSnapLenQ  = 0;
             long totalBytes = remaining * 16L;
@@ -1549,7 +1566,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (kernelSnapshotQ != null)
                 kernelSnapshotQ.CopyTo(Bus.Ram.AsSpan(0, kernelSnapLenQ));
 
-            // Debug: verify bytes at a known string address after the fill.
             // ── Step 8: update CPU registers to post-loop state ───────────────
             // After the last BNE not taken + delay slot fired:
             //   addrReg = limVal
@@ -1563,6 +1579,322 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             InstructionCount += (ulong)remaining;
             return true;
         }
+
+
+        /// <summary>
+        /// Fast-forward the PS2 BIOS kernel linear-search loop.
+        ///
+        /// Pattern detected at <c>pc32</c> (a BNE instruction):
+        /// <code>
+        ///   [pc-4]:  lw    entryReg,  0(ptrReg)          ; load table entry
+        ///   [pc]:    bne   entryReg,  targetReg, +k       ; skip if no match
+        ///   [pc+4]:  addiu cntReg,    cntReg,    +1       ; match: count++
+        ///   [pc+8]:  jr    ra                             ; return immediately
+        ///   [pc+12]: addiu entryReg,  $zero,     +1       ; delay slot: rv = 1
+        ///   [pc+4k]: sltu  entryReg,  cntReg,  maxReg    ; bounds-check
+        ///   [pc+4k+4]: bne entryReg,  $zero, [pc-4]      ; loop-back
+        ///   [pc+4k+8]: addiu ptrReg,  ptrReg,    +8      ; advance (delay slot)
+        /// </code>
+        ///
+        /// On real PS2 hardware the search target is always present in the table
+        /// (small valid module table), so the first match terminates the loop
+        /// quickly.  With corrupted BIOS data the table can be 537 million entries
+        /// deep and the target never appears, creating an infinite loop that never
+        /// exits (the loop condition is <c>cntReg &lt; maxReg</c> where
+        /// <c>cntReg</c> only increments on a match, so it stays at 0 forever).
+        ///
+        /// This fast-forward scans the table directly in C# (up to
+        /// <see cref="LinearSearchMaxEntries"/> entries), then either returns the
+        /// found-entry result or fakes a not-found return so execution can continue.
+        /// </summary>
+        private bool TryFastForwardLinearSearch()
+        {
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+            if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
+
+            // ── Step 1: BNE entryReg, targetReg, +k (forward skip) ──────────────
+            uint w0 = FetchWord(pc32);
+            if ((w0 >> 26) != 5u) return false;        // opcode must be BNE
+            int   entryReg  = (int)((w0 >> 21) & 0x1Fu);
+            int   targetReg = (int)((w0 >> 16) & 0x1Fu);
+            short bneImm    = (short)(w0 & 0xFFFFu);
+            if (targetReg == 0)  return false;          // BNE vs zero → different fast-forward
+            if (bneImm    <= 0)  return false;          // must branch forward (skip match path)
+
+            // ── Step 2: ADDIU cntReg, cntReg, +1 ────────────────────────────────
+            uint w1 = FetchWord(pc32 + 4u);
+            if ((w1 >> 26) != 9u) return false;
+            int cntReg = (int)((w1 >> 16) & 0x1Fu);
+            if ((int)((w1 >> 21) & 0x1Fu) != cntReg) return false;  // rs == rt
+            if ((short)(w1 & 0xFFFFu) != 1)          return false;  // imm = +1
+
+            // ── Step 3: JR ra ────────────────────────────────────────────────────
+            uint w2 = FetchWord(pc32 + 8u);
+            if ((w2 >> 26) != 0u || (w2 & 0x3Fu) != 8u)  return false;  // SPECIAL/JR
+            if ((int)((w2 >> 21) & 0x1Fu) != 31)          return false;  // rs must be $ra
+
+            // ── Step 4: ADDIU entryReg, $zero, +1 (delay slot of JR) ────────────
+            uint w3 = FetchWord(pc32 + 12u);
+            if ((w3 >> 26) != 9u)                         return false;
+            if ((int)((w3 >> 21) & 0x1Fu) != 0)           return false;  // rs = $zero
+            if ((int)((w3 >> 16) & 0x1Fu) != entryReg)   return false;  // rt = entryReg
+            if ((short)(w3 & 0xFFFFu) != 1)              return false;  // imm = +1
+
+            // BNE skip target: the SLTU instruction
+            uint sltPC = (uint)((int)(pc32 + 4u) + (int)bneImm * 4);
+
+            // ── Step 5: SLTU entryReg, cntReg, maxReg ───────────────────────────
+            uint w4 = FetchWord(sltPC);
+            if ((w4 >> 26) != 0u || (w4 & 0x3Fu) != 0x2Bu) return false;  // SLTU
+            if ((int)((w4 >> 11) & 0x1Fu) != entryReg)      return false;  // rd
+            if ((int)((w4 >> 21) & 0x1Fu) != cntReg)        return false;  // rs
+            int maxReg = (int)((w4 >> 16) & 0x1Fu);
+
+            // ── Step 6: BNE entryReg, $zero, backward (loop-back) ───────────────
+            uint w5 = FetchWord(sltPC + 4u);
+            if ((w5 >> 26) != 5u)                            return false;
+            if ((int)((w5 >> 21) & 0x1Fu) != entryReg)      return false;
+            if ((int)((w5 >> 16) & 0x1Fu) != 0)             return false;  // rt = $zero
+            short loopImm = (short)(w5 & 0xFFFFu);
+            if (loopImm >= 0) return false;  // must be backward
+            uint loopTop = (uint)((int)(sltPC + 8u) + (int)loopImm * 4);
+            if (loopTop != pc32 - 4u) return false;  // loop-top must be LW before current BNE
+
+            // ── Step 7: ADDIU ptrReg, ptrReg, +8 (delay slot of loop BNE) ───────
+            uint w6 = FetchWord(sltPC + 8u);
+            if ((w6 >> 26) != 9u) return false;
+            int ptrReg = (int)((w6 >> 16) & 0x1Fu);
+            if ((int)((w6 >> 21) & 0x1Fu) != ptrReg)  return false;  // rs == rt
+            if ((short)(w6 & 0xFFFFu) != 8)           return false;  // imm = +8
+
+            // ── Step 8: LW entryReg, 0(ptrReg) at loop-top ──────────────────────
+            uint lwWord = FetchWord(loopTop);
+            if ((lwWord >> 26) != 0x23u)                     return false;  // LW
+            if ((int)((lwWord >> 16) & 0x1Fu) != entryReg)  return false;  // rt
+            if ((int)((lwWord >> 21) & 0x1Fu) != ptrReg)    return false;  // base
+            if ((short)(lwWord & 0xFFFFu) != 0)             return false;  // offset = 0
+
+            // ── Pattern matched.  Extract loop state. ────────────────────────────
+            uint cntVal    = (uint)(Cpu.RegsLo[cntReg]    & 0xFFFFFFFFu);
+            uint maxVal    = (uint)(Cpu.RegsLo[maxReg]    & 0xFFFFFFFFu);
+            uint ptrVirt   = (uint)(Cpu.RegsLo[ptrReg]    & 0xFFFFFFFFu);
+            uint targetVal = (uint)(Cpu.RegsLo[targetReg] & 0xFFFFFFFFu);
+
+            // cntReg only increments on a match (which immediately returns via jr ra).
+            // So when we reach this BNE, cntVal is always 0 for the "not found so far"
+            // path.  The loop exit condition cntVal >= maxVal can never trigger unless
+            // a match is found and the caller re-enters.  Treat remaining as the cap.
+            uint remaining = maxVal - cntVal;
+            if (remaining < BulkFillMinIterations) return false;
+
+            // We are at the BNE: the entry at ptrVirt has already failed.
+            // Scan entries at ptrVirt+8, ptrVirt+16, … up to the cap.
+            const uint LinearSearchMaxEntries = 65536u;
+            uint entriesToScan = Math.Min(remaining - 1u, LinearSearchMaxEntries);
+
+            bool found    = false;
+            uint foundPtr = 0u;
+            for (uint i = 0; i < entriesToScan; i++)
+            {
+                uint entryVirt = ptrVirt + 8u + i * 8u;
+                uint entryPhys = PS2MemoryBus.TranslateAddress(entryVirt);
+                uint entryWord;
+                if (entryPhys + 4u <= (uint)Bus.Ram.Length)
+                    entryWord = System.Runtime.InteropServices.MemoryMarshal
+                                    .Read<uint>(Bus.Ram.AsSpan((int)entryPhys, 4));
+                else
+                    entryWord = Bus.ReadWord(entryVirt);
+
+                if (entryWord == targetVal)
+                {
+                    found    = true;
+                    foundPtr = entryVirt;
+                    break;
+                }
+            }
+
+            if (found)
+            {
+                // Advance pointer to the matching entry and simulate:
+                //   addiu cntReg, cntReg, +1  ; count the match
+                //   jr ra                      ; return to caller
+                //   addiu entryReg, $zero, +1  ; delay slot: return value = 1
+                Cpu.RegsLo[ptrReg]   = (ulong)(int)foundPtr;
+                Cpu.RegsLo[cntReg]   = (ulong)((int)cntVal + 1);
+                Cpu.RegsLo[entryReg] = 1u;
+                Cpu.PC               = Cpu.RegsLo[31];  // jr ra
+            }
+            else
+            {
+                // Target not found within the scan range.  On real PS2 hardware this
+                // branch does not occur (target always present in a valid table).
+                // With corrupted BIOS data (table size = 537 M, all fill bytes) the
+                // search would loop forever.  Return "not found" so the caller can
+                // proceed and eventually exit the outer module-init loop.
+                Cpu.RegsLo[entryReg] = 0u;               // return value = 0 (not found)
+                Cpu.PC               = Cpu.RegsLo[31];   // jr ra
+            }
+
+            InstructionCount += entriesToScan;
+            return true;
+        }
+
+
+        /// <summary>
+        /// Fast-forward the PS2 BIOS outer module-install loop when its loop bound
+        /// is corrupted by fill bytes, causing it to iterate hundreds of millions of
+        /// times instead of the expected small number.
+        ///
+        /// Two variants are recognised:
+        ///
+        /// <b>BNE variant</b> (pc32 = BNE opcode 5):
+        /// <code>
+        ///   [pc-16]: lw    bndReg,  imm(baseReg)   ; reload bound from RAM
+        ///   [pc-12]: addiu cntReg,  cntReg,  +1    ; counter++
+        ///   [pc-8]:  addiu ptr0Reg, ptr0Reg, +12   ; advance primary pointer
+        ///   [pc-4]:  sltu  bndReg,  cntReg, bndReg ; bndReg = (cnt &lt; bound)
+        ///   [pc]:    bne   bndReg,  $zero,  loop   ; loop while bndReg != 0
+        ///   [pc+4]:  addiu ptr2Reg, ptr2Reg, +12   ; delay slot: advance secondary ptr
+        /// </code>
+        /// State synthesised: cntReg=bound, ptr0Reg += remaining×12,
+        /// ptr2Reg += (remaining+1)×12, bndReg=0, PC=pc+8.
+        ///
+        /// <b>BNEL variant</b> (pc32 = BNEL opcode 0x15):
+        /// <code>
+        ///   [pc-8]:  lw    bndReg,  imm(baseReg)   ; reload bound from RAM
+        ///   [pc-4]:  sltu  bndReg,  cntReg, bndReg ; bndReg = (cnt &lt; bound)
+        ///   [pc]:    bnel  bndReg,  $zero,  loop   ; loop while bndReg != 0 (likely)
+        ///   [pc+4]:  &lt;delay slot — nullified on exit&gt;
+        /// </code>
+        /// In this variant the counter (<c>cntReg</c>, e.g. $s1) is incremented
+        /// inside a JAL delay slot deeper in the loop body and is not visible at the
+        /// BNEL site.  State synthesised: cntReg=bound, bndReg=0, PC=pc+8.
+        /// (Other registers modified by JAL delay slots are left unchanged because
+        /// they are restored from the stack immediately after the BNEL loop exits.)
+        ///
+        /// Both variants fire only when the bound loaded from RAM exceeds
+        /// <see cref="ModuleInstallBoundThreshold"/> (64 K).  A valid PS2 BIOS
+        /// module table has at most a few hundred entries; a bound of 537 M (fill
+        /// bytes 0x20202020) or 2.15 G (a stale kernel pointer) indicates corrupted
+        /// kernel data.
+        /// </summary>
+        private bool TryFastForwardModuleInstallLoop()
+        {
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+
+            // Only fire for KSEG0/KSEG1 code.
+            if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
+
+            // ── Common: BNE (opcode 5) or BNEL (opcode 0x15) ────────────────
+            uint brWord = FetchWord(pc32);
+            uint brOpcode = brWord >> 26;
+            bool isBnel = (brOpcode == 0x15u);
+            if (!isBnel && brOpcode != 5u) return false;            // must be BNE or BNEL
+            int bndReg = (int)((brWord >> 21) & 0x1Fu);
+            if (((brWord >> 16) & 0x1Fu) != 0u) return false;      // rt must be $zero
+            int branchImm = (short)(brWord & 0xFFFFu);
+            if (branchImm >= 0) return false;                       // must be backward
+            if (bndReg == 0) return false;
+
+            // ── SLTU at pc-4: sltu bndReg, cntReg, bndReg ───────────────────
+            // rd == rt == bndReg (bound is both input and overwritten by result).
+            uint sltuWord = FetchWord(pc32 - 4u);
+            if ((sltuWord >> 26) != 0u) return false;                        // SPECIAL
+            if ((sltuWord & 0x3Fu) != 0x2Bu) return false;                   // SLTU
+            if ((int)((sltuWord >> 11) & 0x1Fu) != bndReg) return false;     // rd = bndReg
+            if ((int)((sltuWord >> 16) & 0x1Fu) != bndReg) return false;     // rt = bndReg (source)
+            int cntReg = (int)((sltuWord >> 21) & 0x1Fu);
+            if (cntReg == bndReg) return false;
+
+            // ── Guard: bndReg must currently be 1 (loop continues) ──────────
+            if ((Cpu.RegsLo[bndReg] & 0xFFFFFFFFUL) == 0UL) return false;
+
+            int  baseReg;
+            short boundImm;
+
+            if (isBnel)
+            {
+                // ── BNEL variant: LW bndReg, imm(baseReg) at pc-8 ──────────
+                uint lwWord = FetchWord(pc32 - 8u);
+                if ((lwWord >> 26) != 0x23u) return false;                   // LW
+                if ((int)((lwWord >> 16) & 0x1Fu) != bndReg) return false;  // rt = bndReg
+                baseReg  = (int)((lwWord >> 21) & 0x1Fu);
+                boundImm = (short)(lwWord & 0xFFFFu);
+            }
+            else
+            {
+                // ── BNE variant: additional checks at pc-8, pc-12, pc-16 ───
+                // pc+4 (delay slot): ADDIU ptr2Reg, ptr2Reg, +12
+                uint dsWord = FetchWord(pc32 + 4u);
+                if ((dsWord >> 26) != 9u) return false;
+                int dsRs = (int)((dsWord >> 21) & 0x1Fu);
+                int dsRt = (int)((dsWord >> 16) & 0x1Fu);
+                if (dsRs != dsRt) return false;
+                if ((short)(dsWord & 0xFFFFu) != 12) return false;
+
+                // pc-8: ADDIU ptr0Reg, ptr0Reg, +12
+                uint add0Word = FetchWord(pc32 - 8u);
+                if ((add0Word >> 26) != 9u) return false;
+                int add0Rs = (int)((add0Word >> 21) & 0x1Fu);
+                int add0Rt = (int)((add0Word >> 16) & 0x1Fu);
+                if (add0Rs != add0Rt) return false;
+                if ((short)(add0Word & 0xFFFFu) != 12) return false;
+
+                // pc-12: ADDIU cntReg, cntReg, +1
+                uint addCntWord = FetchWord(pc32 - 12u);
+                if ((addCntWord >> 26) != 9u) return false;
+                if ((int)((addCntWord >> 21) & 0x1Fu) != cntReg) return false;
+                if ((int)((addCntWord >> 16) & 0x1Fu) != cntReg) return false;
+                if ((short)(addCntWord & 0xFFFFu) != 1) return false;
+
+                // pc-16: LW bndReg, imm(baseReg)
+                uint lwWord = FetchWord(pc32 - 16u);
+                if ((lwWord >> 26) != 0x23u) return false;
+                if ((int)((lwWord >> 16) & 0x1Fu) != bndReg) return false;
+                baseReg  = (int)((lwWord >> 21) & 0x1Fu);
+                boundImm = (short)(lwWord & 0xFFFFu);
+            }
+
+            // ── Read bound from RAM and check threshold ──────────────────────
+            uint baseVal   = (uint)(Cpu.RegsLo[baseReg] & 0xFFFFFFFFu);
+            uint boundAddr = (uint)((int)baseVal + boundImm);
+            uint bound     = Bus.ReadWord(boundAddr);
+            if (bound <= ModuleInstallBoundThreshold) return false;
+
+            uint s1Val = (uint)(Cpu.RegsLo[cntReg] & 0xFFFFFFFFu);
+            if (s1Val >= bound) return false;
+            long remaining = (long)bound - (long)s1Val;
+            if (remaining <= 0) return false;
+
+            // ── Synthesise final loop state ───────────────────────────────────
+            CpuHelpers.SetReg32(Cpu, cntReg, (int)(s1Val + (uint)remaining)); // = bound
+            CpuHelpers.SetReg32(Cpu, bndReg, 0);                               // SLTU = 0
+            Cpu.PC = pc32 + 8u;                                                 // past branch + delay slot
+
+            if (!isBnel)
+            {
+                // BNE variant: also advance the pointer registers that are
+                // explicitly incremented at the loop back-edge (pc-8 and pc+4).
+                // For BNEL the pointer increment lives inside a JAL delay slot;
+                // those registers are restored from the stack after the loop, so
+                // advancing them here is unnecessary and could introduce rounding
+                // errors for the partially-executed iteration already in flight.
+                uint dsWord = FetchWord(pc32 + 4u);
+                int ptr2Reg = (int)((dsWord >> 16) & 0x1Fu);
+                uint add0Word = FetchWord(pc32 - 8u);
+                int ptr0Reg = (int)((add0Word >> 16) & 0x1Fu);
+                uint ptr0Val = (uint)(Cpu.RegsLo[ptr0Reg] & 0xFFFFFFFFu);
+                uint ptr2Val = (uint)(Cpu.RegsLo[ptr2Reg] & 0xFFFFFFFFu);
+                CpuHelpers.SetReg32(Cpu, ptr0Reg, (int)(ptr0Val + (uint)remaining * 12u));
+                CpuHelpers.SetReg32(Cpu, ptr2Reg, (int)(ptr2Val + (uint)(remaining + 1L) * 12u));
+            }
+
+            InstructionCount += (ulong)remaining * 10u;
+            return true;
+        }
+
+        /// <summary>Minimum bound value before the module-install loop is fast-forwarded.</summary>
+        private const uint ModuleInstallBoundThreshold = 65536u;
 
 
         /// <code>
@@ -1877,17 +2209,56 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (loopStart >= pc32) return false;
             uint loopBodyLen = (pc32 - loopStart) / 4u;                // # instructions before BNEL
 
-            // ── Step 3: Delay slot — ADDIU ptrReg, ptrReg, +1 ───────────────
-            // The pointer-advance MUST be in the BNEL delay slot (Pattern A).
-            // Allowing the advance to be in the JALR delay slot instead (Pattern B)
-            // is too permissive and causes false positives with non-string loops.
+            // ── Step 3: Delay slot — pointer advance detection ───────────────
+            // Two loop variants are in use by the PS2 BIOS puts implementation:
+            //
+            //   Pattern A — ADDIU ptrReg, ptrReg, +1 in the BNEL delay slot.
+            //     (classic null-terminated string walk, pointer advanced after null check)
+            //
+            //   Pattern B — LB argReg, 0(ptrReg) in the BNEL delay slot, with
+            //     ADDIU ptrReg, ptrReg, +1 inside the loop body (typically the
+            //     JALR delay slot).  The loop pre-loads the next character as the
+            //     argument for the upcoming putchar call.
+            //
+            // In both patterns the pointer still advances exactly +1 per iteration
+            // and the fast-forward logic (steps 6–8) is identical.  Pattern B is
+            // distinguished from arbitrary LB-in-delay-slot loops by requiring that
+            // an in-place ADDIU ptrReg++ exists somewhere in the loop body.
             uint dsWord = FetchWord(pc32 + 4u);
-            if ((dsWord >> 26) != 9u) return false;                    // ADDIU opcode = 9
-            int dsRs = (int)((dsWord >> 21) & 0x1Fu);
-            int dsRt = (int)((dsWord >> 16) & 0x1Fu);
-            if (dsRs != dsRt) return false;                            // rs == rt (in-place)
-            if ((short)(dsWord & 0xFFFFu) != 1) return false;         // imm must be +1
-            int ptrReg = dsRt;                                         // string pointer register
+            int ptrReg;
+            if ((dsWord >> 26) == 9u)
+            {
+                // Pattern A: ADDIU ptrReg, ptrReg, +1 in the BNEL delay slot.
+                int dsRs = (int)((dsWord >> 21) & 0x1Fu);
+                int dsRt = (int)((dsWord >> 16) & 0x1Fu);
+                if (dsRs != dsRt) return false;                        // rs == rt (in-place)
+                if ((short)(dsWord & 0xFFFFu) != 1) return false;     // imm must be +1
+                ptrReg = dsRt;
+            }
+            else if ((dsWord >> 26) == 0x20u)
+            {
+                // Pattern B: LB argReg, 0(ptrReg) in the BNEL delay slot.
+                // The base register of the LB is the pointer register.
+                if ((short)(dsWord & 0xFFFFu) != 0) return false;     // LB offset must be 0
+                ptrReg = (int)((dsWord >> 21) & 0x1Fu);               // base = ptrReg
+                // Verify ADDIU ptrReg, ptrReg, +1 is present in the loop body.
+                // This guards against false-positives on non-string LB loops.
+                bool foundAddiu = false;
+                for (uint off = 0u; off < loopBodyLen; off++)
+                {
+                    uint w = FetchWord(loopStart + off * 4u);
+                    if ((w >> 26) == 9u                                // ADDIU
+                        && (int)((w >> 21) & 0x1Fu) == ptrReg         // rs = ptrReg
+                        && (int)((w >> 16) & 0x1Fu) == ptrReg         // rt = ptrReg
+                        && (short)(w & 0xFFFFu) == 1)                 // imm = +1
+                    { foundAddiu = true; break; }
+                }
+                if (!foundAddiu) return false;
+            }
+            else
+            {
+                return false;
+            }
 
             // ── Step 4: Loop body must contain a function call (JALR or JAL) ─
             // This distinguishes the serial putchar loop from simpler byte-scan loops.
