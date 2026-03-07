@@ -2314,5 +2314,271 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.AreEqual(77UL, emu.Cpu.RegsLo[8],
                 "After bulk fill: $ra pre-fetch kept caller instruction (77) in i-cache; RAM overwrite (0x55) not seen");
         }
+
+        // =====================================================================
+        // SBUS serial register (0x1000F100-0x1000F1FF) tests
+        // =====================================================================
+
+        /// <summary>
+        /// Reads from the EE SBUS serial UART range (0x1000F100-0x1000F1FF) must
+        /// always return 0 regardless of previous writes.  This ensures the
+        /// TX-status poll loop in the BIOS putchar routine (which reads SBUS_F130 /
+        /// physical 0x1000F130 and checks for bits 15:12 == 0x8000) exits immediately
+        /// rather than spinning indefinitely.
+        /// </summary>
+        [TestMethod]
+        public void MemoryBus_SbusSerial_ReadAlwaysReturnsZero()
+        {
+            var bus = new PS2MemoryBus();
+
+            // KSEG1 base for 0x1000F130 (TX status) and 0x1000F180 (TX data).
+            const uint SbusF130 = 0xB000F130u; // physical 0x1000F130
+            const uint SbusF180 = 0xB000F180u; // physical 0x1000F180
+            const uint SbusF100 = 0xB000F100u; // physical 0x1000F100 (range start)
+            const uint SbusF1FC = 0xB000F1FCu; // physical 0x1000F1FC (range end -4)
+
+            // Writes to the serial range must be silently discarded.
+            bus.WriteWord(SbusF130, 0x0000_8001u); // write TX-busy init value
+            bus.WriteWord(SbusF180, 0x41u);         // write 'A' to TX data
+            bus.WriteWord(SbusF100, 0xDEAD_BEEFu);
+
+            // All reads in the range must return 0.
+            Assert.AreEqual(0u, bus.ReadWord(SbusF130),
+                "SBUS_F130 (TX status) must read as 0 — loop exit condition");
+            Assert.AreEqual(0u, bus.ReadWord(SbusF180),
+                "SBUS_F180 (TX data) must read as 0 after write discard");
+            Assert.AreEqual(0u, bus.ReadWord(SbusF100),
+                "SBUS_F100 (range start) must read as 0");
+            Assert.AreEqual(0u, bus.ReadWord(SbusF1FC),
+                "SBUS_F1FC (range end) must read as 0");
+        }
+
+        /// <summary>
+        /// Confirm that SBUS_F130 bits 15:12 are 0 after a write that would set the
+        /// TX-busy value (0x8001).  This is the exact condition the BIOS poll loop
+        /// checks: (lw[0xB000F130] & 0xF000) == 0x8000.  Returning 0 means the poll
+        /// exits immediately (0 != 0x8000).
+        /// </summary>
+        [TestMethod]
+        public void MemoryBus_SbusF130_TxBusyBits_AreZeroAfterWrite()
+        {
+            var bus = new PS2MemoryBus();
+
+            // Write a value with bits 15:12 == 0x8 (the TX-busy value the BIOS uses).
+            bus.WriteWord(0xB000F130u, 0x0000_8001u);
+
+            uint status = bus.ReadWord(0xB000F130u);
+            Assert.AreEqual(0u, status & 0xF000u,
+                "SBUS_F130 bits 15:12 must be 0 (TX ready) even after a TX-busy write");
+        }
+
+        // =====================================================================
+        // TryFastForwardBiosPuts tests
+        // =====================================================================
+
+        /// <summary>
+        /// Verify TryFastForwardBiosPuts detects the BIOS puts loop and fast-forwards
+        /// the string pointer to the null terminator in a single Step() call.
+        ///
+        /// The loop pattern at `loopStart`:
+        ///   lui   funcReg, 0x8001                     ; load function-pointer upper
+        ///   lw    funcReg, someOffset(funcReg)         ; load function pointer
+        ///   jalr  funcReg                              ; call putchar
+        ///   daddu a0, v0, zero                         ; delay slot: a0 = char
+        ///   lb    v0, 0(s0)                            ; load next char from s0
+        ///   bnel  v0, $zero, loopStart                 ; loop while non-zero
+        ///   addiu s0, s0, 1                            ; delay slot: s0++
+        /// </summary>
+        [TestMethod]
+        public void EE_BiosPuts_FastForward_AdvancesPointerToNullTerminator()
+        {
+            // Register indices (MIPS ABI)
+            const int V0 = 2;   // charReg (BNEL compares this against zero)
+            const int V1 = 3;   // funcReg (loaded function pointer)
+            const int S0 = 16;  // ptrReg  (string pointer, advanced by delay slot)
+            const int A0 = 4;   // argument register (jalr delay slot)
+
+            // ── Build the loop at KSEG0 0x80020000 ───────────────────────────
+            // Encode each instruction manually.
+            const uint loopBase = 0x80020000u;
+
+            // lui   v1, 0x8001
+            uint lui_v1      = (0x0Fu << 26) | (0u << 21) | (V1 << 16) | 0x8001u;
+            // lw    v1, 0x5958(v1)
+            uint lw_v1       = (0x23u << 26) | ((uint)V1 << 21) | ((uint)V1 << 16)
+                               | (uint)(ushort)0x5958;
+            // jalr  v1
+            uint jalr_v1     = (0u << 26) | ((uint)V1 << 21) | (0u << 16)
+                               | (31u << 11) | 0x09u;
+            // daddu a0, v0, zero  (delay slot of jalr)
+            uint daddu_a0_v0 = (0u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | ((uint)A0 << 11) | 0x2Du;
+            // lb    v0, 0(s0)   — at loopBase+0x10
+            uint lb_v0_s0    = (0x20u << 26) | ((uint)S0 << 21) | ((uint)V0 << 16) | 0u;
+            // bnel  v0, $zero, loopBase  — at loopBase+0x14
+            // offset = (loopBase - (loopBase+0x14+4)) / 4 = (-0x18)/4 = -6
+            uint bnel_v0     = (0x15u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | unchecked((uint)(ushort)(-6));
+            // addiu s0, s0, 1  (delay slot of bnel)
+            uint addiu_s0_p1 = (0x09u << 26) | ((uint)S0 << 21) | ((uint)S0 << 16) | 1u;
+            // nop — instruction after loop (PC+8 from bnel)
+            uint nop_after   = 0u;
+
+            var emu = new PS2Emulator();
+
+            emu.Bus.WriteWord(loopBase + 0x00u, lui_v1);
+            emu.Bus.WriteWord(loopBase + 0x04u, lw_v1);
+            emu.Bus.WriteWord(loopBase + 0x08u, jalr_v1);
+            emu.Bus.WriteWord(loopBase + 0x0Cu, daddu_a0_v0);
+            emu.Bus.WriteWord(loopBase + 0x10u, lb_v0_s0);
+            emu.Bus.WriteWord(loopBase + 0x14u, bnel_v0);      // PC starts here
+            emu.Bus.WriteWord(loopBase + 0x18u, addiu_s0_p1);
+            emu.Bus.WriteWord(loopBase + 0x1Cu, nop_after);
+
+            // ── Place a test string in RAM ────────────────────────────────────
+            const uint strBase = 0x80001000u; // KSEG0 physical 0x00001000
+            const string msg   = "Hello, EE!"; // 10 characters + null
+            for (int i = 0; i < msg.Length; i++)
+                emu.Bus.WriteByte(strBase + (uint)i, (byte)msg[i]);
+            emu.Bus.WriteByte(strBase + (uint)msg.Length, 0); // null terminator
+
+            // ── Set up registers ──────────────────────────────────────────────
+            // PC at the BNEL instruction; s0 points to the first char ('H').
+            // v0 = 'H' (already loaded by the lb before BNEL).
+            emu.Cpu.PC        = loopBase + 0x14u;
+            emu.Cpu.RegsLo[S0] = strBase;               // s0 → "Hello, EE!"
+            emu.Cpu.RegsLo[V0] = (byte)msg[0];          // v0 = 'H' (current char)
+
+            // ── Execute one Step() ────────────────────────────────────────────
+            emu.Step();
+
+            // ── Assertions ───────────────────────────────────────────────────
+            // PC should be at loopBase + 0x14 + 8 = loopBase + 0x1C (past bnel+delay).
+            Assert.AreEqual(loopBase + 0x1Cu, (uint)(emu.Cpu.PC & 0xFFFFFFFFUL),
+                "PC must advance past BNEL + delay slot after fast-forward");
+
+            // s0 should point to the null terminator (strBase + msg.Length).
+            uint expectedPtr = strBase + (uint)msg.Length;
+            Assert.AreEqual(expectedPtr, (uint)(emu.Cpu.RegsLo[S0] & 0xFFFFFFFFUL),
+                "s0 (ptrReg) must point to the null terminator after fast-forward");
+
+            // v0 should be 0 (the null terminator value).
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[V0],
+                "v0 (charReg) must be 0 (null terminator) after fast-forward");
+        }
+
+        /// <summary>
+        /// Verify TryFastForwardBiosPuts does NOT fire when the remaining string is
+        /// shorter than BiosPutsMinLen (8 characters), so short strings execute
+        /// normally character-by-character.
+        /// </summary>
+        [TestMethod]
+        public void EE_BiosPuts_FastForward_DoesNotFireForShortString()
+        {
+            const int V0 = 2;
+            const int V1 = 3;
+            const int S0 = 16;
+            const int A0 = 4;
+            const uint loopBase = 0x80021000u;
+
+            uint lui_v1      = (0x0Fu << 26) | (0u << 21) | ((uint)V1 << 16) | 0x8001u;
+            uint lw_v1       = (0x23u << 26) | ((uint)V1 << 21) | ((uint)V1 << 16)
+                               | (uint)(ushort)0x5958;
+            uint jalr_v1     = (0u << 26) | ((uint)V1 << 21) | (0u << 16)
+                               | (31u << 11) | 0x09u;
+            uint daddu_a0_v0 = (0u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | ((uint)A0 << 11) | 0x2Du;
+            uint lb_v0_s0    = (0x20u << 26) | ((uint)S0 << 21) | ((uint)V0 << 16) | 0u;
+            uint bnel_v0     = (0x15u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | unchecked((uint)(ushort)(-6));
+            uint addiu_s0_p1 = (0x09u << 26) | ((uint)S0 << 21) | ((uint)S0 << 16) | 1u;
+
+            var emu = new PS2Emulator();
+            emu.Bus.WriteWord(loopBase + 0x00u, lui_v1);
+            emu.Bus.WriteWord(loopBase + 0x04u, lw_v1);
+            emu.Bus.WriteWord(loopBase + 0x08u, jalr_v1);
+            emu.Bus.WriteWord(loopBase + 0x0Cu, daddu_a0_v0);
+            emu.Bus.WriteWord(loopBase + 0x10u, lb_v0_s0);
+            emu.Bus.WriteWord(loopBase + 0x14u, bnel_v0);
+            emu.Bus.WriteWord(loopBase + 0x18u, addiu_s0_p1);
+
+            // Very short string: "Hi" (2 chars) — well below BiosPutsMinLen (8).
+            const uint strBase = 0x80002000u;
+            emu.Bus.WriteByte(strBase + 0u, (byte)'H');
+            emu.Bus.WriteByte(strBase + 1u, (byte)'i');
+            emu.Bus.WriteByte(strBase + 2u, 0); // null terminator
+
+            emu.Cpu.PC        = loopBase + 0x14u;
+            emu.Cpu.RegsLo[S0] = strBase;
+            emu.Cpu.RegsLo[V0] = (byte)'H';
+
+            // ── Step should NOT fast-forward — PC must change by exactly the
+            // instruction that was at loopBase+0x14 (the BNEL). ─────────────────
+            // The BNEL v0, $zero with v0='H' (non-zero) takes the branch.
+            // With a taken BNEL, Step() executes: delay slot (addiu s0++), then
+            // jumps to loopBase+0x00 (loop start).
+            emu.Step();
+
+            // After one normal BNEL step the PC should jump to loop start (branch taken).
+            uint pc = (uint)(emu.Cpu.PC & 0xFFFFFFFFUL);
+            Assert.AreNotEqual(loopBase + 0x1Cu, pc,
+                "Fast-forward must NOT fire for short strings; PC should go to loop start, not loop exit");
+        }
+
+        /// <summary>
+        /// Verify TryFastForwardBiosPuts correctly fast-forwards a string that is
+        /// exactly at the minimum threshold (BiosPutsMinLen = 8 characters).
+        /// </summary>
+        [TestMethod]
+        public void EE_BiosPuts_FastForward_FiresAtMinimumLength()
+        {
+            const int V0 = 2;
+            const int V1 = 3;
+            const int S0 = 16;
+            const int A0 = 4;
+            const uint loopBase = 0x80022000u;
+
+            uint lui_v1      = (0x0Fu << 26) | (0u << 21) | ((uint)V1 << 16) | 0x8001u;
+            uint lw_v1       = (0x23u << 26) | ((uint)V1 << 21) | ((uint)V1 << 16)
+                               | (uint)(ushort)0x5958;
+            uint jalr_v1     = (0u << 26) | ((uint)V1 << 21) | (0u << 16)
+                               | (31u << 11) | 0x09u;
+            uint daddu_a0_v0 = (0u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | ((uint)A0 << 11) | 0x2Du;
+            uint lb_v0_s0    = (0x20u << 26) | ((uint)S0 << 21) | ((uint)V0 << 16) | 0u;
+            uint bnel_v0     = (0x15u << 26) | ((uint)V0 << 21) | (0u << 16)
+                               | unchecked((uint)(ushort)(-6));
+            uint addiu_s0_p1 = (0x09u << 26) | ((uint)S0 << 21) | ((uint)S0 << 16) | 1u;
+
+            var emu = new PS2Emulator();
+            emu.Bus.WriteWord(loopBase + 0x00u, lui_v1);
+            emu.Bus.WriteWord(loopBase + 0x04u, lw_v1);
+            emu.Bus.WriteWord(loopBase + 0x08u, jalr_v1);
+            emu.Bus.WriteWord(loopBase + 0x0Cu, daddu_a0_v0);
+            emu.Bus.WriteWord(loopBase + 0x10u, lb_v0_s0);
+            emu.Bus.WriteWord(loopBase + 0x14u, bnel_v0);
+            emu.Bus.WriteWord(loopBase + 0x18u, addiu_s0_p1);
+
+            // String of exactly 8 characters (= BiosPutsMinLen).
+            const uint strBase = 0x80003000u;
+            byte[] testStr = System.Text.Encoding.ASCII.GetBytes("12345678");
+            for (int i = 0; i < testStr.Length; i++)
+                emu.Bus.WriteByte(strBase + (uint)i, testStr[i]);
+            emu.Bus.WriteByte(strBase + (uint)testStr.Length, 0);
+
+            emu.Cpu.PC        = loopBase + 0x14u;
+            emu.Cpu.RegsLo[S0] = strBase;
+            emu.Cpu.RegsLo[V0] = testStr[0]; // '1'
+
+            emu.Step();
+
+            Assert.AreEqual(loopBase + 0x1Cu, (uint)(emu.Cpu.PC & 0xFFFFFFFFUL),
+                "Fast-forward must fire at exactly BiosPutsMinLen (8) characters");
+            Assert.AreEqual(strBase + (uint)testStr.Length,
+                            (uint)(emu.Cpu.RegsLo[S0] & 0xFFFFFFFFUL),
+                "s0 must point to null terminator after fast-forward");
+            Assert.AreEqual(0UL, emu.Cpu.RegsLo[V0],
+                "v0 must be 0 (null) after fast-forward");
+        }
     }
 }

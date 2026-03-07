@@ -471,6 +471,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (TryFastForwardByteCopy())
                 return;
 
+            if (TryFastForwardBiosPuts())
+                return;
+
             // ── Hardware interrupt check ──────────────────────────────────────
             // Deliver a pending INTC interrupt before executing the next instruction
             // when the CPU is ready to accept it.
@@ -1806,6 +1809,140 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             }
 
             InstructionCount += (ulong)chunkLen;
+            return true;
+        }
+
+        // ── BIOS serial-output (puts) loop fast-forward ─────────────────────────
+
+        /// <summary>
+        /// Minimum string length (in bytes) before the BIOS puts fast-forward triggers.
+        /// Very short strings (a single newline, etc.) are cheaper to execute normally.
+        /// </summary>
+        private const int BiosPutsMinLen = 8;
+
+        /// <summary>
+        /// Detect and fast-forward the BIOS null-terminated string output loop.
+        ///
+        /// The PS2 BIOS uses a tight loop to print strings to the EE serial port
+        /// (SBUS_F180 / physical 0x1000F180).  Each iteration loads one byte from
+        /// the string pointer, calls the serial putchar function via a function pointer,
+        /// and advances the pointer.  The loop exits when the loaded byte is zero.
+        ///
+        /// Pattern detected (BNEL variant, the form used by the PS2 BIOS):
+        /// <code>
+        ///   loop_start:
+        ///     lui    funcPtrHi, ...                ; load function-pointer upper
+        ///     lw     funcPtrReg, offset(funcPtrHi) ; load function pointer
+        ///     jalr   funcPtrReg                    ; call putchar(charReg)
+        ///     [delay slot: charReg = current byte] ; e.g. daddu a0, v0, zero
+        ///     lb     charReg, 0(ptrReg)            ; load next character from string
+        ///     bnel   charReg, $zero, loop_start    ; loop while charReg != 0
+        ///     addiu  ptrReg, ptrReg, 1             ; delay slot: advance pointer
+        /// </code>
+        ///
+        /// When detected and the remaining string length exceeds
+        /// <see cref="BiosPutsMinLen"/>, all remaining characters are skipped:
+        /// <paramref name="ptrReg"/> is advanced to the null terminator, charReg is
+        /// set to 0, and the PC is set past the loop.  This is safe because the only
+        /// side-effect of the putchar function is writing to SBUS_F180 (the EE serial
+        /// TX data register), which our emulator does not use for display.  SBUS_F130
+        /// (TX status) is always read as 0, so the inner TX-ready poll loop exits
+        /// immediately regardless.
+        ///
+        /// Returns <c>true</c> if the fast-forward was applied and
+        /// <see cref="Step"/> should return immediately.
+        /// </summary>
+        private bool TryFastForwardBiosPuts()
+        {
+            uint pc32 = (uint)(Cpu.PC & 0xFFFFFFFFUL);
+
+            // Only accelerate KSEG0/KSEG1 code (fixed-mapped kernel region).
+            if ((pc32 & 0xC0000000u) != 0x80000000u) return false;
+
+            // ── Step 1: BNEL at pc32  (opcode = 0x15, rt = $zero) ────────────
+            // Use FetchWord (i-cache) so that any in-flight fills that happen to
+            // overlap this code region return the correct instruction word.
+            uint bnelWord = FetchWord(pc32);
+            if ((bnelWord >> 26) != 0x15u) return false;               // must be BNEL
+            if (((bnelWord >> 16) & 0x1Fu) != 0u) return false;        // rt must be $zero
+            int charReg = (int)((bnelWord >> 21) & 0x1Fu);             // register checked != 0
+
+            // ── Step 2: Branch must be backward ──────────────────────────────
+            int branchImm = (short)(bnelWord & 0xFFFFu);
+            if (branchImm >= 0) return false;                           // loop must be backward
+            uint loopStart = (uint)((int)(pc32 + 4u) + branchImm * 4);
+            if (loopStart >= pc32) return false;
+            uint loopBodyLen = (pc32 - loopStart) / 4u;                // # instructions before BNEL
+
+            // ── Step 3: Delay slot — ADDIU ptrReg, ptrReg, +1 ───────────────
+            uint dsWord = FetchWord(pc32 + 4u);
+            if ((dsWord >> 26) != 9u) return false;                    // ADDIU opcode = 9
+            int dsRs = (int)((dsWord >> 21) & 0x1Fu);
+            int dsRt = (int)((dsWord >> 16) & 0x1Fu);
+            if (dsRs != dsRt) return false;                            // rs == rt (in-place)
+            if ((short)(dsWord & 0xFFFFu) != 1) return false;         // imm must be +1
+            int ptrReg = dsRt;                                         // string pointer register
+
+            // ── Step 4: Instruction immediately before BNEL — LB charReg, 0(ptrReg) ─
+            if (pc32 < 4u) return false;
+            uint lbWord = FetchWord(pc32 - 4u);
+            if ((lbWord >> 26) != 0x20u) return false;                // LB opcode = 0x20
+            if ((int)((lbWord >> 21) & 0x1Fu) != ptrReg) return false; // base = ptrReg
+            if ((int)((lbWord >> 16) & 0x1Fu) != charReg) return false; // dest = charReg
+            if ((short)(lbWord & 0xFFFFu) != 0) return false;         // offset must be 0
+
+            // ── Step 5: Loop body must contain a function call (JALR or JAL) ─
+            // This distinguishes the serial putchar loop from simpler byte-scan loops.
+            bool hasCall = false;
+            for (uint off = 0u; off < loopBodyLen - 1u; off++)        // skip the LB (last instr)
+            {
+                uint w = FetchWord(loopStart + off * 4u);
+                uint op    = w >> 26;
+                uint funct = w & 0x3Fu;
+                if (op == 0x03u || (op == 0u && funct == 0x09u))      // JAL or JALR
+                {
+                    hasCall = true;
+                    break;
+                }
+            }
+            if (!hasCall) return false;
+
+            // ── Step 6: Read the string pointer and validate address ──────────
+            uint ptrVal = (uint)(Cpu.RegsLo[ptrReg] & 0xFFFFFFFFu);
+
+            // The pointer must be in KSEG0 or KSEG1 (kernel virtual RAM).
+            if ((ptrVal & 0x80000000u) == 0u) return false;
+            uint physPtr = PS2MemoryBus.TranslateAddress(ptrVal) & (uint)(PS2MemoryBus.MainRamSize - 1);
+            if (physPtr >= (uint)Bus.Ram.Length) return false;
+
+            // ── Step 7: Measure string length ────────────────────────────────
+            // Count non-null bytes starting from physPtr up to a safety cap.
+            const int MaxScan = 1_000_000;
+            int len = 0;
+            uint scanBase = physPtr;
+            while (scanBase + (uint)len < (uint)Bus.Ram.Length
+                   && len < MaxScan
+                   && Bus.Ram[scanBase + (uint)len] != 0)
+            {
+                len++;
+            }
+
+            // Only fast-forward non-trivial strings.
+            if (len < BiosPutsMinLen) return false;
+
+            // ── Step 8: Fast-forward — skip entire string ─────────────────────
+            // Simulate all 'len' loop iterations plus the final null check:
+            //   ptrReg → ptrReg + len  (null terminator position)
+            //   charReg → 0            (null byte that ended the loop)
+            //   PC → pc32 + 8         (past BNEL + delay slot; delay slot nullified)
+            uint newPtr = ptrVal + (uint)len;
+            // Sign-extend to 64 bits the same way ADDIU would (PS2 EE is MIPS64).
+            Cpu.RegsLo[ptrReg] = (ulong)(long)(int)newPtr;
+            Cpu.RegsLo[charReg] = 0uL;
+            Cpu.PC = pc32 + 8u;    // past BNEL + delay slot; pointer increment is included in ptrReg advance above
+
+            // Count the skipped iterations so InstructionCount stays consistent.
+            InstructionCount += (ulong)len;
             return true;
         }
 
