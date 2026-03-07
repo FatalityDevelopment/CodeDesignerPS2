@@ -356,6 +356,26 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             if ((uint)bit < 32u) _iStat |= 1u << bit;
         }
 
+        /// <summary>
+        /// Enable an IOP interrupt mask bit directly (sets the corresponding I_MASK bit).
+        ///
+        /// In the real PS2 IOP BIOS, certain <c>WaitIntr</c> calls do not write the hardware
+        /// I_MASK register directly; they only update internal kernel tables.  This method
+        /// is called by <see cref="DualCpuScheduler"/> once SIFMAN has completed its F240
+        /// handshake and is known to be waiting for the SBUS interrupt (bit 1), replicating
+        /// the ROM patch that PCSX2 applies to make SIFMAN's <c>WaitIntr(SBUS)</c> work.
+        ///
+        /// Reference: PCSX2 pcsx2/IopBios.cpp — WaitIntr hook enables I_MASK hardware bit.
+        /// </summary>
+        public void EnableInterruptMask(int bit)
+        {
+            if ((uint)bit >= 32u) return;
+            uint prev = _iMask;
+            _iMask |= 1u << bit;
+            if (_iMask != prev)
+                Console.WriteLine($"[IOP I_MASK PATCH] 0x{prev:X8} → 0x{_iMask:X8}  (bit {bit} enabled by scheduler patch)");
+        }
+
         // ── Address translation ───────────────────────────────────────────────
 
         /// <summary>
@@ -502,7 +522,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             {
                 Dmac.Channels[chIdx].WriteRegister(chReg, value);
                 if (chReg == IopDmacChannel.REG_CHCR && Dmac.Channels[chIdx].IsRunning)
-                    Dmac.ExecuteChannel(chIdx, this);
+                {
+                    // CH10 = SIF1 receive (EE→IOP direction).  In the real PS2, the IOP
+                    // DMAC stalls CH10 until the EE fills the SIF1 FIFO.  Emulate this
+                    // by deferring execution when the FIFO is empty: STR stays set so
+                    // DualCpuScheduler can trigger the channel once EE CH6 delivers data.
+                    // Only applies when a real SIF is wired; unit-test scenarios without
+                    // a SharedSif run immediately (zero-fill, matching old behaviour).
+                    // Reference: PCSX2 pcsx2/Sif1.cpp psxDma10 — checks sif1.data.size != 0.
+                    bool sif1Empty = chIdx == 10
+                        && SharedSif != null
+                        && SharedSif.Sif1Count == 0;
+
+                    if (!sif1Empty)
+                        Dmac.ExecuteChannel(chIdx, this);
+                }
                 return;
             }
 

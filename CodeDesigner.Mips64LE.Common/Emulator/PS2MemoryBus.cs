@@ -369,7 +369,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             {
                 Dmac.Channels[chIdx].WriteRegister(chReg, value);
                 if (chReg == DmacChannel.REG_CHCR && Dmac.Channels[chIdx].IsRunning)
-                    Dmac.ExecuteChannel(chIdx, this);
+                {
+                    // CH5 = SIF0 receive (IOP→EE direction).  Defer execution when the
+                    // SIF0 FIFO is empty; DualCpuScheduler will trigger it after IOP CH9
+                    // delivers data.  Mirrors the CH10 deferral in IopMemoryBus.
+                    bool sif0Empty = chIdx == 5 && Sif.Sif0Count == 0;
+                    if (!sif0Empty)
+                        Dmac.ExecuteChannel(chIdx, this);
+                }
                 return;
             }
             if (DMAC.IsGlobalRegion(paddr))
