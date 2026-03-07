@@ -131,15 +131,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         {
             // ── IOP (R3000A) hardware interrupt check ─────────────────────────
             // Keep Cause.IP2 (bit 10) in sync with IOP INTC pending state, then
-            // deliver the interrupt if IEc=1 and any masked IP bit is pending.
-            // Reference: PCSX2 pcsx2/R3000A.cpp psxTestHWInts / IopCounters.cpp iopIntcIrq
+            // deliver the interrupt if I_CTRL is enabled, IEc=1, and any masked
+            // IP bit is pending.
+            // Reference: PCSX2 pcsx2/R3000A.cpp iopEventTest:
+            //   if ((psxHu32(HW_ICTRL) != 0) && (I_STAT & I_MASK) && (SR & 0xFE01) >= 0x401)
+            //     psxException(0, 0);
             if (Bus.IsInterruptPending)
                 State.Cause |= 0x400u;   // IP2 — IOP INTC pending
             else
                 State.Cause &= ~0x400u;  // clear IP2 when INTC is quiet
 
-            if ((State.SR & 0x1u) != 0                         // SR.IEc = 1 (interrupts enabled)
-                && (State.Cause & State.SR & 0xFC00u) != 0)    // any IP bit that's also masked
+            if (Bus.ICtrl != 0u                                    // I_CTRL master-enable (per PCSX2 iopEventTest HW_ICTRL != 0)
+                && (State.SR & 0x1u) != 0                        // SR.IEc = 1 (interrupts enabled)
+                && (State.Cause & State.SR & 0xFC00u) != 0)      // any IP bit that's also masked
             {
                 DispatchIopException(ExceptionCode.Interrupt, State.PC, inDelaySlot: false);
                 InstructionCount++;

@@ -222,6 +222,7 @@ namespace CodeDesigner.Mips64LE
             int       iopMemmoveCallCount = 0;
             int       iopICtrlPollCount   = 0;   // suppress spam after first N prints
             var       iopSeenPcs         = new System.Collections.Generic.HashSet<uint>();
+
             scheduler.IOP.StepHook = state =>
             {
                 uint pc = state.PC;
@@ -354,9 +355,41 @@ namespace CodeDesigner.Mips64LE
                 {
                     iopICtrlPollCount++;
                     uint iCtrl = scheduler.IOP.Bus.ICtrl;  // non-destructive read via property
-                    Console.WriteLine($"  IOP 0x4078 (I_CTRL poll #{iopICtrlPollCount}): I_CTRL=0x{iCtrl:x8} a0=0x{state.ReadReg(4):x8} ra=0x{state.ReadReg(31):x8}");
+                    uint iStat = scheduler.IOP.Bus.IStat;
+                    uint iMask = scheduler.IOP.Bus.IMask;
+                    uint iopSr = state.SR;
+                    Console.WriteLine($"  IOP 0x4078 (I_CTRL poll #{iopICtrlPollCount}): I_CTRL=0x{iCtrl:x8} I_STAT=0x{iStat:x8} I_MASK=0x{iMask:x8} SR=0x{iopSr:x8} a0=0x{state.ReadReg(4):x8} ra=0x{state.ReadReg(31):x8}");
+                    if (iopICtrlPollCount == 1)
+                    {
+                        // On first hit, dump the IOP RAM at 0x4070-0x40C0 to understand the event dispatch code.
+                        Console.WriteLine("  IOP event-dispatch code at 0x4070-0x40C0:");
+                        for (uint dumpAddr = 0x4070u; dumpAddr < 0x40C4u; dumpAddr += 4)
+                        {
+                            try
+                            {
+                                uint iw = scheduler.IOP.Bus.ReadWord(dumpAddr);
+                                string dis = MipsDisassembler.Disassemble(iw, dumpAddr);
+                                string marker = dumpAddr == 0x4078u ? " <-- ENTRY" : "";
+                                Console.WriteLine($"    0x{dumpAddr:x8}: 0x{iw:x8}  {dis}{marker}");
+                            }
+                            catch { }
+                        }
+                    }
                     if (iopICtrlPollCount == 10)
                         Console.WriteLine("  IOP 0x4078: further I_CTRL poll traces suppressed.");
+                }
+
+                // One-shot: when the IOP first enters the WaitSema loop (0x16C3C), dump
+                // the INTC state and IOP s0/s1 so we can see what condition is being waited on.
+                if (pc == 0x16C3Cu && !iopSeenPcs.Contains(0x16C3Cu))
+                {
+                    iopSeenPcs.Add(0x16C3Cu);
+                    uint iCtrlW = scheduler.IOP.Bus.ICtrl;
+                    uint iStatW = scheduler.IOP.Bus.IStat;
+                    uint iMaskW = scheduler.IOP.Bus.IMask;
+                    uint s0 = state.ReadReg(16);
+                    uint s1 = state.ReadReg(17);
+                    Console.WriteLine($"  *** IOP first hit WaitSema loop (0x16C3C): s0=0x{s0:x8} s1=0x{s1:x8} I_CTRL=0x{iCtrlW:x8} I_STAT=0x{iStatW:x8} I_MASK=0x{iMaskW:x8} SR=0x{state.SR:x8} ***");
                 }
             };
 
@@ -526,6 +559,13 @@ namespace CodeDesigner.Mips64LE
                         //   (IOP pc:0xbfc00120, cycle:N) <disasm>
                         Console.WriteLine($"(EE  pc:0x{eePc32:x8} [{GetPcRegion(eePc32)}], cycle:{totalSteps:N0}) {eeInsn}");
                         Console.WriteLine($"(IOP pc:0x{iopPc:x8} [{GetPcRegion(iopPc)}], cycle:{scheduler.TotalIopSteps:N0}) {iopInsn}");
+                        // Periodic IOP INTC state snapshot (helps diagnose persistent WaitSema loops)
+                        {
+                            uint iopICtrl = scheduler.IOP.Bus.ICtrl;
+                            uint iopIStat = scheduler.IOP.Bus.IStat;
+                            uint iopIMask = scheduler.IOP.Bus.IMask;
+                            Console.WriteLine($"     IOP INTC: I_STAT=0x{iopIStat:x8} I_MASK=0x{iopIMask:x8} I_CTRL=0x{iopICtrl:x8} pending={(iopIStat & iopIMask) != 0}");
+                        }
                         Console.WriteLine($"     ~{mips:F2} MIPS");
                         Console.WriteLine();
 

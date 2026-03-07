@@ -661,10 +661,32 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         }
 
         public ushort ReadHalf(uint addr)
-            => (ushort)(ReadByte(addr) | (ReadByte(addr + 1) << 8));
+        {
+            uint physAddr = TranslateAddress(addr);
+            // Hardware registers that require 16-bit-aware reads: timers and INTC.
+            if ((physAddr >= TimerBase  && physAddr < TimerBase  + TimerBankSize) ||
+                (physAddr >= TimerBase2 && physAddr < TimerBase2 + TimerBankSize) ||
+                (physAddr >= IntcBase   && physAddr <= IntcBase  + 8u))
+                return (ushort)ReadWord(addr);
+            return (ushort)(ReadByte(addr) | (ReadByte(addr + 1) << 8));
+        }
 
         public void WriteHalf(uint addr, ushort value)
         {
+            uint physAddr = TranslateAddress(addr);
+            // Route halfword writes to hardware registers (timers, INTC) through the
+            // 32-bit word handler so they are not silently discarded.  The IOP BIOS
+            // uses SH for T0–T2 timer registers (COUNT/MODE/TARGET) and these must
+            // reach WriteTimerWord; without this, timer MODE writes go to MapWrite
+            // which ignores hardware-register addresses, leaving CUE/CMPE cleared
+            // and the timers never fire.  Reference: PCSX2 psxHwWrite16.
+            if ((physAddr >= TimerBase  && physAddr < TimerBase  + TimerBankSize) ||
+                (physAddr >= TimerBase2 && physAddr < TimerBase2 + TimerBankSize) ||
+                (physAddr >= IntcBase   && physAddr <= IntcBase  + 8u))
+            {
+                WriteWord(addr, (uint)value);  // zero-extend 16→32 bits
+                return;
+            }
             WriteByte(addr,     (byte)value);
             WriteByte(addr + 1, (byte)(value >> 8));
         }

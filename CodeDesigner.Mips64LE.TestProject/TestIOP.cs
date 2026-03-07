@@ -560,26 +560,31 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void IopTimer_Tick_IncrementsCount()
         {
+            // IOP timers always count from their clock source regardless of MODE bits.
+            // The hardware has no count-enable bit; MODE only controls interrupts and clock.
             var t = new IopTimer(0);
-            t.WriteRegister(IopTimer.REG_MODE, 0x0080u); // CUE=1
             t.Tick(5);
-            Assert.AreEqual(5u, t.Count, "Count must increment by ticks when CUE is set");
+            Assert.AreEqual(5u, t.Count, "Timer must always count regardless of MODE");
         }
 
         [TestMethod]
-        public void IopTimer_Tick_DisabledWhenCueNotSet()
+        public void IopTimer_Tick_AlwaysCountsWithModeZero()
         {
+            // Per PS1/IOP hardware spec (no$psx.de): the timer has no CUE (count-up enable)
+            // bit.  It always counts from the selected clock source.  The former
+            // IopTimer_Tick_DisabledWhenCueNotSet test verified incorrect CUE behaviour;
+            // this test documents the correct always-counting behaviour.
             var t = new IopTimer(0);
-            // CUE=0 → timer should not count
+            // MODE=0 (no interrupt enables) — timer still counts
             t.Tick(100);
-            Assert.AreEqual(0u, t.Count, "Count must not increment when CUE is clear");
+            Assert.AreEqual(100u, t.Count, "Timer must always count even with MODE=0");
         }
 
         [TestMethod]
         public void IopTimer_Tick_CompareFires_WhenCmpeSet()
         {
             var t = new IopTimer(0);
-            t.WriteRegister(IopTimer.REG_MODE,   0x0090u); // CUE | CMPE
+            t.WriteRegister(IopTimer.REG_MODE,   0x0010u); // CMPE
             t.WriteRegister(IopTimer.REG_TARGET,  10u);
 
             bool fired = false;
@@ -595,7 +600,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void IopTimer_Tick_CompareNotFired_WhenCmpeCleared()
         {
             var t = new IopTimer(0);
-            t.WriteRegister(IopTimer.REG_MODE,   0x0080u); // CUE only; CMPE=0
+            t.WriteRegister(IopTimer.REG_MODE,   0x0000u); // CMPE=0
             t.WriteRegister(IopTimer.REG_TARGET,  5u);
 
             bool fired = false;
@@ -610,7 +615,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void IopTimer_Tick_OverflowFires_WhenOvfeSet()
         {
             var t = new IopTimer(0);
-            t.WriteRegister(IopTimer.REG_MODE, 0x00A0u); // CUE | OVFE
+            t.WriteRegister(IopTimer.REG_MODE, 0x0020u); // OVFE
 
             bool fired = false;
             t.OverflowInterruptPending += (_, _) => fired = true;
@@ -626,7 +631,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void IopTimer_Tick_OverflowNotFired_WhenOvfeCleared()
         {
             var t = new IopTimer(0);
-            t.WriteRegister(IopTimer.REG_MODE, 0x0080u); // CUE only; OVFE=0
+            t.WriteRegister(IopTimer.REG_MODE, 0x0000u); // OVFE=0
 
             bool fired = false;
             t.OverflowInterruptPending += (_, _) => fired = true;
@@ -640,7 +645,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void IopTimer_ModeRead_ClearsEqufAndOvff()
         {
             var t = new IopTimer(0);
-            t.WriteRegister(IopTimer.REG_MODE,   0x00B0u); // CUE | CMPE | OVFE
+            t.WriteRegister(IopTimer.REG_MODE,   0x0030u); // CMPE | OVFE
             t.WriteRegister(IopTimer.REG_TARGET,  3u);
 
             t.Tick(3);           // hit compare → sets EQUF
@@ -659,7 +664,6 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void IopTimer_WriteCount_ResetsCounter()
         {
             var t = new IopTimer(0);
-            t.WriteRegister(IopTimer.REG_MODE, 0x0080u); // CUE
             t.Tick(50);
             Assert.AreEqual(50u, t.Count);
 
@@ -671,7 +675,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void IopTimer_AltSource_DividesBy8()
         {
             var t = new IopTimer(2); // T2 supports alternate source
-            t.WriteRegister(IopTimer.REG_MODE, 0x0180u); // CUE | ALT (÷8)
+            t.WriteRegister(IopTimer.REG_MODE, 0x0100u); // ALT (÷8); no CUE needed
 
             t.Tick(8);   // 8 sysclock cycles → 1 timer increment
             Assert.AreEqual(1u, t.Count, "Alternate source (÷8) must count once per 8 cycles");
@@ -687,7 +691,7 @@ namespace CodeDesigner.Mips64LE.TestProject
         public void IopTimer_Counter_Wraps16Bit()
         {
             var t = new IopTimer(0);
-            t.WriteRegister(IopTimer.REG_MODE, 0x0080u); // CUE, no interrupts
+            // No special mode needed — timer always counts
 
             // Drive count to 0xFFFE
             t.Tick(0xFFFEu);
@@ -696,6 +700,59 @@ namespace CodeDesigner.Mips64LE.TestProject
             // Tick 3 more: 0xFFFE → 0xFFFF → 0x0000 (wrap) → 0x0001
             t.Tick(3u);
             Assert.AreEqual(1u, t.Count, "Counter must wrap at 16-bit boundary");
+        }
+
+        [TestMethod]
+        public void IopTimer_IrqRepeat_FiresOnEveryMatch()
+        {
+            // MODE=0x0050: CMPE | IRQR (repeat mode). Timer fires on every compare match.
+            var t = new IopTimer(0);
+            t.WriteRegister(IopTimer.REG_MODE,   0x0050u); // CMPE | IRQR
+            t.WriteRegister(IopTimer.REG_TARGET,  5u);
+
+            int fireCount = 0;
+            t.CompareInterruptPending += (_, _) => fireCount++;
+
+            // Tick past the target twice (no ZRET, so count continues past target)
+            // First pass at tick 5
+            t.Tick(5);
+            Assert.AreEqual(1, fireCount, "First compare must fire");
+
+            // Clear EQUF by reading MODE (simulates IOP interrupt handler ACK)
+            t.ReadRegister(IopTimer.REG_MODE);
+
+            // Tick another 0x10000 so count wraps and passes target again
+            t.Tick(0x10000u);
+            Assert.IsTrue(fireCount >= 2, "Repeat mode must fire on subsequent matches after EQUF cleared");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_WriteHalf_TimerMode_Reaches_Timer()
+        {
+            // Regression: SH (halfword store) to timer T5 MODE must reach the timer.
+            // Previously WriteHalf fell through to MapWrite which discarded hardware writes.
+            var bus = new IopMemoryBus();
+            // Timer T5 MODE at 0x1F8014A4
+            bus.WriteHalf(0x1F8014A4u, (ushort)0x0030u); // CMPE | OVFE
+            Assert.AreEqual(0x0030u, bus.ReadHalf(0x1F8014A4u), "WriteHalf to T5 MODE must reach timer register");
+        }
+
+        [TestMethod]
+        public void IopMemoryBus_WriteHalf_T5_Mode_Enables_Interrupt()
+        {
+            // Verify that after WriteHalf sets T5 MODE, the timer fires and raises I_STAT.
+            var emulator = new IopEmulator();
+            // T5 TARGET and MODE via bus (as the IOP BIOS does via SW and SH)
+            emulator.Bus.WriteWord(0xBF8014A8u, 10u);                    // TARGET = 10
+            emulator.Bus.WriteHalf(0xBF8014A4u, (ushort)0x0050u);        // MODE: CMPE | IRQR (SH path)
+            emulator.Bus.WriteWord(0x1F801074u, 1u << 16);               // I_MASK: enable T5 (bit 16)
+
+            // Tick the emulator hardware until T5 fires
+            for (int i = 0; i < 20; i++)
+                emulator.TickHardware(1);
+
+            Assert.AreNotEqual(0u, emulator.Bus.IStat & (1u << 16),
+                "T5 interrupt bit must be set in I_STAT after timer fires via WriteHalf MODE write");
         }
 
         // ── T3–T5 bus mapping tests ───────────────────────────────────────────
@@ -4244,7 +4301,8 @@ namespace CodeDesigner.Mips64LE.TestProject
         [TestMethod]
         public void IopEmulator_Interrupt_DeliveredWhenIEcAndIP2Set()
         {
-            // Verify IOP takes hardware interrupt when SR.IEc=1, SR.IM2=1, and INTC pending.
+            // Verify IOP takes hardware interrupt when I_CTRL=1, SR.IEc=1, SR.IM2=1, and INTC pending.
+            // Matches PCSX2 iopEventTest: checks HW_ICTRL != 0 before dispatching.
             var iop = new IopEmulator();
             // SR with IEc=1 (bit 0) and IM2=1 (bit 10), no BEV → vector 0x80000080
             iop.State.SR    = 0x401u;   // IEc=1, IM2=1
@@ -4259,6 +4317,8 @@ namespace CodeDesigner.Mips64LE.TestProject
             iop.Bus.RaiseInterrupt(0);
             // Enable I_MASK bit 0 so IsInterruptPending = true
             iop.Bus.WriteWord(0x1F801074u, 0x1u);
+            // Enable I_CTRL (master interrupt enable) — required per PCSX2 iopEventTest
+            iop.Bus.WriteWord(0x1F801078u, 0x1u);
 
             iop.Step(); // should take interrupt and dispatch to 0x80000080
 
@@ -4280,10 +4340,33 @@ namespace CodeDesigner.Mips64LE.TestProject
 
             iop.Bus.RaiseInterrupt(0);
             iop.Bus.WriteWord(0x1F801074u, 0x1u);
+            iop.Bus.WriteWord(0x1F801078u, 0x1u); // I_CTRL=1 (enabled)
 
             iop.Step(); // should execute nop, NOT take interrupt
 
             Assert.AreEqual(0x80000004u, iop.State.PC, "IOP must NOT take interrupt when IEc=0");
+        }
+
+        [TestMethod]
+        public void IopEmulator_Interrupt_NotTakenWhenICtrlClear()
+        {
+            // IOP must NOT take interrupt when I_CTRL=0 (master disable), even if SR and INTC
+            // are fully enabled.  Matches PCSX2 iopEventTest: HW_ICTRL != 0 guard.
+            var iop = new IopEmulator();
+            iop.State.SR    = 0x401u;   // IEc=1, IM2=1
+            iop.State.Cause = 0u;
+            iop.State.PC    = 0x80000000u;
+
+            iop.LoadProgram(0x00000000u, new uint[] { 0u }); // nop at physical 0 (KSEG0 0x80000000)
+
+            iop.Bus.RaiseInterrupt(0);
+            iop.Bus.WriteWord(0x1F801074u, 0x1u);
+            // I_CTRL intentionally left at 0 (reset default) — interrupt must be suppressed
+
+            iop.Step(); // should execute nop, NOT take interrupt
+
+            Assert.AreEqual(0x80000004u, iop.State.PC,
+                "IOP must NOT take interrupt when I_CTRL=0 (master interrupt disable)");
         }
 
         [TestMethod]
