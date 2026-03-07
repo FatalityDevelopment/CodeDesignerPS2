@@ -1938,7 +1938,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                                 int rs = (int)((jalDs >> 21) & 0x1Fu);
                                 int rt = (int)((jalDs >> 16) & 0x1Fu);
                                 if (rs == rt && (short)(jalDs & 0xFFFFu) == 1)
+                                {
                                     ptrReg = rt;
+                                    Console.Write($"[BiosPuts] Pattern B match at pc=0x{pc32:x8} loopStart=0x{loopStart:x8} ptrReg=${ptrReg} charReg=${charReg} body:");
+                                    for (uint di = 0u; di < loopBodyLen + 2u; di++)
+                                        Console.Write($" 0x{FetchWord(loopStart + di * 4u):x8}");
+                                    Console.WriteLine();
+                                }
                             }
                         }
                     }
@@ -2006,10 +2012,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             //   charReg → 0            (null byte that ended the loop)
             //   PC → pc32 + 8         (past BNEL + delay slot; delay slot nullified)
             uint newPtr = ptrVal + (uint)len;
+            Console.Write($"[BiosPuts] ff: ptrVal=0x{ptrVal:x8} len={len} s={System.Text.Encoding.ASCII.GetString(strRegion, (int)strOffset, Math.Min(len, 60)).Replace("\n","\\n")}  regs before: s0=0x{Cpu.RegsLo[16]:x16} v0=0x{Cpu.RegsLo[2]:x16} a0=0x{Cpu.RegsLo[4]:x16}");
             // Sign-extend to 64 bits the same way ADDIU would (PS2 EE is MIPS64).
             Cpu.RegsLo[ptrReg] = (ulong)(long)(int)newPtr;
             Cpu.RegsLo[charReg] = 0uL;
             Cpu.PC = pc32 + 8u;    // past BNEL + delay slot; pointer increment is included in ptrReg advance above
+            Console.WriteLine($"  regs after: s0=0x{Cpu.RegsLo[16]:x16} v0=0x{Cpu.RegsLo[2]:x16} a0=0x{Cpu.RegsLo[4]:x16}");
 
             // Count the skipped iterations so InstructionCount stays consistent.
             InstructionCount += (ulong)len;
