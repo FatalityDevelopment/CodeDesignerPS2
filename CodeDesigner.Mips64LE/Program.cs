@@ -417,7 +417,7 @@ namespace CodeDesigner.Mips64LE
                             string mark = (da == pc) ? " <-- PC" : "";
                             Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
                         }
-                        catch { }
+                        catch { /* bus read may fail for unmapped/unloaded IOP RAM regions */ }
                     }
                 }
 
@@ -438,7 +438,7 @@ namespace CodeDesigner.Mips64LE
                             string mark = (da == pc) ? " <-- PC" : "";
                             Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
                         }
-                        catch { }
+                        catch { /* skip unloaded address */ }
                     }
                 }
 
@@ -457,7 +457,7 @@ namespace CodeDesigner.Mips64LE
                             string mark = (da == pc) ? " <-- PC" : "";
                             Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
                         }
-                        catch { }
+                        catch { /* skip unloaded address */ }
                     }
                 }
 
@@ -477,7 +477,7 @@ namespace CodeDesigner.Mips64LE
                             string mark = (da == pc) ? " <-- PC" : "";
                             Console.WriteLine($"        0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
                         }
-                        catch { }
+                        catch { /* skip unloaded address */ }
                     }
 
                     // Also scan all IOP RAM for jal 0x4188 instructions (0x0C001062)
@@ -492,14 +492,14 @@ namespace CodeDesigner.Mips64LE
                             {
                                 // Print the instruction 2 before (usually "addiu a0, ...")
                                 uint prev1 = 0, prev2 = 0;
-                                try { prev2 = scheduler.IOP.Bus.ReadWord(sa - 8); } catch {}
-                                try { prev1 = scheduler.IOP.Bus.ReadWord(sa - 4); } catch {}
+                                try { prev2 = scheduler.IOP.Bus.ReadWord(sa - 8); } catch { /* skip */ }
+                                try { prev1 = scheduler.IOP.Bus.ReadWord(sa - 4); } catch { /* skip */ }
                                 uint next1 = 0;
-                                try { next1 = scheduler.IOP.Bus.ReadWord(sa + 4); } catch {}
+                                try { next1 = scheduler.IOP.Bus.ReadWord(sa + 4); } catch { /* skip */ }
                                 Console.WriteLine($"    jal 0x4188 at 0x{sa:X8}: prev2={MipsDisassembler.Disassemble(prev2, sa-8)}  prev={MipsDisassembler.Disassemble(prev1, sa-4)}  delay={MipsDisassembler.Disassemble(next1, sa+4)}");
                             }
                         }
-                        catch { }
+                        catch { /* skip unloaded IOP RAM region */ }
                     }
                 }
             };
