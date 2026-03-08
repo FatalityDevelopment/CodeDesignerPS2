@@ -369,6 +369,20 @@ namespace CodeDesigner.Mips64LE
 
         private const int MaxReadMemLength = 65536;
 
+        // ── Address-translation constants for HandleReadMem ───────────────────
+
+        // EE: uncached direct-mapped user window (PS2 kernel TLB maps RAM here).
+        // 0x20000000–0x21FFFFFF → physical EE RAM 0x00000000–0x01FFFFFF.
+        // EeUncachedRamEnd (0x22000000) is the exclusive upper bound.
+        private const uint EeUncachedRamBase = 0x20000000u;
+        private const uint EeUncachedRamEnd  = 0x22000000u;   // exclusive
+
+        // IOP: the EE VTLB exposes IOP RAM at 0x1C000000–0x1DFFFFFF (PCSX2 vtlb.cpp).
+        // 0x1C000000–0x1DFFFFFF → physical IOP RAM 0x00000000–0x001FFFFF (wrap at RamSize).
+        // EeIopMirrorEnd (0x1E000000) is the exclusive upper bound.
+        private const uint EeIopMirrorBase = 0x1C000000u;
+        private const uint EeIopMirrorEnd  = 0x1E000000u;     // exclusive
+
         /// <summary>
         /// Handle READMEM command — reads raw bytes from the live emulator memory.
         /// </summary>
@@ -395,17 +409,33 @@ namespace CodeDesigner.Mips64LE
 
                     if (useIop)
                     {
-                        // IOP physical address space: 4 MB RAM
-                        bytes[i] = vaddr < (uint)IopMemoryBus.RamSize
-                            ? Scheduler.IOP.Bus.Ram[vaddr]
+                        // Translate IOP virtual address to a physical RAM offset.
+                        // Supported windows:
+                        //   0x00000000–0x003FFFFF  physical IOP RAM (direct)
+                        //   0x80000000–0xBFFFFFFF  KSEG0/KSEG1 — strip top 3 bits
+                        //   0x1C000000–0x1DFFFFFF  EE VTLB mirror of IOP RAM
+                        uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
+                        if (physAddr >= EeIopMirrorBase && physAddr < EeIopMirrorEnd)
+                            physAddr -= EeIopMirrorBase;
+
+                        bytes[i] = physAddr < (uint)IopMemoryBus.RamSize
+                            ? Scheduler.IOP.Bus.Ram[physAddr]
                             : (byte)0;
                     }
                     else
                     {
-                        // EE: translate KSEG0 / KSEG1 (strip top 3 bits)
-                        uint physAddr = (vaddr >= 0x80000000u && vaddr < 0xC0000000u)
-                            ? vaddr & 0x1FFFFFFFu
-                            : vaddr;
+                        // EE: translate virtual address to physical.
+                        // Supported windows:
+                        //   0x80000000–0xBFFFFFFF  KSEG0/KSEG1 — strip top 3 bits
+                        //   0x20000000–0x21FFFFFF  uncached user mirror of EE main RAM
+                        //   0x70000000             scratchpad (handled below by vaddr)
+                        uint physAddr;
+                        if (vaddr >= 0x80000000u && vaddr < 0xC0000000u)
+                            physAddr = vaddr & 0x1FFFFFFFu;
+                        else if (vaddr >= EeUncachedRamBase && vaddr < EeUncachedRamEnd)
+                            physAddr = vaddr - EeUncachedRamBase;
+                        else
+                            physAddr = vaddr;
 
                         if (physAddr < (uint)PS2MemoryBus.MainRamSize)
                             bytes[i] = Scheduler.EE.Bus.Ram[physAddr];
