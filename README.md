@@ -106,6 +106,7 @@ dotnet run -- --server
 | i.LINK / FireWire controller (IOP INTC bit 18) | ✅ |
 | DEV9 parallel-port expansion (IOP INTC bit 13) | ✅ |
 | VSCode extension frontend | ✅ |
+| Breakpoint system (address-based pause + F9 in disasm editor) | ✅ |
 
 ---
 
@@ -252,6 +253,47 @@ dotnet run -- --server
 | Shift 64-bit RegsHi | N/A | **Sign-extended from result bit 63** |
 | VU0 | Not present | COP2 macro-mode + micro-mode |
 | MMI instructions | Not present | Full SIMD multimedia extension |
+
+---
+
+## Breakpoint System
+
+The toolkit has a built-in breakpoint mechanism that lets you pause EE execution at any instruction address, inspect CPU state, and resume — all without modifying the program under test.
+
+### How It Works
+
+`DualCpuScheduler` maintains a `HashSet<uint> Breakpoints`.  After every EE `Step()`, the scheduler checks whether the new EE PC is in that set.  If it is, `Paused` is set to `true` and `LastBreakpointHit` records the address — execution stops until you send a `RESUME` command.
+
+### Setting Breakpoints in the VS Code Disassembler
+
+1. Open a **Live Memory** disassembly panel while the emulator is running.
+2. Navigate to the instruction you want to break at (arrow keys / search).
+3. Press **F9** to toggle a breakpoint on the highlighted row.  
+   - A highlighted row indicates an active breakpoint.
+   - Press F9 again on the same row to clear it.
+4. When the EE PC reaches that address the emulator pauses automatically.  The panel scrolls to the hit address and shows a **PAUSED** indicator.
+5. Press **F5** (or use the *Resume* button) to continue execution.
+
+The panel polls the emulator status every 800 ms, so you will see the pause reflected within about one second.
+
+### Socket Commands
+
+All breakpoint operations are also available over the [TCP socket protocol](SOCKET_COMMUNICATION.md).  Use these commands from any client (e.g. a custom debug script):
+
+| Command | Description |
+|---------|-------------|
+| `SETBP` | Add a breakpoint at a given EE virtual address |
+| `CLEARBP` | Remove the breakpoint at a given address |
+| `CLEARBP_ALL` | Remove all breakpoints |
+| `PAUSE` | Manually pause execution (without a breakpoint) |
+| `RESUME` | Resume execution and clear `LastBreakpointHit` |
+| `GETPC` | Query current EE PC, paused state, and last breakpoint hit address |
+
+See [SOCKET_COMMUNICATION.md](SOCKET_COMMUNICATION.md) for full request/response schemas.
+
+### `BREAK` Instruction
+
+The MIPS `break` instruction (opcode `0x0D`) triggers a `Breakpoint` exception via `CpuExceptionSignal`.  This is the software-only path (EE handles it as a CPU exception); it is separate from the address-based hardware breakpoints described above.
 
 ---
 

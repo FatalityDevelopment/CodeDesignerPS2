@@ -84,9 +84,10 @@ Messages are sent as JSON-encoded strings with the following structure:
 
 ```typescript
 interface CommandMessage {
-    command: string;    // Command type: "ASSEMBLE", "DISASSEMBLE", "PING"
-    data?: string;      // Optional data payload
-    address?: number;   // Optional starting address (for DISASSEMBLE)
+    Command: string;             // Command type (see Supported Commands)
+    Data?: string;               // Optional data payload
+    Address?: number;            // Optional starting address (for DISASSEMBLE)
+    BreakpointAddress?: number;  // EE virtual address (for SETBP / CLEARBP)
 }
 ```
 
@@ -99,6 +100,9 @@ interface CommandResponse {
     Message?: string;
     Error?: string;
     Results?: InstructionResult[];
+    Paused?: boolean;            // Present in GETPC response
+    PC?: number;                 // Current EE PC (GETPC response)
+    BreakpointHitAddress?: number; // Last breakpoint hit address (GETPC response)
 }
 ```
 
@@ -109,8 +113,8 @@ Assembles MIPS assembly code to hex.
 
 ```json
 {
-    "command": "ASSEMBLE",
-    "data": "add t0, t1, t2\nori t3, t0, 0x1234"
+    "Command": "ASSEMBLE",
+    "Data": "add t0, t1, t2\nori t3, t0, 0x1234"
 }
 ```
 
@@ -119,13 +123,13 @@ Disassembles hex code to MIPS assembly. Optionally accepts a starting address fo
 
 ```json
 {
-    "command": "DISASSEMBLE",
-    "data": "0x02114020 0x35080001",
-    "address": 4096
+    "Command": "DISASSEMBLE",
+    "Data": "0x02114020 0x35080001",
+    "Address": 4096
 }
 ```
 
-When `address` is provided, branch instructions will show target addresses and offset indicators:
+When `Address` is provided, branch instructions will show target addresses and offset indicators:
 - `beq zero, zero, $00001008 (+2▼)` instead of just `beq zero, zero, 0x0001`
 
 #### PING
@@ -133,11 +137,92 @@ Tests server connectivity.
 
 ```json
 {
-    "command": "PING"
+    "Command": "PING"
 }
 ```
 
 Response: `{ "Success": true, "Message": "PONG" }`
+
+#### PAUSE
+Manually pauses EE execution.  Returns immediately if the emulator is already paused.
+
+```json
+{
+    "Command": "PAUSE"
+}
+```
+
+Response: `{ "Success": true, "Message": "Paused" }`
+
+#### RESUME
+Resumes EE execution and clears the last breakpoint hit address.
+
+```json
+{
+    "Command": "RESUME"
+}
+```
+
+Response: `{ "Success": true, "Message": "Resumed" }`
+
+#### SETBP
+Adds a breakpoint at the given EE virtual address.  When the EE program counter reaches this address the scheduler sets `Paused = true` automatically.
+
+```json
+{
+    "Command": "SETBP",
+    "BreakpointAddress": 2147483648
+}
+```
+
+`BreakpointAddress` is a 32-bit unsigned integer (pass as a JSON number).  
+Response: `{ "Success": true, "Message": "Breakpoint set at 0x80000000" }`
+
+#### CLEARBP
+Removes the breakpoint at a specific EE virtual address.
+
+```json
+{
+    "Command": "CLEARBP",
+    "BreakpointAddress": 2147483648
+}
+```
+
+Response: `{ "Success": true, "Message": "Breakpoint cleared at 0x80000000" }`
+
+#### CLEARBP_ALL
+Removes all active breakpoints.
+
+```json
+{
+    "Command": "CLEARBP_ALL"
+}
+```
+
+Response: `{ "Success": true, "Message": "All breakpoints cleared" }`
+
+#### GETPC
+Returns the current EE program counter together with the emulator pause state and the address of the most recently hit breakpoint (if any).
+
+```json
+{
+    "Command": "GETPC"
+}
+```
+
+Example response:
+```json
+{
+    "Success": true,
+    "Command": "GETPC",
+    "Paused": true,
+    "PC": 2147483904,
+    "BreakpointHitAddress": 2147483904
+}
+```
+
+`PC` and `BreakpointHitAddress` are 32-bit unsigned integers encoded as JSON numbers.  
+`BreakpointHitAddress` is `null` if no breakpoint has fired since the last `RESUME`.
 
 ### Protocol
 

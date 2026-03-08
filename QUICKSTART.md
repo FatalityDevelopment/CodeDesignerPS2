@@ -177,6 +177,65 @@ jr $ra
 3. Restart the server
 4. Try reconnecting from VSCode
 
+## Using Breakpoints
+
+The Live Disassembler lets you pause EE execution at any instruction address and inspect state, without modifying the program.
+
+### Step 1 — Ensure the emulator is running with the server
+
+```bash
+cd CodeDesigner.Mips64LE
+dotnet run -- --server
+```
+
+The C# server must be running and the VSCode extension must be connected before breakpoints work.
+
+### Step 2 — Open a Live Memory panel
+
+A Live Memory disassembler panel opens automatically when you start a live session through the extension.  You can also run **CodeDesigner: Open Live Disassembler** from the Command Palette.
+
+### Step 3 — Set a breakpoint
+
+1. Use the arrow keys to navigate to the instruction you want to break at.
+2. Press **F9** to toggle a breakpoint on the highlighted row.
+   - The row is highlighted to indicate an active breakpoint.
+   - Press F9 again to remove it.
+
+### Step 4 — Wait for the hit
+
+The panel polls the emulator status every 800 ms.  When the EE program counter reaches the breakpoint address:
+
+- The emulator pauses automatically.
+- The panel scrolls to the hit instruction.
+- A **PAUSED** indicator appears in the status bar.
+
+### Step 5 — Resume
+
+Press **F5** (or click the *Resume* button) to continue execution.
+
+### Using breakpoints via the socket protocol
+
+You can also manage breakpoints programmatically from any TCP client on port 8765:
+
+```json
+// Set a breakpoint at 0x80001000
+{ "Command": "SETBP", "BreakpointAddress": 2147487744 }
+
+// Poll until paused
+{ "Command": "GETPC" }
+// Response: { "Success": true, "Paused": true, "PC": 2147487744, "BreakpointHitAddress": 2147487744 }
+
+// Resume
+{ "Command": "RESUME" }
+
+// Remove the breakpoint
+{ "Command": "CLEARBP", "BreakpointAddress": 2147487744 }
+```
+
+See [SOCKET_COMMUNICATION.md](SOCKET_COMMUNICATION.md) for the full command reference.
+
+---
+
 ## Tips
 
 1. **Register Formats**: You can use any of these formats:

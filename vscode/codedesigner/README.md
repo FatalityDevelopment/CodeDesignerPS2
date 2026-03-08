@@ -9,6 +9,9 @@ PlayStation 2 Emotion Engine (EE) via a connection to the CodeDesigner C# backen
 
 - **Assembler Panel** — type EE MIPS assembly and convert it to hex machine code
 - **Disassembler Panel** — paste hex instruction words and get annotated MIPS assembly
+- **Live Disassembler** — view live EE memory disassembly while the emulator is running
+- **Breakpoints** — press **F9** on any instruction row to toggle a breakpoint; the panel auto-scrolls to the hit address when the emulator pauses
+- **Pause / Resume** — pause and resume EE execution from within the disassembler panel
 - **Server connection** — communicates with the C# backend over a local TCP socket (port 8765)
 - Supports the full PS2 EE instruction set: core MIPS64, COP0, COP1 FPU, COP2/VU0 macro-mode, and MMI multimedia extensions
 
@@ -65,6 +68,44 @@ release; modify `socketClient.ts` to change it if needed.
 | `CodeDesigner: Connect to Server` | Connect to the C# backend on port 8765 |
 | `CodeDesigner: Disconnect from Server` | Close the TCP connection |
 | `CodeDesigner: Send Message to Server` | Send a raw JSON message (for debugging) |
+
+---
+
+## Using Breakpoints
+
+The Live Disassembler panel has a built-in breakpoint system that lets you pause EE execution at any instruction address.
+
+### Prerequisites
+
+- The C# backend must be running in server mode (`dotnet run -- --server`).
+- The extension must be connected (run **CodeDesigner: Connect to Server**).
+- A **Live Memory** disassembler panel must be open (opened automatically when a live session is started).
+
+### Setting and Clearing Breakpoints
+
+1. Navigate to the instruction row you want to break at using the arrow keys or the search bar.
+2. Press **F9** to toggle a breakpoint on the highlighted instruction.
+   - A coloured highlight on the row shows the breakpoint is active.
+   - Press **F9** again on the same row to remove it.
+3. Once set, execution pauses automatically the next time the EE program counter reaches that address.
+
+### When a Breakpoint Fires
+
+- The disassembler panel scrolls to the instruction that triggered the pause.
+- A **PAUSED** indicator appears in the panel status bar.
+- The highlighted row shows the breakpoint hit address.
+
+### Resuming Execution
+
+- Press **F5** inside the panel, or click the *Resume* button, to continue execution.
+- `LastBreakpointHit` is cleared automatically on resume.
+
+### Clearing All Breakpoints
+
+Open the Command Palette (`Ctrl+Shift+P`) and run **CodeDesigner: Clear All Breakpoints**, or call the `CLEARBP_ALL` socket command directly.
+
+> **Tip:** Breakpoints are address-based and work even if the program was loaded from an ELF file.  
+> The `break` MIPS instruction (opcode `0x0D`) is a *separate*, software-only mechanism that triggers a CPU exception — it does not use the breakpoint system described here.
 
 ---
 
