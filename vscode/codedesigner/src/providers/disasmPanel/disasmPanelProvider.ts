@@ -4,7 +4,7 @@ import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import { getNonce } from '../../helpers';
 import { getDisasmPanelHtml, DisasmPanelData, EmuOption } from './disasmPanelTemplate';
-import { getSocketClient, getOutputChannel } from '../../extension';
+import { getOutputChannel } from '../../extension';
 
 interface EmuSettings {
     bios?: Array<{ name: string; path: string }>;
@@ -43,17 +43,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this.buildHtml();
 
         // Listen to messages from the webview
-        webviewView.webview.onDidReceiveMessage(async msg => {
+        webviewView.webview.onDidReceiveMessage(msg => {
             switch (msg.command) {
                 case 'connect':
                     this.handleConnect(msg.emulatorPath, msg.biosPath, msg.gamePath);
                     break;
 
-                case 'disassemble':
-                    await this.handleDisassemble(msg.data);
-                    break;
-
-                // Dropdown change notifications (no-op for now – stored server-side if needed)
+                // Dropdown change notifications (no-op for now)
                 case 'emulatorChanged':
                 case 'biosChanged':
                 case 'gameChanged':
@@ -177,47 +173,5 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return p;
         }
         return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
-    }
-
-    // ── Disassembly ───────────────────────────────────────────────────────────
-
-    private async handleDisassemble(hexCode: string) {
-        const socketClient = getSocketClient();
-
-        if (!socketClient || !socketClient.isConnected()) {
-            this.sendDisasmResult(false, '', 'Not connected to C# server. Use "Connect to Server" command first.');
-            return;
-        }
-
-        try {
-            const results = await socketClient.disassemble(hexCode);
-
-            const asmLines: string[] = [];
-            for (const result of results) {
-                if (result.Success) {
-                    const line = result.Comment
-                        ? `${result.Hex}  ${result.Assembly}  ${result.Comment}`
-                        : `${result.Hex}  ${result.Assembly}`;
-                    asmLines.push(line);
-                } else {
-                    asmLines.push(`${result.Hex}  ERROR: ${result.Error}`);
-                }
-            }
-
-            this.sendDisasmResult(true, asmLines.join('\n'), '');
-        } catch (error: any) {
-            this.sendDisasmResult(false, '', error.message || 'Disassembly failed');
-        }
-    }
-
-    private sendDisasmResult(success: boolean, data: string, error: string) {
-        if (this.webview) {
-            this.webview.postMessage({
-                command: 'disassembleResult',
-                success,
-                data,
-                error
-            });
-        }
     }
 }

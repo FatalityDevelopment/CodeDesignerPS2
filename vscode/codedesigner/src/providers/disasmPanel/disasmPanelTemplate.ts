@@ -35,22 +35,11 @@ ${getDisasmPanelStyles()}
 </head>
 <body>
 
-<h3>MIPS Disassembler</h3>
+<h3>Emulator</h3>
 <div class="container">
 
     ${getEmulatorControls(data)}
 
-    <hr class="section-divider">
-
-    <label for="hexInput">Hex Code (one per line or space-separated):</label>
-    <textarea id="hexInput" rows="10" placeholder="0x02114020&#10;0x21090064&#10;0x11090010"></textarea>
-
-    <button id="disassembleBtn">Disassemble</button>
-
-    <label for="asmOutput">Assembly Output:</label>
-    <textarea id="asmOutput" rows="10" readonly></textarea>
-
-    <div id="status" class="status"></div>
 </div>
 
 ${getScript(nonce)}
@@ -140,38 +129,11 @@ document.getElementById('gameSelect').onchange = (e) => {
     vscode.postMessage({ command: 'gameChanged', gamePath: e.target.value });
 };
 
-document.getElementById('disassembleBtn').onclick = () => {
-    const hexInput = document.getElementById('hexInput').value;
-    const statusDiv = document.getElementById('status');
-
-    statusDiv.textContent = 'Disassembling...';
-    statusDiv.className = 'status';
-
-    vscode.postMessage({
-        command: 'disassemble',
-        data: hexInput
-    });
-};
-
 // Listen for messages from the extension
 window.addEventListener('message', event => {
     const message = event.data;
 
     switch (message.command) {
-        case 'disassembleResult':
-            const asmOutput = document.getElementById('asmOutput');
-            const statusDiv = document.getElementById('status');
-
-            if (message.success) {
-                asmOutput.value = message.data;
-                statusDiv.textContent = 'Disassembly complete!';
-                statusDiv.className = 'status success';
-            } else {
-                statusDiv.textContent = 'Error: ' + message.error;
-                statusDiv.className = 'status error';
-            }
-            break;
-
         case 'connectionStatus':
             const btn = document.getElementById('connectBtn');
             btn.textContent = message.connected ? 'Disconnect' : 'Connect';
@@ -180,3 +142,4 @@ window.addEventListener('message', event => {
 });
 </script>`;
 }
+

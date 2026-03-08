@@ -3334,15 +3334,12 @@ class DisasmPanelProvider {
         // Render the panel with settings data
         webviewView.webview.html = this.buildHtml();
         // Listen to messages from the webview
-        webviewView.webview.onDidReceiveMessage(async (msg) => {
+        webviewView.webview.onDidReceiveMessage(msg => {
             switch (msg.command) {
                 case 'connect':
                     this.handleConnect(msg.emulatorPath, msg.biosPath, msg.gamePath);
                     break;
-                case 'disassemble':
-                    await this.handleDisassemble(msg.data);
-                    break;
-                // Dropdown change notifications (no-op for now – stored server-side if needed)
+                // Dropdown change notifications (no-op for now)
                 case 'emulatorChanged':
                 case 'biosChanged':
                 case 'gameChanged':
@@ -3449,43 +3446,6 @@ class DisasmPanelProvider {
         }
         return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
     }
-    // ── Disassembly ───────────────────────────────────────────────────────────
-    async handleDisassemble(hexCode) {
-        const socketClient = (0, extension_1.getSocketClient)();
-        if (!socketClient || !socketClient.isConnected()) {
-            this.sendDisasmResult(false, '', 'Not connected to C# server. Use "Connect to Server" command first.');
-            return;
-        }
-        try {
-            const results = await socketClient.disassemble(hexCode);
-            const asmLines = [];
-            for (const result of results) {
-                if (result.Success) {
-                    const line = result.Comment
-                        ? `${result.Hex}  ${result.Assembly}  ${result.Comment}`
-                        : `${result.Hex}  ${result.Assembly}`;
-                    asmLines.push(line);
-                }
-                else {
-                    asmLines.push(`${result.Hex}  ERROR: ${result.Error}`);
-                }
-            }
-            this.sendDisasmResult(true, asmLines.join('\n'), '');
-        }
-        catch (error) {
-            this.sendDisasmResult(false, '', error.message || 'Disassembly failed');
-        }
-    }
-    sendDisasmResult(success, data, error) {
-        if (this.webview) {
-            this.webview.postMessage({
-                command: 'disassembleResult',
-                success,
-                data,
-                error
-            });
-        }
-    }
 }
 exports.DisasmPanelProvider = DisasmPanelProvider;
 
@@ -3528,22 +3488,11 @@ ${(0, disasmPanelStyles_1.getDisasmPanelStyles)()}
 </head>
 <body>
 
-<h3>MIPS Disassembler</h3>
+<h3>Emulator</h3>
 <div class="container">
 
     ${getEmulatorControls(data)}
 
-    <hr class="section-divider">
-
-    <label for="hexInput">Hex Code (one per line or space-separated):</label>
-    <textarea id="hexInput" rows="10" placeholder="0x02114020&#10;0x21090064&#10;0x11090010"></textarea>
-
-    <button id="disassembleBtn">Disassemble</button>
-
-    <label for="asmOutput">Assembly Output:</label>
-    <textarea id="asmOutput" rows="10" readonly></textarea>
-
-    <div id="status" class="status"></div>
 </div>
 
 ${getScript(nonce)}
@@ -3626,38 +3575,11 @@ document.getElementById('gameSelect').onchange = (e) => {
     vscode.postMessage({ command: 'gameChanged', gamePath: e.target.value });
 };
 
-document.getElementById('disassembleBtn').onclick = () => {
-    const hexInput = document.getElementById('hexInput').value;
-    const statusDiv = document.getElementById('status');
-
-    statusDiv.textContent = 'Disassembling...';
-    statusDiv.className = 'status';
-
-    vscode.postMessage({
-        command: 'disassemble',
-        data: hexInput
-    });
-};
-
 // Listen for messages from the extension
 window.addEventListener('message', event => {
     const message = event.data;
 
     switch (message.command) {
-        case 'disassembleResult':
-            const asmOutput = document.getElementById('asmOutput');
-            const statusDiv = document.getElementById('status');
-
-            if (message.success) {
-                asmOutput.value = message.data;
-                statusDiv.textContent = 'Disassembly complete!';
-                statusDiv.className = 'status success';
-            } else {
-                statusDiv.textContent = 'Error: ' + message.error;
-                statusDiv.className = 'status error';
-            }
-            break;
-
         case 'connectionStatus':
             const btn = document.getElementById('connectBtn');
             btn.textContent = message.connected ? 'Disconnect' : 'Connect';
@@ -3693,11 +3615,6 @@ body {
     gap: 10px;
 }
 
-label {
-    font-weight: bold;
-    margin-top: 10px;
-}
-
 .row {
     display: flex;
     gap: 8px;
@@ -3709,7 +3626,7 @@ label {
     flex: 1;
 }
 
-select, textarea, button {
+select, button {
     font-family: var(--vscode-editor-font-family);
     font-size: var(--vscode-editor-font-size);
 }
@@ -3720,17 +3637,6 @@ select {
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
     padding: 4px;
-}
-
-textarea {
-    width: 100%;
-    background: var(--vscode-input-background);
-    color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border);
-    padding: 8px;
-    font-family: var(--vscode-editor-font-family);
-    font-size: var(--vscode-editor-font-size);
-    resize: vertical;
 }
 
 button {
@@ -3744,29 +3650,6 @@ button {
 
 button:hover {
     background: var(--vscode-button-hoverBackground);
-}
-
-.section-divider {
-    border: none;
-    border-top: 1px solid var(--vscode-input-border);
-    margin: 8px 0;
-}
-
-.status {
-    padding: 8px;
-    margin-top: 10px;
-    border-radius: 4px;
-    font-size: 12px;
-}
-
-.status.success {
-    background: var(--vscode-testing-iconPassed);
-    color: white;
-}
-
-.status.error {
-    background: var(--vscode-testing-iconFailed);
-    color: white;
 }
 </style>`;
 }
