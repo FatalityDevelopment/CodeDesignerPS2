@@ -109,10 +109,22 @@ function getGrid(): string {
 function getDebugPanel(): string {
     return `<div id="debug-panel">
     <div id="debug-tabs">
-        <button class="debug-tab active" data-tab="registers">Registers</button>
+        <button class="debug-tab active" data-tab="registers">GPR</button>
+        <button class="debug-tab" data-tab="cop0">CP0</button>
+        <button class="debug-tab" data-tab="fpr">FPR</button>
+        <button class="debug-tab" data-tab="fcr">FCR</button>
+        <button class="debug-tab" data-tab="vu0f">VU0f</button>
+        <button class="debug-tab" data-tab="vu0i">VU0i</button>
+        <button class="debug-tab" data-tab="gs">GS</button>
         <button class="debug-tab" data-tab="stack">Stack</button>
     </div>
-    <div id="reg-content" class="debug-tab-content active"></div>
+    <div id="registers-content" class="debug-tab-content active"></div>
+    <div id="cop0-content" class="debug-tab-content"></div>
+    <div id="fpr-content" class="debug-tab-content"></div>
+    <div id="fcr-content" class="debug-tab-content"></div>
+    <div id="vu0f-content" class="debug-tab-content"></div>
+    <div id="vu0i-content" class="debug-tab-content"></div>
+    <div id="gs-content" class="debug-tab-content"></div>
     <div id="stack-content" class="debug-tab-content"></div>
 </div>`;
 }
@@ -150,7 +162,7 @@ const liveToolbar = document.getElementById("live-toolbar");
 const liveIndicator = document.getElementById("live-indicator");
 const playPauseBtn = document.getElementById("play-pause-btn");
 const debugPanel = document.getElementById("debug-panel");
-const regContent = document.getElementById("reg-content");
+const regContent = document.getElementById("registers-content");
 const stackContent = document.getElementById("stack-content");
 
 const state = {
@@ -865,7 +877,7 @@ function generateZeroPage(startIndex) {
     return rows;
 }
 
-// ── Debug Panel (Registers + Stack) ──────────────────────────────────────────
+// ── Debug Panel ──────────────────────────────────────────────────────────────
 
 const MIPS_REG_NAMES = [
     '$zero','$at','$v0','$v1','$a0','$a1','$a2','$a3',
@@ -874,13 +886,50 @@ const MIPS_REG_NAMES = [
     '$t8','$t9','$k0','$k1','$gp','$sp','$fp','$ra'
 ];
 
+const COP0_REG_NAMES = [
+    'Index','Random','EntryLo0','EntryLo1','Context','PageMask','Wired','Reserved7',
+    'BadVAddr','Count','EntryHi','Compare','Status','Cause','EPC','PRId',
+    'Config','LLAddr','WatchLo','WatchHi','XContext','Reserved21','Reserved22','Reserved23',
+    'Reserved24','PerfCnt','ErrCtl','CacheErr','TagLo','TagHi','ErrorEPC','Reserved31'
+];
+
+const GS_PRIV_NAMES = [
+    'PMODE','SMODE1','SMODE2','SRFSH','SYNCH1','SYNCH2','SYNCV',
+    'DISPFB1','DISPLAY1','DISPFB2','DISPLAY2',
+    'EXTBUF','EXTDATA','EXTWRITE','BGCOLOR',
+    'CSR','IMR','BUSDIR','SIGLBLID'
+];
+
 function hex32(n) {
     return (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
 }
 
+function hex64(lo, hi) {
+    // lo and hi are 32-bit halves; hi may be 0 for most regs
+    const loStr = (lo >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    const hiStr = (hi >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    return hiStr + '_' + loStr;
+}
+
+// Reinterpret a raw IEEE-754 uint32 bit pattern as a float string.
+// Uses a DataView trick to avoid precision loss.
+function rawBitsToFloat(bits) {
+    const buf = new ArrayBuffer(4);
+    new Uint32Array(buf)[0] = bits >>> 0;
+    const f = new DataView(buf).getFloat32(0, true);
+    // Show up to 6 significant digits; strip trailing zeros for brevity
+    return f.toPrecision(6).replace(/\\.?0+$/, '');
+}
+
 function showDebugPanel(regs, stackBytes, stackBase) {
     debugPanel.classList.add('visible');
-    renderRegPanel(regs);
+    renderGprPanel(regs);
+    renderCop0Panel(regs);
+    renderFprPanel(regs);
+    renderFcrPanel(regs);
+    renderVu0fPanel(regs);
+    renderVu0iPanel(regs);
+    renderGsPanel(regs);
     renderStackPanel(regs, stackBytes, stackBase);
 }
 
@@ -888,34 +937,160 @@ function hideDebugPanel() {
     debugPanel.classList.remove('visible');
 }
 
-function renderRegPanel(regs) {
-    let html = '<div class="dbg-section-title">CPU Registers</div>';
-    // PC
+// ── GPR tab ──────────────────────────────────────────────────────────────────
+function renderGprPanel(regs) {
+    if (!regs) { regContent.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">General Purpose Registers</div>';
     html += \`<div class="dbg-row"><span class="dbg-name">PC  </span><span class="dbg-val">\${hex32(regs.pc)}</span></div>\`;
-    // HI/LO
     html += \`<div class="dbg-row"><span class="dbg-name">HI  </span><span class="dbg-val">\${hex32(regs.hi)}</span><span class="dbg-name" style="margin-left:8px">LO  </span><span class="dbg-val">\${hex32(regs.lo)}</span></div>\`;
     html += \`<div class="dbg-row"><span class="dbg-name">HI1 </span><span class="dbg-val">\${hex32(regs.hi1)}</span><span class="dbg-name" style="margin-left:8px">LO1 </span><span class="dbg-val">\${hex32(regs.lo1)}</span></div>\`;
     html += \`<div class="dbg-row"><span class="dbg-name">SA  </span><span class="dbg-val">\${hex32(regs.sa)}</span></div>\`;
     html += '<div class="dbg-divider"></div>';
-    // GPRs
+    const gpr = regs.gpr ?? [];
     for (let i = 0; i < 32; i++) {
         const name = MIPS_REG_NAMES[i].padEnd(5);
-        const val = hex32(regs.gpr[i]);
-        const changed = regs.gpr[i] !== 0;
-        html += \`<div class="dbg-row\${changed ? ' dbg-nonzero' : ''}"><span class="dbg-name">\${name}</span><span class="dbg-val">\${val}</span></div>\`;
+        const val = hex32(gpr[i] ?? 0);
+        const nz  = (gpr[i] ?? 0) !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name">\${name}</span><span class="dbg-val">\${val}</span></div>\`;
+    }
+    regContent.innerHTML = html;
+}
+
+// ── CP0 tab ──────────────────────────────────────────────────────────────────
+function renderCop0Panel(regs) {
+    const el = document.getElementById('cop0-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">System Control (COP0)</div>';
+    const cop0 = regs.cop0Regs ?? [];
+    for (let i = 0; i < 32; i++) {
+        const name = ('r' + i + ' ' + COP0_REG_NAMES[i]).substring(0, 14).padEnd(14);
+        const val  = hex32(cop0[i] ?? 0);
+        const nz   = (cop0[i] ?? 0) !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name" style="font-size:10px">\${name}</span><span class="dbg-val">\${val}</span></div>\`;
+    }
+    el.innerHTML = html;
+}
+
+// ── FPR tab ──────────────────────────────────────────────────────────────────
+function renderFprPanel(regs) {
+    const el = document.getElementById('fpr-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">Floating Point Registers (COP1)</div>';
+    const fpr = regs.fpr ?? [];
+    for (let i = 0; i < 32; i++) {
+        const bits = (fpr[i] ?? 0) >>> 0;
+        const fval = rawBitsToFloat(bits);
+        const nz   = bits !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name">f\${String(i).padStart(2,'0')} </span><span class="dbg-val">\${hex32(bits)}</span><span class="dbg-dim" style="margin-left:6px">\${fval}</span></div>\`;
     }
     html += '<div class="dbg-divider"></div>';
-    html += '<div class="dbg-section-title">COP0</div>';
-    html += \`<div class="dbg-row"><span class="dbg-name">Status</span><span class="dbg-val">\${hex32(regs.cop0Status)}</span></div>\`;
-    html += \`<div class="dbg-row"><span class="dbg-name">Cause </span><span class="dbg-val">\${hex32(regs.cop0Cause)}</span></div>\`;
-    html += \`<div class="dbg-row"><span class="dbg-name">EPC   </span><span class="dbg-val">\${hex32(regs.cop0Epc)}</span></div>\`;
-    html += \`<div class="dbg-row"><span class="dbg-name">Count </span><span class="dbg-val">\${hex32(regs.cop0Count)}</span></div>\`;
-    regContent.innerHTML = html;
+    const accBits = (regs.fprAcc ?? 0) >>> 0;
+    html += \`<div class="dbg-row\${accBits !== 0 ? ' dbg-nonzero' : ''}"><span class="dbg-name">ACC  </span><span class="dbg-val">\${hex32(accBits)}</span><span class="dbg-dim" style="margin-left:6px">\${rawBitsToFloat(accBits)}</span></div>\`;
+    el.innerHTML = html;
+}
+
+// ── FCR tab ──────────────────────────────────────────────────────────────────
+function renderFcrPanel(regs) {
+    const el = document.getElementById('fcr-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">FPU Control Registers (FCR)</div>';
+    const fcr0  = (regs.fcr0  ?? 0) >>> 0;
+    const fcr31 = (regs.fcr31 ?? 0) >>> 0;
+    html += \`<div class="dbg-row"><span class="dbg-name">FCR0  </span><span class="dbg-val">\${hex32(fcr0)}</span><span class="dbg-dim" style="margin-left:6px">FIR (implementation)</span></div>\`;
+    html += \`<div class="dbg-row\${fcr31 !== 0 ? ' dbg-nonzero' : ''}"><span class="dbg-name">FCR31 </span><span class="dbg-val">\${hex32(fcr31)}</span><span class="dbg-dim" style="margin-left:6px">FCSR (control/status)</span></div>\`;
+    // Decode key FCR31 fields
+    html += '<div class="dbg-divider"></div>';
+    html += '<div class="dbg-section-title">FCR31 decode</div>';
+    const rm    = fcr31 & 0x3;
+    const flags = (fcr31 >> 7)  & 0x1F;
+    const ena   = (fcr31 >> 12) & 0x1F;
+    const cause = (fcr31 >> 18) & 0x3F;
+    const cc    = (fcr31 >> 23) & 0x1;
+    const fs    = (fcr31 >> 24) & 0x1;
+    const rmStr = ['RN (nearest)','RZ (zero)','RP (+inf)','RM (-inf)'][rm];
+    html += \`<div class="dbg-row"><span class="dbg-name">RM    </span><span class="dbg-val">\${rmStr}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Flags </span><span class="dbg-val">\${flags.toString(2).padStart(5,'0')}</span><span class="dbg-dim" style="margin-left:6px">V Z O U I (sticky)</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Enable</span><span class="dbg-val">\${ena.toString(2).padStart(5,'0')}</span><span class="dbg-dim" style="margin-left:6px">V Z O U I</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Cause </span><span class="dbg-val">\${cause.toString(2).padStart(6,'0')}</span><span class="dbg-dim" style="margin-left:6px">E V Z O U I</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">CC    </span><span class="dbg-val">\${cc}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">FS    </span><span class="dbg-val">\${fs}</span><span class="dbg-dim" style="margin-left:6px">flush-to-zero</span></div>\`;
+    el.innerHTML = html;
+}
+
+// ── VU0f tab ─────────────────────────────────────────────────────────────────
+function renderVu0fPanel(regs) {
+    const el = document.getElementById('vu0f-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">VU0 Float Registers (vf0–vf31)</div>';
+    const xs = regs.vu0fX ?? [];
+    const ys = regs.vu0fY ?? [];
+    const zs = regs.vu0fZ ?? [];
+    const ws = regs.vu0fW ?? [];
+    for (let i = 0; i < 32; i++) {
+        const xb = (xs[i] ?? 0) >>> 0; const yb = (ys[i] ?? 0) >>> 0;
+        const zb = (zs[i] ?? 0) >>> 0; const wb = (ws[i] ?? 0) >>> 0;
+        const nz = xb !== 0 || yb !== 0 || zb !== 0 || wb !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}">
+            <span class="dbg-name">vf\${String(i).padStart(2,'0')}</span>
+            <span class="dbg-dim" style="font-size:9px;margin-left:4px">x:\${rawBitsToFloat(xb)} y:\${rawBitsToFloat(yb)} z:\${rawBitsToFloat(zb)} w:\${rawBitsToFloat(wb)}</span>
+        </div>\`;
+    }
+    html += '<div class="dbg-divider"></div>';
+    const axb = (regs.vu0AccX ?? 0) >>> 0; const ayb = (regs.vu0AccY ?? 0) >>> 0;
+    const azb = (regs.vu0AccZ ?? 0) >>> 0; const awb = (regs.vu0AccW ?? 0) >>> 0;
+    html += \`<div class="dbg-row"><span class="dbg-name">ACC  </span><span class="dbg-dim" style="font-size:9px;margin-left:4px">x:\${rawBitsToFloat(axb)} y:\${rawBitsToFloat(ayb)} z:\${rawBitsToFloat(azb)} w:\${rawBitsToFloat(awb)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Q    </span><span class="dbg-val">\${hex32((regs.vu0Q ?? 0) >>> 0)}</span><span class="dbg-dim" style="margin-left:6px">\${rawBitsToFloat((regs.vu0Q ?? 0) >>> 0)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">P    </span><span class="dbg-val">\${hex32((regs.vu0P ?? 0) >>> 0)}</span><span class="dbg-dim" style="margin-left:6px">\${rawBitsToFloat((regs.vu0P ?? 0) >>> 0)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">I    </span><span class="dbg-val">\${hex32((regs.vu0I ?? 0) >>> 0)}</span><span class="dbg-dim" style="margin-left:6px">\${rawBitsToFloat((regs.vu0I ?? 0) >>> 0)}</span></div>\`;
+    html += '<div class="dbg-divider"></div>';
+    html += \`<div class="dbg-row"><span class="dbg-name">Status</span><span class="dbg-val">\${hex32(regs.vu0Status ?? 0)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">MAC   </span><span class="dbg-val">\${((regs.vu0Mac ?? 0) >>> 0).toString(16).toUpperCase().padStart(4,'0')}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Clip  </span><span class="dbg-val">\${hex32(regs.vu0Clip ?? 0)}</span></div>\`;
+    el.innerHTML = html;
+}
+
+// ── VU0i tab ─────────────────────────────────────────────────────────────────
+function renderVu0iPanel(regs) {
+    const el = document.getElementById('vu0i-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">VU0 Integer Registers (vi0–vi15)</div>';
+    const vi = regs.vu0i ?? [];
+    for (let i = 0; i < 16; i++) {
+        const val = (vi[i] ?? 0) & 0xFFFF;
+        const nz  = val !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name">vi\${String(i).padStart(2,'0')} </span><span class="dbg-val">\${val.toString(16).toUpperCase().padStart(4,'0')}</span><span class="dbg-dim" style="margin-left:6px">\${val}</span></div>\`;
+    }
+    el.innerHTML = html;
+}
+
+// ── GS tab ───────────────────────────────────────────────────────────────────
+function renderGsPanel(regs) {
+    const el = document.getElementById('gs-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">Graphics Synthesizer Registers</div>';
+    const priv = regs.gsPriv ?? [];
+    for (let i = 0; i < GS_PRIV_NAMES.length; i++) {
+        const raw = priv[i] ?? 0;
+        // Treat as two 32-bit halves (JSON loses upper bits beyond 53-bit safe int)
+        const lo = (raw & 0xFFFFFFFF) >>> 0;
+        const hi = Math.floor(raw / 0x100000000) >>> 0;
+        const valStr = hi !== 0 ? hex64(lo, hi) : hex32(lo);
+        const nz = raw !== 0;
+        const name = GS_PRIV_NAMES[i].padEnd(10);
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name" style="font-size:10px">\${name}</span><span class="dbg-val" style="font-size:10px">\${valStr}</span></div>\`;
+    }
+    el.innerHTML = html;
 }
 
 function renderStackPanel(regs, stackBytes, stackBase) {
     if (!regs) { stackContent.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
-    const sp = regs.gpr[29];
+    const sp = (regs.gpr ?? [])[29] ?? 0;
     let html = \`<div class="dbg-section-title">Stack  SP=\${hex32(sp)}</div>\`;
     if (!stackBytes || stackBytes.length === 0) {
         html += '<div class="dbg-row dbg-dim">Stack data unavailable</div>';
