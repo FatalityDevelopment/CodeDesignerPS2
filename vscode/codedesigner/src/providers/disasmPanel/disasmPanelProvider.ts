@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn, ChildProcess } from 'child_process';
 import { getNonce } from '../../helpers';
 import { getDisasmPanelHtml, DisasmPanelData, EmuOption, SnapshotEntry } from './disasmPanelTemplate';
 import { getOutputChannel } from '../../extension';
@@ -24,7 +23,7 @@ const LIVE_REGIONS = [
 
 export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
-    private emulatorProcess?: ChildProcess;
+    private emulatorTerminal?: vscode.Terminal;
     private settings: EmuSettings = {};
     private workspaceRoot: string = '';
     private snapshots: SnapshotEntry[] = [];
@@ -53,6 +52,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Reload when the user opens a workspace folder after the panel is shown
         context.subscriptions.push(
             vscode.workspace.onDidChangeWorkspaceFolders(() => this.reloadAndRefresh())
+        );
+
+        // Detect when the emulator terminal is closed externally
+        context.subscriptions.push(
+            vscode.window.onDidCloseTerminal(t => {
+                if (t === this.emulatorTerminal) {
+                    getOutputChannel().appendLine('[INFO] Emulator terminal closed.');
+                    try { this.socketClient.disconnect(); } catch { /* ignore */ }
+                    this.cleanupProcess();
+                }
+            })
         );
     }
 
@@ -160,7 +170,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }));
 
         const templateData: DisasmPanelData = {
-            connected:   this.emulatorProcess != null || this.socketClient.isConnected(),
+            connected:   this.emulatorTerminal != null || this.socketClient.isConnected(),
             emulators,
             biosOptions,
             gameOptions,
@@ -175,9 +185,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const out = getOutputChannel();
 
         // Toggle: if already running or already socket-connected, stop/disconnect
-        if (this.emulatorProcess || this.socketClient.isConnected()) {
-            if (this.emulatorProcess) {
-                this.emulatorProcess.kill();
+        if (this.emulatorTerminal || this.socketClient.isConnected()) {
+            if (this.emulatorTerminal) {
+                this.emulatorTerminal.dispose();
                 out.appendLine('[INFO] Emulator stopped by user.');
             } else {
                 out.appendLine('[INFO] Disconnected from server.');
@@ -209,7 +219,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    /** Spawn the emulator executable and, once the embedded server is up, connect. */
+    /** Launch the emulator in a VS Code terminal tab and, once the server is up, connect. */
     private spawnAndConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
 
@@ -223,27 +233,18 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         out.appendLine(`[INFO] Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
 
-        const proc = spawn(resolvedExe, cliArgs, {
-            windowsHide: true,
-            stdio: ['ignore', 'pipe', 'pipe'],
+        // Use shellPath/shellArgs to pass the exe and its arguments directly to
+        // the OS without any shell quoting — this avoids shell-injection concerns
+        // and works cross-platform regardless of the user's default shell.
+        const terminal = vscode.window.createTerminal({
+            name:      'PS2 Emulator',
+            shellPath: resolvedExe,
+            shellArgs: cliArgs,
         });
+        terminal.show(true);          // reveal but keep editor focus
 
-        this.emulatorProcess = proc;
+        this.emulatorTerminal = terminal;
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
-
-        proc.stdout?.on('data', (chunk: Buffer) => out.append(chunk.toString()));
-        proc.stderr?.on('data', (chunk: Buffer) => out.append(chunk.toString()));
-
-        proc.on('error', (err: Error) => {
-            out.appendLine(`[ERROR] Failed to start emulator: ${err.message}`);
-            vscode.window.showErrorMessage(`Failed to start emulator: ${err.message}`);
-            this.cleanupProcess();
-        });
-
-        proc.on('close', (code: number | null) => {
-            out.appendLine(`[INFO] Emulator exited with code ${code ?? 'null'}.`);
-            this.cleanupProcess();
-        });
 
         // After the emulator starts the embedded socket server, connect the
         // socket client and open a live memory view for every region.
@@ -289,7 +290,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private cleanupProcess(): void {
-        this.emulatorProcess = undefined;
+        this.emulatorTerminal = undefined;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
     }
 

@@ -48,8 +48,8 @@ exports.deactivate = deactivate;
 const vscode = __importStar(__webpack_require__(1));
 const disasmEditorProvider_1 = __webpack_require__(2);
 const disasmPanelProvider_1 = __webpack_require__(7);
-const asmPanelProvider_1 = __webpack_require__(13);
-const socketClient_1 = __webpack_require__(16);
+const asmPanelProvider_1 = __webpack_require__(12);
+const socketClient_1 = __webpack_require__(15);
 let socketClient = null;
 let outputChannel;
 /**
@@ -3480,9 +3480,8 @@ exports.DisasmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
 const fs = __importStar(__webpack_require__(3));
 const path = __importStar(__webpack_require__(8));
-const child_process_1 = __webpack_require__(9);
 const helpers_1 = __webpack_require__(4);
-const disasmPanelTemplate_1 = __webpack_require__(10);
+const disasmPanelTemplate_1 = __webpack_require__(9);
 const extension_1 = __webpack_require__(0);
 /** Memory regions exposed as separate editor windows when the emulator is running. */
 const LIVE_REGIONS = [
@@ -3495,7 +3494,7 @@ class DisasmPanelProvider {
     socketClient;
     editorProvider;
     webview;
-    emulatorProcess;
+    emulatorTerminal;
     settings = {};
     workspaceRoot = '';
     snapshots = [];
@@ -3516,6 +3515,17 @@ class DisasmPanelProvider {
         context.subscriptions.push(watcher);
         // Reload when the user opens a workspace folder after the panel is shown
         context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => this.reloadAndRefresh()));
+        // Detect when the emulator terminal is closed externally
+        context.subscriptions.push(vscode.window.onDidCloseTerminal(t => {
+            if (t === this.emulatorTerminal) {
+                (0, extension_1.getOutputChannel)().appendLine('[INFO] Emulator terminal closed.');
+                try {
+                    this.socketClient.disconnect();
+                }
+                catch { /* ignore */ }
+                this.cleanupProcess();
+            }
+        }));
     }
     resolveWebviewView(webviewView) {
         this.webview = webviewView.webview;
@@ -3611,7 +3621,7 @@ class DisasmPanelProvider {
             name: g.name, path: g.path
         }));
         const templateData = {
-            connected: this.emulatorProcess != null || this.socketClient.isConnected(),
+            connected: this.emulatorTerminal != null || this.socketClient.isConnected(),
             emulators,
             biosOptions,
             gameOptions,
@@ -3623,9 +3633,9 @@ class DisasmPanelProvider {
     handleConnect(emulatorPath, biosPath, gamePath) {
         const out = (0, extension_1.getOutputChannel)();
         // Toggle: if already running or already socket-connected, stop/disconnect
-        if (this.emulatorProcess || this.socketClient.isConnected()) {
-            if (this.emulatorProcess) {
-                this.emulatorProcess.kill();
+        if (this.emulatorTerminal || this.socketClient.isConnected()) {
+            if (this.emulatorTerminal) {
+                this.emulatorTerminal.dispose();
                 out.appendLine('[INFO] Emulator stopped by user.');
             }
             else {
@@ -3654,7 +3664,7 @@ class DisasmPanelProvider {
             this.spawnAndConnect(emulatorPath, biosPath, gamePath);
         });
     }
-    /** Spawn the emulator executable and, once the embedded server is up, connect. */
+    /** Launch the emulator in a VS Code terminal tab and, once the server is up, connect. */
     spawnAndConnect(emulatorPath, biosPath, gamePath) {
         const out = (0, extension_1.getOutputChannel)();
         const resolvedExe = this.resolvePath(emulatorPath);
@@ -3668,23 +3678,17 @@ class DisasmPanelProvider {
             cliArgs.push('--disc', resolvedDisc);
         }
         out.appendLine(`[INFO] Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
-        const proc = (0, child_process_1.spawn)(resolvedExe, cliArgs, {
-            windowsHide: true,
-            stdio: ['ignore', 'pipe', 'pipe'],
+        // Use shellPath/shellArgs to pass the exe and its arguments directly to
+        // the OS without any shell quoting — this avoids shell-injection concerns
+        // and works cross-platform regardless of the user's default shell.
+        const terminal = vscode.window.createTerminal({
+            name: 'PS2 Emulator',
+            shellPath: resolvedExe,
+            shellArgs: cliArgs,
         });
-        this.emulatorProcess = proc;
+        terminal.show(true); // reveal but keep editor focus
+        this.emulatorTerminal = terminal;
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
-        proc.stdout?.on('data', (chunk) => out.append(chunk.toString()));
-        proc.stderr?.on('data', (chunk) => out.append(chunk.toString()));
-        proc.on('error', (err) => {
-            out.appendLine(`[ERROR] Failed to start emulator: ${err.message}`);
-            vscode.window.showErrorMessage(`Failed to start emulator: ${err.message}`);
-            this.cleanupProcess();
-        });
-        proc.on('close', (code) => {
-            out.appendLine(`[INFO] Emulator exited with code ${code ?? 'null'}.`);
-            this.cleanupProcess();
-        });
         // After the emulator starts the embedded socket server, connect the
         // socket client and open a live memory view for every region.
         this.connectSocketAndOpenViews();
@@ -3725,7 +3729,7 @@ class DisasmPanelProvider {
         setTimeout(tryConnect, 1000);
     }
     cleanupProcess() {
-        this.emulatorProcess = undefined;
+        this.emulatorTerminal = undefined;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
     }
     // ── Snapshot ──────────────────────────────────────────────────────────────
@@ -3738,7 +3742,7 @@ class DisasmPanelProvider {
         const timestamp = DisasmPanelProvider.formatSnapshotTimestamp(new Date());
         const snapshotsDir = this.workspaceRoot
             ? path.join(this.workspaceRoot, 'snapshots', timestamp)
-            : path.join((__webpack_require__(12).tmpdir)(), 'ps2snapshots', timestamp);
+            : path.join((__webpack_require__(11).tmpdir)(), 'ps2snapshots', timestamp);
         out.appendLine(`[INFO] Taking snapshot → ${snapshotsDir}`);
         try {
             const regions = await this.socketClient.snapshot(snapshotsDir);
@@ -3799,12 +3803,6 @@ module.exports = require("path");
 
 /***/ }),
 /* 9 */
-/***/ ((module) => {
-
-module.exports = require("child_process");
-
-/***/ }),
-/* 10 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -3813,7 +3811,7 @@ module.exports = require("child_process");
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getDisasmPanelHtml = getDisasmPanelHtml;
-const disasmPanelStyles_1 = __webpack_require__(11);
+const disasmPanelStyles_1 = __webpack_require__(10);
 function getDisasmPanelHtml(data, nonce) {
     return `<!DOCTYPE html>
 <html>
@@ -3978,7 +3976,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 11 */
+/* 10 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -4087,13 +4085,13 @@ button:disabled {
 
 
 /***/ }),
-/* 12 */
+/* 11 */
 /***/ ((module) => {
 
 module.exports = require("os");
 
 /***/ }),
-/* 13 */
+/* 12 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -4134,7 +4132,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AsmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
 const helpers_1 = __webpack_require__(4);
-const asmPanelTemplate_1 = __webpack_require__(14);
+const asmPanelTemplate_1 = __webpack_require__(13);
 const extension_1 = __webpack_require__(0);
 class AsmPanelProvider {
     webview;
@@ -4205,7 +4203,7 @@ exports.AsmPanelProvider = AsmPanelProvider;
 
 
 /***/ }),
-/* 14 */
+/* 13 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -4215,7 +4213,7 @@ exports.AsmPanelProvider = AsmPanelProvider;
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getAsmPanelHtml = getAsmPanelHtml;
-const asmPanelStyles_1 = __webpack_require__(15);
+const asmPanelStyles_1 = __webpack_require__(14);
 /**
  * Main panel template - returns complete HTML
  */
@@ -4345,7 +4343,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 15 */
+/* 14 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -4442,7 +4440,7 @@ button:disabled {
 
 
 /***/ }),
-/* 16 */
+/* 15 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -4481,7 +4479,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SocketClient = void 0;
-const net = __importStar(__webpack_require__(17));
+const net = __importStar(__webpack_require__(16));
 /**
  * Socket client for communication with C# server
  */
@@ -4786,7 +4784,7 @@ exports.SocketClient = SocketClient;
 
 
 /***/ }),
-/* 17 */
+/* 16 */
 /***/ ((module) => {
 
 module.exports = require("net");
