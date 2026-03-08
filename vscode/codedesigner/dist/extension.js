@@ -48,8 +48,8 @@ exports.deactivate = deactivate;
 const vscode = __importStar(__webpack_require__(1));
 const disasmEditorProvider_1 = __webpack_require__(2);
 const disasmPanelProvider_1 = __webpack_require__(7);
-const asmPanelProvider_1 = __webpack_require__(13);
-const socketClient_1 = __webpack_require__(16);
+const asmPanelProvider_1 = __webpack_require__(10);
+const socketClient_1 = __webpack_require__(14);
 let socketClient = null;
 let outputChannel;
 /**
@@ -3389,10 +3389,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.DisasmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
 const fs = __importStar(__webpack_require__(3));
-const path = __importStar(__webpack_require__(8));
-const child_process_1 = __webpack_require__(9);
+const path = __importStar(__webpack_require__(16));
+const child_process_1 = __webpack_require__(11);
 const helpers_1 = __webpack_require__(4);
-const disasmPanelTemplate_1 = __webpack_require__(10);
+const disasmPanelTemplate_1 = __webpack_require__(8);
 const extension_1 = __webpack_require__(0);
 /** Memory regions exposed as separate editor windows when the emulator is running. */
 const LIVE_REGIONS = [
@@ -3625,7 +3625,7 @@ class DisasmPanelProvider {
         const timestamp = DisasmPanelProvider.formatSnapshotTimestamp(new Date());
         const snapshotsDir = this.workspaceRoot
             ? path.join(this.workspaceRoot, 'snapshots', timestamp)
-            : path.join((__webpack_require__(12).tmpdir)(), 'ps2snapshots', timestamp);
+            : path.join((__webpack_require__(17).tmpdir)(), 'ps2snapshots', timestamp);
         out.appendLine(`[INFO] Taking snapshot → ${snapshotsDir}`);
         try {
             const regions = await this.socketClient.snapshot(snapshotsDir);
@@ -3680,18 +3680,6 @@ exports.DisasmPanelProvider = DisasmPanelProvider;
 
 /***/ }),
 /* 8 */
-/***/ ((module) => {
-
-module.exports = require("path");
-
-/***/ }),
-/* 9 */
-/***/ ((module) => {
-
-module.exports = require("child_process");
-
-/***/ }),
-/* 10 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -3700,7 +3688,7 @@ module.exports = require("child_process");
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getDisasmPanelHtml = getDisasmPanelHtml;
-const disasmPanelStyles_1 = __webpack_require__(11);
+const disasmPanelStyles_1 = __webpack_require__(9);
 function getDisasmPanelHtml(data, nonce) {
     return `<!DOCTYPE html>
 <html>
@@ -3865,7 +3853,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 11 */
+/* 9 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -3974,13 +3962,7 @@ button:disabled {
 
 
 /***/ }),
-/* 12 */
-/***/ ((module) => {
-
-module.exports = require("os");
-
-/***/ }),
-/* 13 */
+/* 10 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -4020,9 +4002,9 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AsmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
-const child_process_1 = __webpack_require__(9);
+const child_process_1 = __webpack_require__(11);
 const helpers_1 = __webpack_require__(4);
-const asmPanelTemplate_1 = __webpack_require__(14);
+const asmPanelTemplate_1 = __webpack_require__(12);
 const extension_1 = __webpack_require__(0);
 let outputChannel;
 class AsmPanelProvider {
@@ -4143,7 +4125,13 @@ exports.AsmPanelProvider = AsmPanelProvider;
 
 
 /***/ }),
-/* 14 */
+/* 11 */
+/***/ ((module) => {
+
+module.exports = require("child_process");
+
+/***/ }),
+/* 12 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -4153,7 +4141,7 @@ exports.AsmPanelProvider = AsmPanelProvider;
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getAsmPanelHtml = getAsmPanelHtml;
-const asmPanelStyles_1 = __webpack_require__(15);
+const asmPanelStyles_1 = __webpack_require__(13);
 /**
  * Main panel template - returns complete HTML
  */
@@ -4283,7 +4271,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 15 */
+/* 13 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -4380,7 +4368,7 @@ button:disabled {
 
 
 /***/ }),
-/* 16 */
+/* 14 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -4419,7 +4407,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SocketClient = void 0;
-const net = __importStar(__webpack_require__(17));
+const net = __importStar(__webpack_require__(15));
 /**
  * Socket client for communication with C# server
  */
@@ -4724,10 +4712,22 @@ exports.SocketClient = SocketClient;
 
 
 /***/ }),
-/* 17 */
+/* 15 */
 /***/ ((module) => {
 
 module.exports = require("net");
+
+/***/ }),
+/* 16 */
+/***/ ((module) => {
+
+module.exports = require("path");
+
+/***/ }),
+/* 17 */
+/***/ ((module) => {
+
+module.exports = require("os");
 
 /***/ })
 /******/ 	]);
