@@ -22,7 +22,7 @@
   "emulators": [
     {
       "type": "code-designer",
-      "path": "../../CodeDesigner.Mips64LE/bin/Debug/net9.0/CodeDesigner.Mips64LE.exe"
+      "path": "../../CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.exe"
     },
     {
       "type": "pcsx2",
