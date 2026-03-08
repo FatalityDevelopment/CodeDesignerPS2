@@ -226,6 +226,12 @@ body {
 #grid::-webkit-scrollbar {
     display: none; /* Chrome/Safari/Edge */
 } 
+
+#content-wrapper {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
  
 .row {
     display: grid;
@@ -342,21 +348,6 @@ body {
     50% { opacity: 0.35; }
 }
 
-#refresh-btn {
-    background: #3c3c3c;
-    border: 1px solid #3e3e42;
-    color: #cccccc;
-    padding: 2px 10px;
-    cursor: pointer;
-    font-family: monospace;
-    font-size: 11px;
-    outline: none;
-}
-
-#refresh-btn:hover {
-    background: #505050;
-}
-
 #play-pause-btn {
     background: #3c3c3c;
     border: 1px solid #3e3e42;
@@ -385,6 +376,126 @@ body {
 
 #interval-select:hover {
     background: #505050;
+}
+
+/* ── Debug Panel (Registers + Stack) ─────────────────────────────────── */
+
+#debug-panel {
+    width: 320px;
+    min-width: 320px;
+    display: none;
+    flex-direction: column;
+    background: #1e1e1e;
+    border-left: 1px solid #3e3e42;
+    overflow: hidden;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+#debug-panel.visible {
+    display: flex;
+}
+
+#debug-tabs {
+    display: flex;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+}
+
+.debug-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #858585;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+.debug-tab:hover {
+    color: #d4d4d4;
+}
+
+.debug-tab.active {
+    color: #d4d4d4;
+    border-bottom-color: #007acc;
+}
+
+.debug-tab-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.debug-tab-content.active {
+    display: block;
+}
+
+.debug-tab-content::-webkit-scrollbar {
+    width: 6px;
+}
+.debug-tab-content::-webkit-scrollbar-thumb {
+    background: #424242;
+}
+
+.dbg-section-title {
+    color: #858585;
+    font-size: 10px;
+    text-transform: uppercase;
+    padding: 6px 8px 2px;
+    letter-spacing: 0.05em;
+}
+
+.dbg-divider {
+    border-bottom: 1px solid #3e3e42;
+    margin: 4px 8px;
+}
+
+.dbg-row {
+    display: flex;
+    align-items: center;
+    padding: 1px 8px;
+    line-height: 1.6;
+}
+
+.dbg-row:hover {
+    background: #2a2d2e;
+}
+
+.dbg-name {
+    color: #9cdcfe;
+    width: 7ch;
+    flex-shrink: 0;
+    white-space: pre;
+}
+
+.dbg-addr {
+    color: #c586c0;
+    width: 9ch;
+    flex-shrink: 0;
+}
+
+.dbg-val {
+    color: #d4d4d4;
+    font-family: monospace;
+}
+
+.dbg-nonzero .dbg-val {
+    color: #dcdcaa;
+}
+
+.dbg-retaddr .dbg-val {
+    color: #4ec9b0;
+}
+
+.dbg-dim {
+    color: #858585;
+    font-size: 10px;
+    margin-left: 6px;
 }
 
 </style>`;

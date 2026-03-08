@@ -45,14 +45,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Format bytes for display (space-separated, big-endian)
+   * Format bytes for display (no spaces, big-endian)
    */
   private formatBytesForDisplay(buffer: Buffer, offset: number, length: number): string {
     const slice = buffer.slice(offset, offset + length);
     return Array.from(slice)
       .reverse()
       .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-      .join(" ");
+      .join("");
   }
 
   /**
@@ -308,7 +308,24 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'getStatus') {
                 try {
                     const status = await this.socketClient!.getPC();
-                    panel.webview.postMessage({ type: 'status', ...status });
+                    const statusMsg: any = { type: 'status', ...status };
+                    // When paused, also fetch registers for the debug panel
+                    if (status.paused) {
+                        try {
+                            const regs = await this.socketClient!.getRegisters();
+                            statusMsg.registers = regs;
+                            // Fetch stack memory (128 bytes from $sp = gpr[29])
+                            const sp = regs.gpr[29];
+                            if (sp) {
+                                try {
+                                    const stackBuf = await this.socketClient!.readMemory(sp, 128, 'ee');
+                                    statusMsg.stackBytes = Array.from(stackBuf);
+                                    statusMsg.stackBase = sp;
+                                } catch { /* ignore stack read errors */ }
+                            }
+                        } catch { /* ignore register fetch errors */ }
+                    }
+                    panel.webview.postMessage(statusMsg);
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to get status: ${err?.message ?? err}`);
                 }
@@ -317,6 +334,16 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 panel.webview.postMessage({ type: 'searchResults', matches: [] });
             }
         });
+    }
+
+    /**
+     * Reset all live panels: clears their page caches and shows zeroed-out rows.
+     * Called by DisasmPanelProvider after triggering an emulator restart.
+     */
+    public resetLivePanels(): void {
+        for (const p of this._livePanels) {
+            p.webview.postMessage({ type: 'reset' });
+        }
     }
 
     /**
