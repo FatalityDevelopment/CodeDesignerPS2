@@ -236,12 +236,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Try connecting to an already-running server first. If the C# server
         // was started manually (e.g. `dotnet run -- --server` or `--run`), we
         // can reuse it without spawning a new process.
-        this.socketClient.connect().then(async () => {
-            out.appendLine('[INFO] Connected to existing emulator server. Opening memory views…');
-            this.webview?.postMessage({ command: 'connectionStatus', connected: true });
-            for (const r of LIVE_REGIONS) {
-                await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
-            }
+        // NOTE: do NOT open memory views here — the socketClient.onConnected
+        // event (registered in extension.ts) will fire onSocketConnected() which
+        // opens/reinits all panels.  Duplicating that work here would queue two
+        // concurrent sets of READMEM requests against the server, which (before
+        // the _pendingResponses fix) caused response mis-routing and is still
+        // wasteful.
+        this.socketClient.connect().then(() => {
+            out.appendLine('[INFO] Connected to existing emulator server. Memory views will open via onSocketConnected.');
         }).catch(() => {
             // No existing server — spawn the emulator and then connect
             this.spawnAndConnect(emulatorPath, biosPath, gamePath);

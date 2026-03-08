@@ -190,6 +190,16 @@ export class SocketClient {
     private messageHandlers: Array<(message: string) => void> = [];
     private connectionHandlers: Array<() => void> = [];
     private disconnectionHandlers: Array<() => void> = [];
+    /**
+     * FIFO queue of one-time response handlers added by sendCommand().
+     * Using a dedicated queue (with shift()) avoids the Array.forEach +
+     * splice-during-iteration bug: when forEach iterates [A, B, C] and A
+     * splices itself out at index 0, forEach advances to index 1 which is
+     * now C (B shifted to 0), so B is skipped and C receives A's response.
+     * With shift(), each incoming message pops exactly one handler off the
+     * front of the queue in FIFO order — matching the order commands were sent.
+     */
+    private _pendingResponses: Array<(message: string) => void> = [];
 
     constructor(host: string = 'localhost', port: number = 8765) {
         this.host = host;
@@ -235,6 +245,14 @@ export class SocketClient {
                     
                     if (message.length > 0) {
                         console.log(`[SOCKET] Complete message received (${message.length} chars): ${message.substring(0, 100)}...`);
+                        // Dispatch to the first pending one-time response handler (FIFO).
+                        // shift() is safe here: it removes the element before calling it,
+                        // so there is no splice-during-iteration issue.
+                        const pending = this._pendingResponses.shift();
+                        if (pending) {
+                            pending(message);
+                        }
+                        // Also dispatch to any persistent broadcast handlers.
                         this.messageHandlers.forEach(handler => handler(message));
                     }
                 }
@@ -307,6 +325,11 @@ export class SocketClient {
         }
         this.connected = false;
         this.wasConnected = false;
+        // Cancel any in-flight requests that will never receive a response.
+        const stale = this._pendingResponses.splice(0);
+        for (const handler of stale) {
+            try { handler('{"Success":false,"Error":"Disconnected"}'); } catch { /* ignore */ }
+        }
         console.log('[SOCKET] Disconnected from server');
     }
 
@@ -356,12 +379,6 @@ export class SocketClient {
                 responseReceived = true;
                 clearTimeout(timeout);
 
-                // Remove the handler
-                const index = this.messageHandlers.indexOf(responseHandler);
-                if (index > -1) {
-                    this.messageHandlers.splice(index, 1);
-                }
-
                 try {
                     // Strip "Echo: " prefix if present
                     let cleanMessage = message;
@@ -385,17 +402,19 @@ export class SocketClient {
                 }
             };
 
-            // Add temporary handler
-            this.messageHandlers.push(responseHandler);
+            // Enqueue handler — must be done before writing to the socket so
+            // there is no window where the response arrives before the handler
+            // is registered.
+            this._pendingResponses.push(responseHandler);
 
             // Set timeout
             const timeout = setTimeout(() => {
                 if (!responseReceived) {
                     responseReceived = true;
-                    // Remove the handler
-                    const index = this.messageHandlers.indexOf(responseHandler);
+                    // Remove the handler from the pending queue
+                    const index = this._pendingResponses.indexOf(responseHandler);
                     if (index > -1) {
-                        this.messageHandlers.splice(index, 1);
+                        this._pendingResponses.splice(index, 1);
                     }
                     reject(new Error('Command timeout'));
                 }
@@ -408,10 +427,10 @@ export class SocketClient {
                 if (error) {
                     clearTimeout(timeout);
                     responseReceived = true;
-                    // Remove the handler
-                    const index = this.messageHandlers.indexOf(responseHandler);
+                    // Remove the handler from the pending queue
+                    const index = this._pendingResponses.indexOf(responseHandler);
                     if (index > -1) {
-                        this.messageHandlers.splice(index, 1);
+                        this._pendingResponses.splice(index, 1);
                     }
                     reject(error);
                 }
