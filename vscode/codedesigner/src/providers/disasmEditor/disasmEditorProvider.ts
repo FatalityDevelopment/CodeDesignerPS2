@@ -274,6 +274,31 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     console.error(`[LIVE] Failed to resume emulator: ${msg}`);
                     vscode.window.showWarningMessage(`Could not resume emulator: ${msg}`);
                 }
+            } else if (message.type === 'setBreakpoint') {
+                try {
+                    await this.socketClient!.setBreakpoint(message.address);
+                } catch (err: any) {
+                    console.error(`[LIVE] Failed to set breakpoint: ${err?.message ?? err}`);
+                }
+            } else if (message.type === 'clearBreakpoint') {
+                try {
+                    await this.socketClient!.clearBreakpoint(message.address);
+                } catch (err: any) {
+                    console.error(`[LIVE] Failed to clear breakpoint: ${err?.message ?? err}`);
+                }
+            } else if (message.type === 'clearAllBreakpoints') {
+                try {
+                    await this.socketClient!.clearAllBreakpoints();
+                } catch (err: any) {
+                    console.error(`[LIVE] Failed to clear all breakpoints: ${err?.message ?? err}`);
+                }
+            } else if (message.type === 'getStatus') {
+                try {
+                    const status = await this.socketClient!.getPC();
+                    panel.webview.postMessage({ type: 'status', ...status });
+                } catch (err: any) {
+                    console.error(`[LIVE] Failed to get status: ${err?.message ?? err}`);
+                }
             } else if (message.type === 'search') {
                 // Full-region live search is expensive; return empty for now
                 panel.webview.postMessage({ type: 'searchResults', matches: [] });

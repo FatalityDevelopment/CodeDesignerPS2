@@ -10,6 +10,7 @@ interface CommandMessage {
     Length?: number;
     Region?: string;
     OutputPath?: string;
+    BreakpointAddress?: number;
 }
 
 /**
@@ -23,6 +24,9 @@ interface CommandResponse {
     Data?: string;
     Results?: InstructionResult[];
     Regions?: SnapshotRegion[];
+    Paused?: boolean;
+    PC?: number;
+    BreakpointHitAddress?: number;
 }
 
 /**
@@ -394,6 +398,55 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'Resume failed');
         }
+    }
+
+    /**
+     * Set a breakpoint at the given EE virtual address
+     */
+    public async setBreakpoint(address: number): Promise<void> {
+        const command: CommandMessage = { Command: 'SETBP', BreakpointAddress: address };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'SetBreakpoint failed');
+        }
+    }
+
+    /**
+     * Clear the breakpoint at the given EE virtual address
+     */
+    public async clearBreakpoint(address: number): Promise<void> {
+        const command: CommandMessage = { Command: 'CLEARBP', BreakpointAddress: address };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ClearBreakpoint failed');
+        }
+    }
+
+    /**
+     * Clear all breakpoints
+     */
+    public async clearAllBreakpoints(): Promise<void> {
+        const command: CommandMessage = { Command: 'CLEARBP_ALL' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ClearAllBreakpoints failed');
+        }
+    }
+
+    /**
+     * Get the current EE PC and paused/breakpoint state
+     */
+    public async getPC(): Promise<{ paused: boolean; pc: number; breakpointHitAddress?: number }> {
+        const command: CommandMessage = { Command: 'GETPC' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetPC failed');
+        }
+        return {
+            paused: response.Paused ?? false,
+            pc: response.PC ?? 0,
+            breakpointHitAddress: response.BreakpointHitAddress,
+        };
     }
 
     /**

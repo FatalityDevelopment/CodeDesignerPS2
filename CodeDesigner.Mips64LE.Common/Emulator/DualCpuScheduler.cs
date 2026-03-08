@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 
@@ -99,6 +100,21 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         }
 
         /// <summary>
+        /// Set of EE virtual addresses at which execution should automatically
+        /// pause (breakpoints).  When the EE program counter reaches any address
+        /// in this set, <see cref="Paused"/> is set to <c>true</c> and
+        /// <see cref="LastBreakpointHit"/> is updated.  The set is not thread-safe;
+        /// modify it only while the scheduler is already paused.
+        /// </summary>
+        public HashSet<uint> Breakpoints { get; } = new HashSet<uint>();
+
+        /// <summary>
+        /// The EE address of the most-recently hit breakpoint, or <c>null</c> if no
+        /// breakpoint has fired since the last <see cref="Resume"/> / construction.
+        /// </summary>
+        public uint? LastBreakpointHit { get; private set; }
+
+        /// <summary>
         /// When <c>true</c>, <see cref="RunSlice"/> returns immediately without
         /// executing any instructions.  Set via the socket PAUSE/RESUME commands.
         /// </summary>
@@ -108,7 +124,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             set
             {
                 if (value) _runGate.Reset();
-                else       _runGate.Set();
+                else
+                {
+                    LastBreakpointHit = null;
+                    _runGate.Set();
+                }
             }
         }
 
@@ -594,6 +614,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // ── EE step ───────────────────────────────────────────────────
                 EE.Step();
                 TotalEeSteps++;
+
+                // ── Breakpoint check ─────────────────────────────────────────
+                if (Breakpoints.Count > 0)
+                {
+                    uint eePc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
+                    if (Breakpoints.Contains(eePc))
+                    {
+                        LastBreakpointHit = eePc;
+                        Paused = true;
+                        return;
+                    }
+                }
 
                 // ── IOP step(s) (proportional, interleaved after each EE step) ─
                 _iopAccumulator++;

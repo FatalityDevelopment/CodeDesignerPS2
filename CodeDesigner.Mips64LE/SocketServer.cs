@@ -171,6 +171,18 @@ namespace CodeDesigner.Mips64LE
                     case "RESUME":
                         return HandleResume();
 
+                    case "SETBP":
+                        return HandleSetBreakpoint(command.BreakpointAddress);
+
+                    case "CLEARBP":
+                        return HandleClearBreakpoint(command.BreakpointAddress);
+
+                    case "CLEARBP_ALL":
+                        return HandleClearAllBreakpoints();
+
+                    case "GETPC":
+                        return HandleGetPC();
+
                     case "PING":
                         return CreateSuccessResponse("PONG");
                     
@@ -496,6 +508,61 @@ namespace CodeDesigner.Mips64LE
             return CreateSuccessResponse("Resumed");
         }
 
+        /// <summary>
+        /// Handle SETBP command — adds a breakpoint at the given EE address.
+        /// </summary>
+        private string HandleSetBreakpoint(uint? address)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (address == null)
+                return CreateErrorResponse("BreakpointAddress is required for SETBP");
+            Scheduler.Breakpoints.Add(address.Value);
+            return CreateSuccessResponse($"Breakpoint set at 0x{address.Value:X8}");
+        }
+
+        /// <summary>
+        /// Handle CLEARBP command — removes the breakpoint at the given EE address.
+        /// </summary>
+        private string HandleClearBreakpoint(uint? address)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (address == null)
+                return CreateErrorResponse("BreakpointAddress is required for CLEARBP");
+            Scheduler.Breakpoints.Remove(address.Value);
+            return CreateSuccessResponse($"Breakpoint cleared at 0x{address.Value:X8}");
+        }
+
+        /// <summary>
+        /// Handle CLEARBP_ALL command — removes all breakpoints.
+        /// </summary>
+        private string HandleClearAllBreakpoints()
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            Scheduler.Breakpoints.Clear();
+            return CreateSuccessResponse("All breakpoints cleared");
+        }
+
+        /// <summary>
+        /// Handle GETPC command — returns current EE PC and paused/breakpoint state.
+        /// </summary>
+        private string HandleGetPC()
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            var response = new CommandResponse
+            {
+                Success = true,
+                Command = "GETPC",
+                Paused  = Scheduler.Paused,
+                PC      = (uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL),
+                BreakpointHitAddress = Scheduler.LastBreakpointHit,
+            };
+            return JsonSerializer.Serialize(response);
+        }
+
         private string CreateSuccessResponse(string message)
         {
             var response = new CommandResponse
@@ -551,6 +618,7 @@ namespace CodeDesigner.Mips64LE
         public int? Length { get; set; }
         public string? Region { get; set; }
         public string? OutputPath { get; set; }
+        public uint? BreakpointAddress { get; set; }
     }
 
     /// <summary>
@@ -565,6 +633,9 @@ namespace CodeDesigner.Mips64LE
         public string? Data { get; set; }
         public List<InstructionResult>? Results { get; set; }
         public List<SnapshotRegion>? Regions { get; set; }
+        public bool? Paused { get; set; }
+        public uint? PC { get; set; }
+        public uint? BreakpointHitAddress { get; set; }
     }
 
     /// <summary>
