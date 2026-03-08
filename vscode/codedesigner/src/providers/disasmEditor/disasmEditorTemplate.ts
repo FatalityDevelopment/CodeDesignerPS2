@@ -96,10 +96,6 @@ function getSearchPanel(): string {
 function getHeaderToolbar(): string {
     return `<div id="header-toolbar">
     <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">⊞ Symbols</button>
-    <div id="live-controls">
-        <span class="live-indicator" id="live-indicator">● LIVE</span>
-        <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
-    </div>
 </div>`;
 }
 
@@ -227,9 +223,6 @@ const gotoBtn = document.getElementById("goto-btn");
 const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
 const headerToolbar = document.getElementById("header-toolbar");
-const liveControls = document.getElementById("live-controls");
-const liveIndicator = document.getElementById("live-indicator");
-const playPauseBtn = document.getElementById("play-pause-btn");
 const debugPanel = document.getElementById("debug-panel");
 const regContent = document.getElementById("registers-content");
 const stackContent = document.getElementById("stack-content");
@@ -364,7 +357,6 @@ window.addEventListener("message", ({ data: msg }) => {
             }
             if (msg.isLive) {
                 state.isLive = true;
-                liveControls.classList.add('visible');
                 headerToolbar.classList.add('live-active');
                 startLiveRefresh();
             }
@@ -1007,19 +999,9 @@ function setLivePausedUi(paused) {
     if (paused) {
         headerToolbar.classList.remove('live-active');
         headerToolbar.classList.add('live-paused');
-        liveIndicator.classList.add('paused');
-        liveIndicator.textContent = '⏸ PAUSED';
-        playPauseBtn.textContent = '▶ Resume';
-        playPauseBtn.title = 'Resume live feed';
-        playPauseBtn.setAttribute('aria-label', 'Resume live feed');
     } else {
         headerToolbar.classList.remove('live-paused');
         headerToolbar.classList.add('live-active');
-        liveIndicator.classList.remove('paused');
-        liveIndicator.textContent = '● LIVE';
-        playPauseBtn.textContent = '⏸ Pause';
-        playPauseBtn.title = 'Pause live feed';
-        playPauseBtn.setAttribute('aria-label', 'Pause live feed');
     }
 }
 
@@ -1565,19 +1547,6 @@ document.querySelectorAll('.debug-tab').forEach(btn => {
         const tab = btn.dataset.tab;
         document.getElementById(tab + '-content')?.classList.add('active');
     });
-});
-
-playPauseBtn.addEventListener('click', () => {
-    livePaused = !livePaused;
-    if (livePaused) {
-        stopLiveRefresh();
-        vscode.postMessage({ type: 'pause' });
-        setLivePausedUi(true);
-    } else {
-        vscode.postMessage({ type: 'resume' });
-        startLiveRefresh();
-        setLivePausedUi(false);
-    }
 });
 
 window.addEventListener('unload', () => {

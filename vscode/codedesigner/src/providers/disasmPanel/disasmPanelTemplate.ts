@@ -45,6 +45,7 @@ ${getDisasmPanelStyles()}
 <div id="emu-status-bar" class="${data.connected ? 'status-connected' : 'status-disconnected'}">
     <span id="emu-status-dot">●</span>
     <span id="emu-status-text">${data.connected ? 'LIVE' : 'STOPPED'}</span>
+    <button id="emu-play-pause-btn" title="Pause emulator" aria-label="Pause emulator">⏸ Pause</button>
 </div>
 
 <h3>Emulator</h3>
@@ -154,6 +155,10 @@ document.getElementById('restartBtn')?.addEventListener('click', () => {
     vscode.postMessage({ command: 'restart' });
 });
 
+document.getElementById('emu-play-pause-btn')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'togglePause' });
+});
+
 document.getElementById('emulatorSelect').onchange = (e) => {
     vscode.postMessage({ command: 'emulatorChanged', emulatorPath: e.target.value });
 };
@@ -192,6 +197,27 @@ window.addEventListener('message', event => {
             if (statusBar && statusText) {
                 statusBar.className = message.connected ? 'status-connected' : 'status-disconnected';
                 statusText.textContent = message.connected ? 'LIVE' : 'STOPPED';
+            }
+            // Reset play/pause button when (dis)connecting
+            const ppBtn = document.getElementById('emu-play-pause-btn');
+            if (ppBtn) {
+                ppBtn.textContent = '⏸ Pause';
+                ppBtn.title = 'Pause emulator';
+            }
+            break;
+        }
+        case 'paused': {
+            const statusBar = document.getElementById('emu-status-bar');
+            const statusText = document.getElementById('emu-status-text');
+            const ppBtn = document.getElementById('emu-play-pause-btn');
+            if (message.paused) {
+                if (statusBar) { statusBar.className = 'status-paused'; }
+                if (statusText) { statusText.textContent = '⏸ PAUSED'; }
+                if (ppBtn) { ppBtn.textContent = '▶ Resume'; ppBtn.title = 'Resume emulator'; }
+            } else {
+                if (statusBar) { statusBar.className = 'status-connected'; }
+                if (statusText) { statusText.textContent = 'LIVE'; }
+                if (ppBtn) { ppBtn.textContent = '⏸ Pause'; ppBtn.title = 'Pause emulator'; }
             }
             break;
         }

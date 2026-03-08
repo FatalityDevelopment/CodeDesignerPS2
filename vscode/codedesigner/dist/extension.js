@@ -104,6 +104,11 @@ function activate(context) {
     disasmPanelProvider.register(context);
     const asmPanelProvider = new asmPanelProvider_1.AsmPanelProvider();
     asmPanelProvider.register(context);
+    // Wire pause-state propagation: when a breakpoint/step pause is detected in the
+    // editor panels, the sidebar status bar needs to update too.
+    editorProvider.onPauseStateChange = (paused) => {
+        disasmPanelProvider.notifyPauseState(paused);
+    };
     // Register socket event handlers
     socketClient.onConnected(() => {
         outputChannel.appendLine('[INFO] Connected to C# server');
@@ -166,6 +171,14 @@ function activate(context) {
             outputChannel.appendLine('[INFO] Make sure the C# server is running on localhost:8765');
         });
     }, 1000);
+    // Open all live memory view tabs immediately so they are always visible.
+    // When not connected they show placeholder content; when the socket connects
+    // they are re-initialized with live data.
+    setTimeout(() => {
+        disasmPanelProvider.openAllLivePanels().catch(err => {
+            outputChannel.appendLine(`[WARN] Could not open live panels at startup: ${err?.message ?? err}`);
+        });
+    }, 600);
 }
 // This method is called when your extension is deactivated
 function deactivate() {
@@ -238,8 +251,20 @@ class DisasmEditorProvider {
     _livePanels = [];
     /** Metadata for each live panel: label, address range. Used for reuse and address lookup. */
     _livePanelInfo = [];
+    /**
+     * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
+     * Set by DisasmPanelProvider so it can update the sidebar status bar.
+     */
+    onPauseStateChange;
     constructor(socketClient) {
         this.socketClient = socketClient;
+    }
+    /**
+     * Called by DisasmPanelProvider to propagate sidebar-initiated pause/resume
+     * to all editor panels' live-bar state.
+     */
+    notifyPauseState(paused) {
+        this._broadcastStatus(paused);
     }
     /**
      * Format bytes for display (no spaces, big-endian)
@@ -404,17 +429,29 @@ class DisasmEditorProvider {
      * Open a live memory view panel (no backing file — pages fetched via socket).
      * Called once per region after connecting to the embedded emulator server.
      * If a panel for this label already exists (e.g. reconnect), it is revealed
-     * instead of creating a duplicate window.
+     * and re-initialized with fresh data when connected.
      */
     async openLiveMemoryView(region, baseAddress, totalBytes, label) {
-        if (!this.socketClient || !this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator. Connect first.');
-            return;
-        }
+        const connected = this.socketClient?.isConnected() ?? false;
         // Reuse an already-open panel with the same label (e.g. after reconnect)
         const existingInfo = this._livePanelInfo.find(i => i.label === label);
         if (existingInfo) {
             existingInfo.panel.reveal(vscode.ViewColumn.One, true);
+            // Re-initialize with live data now that we have a connection
+            if (connected) {
+                const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
+                existingInfo.panel.webview.postMessage({
+                    type: 'init',
+                    totalInstructions,
+                    pageSize: DisasmEditorProvider.PAGE_SIZE,
+                    baseAddress,
+                    isLive: true,
+                    regionLabel: label,
+                    totalBytes,
+                });
+                await this.sendLiveDisasmPage(existingInfo.panel, region, baseAddress, totalBytes, 0);
+                await this.sendLiveHexView(existingInfo.panel, region, baseAddress, baseAddress, DisasmEditorProvider.INSTRUCTION_SIZE);
+            }
             return;
         }
         const panel = vscode.window.createWebviewPanel('disasm.liveMemory', label, vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });
@@ -440,9 +477,11 @@ class DisasmEditorProvider {
             regionLabel: label,
             totalBytes,
         });
-        // Send first page and hex view
-        await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
-        await this.sendLiveHexView(panel, region, baseAddress, baseAddress, DisasmEditorProvider.INSTRUCTION_SIZE);
+        if (connected) {
+            // Send first page and hex view
+            await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
+            await this.sendLiveHexView(panel, region, baseAddress, baseAddress, DisasmEditorProvider.INSTRUCTION_SIZE);
+        }
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message.type === 'requestPage') {
                 await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, message.startIndex);
@@ -571,12 +610,14 @@ class DisasmEditorProvider {
      * Send a minimal `status` message to all registered live panels.
      * Called immediately after a user-initiated pause or resume so every window
      * updates its live-bar indicator without waiting for the next status-poll cycle.
+     * Also fires the onPauseStateChange callback so the sidebar can update its bar.
      */
     _broadcastStatus(paused) {
         const msg = { type: 'status', paused };
         for (const p of this._livePanels) {
             p.webview.postMessage(msg);
         }
+        this.onPauseStateChange?.(paused);
     }
     /**
      * Broadcast a full status message (including PC, registers, etc.) to every
@@ -2799,10 +2840,6 @@ function getSearchPanel() {
 function getHeaderToolbar() {
     return `<div id="header-toolbar">
     <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">⊞ Symbols</button>
-    <div id="live-controls">
-        <span class="live-indicator" id="live-indicator">● LIVE</span>
-        <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
-    </div>
 </div>`;
 }
 function getHexContainer() {
@@ -2923,9 +2960,6 @@ const gotoBtn = document.getElementById("goto-btn");
 const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
 const headerToolbar = document.getElementById("header-toolbar");
-const liveControls = document.getElementById("live-controls");
-const liveIndicator = document.getElementById("live-indicator");
-const playPauseBtn = document.getElementById("play-pause-btn");
 const debugPanel = document.getElementById("debug-panel");
 const regContent = document.getElementById("registers-content");
 const stackContent = document.getElementById("stack-content");
@@ -3060,7 +3094,6 @@ window.addEventListener("message", ({ data: msg }) => {
             }
             if (msg.isLive) {
                 state.isLive = true;
-                liveControls.classList.add('visible');
                 headerToolbar.classList.add('live-active');
                 startLiveRefresh();
             }
@@ -3703,19 +3736,9 @@ function setLivePausedUi(paused) {
     if (paused) {
         headerToolbar.classList.remove('live-active');
         headerToolbar.classList.add('live-paused');
-        liveIndicator.classList.add('paused');
-        liveIndicator.textContent = '⏸ PAUSED';
-        playPauseBtn.textContent = '▶ Resume';
-        playPauseBtn.title = 'Resume live feed';
-        playPauseBtn.setAttribute('aria-label', 'Resume live feed');
     } else {
         headerToolbar.classList.remove('live-paused');
         headerToolbar.classList.add('live-active');
-        liveIndicator.classList.remove('paused');
-        liveIndicator.textContent = '● LIVE';
-        playPauseBtn.textContent = '⏸ Pause';
-        playPauseBtn.title = 'Pause live feed';
-        playPauseBtn.setAttribute('aria-label', 'Pause live feed');
     }
 }
 
@@ -4261,19 +4284,6 @@ document.querySelectorAll('.debug-tab').forEach(btn => {
         const tab = btn.dataset.tab;
         document.getElementById(tab + '-content')?.classList.add('active');
     });
-});
-
-playPauseBtn.addEventListener('click', () => {
-    livePaused = !livePaused;
-    if (livePaused) {
-        stopLiveRefresh();
-        vscode.postMessage({ type: 'pause' });
-        setLivePausedUi(true);
-    } else {
-        vscode.postMessage({ type: 'resume' });
-        startLiveRefresh();
-        setLivePausedUi(false);
-    }
 });
 
 window.addEventListener('unload', () => {
@@ -5358,6 +5368,7 @@ class DisasmPanelProvider {
     selectedEmulatorPath = '';
     selectedBiosPath = '';
     selectedGamePath = '';
+    _paused = false;
     constructor(socketClient, editorProvider) {
         this.socketClient = socketClient;
         this.editorProvider = editorProvider;
@@ -5409,6 +5420,9 @@ class DisasmPanelProvider {
                     break;
                 case 'restart':
                     await this.handleRestart();
+                    break;
+                case 'togglePause':
+                    await this.handleTogglePause();
                     break;
                 // Dropdown change notifications — save current selections
                 case 'emulatorChanged':
@@ -5601,40 +5615,62 @@ class DisasmPanelProvider {
     }
     cleanupProcess() {
         this.emulatorTerminal = undefined;
+        this._paused = false;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
     }
-    /** Restart the emulator: kill the current process and relaunch with the same disc image. */
-    async handleRestart() {
+    /** Toggle emulator pause/resume via the socket connection. */
+    async handleTogglePause() {
         const out = (0, extension_1.getOutputChannel)();
-        const emulatorPath = this.selectedEmulatorPath;
-        if (!emulatorPath) {
-            vscode.window.showWarningMessage('No emulator selected. Cannot restart.');
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
             return;
         }
-        out.appendLine('[INFO] Restarting emulator — reloading disc image…');
+        try {
+            if (this._paused) {
+                await this.socketClient.resume();
+                this._paused = false;
+            }
+            else {
+                await this.socketClient.pause();
+                this._paused = true;
+            }
+            this.webview?.postMessage({ command: 'paused', paused: this._paused });
+            this.editorProvider.notifyPauseState(this._paused);
+        }
+        catch (err) {
+            out.appendLine(`[ERROR] Pause/Resume failed: ${err?.message ?? err}`);
+        }
+    }
+    /**
+     * Called by DisasmEditorProvider when the emulator's pause state changes
+     * (e.g. a breakpoint was hit).  Updates the sidebar status bar accordingly.
+     */
+    notifyPauseState(paused) {
+        this._paused = paused;
+        this.webview?.postMessage({ command: 'paused', paused });
+    }
+    /** Restart the emulator: send RESTART command via socket, keeping the connection alive. */
+    async handleRestart() {
+        const out = (0, extension_1.getOutputChannel)();
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator. Cannot restart.');
+            return;
+        }
+        out.appendLine('[INFO] Restarting emulator via socket…');
         // Blank live panels so stale content is not shown during the restart
         this.editorProvider.resetLivePanels();
-        // Disconnect the socket first
-        if (this.socketClient.isConnected()) {
-            try {
-                this.socketClient.disconnect();
-            }
-            catch (err) {
-                out.appendLine(`[DEBUG] Disconnect during restart: ${err?.message ?? err}`);
-            }
+        try {
+            await this.socketClient.restart();
+            out.appendLine('[INFO] Emulator restarted — paused at reset vector.');
+            // After restart, emulator is paused; reflect that in the sidebar
+            this._paused = true;
+            this.webview?.postMessage({ command: 'paused', paused: true });
+            this.editorProvider.notifyPauseState(true);
         }
-        // Kill the existing terminal / process
-        if (this.emulatorTerminal) {
-            this.emulatorTerminal.dispose();
-            this.emulatorTerminal = undefined;
+        catch (err) {
+            out.appendLine(`[ERROR] Restart failed: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`Restart failed: ${err?.message ?? err}`);
         }
-        // Notify UI that we are now disconnected
-        this.webview?.postMessage({ command: 'connectionStatus', connected: false });
-        // Give the old process a moment to release the port before relaunching
-        await new Promise(resolve => setTimeout(resolve, 800));
-        // Relaunch with the saved emulator / bios / game paths
-        this.spawnAndConnect(emulatorPath, this.selectedBiosPath, this.selectedGamePath);
-        out.appendLine('[INFO] Emulator restarted — waiting for socket connection…');
     }
     // ── Snapshot ──────────────────────────────────────────────────────────────
     async handleSnapshot() {
@@ -5700,7 +5736,18 @@ class DisasmPanelProvider {
      * Opens live memory views for all regions, reusing any already-open panels.
      */
     async onSocketConnected() {
+        this._paused = false;
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
+        for (const r of LIVE_REGIONS) {
+            await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+        }
+    }
+    /**
+     * Open all live memory view panels immediately, even if not connected.
+     * Panels will show placeholder content until the socket connects.
+     * Called at extension activation so tabs are always visible.
+     */
+    async openAllLivePanels() {
         for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
@@ -5744,6 +5791,7 @@ ${(0, disasmPanelStyles_1.getDisasmPanelStyles)()}
 <div id="emu-status-bar" class="${data.connected ? 'status-connected' : 'status-disconnected'}">
     <span id="emu-status-dot">●</span>
     <span id="emu-status-text">${data.connected ? 'LIVE' : 'STOPPED'}</span>
+    <button id="emu-play-pause-btn" title="Pause emulator" aria-label="Pause emulator">⏸ Pause</button>
 </div>
 
 <h3>Emulator</h3>
@@ -5845,6 +5893,10 @@ document.getElementById('restartBtn')?.addEventListener('click', () => {
     vscode.postMessage({ command: 'restart' });
 });
 
+document.getElementById('emu-play-pause-btn')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'togglePause' });
+});
+
 document.getElementById('emulatorSelect').onchange = (e) => {
     vscode.postMessage({ command: 'emulatorChanged', emulatorPath: e.target.value });
 };
@@ -5883,6 +5935,27 @@ window.addEventListener('message', event => {
             if (statusBar && statusText) {
                 statusBar.className = message.connected ? 'status-connected' : 'status-disconnected';
                 statusText.textContent = message.connected ? 'LIVE' : 'STOPPED';
+            }
+            // Reset play/pause button when (dis)connecting
+            const ppBtn = document.getElementById('emu-play-pause-btn');
+            if (ppBtn) {
+                ppBtn.textContent = '⏸ Pause';
+                ppBtn.title = 'Pause emulator';
+            }
+            break;
+        }
+        case 'paused': {
+            const statusBar = document.getElementById('emu-status-bar');
+            const statusText = document.getElementById('emu-status-text');
+            const ppBtn = document.getElementById('emu-play-pause-btn');
+            if (message.paused) {
+                if (statusBar) { statusBar.className = 'status-paused'; }
+                if (statusText) { statusText.textContent = '⏸ PAUSED'; }
+                if (ppBtn) { ppBtn.textContent = '▶ Resume'; ppBtn.title = 'Resume emulator'; }
+            } else {
+                if (statusBar) { statusBar.className = 'status-connected'; }
+                if (statusText) { statusText.textContent = 'LIVE'; }
+                if (ppBtn) { ppBtn.textContent = '⏸ Pause'; ppBtn.title = 'Pause emulator'; }
             }
             break;
         }
@@ -5953,6 +6026,12 @@ body {
     color: #858585;
 }
 
+#emu-status-bar.status-paused {
+    background: #3a1a1a;
+    border-bottom: 1px solid #6a2a2a;
+    color: #e07070;
+}
+
 #emu-status-dot {
     font-size: 10px;
     animation: none;
@@ -5963,9 +6042,37 @@ body {
     color: #4ec94e;
 }
 
+#emu-status-bar.status-paused #emu-status-dot {
+    animation: none;
+    color: #e07070;
+}
+
 @keyframes live-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
+}
+
+#emu-play-pause-btn {
+    margin-left: auto;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: inherit;
+    padding: 1px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+    display: none;
+}
+
+#emu-status-bar.status-connected #emu-play-pause-btn,
+#emu-status-bar.status-paused #emu-play-pause-btn {
+    display: inline-block;
+}
+
+#emu-play-pause-btn:hover {
+    background: rgba(255,255,255,0.18);
 }
 
 .container {

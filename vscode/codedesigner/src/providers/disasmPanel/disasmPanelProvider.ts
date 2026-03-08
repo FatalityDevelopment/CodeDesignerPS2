@@ -37,6 +37,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private selectedEmulatorPath: string = '';
     private selectedBiosPath: string = '';
     private selectedGamePath: string = '';
+    private _paused: boolean = false;
 
     constructor(
         private readonly socketClient: SocketClient,
@@ -102,6 +103,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'restart':
                     await this.handleRestart();
+                    break;
+                case 'togglePause':
+                    await this.handleTogglePause();
                     break;
                 // Dropdown change notifications — save current selections
                 case 'emulatorChanged':
@@ -313,46 +317,66 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     private cleanupProcess(): void {
         this.emulatorTerminal = undefined;
+        this._paused = false;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
     }
 
-    /** Restart the emulator: kill the current process and relaunch with the same disc image. */
+    /** Toggle emulator pause/resume via the socket connection. */
+    private async handleTogglePause(): Promise<void> {
+        const out = getOutputChannel();
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        try {
+            if (this._paused) {
+                await this.socketClient.resume();
+                this._paused = false;
+            } else {
+                await this.socketClient.pause();
+                this._paused = true;
+            }
+            this.webview?.postMessage({ command: 'paused', paused: this._paused });
+            this.editorProvider.notifyPauseState(this._paused);
+        } catch (err: any) {
+            out.appendLine(`[ERROR] Pause/Resume failed: ${err?.message ?? err}`);
+        }
+    }
+
+    /**
+     * Called by DisasmEditorProvider when the emulator's pause state changes
+     * (e.g. a breakpoint was hit).  Updates the sidebar status bar accordingly.
+     */
+    public notifyPauseState(paused: boolean): void {
+        this._paused = paused;
+        this.webview?.postMessage({ command: 'paused', paused });
+    }
+
+    /** Restart the emulator: send RESTART command via socket, keeping the connection alive. */
     private async handleRestart(): Promise<void> {
         const out = getOutputChannel();
 
-        const emulatorPath = this.selectedEmulatorPath;
-        if (!emulatorPath) {
-            vscode.window.showWarningMessage('No emulator selected. Cannot restart.');
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator. Cannot restart.');
             return;
         }
 
-        out.appendLine('[INFO] Restarting emulator — reloading disc image…');
+        out.appendLine('[INFO] Restarting emulator via socket…');
 
         // Blank live panels so stale content is not shown during the restart
         this.editorProvider.resetLivePanels();
 
-        // Disconnect the socket first
-        if (this.socketClient.isConnected()) {
-            try { this.socketClient.disconnect(); } catch (err: any) {
-                out.appendLine(`[DEBUG] Disconnect during restart: ${err?.message ?? err}`);
-            }
+        try {
+            await this.socketClient.restart();
+            out.appendLine('[INFO] Emulator restarted — paused at reset vector.');
+            // After restart, emulator is paused; reflect that in the sidebar
+            this._paused = true;
+            this.webview?.postMessage({ command: 'paused', paused: true });
+            this.editorProvider.notifyPauseState(true);
+        } catch (err: any) {
+            out.appendLine(`[ERROR] Restart failed: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`Restart failed: ${err?.message ?? err}`);
         }
-
-        // Kill the existing terminal / process
-        if (this.emulatorTerminal) {
-            this.emulatorTerminal.dispose();
-            this.emulatorTerminal = undefined;
-        }
-
-        // Notify UI that we are now disconnected
-        this.webview?.postMessage({ command: 'connectionStatus', connected: false });
-
-        // Give the old process a moment to release the port before relaunching
-        await new Promise(resolve => setTimeout(resolve, 800));
-
-        // Relaunch with the saved emulator / bios / game paths
-        this.spawnAndConnect(emulatorPath, this.selectedBiosPath, this.selectedGamePath);
-        out.appendLine('[INFO] Emulator restarted — waiting for socket connection…');
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────
@@ -427,7 +451,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * Opens live memory views for all regions, reusing any already-open panels.
      */
     public async onSocketConnected(): Promise<void> {
+        this._paused = false;
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
+        for (const r of LIVE_REGIONS) {
+            await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+        }
+    }
+
+    /**
+     * Open all live memory view panels immediately, even if not connected.
+     * Panels will show placeholder content until the socket connects.
+     * Called at extension activation so tabs are always visible.
+     */
+    public async openAllLivePanels(): Promise<void> {
         for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
