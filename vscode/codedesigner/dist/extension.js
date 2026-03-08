@@ -646,13 +646,29 @@ class DisasmEditorProvider {
         }
     }
     async sendLiveDisasmPage(panel, region, baseAddress, totalBytes, startIndex) {
-        if (!this.socketClient || !this.socketClient.isConnected()) {
-            return;
-        }
         const startOffset = startIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
         const maxBytes = DisasmEditorProvider.PAGE_SIZE * DisasmEditorProvider.INSTRUCTION_SIZE;
         const readLength = Math.min(totalBytes - startOffset, maxBytes);
         if (readLength <= 0) {
+            return;
+        }
+        if (!this.socketClient || !this.socketClient.isConnected()) {
+            // When not connected, send address-only placeholder rows so the grid is
+            // navigable and breakpoints can be set before connecting.
+            const count = Math.floor(readLength / DisasmEditorProvider.INSTRUCTION_SIZE);
+            const rows = [];
+            for (let i = 0; i < count; i++) {
+                const addr = baseAddress + startOffset + i * DisasmEditorProvider.INSTRUCTION_SIZE;
+                rows.push({
+                    addr: addr.toString(16).toUpperCase().padStart(8, '0'),
+                    bytes: '',
+                    label: '',
+                    op: '',
+                    args: '',
+                    comment: '',
+                });
+            }
+            panel.webview.postMessage({ type: 'disasmPage', rows, startIndex });
             return;
         }
         const startAddr = baseAddress + startOffset;
@@ -3081,13 +3097,18 @@ const getLocalIndex = index => index - getPageStart(index);
 window.addEventListener("message", ({ data: msg }) => {
     console.log('[WEBVIEW] Received message:', msg.type, msg);
     switch (msg.type) {
-        case "init":
+        case "init": {
             console.log('[WEBVIEW] Init:', msg.totalInstructions, 'instructions');
             state.totalInstructions = msg.totalInstructions;
             state.pageSize = msg.pageSize;
             state.baseAddress = msg.baseAddress;
             state.totalBytes = msg.totalBytes ?? (msg.totalInstructions * 4);
             state.regionLabel = msg.regionLabel ?? '';
+            // Clear stale page cache and reset pending flag so live refresh
+            // can fire immediately after a reconnect.
+            state.loadedPages.clear();
+            state.disasmRows = [];
+            liveRefreshPending = false;
             if (state.regionLabel) {
                 const rl = document.getElementById('sym-region-label');
                 if (rl) rl.textContent = \`— \${state.regionLabel}\`;
@@ -3097,7 +3118,15 @@ window.addEventListener("message", ({ data: msg }) => {
                 headerToolbar.classList.add('live-active');
                 startLiveRefresh();
             }
+            // Request the current page immediately. The provider responds with
+            // address-only placeholder rows when not connected, or real
+            // disassembly data when connected — so the grid becomes visible
+            // right away in both cases.
+            if (state.totalInstructions > 0) {
+                vscode.postMessage({ type: 'requestPage', startIndex: getPageStart(state.cursor) });
+            }
             break;
+        }
         case "disasmPage":
             console.log('[WEBVIEW] disasmPage:', msg.rows?.length || 0, 'rows, startIndex:', msg.startIndex);
             liveRefreshPending = false;
