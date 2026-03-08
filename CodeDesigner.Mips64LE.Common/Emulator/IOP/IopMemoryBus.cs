@@ -626,7 +626,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                 return _cdvd?.DiscType ?? Cdvd.DISC_NO_DISC;
 
             if (_cdvd != null && addr >= Cdvd.RegBase && addr < Cdvd.RegBase + Cdvd.RegSize)
-                return _cdvd.ReadRegister(addr - Cdvd.RegBase);
+            {
+                byte result = _cdvd.ReadRegister(addr - Cdvd.RegBase);
+                Console.WriteLine($"[CDVD ReadByte] addr=0x{addr:X8} (off={addr - Cdvd.RegBase}) val=0x{result:X2}  PC=0x{DebugCurrentPc:X8}");
+                return result;
+            }
 
             if (_sio2 != null && addr >= Sio2.RegBase && addr < Sio2.RegBase + Sio2.RegSize)
                 return (byte)_sio2.ReadRegister(addr - Sio2.RegBase);

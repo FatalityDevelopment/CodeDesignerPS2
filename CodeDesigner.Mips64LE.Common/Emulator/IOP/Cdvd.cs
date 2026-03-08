@@ -160,8 +160,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <summary>Drive busy executing N-command: CDVD_DRIVE_BUSY in PCSX2.</summary>
         private const byte DRIVE_BUSY      = 0x80;
 
+        // ── CDVD_STATUS values (REG_STATUS / 0x09) — from PCSX2 cdvd.h ──────
+        // These match PCSX2's enum exactly:
+        //   CDVD_STATUS_STOP  = 0x00  (no disc / stopped)
+        //   CDVD_STATUS_READ  = 0x06  (executing N-command)
+        //   CDVD_STATUS_PAUSE = 0x0A  (disc present, idle/paused)
+        private const byte STATUS_STOP  = 0x00;
+        private const byte STATUS_READ  = 0x06;
+        private const byte STATUS_PAUSE = 0x0A; // PCSX2 CDVD_STATUS_PAUSE
+
         // ── INTR_STAT bits ────────────────────────────────────────────────────
-        private const byte INTR_DATA_READY = 0x04; // bit 2: N-command data ready
+        private const byte INTR_DISC_DETECT = 0x01; // bit 0: disc-detection / disc-change (PCSX2 cdvdDetectDisk: cdvd.IntrStat |= 1)
+        private const byte INTR_DATA_READY  = 0x04; // bit 2: N-command data ready
 
         // ── State ─────────────────────────────────────────────────────────────
 
@@ -194,6 +204,18 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         // always sees bit 6 = 1, so the loop at 0xAA70 exits immediately.
         private byte _sReady = 0x40;
 
+        // Drive status: true while an N-command is executing (set before DataReady fires,
+        // cleared after).  Mirrors PCSX2 cdvd.Status: READ (0x06) during command,
+        // PAUSE (0x0A) when disc present and idle.
+        private bool _nCmdActive;
+
+        // N-command result buffer: small responses (GetDriveStatus, etc.) returned
+        // via REG_NDATAOUT (offset 0x0F).  Separate from the DMA sector buffer.
+        // Mirrors PCSX2 cdvd.Result[] / cdvd.ResultP / cdvd.ResultC.
+        private readonly byte[] _nCmdResult = new byte[16];
+        private int _nCmdResultLen;
+        private int _nCmdResultPos;
+
         // Sector data buffer: filled by ExecuteNCommand, consumed by ReadNextDmaWord
         private byte[] _sectorData       = Array.Empty<byte>();
         private int    _sectorDataOffset;
@@ -219,6 +241,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         /// <see cref="IopMemoryBus"/> wires this to assert IOP INTC bit 2.
         /// </summary>
         public event EventHandler? DataReady;
+
+        /// <summary>
+        /// Set ISTAT bit 0 (disc-detection event) and return it so the caller can
+        /// fire IOP INTC bit 2.  Matches PCSX2 cdvdDetectDisk(): cdvd.IntrStat |= 1.
+        /// </summary>
+        public void RaiseDiscDetect()
+        {
+            _nIntrStat |= INTR_DISC_DETECT;
+        }
 
         // ── ISO image loading ─────────────────────────────────────────────────
 
@@ -332,12 +363,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             return offset switch
             {
                 REG_NREADY     => _nReady,                    // READY | MECHA_INIT | DEV9CON (0x4C)
+                REG_NDOUT      => _nCmdResultLen > 0          // 0x06: NCMDResult (PCSX2 cdvdRead06)
+                                      ? _nCmdResult[0]        // non-destructive: same byte every read (like PCSX2 cdvd.NCMDResult)
+                                      : (byte)0x00,           // 0x00 = no result / reset state
                 REG_ISTAT      => _nIntrStat,
-                REG_STATUS     => HasDisc ? (byte)0x06 : (byte)0x00, // 0x06 = paused/disc present
+                REG_STATUS     => HasDisc                     // PCSX2: CDVD_STATUS_PAUSE=0x0A, CDVD_STATUS_READ=0x06, STOP=0x00
+                                      ? (_nCmdActive ? STATUS_READ : STATUS_PAUSE)
+                                      : STATUS_STOP,
                 REG_TRAY       => HasDisc ? (byte)0x00 : (byte)0x01, // 0=closed, 1=open
                 REG_CRT        => DiscType,
-                REG_NDATAOUT   => _sCmdOutputPos < _sCmdOutputLen   // 0x0F = N-cmd data out (placeholder)
-                                      ? _sCmdOutput[_sCmdOutputPos++]
+                REG_NDATAOUT   => _nCmdResultPos < _nCmdResultLen  // 0x0F = N-cmd result bytes (sequential, like PCSX2 cdvd.Result[ResultP++])
+                                      ? _nCmdResult[_nCmdResultPos++]
                                       : (byte)0,
                 REG_SCMD_PARAM => _sReady,                    // 0x17 READ = SREADY/sDataIn (bit6=idle, bit7=error)
                 REG_SDATAOUT   => ReadSDataByte(),            // 0x18 = cdvdRead18: SCMDResultBuff[pos++]
@@ -434,45 +470,113 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         // ── N-command execution ───────────────────────────────────────────────
 
+        /// <summary>
+        /// Set up the N-command result buffer (small responses via REG_NDATAOUT).
+        /// Mirrors PCSX2 SetResultSize(n) which stores n bytes in cdvd.Result[].
+        /// </summary>
+        private void SetNResult(params byte[] bytes)
+        {
+            int len = Math.Min(bytes.Length, _nCmdResult.Length);
+            for (int i = 0; i < len; i++) _nCmdResult[i] = bytes[i];
+            _nCmdResultLen = len;
+            _nCmdResultPos = 0;
+        }
+
         private void ExecuteNCommand(byte cmd)
         {
-            switch (cmd)
+            // Mark drive as busy (STATUS = READ) for the duration of this call.
+            // Matches PCSX2: cdvd.Status = CDVD_STATUS_READ before command, then
+            // reset to CDVD_STATUS_PAUSE after.
+            _nCmdActive = true;
+            _nCmdResultLen = 0;
+            _nCmdResultPos = 0;
+            try
             {
-                case NCMD_READ_CD:
-                    if (_nParamPos >= 5)
-                    {
-                        uint lba        = ReadParamU32(0);
-                        uint count      = _nParamBuf[4];
-                        if (count == 0) count = 1;
-                        byte sectorType = _nParamPos >= 6 ? _nParamBuf[5] : (byte)0;
-                        LoadSectorBuffer(lba, count, sectorType);
-                    }
-                    break;
+                switch (cmd)
+                {
+                    // ── Startup / status N-commands (small results via NDATAOUT) ──
+                    case 0x00: // NoOp / NOP
+                        SetNResult(0x00);
+                        break;
 
-                case NCMD_READ_CDDA:
-                    if (_nParamPos >= 5)
-                    {
-                        uint lba   = ReadParamU32(0);
-                        uint count = _nParamBuf[4];
-                        if (count == 0) count = 1;
-                        LoadCddaBuffer(lba, count);
-                    }
-                    break;
+                    case 0x01: // Standby / Stop
+                        // PCSX2: result[0] = 0 (success).  No disc motion change in emulation.
+                        SetNResult(0x00);
+                        break;
 
-                case NCMD_READ_DVD:
-                    // DVD sectors are always 2048-byte user data; no sector type parameter.
-                    if (_nParamPos >= 5)
-                    {
-                        uint lba   = ReadParamU32(0);
-                        uint count = _nParamBuf[4];
-                        if (count == 0) count = 1;
-                        LoadSectorBuffer(lba, count, sectorType: 0);
-                    }
-                    break;
+                    case 0x02: // Seek
+                        SetNResult(0x00);
+                        break;
 
-                case NCMD_GET_TOC:
-                    LoadTocBuffer();
-                    break;
+                    case 0x03: // GetErrors — returns error count byte
+                        SetNResult(0x00); // 0 = no errors
+                        break;
+
+                    case 0x04: // GetTrayState — returns tray state (same as REG_TRAY)
+                        SetNResult(HasDisc ? (byte)0x00 : (byte)0x01);
+                        break;
+
+                    case 0x0B: // GetDriveStatus / cdvdGetDriveStatus in PCSX2
+                        // Returns 1 byte: the drive STATUS register value.
+                        // CDVDman reads this and checks for CDVD_STATUS_PAUSE (0x0A)
+                        // to confirm disc is idle/ready.
+                        SetNResult(HasDisc ? STATUS_PAUSE : STATUS_STOP);
+                        break;
+
+                    case 0x0C: // GetError (error code)
+                        SetNResult(0x00);
+                        break;
+
+                    case 0x0F: // GetDiscType — same as REG_CRT
+                        SetNResult(DiscType);
+                        break;
+
+                    case 0x10: // GetDiscID / CD-ID (12 bytes)
+                        // Return 12 zero bytes; CDVDman uses this for copy-protection checks.
+                        SetNResult(0,0,0,0, 0,0,0,0, 0,0,0,0);
+                        break;
+
+                    case NCMD_READ_CD:
+                        if (_nParamPos >= 5)
+                        {
+                            uint lba        = ReadParamU32(0);
+                            uint count      = _nParamBuf[4];
+                            if (count == 0) count = 1;
+                            byte sectorType = _nParamPos >= 6 ? _nParamBuf[5] : (byte)0;
+                            LoadSectorBuffer(lba, count, sectorType);
+                        }
+                        break;
+
+                    case NCMD_READ_CDDA:
+                        if (_nParamPos >= 5)
+                        {
+                            uint lba   = ReadParamU32(0);
+                            uint count = _nParamBuf[4];
+                            if (count == 0) count = 1;
+                            LoadCddaBuffer(lba, count);
+                        }
+                        break;
+
+                    case NCMD_READ_DVD:
+                        // DVD sectors are always 2048-byte user data; no sector type parameter.
+                        if (_nParamPos >= 5)
+                        {
+                            uint lba   = ReadParamU32(0);
+                            uint count = _nParamBuf[4];
+                            if (count == 0) count = 1;
+                            LoadSectorBuffer(lba, count, sectorType: 0);
+                        }
+                        break;
+
+                    case NCMD_GET_TOC:
+                        LoadTocBuffer();
+                        break;
+                }
+            }
+            finally
+            {
+                // Command complete: return to PAUSE state (disc present, idle).
+                _nCmdActive = false;
             }
 
             _nIntrStat |= INTR_DATA_READY;
@@ -584,6 +688,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
                     break;
 
                 case 0x42: // CdCloseConfig — returns 1 status byte (0 = OK)
+                    _sCmdOutput[0] = 0x00;
+                    _sCmdOutputLen = 1;
+                    break;
+
+                case 0x43: // CdWriteNVM — write 16 bytes to NVM config, returns 1 status byte
+                    // PCSX2 cdvdWrite43(): writes to BIOS.nvm, returns 0 = OK.
                     _sCmdOutput[0] = 0x00;
                     _sCmdOutputLen = 1;
                     break;

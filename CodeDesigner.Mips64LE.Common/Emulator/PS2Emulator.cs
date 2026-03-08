@@ -1964,7 +1964,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             //             completes (IOP hasn't sent a response yet).
             //   0x24100/0x24108/0x24114 – per-module state words checked in the loop
             //   0x242F8 – module-list pointer checked in the inner loop
-            //   0x24124 – outer-loop exit flag (module count); fill keeps it non-zero
+            //   0x24124 – outer-loop exit flag (module count); fill keeps it non-zero.
+            //             Also force-cleared if it holds a small legitimate module count
+            //             (1–0xFF) because SIFMAN never sends the boot-complete SIF2
+            //             acknowledgements in our emulator, so the EE would wait forever.
             bool patchedAny = false;
             patchedAny |= PatchWordIfFill(0x23FC8u);
             patchedAny |= PatchWordIfFill(0x23FCCu);
@@ -1975,6 +1978,19 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             patchedAny |= PatchWordIfFill(0x24114u);
             patchedAny |= PatchWordIfFill(0x242F8u);
             patchedAny |= PatchWordIfFill(0x24124u);
+            // Also clear legitimate (non-fill) module counts so the loop can exit even
+            // when the IOP has finished loading modules but never sends SIF2 acks.
+            if (0x24124u + 3u < (uint)Bus.Ram.Length)
+            {
+                uint cnt124 = (uint)(Bus.Ram[0x24124] | (Bus.Ram[0x24125] << 8)
+                                   | (Bus.Ram[0x24126] << 16) | (Bus.Ram[0x24127] << 24));
+                if (cnt124 != 0u && cnt124 <= 0xFFu)
+                {
+                    Bus.Ram[0x24124] = 0; Bus.Ram[0x24125] = 0;
+                    Bus.Ram[0x24126] = 0; Bus.Ram[0x24127] = 0;
+                    patchedAny = true;
+                }
+            }
 
             // ── Step 2: full-area scan (one-shot per fill occurrence) ─────────────
             // If any specific field carried fill pattern, reset the one-shot guard so

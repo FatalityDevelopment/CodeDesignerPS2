@@ -195,6 +195,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private ulong _sifmanPatchedAtIopStep;
 
         /// <summary>
+        /// <c>true</c> once the synthetic CDVD disc-detection interrupt (IOP INTC bit 2)
+        /// has been fired.  This interrupt simulates the PS2 hardware disc-detect event
+        /// that PCSX2 fires via <c>cdvdNewDiskCB()</c> / <c>iopIntcIrq(2)</c> a short
+        /// time after the drive detects a disc.  Without it CDVDman never runs its
+        /// interrupt handler to set its internal disc-ready flags, creating a deadlock
+        /// where no N-command is ever issued.
+        /// Reference: PCSX2 pcsx2/CDVD/CDVD.cpp cdvdNewDiskCB().
+        /// </summary>
+        private bool _cdvdDiscInterruptFired;
+
+        /// <summary>
         /// Construct a scheduler, optionally supplying a pre-configured EE emulator.
         /// The IOP is always constructed fresh and wired to the EE's SIF.
         /// </summary>
@@ -326,6 +337,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             _sifmanSbusPatched    = false;
             _sifmanSmflagInjected = false;
             _sifmanPatchedAtIopStep = 0;
+            _cdvdDiscInterruptFired = false;
         }
 
         /// <summary>
@@ -413,6 +425,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // WaitIntr semaphore is woken in spite of any timer-ISR races.
                 if ((EE.Bus.Sif.SmFlag & 0x40000000u) == 0u)
                     IOP.Bus.RaiseInterrupt(1);
+
+                // Keep I_MASK bit 2 (CDVD) enabled from the moment the
+                // disc-detection interrupt fires until CDVDman's handler has run.
+                // The IOP timer ISR at ~0x4C60 writes a fixed I_MASK value
+                // (0x00010809) that clears bit 2, so we must re-assert it on
+                // every slice — identical to the SBUS (bit 1) keep-alive above.
+                // Once _cdvdDiscInterruptFired is true the I_STAT bit 2 is set;
+                // we keep I_MASK bit 2 enabled until I_STAT bit 2 is cleared by
+                // CDVDman's interrupt handler (W0C write to 0x1F801070).
+                if (_cdvdDiscInterruptFired && (IOP.Bus.IStat & 0x4u) != 0u)
+                    IOP.Bus.EnableInterruptMask(2);
             }
 
             // ── Fallback: SMFLAG bit-30 (SIF_STAT_SIFINIT) injection ─────────
@@ -433,6 +456,67 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 EE.Bus.Sif.WriteIopRegister(Hardware.SIF.REG_SMFLAG, 0x40000000u);
             }
 
+            // ── SMFLAG lower-bits clear ───────────────────────────────────────
+            // The EE SBUS handler at 0x8000FAC8 polls SMFLAG until it stabilises,
+            // then checks if (SMFLAG & 0x3FFFFFFF) != 0. While those bits are set
+            // (e.g. bits 16-18 written by SIFMAN during init) the EE does NOT clear
+            // INTC_STAT bit 1, so 0x8000FDE8 returns with the SBUS bit still pending.
+            // The outer module-install loop calls 0x8000FDE8 on every iteration,
+            // meaning the EE spins until the lower SMFLAG bits are cleared.
+            // After SIF init is complete (bit 30 set) and the SBUS keep-alive has
+            // stopped (IOP no longer writing SMFLAG), clear the lower status bits
+            // so the EE acknowledges the SBUS interrupt and exits the spin.
+            if (_sifmanSbusPatched
+                && (EE.Bus.Sif.SmFlag & 0x40000000u) != 0u
+                && (EE.Bus.Sif.SmFlag & 0x3FFFFFFFu) != 0u
+                && TotalIopSteps - _sifmanPatchedAtIopStep >= 500_000UL)
+            {
+                uint smOld = EE.Bus.Sif.SmFlag;
+                // Clear the lower-status bits: the EE acks these by writing 1s to
+                // EE-side SMFLAG register (W1C from EE), which clears them.
+                // We directly clear them in the SIF state to avoid re-triggering
+                // IopSignaledEe and creating a new SBUS interrupt.
+                EE.Bus.Sif.ClearSmFlagLowerBits();
+                Console.WriteLine($"[SMFLAG CLEAR] Cleared SMFLAG lower bits 0x{smOld & 0x3FFFFFFFu:X8} at IOP step {TotalIopSteps:N0}");
+            }
+
+            // ── CDVD disc-detection interrupt injection ───────────────────────
+            // PCSX2 fires IOP INTC bit 2 (CDVD interrupt) a short time after the
+            // drive detects a disc — implemented as cdvdNewDiskCB() → iopIntcIrq(2).
+            // This is an "unsolicited" interrupt (no N-command was issued): REG_ISTAT
+            // is NOT set, so CDVDman's handler identifies it as a disc-detection
+            // event rather than an N-command completion.
+            //
+            // CDVDman's disc-detection handler reads REG_NREADY (0x4C = PAUSE),
+            // REG_STATUS (0x0A = PAUSE), and REG_CRT (disc type) to set its internal
+            // disc-ready flags including [0x11218].bit5.  Without this interrupt the
+            // CDVDman internal flag is never set → no N-command is ever issued →
+            // WaitSema(0x404) blocks forever.
+            //
+            // Timing: fire after SMFLAG bit 30 (SIF init complete) AND enough IOP
+            // steps have elapsed for CDVDman to have loaded and registered its
+            // interrupt handler (~10 M IOP steps after the SBUS patch fires).
+            // The 10M delay is generous; CDVDman typically registers within 1-3 M.
+            if (!_cdvdDiscInterruptFired
+                && IOP.Bus.Cdvd?.HasDisc == true
+                && _sifmanSbusPatched
+                && TotalIopSteps - _sifmanPatchedAtIopStep >= 10_000_000UL)
+            {
+                _cdvdDiscInterruptFired = true;
+                // Set CDVD ISTAT bit 0 (disc-detection event) before raising IOP INTC.
+                // PCSX2 cdvdDetectDisk(): cdvd.IntrStat |= 1 → iopIntcIrq(2).
+                // SIFMAN's interrupt handler at ~0x1F640 reads ISTAT; bit 0 tells it
+                // "disc-detection" rather than "N-cmd complete" so it calls CDVDman's
+                // disc-detection callback which sets [0x11218].bit5 = 1.
+                IOP.Bus.Cdvd!.RaiseDiscDetect();
+                // Enable I_MASK bit 2 so the interrupt is actually delivered
+                // (CDVDman may not have called EnableIntr(CDVD) yet, but enabling
+                // it here is safe — PCSX2's ROM patch also forces mask bits).
+                IOP.Bus.EnableInterruptMask(2);
+                IOP.Bus.RaiseInterrupt(2);
+                Console.WriteLine($"[CDVD DISC] Fired disc-detection interrupt (IOP INTC bit 2) at IOP step {TotalIopSteps:N0}");
+            }
+
             // ── EE EELOAD SIF-init loop guard clear ───────────────────────────
             // After SMFLAG bit 30 is set (IOP-ready signal delivered), clear the
             // EE EELOAD SIF-init loop guard at 0x80024124 and 0x80024100 if they
@@ -440,8 +524,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // The loop at 0x80012540 continues while [0x80024124] != 0, waiting
             // for the IOP SIF BootReply which we cannot produce.  Clearing it
             // mimics the effect of the IOP's reply and allows boot to continue.
-            if (!_sifLoopGuardCleared
-                && (EE.Bus.Sif.SmFlag & 0x40000000u) != 0u)
+            // Runs on every slice (not one-shot) because the BIOS may re-write the
+            // field with a legitimate module count after the first clear.
+            if ((EE.Bus.Sif.SmFlag & 0x40000000u) != 0u)
             {
                 const uint PhysGuard1 = 0x24124u;  // [0x80024124] loop-continue
                 const uint PhysGuard2 = 0x24100u;  // [0x80024100] loop-exit guard
@@ -452,15 +537,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                                   EE.Bus.Ram[PhysGuard1 + 3] != 0);
                 if (g1NonZero)
                 {
-                    _sifLoopGuardCleared = true;
                     uint val1 = (uint)(EE.Bus.Ram[PhysGuard1]
                                     | (EE.Bus.Ram[PhysGuard1+1] << 8)
                                     | (EE.Bus.Ram[PhysGuard1+2] << 16)
                                     | (EE.Bus.Ram[PhysGuard1+3] << 24));
-                    uint val2 = (uint)(EE.Bus.Ram[PhysGuard2]
-                                    | (EE.Bus.Ram[PhysGuard2+1] << 8)
-                                    | (EE.Bus.Ram[PhysGuard2+2] << 16)
-                                    | (EE.Bus.Ram[PhysGuard2+3] << 24));
                     EE.Bus.Ram[PhysGuard1]     = 0;
                     EE.Bus.Ram[PhysGuard1 + 1] = 0;
                     EE.Bus.Ram[PhysGuard1 + 2] = 0;
@@ -469,7 +549,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     EE.Bus.Ram[PhysGuard2 + 1] = 0;
                     EE.Bus.Ram[PhysGuard2 + 2] = 0;
                     EE.Bus.Ram[PhysGuard2 + 3] = 0;
-                    Console.WriteLine($"[EE LOOP GUARD] Cleared 0x80024124 (was 0x{val1:X8}) and 0x80024100 (was 0x{val2:X8}) at EE step {TotalEeSteps:N0}");
+                    if (!_sifLoopGuardCleared)
+                    {
+                        _sifLoopGuardCleared = true;
+                        Console.WriteLine($"[EE LOOP GUARD] Cleared 0x80024124 (was 0x{val1:X8}) at EE step {TotalEeSteps:N0}");
+                    }
                 }
             }
 
