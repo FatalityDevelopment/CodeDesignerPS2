@@ -42,6 +42,11 @@ ${getDisasmPanelStyles()}
 </head>
 <body>
 
+<div id="emu-status-bar" class="${data.connected ? 'status-connected' : 'status-disconnected'}">
+    <span id="emu-status-dot">●</span>
+    <span id="emu-status-text">${data.connected ? 'LIVE' : 'STOPPED'}</span>
+</div>
+
 <h3>Emulator</h3>
 <div class="container">
 
@@ -181,6 +186,13 @@ window.addEventListener('message', event => {
             snapBtn.disabled = !message.connected;
             const restartBtn = document.getElementById('restartBtn');
             if (restartBtn) { restartBtn.disabled = !message.connected; }
+            // Update the live status bar
+            const statusBar = document.getElementById('emu-status-bar');
+            const statusText = document.getElementById('emu-status-text');
+            if (statusBar && statusText) {
+                statusBar.className = message.connected ? 'status-connected' : 'status-disconnected';
+                statusText.textContent = message.connected ? 'LIVE' : 'STOPPED';
+            }
             break;
         }
         case 'updateSnapshots': {

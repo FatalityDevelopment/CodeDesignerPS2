@@ -34,6 +34,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private workspaceRoot: string = '';
     private snapshots: SnapshotEntry[] = [];
     private extensionPath: string = '';
+    private selectedEmulatorPath: string = '';
+    private selectedBiosPath: string = '';
+    private selectedGamePath: string = '';
 
     constructor(
         private readonly socketClient: SocketClient,
@@ -100,10 +103,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'restart':
                     await this.handleRestart();
                     break;
-                // Dropdown change notifications (no-op for now)
+                // Dropdown change notifications — save current selections
                 case 'emulatorChanged':
+                    this.selectedEmulatorPath = msg.emulatorPath ?? '';
+                    break;
                 case 'biosChanged':
+                    this.selectedBiosPath = msg.biosPath ?? '';
+                    break;
                 case 'gameChanged':
+                    this.selectedGamePath = msg.gamePath ?? '';
                     break;
             }
         });
@@ -192,6 +200,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     private handleConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
+
+        // Save current selections for use by Restart
+        this.selectedEmulatorPath = emulatorPath;
+        this.selectedBiosPath = biosPath;
+        this.selectedGamePath = gamePath;
 
         // Toggle: if already running or already socket-connected, stop/disconnect
         if (this.emulatorTerminal || this.socketClient.isConnected()) {
@@ -303,26 +316,43 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
     }
 
-    /** Restart the emulator: reset both CPUs, clear live panel caches, resume running. */
+    /** Restart the emulator: kill the current process and relaunch with the same disc image. */
     private async handleRestart(): Promise<void> {
         const out = getOutputChannel();
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator.');
+
+        const emulatorPath = this.selectedEmulatorPath;
+        if (!emulatorPath) {
+            vscode.window.showWarningMessage('No emulator selected. Cannot restart.');
             return;
         }
-        try {
-            // Immediately blank live panels so stale content is not shown
-            this.editorProvider.resetLivePanels();
-            await this.socketClient.restart();
-            // Resume so the emulator runs from the reset vector instead of
-            // staying paused (which would look like a breakpoint was hit).
-            await this.socketClient.resume();
-            out.appendLine('[INFO] Emulator restarted and running from reset vector.');
-        } catch (err: any) {
-            const msg = err?.message ?? String(err);
-            out.appendLine(`[ERROR] Restart failed: ${msg}`);
-            vscode.window.showErrorMessage(`Restart failed: ${msg}`);
+
+        out.appendLine('[INFO] Restarting emulator — reloading disc image…');
+
+        // Blank live panels so stale content is not shown during the restart
+        this.editorProvider.resetLivePanels();
+
+        // Disconnect the socket first
+        if (this.socketClient.isConnected()) {
+            try { this.socketClient.disconnect(); } catch (err: any) {
+                out.appendLine(`[DEBUG] Disconnect during restart: ${err?.message ?? err}`);
+            }
         }
+
+        // Kill the existing terminal / process
+        if (this.emulatorTerminal) {
+            this.emulatorTerminal.dispose();
+            this.emulatorTerminal = undefined;
+        }
+
+        // Notify UI that we are now disconnected
+        this.webview?.postMessage({ command: 'connectionStatus', connected: false });
+
+        // Give the old process a moment to release the port before relaunching
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+        // Relaunch with the saved emulator / bios / game paths
+        this.spawnAndConnect(emulatorPath, this.selectedBiosPath, this.selectedGamePath);
+        out.appendLine('[INFO] Emulator restarted — waiting for socket connection…');
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────

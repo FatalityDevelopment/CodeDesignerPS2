@@ -220,6 +220,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         } else if (message.type === "editLabel") {
           await this.handleEditLabel(webviewPanel, message.address, message.addressHex,
             message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
+        } else if (message.type === "saveLabel") {
+          await this.handleSaveLabel(webviewPanel, message.address, message.newLabel ?? '', message.newComment ?? '');
         }
       });
     });
@@ -649,6 +651,24 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       return;
     }
 
+    await this.handleAddLabel(panel, address, newLabel, newComment || undefined);
+  }
+
+  /**
+   * Save a label + comment directly (without showInputBox prompts).
+   * Called when the user submits the inline edit overlay in the webview.
+   */
+  private async handleSaveLabel(
+    panel: vscode.WebviewPanel,
+    address: number,
+    newLabel: string,
+    newComment: string
+  ): Promise<void> {
+    if (!newLabel && !newComment) {
+      // Both empty — delete the entry if it existed
+      await this.handleDeleteLabel(panel, address);
+      return;
+    }
     await this.handleAddLabel(panel, address, newLabel, newComment || undefined);
   }
 
