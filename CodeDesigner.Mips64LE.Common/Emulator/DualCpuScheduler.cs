@@ -195,6 +195,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private ulong _sifmanPatchedAtIopStep;
 
         /// <summary>
+        /// <c>true</c> once the synthetic CDVD disc-detection interrupt (IOP INTC bit 2)
+        /// has been fired.  This interrupt simulates the PS2 hardware disc-detect event
+        /// that PCSX2 fires via <c>cdvdNewDiskCB()</c> / <c>iopIntcIrq(2)</c> a short
+        /// time after the drive detects a disc.  Without it CDVDman never runs its
+        /// interrupt handler to set its internal disc-ready flags, creating a deadlock
+        /// where no N-command is ever issued.
+        /// Reference: PCSX2 pcsx2/CDVD/CDVD.cpp cdvdNewDiskCB().
+        /// </summary>
+        private bool _cdvdDiscInterruptFired;
+
+        /// <summary>
         /// Construct a scheduler, optionally supplying a pre-configured EE emulator.
         /// The IOP is always constructed fresh and wired to the EE's SIF.
         /// </summary>
@@ -326,6 +337,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             _sifmanSbusPatched    = false;
             _sifmanSmflagInjected = false;
             _sifmanPatchedAtIopStep = 0;
+            _cdvdDiscInterruptFired = false;
         }
 
         /// <summary>
@@ -413,6 +425,17 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // WaitIntr semaphore is woken in spite of any timer-ISR races.
                 if ((EE.Bus.Sif.SmFlag & 0x40000000u) == 0u)
                     IOP.Bus.RaiseInterrupt(1);
+
+                // Keep I_MASK bit 2 (CDVD) enabled from the moment the
+                // disc-detection interrupt fires until CDVDman's handler has run.
+                // The IOP timer ISR at ~0x4C60 writes a fixed I_MASK value
+                // (0x00010809) that clears bit 2, so we must re-assert it on
+                // every slice — identical to the SBUS (bit 1) keep-alive above.
+                // Once _cdvdDiscInterruptFired is true the I_STAT bit 2 is set;
+                // we keep I_MASK bit 2 enabled until I_STAT bit 2 is cleared by
+                // CDVDman's interrupt handler (W0C write to 0x1F801070).
+                if (_cdvdDiscInterruptFired && (IOP.Bus.IStat & 0x4u) != 0u)
+                    IOP.Bus.EnableInterruptMask(2);
             }
 
             // ── Fallback: SMFLAG bit-30 (SIF_STAT_SIFINIT) injection ─────────
@@ -431,6 +454,43 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 _sifmanSmflagInjected = true;
                 Console.WriteLine($"[SMFLAG FALLBACK] Injecting SMFLAG bit 30 (SIF_STAT_SIFINIT) at IOP step {TotalIopSteps:N0} (EE step {TotalEeSteps:N0})");
                 EE.Bus.Sif.WriteIopRegister(Hardware.SIF.REG_SMFLAG, 0x40000000u);
+            }
+
+            // ── CDVD disc-detection interrupt injection ───────────────────────
+            // PCSX2 fires IOP INTC bit 2 (CDVD interrupt) a short time after the
+            // drive detects a disc — implemented as cdvdNewDiskCB() → iopIntcIrq(2).
+            // This is an "unsolicited" interrupt (no N-command was issued): REG_ISTAT
+            // is NOT set, so CDVDman's handler identifies it as a disc-detection
+            // event rather than an N-command completion.
+            //
+            // CDVDman's disc-detection handler reads REG_NREADY (0x4C = PAUSE),
+            // REG_STATUS (0x0A = PAUSE), and REG_CRT (disc type) to set its internal
+            // disc-ready flags including [0x11218].bit5.  Without this interrupt the
+            // CDVDman internal flag is never set → no N-command is ever issued →
+            // WaitSema(0x404) blocks forever.
+            //
+            // Timing: fire after SMFLAG bit 30 (SIF init complete) AND enough IOP
+            // steps have elapsed for CDVDman to have loaded and registered its
+            // interrupt handler (~10 M IOP steps after the SBUS patch fires).
+            // The 10M delay is generous; CDVDman typically registers within 1-3 M.
+            if (!_cdvdDiscInterruptFired
+                && IOP.Bus.Cdvd?.HasDisc == true
+                && _sifmanSbusPatched
+                && TotalIopSteps - _sifmanPatchedAtIopStep >= 10_000_000UL)
+            {
+                _cdvdDiscInterruptFired = true;
+                // Set CDVD ISTAT bit 0 (disc-detection event) before raising IOP INTC.
+                // PCSX2 cdvdDetectDisk(): cdvd.IntrStat |= 1 → iopIntcIrq(2).
+                // SIFMAN's interrupt handler at ~0x1F640 reads ISTAT; bit 0 tells it
+                // "disc-detection" rather than "N-cmd complete" so it calls CDVDman's
+                // disc-detection callback which sets [0x11218].bit5 = 1.
+                IOP.Bus.Cdvd!.RaiseDiscDetect();
+                // Enable I_MASK bit 2 so the interrupt is actually delivered
+                // (CDVDman may not have called EnableIntr(CDVD) yet, but enabling
+                // it here is safe — PCSX2's ROM patch also forces mask bits).
+                IOP.Bus.EnableInterruptMask(2);
+                IOP.Bus.RaiseInterrupt(2);
+                Console.WriteLine($"[CDVD DISC] Fired disc-detection interrupt (IOP INTC bit 2) at IOP step {TotalIopSteps:N0}");
             }
 
             // ── EE EELOAD SIF-init loop guard clear ───────────────────────────
