@@ -26,7 +26,6 @@ ${getDisasmEditorStyles()}
 <body>
 
 <div id="header">
-${getLiveToolbar()}
 ${getHeaderToolbar()}
 ${getGotoPanel()}
 ${getSearchPanel()}
@@ -93,21 +92,18 @@ function getSearchPanel(): string {
 </div>`;
 }
 
-function getLiveToolbar(): string {
-    return `<div id="live-toolbar">
-    <span class="live-indicator" id="live-indicator">● LIVE</span>
-    <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
+function getHeaderToolbar(): string {
+    return `<div id="header-toolbar">
+    <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">⊞ Symbols</button>
+    <div id="live-controls">
+        <span class="live-indicator" id="live-indicator">● LIVE</span>
+        <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
+    </div>
 </div>`;
 }
 
 function getHexContainer(): string {
     return `<div id="hex-container"></div>`;
-}
-
-function getHeaderToolbar(): string {
-    return `<div id="header-toolbar">
-    <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">⊞ Symbols</button>
-</div>`;
 }
 
 function getGrid(): string {
@@ -205,7 +201,8 @@ const gotoClear = document.getElementById("goto-clear");
 const gotoBtn = document.getElementById("goto-btn");
 const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
-const liveToolbar = document.getElementById("live-toolbar");
+const headerToolbar = document.getElementById("header-toolbar");
+const liveControls = document.getElementById("live-controls");
 const liveIndicator = document.getElementById("live-indicator");
 const playPauseBtn = document.getElementById("play-pause-btn");
 const debugPanel = document.getElementById("debug-panel");
@@ -282,7 +279,8 @@ window.addEventListener("message", ({ data: msg }) => {
             }
             if (msg.isLive) {
                 state.isLive = true;
-                liveToolbar.classList.add('visible');
+                liveControls.classList.add('visible');
+                headerToolbar.classList.add('live-active');
                 startLiveRefresh();
             }
             break;
@@ -325,6 +323,9 @@ window.addEventListener("message", ({ data: msg }) => {
         case "labelsUpdated":
             state.symLabels = msg.labels ?? [];
             renderSymLabels();
+            // Invalidate and reload the current page so the disassembly grid reflects the new label
+            state.loadedPages.delete(getPageStart(state.cursor));
+            checkAndLoadPage();
             break;
         case "stringsUpdated":
             state.symStrings = msg.strings ?? [];
@@ -681,6 +682,18 @@ function renderDisassembly() {
             state.cursor = globalIndex;
             updateCursor();
         };
+        row.ondblclick = () => {
+            state.cursor = globalIndex;
+            updateCursor();
+            vscode.postMessage({
+                type: 'editLabel',
+                address: parseInt(rowData.addr, 16),
+                addressHex: rowData.addr,
+                dataBytes: rowData.bytes,
+                currentLabel: rowData.label || '',
+                currentComment: rowData.comment || '',
+            });
+        };
         grid.appendChild(row);
     });
     updateCursor();
@@ -906,14 +919,16 @@ function doLiveRefresh() {
 
 function setLivePausedUi(paused) {
     if (paused) {
-        liveToolbar.classList.add('paused');
+        headerToolbar.classList.remove('live-active');
+        headerToolbar.classList.add('live-paused');
         liveIndicator.classList.add('paused');
         liveIndicator.textContent = '⏸ PAUSED';
         playPauseBtn.textContent = '▶ Resume';
         playPauseBtn.title = 'Resume live feed';
         playPauseBtn.setAttribute('aria-label', 'Resume live feed');
     } else {
-        liveToolbar.classList.remove('paused');
+        headerToolbar.classList.remove('live-paused');
+        headerToolbar.classList.add('live-active');
         liveIndicator.classList.remove('paused');
         liveIndicator.textContent = '● LIVE';
         playPauseBtn.textContent = '⏸ Pause';

@@ -217,6 +217,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           await this.handleAddLabel(webviewPanel, message.address, message.labelName, message.comment);
         } else if (message.type === "deleteLabel") {
           await this.handleDeleteLabel(webviewPanel, message.address);
+        } else if (message.type === "editLabel") {
+          await this.handleEditLabel(webviewPanel, message.address, message.addressHex,
+            message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
         }
       });
     });
@@ -374,6 +377,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.handleAddLabel(panel, message.address, message.labelName, message.comment);
             } else if (message.type === 'deleteLabel') {
                 await this.handleDeleteLabel(panel, message.address);
+            } else if (message.type === 'editLabel') {
+                await this.handleEditLabel(panel, message.address, message.addressHex,
+                    message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
             }
         });
     }
@@ -594,6 +600,56 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     panel.webview.postMessage({ type: 'symbols', labels, strings, functions });
+  }
+
+  /**
+   * Open a VSCode multi-step input dialog to edit the label and comment for an
+   * address.  The title bar shows the address and raw instruction bytes so the
+   * user has full context.  Pressing Escape on either step cancels the whole
+   * operation with no changes saved.
+   *
+   * @param addressHex - Hex digits only (no "0x" prefix), e.g. "80010000"
+   */
+  private async handleEditLabel(
+    panel: vscode.WebviewPanel,
+    address: number,
+    addressHex: string,
+    dataBytes: string,
+    currentLabel: string,
+    currentComment: string
+  ): Promise<void> {
+    // addressHex is plain hex digits (no "0x" prefix) as produced by
+    // toString(16).toUpperCase().padStart(8,"0") in the webview.
+    const addrDisplay = `0x${addressHex.toUpperCase()}`;
+    const dataDisplay = dataBytes ? ` | Data: ${dataBytes}` : '';
+
+    const newLabel = await vscode.window.showInputBox({
+      title: `Edit Label — ${addrDisplay}${dataDisplay}`,
+      prompt: 'Label (leave empty to remove)',
+      value: currentLabel,
+      placeHolder: 'Label name',
+      ignoreFocusOut: true,
+    });
+    if (newLabel === undefined) { return; } // cancelled
+
+    const newComment = await vscode.window.showInputBox({
+      title: `Edit Comment — ${addrDisplay}`,
+      prompt: 'Comment (leave empty to remove)',
+      value: currentComment,
+      placeHolder: 'Comment',
+      ignoreFocusOut: true,
+    });
+    if (newComment === undefined) { return; } // cancelled
+
+    if (!newLabel && !newComment) {
+      // Both empty — delete the label if it existed
+      if (currentLabel || currentComment) {
+        await this.handleDeleteLabel(panel, address);
+      }
+      return;
+    }
+
+    await this.handleAddLabel(panel, address, newLabel, newComment || undefined);
   }
 
   /**
