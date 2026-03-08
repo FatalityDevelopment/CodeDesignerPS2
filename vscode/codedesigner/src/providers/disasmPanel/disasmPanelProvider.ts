@@ -303,7 +303,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
     }
 
-    /** Restart the emulator: reset both CPUs, clear live panel caches, leave paused. */
+    /** Restart the emulator: reset both CPUs, clear live panel caches, resume running. */
     private async handleRestart(): Promise<void> {
         const out = getOutputChannel();
         if (!this.socketClient.isConnected()) {
@@ -311,10 +311,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
         try {
-            // Immediately blank live panels so user can set early-address breakpoints
+            // Immediately blank live panels so stale content is not shown
             this.editorProvider.resetLivePanels();
             await this.socketClient.restart();
-            out.appendLine('[INFO] Emulator restarted (paused at reset vector).');
+            // Resume so the emulator runs from the reset vector instead of
+            // staying paused (which would look like a breakpoint was hit).
+            await this.socketClient.resume();
+            out.appendLine('[INFO] Emulator restarted and running from reset vector.');
         } catch (err: any) {
             const msg = err?.message ?? String(err);
             out.appendLine(`[ERROR] Restart failed: ${msg}`);
@@ -387,5 +390,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private resolvePath(p: string): string {
         if (path.isAbsolute(p)) { return p; }
         return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
+    }
+
+    /**
+     * Called when the socket connects (including auto-connect on VS Code startup).
+     * Opens live memory views for all regions, reusing any already-open panels.
+     */
+    public async onSocketConnected(): Promise<void> {
+        this.webview?.postMessage({ command: 'connectionStatus', connected: true });
+        for (const r of LIVE_REGIONS) {
+            await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+        }
     }
 }

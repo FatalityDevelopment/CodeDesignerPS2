@@ -119,6 +119,7 @@ interface InstructionResult {
     Hex?: string;
     Error?: string;
     Comment?: string;
+    Label?: string;
 }
 
 /**

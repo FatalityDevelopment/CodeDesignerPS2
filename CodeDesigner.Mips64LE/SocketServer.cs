@@ -25,6 +25,12 @@ namespace CodeDesigner.Mips64LE
         private CancellationTokenSource? _cancellationTokenSource;
 
         /// <summary>
+        /// Symbol/label database loaded from ps2-labels.json at construction time.
+        /// Key = virtual address (uint), Value = (Label, optional Comment).
+        /// </summary>
+        private readonly Dictionary<uint, (string Label, string? Comment)> _labels = new();
+
+        /// <summary>
         /// When set, the READMEM command reads live memory from this scheduler.
         /// </summary>
         public DualCpuScheduler? Scheduler { get; set; }
@@ -36,6 +42,59 @@ namespace CodeDesigner.Mips64LE
         public SocketServer(int port = 8765)
         {
             _port = port;
+            LoadLabels();
+        }
+
+        /// <summary>
+        /// Load PS2 symbol labels from ps2-labels.json.
+        /// Searches the application base directory first, then the current working
+        /// directory, so the file can be placed next to the built executable or in
+        /// the directory from which the process was launched.
+        /// </summary>
+        private void LoadLabels()
+        {
+            var searchPaths = new[]
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2-labels.json"),
+                Path.Combine(Directory.GetCurrentDirectory(), "ps2-labels.json")
+            };
+
+            foreach (var labelsPath in searchPaths)
+            {
+                if (!File.Exists(labelsPath)) continue;
+                try
+                {
+                    var json = File.ReadAllText(labelsPath);
+                    using var doc = JsonDocument.Parse(json);
+                    if (!doc.RootElement.TryGetProperty("symbol", out var symbols)) continue;
+
+                    foreach (var sym in symbols.EnumerateArray())
+                    {
+                        string? addrStr = sym.TryGetProperty("address", out var ap) ? ap.GetString() : null;
+                        string? label   = sym.TryGetProperty("label",   out var lp) ? lp.GetString() : null;
+                        string? comment = sym.TryGetProperty("comment", out var cp) ? cp.GetString() : null;
+
+                        if (addrStr is null || label is null) continue;
+
+                        // Support both "0x1000F000" and plain "268500992" formats
+                        if (addrStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                            addrStr = addrStr[2..];
+
+                        if (uint.TryParse(addrStr,
+                                System.Globalization.NumberStyles.HexNumber,
+                                null, out uint addr))
+                        {
+                            _labels[addr] = (label, comment);
+                        }
+                    }
+                    Console.WriteLine($"[Labels] Loaded {_labels.Count} symbol(s) from {labelsPath}");
+                    return; // use only the first file found
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Labels] Failed to load {labelsPath}: {ex.Message}");
+                }
+            }
         }
 
         public async Task StartAsync()
@@ -346,7 +405,7 @@ namespace CodeDesigner.Mips64LE
                     executeInstructions: true  // Execute instructions to track register state
                 );
 
-                // Apply comments to results
+                // Apply comments and labels to results
                 for (int i = 0; i < results.Count; i++)
                 {
                     if (results[i].Success && instructionList.Count > i)
@@ -355,6 +414,15 @@ namespace CodeDesigner.Mips64LE
                         if (comments.TryGetValue(addr, out var comment))
                         {
                             results[i].Comment = comment;
+                        }
+
+                        // Apply label from the database
+                        if (_labels.TryGetValue(addr, out var labelEntry))
+                        {
+                            results[i].Label = labelEntry.Label;
+                            // Use the label's comment only when the analyzer produced nothing
+                            if (string.IsNullOrEmpty(results[i].Comment) && labelEntry.Comment != null)
+                                results[i].Comment = labelEntry.Comment;
                         }
                     }
                 }
@@ -890,5 +958,6 @@ namespace CodeDesigner.Mips64LE
         public string? Hex { get; set; }
         public string? Error { get; set; }
         public string? Comment { get; set; }  // Added for analyzer-generated comments
+        public string? Label { get; set; }    // Symbol label from ps2-labels.json
     }
 }

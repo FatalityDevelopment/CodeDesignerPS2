@@ -78,6 +78,8 @@ export function activate(context: vscode.ExtensionContext) {
 	socketClient.onConnected(() => {
 		outputChannel.appendLine('[INFO] Connected to C# server');
 		vscode.window.showInformationMessage('Connected to C# server');
+		// Auto-open all live memory views (reuses existing panels if already open)
+		disasmPanelProvider.onSocketConnected();
 	});
 
 	socketClient.onDisconnected(() => {
