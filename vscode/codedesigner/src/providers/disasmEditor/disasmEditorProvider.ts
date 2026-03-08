@@ -481,17 +481,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         if (readLength <= 0) { return; }
 
         if (!this.socketClient || !this.socketClient.isConnected()) {
-            // When not connected, send address-only placeholder rows so the grid is
-            // navigable and breakpoints can be set before connecting.
+            // When not connected, send placeholder rows with default zero data so the
+            // grid is navigable and shows 00000000 / nop before the server connects.
             const count = Math.floor(readLength / DisasmEditorProvider.INSTRUCTION_SIZE);
             const rows: DisassembledRow[] = [];
             for (let i = 0; i < count; i++) {
                 const addr = baseAddress + startOffset + i * DisasmEditorProvider.INSTRUCTION_SIZE;
                 rows.push({
                     addr: addr.toString(16).toUpperCase().padStart(8, '0'),
-                    bytes: '',
+                    bytes: '00000000',
                     label: '',
-                    op: '',
+                    op: 'nop',
                     args: '',
                     comment: '',
                 });
