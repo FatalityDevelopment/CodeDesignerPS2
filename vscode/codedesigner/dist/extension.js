@@ -374,7 +374,13 @@ class DisasmEditorProvider {
                     await this.sendDisasmPage(webviewPanel, fileData, message.startIndex);
                 }
                 else if (message.type === "search") {
-                    await this.performSearch(webviewPanel, fileData, message.query, message.mode);
+                    await this.handleSearch(webviewPanel, message.query, message.mode, DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
+                }
+                else if (message.type === "scanStrings") {
+                    await this.handleFileScan('strings', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+                }
+                else if (message.type === "scanFunctions") {
+                    await this.handleFileScan('functions', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
                 }
                 else if (message.type === "getSymbols") {
                     await this.handleGetSymbols(webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
@@ -425,6 +431,8 @@ class DisasmEditorProvider {
             pageSize: DisasmEditorProvider.PAGE_SIZE,
             baseAddress,
             isLive: true,
+            regionLabel: label,
+            totalBytes,
         });
         // Send first page and hex view
         await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
@@ -521,11 +529,16 @@ class DisasmEditorProvider {
                 }
             }
             else if (message.type === 'search') {
-                // Full-region live search is expensive; return empty for now
-                panel.webview.postMessage({ type: 'searchResults', matches: [] });
+                await this.handleSearch(panel, message.query, message.mode, baseAddress, totalBytes, region);
+            }
+            else if (message.type === 'scanStrings') {
+                await this.handleLiveScan('strings', panel, region, baseAddress, totalBytes);
+            }
+            else if (message.type === 'scanFunctions') {
+                await this.handleLiveScan('functions', panel, region, baseAddress, totalBytes);
             }
             else if (message.type === 'getSymbols') {
-                // Live mode: labels from backend; no fileData so strings/functions empty
+                // Live mode: labels from backend; strings/functions are loaded on-demand via scan buttons
                 await this.handleGetSymbols(panel, undefined, baseAddress);
             }
             else if (message.type === 'addLabel') {
@@ -623,146 +636,81 @@ class DisasmEditorProvider {
             console.error(`[LIVE] sendLiveHexView failed at 0x${alignedAddr.toString(16)}: ${msg}`);
         }
     }
-    async performSearch(webviewPanel, fileData, query, mode) {
-        const matches = [];
-        if (mode === 'bytes') {
-            const pattern = this.parseBytePattern(query);
-            if (!pattern) {
-                webviewPanel.webview.postMessage({ type: 'searchResults', matches: [] });
-                return;
-            }
-            for (let offset = 0; offset <= fileData.length - pattern.length; offset++) {
-                let found = true;
-                for (let i = 0; i < pattern.length; i++) {
-                    if (fileData[offset + i] !== pattern[i]) {
-                        found = false;
-                        break;
-                    }
-                }
-                if (found) {
-                    const instructionIndex = Math.floor(offset / DisasmEditorProvider.INSTRUCTION_SIZE);
-                    const address = DisasmEditorProvider.BASE_ADDRESS + offset;
-                    matches.push({
-                        instructionIndex,
-                        address,
-                        field: 'bytes',
-                        start: 0,
-                        length: pattern.length * 3 - 1
-                    });
-                    offset += pattern.length - 1;
-                }
-            }
+    /**
+     * Unified search via C# backend — works for both live and file-based panels.
+     * For live panels pass region and omit fileData.
+     * For file panels pass fileData and omit region.
+     */
+    async handleSearch(panel, query, mode, baseAddress, length, region, fileData) {
+        if (!this.socketClient?.isConnected()) {
+            panel.webview.postMessage({ type: 'searchResults', matches: [] });
+            return;
         }
-        else if (mode === 'string') {
-            const stringBytes = Buffer.from(query, 'utf8');
-            for (let offset = 0; offset <= fileData.length - stringBytes.length; offset++) {
-                let found = true;
-                for (let i = 0; i < stringBytes.length; i++) {
-                    if (fileData[offset + i] !== stringBytes[i]) {
-                        found = false;
-                        break;
-                    }
-                }
-                if (found) {
-                    const instructionIndex = Math.floor(offset / DisasmEditorProvider.INSTRUCTION_SIZE);
-                    const address = DisasmEditorProvider.BASE_ADDRESS + offset;
-                    matches.push({
-                        instructionIndex,
-                        address,
-                        field: 'bytes',
-                        start: 0,
-                        length: stringBytes.length * 3 - 1
-                    });
-                    offset += stringBytes.length - 1;
-                }
-            }
+        try {
+            const matches = await this.socketClient.search(baseAddress, length, query, mode, region, fileData);
+            panel.webview.postMessage({ type: 'searchResults', matches });
         }
-        else {
-            const totalInstructions = Math.floor(fileData.length / DisasmEditorProvider.INSTRUCTION_SIZE);
-            for (let instrIndex = 0; instrIndex < totalInstructions; instrIndex++) {
-                const offset = instrIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
-                const slice = fileData.slice(offset, offset + DisasmEditorProvider.INSTRUCTION_SIZE);
-                if (slice.length < DisasmEditorProvider.INSTRUCTION_SIZE)
-                    break;
-                const address = DisasmEditorProvider.BASE_ADDRESS + offset;
-                const rows = await this.disassembleWithBackend(address, slice);
-                if (rows.length === 0)
-                    continue;
-                const row = rows[0];
-                const rowMatches = this.searchInRow(row, query, mode);
-                for (const match of rowMatches) {
-                    matches.push({
-                        instructionIndex: instrIndex,
-                        address,
-                        field: match.field,
-                        start: match.start,
-                        length: match.length
-                    });
-                }
-            }
+        catch (err) {
+            console.error(`[SEARCH] Failed: ${err?.message ?? err}`);
+            panel.webview.postMessage({ type: 'searchResults', matches: [] });
         }
-        webviewPanel.webview.postMessage({
-            type: 'searchResults',
-            matches
-        });
     }
-    parseBytePattern(pattern) {
-        const cleaned = pattern.replace(/0x/gi, '').replace(/[,\s]+/g, ' ').trim();
-        if (!cleaned)
-            return null;
-        const bytes = cleaned.split(/\s+/);
-        const result = [];
-        for (const byte of bytes) {
-            if (!/^[0-9a-f]{1,2}$/i.test(byte))
-                return null;
-            result.push(parseInt(byte, 16));
+    /**
+     * Scan a live memory region for strings or functions using the C# backend.
+     * Posts a `stringsUpdated` or `functionsUpdated` message to the webview.
+     */
+    async handleLiveScan(kind, panel, region, baseAddress, totalBytes) {
+        if (!this.socketClient?.isConnected()) {
+            return;
         }
-        return result.length ? result : null;
+        try {
+            if (kind === 'strings') {
+                const strings = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
+                panel.webview.postMessage({ type: 'stringsUpdated', strings });
+            }
+            else {
+                const functions = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
+                panel.webview.postMessage({ type: 'functionsUpdated', functions });
+            }
+        }
+        catch (err) {
+            console.error(`[SYMBOLS] LiveScan(${kind}) failed: ${err?.message ?? err}`);
+            // Send empty result so the webview re-enables the scan button
+            if (kind === 'strings') {
+                panel.webview.postMessage({ type: 'stringsUpdated', strings: [] });
+            }
+            else {
+                panel.webview.postMessage({ type: 'functionsUpdated', functions: [] });
+            }
+        }
     }
-    searchInRow(row, query, mode) {
-        const matches = [];
-        const fields = [
-            { text: row.addr, field: 'addr' },
-            { text: row.bytes, field: 'bytes' },
-            { text: row.label || '', field: 'label' },
-            { text: row.op, field: 'op' },
-            { text: row.args, field: 'args' },
-            { text: row.comment || '', field: 'comment' }
-        ];
-        if (mode === 'text') {
-            const searchLower = query.toLowerCase();
-            for (const { text, field } of fields) {
-                const lower = text.toLowerCase();
-                let index = 0;
-                while ((index = lower.indexOf(searchLower, index)) !== -1) {
-                    matches.push({ field, start: index, length: query.length });
-                    index += query.length;
-                }
+    /**
+     * Scan file binary data for strings or functions using the C# backend.
+     * Posts a `stringsUpdated` or `functionsUpdated` message to the webview.
+     */
+    async handleFileScan(kind, panel, fileData, baseAddress) {
+        if (!this.socketClient?.isConnected()) {
+            return;
+        }
+        try {
+            if (kind === 'strings') {
+                const strings = await this.socketClient.getStrings(fileData, baseAddress);
+                panel.webview.postMessage({ type: 'stringsUpdated', strings });
+            }
+            else {
+                const functions = await this.socketClient.getFunctions(fileData, baseAddress);
+                panel.webview.postMessage({ type: 'functionsUpdated', functions });
             }
         }
-        else {
-            try {
-                const regex = new RegExp(query, 'gi');
-                for (const { text, field } of fields) {
-                    let match;
-                    const fieldRegex = new RegExp(regex);
-                    while ((match = fieldRegex.exec(text)) !== null) {
-                        matches.push({
-                            field,
-                            start: match.index,
-                            length: match[0].length
-                        });
-                        if (match.index === fieldRegex.lastIndex) {
-                            fieldRegex.lastIndex++;
-                        }
-                    }
-                }
+        catch (err) {
+            console.error(`[SYMBOLS] FileScan(${kind}) failed: ${err?.message ?? err}`);
+            if (kind === 'strings') {
+                panel.webview.postMessage({ type: 'stringsUpdated', strings: [] });
             }
-            catch {
-                return [];
+            else {
+                panel.webview.postMessage({ type: 'functionsUpdated', functions: [] });
             }
         }
-        return matches;
     }
     /**
      * Collect labels, strings, and functions from the backend and post them
@@ -2721,10 +2669,10 @@ ${(0, disasmEditorStyles_1.getDisasmEditorStyles)()}
 <body>
 
 <div id="header">
-${getGotoPanel()}
-${getSearchPanel()}
 ${getLiveToolbar()}
 ${getHeaderToolbar()}
+${getGotoPanel()}
+${getSearchPanel()}
 ${getHexContainer()}
 </div>
 <div id="content-wrapper">
@@ -2806,6 +2754,7 @@ function getSymbolsPanel() {
     return `<div id="symbols-panel">
     <div id="symbols-panel-header">
         <span class="symbols-title">Symbols</span>
+        <span id="sym-region-label" class="sym-region-label"></span>
         <button class="sym-header-btn" id="symbols-refresh-btn" title="Refresh symbols">↻</button>
         <button class="sym-header-btn" id="close-symbols-btn" title="Close">×</button>
     </div>
@@ -2919,6 +2868,8 @@ const state = {
     totalInstructions: 0,
     pageSize: 1000,
     baseAddress: 0,
+    totalBytes: 0,
+    regionLabel: '',
     hexData: [],
     hexOffset: 0,
     loadedPages: new Map(),
@@ -2956,6 +2907,12 @@ window.addEventListener("message", ({ data: msg }) => {
             state.totalInstructions = msg.totalInstructions;
             state.pageSize = msg.pageSize;
             state.baseAddress = msg.baseAddress;
+            state.totalBytes = msg.totalBytes ?? (msg.totalInstructions * 4);
+            state.regionLabel = msg.regionLabel ?? '';
+            if (state.regionLabel) {
+                const rl = document.getElementById('sym-region-label');
+                if (rl) rl.textContent = \`— \${state.regionLabel}\`;
+            }
             if (msg.isLive) {
                 state.isLive = true;
                 liveToolbar.classList.add('visible');
@@ -2997,13 +2954,30 @@ window.addEventListener("message", ({ data: msg }) => {
             renderSymLabels();
             renderSymStrings();
             renderSymFunctions();
-            if (typeof window._handleSymbolsDone === 'function') {
-                window._handleSymbolsDone(state.symStrings.length, state.symFunctions.length);
-            }
             break;
         case "labelsUpdated":
             state.symLabels = msg.labels ?? [];
             renderSymLabels();
+            break;
+        case "stringsUpdated":
+            state.symStrings = msg.strings ?? [];
+            renderSymStrings();
+            if (symStringsStatus) {
+                symStringsStatus.textContent = state.symStrings.length > 0
+                    ? \`\${state.symStrings.length} found\`
+                    : 'None found';
+            }
+            if (symScanStringsBtn) symScanStringsBtn.disabled = false;
+            break;
+        case "functionsUpdated":
+            state.symFunctions = msg.functions ?? [];
+            renderSymFunctions();
+            if (symFunctionsStatus) {
+                symFunctionsStatus.textContent = state.symFunctions.length > 0
+                    ? \`\${state.symFunctions.length} found\`
+                    : 'None found';
+            }
+            if (symScanFunctionsBtn) symScanFunctionsBtn.disabled = false;
             break;
     }
 });
@@ -3692,17 +3666,61 @@ function symNavigate(addrHex) {
     goToAddress(addrHex.replace(/^0x/i, ''));
 }
 
+// ── Region helpers ────────────────────────────────────────────────────────────
+
+/** Parse an address hex string (with or without 0x prefix) to a number. */
+function parseAddrHex(addrHex) {
+    return parseInt(String(addrHex).replace(/^0x/i, ''), 16);
+}
+
+/**
+ * Returns true when the given address hex string falls within the address
+ * range of the currently open panel.  For live panels with a known region
+ * this filters out symbols that belong to a different region.  File-based
+ * panels (totalBytes == 0) show everything.
+ */
+function isAddrInCurrentRegion(addrHex) {
+    if (!state.isLive || state.totalBytes <= 0) return true;
+    const addr = parseAddrHex(addrHex);
+    if (isNaN(addr)) return false;
+    const physAddr = toPhysAddr(addr);
+    const physBase = toPhysAddr(state.baseAddress);
+    return physAddr >= physBase && physAddr < physBase + state.totalBytes;
+}
+
+/**
+ * Maps a numeric address to a short PS2 memory region name shown as a badge.
+ * Returns an empty string when the address does not fall in a named region.
+ */
+function getPs2RegionName(addr) {
+    const a = addr >>> 0;
+    const p = toPhysAddr(a);
+    // EE Main RAM — physical 0x00000000–0x01FFFFFF, or uncached mirror 0x20000000–0x21FFFFFF
+    if ((a >= 0x20000000 && a <= 0x21FFFFFF) || p < 0x02000000) return 'EE RAM';
+    // IOP RAM — EE VTLB mirror 0x1C000000–0x1DFFFFFF, or IOP physical 0x00000000–0x001FFFFF
+    if (a >= 0x1C000000 && a <= 0x1DFFFFFF) return 'IOP';
+    // BIOS ROM — physical 0x1FC00000–0x1FFFFFFF (also KSEG1 0xBFC00000)
+    if (p >= 0x1FC00000 && p <= 0x1FFFFFFF) return 'BIOS';
+    // Scratchpad — 0x70000000–0x70003FFF
+    if (a >= 0x70000000 && a <= 0x70003FFF) return 'SPD';
+    return '';
+}
+
 function renderSymLabels() {
     if (!symLabelsList) return;
-    const items = state.symLabels;
-    if (!items || items.length === 0) {
+    const items = (state.symLabels || []).filter(item => isAddrInCurrentRegion(item.address));
+    if (items.length === 0) {
         symLabelsList.innerHTML = '<div class="sym-empty">No labels defined.</div>';
         return;
     }
     symLabelsList.innerHTML = items.map(item => {
         const escapedComment = item.comment ? escHtml(item.comment) : '';
         const comment = escapedComment ? \`<span class="sym-item-comment" title="\${escapedComment}">\${escapedComment}</span>\` : '';
+        const addrNum = parseAddrHex(item.address);
+        const region  = getPs2RegionName(addrNum);
+        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
         return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+            \${badge}
             <span class="sym-item-addr">\${escHtml(item.address)}</span>
             <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
             \${comment}
@@ -3730,15 +3748,21 @@ function renderSymLabels() {
 
 function renderSymStrings() {
     if (!symStringsList) return;
-    const items = state.symStrings;
-    if (!items || items.length === 0) {
+    const items = (state.symStrings || []).filter(item => isAddrInCurrentRegion(item.address));
+    if (items.length === 0) {
         symStringsList.innerHTML = '<div class="sym-empty">No strings found. Click "Scan for strings".</div>';
         return;
     }
-    symStringsList.innerHTML = items.map(item => \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-        <span class="sym-item-addr">\${escHtml(item.address)}</span>
-        <span class="sym-item-value" title="\${escHtml(item.value)}">\${escHtml(item.value)}</span>
-    </div>\`).join('');
+    symStringsList.innerHTML = items.map(item => {
+        const addrNum = parseAddrHex(item.address);
+        const region  = getPs2RegionName(addrNum);
+        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
+        return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+            \${badge}
+            <span class="sym-item-addr">\${escHtml(item.address)}</span>
+            <span class="sym-item-value" title="\${escHtml(item.value)}">\${escHtml(item.value)}</span>
+        </div>\`;
+    }).join('');
 
     symStringsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate(el.dataset.addr));
@@ -3747,15 +3771,21 @@ function renderSymStrings() {
 
 function renderSymFunctions() {
     if (!symFunctionsList) return;
-    const items = state.symFunctions;
-    if (!items || items.length === 0) {
+    const items = (state.symFunctions || []).filter(item => isAddrInCurrentRegion(item.address));
+    if (items.length === 0) {
         symFunctionsList.innerHTML = '<div class="sym-empty">No functions found. Click "Scan for functions".</div>';
         return;
     }
-    symFunctionsList.innerHTML = items.map(item => \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-        <span class="sym-item-addr">\${escHtml(item.address)}</span>
-        <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
-    </div>\`).join('');
+    symFunctionsList.innerHTML = items.map(item => {
+        const addrNum = parseAddrHex(item.address);
+        const region  = getPs2RegionName(addrNum);
+        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
+        return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+            \${badge}
+            <span class="sym-item-addr">\${escHtml(item.address)}</span>
+            <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
+        </div>\`;
+    }).join('');
 
     symFunctionsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate(el.dataset.addr));
@@ -3814,37 +3844,26 @@ symAddBtn.addEventListener('click', () => {
     });
 });
 
-// Scan buttons
+// Scan buttons — ask the backend to scan the current region directly
 symScanStringsBtn.addEventListener('click', () => {
     symStringsStatus.textContent = 'Scanning…';
     symScanStringsBtn.disabled = true;
-    // Request a full symbols refresh which includes the string scan
-    vscode.postMessage({ type: 'getSymbols' });
-    // The provider will run the scan and reply with type:'symbols'
-    // Re-enable after a generous timeout in case the scan is slow
+    vscode.postMessage({ type: 'scanStrings' });
     setTimeout(() => {
         symScanStringsBtn.disabled = false;
         if (symStringsStatus.textContent === 'Scanning…') symStringsStatus.textContent = '';
-    }, 60000);
+    }, 120000);
 });
 
 symScanFunctionsBtn.addEventListener('click', () => {
     symFunctionsStatus.textContent = 'Scanning…';
     symScanFunctionsBtn.disabled = true;
-    vscode.postMessage({ type: 'getSymbols' });
+    vscode.postMessage({ type: 'scanFunctions' });
     setTimeout(() => {
         symScanFunctionsBtn.disabled = false;
         if (symFunctionsStatus.textContent === 'Scanning…') symFunctionsStatus.textContent = '';
-    }, 60000);
+    }, 120000);
 });
-
-// Update scan status text when symbols message arrives
-window._handleSymbolsDone = function(strCount, fnCount) {
-    if (symStringsStatus) symStringsStatus.textContent = strCount > 0 ? \`\${strCount} found\` : 'None found';
-    if (symFunctionsStatus) symFunctionsStatus.textContent = fnCount > 0 ? \`\${fnCount} found\` : 'None found';
-    if (symScanStringsBtn)  symScanStringsBtn.disabled = false;
-    if (symScanFunctionsBtn) symScanFunctionsBtn.disabled = false;
-};
 
 // ── Debug Panel ──────────────────────────────────────────────────────────────
 
@@ -4707,9 +4726,34 @@ body {
     color: #d4d4d4;
     font-size: 11px;
     font-weight: bold;
-    flex: 1;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+    flex-shrink: 0;
+}
+
+/* Region label shown in the symbols panel header (e.g. "— IOP RAM") */
+#sym-region-label {
+    color: #858585;
+    font-size: 11px;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Compact region badge shown on each symbol row */
+.sym-region-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-family: monospace;
+    background: #2d4a2d;
+    color: #7ec87e;
+    border: 1px solid #3a5c3a;
+    border-radius: 2px;
+    padding: 0 4px;
+    line-height: 14px;
+    flex-shrink: 0;
+    letter-spacing: 0.02em;
 }
 
 .sym-header-btn {
@@ -6512,6 +6556,60 @@ class SocketClient {
             throw new Error(response.Error || 'GetFunctions failed');
         }
         return response.Functions ?? [];
+    }
+    /**
+     * Scan a live emulator memory region for null-terminated ASCII strings.
+     * The C# server reads the bytes directly — no binary data is transferred.
+     * @param address  Virtual start address of the region.
+     * @param length   Number of bytes to scan.
+     * @param region   "ee" or "iop".
+     */
+    async scanLiveStrings(address, length, region) {
+        const response = await this.sendCommand({ Command: 'SCANSTRINGS', Address: address, Length: length, Region: region }, 120000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanStrings failed');
+        }
+        return response.Strings ?? [];
+    }
+    /**
+     * Scan a live emulator memory region for MIPS function entry points.
+     * The C# server reads the bytes directly — no binary data is transferred.
+     * @param address  Virtual start address of the region.
+     * @param length   Number of bytes to scan.
+     * @param region   "ee" or "iop".
+     */
+    async scanLiveFunctions(address, length, region) {
+        const response = await this.sendCommand({ Command: 'SCANFUNCTIONS', Address: address, Length: length, Region: region }, 120000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanFunctions failed');
+        }
+        return response.Functions ?? [];
+    }
+    /**
+     * Search for a query string/pattern in a memory region using the C# backend.
+     * For live panels pass address+length+region; for file panels pass fileData.
+     * @param address   Virtual start address (used for live searches and match address calculation).
+     * @param length    Byte length (required for live searches, ignored when fileData provided).
+     * @param query     The search string, byte pattern, or regex.
+     * @param mode      "text" | "bytes" | "string" | "regex"
+     * @param region    "ee" or "iop" — only used for live searches.
+     * @param fileData  Binary data buffer — when provided the server searches this instead of live memory.
+     */
+    async search(address, length, query, mode, region, fileData) {
+        const command = {
+            Command: 'SEARCH',
+            Address: address,
+            Length: length,
+            Query: query,
+            SearchMode: mode,
+            Region: region,
+            Data: fileData ? fileData.toString('base64') : undefined,
+        };
+        const response = await this.sendCommand(command, 120000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Search failed');
+        }
+        return response.Matches ?? [];
     }
     /**
      * Ping the server
