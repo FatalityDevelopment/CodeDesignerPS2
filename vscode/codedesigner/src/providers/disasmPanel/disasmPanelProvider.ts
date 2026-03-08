@@ -19,10 +19,13 @@ const LIVE_REGIONS = [
     // The PS2 kernel TLB maps physical RAM here without caching, so user-mode code
     // typically accesses / patches memory through this range.
     { region: 'ee',  address: 0x20000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
-    // IOP RAM: show via the EE VTLB mirror at 0x1C000000–0x1C1FFFFF.
+    // IOP RAM: show via the EE VTLB mirror at 0x1C000000–0x1DFFFFFF (2 MB window).
     // PCSX2 vtlb.cpp maps psxM (IOP RAM) to EE virtual 0x1C000000; the server
     // translates this virtual address back to a physical IOP RAM offset.
-    { region: 'iop', address: 0x1C000000, size:  4 * 1024 * 1024, label: 'IOP RAM'       },
+    // Size is capped at 2 MB to match EeIopMirrorEnd (0x1E000000) and avoid the
+    // range overlapping with BIOS ROM at 0x1FC00000 which would cause the wrong
+    // panel to be revealed on breakpoints.
+    { region: 'iop', address: 0x1C000000, size:  2 * 1024 * 1024, label: 'IOP RAM'       },
     { region: 'ee',  address: 0x1FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
     { region: 'ee',  address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad'    },
 ];
