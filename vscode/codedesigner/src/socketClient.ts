@@ -17,6 +17,7 @@ interface CommandMessage {
  * Register dump returned by GETREGS
  */
 export interface RegisterDump {
+    // GPR
     gpr: number[];       // 32 GPR values (lower 64 bits as JS number)
     pc: number;
     hi: number;
@@ -24,10 +25,40 @@ export interface RegisterDump {
     hi1: number;
     lo1: number;
     sa: number;
+    // COP0 legacy convenience fields
     cop0Status: number;
     cop0Cause: number;
     cop0Epc: number;
     cop0Count: number;
+    // COP0 full register file (32 entries)
+    cop0Regs: number[];
+    // FPR – 32 × raw IEEE-754 uint bit patterns; use rawBitsToFloat() to display
+    fpr: number[];
+    fprAcc: number;
+    // FCR
+    fcr0: number;
+    fcr31: number;
+    // VU0 float registers – 32 × 4 components, each raw IEEE-754 uint
+    vu0fX: number[];
+    vu0fY: number[];
+    vu0fZ: number[];
+    vu0fW: number[];
+    // VU0 ACC / special
+    vu0AccX: number;
+    vu0AccY: number;
+    vu0AccZ: number;
+    vu0AccW: number;
+    vu0Q: number;
+    vu0P: number;
+    vu0I: number;
+    // VU0 integer registers (16 entries)
+    vu0i: number[];
+    // VU0 flags
+    vu0Status: number;
+    vu0Mac: number;
+    vu0Clip: number;
+    // GS privileged registers (19 entries – see order in HandleGetRegisters)
+    gsPriv: number[];
 }
 
 /**
@@ -56,6 +87,27 @@ interface CommandResponse {
     COP0_Cause?: number;
     COP0_EPC?: number;
     COP0_Count?: number;
+    COP0_Regs?: number[];
+    FPR?: number[];
+    FPR_ACC?: number;
+    FCR0?: number;
+    FCR31?: number;
+    VU0F_X?: number[];
+    VU0F_Y?: number[];
+    VU0F_Z?: number[];
+    VU0F_W?: number[];
+    VU0F_ACC_X?: number;
+    VU0F_ACC_Y?: number;
+    VU0F_ACC_Z?: number;
+    VU0F_ACC_W?: number;
+    VU0F_Q?: number;
+    VU0F_P?: number;
+    VU0F_I?: number;
+    VU0I?: number[];
+    VU0_Status?: number;
+    VU0_MAC?: number;
+    VU0_Clip?: number;
+    GS_Priv?: number[];
 }
 
 /**
@@ -510,6 +562,27 @@ export class SocketClient {
             cop0Cause:  response.COP0_Cause  ?? 0,
             cop0Epc:    response.COP0_EPC    ?? 0,
             cop0Count:  response.COP0_Count  ?? 0,
+            cop0Regs:   response.COP0_Regs  ?? new Array(32).fill(0),
+            fpr:        response.FPR        ?? new Array(32).fill(0),
+            fprAcc:     response.FPR_ACC    ?? 0,
+            fcr0:       response.FCR0       ?? 0,
+            fcr31:      response.FCR31      ?? 0,
+            vu0fX:      response.VU0F_X     ?? new Array(32).fill(0),
+            vu0fY:      response.VU0F_Y     ?? new Array(32).fill(0),
+            vu0fZ:      response.VU0F_Z     ?? new Array(32).fill(0),
+            vu0fW:      response.VU0F_W     ?? new Array(32).fill(0),
+            vu0AccX:    response.VU0F_ACC_X ?? 0,
+            vu0AccY:    response.VU0F_ACC_Y ?? 0,
+            vu0AccZ:    response.VU0F_ACC_Z ?? 0,
+            vu0AccW:    response.VU0F_ACC_W ?? 0,
+            vu0Q:       response.VU0F_Q     ?? 0,
+            vu0P:       response.VU0F_P     ?? 0,
+            vu0I:       response.VU0F_I     ?? 0,
+            vu0i:       response.VU0I       ?? new Array(16).fill(0),
+            vu0Status:  response.VU0_Status ?? 0,
+            vu0Mac:     response.VU0_MAC    ?? 0,
+            vu0Clip:    response.VU0_Clip   ?? 0,
+            gsPriv:     response.GS_Priv    ?? new Array(19).fill(0),
         };
     }
 

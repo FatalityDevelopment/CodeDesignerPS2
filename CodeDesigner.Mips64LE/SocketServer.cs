@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.Emulator;
+using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 
 namespace CodeDesigner.Mips64LE
@@ -600,20 +601,94 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle GETREGS command — returns full EE CPU register state.
+        /// Handle GETREGS command — returns the full EE CPU register state including
+        /// GPR, all 32 COP0 registers, FPR/FCR (COP1), VU0 float/integer registers,
+        /// and key GS privileged registers.
         /// </summary>
         private string HandleGetRegisters()
         {
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
-            var cpu = Scheduler.EE.Cpu;
+            var cpu  = Scheduler.EE.Cpu;
+            var cop0 = cpu.COP0;
+            var cop1 = cpu.COP1;
+            var vu0  = cpu.VU0;
+            var gs   = Scheduler.EE.Bus.Gs;
 
+            // GPR (32 × 64-bit lower lane)
             var gpr = new List<ulong>(32);
             for (int i = 0; i < 32; i++)
                 gpr.Add(cpu.RegsLo[i]);
 
-            var cop0 = cpu.COP0;
+            // COP0 – all 32 registers (read as 64-bit to preserve high bits where relevant)
+            var cop0Regs = new List<ulong>(32);
+            for (int i = 0; i < 32; i++)
+                cop0Regs.Add(cop0.ReadRegister64(i));
+
+            // COP1 FPR – 32 × 32-bit floats, transmitted as raw IEEE-754 bit patterns (uint)
+            // so the client can display them as both float and hex without precision loss.
+            var fpr = new List<uint>(32);
+            for (int i = 0; i < 32; i++)
+                fpr.Add(BitConverter.SingleToUInt32Bits(cpu.FPR[i]));
+            uint faccBits = BitConverter.SingleToUInt32Bits(cpu.FACC);
+
+            // FCR – only FCR0 (implementation) and FCR31 (FCSR) are architecturally
+            // defined on the PS2 EE; the rest are reserved/unused.
+            uint fcr0  = cop1.ReadControlRegister(0);
+            uint fcr31 = cop1.ReadControlRegister(31);
+
+            // VU0 float registers – 32 × 4-component (x,y,z,w), each component as uint bits
+            var vu0fX = new List<uint>(32);
+            var vu0fY = new List<uint>(32);
+            var vu0fZ = new List<uint>(32);
+            var vu0fW = new List<uint>(32);
+            for (int i = 0; i < 32; i++)
+            {
+                var v = vu0.VF[i];
+                vu0fX.Add(BitConverter.SingleToUInt32Bits(v.X));
+                vu0fY.Add(BitConverter.SingleToUInt32Bits(v.Y));
+                vu0fZ.Add(BitConverter.SingleToUInt32Bits(v.Z));
+                vu0fW.Add(BitConverter.SingleToUInt32Bits(v.W));
+            }
+            // VU0 ACC register
+            uint vu0accX = BitConverter.SingleToUInt32Bits(vu0.ACC.X);
+            uint vu0accY = BitConverter.SingleToUInt32Bits(vu0.ACC.Y);
+            uint vu0accZ = BitConverter.SingleToUInt32Bits(vu0.ACC.Z);
+            uint vu0accW = BitConverter.SingleToUInt32Bits(vu0.ACC.W);
+            uint vu0Q = BitConverter.SingleToUInt32Bits(vu0.Q);
+            uint vu0P = BitConverter.SingleToUInt32Bits(vu0.P);
+            uint vu0I = BitConverter.SingleToUInt32Bits(vu0.I);
+
+            // VU0 integer registers – 16 × 16-bit
+            var vu0i = new List<uint>(16);
+            for (int i = 0; i < 16; i++)
+                vu0i.Add(vu0.VI[i]);
+
+            // GS privileged registers
+            var gsPriv = new List<ulong>
+            {
+                gs.ReadPriv64(GS.PRIV_PMODE),
+                gs.ReadPriv64(GS.PRIV_SMODE1),
+                gs.ReadPriv64(GS.PRIV_SMODE2),
+                gs.ReadPriv64(GS.PRIV_SRFSH),
+                gs.ReadPriv64(GS.PRIV_SYNCH1),
+                gs.ReadPriv64(GS.PRIV_SYNCH2),
+                gs.ReadPriv64(GS.PRIV_SYNCV),
+                gs.ReadPriv64(GS.PRIV_DISPFB1),
+                gs.ReadPriv64(GS.PRIV_DISPLAY1),
+                gs.ReadPriv64(GS.PRIV_DISPFB2),
+                gs.ReadPriv64(GS.PRIV_DISPLAY2),
+                gs.ReadPriv64(GS.PRIV_EXTBUF),
+                gs.ReadPriv64(GS.PRIV_EXTDATA),
+                gs.ReadPriv64(GS.PRIV_EXTWRITE),
+                gs.ReadPriv64(GS.PRIV_BGCOLOR),
+                gs.ReadPriv64(GS.PRIV_CSR),
+                gs.ReadPriv64(GS.PRIV_IMR),
+                gs.ReadPriv64(GS.PRIV_BUSDIR),
+                gs.ReadPriv64(GS.PRIV_SIGLBLID),
+            };
+
             var response = new CommandResponse
             {
                 Success  = true,
@@ -625,10 +700,33 @@ namespace CodeDesigner.Mips64LE
                 GPR_HI1  = cpu.HI1,
                 GPR_LO1  = cpu.LO1,
                 GPR_SA   = cpu.SA,
+                // Legacy COP0 fields (kept for backward compatibility)
                 COP0_Status = cop0.ReadRegister32(12),
                 COP0_Cause  = cop0.ReadRegister32(13),
                 COP0_EPC    = cop0.ReadRegister64(14),
                 COP0_Count  = cop0.ReadRegister32(9),
+                // Full register sets
+                COP0_Regs   = cop0Regs,
+                FPR         = fpr,
+                FPR_ACC     = faccBits,
+                FCR0        = fcr0,
+                FCR31       = fcr31,
+                VU0F_X      = vu0fX,
+                VU0F_Y      = vu0fY,
+                VU0F_Z      = vu0fZ,
+                VU0F_W      = vu0fW,
+                VU0F_ACC_X  = vu0accX,
+                VU0F_ACC_Y  = vu0accY,
+                VU0F_ACC_Z  = vu0accZ,
+                VU0F_ACC_W  = vu0accW,
+                VU0F_Q      = vu0Q,
+                VU0F_P      = vu0P,
+                VU0F_I      = vu0I,
+                VU0I        = vu0i,
+                VU0_Status  = vu0.StatusFlags,
+                VU0_MAC     = vu0.MACFlags,
+                VU0_Clip    = vu0.ClipFlags,
+                GS_Priv     = gsPriv,
             };
             return JsonSerializer.Serialize(response);
         }
@@ -733,10 +831,42 @@ namespace CodeDesigner.Mips64LE
         public ulong? GPR_HI1 { get; set; }
         public ulong? GPR_LO1 { get; set; }
         public int? GPR_SA { get; set; }
+        // Legacy COP0 convenience fields (kept for backward compatibility)
         public uint? COP0_Status { get; set; }
         public uint? COP0_Cause { get; set; }
         public ulong? COP0_EPC { get; set; }
         public uint? COP0_Count { get; set; }
+        // Full COP0 register file (32 × 64-bit)
+        public List<ulong>? COP0_Regs { get; set; }
+        // COP1 FPR (32 × 32-bit, as raw IEEE-754 uint bit patterns)
+        public List<uint>? FPR { get; set; }
+        public uint? FPR_ACC { get; set; }
+        // COP1 FCR control registers
+        public uint? FCR0 { get; set; }
+        public uint? FCR31 { get; set; }
+        // VU0 float registers (32 × vec4, each component as raw IEEE-754 uint)
+        public List<uint>? VU0F_X { get; set; }
+        public List<uint>? VU0F_Y { get; set; }
+        public List<uint>? VU0F_Z { get; set; }
+        public List<uint>? VU0F_W { get; set; }
+        // VU0 ACC accumulator (vec4)
+        public uint? VU0F_ACC_X { get; set; }
+        public uint? VU0F_ACC_Y { get; set; }
+        public uint? VU0F_ACC_Z { get; set; }
+        public uint? VU0F_ACC_W { get; set; }
+        // VU0 Q/P/I special float registers
+        public uint? VU0F_Q { get; set; }
+        public uint? VU0F_P { get; set; }
+        public uint? VU0F_I { get; set; }
+        // VU0 integer registers (16 × 16-bit, stored as uint)
+        public List<uint>? VU0I { get; set; }
+        // VU0 flag registers
+        public uint? VU0_Status { get; set; }
+        public ushort? VU0_MAC { get; set; }
+        public uint? VU0_Clip { get; set; }
+        // GS privileged registers (PMODE, SMODE1/2, SRFSH, SYNCH1/2, SYNCV,
+        //   DISPFB1/2, DISPLAY1/2, EXTBUF/DATA/WRITE, BGCOLOR, CSR, IMR, BUSDIR, SIGLBLID)
+        public List<ulong>? GS_Priv { get; set; }
     }
 
     /// <summary>
