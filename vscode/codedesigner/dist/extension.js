@@ -48,8 +48,8 @@ exports.deactivate = deactivate;
 const vscode = __importStar(__webpack_require__(1));
 const disasmEditorProvider_1 = __webpack_require__(2);
 const disasmPanelProvider_1 = __webpack_require__(7);
-const asmPanelProvider_1 = __webpack_require__(10);
-const socketClient_1 = __webpack_require__(14);
+const asmPanelProvider_1 = __webpack_require__(12);
+const socketClient_1 = __webpack_require__(15);
 let socketClient = null;
 let outputChannel;
 /**
@@ -3306,42 +3306,158 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.DisasmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
+const fs = __importStar(__webpack_require__(3));
+const path = __importStar(__webpack_require__(8));
+const child_process_1 = __webpack_require__(9);
 const helpers_1 = __webpack_require__(4);
-const disasmPanelTemplate_1 = __webpack_require__(8);
+const disasmPanelTemplate_1 = __webpack_require__(10);
 const extension_1 = __webpack_require__(0);
 class DisasmPanelProvider {
     webview;
+    emulatorProcess;
+    settings = {};
+    workspaceRoot = '';
     // Register the provider with VS Code
     register(context) {
         context.subscriptions.push(vscode.window.registerWebviewViewProvider('disasm.disasmPanel', this));
     }
     resolveWebviewView(webviewView) {
         this.webview = webviewView.webview;
+        // Resolve workspace root (used to turn relative paths into absolute)
+        this.workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+        // Load emu-settings.json from the workspace root
+        this.loadEmuSettings();
         // Setup webview options
         webviewView.webview.options = {
             enableScripts: true
         };
-        // Generate HTML from template
-        const templateData = {
-            connected: false
-        };
-        webviewView.webview.html = (0, disasmPanelTemplate_1.getDisasmPanelHtml)(templateData, (0, helpers_1.getNonce)());
+        // Render the panel with settings data
+        webviewView.webview.html = this.buildHtml();
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async (msg) => {
-            if (msg.command === 'disassemble') {
-                await this.handleDisassemble(msg.data);
+            switch (msg.command) {
+                case 'connect':
+                    this.handleConnect(msg.emulatorPath, msg.biosPath, msg.gamePath);
+                    break;
+                case 'disassemble':
+                    await this.handleDisassemble(msg.data);
+                    break;
+                // Dropdown change notifications (no-op for now – stored server-side if needed)
+                case 'emulatorChanged':
+                case 'biosChanged':
+                case 'gameChanged':
+                    break;
             }
         });
     }
+    // ── Settings ──────────────────────────────────────────────────────────────
+    loadEmuSettings() {
+        if (!this.workspaceRoot) {
+            return;
+        }
+        const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
+        try {
+            const raw = fs.readFileSync(settingsPath, 'utf-8');
+            this.settings = JSON.parse(raw);
+        }
+        catch (err) {
+            const outputChannel = (0, extension_1.getOutputChannel)();
+            outputChannel.appendLine(`[WARN] Could not load emu-settings.json: ${err?.message ?? err}`);
+            this.settings = {};
+        }
+    }
+    buildHtml() {
+        const emulators = (this.settings.emulators ?? []).map(e => ({
+            type: e.type,
+            path: e.path
+        }));
+        const biosOptions = (this.settings.bios ?? []).map(b => ({
+            name: b.name,
+            path: b.path
+        }));
+        const gameOptions = (this.settings.games ?? []).map(g => ({
+            name: g.name,
+            path: g.path
+        }));
+        const templateData = {
+            connected: this.emulatorProcess != null,
+            emulators,
+            biosOptions,
+            gameOptions
+        };
+        return (0, disasmPanelTemplate_1.getDisasmPanelHtml)(templateData, (0, helpers_1.getNonce)());
+    }
+    // ── Emulator launch ───────────────────────────────────────────────────────
+    handleConnect(emulatorPath, biosPath, gamePath) {
+        const outputChannel = (0, extension_1.getOutputChannel)();
+        // If already running, kill it (toggle behaviour)
+        if (this.emulatorProcess) {
+            this.emulatorProcess.kill();
+            outputChannel.appendLine('[INFO] Emulator stopped by user.');
+            this.cleanupProcess();
+            return;
+        }
+        if (!emulatorPath) {
+            vscode.window.showWarningMessage('Please select an emulator.');
+            return;
+        }
+        // Resolve relative paths against the workspace root
+        const resolvedExe = this.resolvePath(emulatorPath);
+        const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
+        const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
+        // Build argument list:  --run [--bios <path>] [--disc <path>]
+        const cliArgs = ['--run'];
+        if (resolvedBios) {
+            cliArgs.push('--bios', resolvedBios);
+        }
+        if (resolvedDisc) {
+            cliArgs.push('--disc', resolvedDisc);
+        }
+        outputChannel.show(true);
+        outputChannel.appendLine(`[INFO] Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
+        // Spawn without a visible console window
+        const proc = (0, child_process_1.spawn)(resolvedExe, cliArgs, {
+            windowsHide: true,
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+        this.emulatorProcess = proc;
+        this.webview?.postMessage({ command: 'connectionStatus', connected: true });
+        proc.stdout?.on('data', (chunk) => {
+            outputChannel.append(chunk.toString());
+        });
+        proc.stderr?.on('data', (chunk) => {
+            outputChannel.append(chunk.toString());
+        });
+        proc.on('error', (err) => {
+            outputChannel.appendLine(`[ERROR] Failed to start emulator: ${err.message}`);
+            vscode.window.showErrorMessage(`Failed to start emulator: ${err.message}`);
+            this.cleanupProcess();
+        });
+        proc.on('close', (code) => {
+            outputChannel.appendLine(`[INFO] Emulator exited with code ${code ?? 'null'}.`);
+            this.cleanupProcess();
+        });
+    }
+    cleanupProcess() {
+        this.emulatorProcess = undefined;
+        this.webview?.postMessage({ command: 'connectionStatus', connected: false });
+    }
+    /** Resolve a workspace-relative path to an absolute path. */
+    resolvePath(p) {
+        if (path.isAbsolute(p)) {
+            return p;
+        }
+        return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
+    }
+    // ── Disassembly ───────────────────────────────────────────────────────────
     async handleDisassemble(hexCode) {
         const socketClient = (0, extension_1.getSocketClient)();
         if (!socketClient || !socketClient.isConnected()) {
-            this.sendResult(false, '', 'Not connected to C# server. Use "Connect to Server" command first.');
+            this.sendDisasmResult(false, '', 'Not connected to C# server. Use "Connect to Server" command first.');
             return;
         }
         try {
             const results = await socketClient.disassemble(hexCode);
-            // Format results as assembly output
             const asmLines = [];
             for (const result of results) {
                 if (result.Success) {
@@ -3354,19 +3470,19 @@ class DisasmPanelProvider {
                     asmLines.push(`${result.Hex}  ERROR: ${result.Error}`);
                 }
             }
-            this.sendResult(true, asmLines.join('\n'), '');
+            this.sendDisasmResult(true, asmLines.join('\n'), '');
         }
         catch (error) {
-            this.sendResult(false, '', error.message || 'Disassembly failed');
+            this.sendDisasmResult(false, '', error.message || 'Disassembly failed');
         }
     }
-    sendResult(success, data, error) {
+    sendDisasmResult(success, data, error) {
         if (this.webview) {
             this.webview.postMessage({
                 command: 'disassembleResult',
-                success: success,
-                data: data,
-                error: error
+                success,
+                data,
+                error
             });
         }
     }
@@ -3376,6 +3492,18 @@ exports.DisasmPanelProvider = DisasmPanelProvider;
 
 /***/ }),
 /* 8 */
+/***/ ((module) => {
+
+module.exports = require("path");
+
+/***/ }),
+/* 9 */
+/***/ ((module) => {
+
+module.exports = require("child_process");
+
+/***/ }),
+/* 10 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -3384,7 +3512,7 @@ exports.DisasmPanelProvider = DisasmPanelProvider;
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getDisasmPanelHtml = getDisasmPanelHtml;
-const disasmPanelStyles_1 = __webpack_require__(9);
+const disasmPanelStyles_1 = __webpack_require__(11);
 function getDisasmPanelHtml(data, nonce) {
     return `<!DOCTYPE html>
 <html>
@@ -3402,14 +3530,19 @@ ${(0, disasmPanelStyles_1.getDisasmPanelStyles)()}
 
 <h3>MIPS Disassembler</h3>
 <div class="container">
+
+    ${getEmulatorControls(data)}
+
+    <hr class="section-divider">
+
     <label for="hexInput">Hex Code (one per line or space-separated):</label>
     <textarea id="hexInput" rows="10" placeholder="0x02114020&#10;0x21090064&#10;0x11090010"></textarea>
-    
+
     <button id="disassembleBtn">Disassemble</button>
-    
+
     <label for="asmOutput">Assembly Output:</label>
     <textarea id="asmOutput" rows="10" readonly></textarea>
-    
+
     <div id="status" class="status"></div>
 </div>
 
@@ -3418,18 +3551,89 @@ ${getScript(nonce)}
 </body>
 </html>`;
 }
+function getEmulatorControls(data) {
+    const emulators = data.emulators || [];
+    const biosOptions = data.biosOptions || [];
+    const gameOptions = data.gameOptions || [];
+    const selEmu = data.selectedEmulator || '';
+    const selBios = data.selectedBios || '';
+    const selGame = data.selectedGame || '';
+    const emuOptions = emulators.map(e => {
+        const label = e.type ?? e.name ?? '';
+        const val = e.path;
+        return `<option value="${escapeHtml(val)}" ${selEmu === val ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+    const biosOptHtml = biosOptions.map(b => {
+        const label = b.name ?? b.type ?? '';
+        const val = b.path;
+        return `<option value="${escapeHtml(val)}" ${selBios === val ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+    const gameOptHtml = gameOptions.map(g => {
+        const label = g.name ?? g.type ?? '';
+        const val = g.path;
+        return `<option value="${escapeHtml(val)}" ${selGame === val ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+    return `<div class="row">
+    <select id="emulatorSelect">
+        <option value="">Select Emulator...</option>
+        ${emuOptions}
+    </select>
+</div>
+<div class="row">
+    <select id="biosSelect">
+        <option value="">Select BIOS...</option>
+        ${biosOptHtml}
+    </select>
+</div>
+<div class="row">
+    <select id="gameSelect">
+        <option value="">Select Game...</option>
+        ${gameOptHtml}
+    </select>
+</div>
+<div class="row">
+    <button id="connectBtn">${data.connected ? 'Disconnect' : 'Connect'}</button>
+</div>`;
+}
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
 function getScript(nonce) {
     return `<script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
 
+document.getElementById('connectBtn').onclick = () => {
+    const emulatorPath = document.getElementById('emulatorSelect').value;
+    const biosPath = document.getElementById('biosSelect').value;
+    const gamePath = document.getElementById('gameSelect').value;
+    vscode.postMessage({ command: 'connect', emulatorPath, biosPath, gamePath });
+};
+
+document.getElementById('emulatorSelect').onchange = (e) => {
+    vscode.postMessage({ command: 'emulatorChanged', emulatorPath: e.target.value });
+};
+
+document.getElementById('biosSelect').onchange = (e) => {
+    vscode.postMessage({ command: 'biosChanged', biosPath: e.target.value });
+};
+
+document.getElementById('gameSelect').onchange = (e) => {
+    vscode.postMessage({ command: 'gameChanged', gamePath: e.target.value });
+};
+
 document.getElementById('disassembleBtn').onclick = () => {
     const hexInput = document.getElementById('hexInput').value;
     const statusDiv = document.getElementById('status');
-    
+
     statusDiv.textContent = 'Disassembling...';
     statusDiv.className = 'status';
-    
-    vscode.postMessage({ 
+
+    vscode.postMessage({
         command: 'disassemble',
         data: hexInput
     });
@@ -3438,12 +3642,12 @@ document.getElementById('disassembleBtn').onclick = () => {
 // Listen for messages from the extension
 window.addEventListener('message', event => {
     const message = event.data;
-    
+
     switch (message.command) {
         case 'disassembleResult':
             const asmOutput = document.getElementById('asmOutput');
             const statusDiv = document.getElementById('status');
-            
+
             if (message.success) {
                 asmOutput.value = message.data;
                 statusDiv.textContent = 'Disassembly complete!';
@@ -3453,6 +3657,11 @@ window.addEventListener('message', event => {
                 statusDiv.className = 'status error';
             }
             break;
+
+        case 'connectionStatus':
+            const btn = document.getElementById('connectBtn');
+            btn.textContent = message.connected ? 'Disconnect' : 'Connect';
+            break;
     }
 });
 </script>`;
@@ -3460,7 +3669,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 9 */
+/* 11 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -3489,6 +3698,30 @@ label {
     margin-top: 10px;
 }
 
+.row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.row select,
+.row button {
+    flex: 1;
+}
+
+select, textarea, button {
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+}
+
+select {
+    width: 100%;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 4px;
+}
+
 textarea {
     width: 100%;
     background: var(--vscode-input-background);
@@ -3513,6 +3746,12 @@ button:hover {
     background: var(--vscode-button-hoverBackground);
 }
 
+.section-divider {
+    border: none;
+    border-top: 1px solid var(--vscode-input-border);
+    margin: 8px 0;
+}
+
 .status {
     padding: 8px;
     margin-top: 10px;
@@ -3534,7 +3773,7 @@ button:hover {
 
 
 /***/ }),
-/* 10 */
+/* 12 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -3574,9 +3813,9 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AsmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
-const child_process_1 = __webpack_require__(11);
+const child_process_1 = __webpack_require__(9);
 const helpers_1 = __webpack_require__(4);
-const asmPanelTemplate_1 = __webpack_require__(12);
+const asmPanelTemplate_1 = __webpack_require__(13);
 const extension_1 = __webpack_require__(0);
 let outputChannel;
 class AsmPanelProvider {
@@ -3697,13 +3936,7 @@ exports.AsmPanelProvider = AsmPanelProvider;
 
 
 /***/ }),
-/* 11 */
-/***/ ((module) => {
-
-module.exports = require("child_process");
-
-/***/ }),
-/* 12 */
+/* 13 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -3713,7 +3946,7 @@ module.exports = require("child_process");
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getAsmPanelHtml = getAsmPanelHtml;
-const asmPanelStyles_1 = __webpack_require__(13);
+const asmPanelStyles_1 = __webpack_require__(14);
 /**
  * Main panel template - returns complete HTML
  */
@@ -3843,7 +4076,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 13 */
+/* 14 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -3940,7 +4173,7 @@ button:disabled {
 
 
 /***/ }),
-/* 14 */
+/* 15 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -3979,7 +4212,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SocketClient = void 0;
-const net = __importStar(__webpack_require__(15));
+const net = __importStar(__webpack_require__(16));
 /**
  * Socket client for communication with C# server
  */
@@ -4250,7 +4483,7 @@ exports.SocketClient = SocketClient;
 
 
 /***/ }),
-/* 15 */
+/* 16 */
 /***/ ((module) => {
 
 module.exports = require("net");

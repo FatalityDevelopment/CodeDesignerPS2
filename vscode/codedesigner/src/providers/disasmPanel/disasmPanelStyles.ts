@@ -22,6 +22,30 @@ label {
     margin-top: 10px;
 }
 
+.row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.row select,
+.row button {
+    flex: 1;
+}
+
+select, textarea, button {
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+}
+
+select {
+    width: 100%;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 4px;
+}
+
 textarea {
     width: 100%;
     background: var(--vscode-input-background);
@@ -44,6 +68,12 @@ button {
 
 button:hover {
     background: var(--vscode-button-hoverBackground);
+}
+
+.section-divider {
+    border: none;
+    border-top: 1px solid var(--vscode-input-border);
+    margin: 8px 0;
 }
 
 .status {
