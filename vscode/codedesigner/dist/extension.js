@@ -2488,10 +2488,12 @@ ${(0, disasmEditorStyles_1.getDisasmEditorStyles)()}
  
 <body>
 
+<div id="header">
 ${getGotoPanel()}
 ${getSearchPanel()}
 ${getLiveToolbar()}
 ${getHexContainer()}
+</div>
 ${getGrid()}
 
 ${getScript(nonce)}
@@ -3073,6 +3075,11 @@ function handleBranchHighlight(row, rowIndex) {
     }
 }
 
+// Prevent mouse wheel scrolling — keyboard is the only way to navigate
+document.addEventListener('wheel', e => {
+    e.preventDefault();
+}, { passive: false });
+
 function startLiveRefresh() {
     if (liveRefreshTimer !== null) { return; }
     liveRefreshTimer = setInterval(doLiveRefresh, 1000);
@@ -3123,7 +3130,15 @@ body {
     font-family: monospace; 
     background: #1e1e1e;
     color: #d4d4d4;
-} 
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+#header {
+    flex-shrink: 0;
+}
 
 #search-panel {
     display: none;
@@ -3323,9 +3338,14 @@ body {
 }
  
 #grid { 
-    outline: none; 
-    max-height: calc(100vh - 120px); 
-    overflow-y: auto;
+    outline: none;
+    flex: 1;
+    overflow-y: scroll;
+    scrollbar-width: none; /* Firefox */
+}
+
+#grid::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Edge */
 } 
  
 .row {

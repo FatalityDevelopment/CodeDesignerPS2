@@ -25,10 +25,12 @@ ${getDisasmEditorStyles()}
  
 <body>
 
+<div id="header">
 ${getGotoPanel()}
 ${getSearchPanel()}
 ${getLiveToolbar()}
 ${getHexContainer()}
+</div>
 ${getGrid()}
 
 ${getScript(nonce)}
@@ -616,6 +618,11 @@ function handleBranchHighlight(row, rowIndex) {
         }
     }
 }
+
+// Prevent mouse wheel scrolling — keyboard is the only way to navigate
+document.addEventListener('wheel', e => {
+    e.preventDefault();
+}, { passive: false });
 
 function startLiveRefresh() {
     if (liveRefreshTimer !== null) { return; }

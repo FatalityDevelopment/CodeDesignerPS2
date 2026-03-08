@@ -110,7 +110,6 @@ namespace CodeDesigner.Mips64LE
 
                             if (!string.IsNullOrEmpty(message))
                             {
-                                Console.WriteLine($"Received message ({message.Length} chars)");
                                 MessageReceived?.Invoke(this, message);
 
                                 // Process command and generate response
