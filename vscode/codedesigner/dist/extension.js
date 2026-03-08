@@ -108,6 +108,8 @@ function activate(context) {
     socketClient.onConnected(() => {
         outputChannel.appendLine('[INFO] Connected to C# server');
         vscode.window.showInformationMessage('Connected to C# server');
+        // Auto-open all live memory views (reuses existing panels if already open)
+        disasmPanelProvider.onSocketConnected();
     });
     socketClient.onDisconnected(() => {
         outputChannel.appendLine('[WARN] Disconnected from C# server');
@@ -234,18 +236,20 @@ class DisasmEditorProvider {
     socketClient;
     /** All currently-open live memory panels. Used to broadcast pause/resume state. */
     _livePanels = [];
+    /** Metadata for each live panel: label, address range. Used for reuse and address lookup. */
+    _livePanelInfo = [];
     constructor(socketClient) {
         this.socketClient = socketClient;
     }
     /**
-     * Format bytes for display (space-separated, big-endian)
+     * Format bytes for display (no spaces, big-endian)
      */
     formatBytesForDisplay(buffer, offset, length) {
         const slice = buffer.slice(offset, offset + length);
         return Array.from(slice)
             .reverse()
             .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-            .join(" ");
+            .join("");
     }
     /**
      * Disassemble binary data using the C# backend via socket client
@@ -298,7 +302,7 @@ class DisasmEditorProvider {
                     rows.push({
                         addr: currentAddr.toString(16).toUpperCase().padStart(8, "0"),
                         bytes: bytesLE,
-                        label: "",
+                        label: result.Label || "",
                         op: op,
                         args: args,
                         comment: result.Comment || "", // Use comment from backend analyzer
@@ -378,17 +382,31 @@ class DisasmEditorProvider {
     /**
      * Open a live memory view panel (no backing file — pages fetched via socket).
      * Called once per region after connecting to the embedded emulator server.
+     * If a panel for this label already exists (e.g. reconnect), it is revealed
+     * instead of creating a duplicate window.
      */
     async openLiveMemoryView(region, baseAddress, totalBytes, label) {
         if (!this.socketClient || !this.socketClient.isConnected()) {
             vscode.window.showWarningMessage('Not connected to emulator. Connect first.');
             return;
         }
+        // Reuse an already-open panel with the same label (e.g. after reconnect)
+        const existingInfo = this._livePanelInfo.find(i => i.label === label);
+        if (existingInfo) {
+            existingInfo.panel.reveal(vscode.ViewColumn.One, true);
+            return;
+        }
         const panel = vscode.window.createWebviewPanel('disasm.liveMemory', label, vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });
-        // Track this panel so pause/resume can be broadcast to all live windows.
+        // Track this panel for pause/resume broadcast and address lookup.
+        const physBase = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
+            ? (baseAddress & 0x1FFFFFFF) >>> 0
+            : baseAddress >>> 0;
+        const info = { panel, label, region, baseAddress, totalBytes, physBaseAddress: physBase };
         this._livePanels.push(panel);
+        this._livePanelInfo.push(info);
         panel.onDidDispose(() => {
             this._livePanels = this._livePanels.filter(p => p !== panel);
+            this._livePanelInfo = this._livePanelInfo.filter(info => info.panel !== panel);
         });
         panel.webview.html = (0, disasmEditorTemplate_1.getDisasmEditorHtml)({}, (0, helpers_1.getNonce)());
         const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -461,7 +479,33 @@ class DisasmEditorProvider {
             else if (message.type === 'getStatus') {
                 try {
                     const status = await this.socketClient.getPC();
-                    panel.webview.postMessage({ type: 'status', ...status });
+                    const statusMsg = { type: 'status', ...status };
+                    // When paused, also fetch registers for the debug panel
+                    if (status.paused) {
+                        try {
+                            const regs = await this.socketClient.getRegisters();
+                            statusMsg.registers = regs;
+                            // Fetch stack memory (128 bytes from $sp = gpr[29])
+                            const sp = regs.gpr[29];
+                            if (sp !== undefined) {
+                                try {
+                                    const stackBuf = await this.socketClient.readMemory(sp, 128, 'ee');
+                                    statusMsg.stackBytes = Array.from(stackBuf);
+                                    statusMsg.stackBase = sp;
+                                }
+                                catch { /* ignore stack read errors */ }
+                            }
+                        }
+                        catch { /* ignore register fetch errors */ }
+                        // When a breakpoint was hit, bring the correct panel to front
+                        // and broadcast the full status to every live window.
+                        const hitAddr = status.breakpointHitAddress ?? status.pc;
+                        this._revealPanelForAddress(hitAddr);
+                        this._broadcastFullStatus(statusMsg);
+                    }
+                    else {
+                        panel.webview.postMessage(statusMsg);
+                    }
                 }
                 catch (err) {
                     console.error(`[LIVE] Failed to get status: ${err?.message ?? err}`);
@@ -474,7 +518,16 @@ class DisasmEditorProvider {
         });
     }
     /**
-     * Send a `status` message to all registered live panels.
+     * Reset all live panels: clears their page caches and shows zeroed-out rows.
+     * Called by DisasmPanelProvider after triggering an emulator restart.
+     */
+    resetLivePanels() {
+        for (const p of this._livePanels) {
+            p.webview.postMessage({ type: 'reset' });
+        }
+    }
+    /**
+     * Send a minimal `status` message to all registered live panels.
      * Called immediately after a user-initiated pause or resume so every window
      * updates its live-bar indicator without waiting for the next status-poll cycle.
      */
@@ -482,6 +535,32 @@ class DisasmEditorProvider {
         const msg = { type: 'status', paused };
         for (const p of this._livePanels) {
             p.webview.postMessage(msg);
+        }
+    }
+    /**
+     * Broadcast a full status message (including PC, registers, etc.) to every
+     * live panel.  Called when a breakpoint is hit so all windows update at once.
+     */
+    _broadcastFullStatus(statusMsg) {
+        for (const p of this._livePanels) {
+            p.webview.postMessage(statusMsg);
+        }
+    }
+    /**
+     * Find the live panel whose address range contains `addr` and reveal it so
+     * the user immediately sees the paused location.  Strips KSEG0/KSEG1 bits
+     * before comparing, matching the MIPS physical-address mapping.
+     * Panel base addresses are pre-computed as physBaseAddress at creation time.
+     */
+    _revealPanelForAddress(addr) {
+        const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
+            ? (addr & 0x1FFFFFFF) >>> 0
+            : addr >>> 0;
+        for (const info of this._livePanelInfo) {
+            if (physAddr >= info.physBaseAddress && physAddr < info.physBaseAddress + info.totalBytes) {
+                info.panel.reveal(vscode.ViewColumn.One, false);
+                return;
+            }
         }
     }
     async sendLiveDisasmPage(panel, region, baseAddress, totalBytes, startIndex) {
@@ -2567,7 +2646,10 @@ ${getSearchPanel()}
 ${getLiveToolbar()}
 ${getHexContainer()}
 </div>
+<div id="content-wrapper">
 ${getGrid()}
+${getDebugPanel()}
+</div>
 
 ${getScript(nonce)}
 
@@ -2625,7 +2707,6 @@ function getLiveToolbar() {
     return `<div id="live-toolbar">
     <span class="live-indicator" id="live-indicator">● LIVE</span>
     <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
-    <button id="refresh-btn" title="Refresh current view">↻ Refresh</button>
 </div>`;
 }
 function getHexContainer() {
@@ -2633,6 +2714,28 @@ function getHexContainer() {
 }
 function getGrid() {
     return `<div id="grid" tabindex="0"></div>`;
+}
+function getDebugPanel() {
+    return `<div id="debug-panel">
+    <div id="debug-tabs">
+        <button class="debug-tab active" data-tab="registers">GPR</button>
+        <button class="debug-tab" data-tab="cop0">CP0</button>
+        <button class="debug-tab" data-tab="fpr">FPR</button>
+        <button class="debug-tab" data-tab="fcr">FCR</button>
+        <button class="debug-tab" data-tab="vu0f">VU0f</button>
+        <button class="debug-tab" data-tab="vu0i">VU0i</button>
+        <button class="debug-tab" data-tab="gs">GS</button>
+        <button class="debug-tab" data-tab="stack">Stack</button>
+    </div>
+    <div id="registers-content" class="debug-tab-content active"></div>
+    <div id="cop0-content" class="debug-tab-content"></div>
+    <div id="fpr-content" class="debug-tab-content"></div>
+    <div id="fcr-content" class="debug-tab-content"></div>
+    <div id="vu0f-content" class="debug-tab-content"></div>
+    <div id="vu0i-content" class="debug-tab-content"></div>
+    <div id="gs-content" class="debug-tab-content"></div>
+    <div id="stack-content" class="debug-tab-content"></div>
+</div>`;
 }
 function getScript(nonce) {
     // The JavaScript content from the HTML file - too large to inline
@@ -2664,8 +2767,10 @@ const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
 const liveToolbar = document.getElementById("live-toolbar");
 const liveIndicator = document.getElementById("live-indicator");
-const refreshBtn = document.getElementById("refresh-btn");
 const playPauseBtn = document.getElementById("play-pause-btn");
+const debugPanel = document.getElementById("debug-panel");
+const regContent = document.getElementById("registers-content");
+const stackContent = document.getElementById("stack-content");
 
 const state = {
     cursor: 0,
@@ -2683,7 +2788,8 @@ const state = {
     searchActive: false,
     gotoActive: false,
     isLive: false,
-    breakpoints: new Set()
+    breakpoints: new Set(),
+    breakpointHitAddress: undefined
 };
 
 let liveRefreshTimer = null;
@@ -2733,7 +2839,10 @@ window.addEventListener("message", ({ data: msg }) => {
             handleSearchResults(msg.matches);
             break;
         case "status":
-            handleStatusUpdate(msg.paused, msg.pc, msg.breakpointHitAddress);
+            handleStatusUpdate(msg.paused, msg.pc, msg.breakpointHitAddress, msg.registers, msg.stackBytes, msg.stackBase);
+            break;
+        case "reset":
+            handleReset();
             break;
     }
 });
@@ -2880,11 +2989,9 @@ function goToAddress() {
         return;
     }
     gotoInput.classList.remove('error');
-    if (addr < state.baseAddress) {
-        gotoInfo.textContent = 'Address below base';
-        return;
-    }
-    const instrIndex = Math.floor((addr - state.baseAddress) / 4);
+    const physAddr  = toPhysAddr(addr);
+    const physBase  = toPhysAddr(state.baseAddress);
+    const instrIndex = Math.floor((physAddr - physBase) / 4);
     if (instrIndex < 0 || instrIndex >= state.totalInstructions) {
         gotoInfo.textContent = 'Address out of range';
         return;
@@ -3059,6 +3166,14 @@ function renderDisassembly() {
             row.classList.add("breakpoint");
             row.classList.add("breakpoint-active");
         }
+        // Distinct highlight for the row where execution actually stopped
+        if (state.breakpointHitAddress !== undefined) {
+            const hitPhys = toPhysAddr(state.breakpointHitAddress);
+            const rowPhys = toPhysAddr(rowAddr);
+            if (hitPhys === rowPhys) {
+                row.classList.add("breakpoint-hit");
+            }
+        }
         row.innerHTML = buildDisasmRowHtml(rowData, globalIndex);
         row.onclick = () => {
             state.cursor = globalIndex;
@@ -3150,8 +3265,9 @@ function navigateToCurrentRowTarget() {
 }
 
 function navigateToAddress(addr) {
-    if (addr < state.baseAddress) return;
-    const instrIndex = Math.floor((addr - state.baseAddress) / 4);
+    const physAddr  = toPhysAddr(addr);
+    const physBase  = toPhysAddr(state.baseAddress);
+    const instrIndex = Math.floor((physAddr - physBase) / 4);
     if (instrIndex < 0 || instrIndex >= state.totalInstructions) return;
     state.cursor = instrIndex;
     const pageReady = checkAndLoadPage();
@@ -3213,7 +3329,8 @@ function updateCursor() {
 
 function updateHexForRow(row) {
     const addr = parseInt(row.addr, 16);
-    const length = row.bytes?.trim().split(/\\s+/).length || 4;
+    const byteStr = row.bytes?.trim() || '';
+    const length = byteStr.length > 0 ? Math.floor(byteStr.length / 2) : 4;
     const inView = addr >= state.hexOffset && addr + length <= state.hexOffset + state.hexData.length;
     if (inView) {
         renderHexView(state.hexData, state.hexOffset, addr, length);
@@ -3280,16 +3397,6 @@ function doLiveRefresh() {
     vscode.postMessage({ type: 'requestPage', startIndex });
 }
 
-function manualRefresh() {
-    if (liveRefreshPending) { return; }
-    liveRefreshPending = true;
-    const startIndex = getPageStart(state.cursor);
-    state.loadedPages.delete(startIndex);
-    vscode.postMessage({ type: 'requestPage', startIndex });
-}
-
-refreshBtn.addEventListener('click', manualRefresh);
-
 function setLivePausedUi(paused) {
     if (paused) {
         liveToolbar.classList.add('paused');
@@ -3308,29 +3415,342 @@ function setLivePausedUi(paused) {
     }
 }
 
-function handleStatusUpdate(paused, pc, breakpointHitAddress) {
+// Normalize a MIPS virtual address to its physical counterpart.
+// KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1 (0xA0000000–0xBFFFFFFF) are both
+// direct-mapped: physical = VA & 0x1FFFFFFF.  All other segments are returned
+// unchanged.  This lets panels whose baseAddress is a physical address (e.g.
+// BIOS ROM at 0x1FC00000) correctly match a PC in KSEG1 (e.g. 0xBFC00000).
+// The >>> 0 ensures the result is an unsigned 32-bit JS number regardless of
+// JavaScript's signed-integer bitwise semantics.
+function toPhysAddr(va) {
+    return (va >= 0x80000000 && va <= 0xBFFFFFFF) ? ((va & 0x1FFFFFFF) >>> 0) : (va >>> 0);
+}
+
+function handleStatusUpdate(paused, pc, breakpointHitAddress, registers, stackBytes, stackBase) {
     // If the emulator paused itself (e.g. breakpoint) and the user didn't
     // manually pause, mirror that state in the UI.
     if (paused && !livePaused) {
         livePaused = true;
         stopLiveRefresh();
         setLivePausedUi(true);
-        // Navigate cursor to the current PC so the user sees where execution stopped
-        if (pc !== undefined && pc !== null) {
-            const instrIndex = Math.floor((pc - state.baseAddress) / 4);
-            if (instrIndex >= 0 && instrIndex < state.totalInstructions) {
-                state.cursor = instrIndex;
-                const pageReady = checkAndLoadPage();
-                if (pageReady) { updateCursor(); }
-            }
+    }
+
+    // Track which address triggered the pause (undefined when running)
+    if (paused) {
+        state.breakpointHitAddress = breakpointHitAddress ?? pc;
+    } else {
+        state.breakpointHitAddress = undefined;
+    }
+
+    // Whenever paused (first detection or re-polled), navigate the cursor to the
+    // current PC so the disassembler always shows the correct instruction — even
+    // for early BIOS addresses where the PC is a KSEG1 virtual address but the
+    // panel's baseAddress is a physical address.
+    if (paused && pc !== undefined && pc !== null) {
+        const physPc   = toPhysAddr(pc);
+        const physBase = toPhysAddr(state.baseAddress);
+        const instrIndex = Math.floor((physPc - physBase) / 4);
+        if (instrIndex >= 0 && instrIndex < state.totalInstructions) {
+            state.cursor = instrIndex;
+            const pageReady = checkAndLoadPage();
+            if (pageReady) { updateCursor(); }
         }
-    } else if (!paused && livePaused) {
+    }
+
+    if (!paused && livePaused) {
         // Emulator resumed externally
         livePaused = false;
+        state.breakpointHitAddress = undefined;
         setLivePausedUi(false);
         startLiveRefresh();
+        hideDebugPanel();
+        return;
+    }
+    // Update debug panel whenever we are paused and have register data
+    if (paused && registers) {
+        showDebugPanel(registers, stackBytes, stackBase);
     }
 }
+
+function handleReset() {
+    // Clear all cached pages so zeroed-out rows are displayed immediately
+    state.loadedPages.clear();
+    state.disasmRows = [];
+    state.breakpointHitAddress = undefined;
+    const startIndex = getPageStart(state.cursor);
+    const zeroRows = generateZeroPage(startIndex);
+    state.loadedPages.set(startIndex, zeroRows);
+    state.disasmRows = zeroRows;
+    renderDisassembly();
+    hideDebugPanel();
+    // Restart live refresh so the emulator re-runs from the reset vector
+    livePaused = false;
+    setLivePausedUi(false);
+    restartLiveRefresh();
+}
+
+function generateZeroPage(startIndex) {
+    const rows = [];
+    const count = Math.min(state.pageSize, state.totalInstructions - startIndex);
+    for (let i = 0; i < count; i++) {
+        const addr = state.baseAddress + (startIndex + i) * 4;
+        rows.push({
+            addr: addr.toString(16).toUpperCase().padStart(8, '0'),
+            bytes: '00000000',
+            label: '',
+            op: 'nop',
+            args: '',
+            comment: ''
+        });
+    }
+    return rows;
+}
+
+// ── Debug Panel ──────────────────────────────────────────────────────────────
+
+const MIPS_REG_NAMES = [
+    '$zero','$at','$v0','$v1','$a0','$a1','$a2','$a3',
+    '$t0','$t1','$t2','$t3','$t4','$t5','$t6','$t7',
+    '$s0','$s1','$s2','$s3','$s4','$s5','$s6','$s7',
+    '$t8','$t9','$k0','$k1','$gp','$sp','$fp','$ra'
+];
+
+const COP0_REG_NAMES = [
+    'Index','Random','EntryLo0','EntryLo1','Context','PageMask','Wired','Reserved7',
+    'BadVAddr','Count','EntryHi','Compare','Status','Cause','EPC','PRId',
+    'Config','LLAddr','WatchLo','WatchHi','XContext','Reserved21','Reserved22','Reserved23',
+    'Reserved24','PerfCnt','ErrCtl','CacheErr','TagLo','TagHi','ErrorEPC','Reserved31'
+];
+
+const GS_PRIV_NAMES = [
+    'PMODE','SMODE1','SMODE2','SRFSH','SYNCH1','SYNCH2','SYNCV',
+    'DISPFB1','DISPLAY1','DISPFB2','DISPLAY2',
+    'EXTBUF','EXTDATA','EXTWRITE','BGCOLOR',
+    'CSR','IMR','BUSDIR','SIGLBLID'
+];
+
+function hex32(n) {
+    return (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+}
+
+function hex64(lo, hi) {
+    // lo and hi are 32-bit halves; hi may be 0 for most regs
+    const loStr = (lo >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    const hiStr = (hi >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    return hiStr + '_' + loStr;
+}
+
+// Reinterpret a raw IEEE-754 uint32 bit pattern as a float string.
+// Uses a DataView trick to avoid precision loss.
+function rawBitsToFloat(bits) {
+    const buf = new ArrayBuffer(4);
+    new Uint32Array(buf)[0] = bits >>> 0;
+    const f = new DataView(buf).getFloat32(0, true);
+    // Show up to 6 significant digits; strip trailing zeros for brevity
+    return f.toPrecision(6).replace(/\\.?0+$/, '');
+}
+
+function showDebugPanel(regs, stackBytes, stackBase) {
+    debugPanel.classList.add('visible');
+    renderGprPanel(regs);
+    renderCop0Panel(regs);
+    renderFprPanel(regs);
+    renderFcrPanel(regs);
+    renderVu0fPanel(regs);
+    renderVu0iPanel(regs);
+    renderGsPanel(regs);
+    renderStackPanel(regs, stackBytes, stackBase);
+}
+
+function hideDebugPanel() {
+    debugPanel.classList.remove('visible');
+}
+
+// ── GPR tab ──────────────────────────────────────────────────────────────────
+function renderGprPanel(regs) {
+    if (!regs) { regContent.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">General Purpose Registers</div>';
+    html += \`<div class="dbg-row"><span class="dbg-name">PC  </span><span class="dbg-val">\${hex32(regs.pc)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">HI  </span><span class="dbg-val">\${hex32(regs.hi)}</span><span class="dbg-name" style="margin-left:8px">LO  </span><span class="dbg-val">\${hex32(regs.lo)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">HI1 </span><span class="dbg-val">\${hex32(regs.hi1)}</span><span class="dbg-name" style="margin-left:8px">LO1 </span><span class="dbg-val">\${hex32(regs.lo1)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">SA  </span><span class="dbg-val">\${hex32(regs.sa)}</span></div>\`;
+    html += '<div class="dbg-divider"></div>';
+    const gpr = regs.gpr ?? [];
+    for (let i = 0; i < 32; i++) {
+        const name = MIPS_REG_NAMES[i].padEnd(5);
+        const val = hex32(gpr[i] ?? 0);
+        const nz  = (gpr[i] ?? 0) !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name">\${name}</span><span class="dbg-val">\${val}</span></div>\`;
+    }
+    regContent.innerHTML = html;
+}
+
+// ── CP0 tab ──────────────────────────────────────────────────────────────────
+function renderCop0Panel(regs) {
+    const el = document.getElementById('cop0-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">System Control (COP0)</div>';
+    const cop0 = regs.cop0Regs ?? [];
+    for (let i = 0; i < 32; i++) {
+        const name = ('r' + i + ' ' + COP0_REG_NAMES[i]).substring(0, 14).padEnd(14);
+        const val  = hex32(cop0[i] ?? 0);
+        const nz   = (cop0[i] ?? 0) !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name" style="font-size:10px">\${name}</span><span class="dbg-val">\${val}</span></div>\`;
+    }
+    el.innerHTML = html;
+}
+
+// ── FPR tab ──────────────────────────────────────────────────────────────────
+function renderFprPanel(regs) {
+    const el = document.getElementById('fpr-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">Floating Point Registers (COP1)</div>';
+    const fpr = regs.fpr ?? [];
+    for (let i = 0; i < 32; i++) {
+        const bits = (fpr[i] ?? 0) >>> 0;
+        const fval = rawBitsToFloat(bits);
+        const nz   = bits !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name">f\${String(i).padStart(2,'0')} </span><span class="dbg-val">\${hex32(bits)}</span><span class="dbg-dim" style="margin-left:6px">\${fval}</span></div>\`;
+    }
+    html += '<div class="dbg-divider"></div>';
+    const accBits = (regs.fprAcc ?? 0) >>> 0;
+    html += \`<div class="dbg-row\${accBits !== 0 ? ' dbg-nonzero' : ''}"><span class="dbg-name">ACC  </span><span class="dbg-val">\${hex32(accBits)}</span><span class="dbg-dim" style="margin-left:6px">\${rawBitsToFloat(accBits)}</span></div>\`;
+    el.innerHTML = html;
+}
+
+// ── FCR tab ──────────────────────────────────────────────────────────────────
+function renderFcrPanel(regs) {
+    const el = document.getElementById('fcr-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">FPU Control Registers (FCR)</div>';
+    const fcr0  = (regs.fcr0  ?? 0) >>> 0;
+    const fcr31 = (regs.fcr31 ?? 0) >>> 0;
+    html += \`<div class="dbg-row"><span class="dbg-name">FCR0  </span><span class="dbg-val">\${hex32(fcr0)}</span><span class="dbg-dim" style="margin-left:6px">FIR (implementation)</span></div>\`;
+    html += \`<div class="dbg-row\${fcr31 !== 0 ? ' dbg-nonzero' : ''}"><span class="dbg-name">FCR31 </span><span class="dbg-val">\${hex32(fcr31)}</span><span class="dbg-dim" style="margin-left:6px">FCSR (control/status)</span></div>\`;
+    // Decode key FCR31 fields
+    html += '<div class="dbg-divider"></div>';
+    html += '<div class="dbg-section-title">FCR31 decode</div>';
+    const rm    = fcr31 & 0x3;
+    const flags = (fcr31 >> 7)  & 0x1F;
+    const ena   = (fcr31 >> 12) & 0x1F;
+    const cause = (fcr31 >> 18) & 0x3F;
+    const cc    = (fcr31 >> 23) & 0x1;
+    const fs    = (fcr31 >> 24) & 0x1;
+    const rmStr = ['RN (nearest)','RZ (zero)','RP (+inf)','RM (-inf)'][rm];
+    html += \`<div class="dbg-row"><span class="dbg-name">RM    </span><span class="dbg-val">\${rmStr}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Flags </span><span class="dbg-val">\${flags.toString(2).padStart(5,'0')}</span><span class="dbg-dim" style="margin-left:6px">V Z O U I (sticky)</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Enable</span><span class="dbg-val">\${ena.toString(2).padStart(5,'0')}</span><span class="dbg-dim" style="margin-left:6px">V Z O U I</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Cause </span><span class="dbg-val">\${cause.toString(2).padStart(6,'0')}</span><span class="dbg-dim" style="margin-left:6px">E V Z O U I</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">CC    </span><span class="dbg-val">\${cc}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">FS    </span><span class="dbg-val">\${fs}</span><span class="dbg-dim" style="margin-left:6px">flush-to-zero</span></div>\`;
+    el.innerHTML = html;
+}
+
+// ── VU0f tab ─────────────────────────────────────────────────────────────────
+function renderVu0fPanel(regs) {
+    const el = document.getElementById('vu0f-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">VU0 Float Registers (vf0–vf31)</div>';
+    const xs = regs.vu0fX ?? [];
+    const ys = regs.vu0fY ?? [];
+    const zs = regs.vu0fZ ?? [];
+    const ws = regs.vu0fW ?? [];
+    for (let i = 0; i < 32; i++) {
+        const xb = (xs[i] ?? 0) >>> 0; const yb = (ys[i] ?? 0) >>> 0;
+        const zb = (zs[i] ?? 0) >>> 0; const wb = (ws[i] ?? 0) >>> 0;
+        const nz = xb !== 0 || yb !== 0 || zb !== 0 || wb !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}">
+            <span class="dbg-name">vf\${String(i).padStart(2,'0')}</span>
+            <span class="dbg-dim" style="font-size:9px;margin-left:4px">x:\${rawBitsToFloat(xb)} y:\${rawBitsToFloat(yb)} z:\${rawBitsToFloat(zb)} w:\${rawBitsToFloat(wb)}</span>
+        </div>\`;
+    }
+    html += '<div class="dbg-divider"></div>';
+    const axb = (regs.vu0AccX ?? 0) >>> 0; const ayb = (regs.vu0AccY ?? 0) >>> 0;
+    const azb = (regs.vu0AccZ ?? 0) >>> 0; const awb = (regs.vu0AccW ?? 0) >>> 0;
+    html += \`<div class="dbg-row"><span class="dbg-name">ACC  </span><span class="dbg-dim" style="font-size:9px;margin-left:4px">x:\${rawBitsToFloat(axb)} y:\${rawBitsToFloat(ayb)} z:\${rawBitsToFloat(azb)} w:\${rawBitsToFloat(awb)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Q    </span><span class="dbg-val">\${hex32((regs.vu0Q ?? 0) >>> 0)}</span><span class="dbg-dim" style="margin-left:6px">\${rawBitsToFloat((regs.vu0Q ?? 0) >>> 0)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">P    </span><span class="dbg-val">\${hex32((regs.vu0P ?? 0) >>> 0)}</span><span class="dbg-dim" style="margin-left:6px">\${rawBitsToFloat((regs.vu0P ?? 0) >>> 0)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">I    </span><span class="dbg-val">\${hex32((regs.vu0I ?? 0) >>> 0)}</span><span class="dbg-dim" style="margin-left:6px">\${rawBitsToFloat((regs.vu0I ?? 0) >>> 0)}</span></div>\`;
+    html += '<div class="dbg-divider"></div>';
+    html += \`<div class="dbg-row"><span class="dbg-name">Status</span><span class="dbg-val">\${hex32(regs.vu0Status ?? 0)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">MAC   </span><span class="dbg-val">\${((regs.vu0Mac ?? 0) >>> 0).toString(16).toUpperCase().padStart(4,'0')}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Clip  </span><span class="dbg-val">\${hex32(regs.vu0Clip ?? 0)}</span></div>\`;
+    el.innerHTML = html;
+}
+
+// ── VU0i tab ─────────────────────────────────────────────────────────────────
+function renderVu0iPanel(regs) {
+    const el = document.getElementById('vu0i-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">VU0 Integer Registers (vi0–vi15)</div>';
+    const vi = regs.vu0i ?? [];
+    for (let i = 0; i < 16; i++) {
+        const val = (vi[i] ?? 0) & 0xFFFF;
+        const nz  = val !== 0;
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name">vi\${String(i).padStart(2,'0')} </span><span class="dbg-val">\${val.toString(16).toUpperCase().padStart(4,'0')}</span><span class="dbg-dim" style="margin-left:6px">\${val}</span></div>\`;
+    }
+    el.innerHTML = html;
+}
+
+// ── GS tab ───────────────────────────────────────────────────────────────────
+function renderGsPanel(regs) {
+    const el = document.getElementById('gs-content');
+    if (!el) return;
+    if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    let html = '<div class="dbg-section-title">Graphics Synthesizer Registers</div>';
+    const priv = regs.gsPriv ?? [];
+    for (let i = 0; i < GS_PRIV_NAMES.length; i++) {
+        const raw = priv[i] ?? 0;
+        // Treat as two 32-bit halves (JSON loses upper bits beyond 53-bit safe int)
+        const lo = (raw & 0xFFFFFFFF) >>> 0;
+        const hi = Math.floor(raw / 0x100000000) >>> 0;
+        const valStr = hi !== 0 ? hex64(lo, hi) : hex32(lo);
+        const nz = raw !== 0;
+        const name = GS_PRIV_NAMES[i].padEnd(10);
+        html += \`<div class="dbg-row\${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name" style="font-size:10px">\${name}</span><span class="dbg-val" style="font-size:10px">\${valStr}</span></div>\`;
+    }
+    el.innerHTML = html;
+}
+
+function renderStackPanel(regs, stackBytes, stackBase) {
+    if (!regs) { stackContent.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    const sp = (regs.gpr ?? [])[29] ?? 0;
+    let html = \`<div class="dbg-section-title">Stack  SP=\${hex32(sp)}</div>\`;
+    if (!stackBytes || stackBytes.length === 0) {
+        html += '<div class="dbg-row dbg-dim">Stack data unavailable</div>';
+        stackContent.innerHTML = html;
+        return;
+    }
+    // Show 32 slots (128 bytes)
+    for (let i = 0; i < Math.min(stackBytes.length, 128); i += 4) {
+        const addr = (stackBase + i) >>> 0;
+        const word = ((stackBytes[i+3] << 24) | (stackBytes[i+2] << 16) | (stackBytes[i+1] << 8) | stackBytes[i]) >>> 0;
+        const addrStr = hex32(addr);
+        const valStr  = hex32(word);
+        // Highlight potential return addresses (KSEG0/KSEG1 range)
+        const isCodeAddr = word >= 0x80000000 && word < 0xC0000000;
+        const cls = isCodeAddr ? ' dbg-retaddr' : '';
+        const annotation = isCodeAddr ? ' <span class="dbg-dim">← code ptr</span>' : '';
+        html += \`<div class="dbg-row\${cls}"><span class="dbg-addr">\${addrStr}</span><span class="dbg-val">\${valStr}</span>\${annotation}</div>\`;
+    }
+    stackContent.innerHTML = html;
+}
+
+// Debug panel tab switching
+document.querySelectorAll('.debug-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.debug-tab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.debug-tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.tab;
+        document.getElementById(tab + '-content')?.classList.add('active');
+    });
+});
 
 playPauseBtn.addEventListener('click', () => {
     livePaused = !livePaused;
@@ -3593,6 +4013,12 @@ body {
 #grid::-webkit-scrollbar {
     display: none; /* Chrome/Safari/Edge */
 } 
+
+#content-wrapper {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
  
 .row {
     display: grid;
@@ -3626,6 +4052,22 @@ body {
 
 .row.active.breakpoint-active {
     background: #264f78;
+}
+
+/* Row where execution actually stopped (breakpoint hit) — amber highlight */
+.row.breakpoint-hit {
+    background: #4a3800;
+}
+
+.row.breakpoint-hit .addr::before {
+    content: '▶';
+    color: #f0c040;
+    margin-right: 4px;
+    font-size: 10px;
+}
+
+.row.active.breakpoint-hit {
+    background: #6a5000;
 }
 
 .row.search-match {
@@ -3709,21 +4151,6 @@ body {
     50% { opacity: 0.35; }
 }
 
-#refresh-btn {
-    background: #3c3c3c;
-    border: 1px solid #3e3e42;
-    color: #cccccc;
-    padding: 2px 10px;
-    cursor: pointer;
-    font-family: monospace;
-    font-size: 11px;
-    outline: none;
-}
-
-#refresh-btn:hover {
-    background: #505050;
-}
-
 #play-pause-btn {
     background: #3c3c3c;
     border: 1px solid #3e3e42;
@@ -3752,6 +4179,126 @@ body {
 
 #interval-select:hover {
     background: #505050;
+}
+
+/* ── Debug Panel (Registers + Stack) ─────────────────────────────────── */
+
+#debug-panel {
+    width: 320px;
+    min-width: 320px;
+    display: none;
+    flex-direction: column;
+    background: #1e1e1e;
+    border-left: 1px solid #3e3e42;
+    overflow: hidden;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+#debug-panel.visible {
+    display: flex;
+}
+
+#debug-tabs {
+    display: flex;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+}
+
+.debug-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #858585;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+.debug-tab:hover {
+    color: #d4d4d4;
+}
+
+.debug-tab.active {
+    color: #d4d4d4;
+    border-bottom-color: #007acc;
+}
+
+.debug-tab-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.debug-tab-content.active {
+    display: block;
+}
+
+.debug-tab-content::-webkit-scrollbar {
+    width: 6px;
+}
+.debug-tab-content::-webkit-scrollbar-thumb {
+    background: #424242;
+}
+
+.dbg-section-title {
+    color: #858585;
+    font-size: 10px;
+    text-transform: uppercase;
+    padding: 6px 8px 2px;
+    letter-spacing: 0.05em;
+}
+
+.dbg-divider {
+    border-bottom: 1px solid #3e3e42;
+    margin: 4px 8px;
+}
+
+.dbg-row {
+    display: flex;
+    align-items: center;
+    padding: 1px 8px;
+    line-height: 1.6;
+}
+
+.dbg-row:hover {
+    background: #2a2d2e;
+}
+
+.dbg-name {
+    color: #9cdcfe;
+    width: 7ch;
+    flex-shrink: 0;
+    white-space: pre;
+}
+
+.dbg-addr {
+    color: #c586c0;
+    width: 9ch;
+    flex-shrink: 0;
+}
+
+.dbg-val {
+    color: #d4d4d4;
+    font-family: monospace;
+}
+
+.dbg-nonzero .dbg-val {
+    color: #dcdcaa;
+}
+
+.dbg-retaddr .dbg-val {
+    color: #4ec9b0;
+}
+
+.dbg-dim {
+    color: #858585;
+    font-size: 10px;
+    margin-left: 6px;
 }
 
 </style>`;
@@ -3874,6 +4421,9 @@ class DisasmPanelProvider {
                     break;
                 case 'openSnapshot':
                     await this.handleOpenSnapshot(msg.path);
+                    break;
+                case 'restart':
+                    await this.handleRestart();
                     break;
                 // Dropdown change notifications (no-op for now)
                 case 'emulatorChanged':
@@ -4059,6 +4609,28 @@ class DisasmPanelProvider {
         this.emulatorTerminal = undefined;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
     }
+    /** Restart the emulator: reset both CPUs, clear live panel caches, resume running. */
+    async handleRestart() {
+        const out = (0, extension_1.getOutputChannel)();
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        try {
+            // Immediately blank live panels so stale content is not shown
+            this.editorProvider.resetLivePanels();
+            await this.socketClient.restart();
+            // Resume so the emulator runs from the reset vector instead of
+            // staying paused (which would look like a breakpoint was hit).
+            await this.socketClient.resume();
+            out.appendLine('[INFO] Emulator restarted and running from reset vector.');
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            out.appendLine(`[ERROR] Restart failed: ${msg}`);
+            vscode.window.showErrorMessage(`Restart failed: ${msg}`);
+        }
+    }
     // ── Snapshot ──────────────────────────────────────────────────────────────
     async handleSnapshot() {
         const out = (0, extension_1.getOutputChannel)();
@@ -4117,6 +4689,16 @@ class DisasmPanelProvider {
             return p;
         }
         return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
+    }
+    /**
+     * Called when the socket connects (including auto-connect on VS Code startup).
+     * Opens live memory views for all regions, reusing any already-open panels.
+     */
+    async onSocketConnected() {
+        this.webview?.postMessage({ command: 'connectionStatus', connected: true });
+        for (const r of LIVE_REGIONS) {
+            await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+        }
     }
 }
 exports.DisasmPanelProvider = DisasmPanelProvider;
@@ -4210,6 +4792,9 @@ function getEmulatorControls(data) {
     <button id="connectBtn">${data.connected ? 'Disconnect' : 'Connect'}</button>
 </div>
 <div class="row">
+    <button id="restartBtn" ${data.connected ? '' : 'disabled'}>⟳ Restart</button>
+</div>
+<div class="row">
     <button id="snapshotBtn" ${data.connected ? '' : 'disabled'}>Take Snapshot</button>
 </div>
 ${data.snapshots && data.snapshots.length > 0 ? getSnapshotList(data.snapshots) : ''}`;
@@ -4246,6 +4831,10 @@ document.getElementById('snapshotBtn')?.addEventListener('click', () => {
     vscode.postMessage({ command: 'snapshot' });
 });
 
+document.getElementById('restartBtn')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'restart' });
+});
+
 document.getElementById('emulatorSelect').onchange = (e) => {
     vscode.postMessage({ command: 'emulatorChanged', emulatorPath: e.target.value });
 };
@@ -4276,6 +4865,8 @@ window.addEventListener('message', event => {
             btn.textContent = message.connected ? 'Disconnect' : 'Connect';
             const snapBtn = document.getElementById('snapshotBtn');
             snapBtn.disabled = !message.connected;
+            const restartBtn = document.getElementById('restartBtn');
+            if (restartBtn) { restartBtn.disabled = !message.connected; }
             break;
         }
         case 'updateSnapshots': {
@@ -5156,6 +5747,60 @@ class SocketClient {
             paused: response.Paused ?? false,
             pc: response.PC ?? 0,
             breakpointHitAddress: response.BreakpointHitAddress,
+        };
+    }
+    /**
+     * Restart the emulator (reset both CPUs to power-on state, then pause)
+     */
+    async restart() {
+        const command = { Command: 'RESTART' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Restart failed');
+        }
+    }
+    /**
+     * Get a full CPU register dump from the running emulator
+     */
+    async getRegisters() {
+        const command = { Command: 'GETREGS' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetRegisters failed');
+        }
+        return {
+            gpr: response.GPR ?? new Array(32).fill(0),
+            pc: response.GPR_PC ?? 0,
+            hi: response.GPR_HI ?? 0,
+            lo: response.GPR_LO ?? 0,
+            hi1: response.GPR_HI1 ?? 0,
+            lo1: response.GPR_LO1 ?? 0,
+            sa: response.GPR_SA ?? 0,
+            cop0Status: response.COP0_Status ?? 0,
+            cop0Cause: response.COP0_Cause ?? 0,
+            cop0Epc: response.COP0_EPC ?? 0,
+            cop0Count: response.COP0_Count ?? 0,
+            cop0Regs: response.COP0_Regs ?? new Array(32).fill(0),
+            fpr: response.FPR ?? new Array(32).fill(0),
+            fprAcc: response.FPR_ACC ?? 0,
+            fcr0: response.FCR0 ?? 0,
+            fcr31: response.FCR31 ?? 0,
+            vu0fX: response.VU0F_X ?? new Array(32).fill(0),
+            vu0fY: response.VU0F_Y ?? new Array(32).fill(0),
+            vu0fZ: response.VU0F_Z ?? new Array(32).fill(0),
+            vu0fW: response.VU0F_W ?? new Array(32).fill(0),
+            vu0AccX: response.VU0F_ACC_X ?? 0,
+            vu0AccY: response.VU0F_ACC_Y ?? 0,
+            vu0AccZ: response.VU0F_ACC_Z ?? 0,
+            vu0AccW: response.VU0F_ACC_W ?? 0,
+            vu0Q: response.VU0F_Q ?? 0,
+            vu0P: response.VU0F_P ?? 0,
+            vu0I: response.VU0F_I ?? 0,
+            vu0i: response.VU0I ?? new Array(16).fill(0),
+            vu0Status: response.VU0_Status ?? 0,
+            vu0Mac: response.VU0_MAC ?? 0,
+            vu0Clip: response.VU0_Clip ?? 0,
+            gsPriv: response.GS_Priv ?? new Array(19).fill(0),
         };
     }
     /**

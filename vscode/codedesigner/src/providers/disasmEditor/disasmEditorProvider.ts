@@ -39,6 +39,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private socketClient: SocketClient | null;
   /** All currently-open live memory panels. Used to broadcast pause/resume state. */
   private _livePanels: vscode.WebviewPanel[] = [];
+  /** Metadata for each live panel: label, address range. Used for reuse and address lookup. */
+  private _livePanelInfo: Array<{
+    panel: vscode.WebviewPanel;
+    label: string;
+    region: string;
+    baseAddress: number;
+    totalBytes: number;
+    physBaseAddress: number;  // pre-computed physical base for fast address lookup
+  }> = [];
 
   constructor(socketClient: SocketClient | null) {
     this.socketClient = socketClient;
@@ -114,7 +123,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           rows.push({
             addr: currentAddr.toString(16).toUpperCase().padStart(8, "0"),
             bytes: bytesLE,
-            label: "",
+            label: result.Label || "",
             op: op,
             args: args,
             comment: result.Comment || "",  // Use comment from backend analyzer
@@ -218,6 +227,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     /**
      * Open a live memory view panel (no backing file — pages fetched via socket).
      * Called once per region after connecting to the embedded emulator server.
+     * If a panel for this label already exists (e.g. reconnect), it is revealed
+     * instead of creating a duplicate window.
      */
     async openLiveMemoryView(
         region: string,
@@ -230,6 +241,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             return;
         }
 
+        // Reuse an already-open panel with the same label (e.g. after reconnect)
+        const existingInfo = this._livePanelInfo.find(i => i.label === label);
+        if (existingInfo) {
+            existingInfo.panel.reveal(vscode.ViewColumn.One, true);
+            return;
+        }
+
         const panel = vscode.window.createWebviewPanel(
             'disasm.liveMemory',
             label,
@@ -237,10 +255,16 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             { enableScripts: true, retainContextWhenHidden: true }
         );
 
-        // Track this panel so pause/resume can be broadcast to all live windows.
+        // Track this panel for pause/resume broadcast and address lookup.
+        const physBase = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
+            ? (baseAddress & 0x1FFFFFFF) >>> 0
+            : baseAddress >>> 0;
+        const info = { panel, label, region, baseAddress, totalBytes, physBaseAddress: physBase };
         this._livePanels.push(panel);
+        this._livePanelInfo.push(info);
         panel.onDidDispose(() => {
             this._livePanels = this._livePanels.filter(p => p !== panel);
+            this._livePanelInfo = this._livePanelInfo.filter(info => info.panel !== panel);
         });
 
         panel.webview.html = getDisasmEditorHtml({} as DisasmEditorData, getNonce());
@@ -324,8 +348,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                                 } catch { /* ignore stack read errors */ }
                             }
                         } catch { /* ignore register fetch errors */ }
+
+                        // When a breakpoint was hit, bring the correct panel to front
+                        // and broadcast the full status to every live window.
+                        const hitAddr = status.breakpointHitAddress ?? status.pc;
+                        this._revealPanelForAddress(hitAddr);
+                        this._broadcastFullStatus(statusMsg);
+                    } else {
+                        panel.webview.postMessage(statusMsg);
                     }
-                    panel.webview.postMessage(statusMsg);
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to get status: ${err?.message ?? err}`);
                 }
@@ -347,7 +378,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     /**
-     * Send a `status` message to all registered live panels.
+     * Send a minimal `status` message to all registered live panels.
      * Called immediately after a user-initiated pause or resume so every window
      * updates its live-bar indicator without waiting for the next status-poll cycle.
      */
@@ -355,6 +386,35 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const msg = { type: 'status', paused };
         for (const p of this._livePanels) {
             p.webview.postMessage(msg);
+        }
+    }
+
+    /**
+     * Broadcast a full status message (including PC, registers, etc.) to every
+     * live panel.  Called when a breakpoint is hit so all windows update at once.
+     */
+    private _broadcastFullStatus(statusMsg: object): void {
+        for (const p of this._livePanels) {
+            p.webview.postMessage(statusMsg);
+        }
+    }
+
+    /**
+     * Find the live panel whose address range contains `addr` and reveal it so
+     * the user immediately sees the paused location.  Strips KSEG0/KSEG1 bits
+     * before comparing, matching the MIPS physical-address mapping.
+     * Panel base addresses are pre-computed as physBaseAddress at creation time.
+     */
+    private _revealPanelForAddress(addr: number): void {
+        const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
+            ? (addr & 0x1FFFFFFF) >>> 0
+            : addr >>> 0;
+
+        for (const info of this._livePanelInfo) {
+            if (physAddr >= info.physBaseAddress && physAddr < info.physBaseAddress + info.totalBytes) {
+                info.panel.reveal(vscode.ViewColumn.One, false);
+                return;
+            }
         }
     }
 

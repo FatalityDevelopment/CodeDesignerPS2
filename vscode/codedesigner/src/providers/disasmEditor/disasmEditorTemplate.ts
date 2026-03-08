@@ -181,7 +181,8 @@ const state = {
     searchActive: false,
     gotoActive: false,
     isLive: false,
-    breakpoints: new Set()
+    breakpoints: new Set(),
+    breakpointHitAddress: undefined
 };
 
 let liveRefreshTimer = null;
@@ -558,6 +559,14 @@ function renderDisassembly() {
             row.classList.add("breakpoint");
             row.classList.add("breakpoint-active");
         }
+        // Distinct highlight for the row where execution actually stopped
+        if (state.breakpointHitAddress !== undefined) {
+            const hitPhys = toPhysAddr(state.breakpointHitAddress);
+            const rowPhys = toPhysAddr(rowAddr);
+            if (hitPhys === rowPhys) {
+                row.classList.add("breakpoint-hit");
+            }
+        }
         row.innerHTML = buildDisasmRowHtml(rowData, globalIndex);
         row.onclick = () => {
             state.cursor = globalIndex;
@@ -819,6 +828,13 @@ function handleStatusUpdate(paused, pc, breakpointHitAddress, registers, stackBy
         setLivePausedUi(true);
     }
 
+    // Track which address triggered the pause (undefined when running)
+    if (paused) {
+        state.breakpointHitAddress = breakpointHitAddress ?? pc;
+    } else {
+        state.breakpointHitAddress = undefined;
+    }
+
     // Whenever paused (first detection or re-polled), navigate the cursor to the
     // current PC so the disassembler always shows the correct instruction — even
     // for early BIOS addresses where the PC is a KSEG1 virtual address but the
@@ -837,6 +853,7 @@ function handleStatusUpdate(paused, pc, breakpointHitAddress, registers, stackBy
     if (!paused && livePaused) {
         // Emulator resumed externally
         livePaused = false;
+        state.breakpointHitAddress = undefined;
         setLivePausedUi(false);
         startLiveRefresh();
         hideDebugPanel();
@@ -852,12 +869,17 @@ function handleReset() {
     // Clear all cached pages so zeroed-out rows are displayed immediately
     state.loadedPages.clear();
     state.disasmRows = [];
+    state.breakpointHitAddress = undefined;
     const startIndex = getPageStart(state.cursor);
     const zeroRows = generateZeroPage(startIndex);
     state.loadedPages.set(startIndex, zeroRows);
     state.disasmRows = zeroRows;
     renderDisassembly();
     hideDebugPanel();
+    // Restart live refresh so the emulator re-runs from the reset vector
+    livePaused = false;
+    setLivePausedUi(false);
+    restartLiveRefresh();
 }
 
 function generateZeroPage(startIndex) {

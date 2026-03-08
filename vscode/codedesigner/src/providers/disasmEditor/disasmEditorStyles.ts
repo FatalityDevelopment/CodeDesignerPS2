@@ -267,6 +267,22 @@ body {
     background: #264f78;
 }
 
+/* Row where execution actually stopped (breakpoint hit) — amber highlight */
+.row.breakpoint-hit {
+    background: #4a3800;
+}
+
+.row.breakpoint-hit .addr::before {
+    content: '▶';
+    color: #f0c040;
+    margin-right: 4px;
+    font-size: 10px;
+}
+
+.row.active.breakpoint-hit {
+    background: #6a5000;
+}
+
 .row.search-match {
     background: #613214;
 }
