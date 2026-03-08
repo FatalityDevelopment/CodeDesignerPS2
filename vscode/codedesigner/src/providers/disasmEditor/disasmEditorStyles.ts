@@ -235,7 +235,7 @@ body {
  
 .row {
     display: grid;
-    grid-template-columns: 10ch 12ch 18ch 8ch 40ch 1fr;
+    grid-template-columns: 10ch 12ch 26ch 8ch 34ch 22ch;
     padding: 2px 6px;
     cursor: default;
 }
@@ -301,7 +301,7 @@ body {
 .label { color: #4ec9b0; } 
 .op { color: #dcdcaa; } 
 .args { color: #ce9178; } 
-.comment { color: #6a9955; } 
+.comment { color: #6a9955; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } 
 
 .search-match-highlight {
     background: #f9826c;
@@ -329,23 +329,7 @@ body {
     display: block;
 }
 
-#live-toolbar {
-    display: none;
-    align-items: center;
-    gap: 10px;
-    background: #1e3a1e;
-    border-bottom: 1px solid #3e3e42;
-    padding: 4px 12px;
-    transition: background 0.2s;
-}
-
-#live-toolbar.visible {
-    display: flex;
-}
-
-#live-toolbar.paused {
-    background: #3a1e1e;
-}
+/* ── Live mode indicator (inside header-toolbar) ─────────────────────── */
 
 .live-indicator {
     color: #4ec94e;
@@ -514,7 +498,7 @@ body {
     margin-left: 6px;
 }
 
-/* ── Header toolbar (always-visible strip for panel toggles) ─────────── */
+/* ── Header toolbar (always-visible strip for panel toggles + live status) ── */
 
 #header-toolbar {
     display: flex;
@@ -523,6 +507,25 @@ body {
     background: #252526;
     border-bottom: 1px solid #3e3e42;
     padding: 2px 8px;
+}
+
+#header-toolbar.live-active {
+    background: #1e3a1e;
+}
+
+#header-toolbar.live-paused {
+    background: #3a1e1e;
+}
+
+#live-controls {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+#live-controls.visible {
+    display: flex;
 }
 
 .header-tool-btn {

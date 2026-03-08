@@ -391,6 +391,9 @@ class DisasmEditorProvider {
                 else if (message.type === "deleteLabel") {
                     await this.handleDeleteLabel(webviewPanel, message.address);
                 }
+                else if (message.type === "editLabel") {
+                    await this.handleEditLabel(webviewPanel, message.address, message.addressHex, message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
+                }
             });
         });
     }
@@ -546,6 +549,9 @@ class DisasmEditorProvider {
             }
             else if (message.type === 'deleteLabel') {
                 await this.handleDeleteLabel(panel, message.address);
+            }
+            else if (message.type === 'editLabel') {
+                await this.handleEditLabel(panel, message.address, message.addressHex, message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
             }
         });
     }
@@ -739,6 +745,48 @@ class DisasmEditorProvider {
             }
         }
         panel.webview.postMessage({ type: 'symbols', labels, strings, functions });
+    }
+    /**
+     * Open a VSCode multi-step input dialog to edit the label and comment for an
+     * address.  The title bar shows the address and raw instruction bytes so the
+     * user has full context.  Pressing Escape on either step cancels the whole
+     * operation with no changes saved.
+     *
+     * @param addressHex - Hex digits only (no "0x" prefix), e.g. "80010000"
+     */
+    async handleEditLabel(panel, address, addressHex, dataBytes, currentLabel, currentComment) {
+        // addressHex is plain hex digits (no "0x" prefix) as produced by
+        // toString(16).toUpperCase().padStart(8,"0") in the webview.
+        const addrDisplay = `0x${addressHex.toUpperCase()}`;
+        const dataDisplay = dataBytes ? ` | Data: ${dataBytes}` : '';
+        const newLabel = await vscode.window.showInputBox({
+            title: `Edit Label — ${addrDisplay}${dataDisplay}`,
+            prompt: 'Label (leave empty to remove)',
+            value: currentLabel,
+            placeHolder: 'Label name',
+            ignoreFocusOut: true,
+        });
+        if (newLabel === undefined) {
+            return;
+        } // cancelled
+        const newComment = await vscode.window.showInputBox({
+            title: `Edit Comment — ${addrDisplay}`,
+            prompt: 'Comment (leave empty to remove)',
+            value: currentComment,
+            placeHolder: 'Comment',
+            ignoreFocusOut: true,
+        });
+        if (newComment === undefined) {
+            return;
+        } // cancelled
+        if (!newLabel && !newComment) {
+            // Both empty — delete the label if it existed
+            if (currentLabel || currentComment) {
+                await this.handleDeleteLabel(panel, address);
+            }
+            return;
+        }
+        await this.handleAddLabel(panel, address, newLabel, newComment || undefined);
     }
     /**
      * Add (or update) a label in the backend database and send back a fresh
@@ -2669,7 +2717,6 @@ ${(0, disasmEditorStyles_1.getDisasmEditorStyles)()}
 <body>
 
 <div id="header">
-${getLiveToolbar()}
 ${getHeaderToolbar()}
 ${getGotoPanel()}
 ${getSearchPanel()}
@@ -2733,19 +2780,17 @@ function getSearchPanel() {
     </div>
 </div>`;
 }
-function getLiveToolbar() {
-    return `<div id="live-toolbar">
-    <span class="live-indicator" id="live-indicator">● LIVE</span>
-    <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
+function getHeaderToolbar() {
+    return `<div id="header-toolbar">
+    <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">⊞ Symbols</button>
+    <div id="live-controls">
+        <span class="live-indicator" id="live-indicator">● LIVE</span>
+        <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
+    </div>
 </div>`;
 }
 function getHexContainer() {
     return `<div id="hex-container"></div>`;
-}
-function getHeaderToolbar() {
-    return `<div id="header-toolbar">
-    <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">⊞ Symbols</button>
-</div>`;
 }
 function getGrid() {
     return `<div id="grid" tabindex="0"></div>`;
@@ -2838,7 +2883,8 @@ const gotoClear = document.getElementById("goto-clear");
 const gotoBtn = document.getElementById("goto-btn");
 const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
-const liveToolbar = document.getElementById("live-toolbar");
+const headerToolbar = document.getElementById("header-toolbar");
+const liveControls = document.getElementById("live-controls");
 const liveIndicator = document.getElementById("live-indicator");
 const playPauseBtn = document.getElementById("play-pause-btn");
 const debugPanel = document.getElementById("debug-panel");
@@ -2915,7 +2961,8 @@ window.addEventListener("message", ({ data: msg }) => {
             }
             if (msg.isLive) {
                 state.isLive = true;
-                liveToolbar.classList.add('visible');
+                liveControls.classList.add('visible');
+                headerToolbar.classList.add('live-active');
                 startLiveRefresh();
             }
             break;
@@ -2958,6 +3005,9 @@ window.addEventListener("message", ({ data: msg }) => {
         case "labelsUpdated":
             state.symLabels = msg.labels ?? [];
             renderSymLabels();
+            // Invalidate and reload the current page so the disassembly grid reflects the new label
+            state.loadedPages.delete(getPageStart(state.cursor));
+            checkAndLoadPage();
             break;
         case "stringsUpdated":
             state.symStrings = msg.strings ?? [];
@@ -3314,6 +3364,18 @@ function renderDisassembly() {
             state.cursor = globalIndex;
             updateCursor();
         };
+        row.ondblclick = () => {
+            state.cursor = globalIndex;
+            updateCursor();
+            vscode.postMessage({
+                type: 'editLabel',
+                address: parseInt(rowData.addr, 16),
+                addressHex: rowData.addr,
+                dataBytes: rowData.bytes,
+                currentLabel: rowData.label || '',
+                currentComment: rowData.comment || '',
+            });
+        };
         grid.appendChild(row);
     });
     updateCursor();
@@ -3539,14 +3601,16 @@ function doLiveRefresh() {
 
 function setLivePausedUi(paused) {
     if (paused) {
-        liveToolbar.classList.add('paused');
+        headerToolbar.classList.remove('live-active');
+        headerToolbar.classList.add('live-paused');
         liveIndicator.classList.add('paused');
         liveIndicator.textContent = '⏸ PAUSED';
         playPauseBtn.textContent = '▶ Resume';
         playPauseBtn.title = 'Resume live feed';
         playPauseBtn.setAttribute('aria-label', 'Resume live feed');
     } else {
-        liveToolbar.classList.remove('paused');
+        headerToolbar.classList.remove('live-paused');
+        headerToolbar.classList.add('live-active');
         liveIndicator.classList.remove('paused');
         liveIndicator.textContent = '● LIVE';
         playPauseBtn.textContent = '⏸ Pause';
@@ -4381,7 +4445,7 @@ body {
  
 .row {
     display: grid;
-    grid-template-columns: 10ch 12ch 18ch 8ch 40ch 1fr;
+    grid-template-columns: 10ch 12ch 26ch 8ch 34ch 22ch;
     padding: 2px 6px;
     cursor: default;
 }
@@ -4447,7 +4511,7 @@ body {
 .label { color: #4ec9b0; } 
 .op { color: #dcdcaa; } 
 .args { color: #ce9178; } 
-.comment { color: #6a9955; } 
+.comment { color: #6a9955; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } 
 
 .search-match-highlight {
     background: #f9826c;
@@ -4475,23 +4539,7 @@ body {
     display: block;
 }
 
-#live-toolbar {
-    display: none;
-    align-items: center;
-    gap: 10px;
-    background: #1e3a1e;
-    border-bottom: 1px solid #3e3e42;
-    padding: 4px 12px;
-    transition: background 0.2s;
-}
-
-#live-toolbar.visible {
-    display: flex;
-}
-
-#live-toolbar.paused {
-    background: #3a1e1e;
-}
+/* ── Live mode indicator (inside header-toolbar) ─────────────────────── */
 
 .live-indicator {
     color: #4ec94e;
@@ -4660,7 +4708,7 @@ body {
     margin-left: 6px;
 }
 
-/* ── Header toolbar (always-visible strip for panel toggles) ─────────── */
+/* ── Header toolbar (always-visible strip for panel toggles + live status) ── */
 
 #header-toolbar {
     display: flex;
@@ -4669,6 +4717,25 @@ body {
     background: #252526;
     border-bottom: 1px solid #3e3e42;
     padding: 2px 8px;
+}
+
+#header-toolbar.live-active {
+    background: #1e3a1e;
+}
+
+#header-toolbar.live-paused {
+    background: #3a1e1e;
+}
+
+#live-controls {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+#live-controls.visible {
+    display: flex;
 }
 
 .header-tool-btn {
