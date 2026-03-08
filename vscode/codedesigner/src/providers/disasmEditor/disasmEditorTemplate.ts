@@ -369,11 +369,9 @@ function goToAddress() {
         return;
     }
     gotoInput.classList.remove('error');
-    if (addr < state.baseAddress) {
-        gotoInfo.textContent = 'Address below base';
-        return;
-    }
-    const instrIndex = Math.floor((addr - state.baseAddress) / 4);
+    const physAddr  = toPhysAddr(addr);
+    const physBase  = toPhysAddr(state.baseAddress);
+    const instrIndex = Math.floor((physAddr - physBase) / 4);
     if (instrIndex < 0 || instrIndex >= state.totalInstructions) {
         gotoInfo.textContent = 'Address out of range';
         return;
@@ -639,8 +637,9 @@ function navigateToCurrentRowTarget() {
 }
 
 function navigateToAddress(addr) {
-    if (addr < state.baseAddress) return;
-    const instrIndex = Math.floor((addr - state.baseAddress) / 4);
+    const physAddr  = toPhysAddr(addr);
+    const physBase  = toPhysAddr(state.baseAddress);
+    const instrIndex = Math.floor((physAddr - physBase) / 4);
     if (instrIndex < 0 || instrIndex >= state.totalInstructions) return;
     state.cursor = instrIndex;
     const pageReady = checkAndLoadPage();
@@ -788,6 +787,17 @@ function setLivePausedUi(paused) {
     }
 }
 
+// Normalize a MIPS virtual address to its physical counterpart.
+// KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1 (0xA0000000–0xBFFFFFFF) are both
+// direct-mapped: physical = VA & 0x1FFFFFFF.  All other segments are returned
+// unchanged.  This lets panels whose baseAddress is a physical address (e.g.
+// BIOS ROM at 0x1FC00000) correctly match a PC in KSEG1 (e.g. 0xBFC00000).
+// The >>> 0 ensures the result is an unsigned 32-bit JS number regardless of
+// JavaScript's signed-integer bitwise semantics.
+function toPhysAddr(va) {
+    return (va >= 0x80000000 && va <= 0xBFFFFFFF) ? ((va & 0x1FFFFFFF) >>> 0) : (va >>> 0);
+}
+
 function handleStatusUpdate(paused, pc, breakpointHitAddress, registers, stackBytes, stackBase) {
     // If the emulator paused itself (e.g. breakpoint) and the user didn't
     // manually pause, mirror that state in the UI.
@@ -795,16 +805,24 @@ function handleStatusUpdate(paused, pc, breakpointHitAddress, registers, stackBy
         livePaused = true;
         stopLiveRefresh();
         setLivePausedUi(true);
-        // Navigate cursor to the current PC so the user sees where execution stopped
-        if (pc !== undefined && pc !== null) {
-            const instrIndex = Math.floor((pc - state.baseAddress) / 4);
-            if (instrIndex >= 0 && instrIndex < state.totalInstructions) {
-                state.cursor = instrIndex;
-                const pageReady = checkAndLoadPage();
-                if (pageReady) { updateCursor(); }
-            }
+    }
+
+    // Whenever paused (first detection or re-polled), navigate the cursor to the
+    // current PC so the disassembler always shows the correct instruction — even
+    // for early BIOS addresses where the PC is a KSEG1 virtual address but the
+    // panel's baseAddress is a physical address.
+    if (paused && pc !== undefined && pc !== null) {
+        const physPc   = toPhysAddr(pc);
+        const physBase = toPhysAddr(state.baseAddress);
+        const instrIndex = Math.floor((physPc - physBase) / 4);
+        if (instrIndex >= 0 && instrIndex < state.totalInstructions) {
+            state.cursor = instrIndex;
+            const pageReady = checkAndLoadPage();
+            if (pageReady) { updateCursor(); }
         }
-    } else if (!paused && livePaused) {
+    }
+
+    if (!paused && livePaused) {
         // Emulator resumed externally
         livePaused = false;
         setLivePausedUi(false);
