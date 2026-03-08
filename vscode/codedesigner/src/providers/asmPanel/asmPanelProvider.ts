@@ -1,15 +1,7 @@
 import * as vscode from 'vscode';
-import { exec } from 'child_process';
 import { getNonce } from '../../helpers';
 import { getAsmPanelHtml, AsmPanelData } from './asmPanelTemplate';
 import { getSocketClient } from '../../extension';
-
-let outputChannel: vscode.OutputChannel;
-
-interface CompilerResult {
-    cheatCodes?: string;
-    debugMessages?: string[];
-}
 
 export class AsmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
@@ -36,11 +28,6 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
         };
         webviewView.webview.html = getAsmPanelHtml(templateData, getNonce());
 
-        // Ensure output channel exists
-        if (!outputChannel) {
-            outputChannel = vscode.window.createOutputChannel('Assembler');
-        }
-
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async message => {
             switch (message.command) {
@@ -52,14 +39,6 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
 
                 case 'assemble':
                     await this.handleAssemble(message.data);
-                    break;
-
-                case 'compile':
-                    this.runCds('-c');
-                    break;
-
-                case 'decompile':
-                    this.runCds('-d');
                     break;
             }
         });
@@ -101,59 +80,5 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
                 error: error
             });
         }
-    }
-
-    private runCds(option: string) {
-
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            vscode.window.showErrorMessage('No active file.');
-            return;
-        }
-
-        const sourcePath = editor.document.uri.fsPath;
-
-        const exePath =
-            'C:\\Users\\tholu\\source\\repos\\CodeDesignerAI\\CodeDesigner.ConsoleApp\\bin\\Debug\\net9.0\\CodeDesigner.ConsoleApp.exe';
-
-        const command = `"${exePath}" CDS ${option} -f "${sourcePath}"`;
-
-        outputChannel.clear();
-        outputChannel.show(true);
-        outputChannel.appendLine(`> ${command}\n`);
-        //outputChannel.appendLine(this.getWorkspaceRoot() ?? 'No workspace root');
-
-        exec(command, (error, stdout, stderr) => {
-
-            if (stderr) {
-                outputChannel.appendLine(stderr);
-            }
-
-            if (error) {
-                outputChannel.appendLine(`ERROR: ${error.message}`);
-                return;
-            }
-
-            try {
-                const result: CompilerResult = JSON.parse(stdout);
-
-                // Show debug messages
-                result.debugMessages?.forEach(msg =>
-                    outputChannel.appendLine(msg)
-                );
-
-                // Push cheatCodes back into the panel textarea
-                if (result.cheatCodes && this.webview) {
-                    this.webview.postMessage({
-                        command: 'setCode',
-                        code: result.cheatCodes
-                    });
-                }
-
-            } catch (e) {
-                outputChannel.appendLine('Failed to parse compiler JSON output');
-                outputChannel.appendLine(stdout);
-            }
-        });
     }
 }
