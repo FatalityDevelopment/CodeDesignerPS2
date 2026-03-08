@@ -947,7 +947,7 @@ namespace CodeDesigner.Mips64LE
         /// <summary>
         /// Handle GETFUNCTIONS — scans base64-encoded binary data for MIPS function
         /// entry points.  Detects two patterns:
-        ///   1. ADDIU $sp, $sp, -N  (stack-frame prologue, opcode 9, rs=rt=29, imm&lt;0)
+        ///   1. ADDIU $sp, $sp, -N  (stack-frame prologue, opcode 9, rs=rt=29, imm less than 0)
         ///   2. Targets of JAL instructions within the same binary block.
         /// Auto-labels each candidate "FNC_0xADDRESS", but respects any user-defined
         /// label already in the database.
@@ -964,7 +964,8 @@ namespace CodeDesigner.Mips64LE
 
                 for (int i = 0; i + 3 < bytes.Length; i += 4)
                 {
-                    uint instr  = (uint)(bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24));
+                    // Read little-endian 32-bit instruction word
+                    uint instr  = BitConverter.ToUInt32(bytes, i);
                     uint opcode = (instr >> 26) & 0x3Fu;
 
                     if (opcode == 0x09u) // ADDIU
@@ -1032,11 +1033,11 @@ namespace CodeDesigner.Mips64LE
 
             var symbols = _labels
                 .OrderBy(kv => kv.Key)
-                .Select(kv => (object)new
+                .Select(kv => new LabelEntry
                 {
-                    address = $"0x{kv.Key:X8}",
-                    label   = kv.Value.Label,
-                    comment = kv.Value.Comment
+                    Address = $"0x{kv.Key:X8}",
+                    Label   = kv.Value.Label,
+                    Comment = kv.Value.Comment
                 })
                 .ToList();
 
@@ -1200,8 +1201,11 @@ namespace CodeDesigner.Mips64LE
     /// <summary>One entry in the label/symbol database.</summary>
     public class LabelEntry
     {
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
         public string  Address { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("label")]
         public string  Label   { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("comment")]
         public string? Comment { get; set; }
     }
 

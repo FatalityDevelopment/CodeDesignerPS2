@@ -3700,7 +3700,8 @@ function renderSymLabels() {
         return;
     }
     symLabelsList.innerHTML = items.map(item => {
-        const comment = item.comment ? \`<span class="sym-item-comment" title="\${escHtml(item.comment)}">\${escHtml(item.comment)}</span>\` : '';
+        const escapedComment = item.comment ? escHtml(item.comment) : '';
+        const comment = escapedComment ? \`<span class="sym-item-comment" title="\${escapedComment}">\${escapedComment}</span>\` : '';
         return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
             <span class="sym-item-addr">\${escHtml(item.address)}</span>
             <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
@@ -3838,7 +3839,6 @@ symScanFunctionsBtn.addEventListener('click', () => {
 });
 
 // Update scan status text when symbols message arrives
-const _origSymbolsHandler = window._handleSymbolsMsg;
 window._handleSymbolsDone = function(strCount, fnCount) {
     if (symStringsStatus) symStringsStatus.textContent = strCount > 0 ? \`\${strCount} found\` : 'None found';
     if (symFunctionsStatus) symFunctionsStatus.textContent = fnCount > 0 ? \`\${fnCount} found\` : 'None found';
