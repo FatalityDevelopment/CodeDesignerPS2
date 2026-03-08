@@ -1,0 +1,32 @@
+{
+  "bios": [
+    {
+      "name": "SCPH-70012 USA v12.0",
+      "path": "../../CodeDesigner.Mips64LE.Common/Bios/SCPH-70012_BIOS_V12_USA_200.bin"
+    },
+    {
+      "name": "SCPH-70004 PAL v12.0",
+      "path": "../../CodeDesigner.Mips64LE.Common/Bios/SCPH-70004_BIOS_V12_PAL_200.BIN"
+    },
+    {
+      "name": "SCPH-10000 Japan v0.1",
+      "path": "../../CodeDesigner.Mips64LE.Common/Bios/scph10000.bin"
+    }
+  ],
+  "games": [
+    {
+      "name": "Gameshark 2 v4 PS2",
+      "path": "../../CodeDesigner.Mips64LE/Isos/Gameshark 2 v4 PS2.zip"
+    }
+  ],
+  "emulators": [
+    {
+      "type": "code-designer",
+      "path": "../../CodeDesigner.Mips64LE/bin/Debug/net9.0/CodeDesigner.Mips64LE.exe"
+    },
+    {
+      "type": "pcsx2",
+      "path": ""
+    }
+  ]
+}

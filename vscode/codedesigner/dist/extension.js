@@ -3409,19 +3409,28 @@ class DisasmPanelProvider {
     settings = {};
     workspaceRoot = '';
     snapshots = [];
+    extensionPath = '';
     constructor(socketClient, editorProvider) {
         this.socketClient = socketClient;
         this.editorProvider = editorProvider;
     }
     // Register the provider with VS Code
     register(context) {
+        this.extensionPath = context.extensionPath;
         context.subscriptions.push(vscode.window.registerWebviewViewProvider('disasm.disasmPanel', this));
+        // Reload settings whenever emu-settings.json is created or changed
+        const watcher = vscode.workspace.createFileSystemWatcher('**/emu-settings.json');
+        watcher.onDidCreate(() => this.reloadAndRefresh());
+        watcher.onDidChange(() => this.reloadAndRefresh());
+        watcher.onDidDelete(() => this.reloadAndRefresh());
+        context.subscriptions.push(watcher);
+        // Reload when the user opens a workspace folder after the panel is shown
+        context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => this.reloadAndRefresh()));
     }
     resolveWebviewView(webviewView) {
         this.webview = webviewView.webview;
-        // Resolve workspace root (used to turn relative paths into absolute)
-        this.workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-        // Load emu-settings.json from the workspace root
+        // Load emu-settings.json (searches workspace folders then walks up from
+        // the extension directory, so this works even when no workspace is open).
         this.loadEmuSettings();
         // Setup webview options
         webviewView.webview.options = { enableScripts: true };
@@ -3448,18 +3457,57 @@ class DisasmPanelProvider {
         });
     }
     // ── Settings ──────────────────────────────────────────────────────────────
+    /** Maximum number of parent directories to climb when searching for emu-settings.json. */
+    static MAX_PARENT_SEARCH_DEPTH = 6;
     loadEmuSettings() {
-        if (!this.workspaceRoot) {
-            return;
+        // 1. Try every open workspace folder
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+            if (this.tryLoadSettingsFrom(path.join(folder.uri.fsPath, 'emu-settings.json'))) {
+                return;
+            }
         }
-        const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
+        // 2. Walk up from the extension install directory (handles the case where
+        //    the developer opens vscode/codedesigner directly and the repo root is
+        //    a few levels above).
+        if (this.extensionPath) {
+            let dir = this.extensionPath;
+            for (let i = 0; i < DisasmPanelProvider.MAX_PARENT_SEARCH_DEPTH; i++) {
+                if (this.tryLoadSettingsFrom(path.join(dir, 'emu-settings.json'))) {
+                    return;
+                }
+                const parent = path.dirname(dir);
+                if (parent === dir) {
+                    break;
+                } // reached filesystem root
+                dir = parent;
+            }
+        }
+        (0, extension_1.getOutputChannel)().appendLine('[WARN] Could not find emu-settings.json in any workspace folder or extension directory tree.');
+        this.settings = {};
+    }
+    /** Attempt to load settings from a specific file path. Returns true on success. */
+    tryLoadSettingsFrom(settingsPath) {
         try {
             const raw = fs.readFileSync(settingsPath, 'utf-8');
             this.settings = JSON.parse(raw);
+            // Keep workspaceRoot in sync with wherever the file was found
+            this.workspaceRoot = path.dirname(settingsPath);
+            return true;
         }
         catch (err) {
-            (0, extension_1.getOutputChannel)().appendLine(`[WARN] Could not load emu-settings.json: ${err?.message ?? err}`);
-            this.settings = {};
+            // ENOENT (file not found) is expected during the directory walk; only
+            // log unexpected errors (e.g. parse failure, permission denied).
+            if (err?.code !== 'ENOENT') {
+                (0, extension_1.getOutputChannel)().appendLine(`[DEBUG] Could not read ${settingsPath}: ${err?.message ?? err}`);
+            }
+            return false;
+        }
+    }
+    /** Reload settings and re-render the webview panel. */
+    reloadAndRefresh() {
+        this.loadEmuSettings();
+        if (this.webview) {
+            this.webview.html = this.buildHtml();
         }
     }
     buildHtml() {
