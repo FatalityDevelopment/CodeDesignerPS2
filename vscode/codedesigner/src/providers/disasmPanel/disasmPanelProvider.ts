@@ -97,6 +97,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'openSnapshot':
                     await this.handleOpenSnapshot(msg.path);
                     break;
+                case 'restart':
+                    await this.handleRestart();
+                    break;
                 // Dropdown change notifications (no-op for now)
                 case 'emulatorChanged':
                 case 'biosChanged':
@@ -298,6 +301,25 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private cleanupProcess(): void {
         this.emulatorTerminal = undefined;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
+    }
+
+    /** Restart the emulator: reset both CPUs, clear live panel caches, leave paused. */
+    private async handleRestart(): Promise<void> {
+        const out = getOutputChannel();
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        try {
+            // Immediately blank live panels so user can set early-address breakpoints
+            this.editorProvider.resetLivePanels();
+            await this.socketClient.restart();
+            out.appendLine('[INFO] Emulator restarted (paused at reset vector).');
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            out.appendLine(`[ERROR] Restart failed: ${msg}`);
+            vscode.window.showErrorMessage(`Restart failed: ${msg}`);
+        }
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────

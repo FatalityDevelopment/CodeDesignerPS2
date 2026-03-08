@@ -14,6 +14,23 @@ interface CommandMessage {
 }
 
 /**
+ * Register dump returned by GETREGS
+ */
+export interface RegisterDump {
+    gpr: number[];       // 32 GPR values (lower 64 bits as JS number)
+    pc: number;
+    hi: number;
+    lo: number;
+    hi1: number;
+    lo1: number;
+    sa: number;
+    cop0Status: number;
+    cop0Cause: number;
+    cop0Epc: number;
+    cop0Count: number;
+}
+
+/**
  * Response format for socket communication
  */
 interface CommandResponse {
@@ -27,6 +44,18 @@ interface CommandResponse {
     Paused?: boolean;
     PC?: number;
     BreakpointHitAddress?: number;
+    // GETREGS fields
+    GPR?: number[];
+    GPR_PC?: number;
+    GPR_HI?: number;
+    GPR_LO?: number;
+    GPR_HI1?: number;
+    GPR_LO1?: number;
+    GPR_SA?: number;
+    COP0_Status?: number;
+    COP0_Cause?: number;
+    COP0_EPC?: number;
+    COP0_Count?: number;
 }
 
 /**
@@ -446,6 +475,41 @@ export class SocketClient {
             paused: response.Paused ?? false,
             pc: response.PC ?? 0,
             breakpointHitAddress: response.BreakpointHitAddress,
+        };
+    }
+
+    /**
+     * Restart the emulator (reset both CPUs to power-on state, then pause)
+     */
+    public async restart(): Promise<void> {
+        const command: CommandMessage = { Command: 'RESTART' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Restart failed');
+        }
+    }
+
+    /**
+     * Get a full CPU register dump from the running emulator
+     */
+    public async getRegisters(): Promise<RegisterDump> {
+        const command: CommandMessage = { Command: 'GETREGS' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetRegisters failed');
+        }
+        return {
+            gpr:        response.GPR        ?? new Array(32).fill(0),
+            pc:         response.GPR_PC     ?? 0,
+            hi:         response.GPR_HI     ?? 0,
+            lo:         response.GPR_LO     ?? 0,
+            hi1:        response.GPR_HI1    ?? 0,
+            lo1:        response.GPR_LO1    ?? 0,
+            sa:         response.GPR_SA     ?? 0,
+            cop0Status: response.COP0_Status ?? 0,
+            cop0Cause:  response.COP0_Cause  ?? 0,
+            cop0Epc:    response.COP0_EPC    ?? 0,
+            cop0Count:  response.COP0_Count  ?? 0,
         };
     }
 

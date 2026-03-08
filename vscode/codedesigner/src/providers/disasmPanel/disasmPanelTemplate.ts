@@ -103,6 +103,9 @@ function getEmulatorControls(data: DisasmPanelData): string {
     <button id="connectBtn">${data.connected ? 'Disconnect' : 'Connect'}</button>
 </div>
 <div class="row">
+    <button id="restartBtn" ${data.connected ? '' : 'disabled'}>⟳ Restart</button>
+</div>
+<div class="row">
     <button id="snapshotBtn" ${data.connected ? '' : 'disabled'}>Take Snapshot</button>
 </div>
 ${data.snapshots && data.snapshots.length > 0 ? getSnapshotList(data.snapshots) : ''}`;
@@ -142,6 +145,10 @@ document.getElementById('snapshotBtn')?.addEventListener('click', () => {
     vscode.postMessage({ command: 'snapshot' });
 });
 
+document.getElementById('restartBtn')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'restart' });
+});
+
 document.getElementById('emulatorSelect').onchange = (e) => {
     vscode.postMessage({ command: 'emulatorChanged', emulatorPath: e.target.value });
 };
@@ -172,6 +179,8 @@ window.addEventListener('message', event => {
             btn.textContent = message.connected ? 'Disconnect' : 'Connect';
             const snapBtn = document.getElementById('snapshotBtn');
             snapBtn.disabled = !message.connected;
+            const restartBtn = document.getElementById('restartBtn');
+            if (restartBtn) { restartBtn.disabled = !message.connected; }
             break;
         }
         case 'updateSnapshots': {

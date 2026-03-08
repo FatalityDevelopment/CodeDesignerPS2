@@ -183,6 +183,12 @@ namespace CodeDesigner.Mips64LE
                     case "GETPC":
                         return HandleGetPC();
 
+                    case "GETREGS":
+                        return HandleGetRegisters();
+
+                    case "RESTART":
+                        return HandleRestart();
+
                     case "PING":
                         return CreateSuccessResponse("PONG");
                     
@@ -593,6 +599,58 @@ namespace CodeDesigner.Mips64LE
             return JsonSerializer.Serialize(response);
         }
 
+        /// <summary>
+        /// Handle GETREGS command — returns full EE CPU register state.
+        /// </summary>
+        private string HandleGetRegisters()
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            var cpu = Scheduler.EE.Cpu;
+
+            var gpr = new List<ulong>(32);
+            for (int i = 0; i < 32; i++)
+                gpr.Add(cpu.RegsLo[i]);
+
+            var cop0 = cpu.COP0;
+            var response = new CommandResponse
+            {
+                Success  = true,
+                Command  = "GETREGS",
+                GPR      = gpr,
+                GPR_PC   = cpu.PC & 0xFFFFFFFFUL,
+                GPR_HI   = cpu.HI,
+                GPR_LO   = cpu.LO,
+                GPR_HI1  = cpu.HI1,
+                GPR_LO1  = cpu.LO1,
+                GPR_SA   = cpu.SA,
+                COP0_Status = cop0.ReadRegister32(12),
+                COP0_Cause  = cop0.ReadRegister32(13),
+                COP0_EPC    = cop0.ReadRegister64(14),
+                COP0_Count  = cop0.ReadRegister32(9),
+            };
+            return JsonSerializer.Serialize(response);
+        }
+
+        /// <summary>
+        /// Handle RESTART command — resets both CPUs to their power-on states and
+        /// leaves the emulator paused so the client can set breakpoints before resuming.
+        /// Unpauses first in case the emulator was already halted; Reset() restores
+        /// all registers and clears counters regardless of Paused state, then we
+        /// set Paused=true so the scheduler stops at the reset vector.
+        /// </summary>
+        private string HandleRestart()
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            Scheduler.Paused = false;   // ungate the run-gate so Reset() can run cleanly
+            Scheduler.Reset();
+            Scheduler.Paused = true;    // halt at reset vector; client resumes when ready
+            return CreateSuccessResponse("Restarted");
+        }
+
         private string CreateSuccessResponse(string message)
         {
             var response = new CommandResponse
@@ -666,6 +724,19 @@ namespace CodeDesigner.Mips64LE
         public bool? Paused { get; set; }
         public uint? PC { get; set; }
         public uint? BreakpointHitAddress { get; set; }
+
+        // GETREGS fields
+        public List<ulong>? GPR { get; set; }
+        public ulong? GPR_PC { get; set; }
+        public ulong? GPR_HI { get; set; }
+        public ulong? GPR_LO { get; set; }
+        public ulong? GPR_HI1 { get; set; }
+        public ulong? GPR_LO1 { get; set; }
+        public int? GPR_SA { get; set; }
+        public uint? COP0_Status { get; set; }
+        public uint? COP0_Cause { get; set; }
+        public ulong? COP0_EPC { get; set; }
+        public uint? COP0_Count { get; set; }
     }
 
     /// <summary>

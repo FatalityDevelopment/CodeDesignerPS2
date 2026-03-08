@@ -31,7 +31,10 @@ ${getSearchPanel()}
 ${getLiveToolbar()}
 ${getHexContainer()}
 </div>
+<div id="content-wrapper">
 ${getGrid()}
+${getDebugPanel()}
+</div>
 
 ${getScript(nonce)}
 
@@ -92,7 +95,6 @@ function getLiveToolbar(): string {
     return `<div id="live-toolbar">
     <span class="live-indicator" id="live-indicator">● LIVE</span>
     <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
-    <button id="refresh-btn" title="Refresh current view">↻ Refresh</button>
 </div>`;
 }
 
@@ -102,6 +104,17 @@ function getHexContainer(): string {
 
 function getGrid(): string {
     return `<div id="grid" tabindex="0"></div>`;
+}
+
+function getDebugPanel(): string {
+    return `<div id="debug-panel">
+    <div id="debug-tabs">
+        <button class="debug-tab active" data-tab="registers">Registers</button>
+        <button class="debug-tab" data-tab="stack">Stack</button>
+    </div>
+    <div id="reg-content" class="debug-tab-content active"></div>
+    <div id="stack-content" class="debug-tab-content"></div>
+</div>`;
 }
 
 function getScript(nonce: string): string {
@@ -135,8 +148,10 @@ const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
 const liveToolbar = document.getElementById("live-toolbar");
 const liveIndicator = document.getElementById("live-indicator");
-const refreshBtn = document.getElementById("refresh-btn");
 const playPauseBtn = document.getElementById("play-pause-btn");
+const debugPanel = document.getElementById("debug-panel");
+const regContent = document.getElementById("reg-content");
+const stackContent = document.getElementById("stack-content");
 
 const state = {
     cursor: 0,
@@ -204,7 +219,10 @@ window.addEventListener("message", ({ data: msg }) => {
             handleSearchResults(msg.matches);
             break;
         case "status":
-            handleStatusUpdate(msg.paused, msg.pc, msg.breakpointHitAddress);
+            handleStatusUpdate(msg.paused, msg.pc, msg.breakpointHitAddress, msg.registers, msg.stackBytes, msg.stackBase);
+            break;
+        case "reset":
+            handleReset();
             break;
     }
 });
@@ -684,7 +702,8 @@ function updateCursor() {
 
 function updateHexForRow(row) {
     const addr = parseInt(row.addr, 16);
-    const length = row.bytes?.trim().split(/\\s+/).length || 4;
+    const byteStr = row.bytes?.trim() || '';
+    const length = byteStr.length > 0 ? Math.floor(byteStr.length / 2) : 4;
     const inView = addr >= state.hexOffset && addr + length <= state.hexOffset + state.hexData.length;
     if (inView) {
         renderHexView(state.hexData, state.hexOffset, addr, length);
@@ -751,16 +770,6 @@ function doLiveRefresh() {
     vscode.postMessage({ type: 'requestPage', startIndex });
 }
 
-function manualRefresh() {
-    if (liveRefreshPending) { return; }
-    liveRefreshPending = true;
-    const startIndex = getPageStart(state.cursor);
-    state.loadedPages.delete(startIndex);
-    vscode.postMessage({ type: 'requestPage', startIndex });
-}
-
-refreshBtn.addEventListener('click', manualRefresh);
-
 function setLivePausedUi(paused) {
     if (paused) {
         liveToolbar.classList.add('paused');
@@ -779,7 +788,7 @@ function setLivePausedUi(paused) {
     }
 }
 
-function handleStatusUpdate(paused, pc, breakpointHitAddress) {
+function handleStatusUpdate(paused, pc, breakpointHitAddress, registers, stackBytes, stackBase) {
     // If the emulator paused itself (e.g. breakpoint) and the user didn't
     // manually pause, mirror that state in the UI.
     if (paused && !livePaused) {
@@ -800,8 +809,126 @@ function handleStatusUpdate(paused, pc, breakpointHitAddress) {
         livePaused = false;
         setLivePausedUi(false);
         startLiveRefresh();
+        hideDebugPanel();
+        return;
+    }
+    // Update debug panel whenever we are paused and have register data
+    if (paused && registers) {
+        showDebugPanel(registers, stackBytes, stackBase);
     }
 }
+
+function handleReset() {
+    // Clear all cached pages so zeroed-out rows are displayed immediately
+    state.loadedPages.clear();
+    state.disasmRows = [];
+    const startIndex = getPageStart(state.cursor);
+    const zeroRows = generateZeroPage(startIndex);
+    state.loadedPages.set(startIndex, zeroRows);
+    state.disasmRows = zeroRows;
+    renderDisassembly();
+    hideDebugPanel();
+}
+
+function generateZeroPage(startIndex) {
+    const rows = [];
+    const count = Math.min(state.pageSize, state.totalInstructions - startIndex);
+    for (let i = 0; i < count; i++) {
+        const addr = state.baseAddress + (startIndex + i) * 4;
+        rows.push({
+            addr: addr.toString(16).toUpperCase().padStart(8, '0'),
+            bytes: '00000000',
+            label: '',
+            op: 'nop',
+            args: '',
+            comment: ''
+        });
+    }
+    return rows;
+}
+
+// ── Debug Panel (Registers + Stack) ──────────────────────────────────────────
+
+const MIPS_REG_NAMES = [
+    '$zero','$at','$v0','$v1','$a0','$a1','$a2','$a3',
+    '$t0','$t1','$t2','$t3','$t4','$t5','$t6','$t7',
+    '$s0','$s1','$s2','$s3','$s4','$s5','$s6','$s7',
+    '$t8','$t9','$k0','$k1','$gp','$sp','$fp','$ra'
+];
+
+function hex32(n) {
+    return (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+}
+
+function showDebugPanel(regs, stackBytes, stackBase) {
+    debugPanel.classList.add('visible');
+    renderRegPanel(regs);
+    renderStackPanel(regs, stackBytes, stackBase);
+}
+
+function hideDebugPanel() {
+    debugPanel.classList.remove('visible');
+}
+
+function renderRegPanel(regs) {
+    let html = '<div class="dbg-section-title">CPU Registers</div>';
+    // PC
+    html += \`<div class="dbg-row"><span class="dbg-name">PC  </span><span class="dbg-val">\${hex32(regs.pc)}</span></div>\`;
+    // HI/LO
+    html += \`<div class="dbg-row"><span class="dbg-name">HI  </span><span class="dbg-val">\${hex32(regs.hi)}</span><span class="dbg-name" style="margin-left:8px">LO  </span><span class="dbg-val">\${hex32(regs.lo)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">HI1 </span><span class="dbg-val">\${hex32(regs.hi1)}</span><span class="dbg-name" style="margin-left:8px">LO1 </span><span class="dbg-val">\${hex32(regs.lo1)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">SA  </span><span class="dbg-val">\${hex32(regs.sa)}</span></div>\`;
+    html += '<div class="dbg-divider"></div>';
+    // GPRs
+    for (let i = 0; i < 32; i++) {
+        const name = MIPS_REG_NAMES[i].padEnd(5);
+        const val = hex32(regs.gpr[i]);
+        const changed = regs.gpr[i] !== 0;
+        html += \`<div class="dbg-row\${changed ? ' dbg-nonzero' : ''}"><span class="dbg-name">\${name}</span><span class="dbg-val">\${val}</span></div>\`;
+    }
+    html += '<div class="dbg-divider"></div>';
+    html += '<div class="dbg-section-title">COP0</div>';
+    html += \`<div class="dbg-row"><span class="dbg-name">Status</span><span class="dbg-val">\${hex32(regs.cop0Status)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Cause </span><span class="dbg-val">\${hex32(regs.cop0Cause)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">EPC   </span><span class="dbg-val">\${hex32(regs.cop0Epc)}</span></div>\`;
+    html += \`<div class="dbg-row"><span class="dbg-name">Count </span><span class="dbg-val">\${hex32(regs.cop0Count)}</span></div>\`;
+    regContent.innerHTML = html;
+}
+
+function renderStackPanel(regs, stackBytes, stackBase) {
+    if (!regs) { stackContent.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+    const sp = regs.gpr[29];
+    let html = \`<div class="dbg-section-title">Stack  SP=\${hex32(sp)}</div>\`;
+    if (!stackBytes || stackBytes.length === 0) {
+        html += '<div class="dbg-row dbg-dim">Stack data unavailable</div>';
+        stackContent.innerHTML = html;
+        return;
+    }
+    // Show 32 slots (128 bytes)
+    for (let i = 0; i < Math.min(stackBytes.length, 128); i += 4) {
+        const addr = (stackBase + i) >>> 0;
+        const word = ((stackBytes[i+3] << 24) | (stackBytes[i+2] << 16) | (stackBytes[i+1] << 8) | stackBytes[i]) >>> 0;
+        const addrStr = hex32(addr);
+        const valStr  = hex32(word);
+        // Highlight potential return addresses (KSEG0/KSEG1 range)
+        const isCodeAddr = word >= 0x80000000 && word < 0xC0000000;
+        const cls = isCodeAddr ? ' dbg-retaddr' : '';
+        const annotation = isCodeAddr ? ' <span class="dbg-dim">← code ptr</span>' : '';
+        html += \`<div class="dbg-row\${cls}"><span class="dbg-addr">\${addrStr}</span><span class="dbg-val">\${valStr}</span>\${annotation}</div>\`;
+    }
+    stackContent.innerHTML = html;
+}
+
+// Debug panel tab switching
+document.querySelectorAll('.debug-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.debug-tab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.debug-tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.tab;
+        document.getElementById(tab + '-content')?.classList.add('active');
+    });
+});
 
 playPauseBtn.addEventListener('click', () => {
     livePaused = !livePaused;
