@@ -26,10 +26,10 @@ ${getDisasmEditorStyles()}
 <body>
 
 <div id="header">
-${getGotoPanel()}
-${getSearchPanel()}
 ${getLiveToolbar()}
 ${getHeaderToolbar()}
+${getGotoPanel()}
+${getSearchPanel()}
 ${getHexContainer()}
 </div>
 <div id="content-wrapper">
@@ -118,6 +118,7 @@ function getSymbolsPanel(): string {
     return `<div id="symbols-panel">
     <div id="symbols-panel-header">
         <span class="symbols-title">Symbols</span>
+        <span id="sym-region-label" class="sym-region-label"></span>
         <button class="sym-header-btn" id="symbols-refresh-btn" title="Refresh symbols">↻</button>
         <button class="sym-header-btn" id="close-symbols-btn" title="Close">×</button>
     </div>
@@ -234,6 +235,8 @@ const state = {
     totalInstructions: 0,
     pageSize: 1000,
     baseAddress: 0,
+    totalBytes: 0,
+    regionLabel: '',
     hexData: [],
     hexOffset: 0,
     loadedPages: new Map(),
@@ -271,6 +274,12 @@ window.addEventListener("message", ({ data: msg }) => {
             state.totalInstructions = msg.totalInstructions;
             state.pageSize = msg.pageSize;
             state.baseAddress = msg.baseAddress;
+            state.totalBytes = msg.totalBytes ?? (msg.totalInstructions * 4);
+            state.regionLabel = msg.regionLabel ?? '';
+            if (state.regionLabel) {
+                const rl = document.getElementById('sym-region-label');
+                if (rl) rl.textContent = \`— \${state.regionLabel}\`;
+            }
             if (msg.isLive) {
                 state.isLive = true;
                 liveToolbar.classList.add('visible');
@@ -312,13 +321,30 @@ window.addEventListener("message", ({ data: msg }) => {
             renderSymLabels();
             renderSymStrings();
             renderSymFunctions();
-            if (typeof window._handleSymbolsDone === 'function') {
-                window._handleSymbolsDone(state.symStrings.length, state.symFunctions.length);
-            }
             break;
         case "labelsUpdated":
             state.symLabels = msg.labels ?? [];
             renderSymLabels();
+            break;
+        case "stringsUpdated":
+            state.symStrings = msg.strings ?? [];
+            renderSymStrings();
+            if (symStringsStatus) {
+                symStringsStatus.textContent = state.symStrings.length > 0
+                    ? \`\${state.symStrings.length} found\`
+                    : 'None found';
+            }
+            if (symScanStringsBtn) symScanStringsBtn.disabled = false;
+            break;
+        case "functionsUpdated":
+            state.symFunctions = msg.functions ?? [];
+            renderSymFunctions();
+            if (symFunctionsStatus) {
+                symFunctionsStatus.textContent = state.symFunctions.length > 0
+                    ? \`\${state.symFunctions.length} found\`
+                    : 'None found';
+            }
+            if (symScanFunctionsBtn) symScanFunctionsBtn.disabled = false;
             break;
     }
 });
@@ -1007,17 +1033,61 @@ function symNavigate(addrHex) {
     goToAddress(addrHex.replace(/^0x/i, ''));
 }
 
+// ── Region helpers ────────────────────────────────────────────────────────────
+
+/** Parse an address hex string (with or without 0x prefix) to a number. */
+function parseAddrHex(addrHex) {
+    return parseInt(String(addrHex).replace(/^0x/i, ''), 16);
+}
+
+/**
+ * Returns true when the given address hex string falls within the address
+ * range of the currently open panel.  For live panels with a known region
+ * this filters out symbols that belong to a different region.  File-based
+ * panels (totalBytes == 0) show everything.
+ */
+function isAddrInCurrentRegion(addrHex) {
+    if (!state.isLive || state.totalBytes <= 0) return true;
+    const addr = parseAddrHex(addrHex);
+    if (isNaN(addr)) return false;
+    const physAddr = toPhysAddr(addr);
+    const physBase = toPhysAddr(state.baseAddress);
+    return physAddr >= physBase && physAddr < physBase + state.totalBytes;
+}
+
+/**
+ * Maps a numeric address to a short PS2 memory region name shown as a badge.
+ * Returns an empty string when the address does not fall in a named region.
+ */
+function getPs2RegionName(addr) {
+    const a = addr >>> 0;
+    const p = toPhysAddr(a);
+    // EE Main RAM — physical 0x00000000–0x01FFFFFF, or uncached mirror 0x20000000–0x21FFFFFF
+    if ((a >= 0x20000000 && a <= 0x21FFFFFF) || p < 0x02000000) return 'EE RAM';
+    // IOP RAM — EE VTLB mirror 0x1C000000–0x1DFFFFFF, or IOP physical 0x00000000–0x001FFFFF
+    if (a >= 0x1C000000 && a <= 0x1DFFFFFF) return 'IOP';
+    // BIOS ROM — physical 0x1FC00000–0x1FFFFFFF (also KSEG1 0xBFC00000)
+    if (p >= 0x1FC00000 && p <= 0x1FFFFFFF) return 'BIOS';
+    // Scratchpad — 0x70000000–0x70003FFF
+    if (a >= 0x70000000 && a <= 0x70003FFF) return 'SPD';
+    return '';
+}
+
 function renderSymLabels() {
     if (!symLabelsList) return;
-    const items = state.symLabels;
-    if (!items || items.length === 0) {
+    const items = (state.symLabels || []).filter(item => isAddrInCurrentRegion(item.address));
+    if (items.length === 0) {
         symLabelsList.innerHTML = '<div class="sym-empty">No labels defined.</div>';
         return;
     }
     symLabelsList.innerHTML = items.map(item => {
         const escapedComment = item.comment ? escHtml(item.comment) : '';
         const comment = escapedComment ? \`<span class="sym-item-comment" title="\${escapedComment}">\${escapedComment}</span>\` : '';
+        const addrNum = parseAddrHex(item.address);
+        const region  = getPs2RegionName(addrNum);
+        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
         return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+            \${badge}
             <span class="sym-item-addr">\${escHtml(item.address)}</span>
             <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
             \${comment}
@@ -1045,15 +1115,21 @@ function renderSymLabels() {
 
 function renderSymStrings() {
     if (!symStringsList) return;
-    const items = state.symStrings;
-    if (!items || items.length === 0) {
+    const items = (state.symStrings || []).filter(item => isAddrInCurrentRegion(item.address));
+    if (items.length === 0) {
         symStringsList.innerHTML = '<div class="sym-empty">No strings found. Click "Scan for strings".</div>';
         return;
     }
-    symStringsList.innerHTML = items.map(item => \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-        <span class="sym-item-addr">\${escHtml(item.address)}</span>
-        <span class="sym-item-value" title="\${escHtml(item.value)}">\${escHtml(item.value)}</span>
-    </div>\`).join('');
+    symStringsList.innerHTML = items.map(item => {
+        const addrNum = parseAddrHex(item.address);
+        const region  = getPs2RegionName(addrNum);
+        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
+        return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+            \${badge}
+            <span class="sym-item-addr">\${escHtml(item.address)}</span>
+            <span class="sym-item-value" title="\${escHtml(item.value)}">\${escHtml(item.value)}</span>
+        </div>\`;
+    }).join('');
 
     symStringsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate(el.dataset.addr));
@@ -1062,15 +1138,21 @@ function renderSymStrings() {
 
 function renderSymFunctions() {
     if (!symFunctionsList) return;
-    const items = state.symFunctions;
-    if (!items || items.length === 0) {
+    const items = (state.symFunctions || []).filter(item => isAddrInCurrentRegion(item.address));
+    if (items.length === 0) {
         symFunctionsList.innerHTML = '<div class="sym-empty">No functions found. Click "Scan for functions".</div>';
         return;
     }
-    symFunctionsList.innerHTML = items.map(item => \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-        <span class="sym-item-addr">\${escHtml(item.address)}</span>
-        <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
-    </div>\`).join('');
+    symFunctionsList.innerHTML = items.map(item => {
+        const addrNum = parseAddrHex(item.address);
+        const region  = getPs2RegionName(addrNum);
+        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
+        return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+            \${badge}
+            <span class="sym-item-addr">\${escHtml(item.address)}</span>
+            <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
+        </div>\`;
+    }).join('');
 
     symFunctionsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate(el.dataset.addr));
@@ -1129,37 +1211,26 @@ symAddBtn.addEventListener('click', () => {
     });
 });
 
-// Scan buttons
+// Scan buttons — ask the backend to scan the current region directly
 symScanStringsBtn.addEventListener('click', () => {
     symStringsStatus.textContent = 'Scanning…';
     symScanStringsBtn.disabled = true;
-    // Request a full symbols refresh which includes the string scan
-    vscode.postMessage({ type: 'getSymbols' });
-    // The provider will run the scan and reply with type:'symbols'
-    // Re-enable after a generous timeout in case the scan is slow
+    vscode.postMessage({ type: 'scanStrings' });
     setTimeout(() => {
         symScanStringsBtn.disabled = false;
         if (symStringsStatus.textContent === 'Scanning…') symStringsStatus.textContent = '';
-    }, 60000);
+    }, 120000);
 });
 
 symScanFunctionsBtn.addEventListener('click', () => {
     symFunctionsStatus.textContent = 'Scanning…';
     symScanFunctionsBtn.disabled = true;
-    vscode.postMessage({ type: 'getSymbols' });
+    vscode.postMessage({ type: 'scanFunctions' });
     setTimeout(() => {
         symScanFunctionsBtn.disabled = false;
         if (symFunctionsStatus.textContent === 'Scanning…') symFunctionsStatus.textContent = '';
-    }, 60000);
+    }, 120000);
 });
-
-// Update scan status text when symbols message arrives
-window._handleSymbolsDone = function(strCount, fnCount) {
-    if (symStringsStatus) symStringsStatus.textContent = strCount > 0 ? \`\${strCount} found\` : 'None found';
-    if (symFunctionsStatus) symFunctionsStatus.textContent = fnCount > 0 ? \`\${fnCount} found\` : 'None found';
-    if (symScanStringsBtn)  symScanStringsBtn.disabled = false;
-    if (symScanFunctionsBtn) symScanFunctionsBtn.disabled = false;
-};
 
 // ── Debug Panel ──────────────────────────────────────────────────────────────
 

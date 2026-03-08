@@ -13,6 +13,8 @@ interface CommandMessage {
     BreakpointAddress?: number;
     Label?: string;
     Comment?: string;
+    Query?: string;
+    SearchMode?: string;
 }
 
 /**
@@ -38,6 +40,17 @@ export interface StringEntry {
 export interface FunctionEntry {
     address: string;
     label:   string;
+}
+
+/**
+ * One search match returned by the SEARCH command.
+ */
+export interface SearchMatch {
+    instructionIndex: number;
+    address:          number;
+    field:            string;
+    start:            number;
+    length:           number;
 }
 
 /**
@@ -139,6 +152,7 @@ interface CommandResponse {
     Labels?:    LabelEntry[];
     Strings?:   StringEntry[];
     Functions?: FunctionEntry[];
+    Matches?:   SearchMatch[];
 }
 
 /**
@@ -682,6 +696,76 @@ export class SocketClient {
             throw new Error(response.Error || 'GetFunctions failed');
         }
         return response.Functions ?? [];
+    }
+
+    /**
+     * Scan a live emulator memory region for null-terminated ASCII strings.
+     * The C# server reads the bytes directly — no binary data is transferred.
+     * @param address  Virtual start address of the region.
+     * @param length   Number of bytes to scan.
+     * @param region   "ee" or "iop".
+     */
+    public async scanLiveStrings(address: number, length: number, region: string): Promise<StringEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'SCANSTRINGS', Address: address, Length: length, Region: region },
+            120000
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanStrings failed');
+        }
+        return response.Strings ?? [];
+    }
+
+    /**
+     * Scan a live emulator memory region for MIPS function entry points.
+     * The C# server reads the bytes directly — no binary data is transferred.
+     * @param address  Virtual start address of the region.
+     * @param length   Number of bytes to scan.
+     * @param region   "ee" or "iop".
+     */
+    public async scanLiveFunctions(address: number, length: number, region: string): Promise<FunctionEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'SCANFUNCTIONS', Address: address, Length: length, Region: region },
+            120000
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanFunctions failed');
+        }
+        return response.Functions ?? [];
+    }
+
+    /**
+     * Search for a query string/pattern in a memory region using the C# backend.
+     * For live panels pass address+length+region; for file panels pass fileData.
+     * @param address   Virtual start address (used for live searches and match address calculation).
+     * @param length    Byte length (required for live searches, ignored when fileData provided).
+     * @param query     The search string, byte pattern, or regex.
+     * @param mode      "text" | "bytes" | "string" | "regex"
+     * @param region    "ee" or "iop" — only used for live searches.
+     * @param fileData  Binary data buffer — when provided the server searches this instead of live memory.
+     */
+    public async search(
+        address: number,
+        length: number,
+        query: string,
+        mode: string,
+        region?: string,
+        fileData?: Buffer
+    ): Promise<SearchMatch[]> {
+        const command: CommandMessage = {
+            Command:    'SEARCH',
+            Address:    address,
+            Length:     length,
+            Query:      query,
+            SearchMode: mode,
+            Region:     region,
+            Data:       fileData ? fileData.toString('base64') : undefined,
+        };
+        const response = await this.sendCommand(command, 120000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Search failed');
+        }
+        return response.Matches ?? [];
     }
 
     /**

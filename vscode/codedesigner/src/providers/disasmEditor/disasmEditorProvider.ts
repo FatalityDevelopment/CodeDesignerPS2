@@ -2,21 +2,8 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import { getNonce } from "../../helpers";
 import { getDisasmEditorHtml, DisasmEditorData } from "./disasmEditorTemplate";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, SearchMatch } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
-
-/**
- * Allowed searchable fields in a disassembled instruction row
- */
-type SearchField = 'addr' | 'bytes' | 'label' | 'op' | 'args' | 'comment';
-
-interface SearchMatch {
-  instructionIndex: number;
-  address: number;
-  field: SearchField;
-  start: number;
-  length: number;
-}
 
 /**
  * Structure for disassembled instruction row
@@ -218,7 +205,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         } else if (message.type === "requestPage") {
           await this.sendDisasmPage(webviewPanel, fileData, message.startIndex);
         } else if (message.type === "search") {
-          await this.performSearch(webviewPanel, fileData, message.query, message.mode);
+          await this.handleSearch(webviewPanel, message.query, message.mode,
+            DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
+        } else if (message.type === "scanStrings") {
+          await this.handleFileScan('strings', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+        } else if (message.type === "scanFunctions") {
+          await this.handleFileScan('functions', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
         } else if (message.type === "getSymbols") {
           await this.handleGetSymbols(webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
         } else if (message.type === "addLabel") {
@@ -283,6 +275,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             pageSize: DisasmEditorProvider.PAGE_SIZE,
             baseAddress,
             isLive: true,
+            regionLabel: label,
+            totalBytes,
         });
 
         // Send first page and hex view
@@ -367,10 +361,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     console.error(`[LIVE] Failed to get status: ${err?.message ?? err}`);
                 }
             } else if (message.type === 'search') {
-                // Full-region live search is expensive; return empty for now
-                panel.webview.postMessage({ type: 'searchResults', matches: [] });
+                await this.handleSearch(panel, message.query, message.mode,
+                    baseAddress, totalBytes, region);
+            } else if (message.type === 'scanStrings') {
+                await this.handleLiveScan('strings', panel, region, baseAddress, totalBytes);
+            } else if (message.type === 'scanFunctions') {
+                await this.handleLiveScan('functions', panel, region, baseAddress, totalBytes);
             } else if (message.type === 'getSymbols') {
-                // Live mode: labels from backend; no fileData so strings/functions empty
+                // Live mode: labels from backend; strings/functions are loaded on-demand via scan buttons
                 await this.handleGetSymbols(panel, undefined, baseAddress);
             } else if (message.type === 'addLabel') {
                 await this.handleAddLabel(panel, message.address, message.labelName, message.comment);
@@ -482,177 +480,93 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         }
     }
 
-    private async performSearch(
-    webviewPanel: vscode.WebviewPanel,
-    fileData: Buffer,
+  /**
+   * Unified search via C# backend — works for both live and file-based panels.
+   * For live panels pass region and omit fileData.
+   * For file panels pass fileData and omit region.
+   */
+  private async handleSearch(
+    panel: vscode.WebviewPanel,
     query: string,
-    mode: 'text' | 'bytes' | 'string' | 'regex'
+    mode: string,
+    baseAddress: number,
+    length: number,
+    region?: string,
+    fileData?: Buffer
   ): Promise<void> {
-    const matches: SearchMatch[] = [];
-
-    if (mode === 'bytes') {
-      const pattern = this.parseBytePattern(query);
-      if (!pattern) {
-        webviewPanel.webview.postMessage({ type: 'searchResults', matches: [] });
-        return;
-      }
-
-      for (let offset = 0; offset <= fileData.length - pattern.length; offset++) {
-        let found = true;
-        for (let i = 0; i < pattern.length; i++) {
-          if (fileData[offset + i] !== pattern[i]) {
-            found = false;
-            break;
-          }
-        }
-
-        if (found) {
-          const instructionIndex = Math.floor(offset / DisasmEditorProvider.INSTRUCTION_SIZE);
-          const address = DisasmEditorProvider.BASE_ADDRESS + offset;
-
-          matches.push({
-            instructionIndex,
-            address,
-            field: 'bytes',
-            start: 0,
-            length: pattern.length * 3 - 1
-          });
-
-          offset += pattern.length - 1;
-        }
-      }
-    } else if (mode === 'string') {
-      const stringBytes = Buffer.from(query, 'utf8');
-
-      for (let offset = 0; offset <= fileData.length - stringBytes.length; offset++) {
-        let found = true;
-        for (let i = 0; i < stringBytes.length; i++) {
-          if (fileData[offset + i] !== stringBytes[i]) {
-            found = false;
-            break;
-          }
-        }
-
-        if (found) {
-          const instructionIndex = Math.floor(offset / DisasmEditorProvider.INSTRUCTION_SIZE);
-          const address = DisasmEditorProvider.BASE_ADDRESS + offset;
-
-          matches.push({
-            instructionIndex,
-            address,
-            field: 'bytes',
-            start: 0,
-            length: stringBytes.length * 3 - 1
-          });
-
-          offset += stringBytes.length - 1;
-        }
-      }
-    } else {
-      const totalInstructions = Math.floor(
-        fileData.length / DisasmEditorProvider.INSTRUCTION_SIZE
+    if (!this.socketClient?.isConnected()) {
+      panel.webview.postMessage({ type: 'searchResults', matches: [] });
+      return;
+    }
+    try {
+      const matches = await this.socketClient.search(
+        baseAddress, length, query, mode, region, fileData
       );
-
-      for (let instrIndex = 0; instrIndex < totalInstructions; instrIndex++) {
-        const offset = instrIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
-        const slice = fileData.slice(offset, offset + DisasmEditorProvider.INSTRUCTION_SIZE);
-        if (slice.length < DisasmEditorProvider.INSTRUCTION_SIZE) break;
-
-        const address = DisasmEditorProvider.BASE_ADDRESS + offset;
-        const rows = await this.disassembleWithBackend(address, slice);
-
-        if (rows.length === 0) continue;
-
-        const row = rows[0];
-        const rowMatches = this.searchInRow(row, query, mode);
-
-        for (const match of rowMatches) {
-          matches.push({
-            instructionIndex: instrIndex,
-            address,
-            field: match.field,
-            start: match.start,
-            length: match.length
-          });
-        }
-      }
+      panel.webview.postMessage({ type: 'searchResults', matches });
+    } catch (err: any) {
+      console.error(`[SEARCH] Failed: ${err?.message ?? err}`);
+      panel.webview.postMessage({ type: 'searchResults', matches: [] });
     }
-
-    webviewPanel.webview.postMessage({
-      type: 'searchResults',
-      matches
-    });
   }
 
-  private parseBytePattern(pattern: string): number[] | null {
-    const cleaned = pattern.replace(/0x/gi, '').replace(/[,\s]+/g, ' ').trim();
-    if (!cleaned) return null;
-
-    const bytes = cleaned.split(/\s+/);
-    const result: number[] = [];
-
-    for (const byte of bytes) {
-      if (!/^[0-9a-f]{1,2}$/i.test(byte)) return null;
-      result.push(parseInt(byte, 16));
+  /**
+   * Scan a live memory region for strings or functions using the C# backend.
+   * Posts a `stringsUpdated` or `functionsUpdated` message to the webview.
+   */
+  private async handleLiveScan(
+    kind: 'strings' | 'functions',
+    panel: vscode.WebviewPanel,
+    region: string,
+    baseAddress: number,
+    totalBytes: number
+  ): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      if (kind === 'strings') {
+        const strings = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
+        panel.webview.postMessage({ type: 'stringsUpdated', strings });
+      } else {
+        const functions = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
+        panel.webview.postMessage({ type: 'functionsUpdated', functions });
+      }
+    } catch (err: any) {
+      console.error(`[SYMBOLS] LiveScan(${kind}) failed: ${err?.message ?? err}`);
+      // Send empty result so the webview re-enables the scan button
+      if (kind === 'strings') {
+        panel.webview.postMessage({ type: 'stringsUpdated', strings: [] });
+      } else {
+        panel.webview.postMessage({ type: 'functionsUpdated', functions: [] });
+      }
     }
-
-    return result.length ? result : null;
   }
 
-  private searchInRow(
-    row: any,
-    query: string,
-    mode: 'text' | 'regex'
-  ): Array<{ field: SearchField; start: number; length: number }> {
-    const matches: Array<{ field: SearchField; start: number; length: number }> = [];
-
-    const fields: Array<{ text: string; field: SearchField }> = [
-      { text: row.addr, field: 'addr' },
-      { text: row.bytes, field: 'bytes' },
-      { text: row.label || '', field: 'label' },
-      { text: row.op, field: 'op' },
-      { text: row.args, field: 'args' },
-      { text: row.comment || '', field: 'comment' }
-    ];
-
-    if (mode === 'text') {
-      const searchLower = query.toLowerCase();
-
-      for (const { text, field } of fields) {
-        const lower = text.toLowerCase();
-        let index = 0;
-
-        while ((index = lower.indexOf(searchLower, index)) !== -1) {
-          matches.push({ field, start: index, length: query.length });
-          index += query.length;
-        }
+  /**
+   * Scan file binary data for strings or functions using the C# backend.
+   * Posts a `stringsUpdated` or `functionsUpdated` message to the webview.
+   */
+  private async handleFileScan(
+    kind: 'strings' | 'functions',
+    panel: vscode.WebviewPanel,
+    fileData: Buffer,
+    baseAddress: number
+  ): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      if (kind === 'strings') {
+        const strings = await this.socketClient.getStrings(fileData, baseAddress);
+        panel.webview.postMessage({ type: 'stringsUpdated', strings });
+      } else {
+        const functions = await this.socketClient.getFunctions(fileData, baseAddress);
+        panel.webview.postMessage({ type: 'functionsUpdated', functions });
       }
-    } else {
-      try {
-        const regex = new RegExp(query, 'gi');
-
-        for (const { text, field } of fields) {
-          let match: RegExpExecArray | null;
-          const fieldRegex = new RegExp(regex);
-
-          while ((match = fieldRegex.exec(text)) !== null) {
-            matches.push({
-              field,
-              start: match.index,
-              length: match[0].length
-            });
-
-            if (match.index === fieldRegex.lastIndex) {
-              fieldRegex.lastIndex++;
-            }
-          }
-        }
-      } catch {
-        return [];
+    } catch (err: any) {
+      console.error(`[SYMBOLS] FileScan(${kind}) failed: ${err?.message ?? err}`);
+      if (kind === 'strings') {
+        panel.webview.postMessage({ type: 'stringsUpdated', strings: [] });
+      } else {
+        panel.webview.postMessage({ type: 'functionsUpdated', functions: [] });
       }
     }
-
-    return matches;
   }
 
   /**

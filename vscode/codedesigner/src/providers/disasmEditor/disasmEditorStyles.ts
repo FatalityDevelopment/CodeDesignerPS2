@@ -580,9 +580,34 @@ body {
     color: #d4d4d4;
     font-size: 11px;
     font-weight: bold;
-    flex: 1;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+    flex-shrink: 0;
+}
+
+/* Region label shown in the symbols panel header (e.g. "— IOP RAM") */
+#sym-region-label {
+    color: #858585;
+    font-size: 11px;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Compact region badge shown on each symbol row */
+.sym-region-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-family: monospace;
+    background: #2d4a2d;
+    color: #7ec87e;
+    border: 1px solid #3a5c3a;
+    border-radius: 2px;
+    padding: 0 4px;
+    line-height: 14px;
+    flex-shrink: 0;
+    letter-spacing: 0.02em;
 }
 
 .sym-header-btn {

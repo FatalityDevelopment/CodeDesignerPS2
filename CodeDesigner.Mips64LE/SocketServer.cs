@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CodeDesigner.Mips64LE.Common;
@@ -265,6 +266,17 @@ namespace CodeDesigner.Mips64LE
                     case "GETFUNCTIONS":
                         return HandleGetFunctions(command.Address ?? 0, command.Data);
 
+                    case "SCANSTRINGS":
+                        return HandleScanStrings(command.Address ?? 0, command.Length ?? 0, command.Region);
+
+                    case "SCANFUNCTIONS":
+                        return HandleScanFunctions(command.Address ?? 0, command.Length ?? 0, command.Region);
+
+                    case "SEARCH":
+                        return HandleSearch(command.Query ?? "", command.SearchMode ?? "text",
+                                            command.Address ?? 0, command.Length ?? 0,
+                                            command.Region, command.Data);
+
                     case "PING":
                         return CreateSuccessResponse("PONG");
                     
@@ -460,7 +472,7 @@ namespace CodeDesigner.Mips64LE
 
         private const int MaxReadMemLength = 65536;
 
-        // ── Address-translation constants for HandleReadMem ───────────────────
+        // ── Address-translation constants for HandleReadMem / scan helpers ────
 
         // EE: uncached direct-mapped user window (PS2 kernel TLB maps RAM here).
         // 0x20000000–0x21FFFFFF → physical EE RAM 0x00000000–0x01FFFFFF.
@@ -1013,6 +1025,350 @@ namespace CodeDesigner.Mips64LE
             }
         }
 
+        // ── Live-memory helpers (no MaxReadMemLength cap) ─────────────────────
+
+        /// <summary>
+        /// Read <paramref name="length"/> bytes starting at <paramref name="startAddress"/>
+        /// directly from the live emulator RAM arrays.  Used by SCANSTRINGS,
+        /// SCANFUNCTIONS, and SEARCH so they can scan whole regions without the
+        /// 64 KB cap that READMEM enforces.
+        /// </summary>
+        private byte[] ReadLiveBytes(uint startAddress, int length, bool useIop)
+        {
+            var bytes = new byte[length];
+            for (int i = 0; i < length; i++)
+            {
+                uint vaddr = startAddress + (uint)i;
+                if (useIop)
+                {
+                    uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
+                    if (physAddr >= EeIopMirrorBase && physAddr < EeIopMirrorEnd)
+                        physAddr -= EeIopMirrorBase;
+                    bytes[i] = physAddr < (uint)IopMemoryBus.RamSize
+                        ? Scheduler!.IOP.Bus.Ram[physAddr]
+                        : (byte)0;
+                }
+                else
+                {
+                    uint physAddr;
+                    if (vaddr >= 0x80000000u && vaddr < 0xC0000000u)
+                        physAddr = vaddr & 0x1FFFFFFFu;
+                    else if (vaddr >= EeUncachedRamBase && vaddr < EeUncachedRamEnd)
+                        physAddr = vaddr - EeUncachedRamBase;
+                    else
+                        physAddr = vaddr;
+
+                    if (physAddr < (uint)PS2MemoryBus.MainRamSize)
+                        bytes[i] = Scheduler!.EE.Bus.Ram[physAddr];
+                    else if (physAddr >= PS2MemoryBus.BiosRomPhysBase &&
+                             physAddr <  PS2MemoryBus.BiosRomPhysBase + (uint)PS2MemoryBus.BiosRomSize)
+                        bytes[i] = Scheduler!.EE.Bus.Bios[physAddr - PS2MemoryBus.BiosRomPhysBase];
+                    else if (vaddr >= 0x70000000u && vaddr < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                        bytes[i] = Scheduler!.EE.Bus.Scratchpad[vaddr - 0x70000000u];
+                    else
+                        bytes[i] = 0;
+                }
+            }
+            return bytes;
+        }
+
+        /// <summary>
+        /// Handle SCANSTRINGS — reads <paramref name="length"/> bytes of live emulator
+        /// memory starting at <paramref name="address"/> and scans for null-terminated
+        /// printable ASCII strings of at least 4 characters.
+        /// </summary>
+        private string HandleScanStrings(uint address, int length, string? region)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (length <= 0)
+                return CreateErrorResponse("Length is required for SCANSTRINGS");
+
+            try
+            {
+                bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+                var bytes   = ReadLiveBytes(address, length, useIop);
+                var results = new List<StringEntry>();
+                const int MinLength = 4;
+
+                int i = 0;
+                while (i < bytes.Length)
+                {
+                    if (bytes[i] >= 0x20 && bytes[i] <= 0x7E)
+                    {
+                        int start = i;
+                        while (i < bytes.Length && bytes[i] >= 0x20 && bytes[i] <= 0x7E)
+                            i++;
+                        if (i < bytes.Length && bytes[i] == 0x00 && (i - start) >= MinLength)
+                        {
+                            results.Add(new StringEntry
+                            {
+                                Address = $"0x{(address + (uint)start):X8}",
+                                Value   = Encoding.ASCII.GetString(bytes, start, i - start)
+                            });
+                        }
+                        i++;
+                    }
+                    else
+                    {
+                        i++;
+                    }
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "SCANSTRINGS",
+                    Strings = results
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ScanStrings error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle SCANFUNCTIONS — reads <paramref name="length"/> bytes of live emulator
+        /// memory and detects MIPS function entry points via ADDIU $sp,$sp,-N prologues
+        /// and JAL targets.
+        /// </summary>
+        private string HandleScanFunctions(uint address, int length, string? region)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (length <= 0)
+                return CreateErrorResponse("Length is required for SCANFUNCTIONS");
+
+            try
+            {
+                bool useIop  = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+                var bytes      = ReadLiveBytes(address, length, useIop);
+                var candidates = new HashSet<uint>();
+
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    uint instr  = BitConverter.ToUInt32(bytes, i);
+                    uint opcode = (instr >> 26) & 0x3Fu;
+
+                    if (opcode == 0x09u)
+                    {
+                        uint  rs  = (instr >> 21) & 0x1Fu;
+                        uint  rt  = (instr >> 16) & 0x1Fu;
+                        short imm = (short)(instr & 0xFFFFu);
+                        if (rs == 29u && rt == 29u && imm < 0)
+                            candidates.Add(address + (uint)i);
+                    }
+                    else if (opcode == 0x03u)
+                    {
+                        uint pc     = address + (uint)i;
+                        uint target = ((instr & 0x03FFFFFFu) << 2) | (pc & 0xF0000000u);
+                        if (target >= address && target < address + (uint)bytes.Length)
+                            candidates.Add(target);
+                    }
+                }
+
+                var functions = candidates
+                    .OrderBy(addr => addr)
+                    .Select(addr => new FunctionEntry
+                    {
+                        Address = $"0x{addr:X8}",
+                        Label   = _labels.TryGetValue(addr, out var entry)
+                                      ? entry.Label
+                                      : $"FNC_0x{addr:X8}"
+                    })
+                    .ToList();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success   = true,
+                    Command   = "SCANFUNCTIONS",
+                    Functions = functions
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ScanFunctions error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle SEARCH — searches bytes for a query string using the given mode.
+        /// Bytes are taken from base64-encoded <c>Data</c> when present, or read
+        /// directly from live emulator memory using <c>Address</c>, <c>Length</c>
+        /// and <c>Region</c>.
+        /// Modes: "text" (case-insensitive substring), "bytes" (hex pattern),
+        ///        "string" (raw byte match), "regex" (case-insensitive regex).
+        /// </summary>
+        private string HandleSearch(string query, string mode, uint startAddress, int length,
+                                    string? region, string? base64Data)
+        {
+            if (string.IsNullOrEmpty(query))
+                return CreateErrorResponse("Query is required for SEARCH");
+
+            try
+            {
+                byte[] bytes;
+                if (!string.IsNullOrEmpty(base64Data))
+                {
+                    bytes = Convert.FromBase64String(base64Data);
+                }
+                else
+                {
+                    if (Scheduler == null)
+                        return CreateErrorResponse("Emulator not running — no scheduler attached");
+                    if (length <= 0)
+                        return CreateErrorResponse("Length is required when searching live memory");
+                    bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+                    bytes = ReadLiveBytes(startAddress, length, useIop);
+                }
+
+                var matches = new List<SearchMatch>();
+
+                if (mode == "bytes")
+                {
+                    var pattern = ParseBytePattern(query);
+                    if (pattern == null)
+                        return CreateErrorResponse("Invalid byte pattern");
+
+                    for (int i = 0; i <= bytes.Length - pattern.Length; i++)
+                    {
+                        bool found = true;
+                        for (int j = 0; j < pattern.Length; j++)
+                            if (bytes[i + j] != pattern[j]) { found = false; break; }
+                        if (found)
+                        {
+                            matches.Add(new SearchMatch
+                            {
+                                InstructionIndex = i / 4,
+                                Address          = startAddress + (uint)i,
+                                Field            = "bytes",
+                                Start            = 0,
+                                Length           = pattern.Length * 3 - 1
+                            });
+                            i += pattern.Length - 1;
+                        }
+                    }
+                }
+                else if (mode == "string")
+                {
+                    var strBytes = Encoding.UTF8.GetBytes(query);
+                    for (int i = 0; i <= bytes.Length - strBytes.Length; i++)
+                    {
+                        bool found = true;
+                        for (int j = 0; j < strBytes.Length; j++)
+                            if (bytes[i + j] != strBytes[j]) { found = false; break; }
+                        if (found)
+                        {
+                            matches.Add(new SearchMatch
+                            {
+                                InstructionIndex = i / 4,
+                                Address          = startAddress + (uint)i,
+                                Field            = "bytes",
+                                Start            = 0,
+                                Length           = strBytes.Length * 3 - 1
+                            });
+                            i += strBytes.Length - 1;
+                        }
+                    }
+                }
+                else
+                {
+                    // text or regex: disassemble each instruction and search its fields
+                    bool useRegex = mode == "regex";
+                    Regex? rx = null;
+                    if (useRegex)
+                    {
+                        try { rx = new Regex(query, RegexOptions.IgnoreCase); }
+                        catch { return CreateErrorResponse("Invalid regular expression"); }
+                    }
+                    string queryLower = query.ToLowerInvariant();
+
+                    for (int i = 0; i + 3 < bytes.Length; i += 4)
+                    {
+                        uint   word = BitConverter.ToUInt32(bytes, i);
+                        uint   addr = startAddress + (uint)i;
+                        int    idx  = i / 4;
+
+                        string addrStr  = $"{addr:X8}";
+                        string bytesStr = $"{bytes[i+3]:X2}{bytes[i+2]:X2}{bytes[i+1]:X2}{bytes[i]:X2}";
+                        string disasm   = MipsDisassembler.Disassemble(word, addr);
+                        int    sp       = disasm.IndexOf(' ');
+                        string op       = sp < 0 ? disasm : disasm[..sp];
+                        string args     = sp < 0 ? "" : disasm[(sp + 1)..].Trim();
+                        bool   hasLabel = _labels.TryGetValue(addr, out var le);
+                        string label    = hasLabel ? le!.Label         : "";
+                        string comment  = hasLabel ? (le!.Comment ?? "") : "";
+
+                        (string name, string text)[] fields =
+                        {
+                            ("addr",    addrStr),
+                            ("bytes",   bytesStr),
+                            ("label",   label),
+                            ("op",      op),
+                            ("args",    args),
+                            ("comment", comment),
+                        };
+
+                        foreach (var (fieldName, fieldText) in fields)
+                        {
+                            if (useRegex && rx != null)
+                            {
+                                foreach (Match m in rx.Matches(fieldText))
+                                    matches.Add(new SearchMatch
+                                    {
+                                        InstructionIndex = idx, Address = addr,
+                                        Field = fieldName, Start = m.Index, Length = m.Length
+                                    });
+                            }
+                            else
+                            {
+                                string fl = fieldText.ToLowerInvariant();
+                                int    fi = 0;
+                                while ((fi = fl.IndexOf(queryLower, fi, StringComparison.Ordinal)) >= 0)
+                                {
+                                    matches.Add(new SearchMatch
+                                    {
+                                        InstructionIndex = idx, Address = addr,
+                                        Field = fieldName, Start = fi, Length = query.Length
+                                    });
+                                    fi += query.Length;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "SEARCH",
+                    Matches = matches
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Search error: {ex.Message}");
+            }
+        }
+
+        /// <summary>Parse a whitespace/comma-separated hex byte pattern string.</summary>
+        private static byte[]? ParseBytePattern(string pattern)
+        {
+            var cleaned = pattern
+                .Replace("0x", "", StringComparison.OrdinalIgnoreCase)
+                .Replace(",", " ").Trim();
+            if (string.IsNullOrEmpty(cleaned)) return null;
+            var parts  = cleaned.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            var result = new List<byte>();
+            foreach (var p in parts)
+            {
+                if (!Regex.IsMatch(p, @"^[0-9a-fA-F]{1,2}$")) return null;
+                result.Add(Convert.ToByte(p, 16));
+            }
+            return result.Count > 0 ? result.ToArray() : null;
+        }
+
         /// <summary>
         /// Persist the current in-memory label dictionary back to the first ps2-labels.json
         /// file that was found at startup (or the base-directory path as a fallback).
@@ -1106,6 +1462,8 @@ namespace CodeDesigner.Mips64LE
         public uint? BreakpointAddress { get; set; }
         public string? Label { get; set; }
         public string? Comment { get; set; }
+        public string? Query { get; set; }
+        public string? SearchMode { get; set; }
     }
 
     /// <summary>
@@ -1172,6 +1530,7 @@ namespace CodeDesigner.Mips64LE
         public List<LabelEntry>?    Labels    { get; set; }
         public List<StringEntry>?   Strings   { get; set; }
         public List<FunctionEntry>? Functions { get; set; }
+        public List<SearchMatch>?   Matches   { get; set; }
     }
 
     /// <summary>
@@ -1221,5 +1580,24 @@ namespace CodeDesigner.Mips64LE
     {
         public string Address { get; set; } = string.Empty;
         public string Label   { get; set; } = string.Empty;
+    }
+
+    /// <summary>One match returned by the SEARCH command.</summary>
+    public class SearchMatch
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("instructionIndex")]
+        public int InstructionIndex { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
+        public uint Address { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("field")]
+        public string Field { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("start")]
+        public int Start { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("length")]
+        public int Length { get; set; }
     }
 }
