@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -248,6 +249,21 @@ namespace CodeDesigner.Mips64LE
 
                     case "RESTART":
                         return HandleRestart();
+
+                    case "GETLABELS":
+                        return HandleGetLabels();
+
+                    case "ADDLABEL":
+                        return HandleAddLabel(command.Address, command.Label, command.Comment);
+
+                    case "DELETELABEL":
+                        return HandleDeleteLabel(command.Address);
+
+                    case "GETSTRINGS":
+                        return HandleGetStrings(command.Address ?? 0, command.Data);
+
+                    case "GETFUNCTIONS":
+                        return HandleGetFunctions(command.Address ?? 0, command.Data);
 
                     case "PING":
                         return CreateSuccessResponse("PONG");
@@ -817,6 +833,220 @@ namespace CodeDesigner.Mips64LE
             return CreateSuccessResponse("Restarted");
         }
 
+        /// <summary>
+        /// Handle GETLABELS — returns all labels in the database, sorted by address.
+        /// </summary>
+        private string HandleGetLabels()
+        {
+            var labels = _labels
+                .OrderBy(kv => kv.Key)
+                .Select(kv => new LabelEntry
+                {
+                    Address = $"0x{kv.Key:X8}",
+                    Label   = kv.Value.Label,
+                    Comment = kv.Value.Comment
+                })
+                .ToList();
+
+            return JsonSerializer.Serialize(new CommandResponse
+            {
+                Success = true,
+                Command = "GETLABELS",
+                Labels  = labels
+            });
+        }
+
+        /// <summary>
+        /// Handle ADDLABEL — inserts or updates a label, then persists to disk.
+        /// </summary>
+        private string HandleAddLabel(uint? address, string? label, string? comment)
+        {
+            if (address == null)
+                return CreateErrorResponse("Address is required for ADDLABEL");
+            if (string.IsNullOrWhiteSpace(label))
+                return CreateErrorResponse("Label is required for ADDLABEL");
+
+            var trimmedLabel   = label.Trim();
+            var trimmedComment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
+
+            _labels[address.Value] = (trimmedLabel, trimmedComment);
+            SaveLabels();
+
+            return CreateSuccessResponse($"Label '{trimmedLabel}' set at 0x{address.Value:X8}");
+        }
+
+        /// <summary>
+        /// Handle DELETELABEL — removes a label by address, then persists to disk.
+        /// </summary>
+        private string HandleDeleteLabel(uint? address)
+        {
+            if (address == null)
+                return CreateErrorResponse("Address is required for DELETELABEL");
+
+            if (!_labels.Remove(address.Value))
+                return CreateErrorResponse($"No label found at 0x{address.Value:X8}");
+
+            SaveLabels();
+            return CreateSuccessResponse($"Label removed at 0x{address.Value:X8}");
+        }
+
+        /// <summary>
+        /// Handle GETSTRINGS — scans base64-encoded binary data for null-terminated
+        /// printable ASCII strings of at least MinStringLength characters.
+        /// </summary>
+        private string HandleGetStrings(uint startAddress, string? base64Data)
+        {
+            if (string.IsNullOrEmpty(base64Data))
+                return CreateErrorResponse("Data (base64 binary) is required for GETSTRINGS");
+
+            try
+            {
+                var bytes   = Convert.FromBase64String(base64Data);
+                var results = new List<StringEntry>();
+                const int MinLength = 4;
+
+                int i = 0;
+                while (i < bytes.Length)
+                {
+                    if (bytes[i] >= 0x20 && bytes[i] <= 0x7E)
+                    {
+                        int start = i;
+                        while (i < bytes.Length && bytes[i] >= 0x20 && bytes[i] <= 0x7E)
+                            i++;
+
+                        // Must be null-terminated and meet minimum length
+                        if (i < bytes.Length && bytes[i] == 0x00 && (i - start) >= MinLength)
+                        {
+                            results.Add(new StringEntry
+                            {
+                                Address = $"0x{(startAddress + (uint)start):X8}",
+                                Value   = Encoding.ASCII.GetString(bytes, start, i - start)
+                            });
+                        }
+                        i++; // step past the null / non-printable byte
+                    }
+                    else
+                    {
+                        i++;
+                    }
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "GETSTRINGS",
+                    Strings = results
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"GetStrings error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle GETFUNCTIONS — scans base64-encoded binary data for MIPS function
+        /// entry points.  Detects two patterns:
+        ///   1. ADDIU $sp, $sp, -N  (stack-frame prologue, opcode 9, rs=rt=29, imm&lt;0)
+        ///   2. Targets of JAL instructions within the same binary block.
+        /// Auto-labels each candidate "FNC_0xADDRESS", but respects any user-defined
+        /// label already in the database.
+        /// </summary>
+        private string HandleGetFunctions(uint startAddress, string? base64Data)
+        {
+            if (string.IsNullOrEmpty(base64Data))
+                return CreateErrorResponse("Data (base64 binary) is required for GETFUNCTIONS");
+
+            try
+            {
+                var bytes     = Convert.FromBase64String(base64Data);
+                var candidates = new HashSet<uint>();
+
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    uint instr  = (uint)(bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24));
+                    uint opcode = (instr >> 26) & 0x3Fu;
+
+                    if (opcode == 0x09u) // ADDIU
+                    {
+                        uint  rs  = (instr >> 21) & 0x1Fu;
+                        uint  rt  = (instr >> 16) & 0x1Fu;
+                        short imm = (short)(instr & 0xFFFFu);
+
+                        // ADDIU $sp, $sp, -N  →  function prologue
+                        if (rs == 29u && rt == 29u && imm < 0)
+                            candidates.Add(startAddress + (uint)i);
+                    }
+                    else if (opcode == 0x03u) // JAL
+                    {
+                        uint pc         = startAddress + (uint)i;
+                        uint target     = ((instr & 0x03FFFFFFu) << 2) | (pc & 0xF0000000u);
+
+                        // Only include targets that fall inside the scanned block
+                        if (target >= startAddress && target < startAddress + (uint)bytes.Length)
+                            candidates.Add(target);
+                    }
+                }
+
+                var functions = candidates
+                    .OrderBy(addr => addr)
+                    .Select(addr => new FunctionEntry
+                    {
+                        Address = $"0x{addr:X8}",
+                        Label   = _labels.TryGetValue(addr, out var entry)
+                                      ? entry.Label
+                                      : $"FNC_0x{addr:X8}"
+                    })
+                    .ToList();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success   = true,
+                    Command   = "GETFUNCTIONS",
+                    Functions = functions
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"GetFunctions error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Persist the current in-memory label dictionary back to the first ps2-labels.json
+        /// file that was found at startup (or the base-directory path as a fallback).
+        /// </summary>
+        private void SaveLabels()
+        {
+            var searchPaths = new[]
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2-labels.json"),
+                Path.Combine(Directory.GetCurrentDirectory(),       "ps2-labels.json")
+            };
+
+            string savePath = searchPaths[0];
+            foreach (var p in searchPaths)
+            {
+                if (File.Exists(p)) { savePath = p; break; }
+            }
+
+            var symbols = _labels
+                .OrderBy(kv => kv.Key)
+                .Select(kv => (object)new
+                {
+                    address = $"0x{kv.Key:X8}",
+                    label   = kv.Value.Label,
+                    comment = kv.Value.Comment
+                })
+                .ToList();
+
+            var json = JsonSerializer.Serialize(new { symbol = symbols },
+                new JsonSerializerOptions { WriteIndented = true });
+
+            File.WriteAllText(savePath, json);
+            Console.WriteLine($"[Labels] Saved {_labels.Count} symbol(s) to {savePath}");
+        }
+
         private string CreateSuccessResponse(string message)
         {
             var response = new CommandResponse
@@ -873,6 +1103,8 @@ namespace CodeDesigner.Mips64LE
         public string? Region { get; set; }
         public string? OutputPath { get; set; }
         public uint? BreakpointAddress { get; set; }
+        public string? Label { get; set; }
+        public string? Comment { get; set; }
     }
 
     /// <summary>
@@ -935,6 +1167,10 @@ namespace CodeDesigner.Mips64LE
         // GS privileged registers (PMODE, SMODE1/2, SRFSH, SYNCH1/2, SYNCV,
         //   DISPFB1/2, DISPLAY1/2, EXTBUF/DATA/WRITE, BGCOLOR, CSR, IMR, BUSDIR, SIGLBLID)
         public List<ulong>? GS_Priv { get; set; }
+        // Symbol panel results
+        public List<LabelEntry>?    Labels    { get; set; }
+        public List<StringEntry>?   Strings   { get; set; }
+        public List<FunctionEntry>? Functions { get; set; }
     }
 
     /// <summary>
@@ -959,5 +1195,27 @@ namespace CodeDesigner.Mips64LE
         public string? Error { get; set; }
         public string? Comment { get; set; }  // Added for analyzer-generated comments
         public string? Label { get; set; }    // Symbol label from ps2-labels.json
+    }
+
+    /// <summary>One entry in the label/symbol database.</summary>
+    public class LabelEntry
+    {
+        public string  Address { get; set; } = string.Empty;
+        public string  Label   { get; set; } = string.Empty;
+        public string? Comment { get; set; }
+    }
+
+    /// <summary>A null-terminated ASCII string found in the binary.</summary>
+    public class StringEntry
+    {
+        public string Address { get; set; } = string.Empty;
+        public string Value   { get; set; } = string.Empty;
+    }
+
+    /// <summary>A detected function entry point.</summary>
+    public class FunctionEntry
+    {
+        public string Address { get; set; } = string.Empty;
+        public string Label   { get; set; } = string.Empty;
     }
 }

@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import { getNonce } from "../../helpers";
 import { getDisasmEditorHtml, DisasmEditorData } from "./disasmEditorTemplate";
-import { SocketClient } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 
 /**
@@ -219,6 +219,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           await this.sendDisasmPage(webviewPanel, fileData, message.startIndex);
         } else if (message.type === "search") {
           await this.performSearch(webviewPanel, fileData, message.query, message.mode);
+        } else if (message.type === "getSymbols") {
+          await this.handleGetSymbols(webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+        } else if (message.type === "addLabel") {
+          await this.handleAddLabel(webviewPanel, message.address, message.labelName, message.comment);
+        } else if (message.type === "deleteLabel") {
+          await this.handleDeleteLabel(webviewPanel, message.address);
         }
       });
     });
@@ -363,6 +369,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'search') {
                 // Full-region live search is expensive; return empty for now
                 panel.webview.postMessage({ type: 'searchResults', matches: [] });
+            } else if (message.type === 'getSymbols') {
+                // Live mode: labels from backend; no fileData so strings/functions empty
+                await this.handleGetSymbols(panel, undefined, baseAddress);
+            } else if (message.type === 'addLabel') {
+                await this.handleAddLabel(panel, message.address, message.labelName, message.comment);
+            } else if (message.type === 'deleteLabel') {
+                await this.handleDeleteLabel(panel, message.address);
             }
         });
     }
@@ -640,6 +653,70 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     return matches;
+  }
+
+  /**
+   * Collect labels, strings, and functions from the backend and post them
+   * back to the webview as a single `symbols` message.
+   * For live panels that have no backing fileData, pass `undefined`; in that
+   * case strings and functions are returned empty.
+   */
+  private async handleGetSymbols(
+    panel: vscode.WebviewPanel,
+    fileData: Buffer | undefined,
+    baseAddress: number
+  ): Promise<void> {
+    let labels:    LabelEntry[]    = [];
+    let strings:   StringEntry[]   = [];
+    let functions: FunctionEntry[] = [];
+
+    if (this.socketClient?.isConnected()) {
+      try { labels = await this.socketClient.getLabels(); } catch { /* ignore */ }
+
+      if (fileData && fileData.length > 0) {
+        try { strings   = await this.socketClient.getStrings(fileData, baseAddress); }   catch { /* ignore */ }
+        try { functions = await this.socketClient.getFunctions(fileData, baseAddress); } catch { /* ignore */ }
+      }
+    }
+
+    panel.webview.postMessage({ type: 'symbols', labels, strings, functions });
+  }
+
+  /**
+   * Add (or update) a label in the backend database and send back a fresh
+   * label list so the symbols panel refreshes instantly.
+   */
+  private async handleAddLabel(
+    panel: vscode.WebviewPanel,
+    address: number,
+    labelName: string,
+    comment: string | undefined
+  ): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      await this.socketClient.addLabel(address, labelName, comment);
+      const labels = await this.socketClient.getLabels();
+      panel.webview.postMessage({ type: 'labelsUpdated', labels });
+    } catch (err: any) {
+      console.error(`[SYMBOLS] AddLabel failed: ${err?.message ?? err}`);
+    }
+  }
+
+  /**
+   * Delete a label in the backend database and send back a fresh label list.
+   */
+  private async handleDeleteLabel(
+    panel: vscode.WebviewPanel,
+    address: number
+  ): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      await this.socketClient.deleteLabel(address);
+      const labels = await this.socketClient.getLabels();
+      panel.webview.postMessage({ type: 'labelsUpdated', labels });
+    } catch (err: any) {
+      console.error(`[SYMBOLS] DeleteLabel failed: ${err?.message ?? err}`);
+    }
   }
 
   private async sendDisasmPage(

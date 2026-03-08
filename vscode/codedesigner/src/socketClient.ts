@@ -11,6 +11,33 @@ interface CommandMessage {
     Region?: string;
     OutputPath?: string;
     BreakpointAddress?: number;
+    Label?: string;
+    Comment?: string;
+}
+
+/**
+ * One entry in the symbol / label database.
+ */
+export interface LabelEntry {
+    address: string;
+    label:   string;
+    comment?: string;
+}
+
+/**
+ * A null-terminated ASCII string found in the binary.
+ */
+export interface StringEntry {
+    address: string;
+    value:   string;
+}
+
+/**
+ * A detected function entry point.
+ */
+export interface FunctionEntry {
+    address: string;
+    label:   string;
 }
 
 /**
@@ -108,6 +135,10 @@ interface CommandResponse {
     VU0_MAC?: number;
     VU0_Clip?: number;
     GS_Priv?: number[];
+    // Symbol panel results
+    Labels?:    LabelEntry[];
+    Strings?:   StringEntry[];
+    Functions?: FunctionEntry[];
 }
 
 /**
@@ -296,7 +327,7 @@ export class SocketClient {
     /**
      * Send a command and wait for response
      */
-    private sendCommand(command: CommandMessage): Promise<CommandResponse> {
+    private sendCommand(command: CommandMessage, timeoutMs: number = 10000): Promise<CommandResponse> {
         return new Promise((resolve, reject) => {
             if (!this.connected || !this.client) {
                 reject(new Error('Not connected to server'));
@@ -304,7 +335,6 @@ export class SocketClient {
             }
 
             let responseReceived = false;
-            const timeoutMs = 10000; // 10 second timeout
 
             // Set up one-time response handler
             const responseHandler = (message: string) => {
@@ -585,6 +615,73 @@ export class SocketClient {
             vu0Clip:    response.VU0_Clip   ?? 0,
             gsPriv:     response.GS_Priv    ?? new Array(19).fill(0),
         };
+    }
+
+    /**
+     * Fetch all labels from the server's symbol database.
+     */
+    public async getLabels(): Promise<LabelEntry[]> {
+        const response = await this.sendCommand({ Command: 'GETLABELS' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetLabels failed');
+        }
+        return response.Labels ?? [];
+    }
+
+    /**
+     * Add or update a label in the server's symbol database.
+     * The server persists the change to ps2-labels.json immediately.
+     */
+    public async addLabel(address: number, label: string, comment?: string): Promise<void> {
+        const cmd: CommandMessage = { Command: 'ADDLABEL', Address: address, Label: label };
+        if (comment) { cmd.Comment = comment; }
+        const response = await this.sendCommand(cmd);
+        if (!response.Success) {
+            throw new Error(response.Error || 'AddLabel failed');
+        }
+    }
+
+    /**
+     * Delete a label from the server's symbol database by address.
+     */
+    public async deleteLabel(address: number): Promise<void> {
+        const response = await this.sendCommand({ Command: 'DELETELABEL', Address: address });
+        if (!response.Success) {
+            throw new Error(response.Error || 'DeleteLabel failed');
+        }
+    }
+
+    /**
+     * Scan binary data for null-terminated ASCII strings (min 4 chars).
+     * @param binaryData  Raw binary buffer to scan.
+     * @param startAddress Virtual address of the first byte in the buffer.
+     */
+    public async getStrings(binaryData: Buffer, startAddress: number): Promise<StringEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'GETSTRINGS', Address: startAddress, Data: binaryData.toString('base64') },
+            60000   // large binary may take a few seconds
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetStrings failed');
+        }
+        return response.Strings ?? [];
+    }
+
+    /**
+     * Scan binary data for MIPS function entry points.
+     * Detects ADDIU $sp,$sp,-N prologues and JAL targets.
+     * @param binaryData  Raw binary buffer to scan.
+     * @param startAddress Virtual address of the first byte in the buffer.
+     */
+    public async getFunctions(binaryData: Buffer, startAddress: number): Promise<FunctionEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'GETFUNCTIONS', Address: startAddress, Data: binaryData.toString('base64') },
+            60000
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetFunctions failed');
+        }
+        return response.Functions ?? [];
     }
 
     /**

@@ -514,5 +514,317 @@ body {
     margin-left: 6px;
 }
 
+/* ── Header toolbar (always-visible strip for panel toggles) ─────────── */
+
+#header-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    padding: 2px 8px;
+}
+
+.header-tool-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.header-tool-btn:hover {
+    background: #505050;
+    color: #fff;
+}
+
+.header-tool-btn.active {
+    background: #007acc;
+    border-color: #007acc;
+    color: #fff;
+}
+
+/* ── Symbols Panel ────────────────────────────────────────────────────── */
+
+#symbols-panel {
+    width: 340px;
+    min-width: 340px;
+    display: none;
+    flex-direction: column;
+    background: #1e1e1e;
+    border-left: 1px solid #3e3e42;
+    overflow: hidden;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+#symbols-panel.visible {
+    display: flex;
+}
+
+#symbols-panel-header {
+    display: flex;
+    align-items: center;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    padding: 4px 8px;
+    flex-shrink: 0;
+    gap: 6px;
+}
+
+.symbols-title {
+    color: #d4d4d4;
+    font-size: 11px;
+    font-weight: bold;
+    flex: 1;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.sym-header-btn {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    line-height: 1;
+    outline: none;
+}
+
+.sym-header-btn:hover {
+    color: #fff;
+}
+
+#sym-tabs {
+    display: flex;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+}
+
+.sym-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #858585;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    flex: 1;
+}
+
+.sym-tab:hover {
+    color: #d4d4d4;
+}
+
+.sym-tab.active {
+    color: #d4d4d4;
+    border-bottom-color: #007acc;
+}
+
+.sym-tab-content {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sym-tab-content.active {
+    display: flex;
+}
+
+/* ── Labels tab ── */
+
+#sym-add-row {
+    display: flex;
+    gap: 4px;
+    padding: 6px 6px 4px;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+}
+
+.sym-add-input {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 3px 6px;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    min-width: 0;
+}
+
+.sym-add-input:focus {
+    border-color: #007acc;
+}
+
+#sym-new-addr {
+    width: 9ch;
+    flex-shrink: 0;
+}
+
+#sym-new-name {
+    flex: 1;
+}
+
+#sym-new-comment {
+    flex: 1;
+}
+
+.sym-add-btn {
+    background: #007acc;
+    border: 1px solid #007acc;
+    color: #fff;
+    padding: 3px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 13px;
+    outline: none;
+    flex-shrink: 0;
+}
+
+.sym-add-btn:hover {
+    background: #1a8fd1;
+}
+
+/* ── Scan row (Strings / Functions tabs) ── */
+
+.sym-scan-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+    background: #252526;
+}
+
+.sym-scan-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 3px 10px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+.sym-scan-btn:hover {
+    background: #505050;
+}
+
+.sym-scan-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sym-status {
+    color: #858585;
+    font-size: 10px;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Shared list styles ── */
+
+.sym-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2px 0;
+}
+
+.sym-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sym-list::-webkit-scrollbar-thumb {
+    background: #424242;
+}
+
+.sym-item {
+    display: flex;
+    align-items: center;
+    padding: 2px 8px;
+    cursor: pointer;
+    gap: 6px;
+    line-height: 1.7;
+}
+
+.sym-item:hover {
+    background: #2a2d2e;
+}
+
+.sym-item-addr {
+    color: #c586c0;
+    width: 10ch;
+    flex-shrink: 0;
+    font-size: 11px;
+}
+
+.sym-item-name {
+    color: #4ec9b0;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+}
+
+.sym-item-value {
+    color: #ce9178;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+}
+
+.sym-item-comment {
+    color: #6a9955;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100px;
+}
+
+.sym-delete-btn {
+    background: none;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    padding: 0 4px;
+    font-size: 14px;
+    line-height: 1;
+    outline: none;
+    flex-shrink: 0;
+    visibility: hidden;
+}
+
+.sym-item:hover .sym-delete-btn {
+    visibility: visible;
+}
+
+.sym-delete-btn:hover {
+    color: #e05555;
+}
+
+.sym-empty {
+    color: #555;
+    font-size: 11px;
+    padding: 12px 8px;
+    text-align: center;
+}
+
 </style>`;
 }
