@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -6,6 +8,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CodeDesigner.Mips64LE.Common;
+using CodeDesigner.Mips64LE.Common.Emulator;
+using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 
 namespace CodeDesigner.Mips64LE
 {
@@ -18,6 +22,11 @@ namespace CodeDesigner.Mips64LE
         private bool _isRunning;
         private readonly int _port;
         private CancellationTokenSource? _cancellationTokenSource;
+
+        /// <summary>
+        /// When set, the READMEM command reads live memory from this scheduler.
+        /// </summary>
+        public DualCpuScheduler? Scheduler { get; set; }
 
         public event EventHandler<string>? MessageReceived;
         public event EventHandler<string>? ClientConnected;
@@ -150,6 +159,12 @@ namespace CodeDesigner.Mips64LE
                     
                     case "DISASSEMBLE":
                         return HandleDisassemble(command.Data, command.Address);
+
+                    case "READMEM":
+                        return HandleReadMem(command.Address ?? 0, command.Length ?? 256, command.Region);
+
+                    case "SNAPSHOT":
+                        return HandleSnapshot(command.OutputPath);
                     
                     case "PING":
                         return CreateSuccessResponse("PONG");
@@ -335,6 +350,125 @@ namespace CodeDesigner.Mips64LE
             }
         }
 
+        private const int MaxReadMemLength = 65536;
+
+        /// <summary>
+        /// Handle READMEM command — reads raw bytes from the live emulator memory.
+        /// </summary>
+        /// <param name="address">Start virtual address (EE or IOP address space).</param>
+        /// <param name="length">Number of bytes to read (capped at MaxReadMemLength).</param>
+        /// <param name="region">"ee" for EE bus, "iop" for IOP bus.</param>
+        private string HandleReadMem(uint address, int length, string? region)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            if (length <= 0 || length > MaxReadMemLength)
+                return CreateErrorResponse($"Invalid length {length} — must be 1–{MaxReadMemLength} bytes");
+
+            bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+
+            try
+            {
+                var bytes = new byte[length];
+
+                for (int i = 0; i < length; i++)
+                {
+                    uint vaddr = address + (uint)i;
+
+                    if (useIop)
+                    {
+                        // IOP physical address space: 4 MB RAM
+                        bytes[i] = vaddr < (uint)IopMemoryBus.RamSize
+                            ? Scheduler.IOP.Bus.Ram[vaddr]
+                            : (byte)0;
+                    }
+                    else
+                    {
+                        // EE: translate KSEG0 / KSEG1 (strip top 3 bits)
+                        uint physAddr = (vaddr >= 0x80000000u && vaddr < 0xC0000000u)
+                            ? vaddr & 0x1FFFFFFFu
+                            : vaddr;
+
+                        if (physAddr < (uint)PS2MemoryBus.MainRamSize)
+                            bytes[i] = Scheduler.EE.Bus.Ram[physAddr];
+                        else if (physAddr >= PS2MemoryBus.BiosRomPhysBase &&
+                                 physAddr <  PS2MemoryBus.BiosRomPhysBase + (uint)PS2MemoryBus.BiosRomSize)
+                            bytes[i] = Scheduler.EE.Bus.Bios[physAddr - PS2MemoryBus.BiosRomPhysBase];
+                        else if (vaddr >= 0x70000000u &&
+                                 vaddr <  0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                            bytes[i] = Scheduler.EE.Bus.Scratchpad[vaddr - 0x70000000u];
+                        else
+                            bytes[i] = 0;
+                    }
+                }
+
+                var response = new CommandResponse
+                {
+                    Success = true,
+                    Command = "READMEM",
+                    Data    = Convert.ToBase64String(bytes)
+                };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ReadMem error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle SNAPSHOT command — dumps all memory regions to .bin files in the
+        /// given output directory and returns the list of written files.
+        /// </summary>
+        private string HandleSnapshot(string? outputPath)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            if (string.IsNullOrWhiteSpace(outputPath))
+                return CreateErrorResponse("OutputPath is required for SNAPSHOT");
+
+            try
+            {
+                Directory.CreateDirectory(outputPath);
+
+                var regions = new[]
+                {
+                    (Label: "EE Main RAM",  File: "EEmem.bin",    Bytes: Scheduler.EE.Bus.Ram,        Base: 0x00000000u),
+                    (Label: "BIOS ROM",     File: "BIOSrom.bin",   Bytes: Scheduler.EE.Bus.Bios,       Base: PS2MemoryBus.BiosRomPhysBase),
+                    (Label: "Scratchpad",   File: "Scratchpad.bin",Bytes: Scheduler.EE.Bus.Scratchpad, Base: 0x70000000u),
+                    (Label: "IOP RAM",      File: "IOPmem.bin",    Bytes: Scheduler.IOP.Bus.Ram,       Base: 0x00000000u),
+                };
+
+                var written = new List<SnapshotRegion>();
+                foreach (var (label, file, bytes, baseAddr) in regions)
+                {
+                    string filePath = Path.Combine(outputPath, file);
+                    File.WriteAllBytes(filePath, bytes);
+                    written.Add(new SnapshotRegion
+                    {
+                        Label       = label,
+                        File        = filePath,
+                        BaseAddress = baseAddr,
+                        Size        = bytes.Length,
+                    });
+                }
+
+                var response = new CommandResponse
+                {
+                    Success = true,
+                    Command = "SNAPSHOT",
+                    Regions = written,
+                };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Snapshot error: {ex.Message}");
+            }
+        }
+
         private string CreateSuccessResponse(string message)
         {
             var response = new CommandResponse
@@ -386,7 +520,10 @@ namespace CodeDesigner.Mips64LE
     {
         public string Command { get; set; } = string.Empty;
         public string? Data { get; set; }
-        public uint? Address { get; set; }  // Optional starting address for disassembly
+        public uint? Address { get; set; }
+        public int? Length { get; set; }
+        public string? Region { get; set; }
+        public string? OutputPath { get; set; }
     }
 
     /// <summary>
@@ -398,7 +535,20 @@ namespace CodeDesigner.Mips64LE
         public string? Command { get; set; }
         public string? Message { get; set; }
         public string? Error { get; set; }
+        public string? Data { get; set; }
         public List<InstructionResult>? Results { get; set; }
+        public List<SnapshotRegion>? Regions { get; set; }
+    }
+
+    /// <summary>
+    /// Describes one memory region written by a SNAPSHOT command.
+    /// </summary>
+    public class SnapshotRegion
+    {
+        public string Label { get; set; } = string.Empty;
+        public string File { get; set; } = string.Empty;
+        public uint BaseAddress { get; set; }
+        public int Size { get; set; }
     }
 
     /// <summary>

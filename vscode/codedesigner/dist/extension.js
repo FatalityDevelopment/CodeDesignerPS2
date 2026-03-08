@@ -48,8 +48,8 @@ exports.deactivate = deactivate;
 const vscode = __importStar(__webpack_require__(1));
 const disasmEditorProvider_1 = __webpack_require__(2);
 const disasmPanelProvider_1 = __webpack_require__(7);
-const asmPanelProvider_1 = __webpack_require__(10);
-const socketClient_1 = __webpack_require__(14);
+const asmPanelProvider_1 = __webpack_require__(13);
+const socketClient_1 = __webpack_require__(16);
 let socketClient = null;
 let outputChannel;
 /**
@@ -99,8 +99,8 @@ function activate(context) {
     };
     // Check for open .bin files after a short delay to ensure extension is fully activated
     setTimeout(checkForOpenBinFiles, 500);
-    // Register webview panels
-    const disasmPanelProvider = new disasmPanelProvider_1.DisasmPanelProvider();
+    // Register webview panels — pass socketClient so the panel can auto-connect
+    const disasmPanelProvider = new disasmPanelProvider_1.DisasmPanelProvider(socketClient, editorProvider);
     disasmPanelProvider.register(context);
     const asmPanelProvider = new asmPanelProvider_1.AsmPanelProvider();
     asmPanelProvider.register(context);
@@ -148,6 +148,13 @@ function activate(context) {
         }
     });
     context.subscriptions.push(connectCommand, disconnectCommand, sendMessageCommand);
+    // ── Live memory view command ──────────────────────────────────────────────
+    // Called by DisasmPanelProvider after the emulator connects.
+    // Opens one editor panel per memory region (EE RAM, IOP RAM, BIOS ROM, Scratchpad).
+    const openLiveMemoryCommand = vscode.commands.registerCommand('codedesigner.openLiveMemory', async (args) => {
+        await editorProvider.openLiveMemoryView(args.region, args.address, args.size, args.label);
+    });
+    context.subscriptions.push(openLiveMemoryCommand);
     // Auto-connect on activation
     outputChannel.appendLine('[INFO] Extension activated, attempting to connect to server...');
     setTimeout(() => {
@@ -368,6 +375,81 @@ class DisasmEditorProvider {
                 }
             });
         });
+    }
+    /**
+     * Open a live memory view panel (no backing file — pages fetched via socket).
+     * Called once per region after connecting to the embedded emulator server.
+     */
+    async openLiveMemoryView(region, baseAddress, totalBytes, label) {
+        if (!this.socketClient || !this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator. Connect first.');
+            return;
+        }
+        const panel = vscode.window.createWebviewPanel('disasm.liveMemory', label, vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });
+        panel.webview.html = (0, disasmEditorTemplate_1.getDisasmEditorHtml)({}, (0, helpers_1.getNonce)());
+        const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
+        panel.webview.postMessage({
+            type: 'init',
+            totalInstructions,
+            pageSize: DisasmEditorProvider.PAGE_SIZE,
+            baseAddress,
+        });
+        // Send first page and hex view
+        await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
+        await this.sendLiveHexView(panel, region, baseAddress, baseAddress, DisasmEditorProvider.INSTRUCTION_SIZE);
+        panel.webview.onDidReceiveMessage(async (message) => {
+            if (message.type === 'requestPage') {
+                await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, message.startIndex);
+            }
+            else if (message.type === 'updateHex') {
+                await this.sendLiveHexView(panel, region, baseAddress, message.address, message.length || DisasmEditorProvider.INSTRUCTION_SIZE);
+            }
+            else if (message.type === 'search') {
+                // Full-region live search is expensive; return empty for now
+                panel.webview.postMessage({ type: 'searchResults', matches: [] });
+            }
+        });
+    }
+    async sendLiveDisasmPage(panel, region, baseAddress, totalBytes, startIndex) {
+        if (!this.socketClient || !this.socketClient.isConnected()) {
+            return;
+        }
+        const startOffset = startIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
+        const maxBytes = DisasmEditorProvider.PAGE_SIZE * DisasmEditorProvider.INSTRUCTION_SIZE;
+        const readLength = Math.min(totalBytes - startOffset, maxBytes);
+        if (readLength <= 0) {
+            return;
+        }
+        const startAddr = baseAddress + startOffset;
+        try {
+            const buffer = await this.socketClient.readMemory(startAddr, readLength, region);
+            const rows = await this.disassembleWithBackend(startAddr, buffer);
+            panel.webview.postMessage({ type: 'disasmPage', rows, startIndex });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            console.error(`[LIVE] sendLiveDisasmPage failed at 0x${startAddr.toString(16)}: ${msg}`);
+        }
+    }
+    async sendLiveHexView(panel, region, baseAddress, highlightAddr, highlightLength) {
+        if (!this.socketClient || !this.socketClient.isConnected()) {
+            return;
+        }
+        const alignedAddr = Math.max(baseAddress, (highlightAddr & ~0xf) - 0x10);
+        try {
+            const buffer = await this.socketClient.readMemory(alignedAddr, DisasmEditorProvider.HEX_VIEW_SIZE, region);
+            panel.webview.postMessage({
+                type: 'hexview',
+                data: Array.from(buffer),
+                offset: alignedAddr,
+                highlight_addr: highlightAddr,
+                highlight_length: highlightLength,
+            });
+        }
+        catch (err) {
+            const msg = err?.message ?? String(err);
+            console.error(`[LIVE] sendLiveHexView failed at 0x${alignedAddr.toString(16)}: ${msg}`);
+        }
     }
     async performSearch(webviewPanel, fileData, query, mode) {
         const matches = [];
@@ -3306,69 +3388,243 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.DisasmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
+const fs = __importStar(__webpack_require__(3));
+const path = __importStar(__webpack_require__(8));
+const child_process_1 = __webpack_require__(9);
 const helpers_1 = __webpack_require__(4);
-const disasmPanelTemplate_1 = __webpack_require__(8);
+const disasmPanelTemplate_1 = __webpack_require__(10);
 const extension_1 = __webpack_require__(0);
+/** Memory regions exposed as separate editor windows when the emulator is running. */
+const LIVE_REGIONS = [
+    { region: 'ee', address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE Main RAM' },
+    { region: 'iop', address: 0x00000000, size: 4 * 1024 * 1024, label: 'IOP RAM' },
+    { region: 'ee', address: 0x1FC00000, size: 4 * 1024 * 1024, label: 'BIOS ROM' },
+    { region: 'ee', address: 0x70000000, size: 16 * 1024, label: 'Scratchpad' },
+];
 class DisasmPanelProvider {
+    socketClient;
+    editorProvider;
     webview;
+    emulatorProcess;
+    settings = {};
+    workspaceRoot = '';
+    snapshots = [];
+    constructor(socketClient, editorProvider) {
+        this.socketClient = socketClient;
+        this.editorProvider = editorProvider;
+    }
     // Register the provider with VS Code
     register(context) {
         context.subscriptions.push(vscode.window.registerWebviewViewProvider('disasm.disasmPanel', this));
     }
     resolveWebviewView(webviewView) {
         this.webview = webviewView.webview;
+        // Resolve workspace root (used to turn relative paths into absolute)
+        this.workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+        // Load emu-settings.json from the workspace root
+        this.loadEmuSettings();
         // Setup webview options
-        webviewView.webview.options = {
-            enableScripts: true
-        };
-        // Generate HTML from template
-        const templateData = {
-            connected: false
-        };
-        webviewView.webview.html = (0, disasmPanelTemplate_1.getDisasmPanelHtml)(templateData, (0, helpers_1.getNonce)());
+        webviewView.webview.options = { enableScripts: true };
+        // Render the panel with settings data
+        webviewView.webview.html = this.buildHtml();
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async (msg) => {
-            if (msg.command === 'disassemble') {
-                await this.handleDisassemble(msg.data);
+            switch (msg.command) {
+                case 'connect':
+                    this.handleConnect(msg.emulatorPath, msg.biosPath, msg.gamePath);
+                    break;
+                case 'snapshot':
+                    await this.handleSnapshot();
+                    break;
+                case 'openSnapshot':
+                    await this.handleOpenSnapshot(msg.path);
+                    break;
+                // Dropdown change notifications (no-op for now)
+                case 'emulatorChanged':
+                case 'biosChanged':
+                case 'gameChanged':
+                    break;
             }
         });
     }
-    async handleDisassemble(hexCode) {
-        const socketClient = (0, extension_1.getSocketClient)();
-        if (!socketClient || !socketClient.isConnected()) {
-            this.sendResult(false, '', 'Not connected to C# server. Use "Connect to Server" command first.');
+    // ── Settings ──────────────────────────────────────────────────────────────
+    loadEmuSettings() {
+        if (!this.workspaceRoot) {
             return;
         }
+        const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
         try {
-            const results = await socketClient.disassemble(hexCode);
-            // Format results as assembly output
-            const asmLines = [];
-            for (const result of results) {
-                if (result.Success) {
-                    const line = result.Comment
-                        ? `${result.Hex}  ${result.Assembly}  ${result.Comment}`
-                        : `${result.Hex}  ${result.Assembly}`;
-                    asmLines.push(line);
-                }
-                else {
-                    asmLines.push(`${result.Hex}  ERROR: ${result.Error}`);
-                }
-            }
-            this.sendResult(true, asmLines.join('\n'), '');
+            const raw = fs.readFileSync(settingsPath, 'utf-8');
+            this.settings = JSON.parse(raw);
         }
-        catch (error) {
-            this.sendResult(false, '', error.message || 'Disassembly failed');
+        catch (err) {
+            (0, extension_1.getOutputChannel)().appendLine(`[WARN] Could not load emu-settings.json: ${err?.message ?? err}`);
+            this.settings = {};
         }
     }
-    sendResult(success, data, error) {
-        if (this.webview) {
-            this.webview.postMessage({
-                command: 'disassembleResult',
-                success: success,
-                data: data,
-                error: error
-            });
+    buildHtml() {
+        const emulators = (this.settings.emulators ?? []).map(e => ({
+            type: e.type, path: e.path
+        }));
+        const biosOptions = (this.settings.bios ?? []).map(b => ({
+            name: b.name, path: b.path
+        }));
+        const gameOptions = (this.settings.games ?? []).map(g => ({
+            name: g.name, path: g.path
+        }));
+        const templateData = {
+            connected: this.emulatorProcess != null,
+            emulators,
+            biosOptions,
+            gameOptions,
+            snapshots: this.snapshots,
+        };
+        return (0, disasmPanelTemplate_1.getDisasmPanelHtml)(templateData, (0, helpers_1.getNonce)());
+    }
+    // ── Emulator launch ───────────────────────────────────────────────────────
+    handleConnect(emulatorPath, biosPath, gamePath) {
+        const out = (0, extension_1.getOutputChannel)();
+        // Toggle: if already running, kill it
+        if (this.emulatorProcess) {
+            this.emulatorProcess.kill();
+            out.appendLine('[INFO] Emulator stopped by user.');
+            this.cleanupProcess();
+            return;
         }
+        if (!emulatorPath) {
+            vscode.window.showWarningMessage('Please select an emulator.');
+            return;
+        }
+        const resolvedExe = this.resolvePath(emulatorPath);
+        const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
+        const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
+        const cliArgs = ['--run'];
+        if (resolvedBios) {
+            cliArgs.push('--bios', resolvedBios);
+        }
+        if (resolvedDisc) {
+            cliArgs.push('--disc', resolvedDisc);
+        }
+        out.show(true);
+        out.appendLine(`[INFO] Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
+        const proc = (0, child_process_1.spawn)(resolvedExe, cliArgs, {
+            windowsHide: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        this.emulatorProcess = proc;
+        this.webview?.postMessage({ command: 'connectionStatus', connected: true });
+        proc.stdout?.on('data', (chunk) => out.append(chunk.toString()));
+        proc.stderr?.on('data', (chunk) => out.append(chunk.toString()));
+        proc.on('error', (err) => {
+            out.appendLine(`[ERROR] Failed to start emulator: ${err.message}`);
+            vscode.window.showErrorMessage(`Failed to start emulator: ${err.message}`);
+            this.cleanupProcess();
+        });
+        proc.on('close', (code) => {
+            out.appendLine(`[INFO] Emulator exited with code ${code ?? 'null'}.`);
+            this.cleanupProcess();
+        });
+        // After the emulator starts the embedded socket server, connect the
+        // socket client and open a live memory view for every region.
+        this.connectSocketAndOpenViews();
+    }
+    /** Formats a Date into a filesystem-safe snapshot folder name. */
+    static formatSnapshotTimestamp(d) {
+        return d.toISOString()
+            .replace(/[:.]/g, '-')
+            .replace('T', '_')
+            .slice(0, 19); // YYYY-MM-DD_HH-MM-SS
+    }
+    /** Polls until the socket server is up (max ~10 s), then opens region windows. */
+    connectSocketAndOpenViews() {
+        const out = (0, extension_1.getOutputChannel)();
+        const maxAttempts = 20;
+        let attempts = 0;
+        const tryConnect = async () => {
+            attempts++;
+            try {
+                if (!this.socketClient.isConnected()) {
+                    await this.socketClient.connect();
+                }
+                out.appendLine('[INFO] Socket connected to emulator. Opening memory views…');
+                for (const r of LIVE_REGIONS) {
+                    await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+                }
+            }
+            catch {
+                if (attempts < maxAttempts && this.emulatorProcess) {
+                    setTimeout(tryConnect, 500);
+                }
+                else {
+                    out.appendLine('[WARN] Could not connect to emulator socket server.');
+                }
+            }
+        };
+        // Give the emulator ~1 s to start listening before first attempt
+        setTimeout(tryConnect, 1000);
+    }
+    cleanupProcess() {
+        this.emulatorProcess = undefined;
+        this.webview?.postMessage({ command: 'connectionStatus', connected: false });
+    }
+    // ── Snapshot ──────────────────────────────────────────────────────────────
+    async handleSnapshot() {
+        const out = (0, extension_1.getOutputChannel)();
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        const timestamp = DisasmPanelProvider.formatSnapshotTimestamp(new Date());
+        const snapshotsDir = this.workspaceRoot
+            ? path.join(this.workspaceRoot, 'snapshots', timestamp)
+            : path.join((__webpack_require__(12).tmpdir)(), 'ps2snapshots', timestamp);
+        out.appendLine(`[INFO] Taking snapshot → ${snapshotsDir}`);
+        try {
+            const regions = await this.socketClient.snapshot(snapshotsDir);
+            out.appendLine(`[INFO] Snapshot complete — ${regions.length} region(s) written.`);
+            // Record in the panel's snapshot list
+            const entry = {
+                label: timestamp,
+                timestamp: new Date().toLocaleTimeString(),
+                path: snapshotsDir,
+            };
+            this.snapshots.unshift(entry);
+            this.webview?.postMessage({
+                command: 'updateSnapshots',
+                snapshots: this.snapshots,
+            });
+            // Open each dumped .bin in the disassembler editor
+            for (const r of regions) {
+                const uri = vscode.Uri.file(r.File);
+                await vscode.commands.executeCommand('vscode.openWith', uri, 'disasm.disasmEditor');
+            }
+        }
+        catch (err) {
+            out.appendLine(`[ERROR] Snapshot failed: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`Snapshot failed: ${err?.message ?? err}`);
+        }
+    }
+    /** Re-open all .bin files from an earlier snapshot folder. */
+    async handleOpenSnapshot(snapshotPath) {
+        try {
+            const files = fs.readdirSync(snapshotPath)
+                .filter(f => f.endsWith('.bin'))
+                .map(f => path.join(snapshotPath, f));
+            for (const f of files) {
+                const uri = vscode.Uri.file(f);
+                await vscode.commands.executeCommand('vscode.openWith', uri, 'disasm.disasmEditor');
+            }
+        }
+        catch (err) {
+            vscode.window.showErrorMessage(`Could not open snapshot: ${err?.message ?? err}`);
+        }
+    }
+    /** Resolve a workspace-relative path to an absolute path. */
+    resolvePath(p) {
+        if (path.isAbsolute(p)) {
+            return p;
+        }
+        return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
     }
 }
 exports.DisasmPanelProvider = DisasmPanelProvider;
@@ -3376,6 +3632,18 @@ exports.DisasmPanelProvider = DisasmPanelProvider;
 
 /***/ }),
 /* 8 */
+/***/ ((module) => {
+
+module.exports = require("path");
+
+/***/ }),
+/* 9 */
+/***/ ((module) => {
+
+module.exports = require("child_process");
+
+/***/ }),
+/* 10 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -3384,7 +3652,7 @@ exports.DisasmPanelProvider = DisasmPanelProvider;
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getDisasmPanelHtml = getDisasmPanelHtml;
-const disasmPanelStyles_1 = __webpack_require__(9);
+const disasmPanelStyles_1 = __webpack_require__(11);
 function getDisasmPanelHtml(data, nonce) {
     return `<!DOCTYPE html>
 <html>
@@ -3400,17 +3668,11 @@ ${(0, disasmPanelStyles_1.getDisasmPanelStyles)()}
 </head>
 <body>
 
-<h3>MIPS Disassembler</h3>
+<h3>Emulator</h3>
 <div class="container">
-    <label for="hexInput">Hex Code (one per line or space-separated):</label>
-    <textarea id="hexInput" rows="10" placeholder="0x02114020&#10;0x21090064&#10;0x11090010"></textarea>
-    
-    <button id="disassembleBtn">Disassemble</button>
-    
-    <label for="asmOutput">Assembly Output:</label>
-    <textarea id="asmOutput" rows="10" readonly></textarea>
-    
-    <div id="status" class="status"></div>
+
+    ${getEmulatorControls(data)}
+
 </div>
 
 ${getScript(nonce)}
@@ -3418,41 +3680,136 @@ ${getScript(nonce)}
 </body>
 </html>`;
 }
+function getEmulatorControls(data) {
+    const emulators = data.emulators || [];
+    const biosOptions = data.biosOptions || [];
+    const gameOptions = data.gameOptions || [];
+    const selEmu = data.selectedEmulator || '';
+    const selBios = data.selectedBios || '';
+    const selGame = data.selectedGame || '';
+    const emuOptions = emulators.map(e => {
+        const label = e.type ?? e.name ?? '';
+        const val = e.path;
+        return `<option value="${escapeHtml(val)}" ${selEmu === val ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+    const biosOptHtml = biosOptions.map(b => {
+        const label = b.name ?? b.type ?? '';
+        const val = b.path;
+        return `<option value="${escapeHtml(val)}" ${selBios === val ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+    const gameOptHtml = gameOptions.map(g => {
+        const label = g.name ?? g.type ?? '';
+        const val = g.path;
+        return `<option value="${escapeHtml(val)}" ${selGame === val ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+    return `<div class="row">
+    <select id="emulatorSelect">
+        <option value="">Select Emulator...</option>
+        ${emuOptions}
+    </select>
+</div>
+<div class="row">
+    <select id="biosSelect">
+        <option value="">Select BIOS...</option>
+        ${biosOptHtml}
+    </select>
+</div>
+<div class="row">
+    <select id="gameSelect">
+        <option value="">Select Game...</option>
+        ${gameOptHtml}
+    </select>
+</div>
+<div class="row">
+    <button id="connectBtn">${data.connected ? 'Disconnect' : 'Connect'}</button>
+</div>
+<div class="row">
+    <button id="snapshotBtn" ${data.connected ? '' : 'disabled'}>Take Snapshot</button>
+</div>
+${data.snapshots && data.snapshots.length > 0 ? getSnapshotList(data.snapshots) : ''}`;
+}
+function getSnapshotList(snapshots) {
+    const items = snapshots.map(s => `
+<div class="snapshot-item">
+    <span class="snapshot-label">${escapeHtml(s.label)}</span>
+    <span class="snapshot-time">${escapeHtml(s.timestamp)}</span>
+    <button class="open-snapshot-btn" data-path="${escapeHtml(s.path)}">Open</button>
+</div>`).join('');
+    return `<div class="snapshot-list"><h4>Snapshots</h4>${items}</div>`;
+}
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
 function getScript(nonce) {
     return `<script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
 
-document.getElementById('disassembleBtn').onclick = () => {
-    const hexInput = document.getElementById('hexInput').value;
-    const statusDiv = document.getElementById('status');
-    
-    statusDiv.textContent = 'Disassembling...';
-    statusDiv.className = 'status';
-    
-    vscode.postMessage({ 
-        command: 'disassemble',
-        data: hexInput
-    });
+document.getElementById('connectBtn').onclick = () => {
+    const emulatorPath = document.getElementById('emulatorSelect').value;
+    const biosPath = document.getElementById('biosSelect').value;
+    const gamePath = document.getElementById('gameSelect').value;
+    vscode.postMessage({ command: 'connect', emulatorPath, biosPath, gamePath });
 };
+
+document.getElementById('snapshotBtn')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'snapshot' });
+});
+
+document.getElementById('emulatorSelect').onchange = (e) => {
+    vscode.postMessage({ command: 'emulatorChanged', emulatorPath: e.target.value });
+};
+
+document.getElementById('biosSelect').onchange = (e) => {
+    vscode.postMessage({ command: 'biosChanged', biosPath: e.target.value });
+};
+
+document.getElementById('gameSelect').onchange = (e) => {
+    vscode.postMessage({ command: 'gameChanged', gamePath: e.target.value });
+};
+
+// Delegate clicks on dynamically-rendered Open buttons
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.open-snapshot-btn');
+    if (btn) {
+        vscode.postMessage({ command: 'openSnapshot', path: btn.dataset.path });
+    }
+});
 
 // Listen for messages from the extension
 window.addEventListener('message', event => {
     const message = event.data;
-    
+
     switch (message.command) {
-        case 'disassembleResult':
-            const asmOutput = document.getElementById('asmOutput');
-            const statusDiv = document.getElementById('status');
-            
-            if (message.success) {
-                asmOutput.value = message.data;
-                statusDiv.textContent = 'Disassembly complete!';
-                statusDiv.className = 'status success';
-            } else {
-                statusDiv.textContent = 'Error: ' + message.error;
-                statusDiv.className = 'status error';
-            }
+        case 'connectionStatus': {
+            const btn = document.getElementById('connectBtn');
+            btn.textContent = message.connected ? 'Disconnect' : 'Connect';
+            const snapBtn = document.getElementById('snapshotBtn');
+            snapBtn.disabled = !message.connected;
             break;
+        }
+        case 'updateSnapshots': {
+            let listEl = document.querySelector('.snapshot-list');
+            if (!listEl) {
+                listEl = document.createElement('div');
+                listEl.className = 'snapshot-list';
+                document.querySelector('.container').appendChild(listEl);
+            }
+            const esc = s => s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            listEl.innerHTML = '<h4>Snapshots</h4>' +
+                message.snapshots.map(s =>
+                    '<div class="snapshot-item">' +
+                    '<span class="snapshot-label">' + esc(s.label) + '</span>' +
+                    '<span class="snapshot-time">' + esc(s.timestamp) + '</span>' +
+                    '<button class="open-snapshot-btn" data-path="' + esc(s.path) + '">Open</button>' +
+                    '</div>'
+                ).join('');
+            break;
+        }
     }
 });
 </script>`;
@@ -3460,7 +3817,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 9 */
+/* 11 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -3484,20 +3841,28 @@ body {
     gap: 10px;
 }
 
-label {
-    font-weight: bold;
-    margin-top: 10px;
+.row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
 }
 
-textarea {
+.row select,
+.row button {
+    flex: 1;
+}
+
+select, button {
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+}
+
+select {
     width: 100%;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
-    padding: 8px;
-    font-family: var(--vscode-editor-font-family);
-    font-size: var(--vscode-editor-font-size);
-    resize: vertical;
+    padding: 4px;
 }
 
 button {
@@ -3513,28 +3878,61 @@ button:hover {
     background: var(--vscode-button-hoverBackground);
 }
 
-.status {
-    padding: 8px;
-    margin-top: 10px;
-    border-radius: 4px;
+button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.snapshot-list {
+    margin-top: 12px;
+    border-top: 1px solid var(--vscode-input-border);
+    padding-top: 8px;
+}
+
+.snapshot-list h4 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.snapshot-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
     font-size: 12px;
 }
 
-.status.success {
-    background: var(--vscode-testing-iconPassed);
-    color: white;
+.snapshot-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.status.error {
-    background: var(--vscode-testing-iconFailed);
-    color: white;
+.snapshot-time {
+    color: var(--vscode-descriptionForeground);
+    white-space: nowrap;
+}
+
+.open-snapshot-btn {
+    padding: 2px 8px;
+    font-size: 11px;
 }
 </style>`;
 }
 
 
 /***/ }),
-/* 10 */
+/* 12 */
+/***/ ((module) => {
+
+module.exports = require("os");
+
+/***/ }),
+/* 13 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -3574,9 +3972,9 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AsmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
-const child_process_1 = __webpack_require__(11);
+const child_process_1 = __webpack_require__(9);
 const helpers_1 = __webpack_require__(4);
-const asmPanelTemplate_1 = __webpack_require__(12);
+const asmPanelTemplate_1 = __webpack_require__(14);
 const extension_1 = __webpack_require__(0);
 let outputChannel;
 class AsmPanelProvider {
@@ -3697,13 +4095,7 @@ exports.AsmPanelProvider = AsmPanelProvider;
 
 
 /***/ }),
-/* 11 */
-/***/ ((module) => {
-
-module.exports = require("child_process");
-
-/***/ }),
-/* 12 */
+/* 14 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -3713,7 +4105,7 @@ module.exports = require("child_process");
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getAsmPanelHtml = getAsmPanelHtml;
-const asmPanelStyles_1 = __webpack_require__(13);
+const asmPanelStyles_1 = __webpack_require__(15);
 /**
  * Main panel template - returns complete HTML
  */
@@ -3843,7 +4235,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 13 */
+/* 15 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -3940,7 +4332,7 @@ button:disabled {
 
 
 /***/ }),
-/* 14 */
+/* 16 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -3979,7 +4371,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SocketClient = void 0;
-const net = __importStar(__webpack_require__(15));
+const net = __importStar(__webpack_require__(17));
 /**
  * Socket client for communication with C# server
  */
@@ -4233,6 +4625,40 @@ class SocketClient {
         return response.Results || [];
     }
     /**
+     * Read raw bytes from the live emulator memory.
+     * @param address  - Start virtual address (EE or IOP space)
+     * @param length   - Number of bytes to read (1–65536 per call)
+     * @param region   - "ee" (default) or "iop"
+     */
+    async readMemory(address, length, region = 'ee') {
+        const command = {
+            Command: 'READMEM',
+            Address: address,
+            Length: length,
+            Region: region,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success || !response.Data) {
+            throw new Error(response.Error || 'ReadMem failed');
+        }
+        return Buffer.from(response.Data, 'base64');
+    }
+    /**
+     * Take a snapshot: write all memory regions to .bin files in outputPath.
+     * Returns the list of written region descriptors.
+     */
+    async snapshot(outputPath) {
+        const command = {
+            Command: 'SNAPSHOT',
+            OutputPath: outputPath,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Snapshot failed');
+        }
+        return response.Regions || [];
+    }
+    /**
      * Ping the server
      */
     async ping() {
@@ -4250,7 +4676,7 @@ exports.SocketClient = SocketClient;
 
 
 /***/ }),
-/* 15 */
+/* 17 */
 /***/ ((module) => {
 
 module.exports = require("net");
