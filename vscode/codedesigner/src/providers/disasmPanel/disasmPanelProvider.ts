@@ -160,7 +160,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }));
 
         const templateData: DisasmPanelData = {
-            connected:   this.emulatorProcess != null,
+            connected:   this.emulatorProcess != null || this.socketClient.isConnected(),
             emulators,
             biosOptions,
             gameOptions,
@@ -174,10 +174,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private handleConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
 
-        // Toggle: if already running, kill it
-        if (this.emulatorProcess) {
-            this.emulatorProcess.kill();
-            out.appendLine('[INFO] Emulator stopped by user.');
+        // Toggle: if already running or already socket-connected, stop/disconnect
+        if (this.emulatorProcess || this.socketClient.isConnected()) {
+            if (this.emulatorProcess) {
+                this.emulatorProcess.kill();
+                out.appendLine('[INFO] Emulator stopped by user.');
+            } else {
+                out.appendLine('[INFO] Disconnected from server.');
+            }
+            this.socketClient.disconnect();
             this.cleanupProcess();
             return;
         }
@@ -187,6 +192,27 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        out.show(true);
+
+        // Try connecting to an already-running server first. If the C# server
+        // was started manually (e.g. `dotnet run -- --server` or `--run`), we
+        // can reuse it without spawning a new process.
+        this.socketClient.connect().then(async () => {
+            out.appendLine('[INFO] Connected to existing emulator server. Opening memory views…');
+            this.webview?.postMessage({ command: 'connectionStatus', connected: true });
+            for (const r of LIVE_REGIONS) {
+                await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+            }
+        }).catch(() => {
+            // No existing server — spawn the emulator and then connect
+            this.spawnAndConnect(emulatorPath, biosPath, gamePath);
+        });
+    }
+
+    /** Spawn the emulator executable and, once the embedded server is up, connect. */
+    private spawnAndConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
+        const out = getOutputChannel();
+
         const resolvedExe  = this.resolvePath(emulatorPath);
         const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
         const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
@@ -195,7 +221,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (resolvedBios) { cliArgs.push('--bios', resolvedBios); }
         if (resolvedDisc) { cliArgs.push('--disc', resolvedDisc); }
 
-        out.show(true);
         out.appendLine(`[INFO] Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
 
         const proc = spawn(resolvedExe, cliArgs, {
@@ -251,7 +276,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         r.region, r.address, r.size, r.label);
                 }
             } catch {
-                if (attempts < maxAttempts && this.emulatorProcess) {
+                if (attempts < maxAttempts) {
                     setTimeout(tryConnect, 500);
                 } else {
                     out.appendLine('[WARN] Could not connect to emulator socket server.');
