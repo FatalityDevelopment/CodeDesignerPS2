@@ -244,6 +244,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             totalInstructions,
             pageSize: DisasmEditorProvider.PAGE_SIZE,
             baseAddress,
+            isLive: true,
         });
 
         // Send first page and hex view

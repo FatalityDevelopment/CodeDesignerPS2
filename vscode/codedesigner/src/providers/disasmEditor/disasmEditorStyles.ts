@@ -279,5 +279,45 @@ body {
     display: block;
 }
 
+#live-toolbar {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    background: #1e3a1e;
+    border-bottom: 1px solid #3e3e42;
+    padding: 4px 12px;
+}
+
+#live-toolbar.visible {
+    display: flex;
+}
+
+.live-indicator {
+    color: #4ec94e;
+    font-size: 11px;
+    font-weight: bold;
+    animation: live-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+#refresh-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 10px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+#refresh-btn:hover {
+    background: #505050;
+}
+
 </style>`;
 }

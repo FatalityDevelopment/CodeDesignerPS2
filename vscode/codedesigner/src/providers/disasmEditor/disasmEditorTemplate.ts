@@ -27,6 +27,7 @@ ${getDisasmEditorStyles()}
 
 ${getGotoPanel()}
 ${getSearchPanel()}
+${getLiveToolbar()}
 ${getHexContainer()}
 ${getGrid()}
 
@@ -85,6 +86,13 @@ function getSearchPanel(): string {
 </div>`;
 }
 
+function getLiveToolbar(): string {
+    return `<div id="live-toolbar">
+    <span class="live-indicator">● LIVE</span>
+    <button id="refresh-btn" title="Refresh current view">↻ Refresh</button>
+</div>`;
+}
+
 function getHexContainer(): string {
     return `<div id="hex-container"></div>`;
 }
@@ -122,6 +130,8 @@ const gotoClear = document.getElementById("goto-clear");
 const gotoBtn = document.getElementById("goto-btn");
 const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
+const liveToolbar = document.getElementById("live-toolbar");
+const refreshBtn = document.getElementById("refresh-btn");
 
 const state = {
     cursor: 0,
@@ -137,8 +147,12 @@ const state = {
     searchMatches: [],
     currentMatch: -1,
     searchActive: false,
-    gotoActive: false
+    gotoActive: false,
+    isLive: false
 };
+
+let liveRefreshTimer = null;
+let liveRefreshPending = false;
 
 const clamp = (val, min, max) => Math.max(min, Math.min(val, max));
 const getPageStart = index => Math.floor(index / state.pageSize) * state.pageSize;
@@ -152,9 +166,15 @@ window.addEventListener("message", ({ data: msg }) => {
             state.totalInstructions = msg.totalInstructions;
             state.pageSize = msg.pageSize;
             state.baseAddress = msg.baseAddress;
+            if (msg.isLive) {
+                state.isLive = true;
+                liveToolbar.classList.add('visible');
+                startLiveRefresh();
+            }
             break;
         case "disasmPage":
             console.log('[WEBVIEW] disasmPage:', msg.rows?.length || 0, 'rows, startIndex:', msg.startIndex);
+            liveRefreshPending = false;
             state.loadedPages.set(msg.startIndex, msg.rows);
             if (msg.startIndex === getPageStart(state.cursor)) {
                 state.disasmRows = msg.rows;
@@ -564,7 +584,7 @@ function updateCursor() {
     const rowEl = grid.children[localIndex];
     if (!rowEl) return;
     rowEl.classList.add("active");
-    rowEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    rowEl.scrollIntoView({ block: "nearest", behavior: "instant" });
     const row = state.disasmRows[localIndex];
     if (!row) return;
     handleBranchHighlight(row, localIndex);
@@ -596,5 +616,35 @@ function handleBranchHighlight(row, rowIndex) {
         }
     }
 }
+
+function startLiveRefresh() {
+    if (liveRefreshTimer !== null) { return; }
+    liveRefreshTimer = setInterval(doLiveRefresh, 1000);
+}
+
+function doLiveRefresh() {
+    if (liveRefreshPending) { return; }
+    liveRefreshPending = true;
+    const startIndex = getPageStart(state.cursor);
+    state.loadedPages.delete(startIndex);
+    vscode.postMessage({ type: 'requestPage', startIndex });
+}
+
+function manualRefresh() {
+    if (liveRefreshPending) { return; }
+    liveRefreshPending = true;
+    const startIndex = getPageStart(state.cursor);
+    state.loadedPages.delete(startIndex);
+    vscode.postMessage({ type: 'requestPage', startIndex });
+}
+
+refreshBtn.addEventListener('click', manualRefresh);
+
+window.addEventListener('unload', () => {
+    if (liveRefreshTimer !== null) {
+        clearInterval(liveRefreshTimer);
+        liveRefreshTimer = null;
+    }
+});
 `;
 }
