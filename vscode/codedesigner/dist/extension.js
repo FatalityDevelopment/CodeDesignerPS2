@@ -376,6 +376,15 @@ class DisasmEditorProvider {
                 else if (message.type === "search") {
                     await this.performSearch(webviewPanel, fileData, message.query, message.mode);
                 }
+                else if (message.type === "getSymbols") {
+                    await this.handleGetSymbols(webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+                }
+                else if (message.type === "addLabel") {
+                    await this.handleAddLabel(webviewPanel, message.address, message.labelName, message.comment);
+                }
+                else if (message.type === "deleteLabel") {
+                    await this.handleDeleteLabel(webviewPanel, message.address);
+                }
             });
         });
     }
@@ -514,6 +523,16 @@ class DisasmEditorProvider {
             else if (message.type === 'search') {
                 // Full-region live search is expensive; return empty for now
                 panel.webview.postMessage({ type: 'searchResults', matches: [] });
+            }
+            else if (message.type === 'getSymbols') {
+                // Live mode: labels from backend; no fileData so strings/functions empty
+                await this.handleGetSymbols(panel, undefined, baseAddress);
+            }
+            else if (message.type === 'addLabel') {
+                await this.handleAddLabel(panel, message.address, message.labelName, message.comment);
+            }
+            else if (message.type === 'deleteLabel') {
+                await this.handleDeleteLabel(panel, message.address);
             }
         });
     }
@@ -744,6 +763,67 @@ class DisasmEditorProvider {
             }
         }
         return matches;
+    }
+    /**
+     * Collect labels, strings, and functions from the backend and post them
+     * back to the webview as a single `symbols` message.
+     * For live panels that have no backing fileData, pass `undefined`; in that
+     * case strings and functions are returned empty.
+     */
+    async handleGetSymbols(panel, fileData, baseAddress) {
+        let labels = [];
+        let strings = [];
+        let functions = [];
+        if (this.socketClient?.isConnected()) {
+            try {
+                labels = await this.socketClient.getLabels();
+            }
+            catch { /* ignore */ }
+            if (fileData && fileData.length > 0) {
+                try {
+                    strings = await this.socketClient.getStrings(fileData, baseAddress);
+                }
+                catch { /* ignore */ }
+                try {
+                    functions = await this.socketClient.getFunctions(fileData, baseAddress);
+                }
+                catch { /* ignore */ }
+            }
+        }
+        panel.webview.postMessage({ type: 'symbols', labels, strings, functions });
+    }
+    /**
+     * Add (or update) a label in the backend database and send back a fresh
+     * label list so the symbols panel refreshes instantly.
+     */
+    async handleAddLabel(panel, address, labelName, comment) {
+        if (!this.socketClient?.isConnected()) {
+            return;
+        }
+        try {
+            await this.socketClient.addLabel(address, labelName, comment);
+            const labels = await this.socketClient.getLabels();
+            panel.webview.postMessage({ type: 'labelsUpdated', labels });
+        }
+        catch (err) {
+            console.error(`[SYMBOLS] AddLabel failed: ${err?.message ?? err}`);
+        }
+    }
+    /**
+     * Delete a label in the backend database and send back a fresh label list.
+     */
+    async handleDeleteLabel(panel, address) {
+        if (!this.socketClient?.isConnected()) {
+            return;
+        }
+        try {
+            await this.socketClient.deleteLabel(address);
+            const labels = await this.socketClient.getLabels();
+            panel.webview.postMessage({ type: 'labelsUpdated', labels });
+        }
+        catch (err) {
+            console.error(`[SYMBOLS] DeleteLabel failed: ${err?.message ?? err}`);
+        }
     }
     async sendDisasmPage(webviewPanel, fileData, startIndex) {
         console.log(`[DISASM] sendDisasmPage called: startIndex=${startIndex}`);
@@ -2644,10 +2724,12 @@ ${(0, disasmEditorStyles_1.getDisasmEditorStyles)()}
 ${getGotoPanel()}
 ${getSearchPanel()}
 ${getLiveToolbar()}
+${getHeaderToolbar()}
 ${getHexContainer()}
 </div>
 <div id="content-wrapper">
 ${getGrid()}
+${getSymbolsPanel()}
 ${getDebugPanel()}
 </div>
 
@@ -2712,8 +2794,50 @@ function getLiveToolbar() {
 function getHexContainer() {
     return `<div id="hex-container"></div>`;
 }
+function getHeaderToolbar() {
+    return `<div id="header-toolbar">
+    <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">⊞ Symbols</button>
+</div>`;
+}
 function getGrid() {
     return `<div id="grid" tabindex="0"></div>`;
+}
+function getSymbolsPanel() {
+    return `<div id="symbols-panel">
+    <div id="symbols-panel-header">
+        <span class="symbols-title">Symbols</span>
+        <button class="sym-header-btn" id="symbols-refresh-btn" title="Refresh symbols">↻</button>
+        <button class="sym-header-btn" id="close-symbols-btn" title="Close">×</button>
+    </div>
+    <div id="sym-tabs">
+        <button class="sym-tab active" data-symtab="labels">Labels</button>
+        <button class="sym-tab" data-symtab="strings">Strings</button>
+        <button class="sym-tab" data-symtab="functions">Functions</button>
+    </div>
+    <div id="sym-labels-content" class="sym-tab-content active">
+        <div id="sym-add-row">
+            <input type="text" id="sym-new-addr"    class="sym-add-input" placeholder="0x00000000" maxlength="10" />
+            <input type="text" id="sym-new-name"    class="sym-add-input" placeholder="Label name" />
+            <input type="text" id="sym-new-comment" class="sym-add-input" placeholder="Comment (opt.)" />
+            <button id="sym-add-btn" class="sym-add-btn" title="Add label">+</button>
+        </div>
+        <div id="sym-labels-list" class="sym-list"></div>
+    </div>
+    <div id="sym-strings-content" class="sym-tab-content">
+        <div class="sym-scan-row">
+            <button id="sym-scan-strings-btn" class="sym-scan-btn">Scan for strings</button>
+            <span id="sym-strings-status" class="sym-status"></span>
+        </div>
+        <div id="sym-strings-list" class="sym-list"></div>
+    </div>
+    <div id="sym-functions-content" class="sym-tab-content">
+        <div class="sym-scan-row">
+            <button id="sym-scan-functions-btn" class="sym-scan-btn">Scan for functions</button>
+            <span id="sym-functions-status" class="sym-status"></span>
+        </div>
+        <div id="sym-functions-list" class="sym-list"></div>
+    </div>
+</div>`;
 }
 function getDebugPanel() {
     return `<div id="debug-panel">
@@ -2772,6 +2896,23 @@ const debugPanel = document.getElementById("debug-panel");
 const regContent = document.getElementById("registers-content");
 const stackContent = document.getElementById("stack-content");
 
+// ── Symbols panel DOM refs ────────────────────────────────────────────────
+const symbolsPanel       = document.getElementById("symbols-panel");
+const symbolsToggleBtn   = document.getElementById("symbols-toggle-btn");
+const symbolsRefreshBtn  = document.getElementById("symbols-refresh-btn");
+const closeSymbolsBtn    = document.getElementById("close-symbols-btn");
+const symNewAddr         = document.getElementById("sym-new-addr");
+const symNewName         = document.getElementById("sym-new-name");
+const symNewComment      = document.getElementById("sym-new-comment");
+const symAddBtn          = document.getElementById("sym-add-btn");
+const symLabelsList      = document.getElementById("sym-labels-list");
+const symStringsList     = document.getElementById("sym-strings-list");
+const symFunctionsList   = document.getElementById("sym-functions-list");
+const symStringsStatus   = document.getElementById("sym-strings-status");
+const symFunctionsStatus = document.getElementById("sym-functions-status");
+const symScanStringsBtn  = document.getElementById("sym-scan-strings-btn");
+const symScanFunctionsBtn= document.getElementById("sym-scan-functions-btn");
+
 const state = {
     cursor: 0,
     disasmRows: [],
@@ -2787,9 +2928,14 @@ const state = {
     currentMatch: -1,
     searchActive: false,
     gotoActive: false,
+    symbolsActive: false,
     isLive: false,
     breakpoints: new Set(),
-    breakpointHitAddress: undefined
+    breakpointHitAddress: undefined,
+    // cached symbols data
+    symLabels: [],
+    symStrings: [],
+    symFunctions: [],
 };
 
 let liveRefreshTimer = null;
@@ -2843,6 +2989,21 @@ window.addEventListener("message", ({ data: msg }) => {
             break;
         case "reset":
             handleReset();
+            break;
+        case "symbols":
+            state.symLabels    = msg.labels    ?? [];
+            state.symStrings   = msg.strings   ?? [];
+            state.symFunctions = msg.functions ?? [];
+            renderSymLabels();
+            renderSymStrings();
+            renderSymFunctions();
+            if (typeof window._handleSymbolsDone === 'function') {
+                window._handleSymbolsDone(state.symStrings.length, state.symFunctions.length);
+            }
+            break;
+        case "labelsUpdated":
+            state.symLabels = msg.labels ?? [];
+            renderSymLabels();
             break;
     }
 });
@@ -3310,6 +3471,11 @@ window.addEventListener('keydown', (e) => {
         e.stopPropagation();
         toggleGoto();
     }
+    if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyS') {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleSymbolsPanel();
+    }
 });
 
 function updateCursor() {
@@ -3505,6 +3671,180 @@ function generateZeroPage(startIndex) {
     }
     return rows;
 }
+
+// ── Symbols Panel ─────────────────────────────────────────────────────────────
+
+function toggleSymbolsPanel() {
+    state.symbolsActive = !state.symbolsActive;
+    symbolsPanel.classList.toggle('visible', state.symbolsActive);
+    symbolsToggleBtn.classList.toggle('active', state.symbolsActive);
+    if (state.symbolsActive) {
+        loadSymbols();
+    }
+}
+
+function loadSymbols() {
+    vscode.postMessage({ type: 'getSymbols' });
+}
+
+function symNavigate(addrHex) {
+    // Strip leading 0x if present, then navigate
+    goToAddress(addrHex.replace(/^0x/i, ''));
+}
+
+function renderSymLabels() {
+    if (!symLabelsList) return;
+    const items = state.symLabels;
+    if (!items || items.length === 0) {
+        symLabelsList.innerHTML = '<div class="sym-empty">No labels defined.</div>';
+        return;
+    }
+    symLabelsList.innerHTML = items.map(item => {
+        const escapedComment = item.comment ? escHtml(item.comment) : '';
+        const comment = escapedComment ? \`<span class="sym-item-comment" title="\${escapedComment}">\${escapedComment}</span>\` : '';
+        return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+            <span class="sym-item-addr">\${escHtml(item.address)}</span>
+            <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
+            \${comment}
+            <button class="sym-delete-btn" data-addr="\${escHtml(item.address)}" title="Delete label">×</button>
+        </div>\`;
+    }).join('');
+
+    // Navigate on row click (but not on delete button)
+    symLabelsList.querySelectorAll('.sym-item').forEach(el => {
+        el.addEventListener('click', e => {
+            if (e.target.classList.contains('sym-delete-btn')) return;
+            symNavigate(el.dataset.addr);
+        });
+    });
+    // Delete button handler
+    symLabelsList.querySelectorAll('.sym-delete-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const addrStr = btn.dataset.addr;
+            const addrNum = parseInt(addrStr.replace(/^0x/i, ''), 16);
+            vscode.postMessage({ type: 'deleteLabel', address: addrNum });
+        });
+    });
+}
+
+function renderSymStrings() {
+    if (!symStringsList) return;
+    const items = state.symStrings;
+    if (!items || items.length === 0) {
+        symStringsList.innerHTML = '<div class="sym-empty">No strings found. Click "Scan for strings".</div>';
+        return;
+    }
+    symStringsList.innerHTML = items.map(item => \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+        <span class="sym-item-addr">\${escHtml(item.address)}</span>
+        <span class="sym-item-value" title="\${escHtml(item.value)}">\${escHtml(item.value)}</span>
+    </div>\`).join('');
+
+    symStringsList.querySelectorAll('.sym-item').forEach(el => {
+        el.addEventListener('click', () => symNavigate(el.dataset.addr));
+    });
+}
+
+function renderSymFunctions() {
+    if (!symFunctionsList) return;
+    const items = state.symFunctions;
+    if (!items || items.length === 0) {
+        symFunctionsList.innerHTML = '<div class="sym-empty">No functions found. Click "Scan for functions".</div>';
+        return;
+    }
+    symFunctionsList.innerHTML = items.map(item => \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+        <span class="sym-item-addr">\${escHtml(item.address)}</span>
+        <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
+    </div>\`).join('');
+
+    symFunctionsList.querySelectorAll('.sym-item').forEach(el => {
+        el.addEventListener('click', () => symNavigate(el.dataset.addr));
+    });
+}
+
+function escHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// Symbols toggle button
+symbolsToggleBtn.addEventListener('click', () => toggleSymbolsPanel());
+
+// Close / refresh buttons inside the panel
+closeSymbolsBtn.addEventListener('click', () => {
+    state.symbolsActive = false;
+    symbolsPanel.classList.remove('visible');
+    symbolsToggleBtn.classList.remove('active');
+});
+
+symbolsRefreshBtn.addEventListener('click', () => loadSymbols());
+
+// Tab switching inside the symbols panel
+document.querySelectorAll('.sym-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.sym-tab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.sym-tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.symtab;
+        document.getElementById('sym-' + tab + '-content')?.classList.add('active');
+    });
+});
+
+// Add label button
+symAddBtn.addEventListener('click', () => {
+    const addrRaw = symNewAddr.value.trim();
+    const name    = symNewName.value.trim();
+    const comment = symNewComment.value.trim();
+    if (!addrRaw || !name) { return; }
+    const addrNum = parseInt(addrRaw.replace(/^0x/i, ''), 16);
+    if (isNaN(addrNum)) { return; }
+    vscode.postMessage({ type: 'addLabel', address: addrNum, labelName: name, comment: comment || undefined });
+    symNewAddr.value = '';
+    symNewName.value = '';
+    symNewComment.value = '';
+});
+
+// Allow Enter key in the add-label inputs to submit
+[symNewAddr, symNewName, symNewComment].forEach(input => {
+    input?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { symAddBtn.click(); }
+    });
+});
+
+// Scan buttons
+symScanStringsBtn.addEventListener('click', () => {
+    symStringsStatus.textContent = 'Scanning…';
+    symScanStringsBtn.disabled = true;
+    // Request a full symbols refresh which includes the string scan
+    vscode.postMessage({ type: 'getSymbols' });
+    // The provider will run the scan and reply with type:'symbols'
+    // Re-enable after a generous timeout in case the scan is slow
+    setTimeout(() => {
+        symScanStringsBtn.disabled = false;
+        if (symStringsStatus.textContent === 'Scanning…') symStringsStatus.textContent = '';
+    }, 60000);
+});
+
+symScanFunctionsBtn.addEventListener('click', () => {
+    symFunctionsStatus.textContent = 'Scanning…';
+    symScanFunctionsBtn.disabled = true;
+    vscode.postMessage({ type: 'getSymbols' });
+    setTimeout(() => {
+        symScanFunctionsBtn.disabled = false;
+        if (symFunctionsStatus.textContent === 'Scanning…') symFunctionsStatus.textContent = '';
+    }, 60000);
+});
+
+// Update scan status text when symbols message arrives
+window._handleSymbolsDone = function(strCount, fnCount) {
+    if (symStringsStatus) symStringsStatus.textContent = strCount > 0 ? \`\${strCount} found\` : 'None found';
+    if (symFunctionsStatus) symFunctionsStatus.textContent = fnCount > 0 ? \`\${fnCount} found\` : 'None found';
+    if (symScanStringsBtn)  symScanStringsBtn.disabled = false;
+    if (symScanFunctionsBtn) symScanFunctionsBtn.disabled = false;
+};
 
 // ── Debug Panel ──────────────────────────────────────────────────────────────
 
@@ -4299,6 +4639,318 @@ body {
     color: #858585;
     font-size: 10px;
     margin-left: 6px;
+}
+
+/* ── Header toolbar (always-visible strip for panel toggles) ─────────── */
+
+#header-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    padding: 2px 8px;
+}
+
+.header-tool-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.header-tool-btn:hover {
+    background: #505050;
+    color: #fff;
+}
+
+.header-tool-btn.active {
+    background: #007acc;
+    border-color: #007acc;
+    color: #fff;
+}
+
+/* ── Symbols Panel ────────────────────────────────────────────────────── */
+
+#symbols-panel {
+    width: 340px;
+    min-width: 340px;
+    display: none;
+    flex-direction: column;
+    background: #1e1e1e;
+    border-left: 1px solid #3e3e42;
+    overflow: hidden;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+#symbols-panel.visible {
+    display: flex;
+}
+
+#symbols-panel-header {
+    display: flex;
+    align-items: center;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    padding: 4px 8px;
+    flex-shrink: 0;
+    gap: 6px;
+}
+
+.symbols-title {
+    color: #d4d4d4;
+    font-size: 11px;
+    font-weight: bold;
+    flex: 1;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.sym-header-btn {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    line-height: 1;
+    outline: none;
+}
+
+.sym-header-btn:hover {
+    color: #fff;
+}
+
+#sym-tabs {
+    display: flex;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+}
+
+.sym-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #858585;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    flex: 1;
+}
+
+.sym-tab:hover {
+    color: #d4d4d4;
+}
+
+.sym-tab.active {
+    color: #d4d4d4;
+    border-bottom-color: #007acc;
+}
+
+.sym-tab-content {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sym-tab-content.active {
+    display: flex;
+}
+
+/* ── Labels tab ── */
+
+#sym-add-row {
+    display: flex;
+    gap: 4px;
+    padding: 6px 6px 4px;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+}
+
+.sym-add-input {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 3px 6px;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    min-width: 0;
+}
+
+.sym-add-input:focus {
+    border-color: #007acc;
+}
+
+#sym-new-addr {
+    width: 9ch;
+    flex-shrink: 0;
+}
+
+#sym-new-name {
+    flex: 1;
+}
+
+#sym-new-comment {
+    flex: 1;
+}
+
+.sym-add-btn {
+    background: #007acc;
+    border: 1px solid #007acc;
+    color: #fff;
+    padding: 3px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 13px;
+    outline: none;
+    flex-shrink: 0;
+}
+
+.sym-add-btn:hover {
+    background: #1a8fd1;
+}
+
+/* ── Scan row (Strings / Functions tabs) ── */
+
+.sym-scan-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+    background: #252526;
+}
+
+.sym-scan-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 3px 10px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+.sym-scan-btn:hover {
+    background: #505050;
+}
+
+.sym-scan-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sym-status {
+    color: #858585;
+    font-size: 10px;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Shared list styles ── */
+
+.sym-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2px 0;
+}
+
+.sym-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sym-list::-webkit-scrollbar-thumb {
+    background: #424242;
+}
+
+.sym-item {
+    display: flex;
+    align-items: center;
+    padding: 2px 8px;
+    cursor: pointer;
+    gap: 6px;
+    line-height: 1.7;
+}
+
+.sym-item:hover {
+    background: #2a2d2e;
+}
+
+.sym-item-addr {
+    color: #c586c0;
+    width: 10ch;
+    flex-shrink: 0;
+    font-size: 11px;
+}
+
+.sym-item-name {
+    color: #4ec9b0;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+}
+
+.sym-item-value {
+    color: #ce9178;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+}
+
+.sym-item-comment {
+    color: #6a9955;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100px;
+}
+
+.sym-delete-btn {
+    background: none;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    padding: 0 4px;
+    font-size: 14px;
+    line-height: 1;
+    outline: none;
+    flex-shrink: 0;
+    visibility: hidden;
+}
+
+.sym-item:hover .sym-delete-btn {
+    visibility: visible;
+}
+
+.sym-delete-btn:hover {
+    color: #e05555;
+}
+
+.sym-empty {
+    color: #555;
+    font-size: 11px;
+    padding: 12px 8px;
+    text-align: center;
 }
 
 </style>`;
@@ -5544,14 +6196,13 @@ class SocketClient {
     /**
      * Send a command and wait for response
      */
-    sendCommand(command) {
+    sendCommand(command, timeoutMs = 10000) {
         return new Promise((resolve, reject) => {
             if (!this.connected || !this.client) {
                 reject(new Error('Not connected to server'));
                 return;
             }
             let responseReceived = false;
-            const timeoutMs = 10000; // 10 second timeout
             // Set up one-time response handler
             const responseHandler = (message) => {
                 if (responseReceived)
@@ -5802,6 +6453,65 @@ class SocketClient {
             vu0Clip: response.VU0_Clip ?? 0,
             gsPriv: response.GS_Priv ?? new Array(19).fill(0),
         };
+    }
+    /**
+     * Fetch all labels from the server's symbol database.
+     */
+    async getLabels() {
+        const response = await this.sendCommand({ Command: 'GETLABELS' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetLabels failed');
+        }
+        return response.Labels ?? [];
+    }
+    /**
+     * Add or update a label in the server's symbol database.
+     * The server persists the change to ps2-labels.json immediately.
+     */
+    async addLabel(address, label, comment) {
+        const cmd = { Command: 'ADDLABEL', Address: address, Label: label };
+        if (comment) {
+            cmd.Comment = comment;
+        }
+        const response = await this.sendCommand(cmd);
+        if (!response.Success) {
+            throw new Error(response.Error || 'AddLabel failed');
+        }
+    }
+    /**
+     * Delete a label from the server's symbol database by address.
+     */
+    async deleteLabel(address) {
+        const response = await this.sendCommand({ Command: 'DELETELABEL', Address: address });
+        if (!response.Success) {
+            throw new Error(response.Error || 'DeleteLabel failed');
+        }
+    }
+    /**
+     * Scan binary data for null-terminated ASCII strings (min 4 chars).
+     * @param binaryData  Raw binary buffer to scan.
+     * @param startAddress Virtual address of the first byte in the buffer.
+     */
+    async getStrings(binaryData, startAddress) {
+        const response = await this.sendCommand({ Command: 'GETSTRINGS', Address: startAddress, Data: binaryData.toString('base64') }, 60000 // large binary may take a few seconds
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetStrings failed');
+        }
+        return response.Strings ?? [];
+    }
+    /**
+     * Scan binary data for MIPS function entry points.
+     * Detects ADDIU $sp,$sp,-N prologues and JAL targets.
+     * @param binaryData  Raw binary buffer to scan.
+     * @param startAddress Virtual address of the first byte in the buffer.
+     */
+    async getFunctions(binaryData, startAddress) {
+        const response = await this.sendCommand({ Command: 'GETFUNCTIONS', Address: startAddress, Data: binaryData.toString('base64') }, 60000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetFunctions failed');
+        }
+        return response.Functions ?? [];
     }
     /**
      * Ping the server

@@ -29,10 +29,12 @@ ${getDisasmEditorStyles()}
 ${getGotoPanel()}
 ${getSearchPanel()}
 ${getLiveToolbar()}
+${getHeaderToolbar()}
 ${getHexContainer()}
 </div>
 <div id="content-wrapper">
 ${getGrid()}
+${getSymbolsPanel()}
 ${getDebugPanel()}
 </div>
 
@@ -102,8 +104,52 @@ function getHexContainer(): string {
     return `<div id="hex-container"></div>`;
 }
 
+function getHeaderToolbar(): string {
+    return `<div id="header-toolbar">
+    <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">⊞ Symbols</button>
+</div>`;
+}
+
 function getGrid(): string {
     return `<div id="grid" tabindex="0"></div>`;
+}
+
+function getSymbolsPanel(): string {
+    return `<div id="symbols-panel">
+    <div id="symbols-panel-header">
+        <span class="symbols-title">Symbols</span>
+        <button class="sym-header-btn" id="symbols-refresh-btn" title="Refresh symbols">↻</button>
+        <button class="sym-header-btn" id="close-symbols-btn" title="Close">×</button>
+    </div>
+    <div id="sym-tabs">
+        <button class="sym-tab active" data-symtab="labels">Labels</button>
+        <button class="sym-tab" data-symtab="strings">Strings</button>
+        <button class="sym-tab" data-symtab="functions">Functions</button>
+    </div>
+    <div id="sym-labels-content" class="sym-tab-content active">
+        <div id="sym-add-row">
+            <input type="text" id="sym-new-addr"    class="sym-add-input" placeholder="0x00000000" maxlength="10" />
+            <input type="text" id="sym-new-name"    class="sym-add-input" placeholder="Label name" />
+            <input type="text" id="sym-new-comment" class="sym-add-input" placeholder="Comment (opt.)" />
+            <button id="sym-add-btn" class="sym-add-btn" title="Add label">+</button>
+        </div>
+        <div id="sym-labels-list" class="sym-list"></div>
+    </div>
+    <div id="sym-strings-content" class="sym-tab-content">
+        <div class="sym-scan-row">
+            <button id="sym-scan-strings-btn" class="sym-scan-btn">Scan for strings</button>
+            <span id="sym-strings-status" class="sym-status"></span>
+        </div>
+        <div id="sym-strings-list" class="sym-list"></div>
+    </div>
+    <div id="sym-functions-content" class="sym-tab-content">
+        <div class="sym-scan-row">
+            <button id="sym-scan-functions-btn" class="sym-scan-btn">Scan for functions</button>
+            <span id="sym-functions-status" class="sym-status"></span>
+        </div>
+        <div id="sym-functions-list" class="sym-list"></div>
+    </div>
+</div>`;
 }
 
 function getDebugPanel(): string {
@@ -165,6 +211,23 @@ const debugPanel = document.getElementById("debug-panel");
 const regContent = document.getElementById("registers-content");
 const stackContent = document.getElementById("stack-content");
 
+// ── Symbols panel DOM refs ────────────────────────────────────────────────
+const symbolsPanel       = document.getElementById("symbols-panel");
+const symbolsToggleBtn   = document.getElementById("symbols-toggle-btn");
+const symbolsRefreshBtn  = document.getElementById("symbols-refresh-btn");
+const closeSymbolsBtn    = document.getElementById("close-symbols-btn");
+const symNewAddr         = document.getElementById("sym-new-addr");
+const symNewName         = document.getElementById("sym-new-name");
+const symNewComment      = document.getElementById("sym-new-comment");
+const symAddBtn          = document.getElementById("sym-add-btn");
+const symLabelsList      = document.getElementById("sym-labels-list");
+const symStringsList     = document.getElementById("sym-strings-list");
+const symFunctionsList   = document.getElementById("sym-functions-list");
+const symStringsStatus   = document.getElementById("sym-strings-status");
+const symFunctionsStatus = document.getElementById("sym-functions-status");
+const symScanStringsBtn  = document.getElementById("sym-scan-strings-btn");
+const symScanFunctionsBtn= document.getElementById("sym-scan-functions-btn");
+
 const state = {
     cursor: 0,
     disasmRows: [],
@@ -180,9 +243,14 @@ const state = {
     currentMatch: -1,
     searchActive: false,
     gotoActive: false,
+    symbolsActive: false,
     isLive: false,
     breakpoints: new Set(),
-    breakpointHitAddress: undefined
+    breakpointHitAddress: undefined,
+    // cached symbols data
+    symLabels: [],
+    symStrings: [],
+    symFunctions: [],
 };
 
 let liveRefreshTimer = null;
@@ -236,6 +304,21 @@ window.addEventListener("message", ({ data: msg }) => {
             break;
         case "reset":
             handleReset();
+            break;
+        case "symbols":
+            state.symLabels    = msg.labels    ?? [];
+            state.symStrings   = msg.strings   ?? [];
+            state.symFunctions = msg.functions ?? [];
+            renderSymLabels();
+            renderSymStrings();
+            renderSymFunctions();
+            if (typeof window._handleSymbolsDone === 'function') {
+                window._handleSymbolsDone(state.symStrings.length, state.symFunctions.length);
+            }
+            break;
+        case "labelsUpdated":
+            state.symLabels = msg.labels ?? [];
+            renderSymLabels();
             break;
     }
 });
@@ -703,6 +786,11 @@ window.addEventListener('keydown', (e) => {
         e.stopPropagation();
         toggleGoto();
     }
+    if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyS') {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleSymbolsPanel();
+    }
 });
 
 function updateCursor() {
@@ -898,6 +986,180 @@ function generateZeroPage(startIndex) {
     }
     return rows;
 }
+
+// ── Symbols Panel ─────────────────────────────────────────────────────────────
+
+function toggleSymbolsPanel() {
+    state.symbolsActive = !state.symbolsActive;
+    symbolsPanel.classList.toggle('visible', state.symbolsActive);
+    symbolsToggleBtn.classList.toggle('active', state.symbolsActive);
+    if (state.symbolsActive) {
+        loadSymbols();
+    }
+}
+
+function loadSymbols() {
+    vscode.postMessage({ type: 'getSymbols' });
+}
+
+function symNavigate(addrHex) {
+    // Strip leading 0x if present, then navigate
+    goToAddress(addrHex.replace(/^0x/i, ''));
+}
+
+function renderSymLabels() {
+    if (!symLabelsList) return;
+    const items = state.symLabels;
+    if (!items || items.length === 0) {
+        symLabelsList.innerHTML = '<div class="sym-empty">No labels defined.</div>';
+        return;
+    }
+    symLabelsList.innerHTML = items.map(item => {
+        const escapedComment = item.comment ? escHtml(item.comment) : '';
+        const comment = escapedComment ? \`<span class="sym-item-comment" title="\${escapedComment}">\${escapedComment}</span>\` : '';
+        return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+            <span class="sym-item-addr">\${escHtml(item.address)}</span>
+            <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
+            \${comment}
+            <button class="sym-delete-btn" data-addr="\${escHtml(item.address)}" title="Delete label">×</button>
+        </div>\`;
+    }).join('');
+
+    // Navigate on row click (but not on delete button)
+    symLabelsList.querySelectorAll('.sym-item').forEach(el => {
+        el.addEventListener('click', e => {
+            if (e.target.classList.contains('sym-delete-btn')) return;
+            symNavigate(el.dataset.addr);
+        });
+    });
+    // Delete button handler
+    symLabelsList.querySelectorAll('.sym-delete-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const addrStr = btn.dataset.addr;
+            const addrNum = parseInt(addrStr.replace(/^0x/i, ''), 16);
+            vscode.postMessage({ type: 'deleteLabel', address: addrNum });
+        });
+    });
+}
+
+function renderSymStrings() {
+    if (!symStringsList) return;
+    const items = state.symStrings;
+    if (!items || items.length === 0) {
+        symStringsList.innerHTML = '<div class="sym-empty">No strings found. Click "Scan for strings".</div>';
+        return;
+    }
+    symStringsList.innerHTML = items.map(item => \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+        <span class="sym-item-addr">\${escHtml(item.address)}</span>
+        <span class="sym-item-value" title="\${escHtml(item.value)}">\${escHtml(item.value)}</span>
+    </div>\`).join('');
+
+    symStringsList.querySelectorAll('.sym-item').forEach(el => {
+        el.addEventListener('click', () => symNavigate(el.dataset.addr));
+    });
+}
+
+function renderSymFunctions() {
+    if (!symFunctionsList) return;
+    const items = state.symFunctions;
+    if (!items || items.length === 0) {
+        symFunctionsList.innerHTML = '<div class="sym-empty">No functions found. Click "Scan for functions".</div>';
+        return;
+    }
+    symFunctionsList.innerHTML = items.map(item => \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
+        <span class="sym-item-addr">\${escHtml(item.address)}</span>
+        <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
+    </div>\`).join('');
+
+    symFunctionsList.querySelectorAll('.sym-item').forEach(el => {
+        el.addEventListener('click', () => symNavigate(el.dataset.addr));
+    });
+}
+
+function escHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// Symbols toggle button
+symbolsToggleBtn.addEventListener('click', () => toggleSymbolsPanel());
+
+// Close / refresh buttons inside the panel
+closeSymbolsBtn.addEventListener('click', () => {
+    state.symbolsActive = false;
+    symbolsPanel.classList.remove('visible');
+    symbolsToggleBtn.classList.remove('active');
+});
+
+symbolsRefreshBtn.addEventListener('click', () => loadSymbols());
+
+// Tab switching inside the symbols panel
+document.querySelectorAll('.sym-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.sym-tab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.sym-tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.symtab;
+        document.getElementById('sym-' + tab + '-content')?.classList.add('active');
+    });
+});
+
+// Add label button
+symAddBtn.addEventListener('click', () => {
+    const addrRaw = symNewAddr.value.trim();
+    const name    = symNewName.value.trim();
+    const comment = symNewComment.value.trim();
+    if (!addrRaw || !name) { return; }
+    const addrNum = parseInt(addrRaw.replace(/^0x/i, ''), 16);
+    if (isNaN(addrNum)) { return; }
+    vscode.postMessage({ type: 'addLabel', address: addrNum, labelName: name, comment: comment || undefined });
+    symNewAddr.value = '';
+    symNewName.value = '';
+    symNewComment.value = '';
+});
+
+// Allow Enter key in the add-label inputs to submit
+[symNewAddr, symNewName, symNewComment].forEach(input => {
+    input?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { symAddBtn.click(); }
+    });
+});
+
+// Scan buttons
+symScanStringsBtn.addEventListener('click', () => {
+    symStringsStatus.textContent = 'Scanning…';
+    symScanStringsBtn.disabled = true;
+    // Request a full symbols refresh which includes the string scan
+    vscode.postMessage({ type: 'getSymbols' });
+    // The provider will run the scan and reply with type:'symbols'
+    // Re-enable after a generous timeout in case the scan is slow
+    setTimeout(() => {
+        symScanStringsBtn.disabled = false;
+        if (symStringsStatus.textContent === 'Scanning…') symStringsStatus.textContent = '';
+    }, 60000);
+});
+
+symScanFunctionsBtn.addEventListener('click', () => {
+    symFunctionsStatus.textContent = 'Scanning…';
+    symScanFunctionsBtn.disabled = true;
+    vscode.postMessage({ type: 'getSymbols' });
+    setTimeout(() => {
+        symScanFunctionsBtn.disabled = false;
+        if (symFunctionsStatus.textContent === 'Scanning…') symFunctionsStatus.textContent = '';
+    }, 60000);
+});
+
+// Update scan status text when symbols message arrives
+window._handleSymbolsDone = function(strCount, fnCount) {
+    if (symStringsStatus) symStringsStatus.textContent = strCount > 0 ? \`\${strCount} found\` : 'None found';
+    if (symFunctionsStatus) symFunctionsStatus.textContent = fnCount > 0 ? \`\${fnCount} found\` : 'None found';
+    if (symScanStringsBtn)  symScanStringsBtn.disabled = false;
+    if (symScanFunctionsBtn) symScanFunctionsBtn.disabled = false;
+};
 
 // ── Debug Panel ──────────────────────────────────────────────────────────────
 
