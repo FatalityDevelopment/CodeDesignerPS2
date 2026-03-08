@@ -194,6 +194,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
         // always sees bit 6 = 1, so the loop at 0xAA70 exits immediately.
         private byte _sReady = 0x40;
 
+        // Drive status: true while an N-command is executing (set before DataReady fires,
+        // cleared after).  Mirrors PCSX2 cdvd.Status: READ (0x06) during command,
+        // PAUSE (0x0E) when disc present and idle.
+        private bool _nCmdActive;
+
         // Sector data buffer: filled by ExecuteNCommand, consumed by ReadNextDmaWord
         private byte[] _sectorData       = Array.Empty<byte>();
         private int    _sectorDataOffset;
@@ -333,7 +338,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             {
                 REG_NREADY     => _nReady,                    // READY | MECHA_INIT | DEV9CON (0x4C)
                 REG_ISTAT      => _nIntrStat,
-                REG_STATUS     => HasDisc ? (byte)0x06 : (byte)0x00, // 0x06 = paused/disc present
+                REG_STATUS     => HasDisc
+                                      ? (_nCmdActive ? (byte)0x06 : (byte)0x0E) // 0x0E=PAUSE (idle), 0x06=READ (busy)
+                                      : (byte)0x00, // no disc
                 REG_TRAY       => HasDisc ? (byte)0x00 : (byte)0x01, // 0=closed, 1=open
                 REG_CRT        => DiscType,
                 REG_NDATAOUT   => _sCmdOutputPos < _sCmdOutputLen   // 0x0F = N-cmd data out (placeholder)
@@ -436,43 +443,55 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
 
         private void ExecuteNCommand(byte cmd)
         {
-            switch (cmd)
+            // Mark drive as busy (STATUS = 0x06 READ) for the duration of this call.
+            // Matches PCSX2: cdvd.Status = CDVD_STATUS_READ before command, then
+            // reset to CDVD_STATUS_PAUSE after.
+            _nCmdActive = true;
+            try
             {
-                case NCMD_READ_CD:
-                    if (_nParamPos >= 5)
-                    {
-                        uint lba        = ReadParamU32(0);
-                        uint count      = _nParamBuf[4];
-                        if (count == 0) count = 1;
-                        byte sectorType = _nParamPos >= 6 ? _nParamBuf[5] : (byte)0;
-                        LoadSectorBuffer(lba, count, sectorType);
-                    }
-                    break;
+                switch (cmd)
+                {
+                    case NCMD_READ_CD:
+                        if (_nParamPos >= 5)
+                        {
+                            uint lba        = ReadParamU32(0);
+                            uint count      = _nParamBuf[4];
+                            if (count == 0) count = 1;
+                            byte sectorType = _nParamPos >= 6 ? _nParamBuf[5] : (byte)0;
+                            LoadSectorBuffer(lba, count, sectorType);
+                        }
+                        break;
 
-                case NCMD_READ_CDDA:
-                    if (_nParamPos >= 5)
-                    {
-                        uint lba   = ReadParamU32(0);
-                        uint count = _nParamBuf[4];
-                        if (count == 0) count = 1;
-                        LoadCddaBuffer(lba, count);
-                    }
-                    break;
+                    case NCMD_READ_CDDA:
+                        if (_nParamPos >= 5)
+                        {
+                            uint lba   = ReadParamU32(0);
+                            uint count = _nParamBuf[4];
+                            if (count == 0) count = 1;
+                            LoadCddaBuffer(lba, count);
+                        }
+                        break;
 
-                case NCMD_READ_DVD:
-                    // DVD sectors are always 2048-byte user data; no sector type parameter.
-                    if (_nParamPos >= 5)
-                    {
-                        uint lba   = ReadParamU32(0);
-                        uint count = _nParamBuf[4];
-                        if (count == 0) count = 1;
-                        LoadSectorBuffer(lba, count, sectorType: 0);
-                    }
-                    break;
+                    case NCMD_READ_DVD:
+                        // DVD sectors are always 2048-byte user data; no sector type parameter.
+                        if (_nParamPos >= 5)
+                        {
+                            uint lba   = ReadParamU32(0);
+                            uint count = _nParamBuf[4];
+                            if (count == 0) count = 1;
+                            LoadSectorBuffer(lba, count, sectorType: 0);
+                        }
+                        break;
 
-                case NCMD_GET_TOC:
-                    LoadTocBuffer();
-                    break;
+                    case NCMD_GET_TOC:
+                        LoadTocBuffer();
+                        break;
+                }
+            }
+            finally
+            {
+                // Command complete: return to PAUSE state (disc present, idle).
+                _nCmdActive = false;
             }
 
             _nIntrStat |= INTR_DATA_READY;

@@ -427,6 +427,36 @@ namespace CodeDesigner.Mips64LE
                     Console.WriteLine($"  [SIFMAN-module] PC=0x{pc:X8}  a0=0x{a0T:X8} ra=0x{raT:X8}  I_MASK=0x{iMaskT:X5} I_STAT=0x{iStatT:X5}");
                 }
 
+                // Trace unique IOP PCs in 0x8000-0xA7FF (IOP BIOS upper kernel area,
+                // where SIFMAN's real function implementations live, e.g. 0x90BC).
+                if (pc >= 0x00008000u && pc <= 0x0000A7FFu && !iopSeenPcs.Contains(pc ^ 0xAAAA0000u))
+                {
+                    iopSeenPcs.Add(pc ^ 0xAAAA0000u);
+                    uint iStatT2 = scheduler.IOP.Bus.IStat;
+                    uint iMaskT2 = scheduler.IOP.Bus.IMask;
+                    uint a0T2 = state.ReadReg(4);
+                    uint raT2 = state.ReadReg(31);
+                    uint v0T2 = state.ReadReg(2);
+                    Console.WriteLine($"  [BIOS-upper] PC=0x{pc:X8}  a0=0x{a0T2:X8} v0=0x{v0T2:X8} ra=0x{raT2:X8}  I_MASK=0x{iMaskT2:X5}");
+                    // Dump 0x90B0-0x9200 when first entering 0x90BC (jal $00010DC4 target)
+                    if (pc == 0x000090BCu && !iopSeenPcs.Contains(0x90BC0000u))
+                    {
+                        iopSeenPcs.Add(0x90BC0000u);
+                        Console.WriteLine("  BIOS-upper disc-write func [0x90B0-0x9280]:");
+                        for (uint da = 0x000090B0u; da < 0x00009284u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw3 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis3 = MipsDisassembler.Disassemble(iw3, da);
+                                string mk = (da == pc) ? " <-- PC" : "";
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw3:X8}  {dis3}{mk}");
+                            }
+                            catch { /* skip */ }
+                        }
+                    }
+                }
+
                 // Trace all calls to EnableInterrupt (0x00004188) to see what bits are enabled and from where
                 if (pc == 0x00004188u)
                 {
@@ -435,9 +465,9 @@ namespace CodeDesigner.Mips64LE
                     Console.WriteLine($"  [EnableInterrupt] a0={a0en} (bit=0x{1u << (int)(a0en & 31):X}) ra=0x{raEn:X8}  I_MASK_before=0x{scheduler.IOP.Bus.IMask:X8}");
                 }
 
-                // One-shot: trace unique IOP PCs in the CDVDman range 0xA800-0xB500
+                // One-shot: trace unique IOP PCs in the CDVDman range 0xA800-0xCFFE
                 // to show the complete CDVDman execution path after S-commands finish.
-                if (pc >= 0x0000A800u && pc <= 0x0000B500u && !iopSeenPcs.Contains(pc | 0x80000000u))
+                if (pc >= 0x0000A800u && pc <= 0x0000CFFEu && !iopSeenPcs.Contains(pc | 0x80000000u))
                 {
                     iopSeenPcs.Add(pc | 0x80000000u);
                     uint iStat = scheduler.IOP.Bus.IStat;
@@ -463,6 +493,81 @@ namespace CodeDesigner.Mips64LE
                         // Also dump 0xB000-0xB280 (CDVDman init main function)
                         Console.WriteLine("  CDVDman init main [0xAFC0-0xB280]:");
                         for (uint da = 0x0000AFC0u; da < 0x0000B284u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                    }
+                    // Dump disc-read handler when first reaching 0xAE10 area
+                    if (pc == 0x0000AE10u && !iopSeenPcs.Contains(0xAE108000u))
+                    {
+                        iopSeenPcs.Add(0xAE108000u);
+                        Console.WriteLine("  CDVDman disc-read handler dump [0xAE00-0xAF40]:");
+                        for (uint da = 0x0000AE00u; da < 0x0000AF44u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                string mark = (da == pc) ? " <-- PC" : "";
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}{mark}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                        // Dump the missing range AD64-AE00 and AF44-B500
+                        Console.WriteLine("  CDVDman gap [0xAD64-0xAE00]:");
+                        for (uint da = 0x0000AD64u; da < 0x0000AE04u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                        Console.WriteLine("  CDVDman gap [0xAF44-0xB500]:");
+                        for (uint da = 0x0000AF44u; da < 0x0000B504u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                        Console.WriteLine("  CDVDman code [0xB500-0xC200]:");
+                        for (uint da = 0x0000B500u; da < 0x0000C204u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                        // Dump SIFMAN disc-read functions at 0x10DC4 and key functions
+                        Console.WriteLine("  SIFMAN disc funcs [0x10D44-0x10F00]:");
+                        for (uint da = 0x00010D44u; da < 0x00010F04u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                        // Dump CDVDman 0x108F8 (the queue/signal function)
+                        Console.WriteLine("  CDVDman queue/signal funcs [0x108C0-0x10930]:");
+                        for (uint da = 0x000108C0u; da < 0x00010934u; da += 4)
                         {
                             try
                             {
