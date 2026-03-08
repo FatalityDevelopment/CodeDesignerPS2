@@ -37,6 +37,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private static readonly PAGE_SIZE = 1000;
   private static readonly BUFFER_PAGES = 2;
   private socketClient: SocketClient | null;
+  /** All currently-open live memory panels. Used to broadcast pause/resume state. */
+  private _livePanels: vscode.WebviewPanel[] = [];
 
   constructor(socketClient: SocketClient | null) {
     this.socketClient = socketClient;
@@ -235,6 +237,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             { enableScripts: true, retainContextWhenHidden: true }
         );
 
+        // Track this panel so pause/resume can be broadcast to all live windows.
+        this._livePanels.push(panel);
+        panel.onDidDispose(() => {
+            this._livePanels = this._livePanels.filter(p => p !== panel);
+        });
+
         panel.webview.html = getDisasmEditorHtml({} as DisasmEditorData, getNonce());
 
         const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -261,6 +269,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'pause') {
                 try {
                     await this.socketClient!.pause();
+                    // Immediately reflect the paused state in every live window so all
+                    // panels show "PAUSED" without waiting for their next status poll.
+                    this._broadcastStatus(true);
                 } catch (err: any) {
                     const msg = err?.message ?? String(err);
                     console.error(`[LIVE] Failed to pause emulator: ${msg}`);
@@ -269,6 +280,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'resume') {
                 try {
                     await this.socketClient!.resume();
+                    // Immediately reflect the resumed state in every live window.
+                    this._broadcastStatus(false);
                 } catch (err: any) {
                     const msg = err?.message ?? String(err);
                     console.error(`[LIVE] Failed to resume emulator: ${msg}`);
@@ -304,6 +317,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 panel.webview.postMessage({ type: 'searchResults', matches: [] });
             }
         });
+    }
+
+    /**
+     * Send a `status` message to all registered live panels.
+     * Called immediately after a user-initiated pause or resume so every window
+     * updates its live-bar indicator without waiting for the next status-poll cycle.
+     */
+    private _broadcastStatus(paused: boolean): void {
+        const msg = { type: 'status', paused };
+        for (const p of this._livePanels) {
+            p.webview.postMessage(msg);
+        }
     }
 
     private async sendLiveDisasmPage(

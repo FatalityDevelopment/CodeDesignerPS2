@@ -232,6 +232,8 @@ class DisasmEditorProvider {
     static PAGE_SIZE = 1000;
     static BUFFER_PAGES = 2;
     socketClient;
+    /** All currently-open live memory panels. Used to broadcast pause/resume state. */
+    _livePanels = [];
     constructor(socketClient) {
         this.socketClient = socketClient;
     }
@@ -383,6 +385,11 @@ class DisasmEditorProvider {
             return;
         }
         const panel = vscode.window.createWebviewPanel('disasm.liveMemory', label, vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });
+        // Track this panel so pause/resume can be broadcast to all live windows.
+        this._livePanels.push(panel);
+        panel.onDidDispose(() => {
+            this._livePanels = this._livePanels.filter(p => p !== panel);
+        });
         panel.webview.html = (0, disasmEditorTemplate_1.getDisasmEditorHtml)({}, (0, helpers_1.getNonce)());
         const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
         panel.webview.postMessage({
@@ -405,6 +412,9 @@ class DisasmEditorProvider {
             else if (message.type === 'pause') {
                 try {
                     await this.socketClient.pause();
+                    // Immediately reflect the paused state in every live window so all
+                    // panels show "PAUSED" without waiting for their next status poll.
+                    this._broadcastStatus(true);
                 }
                 catch (err) {
                     const msg = err?.message ?? String(err);
@@ -415,6 +425,8 @@ class DisasmEditorProvider {
             else if (message.type === 'resume') {
                 try {
                     await this.socketClient.resume();
+                    // Immediately reflect the resumed state in every live window.
+                    this._broadcastStatus(false);
                 }
                 catch (err) {
                     const msg = err?.message ?? String(err);
@@ -460,6 +472,17 @@ class DisasmEditorProvider {
                 panel.webview.postMessage({ type: 'searchResults', matches: [] });
             }
         });
+    }
+    /**
+     * Send a `status` message to all registered live panels.
+     * Called immediately after a user-initiated pause or resume so every window
+     * updates its live-bar indicator without waiting for the next status-poll cycle.
+     */
+    _broadcastStatus(paused) {
+        const msg = { type: 'status', paused };
+        for (const p of this._livePanels) {
+            p.webview.postMessage(msg);
+        }
     }
     async sendLiveDisasmPage(panel, region, baseAddress, totalBytes, startIndex) {
         if (!this.socketClient || !this.socketClient.isConnected()) {
@@ -3783,8 +3806,14 @@ const disasmPanelTemplate_1 = __webpack_require__(9);
 const extension_1 = __webpack_require__(0);
 /** Memory regions exposed as separate editor windows when the emulator is running. */
 const LIVE_REGIONS = [
-    { region: 'ee', address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE Main RAM' },
-    { region: 'iop', address: 0x00000000, size: 4 * 1024 * 1024, label: 'IOP RAM' },
+    // EE Main RAM: show via the uncached direct-mapped window (0x20000000–0x21FFFFFF).
+    // The PS2 kernel TLB maps physical RAM here without caching, so user-mode code
+    // typically accesses / patches memory through this range.
+    { region: 'ee', address: 0x20000000, size: 32 * 1024 * 1024, label: 'EE Main RAM' },
+    // IOP RAM: show via the EE VTLB mirror at 0x1C000000–0x1C1FFFFF.
+    // PCSX2 vtlb.cpp maps psxM (IOP RAM) to EE virtual 0x1C000000; the server
+    // translates this virtual address back to a physical IOP RAM offset.
+    { region: 'iop', address: 0x1C000000, size: 4 * 1024 * 1024, label: 'IOP RAM' },
     { region: 'ee', address: 0x1FC00000, size: 4 * 1024 * 1024, label: 'BIOS ROM' },
     { region: 'ee', address: 0x70000000, size: 16 * 1024, label: 'Scratchpad' },
 ];
