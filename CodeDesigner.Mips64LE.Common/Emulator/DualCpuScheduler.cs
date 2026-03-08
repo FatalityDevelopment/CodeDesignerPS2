@@ -456,6 +456,30 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 EE.Bus.Sif.WriteIopRegister(Hardware.SIF.REG_SMFLAG, 0x40000000u);
             }
 
+            // ── SMFLAG lower-bits clear ───────────────────────────────────────
+            // The EE SBUS handler at 0x8000FAC8 polls SMFLAG until it stabilises,
+            // then checks if (SMFLAG & 0x3FFFFFFF) != 0. While those bits are set
+            // (e.g. bits 16-18 written by SIFMAN during init) the EE does NOT clear
+            // INTC_STAT bit 1, so 0x8000FDE8 returns with the SBUS bit still pending.
+            // The outer module-install loop calls 0x8000FDE8 on every iteration,
+            // meaning the EE spins until the lower SMFLAG bits are cleared.
+            // After SIF init is complete (bit 30 set) and the SBUS keep-alive has
+            // stopped (IOP no longer writing SMFLAG), clear the lower status bits
+            // so the EE acknowledges the SBUS interrupt and exits the spin.
+            if (_sifmanSbusPatched
+                && (EE.Bus.Sif.SmFlag & 0x40000000u) != 0u
+                && (EE.Bus.Sif.SmFlag & 0x3FFFFFFFu) != 0u
+                && TotalIopSteps - _sifmanPatchedAtIopStep >= 500_000UL)
+            {
+                uint smOld = EE.Bus.Sif.SmFlag;
+                // Clear the lower-status bits: the EE acks these by writing 1s to
+                // EE-side SMFLAG register (W1C from EE), which clears them.
+                // We directly clear them in the SIF state to avoid re-triggering
+                // IopSignaledEe and creating a new SBUS interrupt.
+                EE.Bus.Sif.ClearSmFlagLowerBits();
+                Console.WriteLine($"[SMFLAG CLEAR] Cleared SMFLAG lower bits 0x{smOld & 0x3FFFFFFFu:X8} at IOP step {TotalIopSteps:N0}");
+            }
+
             // ── CDVD disc-detection interrupt injection ───────────────────────
             // PCSX2 fires IOP INTC bit 2 (CDVD interrupt) a short time after the
             // drive detects a disc — implemented as cdvdNewDiskCB() → iopIntcIrq(2).
@@ -500,8 +524,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             // The loop at 0x80012540 continues while [0x80024124] != 0, waiting
             // for the IOP SIF BootReply which we cannot produce.  Clearing it
             // mimics the effect of the IOP's reply and allows boot to continue.
-            if (!_sifLoopGuardCleared
-                && (EE.Bus.Sif.SmFlag & 0x40000000u) != 0u)
+            // Runs on every slice (not one-shot) because the BIOS may re-write the
+            // field with a legitimate module count after the first clear.
+            if ((EE.Bus.Sif.SmFlag & 0x40000000u) != 0u)
             {
                 const uint PhysGuard1 = 0x24124u;  // [0x80024124] loop-continue
                 const uint PhysGuard2 = 0x24100u;  // [0x80024100] loop-exit guard
@@ -512,15 +537,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                                   EE.Bus.Ram[PhysGuard1 + 3] != 0);
                 if (g1NonZero)
                 {
-                    _sifLoopGuardCleared = true;
                     uint val1 = (uint)(EE.Bus.Ram[PhysGuard1]
                                     | (EE.Bus.Ram[PhysGuard1+1] << 8)
                                     | (EE.Bus.Ram[PhysGuard1+2] << 16)
                                     | (EE.Bus.Ram[PhysGuard1+3] << 24));
-                    uint val2 = (uint)(EE.Bus.Ram[PhysGuard2]
-                                    | (EE.Bus.Ram[PhysGuard2+1] << 8)
-                                    | (EE.Bus.Ram[PhysGuard2+2] << 16)
-                                    | (EE.Bus.Ram[PhysGuard2+3] << 24));
                     EE.Bus.Ram[PhysGuard1]     = 0;
                     EE.Bus.Ram[PhysGuard1 + 1] = 0;
                     EE.Bus.Ram[PhysGuard1 + 2] = 0;
@@ -529,7 +549,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                     EE.Bus.Ram[PhysGuard2 + 1] = 0;
                     EE.Bus.Ram[PhysGuard2 + 2] = 0;
                     EE.Bus.Ram[PhysGuard2 + 3] = 0;
-                    Console.WriteLine($"[EE LOOP GUARD] Cleared 0x80024124 (was 0x{val1:X8}) and 0x80024100 (was 0x{val2:X8}) at EE step {TotalEeSteps:N0}");
+                    if (!_sifLoopGuardCleared)
+                    {
+                        _sifLoopGuardCleared = true;
+                        Console.WriteLine($"[EE LOOP GUARD] Cleared 0x80024124 (was 0x{val1:X8}) at EE step {TotalEeSteps:N0}");
+                    }
                 }
             }
 

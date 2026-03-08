@@ -128,6 +128,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         /// <summary>IOP-to-EE flags (SBUS_SMFLAG).</summary>
         public uint SmFlag => _smflag;
 
+        /// <summary>
+        /// Clears the lower 30 bits of SMFLAG without firing IopSignaledEe.
+        /// Used by DualCpuScheduler to acknowledge IOP status bits on behalf of
+        /// the EE once SIF init is complete, so the EE SBUS handler can exit.
+        /// </summary>
+        public void ClearSmFlagLowerBits() => _smflag &= 0xC0000000u;
+
         /// <summary>EE/IOP bootstrap handshake register (SBUS_F240).</summary>
         public uint F240 => _f240;
 
