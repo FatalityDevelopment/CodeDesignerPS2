@@ -1571,14 +1571,18 @@ namespace CodeDesigner.Mips64LE
     /// <summary>A null-terminated ASCII string found in the binary.</summary>
     public class StringEntry
     {
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
         public string Address { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
         public string Value   { get; set; } = string.Empty;
     }
 
     /// <summary>A detected function entry point.</summary>
     public class FunctionEntry
     {
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
         public string Address { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("label")]
         public string Label   { get; set; } = string.Empty;
     }
 
