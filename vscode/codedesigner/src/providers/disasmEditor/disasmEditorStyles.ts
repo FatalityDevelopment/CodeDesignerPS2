@@ -235,7 +235,7 @@ body {
  
 .row {
     display: grid;
-    grid-template-columns: 10ch 12ch 26ch 8ch 34ch 22ch;
+    grid-template-columns: 10ch 12ch 26ch 8ch 34ch 66ch;
     padding: 2px 6px;
     cursor: default;
 }
@@ -510,11 +510,9 @@ body {
 }
 
 #header-toolbar.live-active {
-    background: #1e3a1e;
 }
 
 #header-toolbar.live-paused {
-    background: #3a1e1e;
 }
 
 #live-controls {
@@ -852,6 +850,139 @@ body {
     font-size: 11px;
     padding: 12px 8px;
     text-align: center;
+}
+
+/* ── Inline address edit overlay ─────────────────────────────────────── */
+
+#edit-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+#edit-overlay.visible {
+    display: flex;
+}
+
+#edit-overlay-box {
+    background: #252526;
+    border: 1px solid #3e3e42;
+    border-radius: 4px;
+    width: 420px;
+    max-width: 90vw;
+    padding: 0;
+    font-family: monospace;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+
+#edit-overlay-header {
+    display: flex;
+    align-items: center;
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    padding: 8px 12px;
+}
+
+#edit-overlay-title {
+    color: #d4d4d4;
+    font-size: 12px;
+    font-weight: bold;
+    flex: 1;
+}
+
+#edit-overlay-close {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+}
+
+#edit-overlay-close:hover {
+    color: #fff;
+}
+
+#edit-overlay-info {
+    padding: 8px 12px 4px;
+    font-size: 11px;
+    color: #9cdcfe;
+    border-bottom: 1px solid #3e3e42;
+    white-space: pre;
+    font-family: monospace;
+}
+
+.edit-overlay-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px 4px;
+}
+
+.edit-overlay-label {
+    color: #858585;
+    font-size: 11px;
+    width: 7ch;
+    flex-shrink: 0;
+}
+
+.edit-overlay-input {
+    flex: 1;
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 4px 8px;
+    font-family: monospace;
+    font-size: 12px;
+    outline: none;
+}
+
+.edit-overlay-input:focus {
+    border-color: #007acc;
+}
+
+#edit-overlay-actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px 12px;
+    justify-content: flex-end;
+}
+
+#edit-overlay-save {
+    background: #007acc;
+    border: 1px solid #007acc;
+    color: #fff;
+    padding: 4px 16px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+    outline: none;
+    border-radius: 2px;
+}
+
+#edit-overlay-save:hover {
+    background: #1a88d8;
+}
+
+#edit-overlay-cancel {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 4px 16px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+    outline: none;
+    border-radius: 2px;
+}
+
+#edit-overlay-cancel:hover {
+    background: #505050;
 }
 
 </style>`;

@@ -394,6 +394,9 @@ class DisasmEditorProvider {
                 else if (message.type === "editLabel") {
                     await this.handleEditLabel(webviewPanel, message.address, message.addressHex, message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
                 }
+                else if (message.type === "saveLabel") {
+                    await this.handleSaveLabel(webviewPanel, message.address, message.newLabel ?? '', message.newComment ?? '');
+                }
             });
         });
     }
@@ -784,6 +787,18 @@ class DisasmEditorProvider {
             if (currentLabel || currentComment) {
                 await this.handleDeleteLabel(panel, address);
             }
+            return;
+        }
+        await this.handleAddLabel(panel, address, newLabel, newComment || undefined);
+    }
+    /**
+     * Save a label + comment directly (without showInputBox prompts).
+     * Called when the user submits the inline edit overlay in the webview.
+     */
+    async handleSaveLabel(panel, address, newLabel, newComment) {
+        if (!newLabel && !newComment) {
+            // Both empty — delete the entry if it existed
+            await this.handleDeleteLabel(panel, address);
             return;
         }
         await this.handleAddLabel(panel, address, newLabel, newComment || undefined);
@@ -2727,6 +2742,7 @@ ${getGrid()}
 ${getSymbolsPanel()}
 ${getDebugPanel()}
 </div>
+${getEditOverlay()}
 
 ${getScript(nonce)}
 
@@ -2855,6 +2871,29 @@ function getDebugPanel() {
     <div id="stack-content" class="debug-tab-content"></div>
 </div>`;
 }
+function getEditOverlay() {
+    return `<div id="edit-overlay">
+    <div id="edit-overlay-box">
+        <div id="edit-overlay-header">
+            <span id="edit-overlay-title">Edit Address</span>
+            <button id="edit-overlay-close" title="Close (Escape)">×</button>
+        </div>
+        <div id="edit-overlay-info"></div>
+        <div class="edit-overlay-field">
+            <label class="edit-overlay-label" for="edit-overlay-label-input">Label</label>
+            <input type="text" id="edit-overlay-label-input" class="edit-overlay-input" placeholder="Label name (leave empty to remove)" />
+        </div>
+        <div class="edit-overlay-field">
+            <label class="edit-overlay-label" for="edit-overlay-comment-input">Comment</label>
+            <input type="text" id="edit-overlay-comment-input" class="edit-overlay-input" placeholder="Comment (leave empty to remove)" />
+        </div>
+        <div id="edit-overlay-actions">
+            <button id="edit-overlay-save">Save</button>
+            <button id="edit-overlay-cancel">Cancel</button>
+        </div>
+    </div>
+</div>`;
+}
 function getScript(nonce) {
     // The JavaScript content from the HTML file - too large to inline
     // Reading from file would be better, but for now returning the massive script
@@ -2907,6 +2946,66 @@ const symStringsStatus   = document.getElementById("sym-strings-status");
 const symFunctionsStatus = document.getElementById("sym-functions-status");
 const symScanStringsBtn  = document.getElementById("sym-scan-strings-btn");
 const symScanFunctionsBtn= document.getElementById("sym-scan-functions-btn");
+
+// ── Edit overlay DOM refs ─────────────────────────────────────────────────
+const editOverlay         = document.getElementById("edit-overlay");
+const editOverlayTitle    = document.getElementById("edit-overlay-title");
+const editOverlayInfo     = document.getElementById("edit-overlay-info");
+const editOverlayLabelIn  = document.getElementById("edit-overlay-label-input");
+const editOverlayCommentIn= document.getElementById("edit-overlay-comment-input");
+const editOverlaySave     = document.getElementById("edit-overlay-save");
+const editOverlayCancel   = document.getElementById("edit-overlay-cancel");
+const editOverlayClose    = document.getElementById("edit-overlay-close");
+
+let _editOverlayAddr = 0;
+let _editOverlayAddrHex = '';
+
+function openEditOverlay(address, addressHex, op, args, bytes, currentLabel, currentComment) {
+    _editOverlayAddr = address;
+    _editOverlayAddrHex = addressHex;
+    editOverlayTitle.textContent = 'Edit Address — 0x' + addressHex.toUpperCase();
+    const instrStr = (op || '') + (args ? '  ' + args : '');
+    editOverlayInfo.textContent = (bytes ? bytes + '   ' : '') + instrStr;
+    editOverlayLabelIn.value = currentLabel || '';
+    editOverlayCommentIn.value = currentComment || '';
+    editOverlay.classList.add('visible');
+    editOverlayLabelIn.focus();
+    editOverlayLabelIn.select();
+}
+
+function closeEditOverlay() {
+    editOverlay.classList.remove('visible');
+}
+
+function saveEditOverlay() {
+    const newLabel   = editOverlayLabelIn.value.trim();
+    const newComment = editOverlayCommentIn.value.trim();
+    vscode.postMessage({
+        type: 'saveLabel',
+        address:    _editOverlayAddr,
+        addressHex: _editOverlayAddrHex,
+        newLabel,
+        newComment,
+    });
+    closeEditOverlay();
+}
+
+editOverlaySave.addEventListener('click', saveEditOverlay);
+editOverlayCancel.addEventListener('click', closeEditOverlay);
+editOverlayClose.addEventListener('click', closeEditOverlay);
+
+editOverlayLabelIn.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { editOverlayCommentIn.focus(); editOverlayCommentIn.select(); }
+    if (e.key === 'Escape') { closeEditOverlay(); }
+});
+editOverlayCommentIn.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { saveEditOverlay(); }
+    if (e.key === 'Escape') { closeEditOverlay(); }
+});
+
+editOverlay.addEventListener('click', e => {
+    if (e.target === editOverlay) { closeEditOverlay(); }
+});
 
 const state = {
     cursor: 0,
@@ -3367,14 +3466,15 @@ function renderDisassembly() {
         row.ondblclick = () => {
             state.cursor = globalIndex;
             updateCursor();
-            vscode.postMessage({
-                type: 'editLabel',
-                address: parseInt(rowData.addr, 16),
-                addressHex: rowData.addr,
-                dataBytes: rowData.bytes,
-                currentLabel: rowData.label || '',
-                currentComment: rowData.comment || '',
-            });
+            openEditOverlay(
+                parseInt(rowData.addr, 16),
+                rowData.addr,
+                rowData.op || '',
+                rowData.args || '',
+                rowData.bytes || '',
+                rowData.label || '',
+                rowData.comment || ''
+            );
         };
         grid.appendChild(row);
     });
@@ -3780,11 +3880,7 @@ function renderSymLabels() {
     symLabelsList.innerHTML = items.map(item => {
         const escapedComment = item.comment ? escHtml(item.comment) : '';
         const comment = escapedComment ? \`<span class="sym-item-comment" title="\${escapedComment}">\${escapedComment}</span>\` : '';
-        const addrNum = parseAddrHex(item.address);
-        const region  = getPs2RegionName(addrNum);
-        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
         return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-            \${badge}
             <span class="sym-item-addr">\${escHtml(item.address)}</span>
             <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
             \${comment}
@@ -3818,11 +3914,7 @@ function renderSymStrings() {
         return;
     }
     symStringsList.innerHTML = items.map(item => {
-        const addrNum = parseAddrHex(item.address);
-        const region  = getPs2RegionName(addrNum);
-        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
         return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-            \${badge}
             <span class="sym-item-addr">\${escHtml(item.address)}</span>
             <span class="sym-item-value" title="\${escHtml(item.value)}">\${escHtml(item.value)}</span>
         </div>\`;
@@ -3841,11 +3933,7 @@ function renderSymFunctions() {
         return;
     }
     symFunctionsList.innerHTML = items.map(item => {
-        const addrNum = parseAddrHex(item.address);
-        const region  = getPs2RegionName(addrNum);
-        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
         return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-            \${badge}
             <span class="sym-item-addr">\${escHtml(item.address)}</span>
             <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
         </div>\`;
@@ -4445,7 +4533,7 @@ body {
  
 .row {
     display: grid;
-    grid-template-columns: 10ch 12ch 26ch 8ch 34ch 22ch;
+    grid-template-columns: 10ch 12ch 26ch 8ch 34ch 66ch;
     padding: 2px 6px;
     cursor: default;
 }
@@ -4720,11 +4808,9 @@ body {
 }
 
 #header-toolbar.live-active {
-    background: #1e3a1e;
 }
 
 #header-toolbar.live-paused {
-    background: #3a1e1e;
 }
 
 #live-controls {
@@ -5064,6 +5150,139 @@ body {
     text-align: center;
 }
 
+/* ── Inline address edit overlay ─────────────────────────────────────── */
+
+#edit-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+#edit-overlay.visible {
+    display: flex;
+}
+
+#edit-overlay-box {
+    background: #252526;
+    border: 1px solid #3e3e42;
+    border-radius: 4px;
+    width: 420px;
+    max-width: 90vw;
+    padding: 0;
+    font-family: monospace;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+
+#edit-overlay-header {
+    display: flex;
+    align-items: center;
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    padding: 8px 12px;
+}
+
+#edit-overlay-title {
+    color: #d4d4d4;
+    font-size: 12px;
+    font-weight: bold;
+    flex: 1;
+}
+
+#edit-overlay-close {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+}
+
+#edit-overlay-close:hover {
+    color: #fff;
+}
+
+#edit-overlay-info {
+    padding: 8px 12px 4px;
+    font-size: 11px;
+    color: #9cdcfe;
+    border-bottom: 1px solid #3e3e42;
+    white-space: pre;
+    font-family: monospace;
+}
+
+.edit-overlay-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px 4px;
+}
+
+.edit-overlay-label {
+    color: #858585;
+    font-size: 11px;
+    width: 7ch;
+    flex-shrink: 0;
+}
+
+.edit-overlay-input {
+    flex: 1;
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 4px 8px;
+    font-family: monospace;
+    font-size: 12px;
+    outline: none;
+}
+
+.edit-overlay-input:focus {
+    border-color: #007acc;
+}
+
+#edit-overlay-actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px 12px;
+    justify-content: flex-end;
+}
+
+#edit-overlay-save {
+    background: #007acc;
+    border: 1px solid #007acc;
+    color: #fff;
+    padding: 4px 16px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+    outline: none;
+    border-radius: 2px;
+}
+
+#edit-overlay-save:hover {
+    background: #1a88d8;
+}
+
+#edit-overlay-cancel {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 4px 16px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+    outline: none;
+    border-radius: 2px;
+}
+
+#edit-overlay-cancel:hover {
+    background: #505050;
+}
+
 </style>`;
 }
 
@@ -5136,6 +5355,9 @@ class DisasmPanelProvider {
     workspaceRoot = '';
     snapshots = [];
     extensionPath = '';
+    selectedEmulatorPath = '';
+    selectedBiosPath = '';
+    selectedGamePath = '';
     constructor(socketClient, editorProvider) {
         this.socketClient = socketClient;
         this.editorProvider = editorProvider;
@@ -5188,10 +5410,15 @@ class DisasmPanelProvider {
                 case 'restart':
                     await this.handleRestart();
                     break;
-                // Dropdown change notifications (no-op for now)
+                // Dropdown change notifications — save current selections
                 case 'emulatorChanged':
+                    this.selectedEmulatorPath = msg.emulatorPath ?? '';
+                    break;
                 case 'biosChanged':
+                    this.selectedBiosPath = msg.biosPath ?? '';
+                    break;
                 case 'gameChanged':
+                    this.selectedGamePath = msg.gamePath ?? '';
                     break;
             }
         });
@@ -5272,6 +5499,10 @@ class DisasmPanelProvider {
     // ── Emulator launch ───────────────────────────────────────────────────────
     handleConnect(emulatorPath, biosPath, gamePath) {
         const out = (0, extension_1.getOutputChannel)();
+        // Save current selections for use by Restart
+        this.selectedEmulatorPath = emulatorPath;
+        this.selectedBiosPath = biosPath;
+        this.selectedGamePath = gamePath;
         // Toggle: if already running or already socket-connected, stop/disconnect
         if (this.emulatorTerminal || this.socketClient.isConnected()) {
             if (this.emulatorTerminal) {
@@ -5372,27 +5603,38 @@ class DisasmPanelProvider {
         this.emulatorTerminal = undefined;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
     }
-    /** Restart the emulator: reset both CPUs, clear live panel caches, resume running. */
+    /** Restart the emulator: kill the current process and relaunch with the same disc image. */
     async handleRestart() {
         const out = (0, extension_1.getOutputChannel)();
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator.');
+        const emulatorPath = this.selectedEmulatorPath;
+        if (!emulatorPath) {
+            vscode.window.showWarningMessage('No emulator selected. Cannot restart.');
             return;
         }
-        try {
-            // Immediately blank live panels so stale content is not shown
-            this.editorProvider.resetLivePanels();
-            await this.socketClient.restart();
-            // Resume so the emulator runs from the reset vector instead of
-            // staying paused (which would look like a breakpoint was hit).
-            await this.socketClient.resume();
-            out.appendLine('[INFO] Emulator restarted and running from reset vector.');
+        out.appendLine('[INFO] Restarting emulator — reloading disc image…');
+        // Blank live panels so stale content is not shown during the restart
+        this.editorProvider.resetLivePanels();
+        // Disconnect the socket first
+        if (this.socketClient.isConnected()) {
+            try {
+                this.socketClient.disconnect();
+            }
+            catch (err) {
+                out.appendLine(`[DEBUG] Disconnect during restart: ${err?.message ?? err}`);
+            }
         }
-        catch (err) {
-            const msg = err?.message ?? String(err);
-            out.appendLine(`[ERROR] Restart failed: ${msg}`);
-            vscode.window.showErrorMessage(`Restart failed: ${msg}`);
+        // Kill the existing terminal / process
+        if (this.emulatorTerminal) {
+            this.emulatorTerminal.dispose();
+            this.emulatorTerminal = undefined;
         }
+        // Notify UI that we are now disconnected
+        this.webview?.postMessage({ command: 'connectionStatus', connected: false });
+        // Give the old process a moment to release the port before relaunching
+        await new Promise(resolve => setTimeout(resolve, 800));
+        // Relaunch with the saved emulator / bios / game paths
+        this.spawnAndConnect(emulatorPath, this.selectedBiosPath, this.selectedGamePath);
+        out.appendLine('[INFO] Emulator restarted — waiting for socket connection…');
     }
     // ── Snapshot ──────────────────────────────────────────────────────────────
     async handleSnapshot() {
@@ -5498,6 +5740,11 @@ ${(0, disasmPanelStyles_1.getDisasmPanelStyles)()}
 
 </head>
 <body>
+
+<div id="emu-status-bar" class="${data.connected ? 'status-connected' : 'status-disconnected'}">
+    <span id="emu-status-dot">●</span>
+    <span id="emu-status-text">${data.connected ? 'LIVE' : 'STOPPED'}</span>
+</div>
 
 <h3>Emulator</h3>
 <div class="container">
@@ -5630,6 +5877,13 @@ window.addEventListener('message', event => {
             snapBtn.disabled = !message.connected;
             const restartBtn = document.getElementById('restartBtn');
             if (restartBtn) { restartBtn.disabled = !message.connected; }
+            // Update the live status bar
+            const statusBar = document.getElementById('emu-status-bar');
+            const statusText = document.getElementById('emu-status-text');
+            if (statusBar && statusText) {
+                statusBar.className = message.connected ? 'status-connected' : 'status-disconnected';
+                statusText.textContent = message.connected ? 'LIVE' : 'STOPPED';
+            }
             break;
         }
         case 'updateSnapshots': {
@@ -5673,6 +5927,45 @@ body {
     font-family: var(--vscode-editor-font-family);
     color: var(--vscode-editor-foreground);
     background: var(--vscode-editor-background);
+}
+
+#emu-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    margin: -10px -10px 10px;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 0.04em;
+}
+
+#emu-status-bar.status-connected {
+    background: #1e3a1e;
+    border-bottom: 1px solid #3a5c3a;
+    color: #7ec87e;
+}
+
+#emu-status-bar.status-disconnected {
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    color: #858585;
+}
+
+#emu-status-dot {
+    font-size: 10px;
+    animation: none;
+}
+
+#emu-status-bar.status-connected #emu-status-dot {
+    animation: live-pulse 1.5s ease-in-out infinite;
+    color: #4ec94e;
+}
+
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
 }
 
 .container {

@@ -11,6 +11,45 @@ body {
     background: var(--vscode-editor-background);
 }
 
+#emu-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    margin: -10px -10px 10px;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 0.04em;
+}
+
+#emu-status-bar.status-connected {
+    background: #1e3a1e;
+    border-bottom: 1px solid #3a5c3a;
+    color: #7ec87e;
+}
+
+#emu-status-bar.status-disconnected {
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    color: #858585;
+}
+
+#emu-status-dot {
+    font-size: 10px;
+    animation: none;
+}
+
+#emu-status-bar.status-connected #emu-status-dot {
+    animation: live-pulse 1.5s ease-in-out infinite;
+    color: #4ec94e;
+}
+
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
 .container {
     display: flex;
     flex-direction: column;

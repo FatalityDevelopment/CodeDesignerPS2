@@ -36,6 +36,7 @@ ${getGrid()}
 ${getSymbolsPanel()}
 ${getDebugPanel()}
 </div>
+${getEditOverlay()}
 
 ${getScript(nonce)}
 
@@ -172,6 +173,30 @@ function getDebugPanel(): string {
 </div>`;
 }
 
+function getEditOverlay(): string {
+    return `<div id="edit-overlay">
+    <div id="edit-overlay-box">
+        <div id="edit-overlay-header">
+            <span id="edit-overlay-title">Edit Address</span>
+            <button id="edit-overlay-close" title="Close (Escape)">×</button>
+        </div>
+        <div id="edit-overlay-info"></div>
+        <div class="edit-overlay-field">
+            <label class="edit-overlay-label" for="edit-overlay-label-input">Label</label>
+            <input type="text" id="edit-overlay-label-input" class="edit-overlay-input" placeholder="Label name (leave empty to remove)" />
+        </div>
+        <div class="edit-overlay-field">
+            <label class="edit-overlay-label" for="edit-overlay-comment-input">Comment</label>
+            <input type="text" id="edit-overlay-comment-input" class="edit-overlay-input" placeholder="Comment (leave empty to remove)" />
+        </div>
+        <div id="edit-overlay-actions">
+            <button id="edit-overlay-save">Save</button>
+            <button id="edit-overlay-cancel">Cancel</button>
+        </div>
+    </div>
+</div>`;
+}
+
 function getScript(nonce: string): string {
     // The JavaScript content from the HTML file - too large to inline
     // Reading from file would be better, but for now returning the massive script
@@ -225,6 +250,66 @@ const symStringsStatus   = document.getElementById("sym-strings-status");
 const symFunctionsStatus = document.getElementById("sym-functions-status");
 const symScanStringsBtn  = document.getElementById("sym-scan-strings-btn");
 const symScanFunctionsBtn= document.getElementById("sym-scan-functions-btn");
+
+// ── Edit overlay DOM refs ─────────────────────────────────────────────────
+const editOverlay         = document.getElementById("edit-overlay");
+const editOverlayTitle    = document.getElementById("edit-overlay-title");
+const editOverlayInfo     = document.getElementById("edit-overlay-info");
+const editOverlayLabelIn  = document.getElementById("edit-overlay-label-input");
+const editOverlayCommentIn= document.getElementById("edit-overlay-comment-input");
+const editOverlaySave     = document.getElementById("edit-overlay-save");
+const editOverlayCancel   = document.getElementById("edit-overlay-cancel");
+const editOverlayClose    = document.getElementById("edit-overlay-close");
+
+let _editOverlayAddr = 0;
+let _editOverlayAddrHex = '';
+
+function openEditOverlay(address, addressHex, op, args, bytes, currentLabel, currentComment) {
+    _editOverlayAddr = address;
+    _editOverlayAddrHex = addressHex;
+    editOverlayTitle.textContent = 'Edit Address — 0x' + addressHex.toUpperCase();
+    const instrStr = (op || '') + (args ? '  ' + args : '');
+    editOverlayInfo.textContent = (bytes ? bytes + '   ' : '') + instrStr;
+    editOverlayLabelIn.value = currentLabel || '';
+    editOverlayCommentIn.value = currentComment || '';
+    editOverlay.classList.add('visible');
+    editOverlayLabelIn.focus();
+    editOverlayLabelIn.select();
+}
+
+function closeEditOverlay() {
+    editOverlay.classList.remove('visible');
+}
+
+function saveEditOverlay() {
+    const newLabel   = editOverlayLabelIn.value.trim();
+    const newComment = editOverlayCommentIn.value.trim();
+    vscode.postMessage({
+        type: 'saveLabel',
+        address:    _editOverlayAddr,
+        addressHex: _editOverlayAddrHex,
+        newLabel,
+        newComment,
+    });
+    closeEditOverlay();
+}
+
+editOverlaySave.addEventListener('click', saveEditOverlay);
+editOverlayCancel.addEventListener('click', closeEditOverlay);
+editOverlayClose.addEventListener('click', closeEditOverlay);
+
+editOverlayLabelIn.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { editOverlayCommentIn.focus(); editOverlayCommentIn.select(); }
+    if (e.key === 'Escape') { closeEditOverlay(); }
+});
+editOverlayCommentIn.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { saveEditOverlay(); }
+    if (e.key === 'Escape') { closeEditOverlay(); }
+});
+
+editOverlay.addEventListener('click', e => {
+    if (e.target === editOverlay) { closeEditOverlay(); }
+});
 
 const state = {
     cursor: 0,
@@ -685,14 +770,15 @@ function renderDisassembly() {
         row.ondblclick = () => {
             state.cursor = globalIndex;
             updateCursor();
-            vscode.postMessage({
-                type: 'editLabel',
-                address: parseInt(rowData.addr, 16),
-                addressHex: rowData.addr,
-                dataBytes: rowData.bytes,
-                currentLabel: rowData.label || '',
-                currentComment: rowData.comment || '',
-            });
+            openEditOverlay(
+                parseInt(rowData.addr, 16),
+                rowData.addr,
+                rowData.op || '',
+                rowData.args || '',
+                rowData.bytes || '',
+                rowData.label || '',
+                rowData.comment || ''
+            );
         };
         grid.appendChild(row);
     });
@@ -1098,11 +1184,7 @@ function renderSymLabels() {
     symLabelsList.innerHTML = items.map(item => {
         const escapedComment = item.comment ? escHtml(item.comment) : '';
         const comment = escapedComment ? \`<span class="sym-item-comment" title="\${escapedComment}">\${escapedComment}</span>\` : '';
-        const addrNum = parseAddrHex(item.address);
-        const region  = getPs2RegionName(addrNum);
-        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
         return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-            \${badge}
             <span class="sym-item-addr">\${escHtml(item.address)}</span>
             <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
             \${comment}
@@ -1136,11 +1218,7 @@ function renderSymStrings() {
         return;
     }
     symStringsList.innerHTML = items.map(item => {
-        const addrNum = parseAddrHex(item.address);
-        const region  = getPs2RegionName(addrNum);
-        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
         return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-            \${badge}
             <span class="sym-item-addr">\${escHtml(item.address)}</span>
             <span class="sym-item-value" title="\${escHtml(item.value)}">\${escHtml(item.value)}</span>
         </div>\`;
@@ -1159,11 +1237,7 @@ function renderSymFunctions() {
         return;
     }
     symFunctionsList.innerHTML = items.map(item => {
-        const addrNum = parseAddrHex(item.address);
-        const region  = getPs2RegionName(addrNum);
-        const badge   = region ? \`<span class="sym-region-badge">\${escHtml(region)}</span>\` : '';
         return \`<div class="sym-item" data-addr="\${escHtml(item.address)}">
-            \${badge}
             <span class="sym-item-addr">\${escHtml(item.address)}</span>
             <span class="sym-item-name" title="\${escHtml(item.label)}">\${escHtml(item.label)}</span>
         </div>\`;
