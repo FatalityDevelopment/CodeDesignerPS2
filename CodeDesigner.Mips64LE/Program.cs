@@ -455,6 +455,22 @@ namespace CodeDesigner.Mips64LE
                             catch { /* skip */ }
                         }
                     }
+                    // Dump 0x86C0-0x8E80 when first entering 0x86D0 (SIFMAN disc-read func)
+                    if (pc == 0x000086D0u && !iopSeenPcs.Contains(0x86D00000u))
+                    {
+                        iopSeenPcs.Add(0x86D00000u);
+                        Console.WriteLine("  BIOS-upper SIFMAN disc-read func [0x86C0-0x8E80]:");
+                        for (uint da = 0x000086C0u; da < 0x00008E84u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw3 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis3 = MipsDisassembler.Disassemble(iw3, da);
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw3:X8}  {dis3}");
+                            }
+                            catch { /* skip */ }
+                        }
+                    }
                 }
 
                 // Trace all calls to EnableInterrupt (0x00004188) to see what bits are enabled and from where
@@ -577,6 +593,62 @@ namespace CodeDesigner.Mips64LE
                             }
                             catch { /* skip unloaded address */ }
                         }
+                        // Dump SIFMAN 0x163D8 (disc-read dispatcher called from CDVDman AE28)
+                        Console.WriteLine("  SIFMAN disc-read dispatcher [0x162B0-0x16960]:");
+                        for (uint da = 0x000162B0u; da < 0x00016964u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                Console.WriteLine($"    0x{da:X8}: 0x{iw2:X8}  {dis2}");
+                            }
+                            catch { /* skip unloaded address */ }
+                        }
+                        // Also dump SIFMAN 0x162E0 data (the 'SIFMAN func struct' used at 86D0)
+                        Console.WriteLine("  SIFMAN 0x162E0 struct/func:");
+                        for (uint da = 0x000162E0u; da < 0x00016310u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                string dis2 = MipsDisassembler.Disassemble(iw2, da);
+                                Console.WriteLine($"    [0x{da:X8}] = 0x{iw2:X8}  {dis2}");
+                            }
+                            catch { /* skip */ }
+                        }
+                        // Dump CDVDman interface struct at 0x10E88 (a0 passed to 0x163D8)
+                        Console.WriteLine("  CDVDman iface struct at 0x10E88:");
+                        for (uint da = 0x00010E80u; da < 0x00010EE0u; da += 4)
+                        {
+                            try
+                            {
+                                uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                                Console.WriteLine($"    [0x{da:X8}] = 0x{iw2:X8}");
+                            }
+                            catch { /* skip */ }
+                        }
+                    }
+                }
+
+                // One-shot: when SIFMAN 0x10D98 is called from CDVDman (ra=0xAE30),
+                // dump all regs and the struct at a0 to see what disc-read dispatch sees.
+                if (pc == 0x00010D98u && state.ReadReg(31) == 0x0000AE30u && !iopSeenPcs.Contains(0xD98AE30u))
+                {
+                    iopSeenPcs.Add(0xD98AE30u);
+                    uint sifA0 = state.ReadReg(4);
+                    uint sifA1 = state.ReadReg(5);
+                    Console.WriteLine($"  *** SIFMAN disc-read call (0x10D98->0x163D8): a0=0x{sifA0:X8} a1=0x{sifA1:X8} I_MASK=0x{scheduler.IOP.Bus.IMask:X8}");
+                    // Dump the struct pointed to by a0
+                    Console.WriteLine($"  Struct at a0=0x{sifA0:X8}:");
+                    for (uint da = sifA0; da < sifA0 + 0x40u; da += 4)
+                    {
+                        try
+                        {
+                            uint iw2 = scheduler.IOP.Bus.ReadWord(da);
+                            Console.WriteLine($"    [0x{da:X8}+{da - sifA0:D2}] = 0x{iw2:X8}");
+                        }
+                        catch { break; }
                     }
                 }
 
