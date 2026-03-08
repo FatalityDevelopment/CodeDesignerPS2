@@ -332,5 +332,35 @@ body {
     background: #505050;
 }
 
+#play-pause-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 10px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+#play-pause-btn:hover {
+    background: #505050;
+}
+
+#interval-select {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 6px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+#interval-select:hover {
+    background: #505050;
+}
+
 </style>`;
 }

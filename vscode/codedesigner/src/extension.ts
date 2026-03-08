@@ -80,10 +80,6 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage('Connected to C# server');
 	});
 
-	socketClient.onMessage((message: string) => {
-		outputChannel.appendLine(`[MESSAGE] ${message}`);
-	});
-
 	socketClient.onDisconnected(() => {
 		outputChannel.appendLine('[WARN] Disconnected from C# server');
 		vscode.window.showWarningMessage('Disconnected from C# server');

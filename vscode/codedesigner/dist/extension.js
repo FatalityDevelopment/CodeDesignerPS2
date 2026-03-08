@@ -109,9 +109,6 @@ function activate(context) {
         outputChannel.appendLine('[INFO] Connected to C# server');
         vscode.window.showInformationMessage('Connected to C# server');
     });
-    socketClient.onMessage((message) => {
-        outputChannel.appendLine(`[MESSAGE] ${message}`);
-    });
     socketClient.onDisconnected(() => {
         outputChannel.appendLine('[WARN] Disconnected from C# server');
         vscode.window.showWarningMessage('Disconnected from C# server');
@@ -2551,7 +2548,15 @@ function getSearchPanel() {
 function getLiveToolbar() {
     return `<div id="live-toolbar">
     <span class="live-indicator">● LIVE</span>
+    <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
     <button id="refresh-btn" title="Refresh current view">↻ Refresh</button>
+    <select id="interval-select" title="Live refresh interval" aria-label="Live refresh interval">
+        <option value="250">250 ms</option>
+        <option value="500">500 ms</option>
+        <option value="1000" selected>1 s</option>
+        <option value="2000">2 s</option>
+        <option value="5000">5 s</option>
+    </select>
 </div>`;
 }
 function getHexContainer() {
@@ -2590,6 +2595,8 @@ const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
 const liveToolbar = document.getElementById("live-toolbar");
 const refreshBtn = document.getElementById("refresh-btn");
+const playPauseBtn = document.getElementById("play-pause-btn");
+const intervalSelect = document.getElementById("interval-select");
 
 const state = {
     cursor: 0,
@@ -2611,6 +2618,8 @@ const state = {
 
 let liveRefreshTimer = null;
 let liveRefreshPending = false;
+let liveRefreshInterval = 1000;
+let livePaused = false;
 
 const clamp = (val, min, max) => Math.max(min, Math.min(val, max));
 const getPageStart = index => Math.floor(index / state.pageSize) * state.pageSize;
@@ -3082,7 +3091,22 @@ document.addEventListener('wheel', e => {
 
 function startLiveRefresh() {
     if (liveRefreshTimer !== null) { return; }
-    liveRefreshTimer = setInterval(doLiveRefresh, 1000);
+    if (livePaused) { return; }
+    liveRefreshTimer = setInterval(doLiveRefresh, liveRefreshInterval);
+}
+
+function stopLiveRefresh() {
+    if (liveRefreshTimer !== null) {
+        clearInterval(liveRefreshTimer);
+        liveRefreshTimer = null;
+    }
+}
+
+function restartLiveRefresh() {
+    stopLiveRefresh();
+    if (!livePaused) {
+        startLiveRefresh();
+    }
 }
 
 function doLiveRefresh() {
@@ -3102,6 +3126,26 @@ function manualRefresh() {
 }
 
 refreshBtn.addEventListener('click', manualRefresh);
+
+playPauseBtn.addEventListener('click', () => {
+    livePaused = !livePaused;
+    if (livePaused) {
+        stopLiveRefresh();
+        playPauseBtn.textContent = '▶ Play';
+        playPauseBtn.title = 'Resume live feed';
+        playPauseBtn.setAttribute('aria-label', 'Resume live feed');
+    } else {
+        startLiveRefresh();
+        playPauseBtn.textContent = '⏸ Pause';
+        playPauseBtn.title = 'Pause live feed';
+        playPauseBtn.setAttribute('aria-label', 'Pause live feed');
+    }
+});
+
+intervalSelect.addEventListener('change', () => {
+    liveRefreshInterval = parseInt(intervalSelect.value, 10);
+    restartLiveRefresh();
+});
 
 window.addEventListener('unload', () => {
     if (liveRefreshTimer !== null) {
@@ -3450,6 +3494,36 @@ body {
 }
 
 #refresh-btn:hover {
+    background: #505050;
+}
+
+#play-pause-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 10px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+#play-pause-btn:hover {
+    background: #505050;
+}
+
+#interval-select {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 6px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+#interval-select:hover {
     background: #505050;
 }
 
