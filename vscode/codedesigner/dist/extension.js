@@ -5570,12 +5570,14 @@ class DisasmPanelProvider {
         // Try connecting to an already-running server first. If the C# server
         // was started manually (e.g. `dotnet run -- --server` or `--run`), we
         // can reuse it without spawning a new process.
-        this.socketClient.connect().then(async () => {
-            out.appendLine('[INFO] Connected to existing emulator server. Opening memory views…');
-            this.webview?.postMessage({ command: 'connectionStatus', connected: true });
-            for (const r of LIVE_REGIONS) {
-                await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
-            }
+        // NOTE: do NOT open memory views here — the socketClient.onConnected
+        // event (registered in extension.ts) will fire onSocketConnected() which
+        // opens/reinits all panels.  Duplicating that work here would queue two
+        // concurrent sets of READMEM requests against the server, which (before
+        // the _pendingResponses fix) caused response mis-routing and is still
+        // wasteful.
+        this.socketClient.connect().then(() => {
+            out.appendLine('[INFO] Connected to existing emulator server. Memory views will open via onSocketConnected.');
         }).catch(() => {
             // No existing server — spawn the emulator and then connect
             this.spawnAndConnect(emulatorPath, biosPath, gamePath);
@@ -6606,6 +6608,16 @@ class SocketClient {
     messageHandlers = [];
     connectionHandlers = [];
     disconnectionHandlers = [];
+    /**
+     * FIFO queue of one-time response handlers added by sendCommand().
+     * Using a dedicated queue (with shift()) avoids the Array.forEach +
+     * splice-during-iteration bug: when forEach iterates [A, B, C] and A
+     * splices itself out at index 0, forEach advances to index 1 which is
+     * now C (B shifted to 0), so B is skipped and C receives A's response.
+     * With shift(), each incoming message pops exactly one handler off the
+     * front of the queue in FIFO order — matching the order commands were sent.
+     */
+    _pendingResponses = [];
     constructor(host = 'localhost', port = 8765) {
         this.host = host;
         this.port = port;
@@ -6643,6 +6655,14 @@ class SocketClient {
                     this.messageBuffer = this.messageBuffer.substring(newlineIndex + 1);
                     if (message.length > 0) {
                         console.log(`[SOCKET] Complete message received (${message.length} chars): ${message.substring(0, 100)}...`);
+                        // Dispatch to the first pending one-time response handler (FIFO).
+                        // shift() is safe here: it removes the element before calling it,
+                        // so there is no splice-during-iteration issue.
+                        const pending = this._pendingResponses.shift();
+                        if (pending) {
+                            pending(message);
+                        }
+                        // Also dispatch to any persistent broadcast handlers.
                         this.messageHandlers.forEach(handler => handler(message));
                     }
                 }
@@ -6710,6 +6730,14 @@ class SocketClient {
         }
         this.connected = false;
         this.wasConnected = false;
+        // Cancel any in-flight requests that will never receive a response.
+        const stale = this._pendingResponses.splice(0);
+        for (const handler of stale) {
+            try {
+                handler('{"Success":false,"Error":"Disconnected"}');
+            }
+            catch { /* ignore */ }
+        }
         console.log('[SOCKET] Disconnected from server');
     }
     /**
@@ -6752,11 +6780,6 @@ class SocketClient {
                     return;
                 responseReceived = true;
                 clearTimeout(timeout);
-                // Remove the handler
-                const index = this.messageHandlers.indexOf(responseHandler);
-                if (index > -1) {
-                    this.messageHandlers.splice(index, 1);
-                }
                 try {
                     // Strip "Echo: " prefix if present
                     let cleanMessage = message;
@@ -6779,16 +6802,18 @@ class SocketClient {
                     reject(new Error(`Failed to parse response: ${errorMsg}`));
                 }
             };
-            // Add temporary handler
-            this.messageHandlers.push(responseHandler);
+            // Enqueue handler — must be done before writing to the socket so
+            // there is no window where the response arrives before the handler
+            // is registered.
+            this._pendingResponses.push(responseHandler);
             // Set timeout
             const timeout = setTimeout(() => {
                 if (!responseReceived) {
                     responseReceived = true;
-                    // Remove the handler
-                    const index = this.messageHandlers.indexOf(responseHandler);
+                    // Remove the handler from the pending queue
+                    const index = this._pendingResponses.indexOf(responseHandler);
                     if (index > -1) {
-                        this.messageHandlers.splice(index, 1);
+                        this._pendingResponses.splice(index, 1);
                     }
                     reject(new Error('Command timeout'));
                 }
@@ -6800,10 +6825,10 @@ class SocketClient {
                 if (error) {
                     clearTimeout(timeout);
                     responseReceived = true;
-                    // Remove the handler
-                    const index = this.messageHandlers.indexOf(responseHandler);
+                    // Remove the handler from the pending queue
+                    const index = this._pendingResponses.indexOf(responseHandler);
                     if (index > -1) {
-                        this.messageHandlers.splice(index, 1);
+                        this._pendingResponses.splice(index, 1);
                     }
                     reject(error);
                 }
