@@ -36,8 +36,22 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     physBaseAddress: number;  // pre-computed physical base for fast address lookup
   }> = [];
 
+  /**
+   * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
+   * Set by DisasmPanelProvider so it can update the sidebar status bar.
+   */
+  public onPauseStateChange?: (paused: boolean) => void;
+
   constructor(socketClient: SocketClient | null) {
     this.socketClient = socketClient;
+  }
+
+  /**
+   * Called by DisasmPanelProvider to propagate sidebar-initiated pause/resume
+   * to all editor panels' live-bar state.
+   */
+  public notifyPauseState(paused: boolean): void {
+    this._broadcastStatus(paused);
   }
 
   /**
@@ -231,7 +245,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
      * Open a live memory view panel (no backing file — pages fetched via socket).
      * Called once per region after connecting to the embedded emulator server.
      * If a panel for this label already exists (e.g. reconnect), it is revealed
-     * instead of creating a duplicate window.
+     * and re-initialized with fresh data when connected.
      */
     async openLiveMemoryView(
         region: string,
@@ -239,15 +253,28 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         totalBytes: number,
         label: string
     ): Promise<void> {
-        if (!this.socketClient || !this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator. Connect first.');
-            return;
-        }
+        const connected = this.socketClient?.isConnected() ?? false;
 
         // Reuse an already-open panel with the same label (e.g. after reconnect)
         const existingInfo = this._livePanelInfo.find(i => i.label === label);
         if (existingInfo) {
             existingInfo.panel.reveal(vscode.ViewColumn.One, true);
+            // Re-initialize with live data now that we have a connection
+            if (connected) {
+                const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
+                existingInfo.panel.webview.postMessage({
+                    type: 'init',
+                    totalInstructions,
+                    pageSize: DisasmEditorProvider.PAGE_SIZE,
+                    baseAddress,
+                    isLive: true,
+                    regionLabel: label,
+                    totalBytes,
+                });
+                await this.sendLiveDisasmPage(existingInfo.panel, region, baseAddress, totalBytes, 0);
+                await this.sendLiveHexView(existingInfo.panel, region, baseAddress, baseAddress,
+                    DisasmEditorProvider.INSTRUCTION_SIZE);
+            }
             return;
         }
 
@@ -284,10 +311,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             totalBytes,
         });
 
-        // Send first page and hex view
-        await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
-        await this.sendLiveHexView(panel, region, baseAddress, baseAddress,
-            DisasmEditorProvider.INSTRUCTION_SIZE);
+        if (connected) {
+            // Send first page and hex view
+            await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
+            await this.sendLiveHexView(panel, region, baseAddress, baseAddress,
+                DisasmEditorProvider.INSTRUCTION_SIZE);
+        }
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message.type === 'requestPage') {
@@ -400,12 +429,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
      * Send a minimal `status` message to all registered live panels.
      * Called immediately after a user-initiated pause or resume so every window
      * updates its live-bar indicator without waiting for the next status-poll cycle.
+     * Also fires the onPauseStateChange callback so the sidebar can update its bar.
      */
     private _broadcastStatus(paused: boolean): void {
         const msg = { type: 'status', paused };
         for (const p of this._livePanels) {
             p.webview.postMessage(msg);
         }
+        this.onPauseStateChange?.(paused);
     }
 
     /**

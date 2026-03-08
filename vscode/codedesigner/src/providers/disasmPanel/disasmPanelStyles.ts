@@ -35,6 +35,12 @@ body {
     color: #858585;
 }
 
+#emu-status-bar.status-paused {
+    background: #3a1a1a;
+    border-bottom: 1px solid #6a2a2a;
+    color: #e07070;
+}
+
 #emu-status-dot {
     font-size: 10px;
     animation: none;
@@ -45,9 +51,37 @@ body {
     color: #4ec94e;
 }
 
+#emu-status-bar.status-paused #emu-status-dot {
+    animation: none;
+    color: #e07070;
+}
+
 @keyframes live-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
+}
+
+#emu-play-pause-btn {
+    margin-left: auto;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: inherit;
+    padding: 1px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+    display: none;
+}
+
+#emu-status-bar.status-connected #emu-play-pause-btn,
+#emu-status-bar.status-paused #emu-play-pause-btn {
+    display: inline-block;
+}
+
+#emu-play-pause-btn:hover {
+    background: rgba(255,255,255,0.18);
 }
 
 .container {

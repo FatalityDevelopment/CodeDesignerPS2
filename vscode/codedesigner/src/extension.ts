@@ -74,6 +74,12 @@ export function activate(context: vscode.ExtensionContext) {
 	const asmPanelProvider = new AsmPanelProvider();
 	asmPanelProvider.register(context);
 
+	// Wire pause-state propagation: when a breakpoint/step pause is detected in the
+	// editor panels, the sidebar status bar needs to update too.
+	editorProvider.onPauseStateChange = (paused: boolean) => {
+		disasmPanelProvider.notifyPauseState(paused);
+	};
+
 	// Register socket event handlers
 	socketClient.onConnected(() => {
 		outputChannel.appendLine('[INFO] Connected to C# server');
@@ -144,6 +150,15 @@ export function activate(context: vscode.ExtensionContext) {
 			outputChannel.appendLine('[INFO] Make sure the C# server is running on localhost:8765');
 		});
 	}, 1000);
+
+	// Open all live memory view tabs immediately so they are always visible.
+	// When not connected they show placeholder content; when the socket connects
+	// they are re-initialized with live data.
+	setTimeout(() => {
+		disasmPanelProvider.openAllLivePanels().catch(err => {
+			outputChannel.appendLine(`[WARN] Could not open live panels at startup: ${err?.message ?? err}`);
+		});
+	}, 600);
 }
 
 // This method is called when your extension is deactivated
