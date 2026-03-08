@@ -93,13 +93,6 @@ function getLiveToolbar(): string {
     <span class="live-indicator">● LIVE</span>
     <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
     <button id="refresh-btn" title="Refresh current view">↻ Refresh</button>
-    <select id="interval-select" title="Live refresh interval" aria-label="Live refresh interval">
-        <option value="250">250 ms</option>
-        <option value="500">500 ms</option>
-        <option value="1000" selected>1 s</option>
-        <option value="2000">2 s</option>
-        <option value="5000">5 s</option>
-    </select>
 </div>`;
 }
 
@@ -143,7 +136,6 @@ const closeGoto = document.getElementById("close-goto");
 const liveToolbar = document.getElementById("live-toolbar");
 const refreshBtn = document.getElementById("refresh-btn");
 const playPauseBtn = document.getElementById("play-pause-btn");
-const intervalSelect = document.getElementById("interval-select");
 
 const state = {
     cursor: 0,
@@ -281,8 +273,10 @@ function jumpToMatch(matchIndex) {
     state.currentMatch = matchIndex;
     const match = state.searchMatches[matchIndex];
     state.cursor = match.instructionIndex;
-    checkAndLoadPage();
-    updateCursor();
+    const pageReady = checkAndLoadPage();
+    if (pageReady) {
+        updateCursor();
+    }
     updateSearchInfo();
 }
 
@@ -363,8 +357,10 @@ function goToAddress() {
     state.cursor = instrIndex;
     state.searchActive = false;
     searchPanel.classList.remove('visible');
-    checkAndLoadPage();
-    updateCursor();
+    const pageReady = checkAndLoadPage();
+    if (pageReady) {
+        updateCursor();
+    }
     gotoInfo.textContent = \`Moved to 0x\${addr.toString(16).toUpperCase()}\`;
 }
 
@@ -565,20 +561,24 @@ grid.addEventListener("keydown", e => {
     if (!delta) return;
     e.preventDefault();
     state.cursor = clamp(state.cursor + delta, 0, state.totalInstructions - 1);
-    checkAndLoadPage();
-    updateCursor();
+    const pageReady = checkAndLoadPage();
+    if (pageReady) {
+        updateCursor();
+    }
 });
 
 function checkAndLoadPage() {
     const startIndex = getPageStart(state.cursor);
     if (!state.loadedPages.has(startIndex)) {
         vscode.postMessage({ type: "requestPage", startIndex });
+        return false;
     } else {
         const cachedRows = state.loadedPages.get(startIndex);
         if (state.disasmRows !== cachedRows) {
             state.disasmRows = cachedRows;
             renderDisassembly();
         }
+        return true;
     }
 }
 
@@ -678,20 +678,17 @@ playPauseBtn.addEventListener('click', () => {
     livePaused = !livePaused;
     if (livePaused) {
         stopLiveRefresh();
+        vscode.postMessage({ type: 'pause' });
         playPauseBtn.textContent = '▶ Play';
         playPauseBtn.title = 'Resume live feed';
         playPauseBtn.setAttribute('aria-label', 'Resume live feed');
     } else {
+        vscode.postMessage({ type: 'resume' });
         startLiveRefresh();
         playPauseBtn.textContent = '⏸ Pause';
         playPauseBtn.title = 'Pause live feed';
         playPauseBtn.setAttribute('aria-label', 'Pause live feed');
     }
-});
-
-intervalSelect.addEventListener('change', () => {
-    liveRefreshInterval = parseInt(intervalSelect.value, 10);
-    restartLiveRefresh();
 });
 
 window.addEventListener('unload', () => {

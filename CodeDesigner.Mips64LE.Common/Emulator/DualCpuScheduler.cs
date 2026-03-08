@@ -99,6 +99,35 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         }
 
         /// <summary>
+        /// When <c>true</c>, <see cref="RunSlice"/> returns immediately without
+        /// executing any instructions.  Set via the socket PAUSE/RESUME commands.
+        /// </summary>
+        public bool Paused
+        {
+            get => !_runGate.IsSet;
+            set
+            {
+                if (value) _runGate.Reset();
+                else       _runGate.Set();
+            }
+        }
+
+        /// <summary>
+        /// Blocks asynchronously until the scheduler is not paused.
+        /// Returns immediately when the scheduler is running.
+        /// </summary>
+        public Task WaitForResumeAsync(System.Threading.CancellationToken ct = default)
+        {
+            if (_runGate.IsSet) return Task.CompletedTask;
+            return Task.Run(() => _runGate.Wait(ct), ct);
+        }
+
+        // Gate used to implement efficient pause/resume without busy-polling.
+        // Set = running (not paused); Reset = paused.
+        private readonly System.Threading.ManualResetEventSlim _runGate =
+            new System.Threading.ManualResetEventSlim(true);
+
+        /// <summary>
         /// Total EE instruction steps executed since the last <see cref="Reset"/>.
         /// </summary>
         public ulong TotalEeSteps { get; private set; }
@@ -367,6 +396,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public void RunSlice(int eeSteps = EeToIopRatio)
         {
             if (eeSteps < 1) eeSteps = 1;
+
+            // ── Pause support ─────────────────────────────────────────────────
+            if (Paused) return;
 
             // ── Persistent SBUS keep-alive (WaitIntr SBUS patch) ─────────────
             // SIFMAN calls WaitIntr(SBUS=1) before entering its idle loop, but

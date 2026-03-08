@@ -375,6 +375,28 @@ export class SocketClient {
     }
 
     /**
+     * Pause emulator execution
+     */
+    public async pause(): Promise<void> {
+        const command: CommandMessage = { Command: 'PAUSE' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Pause failed');
+        }
+    }
+
+    /**
+     * Resume emulator execution
+     */
+    public async resume(): Promise<void> {
+        const command: CommandMessage = { Command: 'RESUME' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Resume failed');
+        }
+    }
+
+    /**
      * Ping the server
      */
     public async ping(): Promise<string> {

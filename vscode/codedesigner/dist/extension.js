@@ -402,6 +402,26 @@ class DisasmEditorProvider {
             else if (message.type === 'updateHex') {
                 await this.sendLiveHexView(panel, region, baseAddress, message.address, message.length || DisasmEditorProvider.INSTRUCTION_SIZE);
             }
+            else if (message.type === 'pause') {
+                try {
+                    await this.socketClient.pause();
+                }
+                catch (err) {
+                    const msg = err?.message ?? String(err);
+                    console.error(`[LIVE] Failed to pause emulator: ${msg}`);
+                    vscode.window.showWarningMessage(`Could not pause emulator: ${msg}`);
+                }
+            }
+            else if (message.type === 'resume') {
+                try {
+                    await this.socketClient.resume();
+                }
+                catch (err) {
+                    const msg = err?.message ?? String(err);
+                    console.error(`[LIVE] Failed to resume emulator: ${msg}`);
+                    vscode.window.showWarningMessage(`Could not resume emulator: ${msg}`);
+                }
+            }
             else if (message.type === 'search') {
                 // Full-region live search is expensive; return empty for now
                 panel.webview.postMessage({ type: 'searchResults', matches: [] });
@@ -2550,13 +2570,6 @@ function getLiveToolbar() {
     <span class="live-indicator">● LIVE</span>
     <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
     <button id="refresh-btn" title="Refresh current view">↻ Refresh</button>
-    <select id="interval-select" title="Live refresh interval" aria-label="Live refresh interval">
-        <option value="250">250 ms</option>
-        <option value="500">500 ms</option>
-        <option value="1000" selected>1 s</option>
-        <option value="2000">2 s</option>
-        <option value="5000">5 s</option>
-    </select>
 </div>`;
 }
 function getHexContainer() {
@@ -2596,7 +2609,6 @@ const closeGoto = document.getElementById("close-goto");
 const liveToolbar = document.getElementById("live-toolbar");
 const refreshBtn = document.getElementById("refresh-btn");
 const playPauseBtn = document.getElementById("play-pause-btn");
-const intervalSelect = document.getElementById("interval-select");
 
 const state = {
     cursor: 0,
@@ -2734,8 +2746,10 @@ function jumpToMatch(matchIndex) {
     state.currentMatch = matchIndex;
     const match = state.searchMatches[matchIndex];
     state.cursor = match.instructionIndex;
-    checkAndLoadPage();
-    updateCursor();
+    const pageReady = checkAndLoadPage();
+    if (pageReady) {
+        updateCursor();
+    }
     updateSearchInfo();
 }
 
@@ -2816,8 +2830,10 @@ function goToAddress() {
     state.cursor = instrIndex;
     state.searchActive = false;
     searchPanel.classList.remove('visible');
-    checkAndLoadPage();
-    updateCursor();
+    const pageReady = checkAndLoadPage();
+    if (pageReady) {
+        updateCursor();
+    }
     gotoInfo.textContent = \`Moved to 0x\${addr.toString(16).toUpperCase()}\`;
 }
 
@@ -3018,20 +3034,24 @@ grid.addEventListener("keydown", e => {
     if (!delta) return;
     e.preventDefault();
     state.cursor = clamp(state.cursor + delta, 0, state.totalInstructions - 1);
-    checkAndLoadPage();
-    updateCursor();
+    const pageReady = checkAndLoadPage();
+    if (pageReady) {
+        updateCursor();
+    }
 });
 
 function checkAndLoadPage() {
     const startIndex = getPageStart(state.cursor);
     if (!state.loadedPages.has(startIndex)) {
         vscode.postMessage({ type: "requestPage", startIndex });
+        return false;
     } else {
         const cachedRows = state.loadedPages.get(startIndex);
         if (state.disasmRows !== cachedRows) {
             state.disasmRows = cachedRows;
             renderDisassembly();
         }
+        return true;
     }
 }
 
@@ -3131,20 +3151,17 @@ playPauseBtn.addEventListener('click', () => {
     livePaused = !livePaused;
     if (livePaused) {
         stopLiveRefresh();
+        vscode.postMessage({ type: 'pause' });
         playPauseBtn.textContent = '▶ Play';
         playPauseBtn.title = 'Resume live feed';
         playPauseBtn.setAttribute('aria-label', 'Resume live feed');
     } else {
+        vscode.postMessage({ type: 'resume' });
         startLiveRefresh();
         playPauseBtn.textContent = '⏸ Pause';
         playPauseBtn.title = 'Pause live feed';
         playPauseBtn.setAttribute('aria-label', 'Pause live feed');
     }
-});
-
-intervalSelect.addEventListener('change', () => {
-    liveRefreshInterval = parseInt(intervalSelect.value, 10);
-    restartLiveRefresh();
 });
 
 window.addEventListener('unload', () => {
@@ -4859,6 +4876,26 @@ class SocketClient {
             throw new Error(response.Error || 'Snapshot failed');
         }
         return response.Regions || [];
+    }
+    /**
+     * Pause emulator execution
+     */
+    async pause() {
+        const command = { Command: 'PAUSE' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Pause failed');
+        }
+    }
+    /**
+     * Resume emulator execution
+     */
+    async resume() {
+        const command = { Command: 'RESUME' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Resume failed');
+        }
     }
     /**
      * Ping the server

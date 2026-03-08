@@ -922,6 +922,13 @@ namespace CodeDesigner.Mips64LE
             {
                 while (!cts.Token.IsCancellationRequested && totalSteps < maxSteps)
                 {
+                    // When paused, wait efficiently for a resume signal rather than busy-polling.
+                    if (scheduler.Paused)
+                    {
+                        await scheduler.WaitForResumeAsync(cts.Token).ConfigureAwait(false);
+                        continue;
+                    }
+
                     int slice = (int)Math.Min(SliceSize, maxSteps - totalSteps);
                     try
                     {

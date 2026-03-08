@@ -165,6 +165,12 @@ namespace CodeDesigner.Mips64LE
                     case "SNAPSHOT":
                         return HandleSnapshot(command.OutputPath);
                     
+                    case "PAUSE":
+                        return HandlePause();
+
+                    case "RESUME":
+                        return HandleResume();
+
                     case "PING":
                         return CreateSuccessResponse("PONG");
                     
@@ -466,6 +472,28 @@ namespace CodeDesigner.Mips64LE
             {
                 return CreateErrorResponse($"Snapshot error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Handle PAUSE command — halts emulator execution.
+        /// </summary>
+        private string HandlePause()
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            Scheduler.Paused = true;
+            return CreateSuccessResponse("Paused");
+        }
+
+        /// <summary>
+        /// Handle RESUME command — resumes emulator execution.
+        /// </summary>
+        private string HandleResume()
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            Scheduler.Paused = false;
+            return CreateSuccessResponse("Resumed");
         }
 
         private string CreateSuccessResponse(string message)

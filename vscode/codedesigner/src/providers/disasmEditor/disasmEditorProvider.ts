@@ -258,6 +258,22 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'updateHex') {
                 await this.sendLiveHexView(panel, region, baseAddress, message.address,
                     message.length || DisasmEditorProvider.INSTRUCTION_SIZE);
+            } else if (message.type === 'pause') {
+                try {
+                    await this.socketClient!.pause();
+                } catch (err: any) {
+                    const msg = err?.message ?? String(err);
+                    console.error(`[LIVE] Failed to pause emulator: ${msg}`);
+                    vscode.window.showWarningMessage(`Could not pause emulator: ${msg}`);
+                }
+            } else if (message.type === 'resume') {
+                try {
+                    await this.socketClient!.resume();
+                } catch (err: any) {
+                    const msg = err?.message ?? String(err);
+                    console.error(`[LIVE] Failed to resume emulator: ${msg}`);
+                    vscode.window.showWarningMessage(`Could not resume emulator: ${msg}`);
+                }
             } else if (message.type === 'search') {
                 // Full-region live search is expensive; return empty for now
                 panel.webview.postMessage({ type: 'searchResults', matches: [] });
