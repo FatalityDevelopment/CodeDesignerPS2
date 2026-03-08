@@ -48,8 +48,8 @@ exports.deactivate = deactivate;
 const vscode = __importStar(__webpack_require__(1));
 const disasmEditorProvider_1 = __webpack_require__(2);
 const disasmPanelProvider_1 = __webpack_require__(7);
-const asmPanelProvider_1 = __webpack_require__(10);
-const socketClient_1 = __webpack_require__(14);
+const asmPanelProvider_1 = __webpack_require__(13);
+const socketClient_1 = __webpack_require__(16);
 let socketClient = null;
 let outputChannel;
 /**
@@ -393,6 +393,7 @@ class DisasmEditorProvider {
             totalInstructions,
             pageSize: DisasmEditorProvider.PAGE_SIZE,
             baseAddress,
+            isLive: true,
         });
         // Send first page and hex view
         await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
@@ -2489,6 +2490,7 @@ ${(0, disasmEditorStyles_1.getDisasmEditorStyles)()}
 
 ${getGotoPanel()}
 ${getSearchPanel()}
+${getLiveToolbar()}
 ${getHexContainer()}
 ${getGrid()}
 
@@ -2544,6 +2546,12 @@ function getSearchPanel() {
     </div>
 </div>`;
 }
+function getLiveToolbar() {
+    return `<div id="live-toolbar">
+    <span class="live-indicator">● LIVE</span>
+    <button id="refresh-btn" title="Refresh current view">↻ Refresh</button>
+</div>`;
+}
 function getHexContainer() {
     return `<div id="hex-container"></div>`;
 }
@@ -2578,6 +2586,8 @@ const gotoClear = document.getElementById("goto-clear");
 const gotoBtn = document.getElementById("goto-btn");
 const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
+const liveToolbar = document.getElementById("live-toolbar");
+const refreshBtn = document.getElementById("refresh-btn");
 
 const state = {
     cursor: 0,
@@ -2593,8 +2603,12 @@ const state = {
     searchMatches: [],
     currentMatch: -1,
     searchActive: false,
-    gotoActive: false
+    gotoActive: false,
+    isLive: false
 };
+
+let liveRefreshTimer = null;
+let liveRefreshPending = false;
 
 const clamp = (val, min, max) => Math.max(min, Math.min(val, max));
 const getPageStart = index => Math.floor(index / state.pageSize) * state.pageSize;
@@ -2608,9 +2622,15 @@ window.addEventListener("message", ({ data: msg }) => {
             state.totalInstructions = msg.totalInstructions;
             state.pageSize = msg.pageSize;
             state.baseAddress = msg.baseAddress;
+            if (msg.isLive) {
+                state.isLive = true;
+                liveToolbar.classList.add('visible');
+                startLiveRefresh();
+            }
             break;
         case "disasmPage":
             console.log('[WEBVIEW] disasmPage:', msg.rows?.length || 0, 'rows, startIndex:', msg.startIndex);
+            liveRefreshPending = false;
             state.loadedPages.set(msg.startIndex, msg.rows);
             if (msg.startIndex === getPageStart(state.cursor)) {
                 state.disasmRows = msg.rows;
@@ -3020,7 +3040,7 @@ function updateCursor() {
     const rowEl = grid.children[localIndex];
     if (!rowEl) return;
     rowEl.classList.add("active");
-    rowEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    rowEl.scrollIntoView({ block: "nearest", behavior: "instant" });
     const row = state.disasmRows[localIndex];
     if (!row) return;
     handleBranchHighlight(row, localIndex);
@@ -3052,6 +3072,36 @@ function handleBranchHighlight(row, rowIndex) {
         }
     }
 }
+
+function startLiveRefresh() {
+    if (liveRefreshTimer !== null) { return; }
+    liveRefreshTimer = setInterval(doLiveRefresh, 1000);
+}
+
+function doLiveRefresh() {
+    if (liveRefreshPending) { return; }
+    liveRefreshPending = true;
+    const startIndex = getPageStart(state.cursor);
+    state.loadedPages.delete(startIndex);
+    vscode.postMessage({ type: 'requestPage', startIndex });
+}
+
+function manualRefresh() {
+    if (liveRefreshPending) { return; }
+    liveRefreshPending = true;
+    const startIndex = getPageStart(state.cursor);
+    state.loadedPages.delete(startIndex);
+    vscode.postMessage({ type: 'requestPage', startIndex });
+}
+
+refreshBtn.addEventListener('click', manualRefresh);
+
+window.addEventListener('unload', () => {
+    if (liveRefreshTimer !== null) {
+        clearInterval(liveRefreshTimer);
+        liveRefreshTimer = null;
+    }
+});
 `;
 }
 
@@ -3343,6 +3393,46 @@ body {
     display: block;
 }
 
+#live-toolbar {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    background: #1e3a1e;
+    border-bottom: 1px solid #3e3e42;
+    padding: 4px 12px;
+}
+
+#live-toolbar.visible {
+    display: flex;
+}
+
+.live-indicator {
+    color: #4ec94e;
+    font-size: 11px;
+    font-weight: bold;
+    animation: live-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+#refresh-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 10px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+#refresh-btn:hover {
+    background: #505050;
+}
+
 </style>`;
 }
 
@@ -3389,10 +3479,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.DisasmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
 const fs = __importStar(__webpack_require__(3));
-const path = __importStar(__webpack_require__(16));
-const child_process_1 = __webpack_require__(11);
+const path = __importStar(__webpack_require__(8));
+const child_process_1 = __webpack_require__(9);
 const helpers_1 = __webpack_require__(4);
-const disasmPanelTemplate_1 = __webpack_require__(8);
+const disasmPanelTemplate_1 = __webpack_require__(10);
 const extension_1 = __webpack_require__(0);
 /** Memory regions exposed as separate editor windows when the emulator is running. */
 const LIVE_REGIONS = [
@@ -3521,7 +3611,7 @@ class DisasmPanelProvider {
             name: g.name, path: g.path
         }));
         const templateData = {
-            connected: this.emulatorProcess != null,
+            connected: this.emulatorProcess != null || this.socketClient.isConnected(),
             emulators,
             biosOptions,
             gameOptions,
@@ -3532,10 +3622,16 @@ class DisasmPanelProvider {
     // ── Emulator launch ───────────────────────────────────────────────────────
     handleConnect(emulatorPath, biosPath, gamePath) {
         const out = (0, extension_1.getOutputChannel)();
-        // Toggle: if already running, kill it
-        if (this.emulatorProcess) {
-            this.emulatorProcess.kill();
-            out.appendLine('[INFO] Emulator stopped by user.');
+        // Toggle: if already running or already socket-connected, stop/disconnect
+        if (this.emulatorProcess || this.socketClient.isConnected()) {
+            if (this.emulatorProcess) {
+                this.emulatorProcess.kill();
+                out.appendLine('[INFO] Emulator stopped by user.');
+            }
+            else {
+                out.appendLine('[INFO] Disconnected from server.');
+            }
+            this.socketClient.disconnect();
             this.cleanupProcess();
             return;
         }
@@ -3543,6 +3639,24 @@ class DisasmPanelProvider {
             vscode.window.showWarningMessage('Please select an emulator.');
             return;
         }
+        out.show(true);
+        // Try connecting to an already-running server first. If the C# server
+        // was started manually (e.g. `dotnet run -- --server` or `--run`), we
+        // can reuse it without spawning a new process.
+        this.socketClient.connect().then(async () => {
+            out.appendLine('[INFO] Connected to existing emulator server. Opening memory views…');
+            this.webview?.postMessage({ command: 'connectionStatus', connected: true });
+            for (const r of LIVE_REGIONS) {
+                await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+            }
+        }).catch(() => {
+            // No existing server — spawn the emulator and then connect
+            this.spawnAndConnect(emulatorPath, biosPath, gamePath);
+        });
+    }
+    /** Spawn the emulator executable and, once the embedded server is up, connect. */
+    spawnAndConnect(emulatorPath, biosPath, gamePath) {
+        const out = (0, extension_1.getOutputChannel)();
         const resolvedExe = this.resolvePath(emulatorPath);
         const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
         const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
@@ -3553,7 +3667,6 @@ class DisasmPanelProvider {
         if (resolvedDisc) {
             cliArgs.push('--disc', resolvedDisc);
         }
-        out.show(true);
         out.appendLine(`[INFO] Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
         const proc = (0, child_process_1.spawn)(resolvedExe, cliArgs, {
             windowsHide: true,
@@ -3600,7 +3713,7 @@ class DisasmPanelProvider {
                 }
             }
             catch {
-                if (attempts < maxAttempts && this.emulatorProcess) {
+                if (attempts < maxAttempts) {
                     setTimeout(tryConnect, 500);
                 }
                 else {
@@ -3625,7 +3738,7 @@ class DisasmPanelProvider {
         const timestamp = DisasmPanelProvider.formatSnapshotTimestamp(new Date());
         const snapshotsDir = this.workspaceRoot
             ? path.join(this.workspaceRoot, 'snapshots', timestamp)
-            : path.join((__webpack_require__(17).tmpdir)(), 'ps2snapshots', timestamp);
+            : path.join((__webpack_require__(12).tmpdir)(), 'ps2snapshots', timestamp);
         out.appendLine(`[INFO] Taking snapshot → ${snapshotsDir}`);
         try {
             const regions = await this.socketClient.snapshot(snapshotsDir);
@@ -3680,6 +3793,18 @@ exports.DisasmPanelProvider = DisasmPanelProvider;
 
 /***/ }),
 /* 8 */
+/***/ ((module) => {
+
+module.exports = require("path");
+
+/***/ }),
+/* 9 */
+/***/ ((module) => {
+
+module.exports = require("child_process");
+
+/***/ }),
+/* 10 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -3688,7 +3813,7 @@ exports.DisasmPanelProvider = DisasmPanelProvider;
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getDisasmPanelHtml = getDisasmPanelHtml;
-const disasmPanelStyles_1 = __webpack_require__(9);
+const disasmPanelStyles_1 = __webpack_require__(11);
 function getDisasmPanelHtml(data, nonce) {
     return `<!DOCTYPE html>
 <html>
@@ -3853,7 +3978,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 9 */
+/* 11 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -3962,7 +4087,13 @@ button:disabled {
 
 
 /***/ }),
-/* 10 */
+/* 12 */
+/***/ ((module) => {
+
+module.exports = require("os");
+
+/***/ }),
+/* 13 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -4002,11 +4133,9 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AsmPanelProvider = void 0;
 const vscode = __importStar(__webpack_require__(1));
-const child_process_1 = __webpack_require__(11);
 const helpers_1 = __webpack_require__(4);
-const asmPanelTemplate_1 = __webpack_require__(12);
+const asmPanelTemplate_1 = __webpack_require__(14);
 const extension_1 = __webpack_require__(0);
-let outputChannel;
 class AsmPanelProvider {
     webview;
     // Register the provider with VS Code
@@ -4025,10 +4154,6 @@ class AsmPanelProvider {
             emulators: ['Project64', 'Mupen64Plus', 'RetroArch']
         };
         webviewView.webview.html = (0, asmPanelTemplate_1.getAsmPanelHtml)(templateData, (0, helpers_1.getNonce)());
-        // Ensure output channel exists
-        if (!outputChannel) {
-            outputChannel = vscode.window.createOutputChannel('Assembler');
-        }
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
@@ -4037,12 +4162,6 @@ class AsmPanelProvider {
                     break;
                 case 'assemble':
                     await this.handleAssemble(message.data);
-                    break;
-                case 'compile':
-                    this.runCds('-c');
-                    break;
-                case 'decompile':
-                    this.runCds('-d');
                     break;
             }
         });
@@ -4081,57 +4200,12 @@ class AsmPanelProvider {
             });
         }
     }
-    runCds(option) {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            vscode.window.showErrorMessage('No active file.');
-            return;
-        }
-        const sourcePath = editor.document.uri.fsPath;
-        const exePath = 'C:\\Users\\tholu\\source\\repos\\CodeDesignerAI\\CodeDesigner.ConsoleApp\\bin\\Debug\\net9.0\\CodeDesigner.ConsoleApp.exe';
-        const command = `"${exePath}" CDS ${option} -f "${sourcePath}"`;
-        outputChannel.clear();
-        outputChannel.show(true);
-        outputChannel.appendLine(`> ${command}\n`);
-        //outputChannel.appendLine(this.getWorkspaceRoot() ?? 'No workspace root');
-        (0, child_process_1.exec)(command, (error, stdout, stderr) => {
-            if (stderr) {
-                outputChannel.appendLine(stderr);
-            }
-            if (error) {
-                outputChannel.appendLine(`ERROR: ${error.message}`);
-                return;
-            }
-            try {
-                const result = JSON.parse(stdout);
-                // Show debug messages
-                result.debugMessages?.forEach(msg => outputChannel.appendLine(msg));
-                // Push cheatCodes back into the panel textarea
-                if (result.cheatCodes && this.webview) {
-                    this.webview.postMessage({
-                        command: 'setCode',
-                        code: result.cheatCodes
-                    });
-                }
-            }
-            catch (e) {
-                outputChannel.appendLine('Failed to parse compiler JSON output');
-                outputChannel.appendLine(stdout);
-            }
-        });
-    }
 }
 exports.AsmPanelProvider = AsmPanelProvider;
 
 
 /***/ }),
-/* 11 */
-/***/ ((module) => {
-
-module.exports = require("child_process");
-
-/***/ }),
-/* 12 */
+/* 14 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -4141,7 +4215,7 @@ module.exports = require("child_process");
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getAsmPanelHtml = getAsmPanelHtml;
-const asmPanelStyles_1 = __webpack_require__(13);
+const asmPanelStyles_1 = __webpack_require__(15);
 /**
  * Main panel template - returns complete HTML
  */
@@ -4271,7 +4345,7 @@ window.addEventListener('message', event => {
 
 
 /***/ }),
-/* 13 */
+/* 15 */
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -4368,7 +4442,7 @@ button:disabled {
 
 
 /***/ }),
-/* 14 */
+/* 16 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -4407,7 +4481,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SocketClient = void 0;
-const net = __importStar(__webpack_require__(15));
+const net = __importStar(__webpack_require__(17));
 /**
  * Socket client for communication with C# server
  */
@@ -4712,22 +4786,10 @@ exports.SocketClient = SocketClient;
 
 
 /***/ }),
-/* 15 */
-/***/ ((module) => {
-
-module.exports = require("net");
-
-/***/ }),
-/* 16 */
-/***/ ((module) => {
-
-module.exports = require("path");
-
-/***/ }),
 /* 17 */
 /***/ ((module) => {
 
-module.exports = require("os");
+module.exports = require("net");
 
 /***/ })
 /******/ 	]);
