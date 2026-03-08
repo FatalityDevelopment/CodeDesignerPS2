@@ -90,7 +90,7 @@ function getSearchPanel(): string {
 
 function getLiveToolbar(): string {
     return `<div id="live-toolbar">
-    <span class="live-indicator">● LIVE</span>
+    <span class="live-indicator" id="live-indicator">● LIVE</span>
     <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
     <button id="refresh-btn" title="Refresh current view">↻ Refresh</button>
 </div>`;
@@ -134,6 +134,7 @@ const gotoBtn = document.getElementById("goto-btn");
 const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
 const liveToolbar = document.getElementById("live-toolbar");
+const liveIndicator = document.getElementById("live-indicator");
 const refreshBtn = document.getElementById("refresh-btn");
 const playPauseBtn = document.getElementById("play-pause-btn");
 
@@ -152,10 +153,12 @@ const state = {
     currentMatch: -1,
     searchActive: false,
     gotoActive: false,
-    isLive: false
+    isLive: false,
+    breakpoints: new Set()
 };
 
 let liveRefreshTimer = null;
+let liveStatusTimer = null;
 let liveRefreshPending = false;
 let liveRefreshInterval = 1000;
 let livePaused = false;
@@ -199,6 +202,9 @@ window.addEventListener("message", ({ data: msg }) => {
         case "searchResults":
             console.log('[WEBVIEW] searchResults:', msg.matches?.length || 0, 'matches');
             handleSearchResults(msg.matches);
+            break;
+        case "status":
+            handleStatusUpdate(msg.paused, msg.pc, msg.breakpointHitAddress);
             break;
     }
 });
@@ -519,6 +525,11 @@ function renderDisassembly() {
         if (i === localCursor) row.classList.add("active");
         if (isRowSearchMatch(globalIndex)) row.classList.add("search-match");
         if (isRowCurrentMatch(globalIndex)) row.classList.add("search-current");
+        const rowAddr = parseInt(rowData.addr, 16);
+        if (state.breakpoints.has(rowAddr)) {
+            row.classList.add("breakpoint");
+            row.classList.add("breakpoint-active");
+        }
         row.innerHTML = buildDisasmRowHtml(rowData, globalIndex);
         row.onclick = () => {
             state.cursor = globalIndex;
@@ -557,6 +568,18 @@ grid.addEventListener("keydown", e => {
     if (state.searchActive && document.activeElement === searchInput) {
         return;
     }
+    // ArrowRight: navigate to branch/jump target address on current row
+    if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        navigateToCurrentRowTarget();
+        return;
+    }
+    // F9: toggle breakpoint on current row
+    if (e.key === 'F9') {
+        e.preventDefault();
+        toggleBreakpointAtCursor();
+        return;
+    }
     const delta = { ArrowDown: 1, ArrowUp: -1, PageDown: 50, PageUp: -50 }[e.key];
     if (!delta) return;
     e.preventDefault();
@@ -566,6 +589,60 @@ grid.addEventListener("keydown", e => {
         updateCursor();
     }
 });
+
+function navigateToCurrentRowTarget() {
+    const localIndex = getLocalIndex(state.cursor);
+    const row = state.disasmRows[localIndex];
+    if (!row) return;
+
+    // 1. Branch target: $XXXXXXXX in args
+    const branchMatch = row.args.match(/\\$([0-9A-F]{8})/i);
+    if (branchMatch) {
+        navigateToAddress(parseInt(branchMatch[1], 16));
+        return;
+    }
+
+    // 2. Jump target: 0xXXXXXXXX in args (e.g. j/jal instructions)
+    const jumpMatch = row.args.match(/0x([0-9A-F]{8})/i);
+    if (jumpMatch) {
+        navigateToAddress(parseInt(jumpMatch[1], 16));
+        return;
+    }
+
+    // 3. Any 8-digit hex address in the comment (analyzer-generated)
+    if (row.comment) {
+        const commentMatch = row.comment.match(/0x([0-9A-F]{8})/i)
+            || row.comment.match(/\\b([0-9A-F]{8})\\b/i);
+        if (commentMatch) {
+            navigateToAddress(parseInt(commentMatch[1], 16));
+            return;
+        }
+    }
+}
+
+function navigateToAddress(addr) {
+    if (addr < state.baseAddress) return;
+    const instrIndex = Math.floor((addr - state.baseAddress) / 4);
+    if (instrIndex < 0 || instrIndex >= state.totalInstructions) return;
+    state.cursor = instrIndex;
+    const pageReady = checkAndLoadPage();
+    if (pageReady) { updateCursor(); }
+}
+
+function toggleBreakpointAtCursor() {
+    const localIndex = getLocalIndex(state.cursor);
+    const row = state.disasmRows[localIndex];
+    if (!row) return;
+    const addr = parseInt(row.addr, 16);
+    if (state.breakpoints.has(addr)) {
+        state.breakpoints.delete(addr);
+        vscode.postMessage({ type: 'clearBreakpoint', address: addr });
+    } else {
+        state.breakpoints.add(addr);
+        vscode.postMessage({ type: 'setBreakpoint', address: addr });
+    }
+    renderDisassembly();
+}
 
 function checkAndLoadPage() {
     const startIndex = getPageStart(state.cursor);
@@ -640,12 +717,22 @@ function startLiveRefresh() {
     if (liveRefreshTimer !== null) { return; }
     if (livePaused) { return; }
     liveRefreshTimer = setInterval(doLiveRefresh, liveRefreshInterval);
+    // Poll emulator status every 800ms to detect breakpoint-triggered pauses
+    if (liveStatusTimer === null) {
+        liveStatusTimer = setInterval(() => {
+            vscode.postMessage({ type: 'getStatus' });
+        }, 800);
+    }
 }
 
 function stopLiveRefresh() {
     if (liveRefreshTimer !== null) {
         clearInterval(liveRefreshTimer);
         liveRefreshTimer = null;
+    }
+    if (liveStatusTimer !== null) {
+        clearInterval(liveStatusTimer);
+        liveStatusTimer = null;
     }
 }
 
@@ -674,20 +761,58 @@ function manualRefresh() {
 
 refreshBtn.addEventListener('click', manualRefresh);
 
+function setLivePausedUi(paused) {
+    if (paused) {
+        liveToolbar.classList.add('paused');
+        liveIndicator.classList.add('paused');
+        liveIndicator.textContent = '⏸ PAUSED';
+        playPauseBtn.textContent = '▶ Resume';
+        playPauseBtn.title = 'Resume live feed';
+        playPauseBtn.setAttribute('aria-label', 'Resume live feed');
+    } else {
+        liveToolbar.classList.remove('paused');
+        liveIndicator.classList.remove('paused');
+        liveIndicator.textContent = '● LIVE';
+        playPauseBtn.textContent = '⏸ Pause';
+        playPauseBtn.title = 'Pause live feed';
+        playPauseBtn.setAttribute('aria-label', 'Pause live feed');
+    }
+}
+
+function handleStatusUpdate(paused, pc, breakpointHitAddress) {
+    // If the emulator paused itself (e.g. breakpoint) and the user didn't
+    // manually pause, mirror that state in the UI.
+    if (paused && !livePaused) {
+        livePaused = true;
+        stopLiveRefresh();
+        setLivePausedUi(true);
+        // Navigate cursor to the current PC so the user sees where execution stopped
+        if (pc !== undefined && pc !== null) {
+            const instrIndex = Math.floor((pc - state.baseAddress) / 4);
+            if (instrIndex >= 0 && instrIndex < state.totalInstructions) {
+                state.cursor = instrIndex;
+                const pageReady = checkAndLoadPage();
+                if (pageReady) { updateCursor(); }
+            }
+        }
+    } else if (!paused && livePaused) {
+        // Emulator resumed externally
+        livePaused = false;
+        setLivePausedUi(false);
+        startLiveRefresh();
+    }
+}
+
 playPauseBtn.addEventListener('click', () => {
     livePaused = !livePaused;
     if (livePaused) {
         stopLiveRefresh();
         vscode.postMessage({ type: 'pause' });
-        playPauseBtn.textContent = '▶ Play';
-        playPauseBtn.title = 'Resume live feed';
-        playPauseBtn.setAttribute('aria-label', 'Resume live feed');
+        setLivePausedUi(true);
     } else {
         vscode.postMessage({ type: 'resume' });
         startLiveRefresh();
-        playPauseBtn.textContent = '⏸ Pause';
-        playPauseBtn.title = 'Pause live feed';
-        playPauseBtn.setAttribute('aria-label', 'Pause live feed');
+        setLivePausedUi(false);
     }
 });
 
@@ -695,6 +820,10 @@ window.addEventListener('unload', () => {
     if (liveRefreshTimer !== null) {
         clearInterval(liveRefreshTimer);
         liveRefreshTimer = null;
+    }
+    if (liveStatusTimer !== null) {
+        clearInterval(liveStatusTimer);
+        liveStatusTimer = null;
     }
 });
 `;

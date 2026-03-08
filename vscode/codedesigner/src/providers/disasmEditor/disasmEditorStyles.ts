@@ -246,6 +246,21 @@ body {
     background: #264f78;
 }
 
+.row.breakpoint .addr::before {
+    content: '●';
+    color: #e05555;
+    margin-right: 4px;
+    font-size: 10px;
+}
+
+.row.breakpoint-active {
+    background: #3a1414;
+}
+
+.row.active.breakpoint-active {
+    background: #264f78;
+}
+
 .row.search-match {
     background: #613214;
 }
@@ -299,10 +314,15 @@ body {
     background: #1e3a1e;
     border-bottom: 1px solid #3e3e42;
     padding: 4px 12px;
+    transition: background 0.2s;
 }
 
 #live-toolbar.visible {
     display: flex;
+}
+
+#live-toolbar.paused {
+    background: #3a1e1e;
 }
 
 .live-indicator {
@@ -310,6 +330,11 @@ body {
     font-size: 11px;
     font-weight: bold;
     animation: live-pulse 1.5s ease-in-out infinite;
+}
+
+.live-indicator.paused {
+    color: #e05555;
+    animation: none;
 }
 
 @keyframes live-pulse {
