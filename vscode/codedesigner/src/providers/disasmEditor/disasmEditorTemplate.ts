@@ -91,7 +91,15 @@ function getSearchPanel(): string {
 function getLiveToolbar(): string {
     return `<div id="live-toolbar">
     <span class="live-indicator">● LIVE</span>
+    <button id="play-pause-btn" title="Pause live feed" aria-label="Pause live feed">⏸ Pause</button>
     <button id="refresh-btn" title="Refresh current view">↻ Refresh</button>
+    <select id="interval-select" title="Live refresh interval" aria-label="Live refresh interval">
+        <option value="250">250 ms</option>
+        <option value="500">500 ms</option>
+        <option value="1000" selected>1 s</option>
+        <option value="2000">2 s</option>
+        <option value="5000">5 s</option>
+    </select>
 </div>`;
 }
 
@@ -134,6 +142,8 @@ const gotoInfo = document.getElementById("goto-info");
 const closeGoto = document.getElementById("close-goto");
 const liveToolbar = document.getElementById("live-toolbar");
 const refreshBtn = document.getElementById("refresh-btn");
+const playPauseBtn = document.getElementById("play-pause-btn");
+const intervalSelect = document.getElementById("interval-select");
 
 const state = {
     cursor: 0,
@@ -155,6 +165,8 @@ const state = {
 
 let liveRefreshTimer = null;
 let liveRefreshPending = false;
+let liveRefreshInterval = 1000;
+let livePaused = false;
 
 const clamp = (val, min, max) => Math.max(min, Math.min(val, max));
 const getPageStart = index => Math.floor(index / state.pageSize) * state.pageSize;
@@ -626,7 +638,22 @@ document.addEventListener('wheel', e => {
 
 function startLiveRefresh() {
     if (liveRefreshTimer !== null) { return; }
-    liveRefreshTimer = setInterval(doLiveRefresh, 1000);
+    if (livePaused) { return; }
+    liveRefreshTimer = setInterval(doLiveRefresh, liveRefreshInterval);
+}
+
+function stopLiveRefresh() {
+    if (liveRefreshTimer !== null) {
+        clearInterval(liveRefreshTimer);
+        liveRefreshTimer = null;
+    }
+}
+
+function restartLiveRefresh() {
+    stopLiveRefresh();
+    if (!livePaused) {
+        startLiveRefresh();
+    }
 }
 
 function doLiveRefresh() {
@@ -646,6 +673,26 @@ function manualRefresh() {
 }
 
 refreshBtn.addEventListener('click', manualRefresh);
+
+playPauseBtn.addEventListener('click', () => {
+    livePaused = !livePaused;
+    if (livePaused) {
+        stopLiveRefresh();
+        playPauseBtn.textContent = '▶ Play';
+        playPauseBtn.title = 'Resume live feed';
+        playPauseBtn.setAttribute('aria-label', 'Resume live feed');
+    } else {
+        startLiveRefresh();
+        playPauseBtn.textContent = '⏸ Pause';
+        playPauseBtn.title = 'Pause live feed';
+        playPauseBtn.setAttribute('aria-label', 'Pause live feed');
+    }
+});
+
+intervalSelect.addEventListener('change', () => {
+    liveRefreshInterval = parseInt(intervalSelect.value, 10);
+    restartLiveRefresh();
+});
 
 window.addEventListener('unload', () => {
     if (liveRefreshTimer !== null) {
