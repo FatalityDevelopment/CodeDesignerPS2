@@ -172,6 +172,14 @@ namespace CodeDesigner.Mips64LE
                 Console.WriteLine($"EE: HLE bios[0x{v1:x}]: {fn}  (pc=0x{pc:x8})");
             };
 
+            // ── Start socket server alongside the emulator ────────────────────
+            // The VSCode extension connects on port 8765 for DISASSEMBLE / READMEM /
+            // SNAPSHOT commands while the emulator is running.
+            var embeddedServer = new SocketServer(8765) { Scheduler = scheduler };
+            embeddedServer.ClientConnected  += (_, ep) => Console.WriteLine($"[Server] Client connected: {ep}");
+            embeddedServer.ClientDisconnected += (_, _) => Console.WriteLine("[Server] Client disconnected");
+            var serverTask = Task.Run(() => embeddedServer.StartAsync());
+
             // ── Run loop ──────────────────────────────────────────────────────
             Console.WriteLine();
             Console.WriteLine("Emulator running. Press Ctrl+C to stop.");
@@ -770,6 +778,9 @@ namespace CodeDesigner.Mips64LE
             uint finalEePc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
             Console.WriteLine($"(EE  pc:0x{finalEePc:x8} [{GetPcRegion(finalEePc)}]) {DisassembleAt(scheduler.EE.Bus, finalEePc)}");
             Console.WriteLine($"(IOP pc:0x{scheduler.IOP.State.PC:x8} [{GetPcRegion(scheduler.IOP.State.PC)}])");
+
+            embeddedServer.Stop();
+            await serverTask.ConfigureAwait(false);
 
             isoStream?.Dispose();
         }

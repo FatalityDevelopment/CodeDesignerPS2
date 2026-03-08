@@ -67,8 +67,8 @@ export function activate(context: vscode.ExtensionContext) {
 	// Check for open .bin files after a short delay to ensure extension is fully activated
 	setTimeout(checkForOpenBinFiles, 500);
 
-	// Register webview panels
-	const disasmPanelProvider = new DisasmPanelProvider();
+	// Register webview panels — pass socketClient so the panel can auto-connect
+	const disasmPanelProvider = new DisasmPanelProvider(socketClient, editorProvider);
 	disasmPanelProvider.register(context);
 
 	const asmPanelProvider = new AsmPanelProvider();
@@ -122,6 +122,17 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	context.subscriptions.push(connectCommand, disconnectCommand, sendMessageCommand);
+
+	// ── Live memory view command ──────────────────────────────────────────────
+	// Called by DisasmPanelProvider after the emulator connects.
+	// Opens one editor panel per memory region (EE RAM, IOP RAM, BIOS ROM, Scratchpad).
+	const openLiveMemoryCommand = vscode.commands.registerCommand(
+		'codedesigner.openLiveMemory',
+		async (args: { region: string; address: number; size: number; label: string }) => {
+			await editorProvider.openLiveMemoryView(args.region, args.address, args.size, args.label);
+		}
+	);
+	context.subscriptions.push(openLiveMemoryCommand);
 
 	// Auto-connect on activation
 	outputChannel.appendLine('[INFO] Extension activated, attempting to connect to server...');

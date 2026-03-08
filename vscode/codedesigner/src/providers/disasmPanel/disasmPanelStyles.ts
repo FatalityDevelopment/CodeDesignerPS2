@@ -53,5 +53,49 @@ button {
 button:hover {
     background: var(--vscode-button-hoverBackground);
 }
+
+button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.snapshot-list {
+    margin-top: 12px;
+    border-top: 1px solid var(--vscode-input-border);
+    padding-top: 8px;
+}
+
+.snapshot-list h4 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.snapshot-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    font-size: 12px;
+}
+
+.snapshot-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.snapshot-time {
+    color: var(--vscode-descriptionForeground);
+    white-space: nowrap;
+}
+
+.open-snapshot-btn {
+    padding: 2px 8px;
+    font-size: 11px;
+}
 </style>`;
 }

@@ -213,7 +213,109 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     });
   }
 
-  private async performSearch(
+    /**
+     * Open a live memory view panel (no backing file — pages fetched via socket).
+     * Called once per region after connecting to the embedded emulator server.
+     */
+    async openLiveMemoryView(
+        region: string,
+        baseAddress: number,
+        totalBytes: number,
+        label: string
+    ): Promise<void> {
+        if (!this.socketClient || !this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator. Connect first.');
+            return;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+            'disasm.liveMemory',
+            label,
+            vscode.ViewColumn.One,
+            { enableScripts: true, retainContextWhenHidden: true }
+        );
+
+        panel.webview.html = getDisasmEditorHtml({} as DisasmEditorData, getNonce());
+
+        const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
+
+        panel.webview.postMessage({
+            type: 'init',
+            totalInstructions,
+            pageSize: DisasmEditorProvider.PAGE_SIZE,
+            baseAddress,
+        });
+
+        // Send first page and hex view
+        await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
+        await this.sendLiveHexView(panel, region, baseAddress, baseAddress,
+            DisasmEditorProvider.INSTRUCTION_SIZE);
+
+        panel.webview.onDidReceiveMessage(async (message) => {
+            if (message.type === 'requestPage') {
+                await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, message.startIndex);
+            } else if (message.type === 'updateHex') {
+                await this.sendLiveHexView(panel, region, baseAddress, message.address,
+                    message.length || DisasmEditorProvider.INSTRUCTION_SIZE);
+            } else if (message.type === 'search') {
+                // Full-region live search is expensive; return empty for now
+                panel.webview.postMessage({ type: 'searchResults', matches: [] });
+            }
+        });
+    }
+
+    private async sendLiveDisasmPage(
+        panel: vscode.WebviewPanel,
+        region: string,
+        baseAddress: number,
+        totalBytes: number,
+        startIndex: number
+    ): Promise<void> {
+        if (!this.socketClient || !this.socketClient.isConnected()) { return; }
+
+        const startOffset = startIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
+        const maxBytes    = DisasmEditorProvider.PAGE_SIZE * DisasmEditorProvider.INSTRUCTION_SIZE;
+        const readLength  = Math.min(totalBytes - startOffset, maxBytes);
+        if (readLength <= 0) { return; }
+
+        const startAddr = baseAddress + startOffset;
+        try {
+            const buffer = await this.socketClient.readMemory(startAddr, readLength, region);
+            const rows   = await this.disassembleWithBackend(startAddr, buffer);
+            panel.webview.postMessage({ type: 'disasmPage', rows, startIndex });
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            console.error(`[LIVE] sendLiveDisasmPage failed at 0x${startAddr.toString(16)}: ${msg}`);
+        }
+    }
+
+    private async sendLiveHexView(
+        panel: vscode.WebviewPanel,
+        region: string,
+        baseAddress: number,
+        highlightAddr: number,
+        highlightLength: number
+    ): Promise<void> {
+        if (!this.socketClient || !this.socketClient.isConnected()) { return; }
+
+        const alignedAddr = Math.max(baseAddress, (highlightAddr & ~0xf) - 0x10);
+        try {
+            const buffer = await this.socketClient.readMemory(
+                alignedAddr, DisasmEditorProvider.HEX_VIEW_SIZE, region);
+            panel.webview.postMessage({
+                type: 'hexview',
+                data: Array.from(buffer),
+                offset: alignedAddr,
+                highlight_addr:   highlightAddr,
+                highlight_length: highlightLength,
+            });
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            console.error(`[LIVE] sendLiveHexView failed at 0x${alignedAddr.toString(16)}: ${msg}`);
+        }
+    }
+
+    private async performSearch(
     webviewPanel: vscode.WebviewPanel,
     fileData: Buffer,
     query: string,

@@ -7,6 +7,9 @@ interface CommandMessage {
     Command: string;
     Data?: string;
     Address?: number;
+    Length?: number;
+    Region?: string;
+    OutputPath?: string;
 }
 
 /**
@@ -17,7 +20,9 @@ interface CommandResponse {
     Command?: string;
     Message?: string;
     Error?: string;
+    Data?: string;
     Results?: InstructionResult[];
+    Regions?: SnapshotRegion[];
 }
 
 /**
@@ -29,6 +34,16 @@ interface InstructionResult {
     Hex?: string;
     Error?: string;
     Comment?: string;
+}
+
+/**
+ * One memory region written by a SNAPSHOT command.
+ */
+export interface SnapshotRegion {
+    Label: string;
+    File: string;
+    BaseAddress: number;
+    Size: number;
 }
 
 /**
@@ -315,6 +330,48 @@ export class SocketClient {
         }
 
         return response.Results || [];
+    }
+
+    /**
+     * Read raw bytes from the live emulator memory.
+     * @param address  - Start virtual address (EE or IOP space)
+     * @param length   - Number of bytes to read (1–65536 per call)
+     * @param region   - "ee" (default) or "iop"
+     */
+    public async readMemory(address: number, length: number, region: string = 'ee'): Promise<Buffer> {
+        const command: CommandMessage = {
+            Command: 'READMEM',
+            Address: address,
+            Length: length,
+            Region: region,
+        };
+
+        const response = await this.sendCommand(command);
+
+        if (!response.Success || !response.Data) {
+            throw new Error(response.Error || 'ReadMem failed');
+        }
+
+        return Buffer.from(response.Data, 'base64');
+    }
+
+    /**
+     * Take a snapshot: write all memory regions to .bin files in outputPath.
+     * Returns the list of written region descriptors.
+     */
+    public async snapshot(outputPath: string): Promise<SnapshotRegion[]> {
+        const command: CommandMessage = {
+            Command: 'SNAPSHOT',
+            OutputPath: outputPath,
+        };
+
+        const response = await this.sendCommand(command);
+
+        if (!response.Success) {
+            throw new Error(response.Error || 'Snapshot failed');
+        }
+
+        return response.Regions || [];
     }
 
     /**
