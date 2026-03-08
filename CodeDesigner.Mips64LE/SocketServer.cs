@@ -634,16 +634,20 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle RESTART command — resets both CPUs to their power-on states.
+        /// Handle RESTART command — resets both CPUs to their power-on states and
+        /// leaves the emulator paused so the client can set breakpoints before resuming.
+        /// Unpauses first in case the emulator was already halted; Reset() restores
+        /// all registers and clears counters regardless of Paused state, then we
+        /// set Paused=true so the scheduler stops at the reset vector.
         /// </summary>
         private string HandleRestart()
         {
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
-            Scheduler.Paused = false;
+            Scheduler.Paused = false;   // ungate the run-gate so Reset() can run cleanly
             Scheduler.Reset();
-            Scheduler.Paused = true;
+            Scheduler.Paused = true;    // halt at reset vector; client resumes when ready
             return CreateSuccessResponse("Restarted");
         }
 

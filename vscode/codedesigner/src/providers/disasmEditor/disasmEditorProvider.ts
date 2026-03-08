@@ -316,7 +316,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                             statusMsg.registers = regs;
                             // Fetch stack memory (128 bytes from $sp = gpr[29])
                             const sp = regs.gpr[29];
-                            if (sp) {
+                            if (sp !== undefined) {
                                 try {
                                     const stackBuf = await this.socketClient!.readMemory(sp, 128, 'ee');
                                     statusMsg.stackBytes = Array.from(stackBuf);
