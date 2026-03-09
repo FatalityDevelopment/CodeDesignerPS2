@@ -192,6 +192,8 @@ export class DisasmEditorComponent implements AfterViewInit {
   private initEditorLogic(): void {
     const vscode = getVsCodeApi();
 
+    const SCAN_TIMEOUT_MS = 120_000;
+
     // ── DOM refs ──────────────────────────────────────────────────────────────
     const hexContainer   = document.getElementById('hex-container')!;
     const grid           = document.getElementById('grid')!;
@@ -1114,7 +1116,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       setTimeout(() => {
         symScanStringsBtn.disabled = false;
         if (symStringsStatus.textContent === 'Scanning…') { symStringsStatus.textContent = ''; }
-      }, 120000);
+      }, SCAN_TIMEOUT_MS);
     });
 
     symScanFunctionsBtn.addEventListener('click', () => {
@@ -1124,7 +1126,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       setTimeout(() => {
         symScanFunctionsBtn.disabled = false;
         if (symFunctionsStatus.textContent === 'Scanning…') { symFunctionsStatus.textContent = ''; }
-      }, 120000);
+      }, SCAN_TIMEOUT_MS);
     });
 
     // ── Debug panel ───────────────────────────────────────────────────────────

@@ -55445,6 +55445,7 @@ let DisasmEditorComponent = class DisasmEditorComponent {
     }
     initEditorLogic() {
         const vscode = (0,_shared_vscode_api__WEBPACK_IMPORTED_MODULE_1__.getVsCodeApi)();
+        const SCAN_TIMEOUT_MS = 120000;
         // ── DOM refs ──────────────────────────────────────────────────────────────
         const hexContainer = document.getElementById('hex-container');
         const grid = document.getElementById('grid');
@@ -56441,7 +56442,7 @@ let DisasmEditorComponent = class DisasmEditorComponent {
                 if (symStringsStatus.textContent === 'Scanning…') {
                     symStringsStatus.textContent = '';
                 }
-            }, 120000);
+            }, SCAN_TIMEOUT_MS);
         });
         symScanFunctionsBtn.addEventListener('click', () => {
             symFunctionsStatus.textContent = 'Scanning…';
@@ -56452,7 +56453,7 @@ let DisasmEditorComponent = class DisasmEditorComponent {
                 if (symFunctionsStatus.textContent === 'Scanning…') {
                     symFunctionsStatus.textContent = '';
                 }
-            }, 120000);
+            }, SCAN_TIMEOUT_MS);
         });
         // ── Debug panel ───────────────────────────────────────────────────────────
         const MIPS_REG_NAMES = [
