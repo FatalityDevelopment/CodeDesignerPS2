@@ -411,6 +411,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     console.error(`[LIVE] Failed to clear all breakpoints: ${err?.message ?? err}`);
                 }
             } else if (message.type === 'getStatus') {
+                if (!this.socketClient?.isConnected()) { return; }
                 try {
                     const status = await this.socketClient!.getPC();
                     const statusMsg: any = { type: 'status', ...status };
