@@ -10,6 +10,17 @@ body {
     flex-direction: column;
 }
 
+/* Angular renders the component inside <app-disasm-editor>.
+   Make it a flex column that fills the full viewport so that the
+   flex-shrink / flex-grow rules on #header and #content-wrapper work. */
+app-disasm-editor {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
 #header {
     flex-shrink: 0;
 }

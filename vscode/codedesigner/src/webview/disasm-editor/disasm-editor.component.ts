@@ -268,6 +268,10 @@ export class DisasmEditorComponent implements AfterViewInit {
     let _editOverlayAddr = 0;
     let _editOverlayAddrHex = '';
 
+    // Render the hex column-header row immediately so it is always visible,
+    // even before hex data arrives from the extension host.
+    hexHeader.appendChild(buildHexHeader());
+
     // ── State ─────────────────────────────────────────────────────────────────
     const state = {
       cursor: 0,
