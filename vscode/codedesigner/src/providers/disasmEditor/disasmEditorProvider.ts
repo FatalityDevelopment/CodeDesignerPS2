@@ -171,7 +171,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                script-src ${webview.cspSource};">
 </head>
 <body>
-<app-disasm-editor></app-disasm-editor>
+<app-disasm-editor><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-disasm-editor>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;
@@ -183,7 +183,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   ): Promise<void> {
     webviewPanel.webview.options = {
       enableScripts: true,
-      localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+      localResourceRoots: [this._extensionUri]
     };
 
     // Track both async preconditions: file loaded + webview ready.
@@ -216,6 +216,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         // Webview has bootstrapped and its listener is registered.
         readyReceived = true;
         if (fileData) { await sendInit(fileData); }
+        return;
+      }
+      if (message.type === 'bootstrapError') {
+        getOutputChannel().appendLine(
+          `[ERROR] Disasm editor Angular bootstrap failed: ${message.error ?? '(no details)'}`
+        );
         return;
       }
       if (!fileData) { return; }
@@ -310,7 +316,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-                localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+                localResourceRoots: [this._extensionUri]
             }
         );
 
@@ -349,6 +355,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     await this.sendLiveHexView(panel, region, baseAddress, baseAddress,
                         DisasmEditorProvider.INSTRUCTION_SIZE);
                 }
+                return;
+            }
+            if (message.type === 'bootstrapError') {
+                getOutputChannel().appendLine(
+                    `[ERROR] Live memory view Angular bootstrap failed (${label}): ${message.error ?? '(no details)'}`
+                );
                 return;
             }
             if (message.type === 'requestPage') {

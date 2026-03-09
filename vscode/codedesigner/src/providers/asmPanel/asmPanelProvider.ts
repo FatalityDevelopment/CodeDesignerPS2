@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getSocketClient } from '../../extension';
+import { getSocketClient, getOutputChannel } from '../../extension';
 
 export class AsmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
@@ -19,13 +19,19 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
         // Setup webview options
         webviewView.webview.options = {
             enableScripts: true,
-            localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+            localResourceRoots: [this._extensionUri]
         };
 
         webviewView.webview.html = this.getHtml(webviewView.webview);
 
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async message => {
+            if (message.type === 'bootstrapError') {
+                getOutputChannel().appendLine(
+                    `[ERROR] Asm panel Angular bootstrap failed: ${message.error ?? '(no details)'}`
+                );
+                return;
+            }
             switch (message.command) {
                 case 'connect':
                     vscode.window.showInformationMessage(
@@ -93,7 +99,7 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
-<app-asm-panel></app-asm-panel>
+<app-asm-panel><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-asm-panel>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;

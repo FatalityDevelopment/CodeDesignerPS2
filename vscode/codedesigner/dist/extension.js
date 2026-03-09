@@ -372,7 +372,7 @@ class DisasmEditorProvider {
                script-src ${webview.cspSource};">
 </head>
 <body>
-<app-disasm-editor></app-disasm-editor>
+<app-disasm-editor><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-disasm-editor>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;
@@ -380,7 +380,7 @@ class DisasmEditorProvider {
     async resolveCustomEditor(document, webviewPanel) {
         webviewPanel.webview.options = {
             enableScripts: true,
-            localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+            localResourceRoots: [this._extensionUri]
         };
         // Track both async preconditions: file loaded + webview ready.
         // init is sent only when both are satisfied (order-independent).
@@ -409,6 +409,10 @@ class DisasmEditorProvider {
                 if (fileData) {
                     await sendInit(fileData);
                 }
+                return;
+            }
+            if (message.type === 'bootstrapError') {
+                (0, extension_1.getOutputChannel)().appendLine(`[ERROR] Disasm editor Angular bootstrap failed: ${message.error ?? '(no details)'}`);
                 return;
             }
             if (!fileData) {
@@ -493,7 +497,7 @@ class DisasmEditorProvider {
         const panel = vscode.window.createWebviewPanel('disasm.liveMemory', label, vscode.ViewColumn.One, {
             enableScripts: true,
             retainContextWhenHidden: true,
-            localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+            localResourceRoots: [this._extensionUri]
         });
         // Track this panel for pause/resume broadcast and address lookup.
         const physBase = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
@@ -527,6 +531,10 @@ class DisasmEditorProvider {
                 if (this.socketClient?.isConnected()) {
                     await this.sendLiveHexView(panel, region, baseAddress, baseAddress, DisasmEditorProvider.INSTRUCTION_SIZE);
                 }
+                return;
+            }
+            if (message.type === 'bootstrapError') {
+                (0, extension_1.getOutputChannel)().appendLine(`[ERROR] Live memory view Angular bootstrap failed (${label}): ${message.error ?? '(no details)'}`);
                 return;
             }
             if (message.type === 'requestPage') {
@@ -1098,7 +1106,7 @@ class DisasmPanelProvider {
         // Setup webview options
         webviewView.webview.options = {
             enableScripts: true,
-            localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+            localResourceRoots: [this._extensionUri]
         };
         // Render the Angular shell.
         // NOTE: Do NOT call postInitMessage() here — wait for the Angular component
@@ -1107,6 +1115,10 @@ class DisasmPanelProvider {
         webviewView.webview.html = this.getHtml(webviewView.webview);
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async (msg) => {
+            if (msg.type === 'bootstrapError') {
+                (0, extension_1.getOutputChannel)().appendLine(`[ERROR] Disasm panel Angular bootstrap failed: ${msg.error ?? '(no details)'}`);
+                return;
+            }
             switch (msg.command) {
                 case 'ready':
                     // Angular component has bootstrapped and its message listener
@@ -1220,7 +1232,7 @@ class DisasmPanelProvider {
                script-src ${webview.cspSource};">
 </head>
 <body>
-<app-disasm-panel></app-disasm-panel>
+<app-disasm-panel><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-disasm-panel>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;
@@ -1552,11 +1564,15 @@ class AsmPanelProvider {
         // Setup webview options
         webviewView.webview.options = {
             enableScripts: true,
-            localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+            localResourceRoots: [this._extensionUri]
         };
         webviewView.webview.html = this.getHtml(webviewView.webview);
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async (message) => {
+            if (message.type === 'bootstrapError') {
+                (0, extension_1.getOutputChannel)().appendLine(`[ERROR] Asm panel Angular bootstrap failed: ${message.error ?? '(no details)'}`);
+                return;
+            }
             switch (message.command) {
                 case 'connect':
                     vscode.window.showInformationMessage('Connect clicked (emulator hookup later)');
@@ -1614,7 +1630,7 @@ class AsmPanelProvider {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
-<app-asm-panel></app-asm-panel>
+<app-asm-panel><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-asm-panel>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;

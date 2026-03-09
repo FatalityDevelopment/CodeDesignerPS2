@@ -64618,7 +64618,23 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-(0,_angular_platform_browser__WEBPACK_IMPORTED_MODULE_1__.bootstrapApplication)(_asm_panel_component__WEBPACK_IMPORTED_MODULE_2__.AsmPanelComponent).catch(console.error);
+function showBootstrapError(err) {
+    const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    document.body.innerHTML =
+        `<div style="font-family:monospace;padding:16px;color:#e74c3c;font-size:12px;">` +
+            `<b>Panel failed to initialise</b><br><br>` +
+            `<pre style="white-space:pre-wrap">${msg}</pre>` +
+            `<br><small>Right-click → Inspect to see full webview console.</small></div>`;
+    try {
+        // Report to extension host Output channel if acquireVsCodeApi hasn't been
+        // called yet (component never ran so the singleton hasn't been created).
+        const api = window
+            .acquireVsCodeApi?.();
+        api?.postMessage({ type: 'bootstrapError', error: msg });
+    }
+    catch { /* ignore — api already acquired by component */ }
+}
+(0,_angular_platform_browser__WEBPACK_IMPORTED_MODULE_1__.bootstrapApplication)(_asm_panel_component__WEBPACK_IMPORTED_MODULE_2__.AsmPanelComponent).catch(showBootstrapError);
 
 })();
 

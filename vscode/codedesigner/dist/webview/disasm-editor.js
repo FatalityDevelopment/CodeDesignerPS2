@@ -58002,7 +58002,21 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-(0,_angular_platform_browser__WEBPACK_IMPORTED_MODULE_1__.bootstrapApplication)(_disasm_editor_component__WEBPACK_IMPORTED_MODULE_2__.DisasmEditorComponent).catch(console.error);
+function showBootstrapError(err) {
+    const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    document.body.innerHTML =
+        `<div style="font-family:monospace;padding:16px;color:#e74c3c;font-size:12px;">` +
+            `<b>Panel failed to initialise</b><br><br>` +
+            `<pre style="white-space:pre-wrap">${msg}</pre>` +
+            `<br><small>Right-click → Inspect to see full webview console.</small></div>`;
+    try {
+        const api = window
+            .acquireVsCodeApi?.();
+        api?.postMessage({ type: 'bootstrapError', error: msg });
+    }
+    catch { /* ignore */ }
+}
+(0,_angular_platform_browser__WEBPACK_IMPORTED_MODULE_1__.bootstrapApplication)(_disasm_editor_component__WEBPACK_IMPORTED_MODULE_2__.DisasmEditorComponent).catch(showBootstrapError);
 
 })();
 

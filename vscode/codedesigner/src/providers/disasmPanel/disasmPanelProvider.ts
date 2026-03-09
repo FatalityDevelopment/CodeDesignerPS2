@@ -94,7 +94,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Setup webview options
         webviewView.webview.options = {
             enableScripts: true,
-            localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+            localResourceRoots: [this._extensionUri]
         };
 
         // Render the Angular shell.
@@ -105,6 +105,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async msg => {
+            if (msg.type === 'bootstrapError') {
+                getOutputChannel().appendLine(
+                    `[ERROR] Disasm panel Angular bootstrap failed: ${msg.error ?? '(no details)'}`
+                );
+                return;
+            }
             switch (msg.command) {
                 case 'ready':
                     // Angular component has bootstrapped and its message listener
@@ -224,7 +230,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                script-src ${webview.cspSource};">
 </head>
 <body>
-<app-disasm-panel></app-disasm-panel>
+<app-disasm-panel><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-disasm-panel>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;
