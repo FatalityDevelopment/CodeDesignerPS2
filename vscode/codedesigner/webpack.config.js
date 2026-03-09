@@ -5,6 +5,12 @@
 const path = require('path');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const { AngularWebpackPlugin } = require('@ngtools/webpack');
+// The Angular Linker processes partially-compiled Angular npm packages (those that still
+// contain ɵɵngDeclare* calls) and converts them to fully-compiled ivy code at build time.
+// Without this, the runtime would fall back to the JIT compiler — which is blocked by
+// VS Code's 'unsafe-eval' CSP — and throw "PlatformLocation needs to be compiled by JIT".
+// We use the `default` export which is a standard babel plugin (no webpack fileSystem needed).
+const { default: angularLinkerPlugin } = require('@angular/compiler-cli/linker/babel');
 
 //@ts-check
 /** @typedef {import('webpack').Configuration} WebpackConfig **/
@@ -87,6 +93,21 @@ const webviewConfig = {
   },
   module: {
     rules: [
+      {
+        // Run the Angular Linker on Angular packages from node_modules.
+        // Angular npm packages ship in "partial compilation" format (ɵɵngDeclare* calls).
+        // The linker converts them to fully-compiled ivy code so that the JIT compiler
+        // is never invoked at runtime.
+        test: /\.[cm]?js$/,
+        include: /node_modules[\\/]@angular/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            plugins: [angularLinkerPlugin],
+            compact: false,
+          },
+        },
+      },
       {
         // @ngtools/webpack handles all TypeScript files for the webview (AOT compilation).
         // This pre-compiles Angular templates at build time, eliminating the need for
