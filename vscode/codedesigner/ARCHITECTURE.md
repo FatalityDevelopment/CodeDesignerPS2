@@ -1,185 +1,178 @@
 # VS Code Extension — Architecture Guide
 
-## Current Structure
+## Project Structure
 
 ```
-vscode/codedesigner/src/
-├── declarations.d.ts              # TypeScript module declarations for .html/.css imports
-├── extension.ts                   # Extension entry point — registers providers & commands
-├── socketClient.ts                # TCP socket client — communicates with the C# backend
-├── utils/
-│   └── nonce.ts                   # CSP nonce generator (single-responsibility utility)
-└── providers/
-    ├── asmPanel/
-    │   ├── asmPanel.css           # Assembler panel styles (standalone CSS file)
-    │   ├── asmPanelProvider.ts    # VS Code WebviewViewProvider implementation
-    │   └── asmPanelTemplate.ts    # HTML template builder (imports CSS, returns string)
-    ├── disasmPanel/
-    │   ├── disasmPanel.css        # Disasm panel styles (standalone CSS file)
-    │   ├── disasmPanelProvider.ts # VS Code WebviewViewProvider implementation
-    │   └── disasmPanelTemplate.ts # HTML template builder (imports CSS, returns string)
-    └── disasmEditor/
-        ├── disasmEditor.css       # Disasm editor styles (single source of truth)
-        ├── disasmEditor.html      # Full HTML + JS for the editor webview
-        ├── disasmEditorProvider.ts# VS Code CustomReadonlyEditorProvider implementation
-        └── disasmEditorTemplate.ts# Thin wrapper: loads .html, injects nonce + CSS
+vscode/codedesigner/
+├── src/
+│   ├── declarations.d.ts              # TypeScript module declarations for .html/.css imports
+│   ├── extension.ts                   # Extension entry point — registers providers & commands
+│   ├── socketClient.ts                # TCP socket client — communicates with the C# backend
+│   ├── utils/
+│   │   └── nonce.ts                   # CSP nonce generator
+│   ├── providers/                     # Extension-host (Node.js) side — one folder per panel
+│   │   ├── asmPanel/
+│   │   │   ├── asmPanel.css           # CSS reference (canonical source in webview folder)
+│   │   │   └── asmPanelProvider.ts    # VS Code WebviewViewProvider — serves Angular bundle
+│   │   ├── disasmPanel/
+│   │   │   ├── disasmPanel.css        # CSS reference
+│   │   │   └── disasmPanelProvider.ts # VS Code WebviewViewProvider — serves Angular bundle
+│   │   └── disasmEditor/
+│   │       ├── disasmEditor.css       # CSS reference
+│   │       └── disasmEditorProvider.ts# VS Code CustomReadonlyEditorProvider — serves Angular bundle
+│   └── webview/                       # Angular 19 webview apps (compiled by webviewConfig)
+│       ├── typings.d.ts               # CSS import declarations for webview TypeScript
+│       ├── shared/
+│       │   ├── vscode-api.ts          # Singleton wrapper for acquireVsCodeApi()
+│       │   └── vscode-bridge.service.ts  # Angular service: postMessage + messages$ RxJS stream
+│       ├── asm-panel/
+│       │   ├── main.ts                # bootstrapApplication(AsmPanelComponent)
+│       │   ├── asm-panel.component.ts # Standalone Angular 19 component
+│       │   └── asm-panel.css          # Styles (style-loader injects at runtime)
+│       ├── disasm-panel/
+│       │   ├── main.ts                # bootstrapApplication(DisasmPanelComponent)
+│       │   ├── disasm-panel.component.ts
+│       │   └── disasm-panel.css
+│       └── disasm-editor/
+│           ├── main.ts                # bootstrapApplication(DisasmEditorComponent)
+│           ├── disasm-editor.component.ts  # Full editor: grid, hex, search, debug panels
+│           └── disasm-editor.css
+├── tsconfig.json                      # Extension-host TypeScript config
+├── tsconfig.webview.json              # Angular/webview TypeScript config
+└── webpack.config.js                  # Exports [extensionConfig, webviewConfig]
 ```
 
-### How `.html` and `.css` imports work
+## Two webpack configurations
 
-Webpack 5's built-in `asset/source` rule (see `webpack.config.js`) bundles any
-`.html` or `.css` file imported in TypeScript as its raw string content:
+### `extensionConfig` (target: `node`)
+Compiles the extension host code (`src/extension.ts`) to `dist/extension.js`.
+
+### `webviewConfig` (target: `web`)
+Compiles three Angular 19 apps to `dist/webview/`:
+
+| Entry point | Output |
+|-------------|--------|
+| `src/webview/asm-panel/main.ts` | `dist/webview/asm-panel.js` |
+| `src/webview/disasm-panel/main.ts` | `dist/webview/disasm-panel.js` |
+| `src/webview/disasm-editor/main.ts` | `dist/webview/disasm-editor.js` |
+
+**Build:** `npm run compile`
+
+## How providers serve Angular apps
+
+Each provider converts the compiled bundle path to a webview-accessible URI:
 
 ```typescript
-import disasmEditorHtml from './disasmEditor.html'; // string
-import disasmEditorCss  from './disasmEditor.css';  // string
-```
-
-`src/declarations.d.ts` provides the TypeScript module declarations so the
-compiler understands these imports. No extra npm packages are required.
-
-### Dynamic injection — the nonce pattern
-
-VS Code webviews require a Content Security Policy nonce to allow inline scripts.
-Template files use `{{NONCE}}` and `{{STYLES}}` as placeholder tokens that are
-substituted at panel-open time:
-
-```typescript
-export function getDisasmEditorHtml(_data: DisasmEditorData, nonce: string): string {
-    return disasmEditorHtml
-        .replace(/\{\{NONCE\}\}/g, nonce)
-        .replace('{{STYLES}}',     disasmEditorCss);
+private getHtml(webview: vscode.Webview): string {
+    const scriptUri = webview.asWebviewUri(
+        vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'asm-panel.js')
+    );
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'unsafe-inline'; script-src ${webview.cspSource};">
+</head>
+<body>
+  <app-asm-panel></app-asm-panel>
+  <script src="${scriptUri}"></script>
+</body>
+</html>`;
 }
 ```
 
----
+- `script-src ${webview.cspSource}` — allows scripts from the extension's `dist/` via `vscode-webview-resource:`; no nonce needed for external scripts
+- `style-src 'unsafe-inline'` — Angular's `style-loader` injects `<style>` tags at runtime
 
-## What Was Removed
+## VS Code ↔ Angular communication
 
-The original `helpers.ts` contained ~1,950 lines of client-side MIPS instruction
-decoding (`decodeMIPS`, `disassemble`, `analyzePointers`) left over from an early
-prototype. All decoding is now handled server-side by the C# backend and delivered
-over the socket connection. These functions had no callers and were deleted.
-
----
-
-## Going Forward — Recommended Architecture
-
-### Problem with the current approach
-
-The `asmPanelTemplate.ts` and `disasmPanelTemplate.ts` files still build HTML via
-TypeScript template literals with dynamic server-side injection (emulator options,
-connection state, etc.). This means:
-
-- No IDE support for the HTML markup inside the string
-- JavaScript inside the webview cannot be type-checked
-- Logic mixes HTML generation with TypeScript business logic
-
-### Option 1 — Static HTML + message-driven state (recommended, no new deps)
-
-Move *all* dynamic state out of the initial HTML and into the webview's JavaScript
-via `postMessage`. The TypeScript provider sends an `init` message immediately after
-the panel opens; the webview JS populates all the fields.
-
-**Benefits:**
-- The HTML becomes fully static (only nonce substitution needed)
-- All webview HTML moves to `.html` files — proper IDE support
-- Webview JS stays vanilla JS (no framework overhead)
-
-**Steps:**
-1. Refactor `asmPanelTemplate.ts` and `disasmPanelTemplate.ts` to static `.html`
-   files (same pattern as `disasmEditor.html` — `{{NONCE}}` only)
-2. Move emulator-list population and connection-state rendering into the webview
-   JavaScript (already done this way in `disasmPanel`)
-3. Delete `asmPanelTemplate.ts` / `disasmPanelTemplate.ts`; replace with slim
-   wrappers that import the `.html` file
-
-### Option 2 — Compiled webview bundles (cleanest long-term)
-
-Move webview JavaScript into proper TypeScript files and compile them as separate
-webpack bundles served via `webview.asWebviewUri(...)`.
-
-**Structure:**
-
-```
-src/providers/disasmEditor/
-├── disasmEditor.html          # Skeleton HTML — <script src="{{WEBVIEW_URI}}">
-├── disasmEditor.css           # Styles
-├── disasmEditorProvider.ts    # Extension host: opens panel, sends messages
-└── webview/
-    ├── disasmEditorWebview.ts # Webview main — runs in browser context
-    ├── grid.ts                # Disassembly grid renderer
-    ├── hexView.ts             # Hex viewer
-    ├── symbolsPanel.ts        # Symbols panel logic
-    └── debugPanel.ts          # Register/stack view
-```
-
-**Webpack config addition:**
-
-```javascript
-const webviewConfig = {
-    target: 'web',                          // Webview runs in a browser-like sandbox
-    entry: {
-        disasmEditorWebview: './src/providers/disasmEditor/webview/disasmEditorWebview.ts',
-        // add more webview entry points here
-    },
-    output: {
-        path: path.resolve(__dirname, 'dist/webview'),
-        filename: '[name].js',
-    },
-    resolve: { extensions: ['.ts', '.js'] },
-    module: { rules: [{ test: /\.ts$/, use: 'ts-loader' }] },
-};
-
-module.exports = [extensionConfig, webviewConfig];
-```
-
-**Benefits:**
-- Full TypeScript type-checking for webview code
-- IDE navigation, refactoring, and IntelliSense in webview files
-- Tree-shaking and bundler optimisations apply to webview code
-- Easy to split into smaller focused modules
-
-**Provider side:**
+`VsCodeBridgeService` wraps the VS Code postMessage API as RxJS observables:
 
 ```typescript
-const webviewUri = panel.webview.asWebviewUri(
-    vscode.Uri.joinPath(this._context.extensionUri, 'dist', 'webview', 'disasmEditorWebview.js')
-);
-panel.webview.html = templateHtml.replace('{{WEBVIEW_URI}}', webviewUri.toString());
+// Send to extension host
+bridge.postMessage({ command: 'assemble', data: code });
+
+// Listen for a specific message type
+bridge.on<AssembleResultMsg>('assembleResult').subscribe(msg => {
+    this.output = msg.data;
+});
 ```
 
-### Option 3 — React / Angular / Svelte (most overhead, most familiar to web devs)
+The extension host sends back via `webview.postMessage(...)` and receives via
+`webview.onDidReceiveMessage(...)` — unchanged from before the Angular migration.
 
-VS Code officially supports framework-based webviews via the
-[webview UI toolkit](https://github.com/microsoft/vscode-webview-ui-toolkit) for
-React, and the [vscode-webview-react-boilerplate](https://github.com/microsoft/vscode-webview-ui-toolkit/tree/main/docs/getting-started) pattern.
+## Angular 19 conventions
 
-**Why Angular specifically:**
-- Declarative templates replace all manual `innerHTML` string concatenation
-- Two-way data binding makes the register/symbol/hex views trivial
-- Angular CDK virtual-scroll is perfect for the 8M-instruction disassembly grid
-- The injector/service pattern maps cleanly onto the message-passing architecture
+All components are **standalone** (no `NgModule`) with `ViewEncapsulation.None`
+so global CSS (VS Code theme variables) applies without scoping:
 
-**Cost:**
-- ~50 KB gzip bundle overhead (Angular runtime)
-- Requires a second webpack config targeting `web` (same as Option 2)
-- Build times increase slightly
+```typescript
+@Component({
+  selector: 'app-asm-panel',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  encapsulation: ViewEncapsulation.None,
+  template: `...`,
+})
+export class AsmPanelComponent implements OnInit, OnDestroy { ... }
+```
 
-**Recommended approach if you go this route:**
-1. Follow Option 2 first to get the webview as a compiled TypeScript bundle
-2. Incrementally replace vanilla JS with Angular components one panel at a time
-3. Use `@vscode/webview-ui-toolkit` components for buttons/dropdowns so they
-   automatically match the active VS Code theme
+`zone.js` is imported as the **first** import in every `main.ts`.
 
----
+## Going further
 
-## Summary of decisions made in this refactor
+### Adding a new panel
 
-| Change | Why |
-|---|---|
-| Deleted `helpers.ts` MIPS decoder | Dead code — server handles all decoding |
-| `getNonce()` → `src/utils/nonce.ts` | Single-responsibility; easy to find |
-| `*Styles.ts` → `*.css` files | Proper CSS files get IDE highlighting, linting, and colour preview |
-| `disasmEditorTemplate.ts` (1583 → 30 lines) | HTML + JS moved to `disasmEditor.html`; template is now a pure-data injection wrapper |
-| Webpack `asset/source` for `.html`/`.css` | Zero new npm deps; built-in webpack 5 feature |
+1. Create `src/webview/my-panel/` with `main.ts`, `my-panel.component.ts`, `my-panel.css`
+2. Add entry in `webviewConfig.entry` in `webpack.config.js`
+3. Create provider in `src/providers/my-panel/myPanelProvider.ts`
+4. Register in `extension.ts`
+
+### Splitting the disasm-editor into sub-components
+
+`disasm-editor.component.ts` (~1,357 lines) is the largest single component. A
+natural decomposition:
+
+```
+disasm-editor/
+  disasm-editor.component.ts        # Root — bootstraps, owns state
+  components/
+    disasm-grid.component.ts        # Virtual instruction rows
+    hex-view.component.ts           # Hex viewer
+    search-panel.component.ts       # Search bar
+    goto-panel.component.ts         # Goto address
+    symbols-panel.component.ts      # Labels / Strings / Functions tabs
+    debug-panel.component.ts        # GPR / COP0 / FPR / VU0 / GS / Stack tabs
+    edit-overlay.component.ts       # Inline label/comment editor modal
+```
+
+Pass state with `@Input()` / `@Output()` or inject a shared service.
+
+### Virtual scrolling
+
+For large binaries (BIOS = 1M instructions), Angular CDK virtual scroll improves
+performance significantly:
+
+```bash
+npm install @angular/cdk
+```
+
+```html
+<cdk-virtual-scroll-viewport itemSize="20" style="height:100%">
+  <div *cdkVirtualFor="let row of disasmRows" class="row">...</div>
+</cdk-virtual-scroll-viewport>
+```
+
+### Angular Signals (replacing mutable state)
+
+Angular 19 signals are the recommended reactive primitive — no extra dependencies:
+
+```typescript
+disasmRows = signal<DisasmRow[]>([]);
+cursor      = signal(0);
+
+// Mutation:
+this.disasmRows.set(newRows);
+this.cursor.update(c => clamp(c + delta, 0, this.totalInstructions - 1));
+```

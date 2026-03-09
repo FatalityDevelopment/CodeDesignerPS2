@@ -64431,18 +64431,28 @@ let DisasmPanelComponent = class DisasmPanelComponent {
     }
     ngOnInit() {
         this.subs.push(this.bridge.on('connectionStatus').subscribe(msg => {
-            this.isConnected = !!(msg['connected']);
+            this.isConnected = msg.connected;
             this.isPaused = false;
         }), this.bridge.on('paused').subscribe(msg => {
-            this.isPaused = !!(msg['paused']);
-            if (!this.isPaused) { /* resumed */ }
+            this.isPaused = msg.paused;
         }), this.bridge.on('updateSnapshots').subscribe(msg => {
-            const snaps = msg['snapshots'];
-            this.snapshots = (snaps ?? []).map(s => ({
-                label: s['label'] ?? '',
-                timestamp: s['timestamp'] ?? '',
-                path: s['path'] ?? '',
-            }));
+            this.snapshots = msg.snapshots ?? [];
+        }), this.bridge.on('init').subscribe(msg => {
+            if (msg.emulators?.length) {
+                this.emulators = msg.emulators;
+            }
+            if (msg.biosOptions?.length) {
+                this.biosOptions = msg.biosOptions;
+            }
+            if (msg.gameOptions?.length) {
+                this.gameOptions = msg.gameOptions;
+            }
+            if (msg.snapshots?.length) {
+                this.snapshots = msg.snapshots;
+            }
+            if (msg.connectedEmulatorPath) {
+                this.selectedEmulator = msg.connectedEmulatorPath;
+            }
         }));
     }
     ngOnDestroy() {

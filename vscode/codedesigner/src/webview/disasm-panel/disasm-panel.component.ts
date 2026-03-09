@@ -16,6 +16,34 @@ interface SnapshotEntry {
   path: string;
 }
 
+/** Message sent by the provider when connection state changes. */
+interface ConnectionStatusMsg {
+  type: 'connectionStatus';
+  connected: boolean;
+}
+
+/** Message sent by the provider when the emulator pauses or resumes. */
+interface PausedMsg {
+  type: 'paused';
+  paused: boolean;
+}
+
+/** Message sent by the provider when the snapshot list changes. */
+interface UpdateSnapshotsMsg {
+  type: 'updateSnapshots';
+  snapshots: SnapshotEntry[];
+}
+
+/** Message sent by the provider with initial panel data (options, existing snapshots). */
+interface InitMsg {
+  type: 'init';
+  emulators: EmuOption[];
+  biosOptions: EmuOption[];
+  gameOptions: EmuOption[];
+  snapshots: SnapshotEntry[];
+  connectedEmulatorPath?: string;
+}
+
 @Component({
   selector: 'app-disasm-panel',
   standalone: true,
@@ -104,21 +132,22 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.subs.push(
-      this.bridge.on<Record<string, unknown>>('connectionStatus').subscribe(msg => {
-        this.isConnected = !!(msg['connected']);
+      this.bridge.on<ConnectionStatusMsg>('connectionStatus').subscribe(msg => {
+        this.isConnected = msg.connected;
         this.isPaused = false;
       }),
-      this.bridge.on<Record<string, unknown>>('paused').subscribe(msg => {
-        this.isPaused = !!(msg['paused']);
-        if (!this.isPaused) { /* resumed */ }
+      this.bridge.on<PausedMsg>('paused').subscribe(msg => {
+        this.isPaused = msg.paused;
       }),
-      this.bridge.on<Record<string, unknown>>('updateSnapshots').subscribe(msg => {
-        const snaps = msg['snapshots'] as Array<Record<string, string>> | undefined;
-        this.snapshots = (snaps ?? []).map(s => ({
-          label: s['label'] ?? '',
-          timestamp: s['timestamp'] ?? '',
-          path: s['path'] ?? '',
-        }));
+      this.bridge.on<UpdateSnapshotsMsg>('updateSnapshots').subscribe(msg => {
+        this.snapshots = msg.snapshots ?? [];
+      }),
+      this.bridge.on<InitMsg>('init').subscribe(msg => {
+        if (msg.emulators?.length)  { this.emulators    = msg.emulators;    }
+        if (msg.biosOptions?.length){ this.biosOptions   = msg.biosOptions;  }
+        if (msg.gameOptions?.length){ this.gameOptions   = msg.gameOptions;  }
+        if (msg.snapshots?.length)  { this.snapshots     = msg.snapshots;    }
+        if (msg.connectedEmulatorPath) { this.selectedEmulator = msg.connectedEmulatorPath; }
       })
     );
   }

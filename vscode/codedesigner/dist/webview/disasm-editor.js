@@ -55439,8 +55439,21 @@ let DisasmEditorComponent = class DisasmEditorComponent {
         this.zone = zone;
     }
     ngAfterViewInit() {
-        // Run all DOM-manipulation logic outside Angular's zone to avoid
-        // unnecessary change-detection cycles from timers and events.
+        // The disassembly editor is a port of a large (~1,350-line) vanilla-JS
+        // implementation that manipulates the DOM directly and relies on
+        // setInterval timers for live refresh.  Running all of this inside
+        // Angular's zone would trigger a change-detection cycle on *every* timer
+        // tick and every keyboard event, causing perceptible jank when the live
+        // refresh fires at 250 ms intervals.
+        //
+        // Because no Angular template bindings or @Input/@Output are used (the
+        // component is purely a scaffold that boots the vanilla logic), there is
+        // nothing for the change detector to check.  Running outside the zone is
+        // therefore both safe and necessary for performance.
+        //
+        // Future work: once the editor is split into proper sub-components with
+        // @Input signals (see ARCHITECTURE.md), each sub-component can run inside
+        // the zone while heavy polling logic (live refresh timer) stays outside.
         this.zone.runOutsideAngular(() => this.initEditorLogic());
     }
     initEditorLogic() {

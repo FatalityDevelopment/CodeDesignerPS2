@@ -17,12 +17,6 @@ interface SnapshotEntry {
     path: string;
 }
 
-interface EmuSettings {
-    bios?: Array<{ name: string; path: string }>;
-    games?: Array<{ name: string; path: string }>;
-    emulators?: Array<{ type: string; path: string }>;
-}
-
 /** Memory regions exposed as separate editor windows when the emulator is running. */
 const LIVE_REGIONS = [
     // EE Main RAM: show via the uncached direct-mapped window (0x20000000–0x21FFFFFF).
