@@ -97,15 +97,20 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
         };
 
-        // Render the Angular shell (settings data sent via postMessage below)
+        // Render the Angular shell.
+        // NOTE: Do NOT call postInitMessage() here — wait for the Angular component
+        // to send { command: 'ready' } before sending init data, so nothing is lost
+        // during the async Angular bootstrap.
         webviewView.webview.html = this.getHtml(webviewView.webview);
-
-        // Send initial settings to Angular component
-        this.postInitMessage();
 
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async msg => {
             switch (msg.command) {
+                case 'ready':
+                    // Angular component has bootstrapped and its message listener
+                    // is registered — now safe to send the initial settings.
+                    this.postInitMessage();
+                    break;
                 case 'connect':
                     this.handleConnect(msg.emulatorPath, msg.biosPath, msg.gamePath);
                     break;

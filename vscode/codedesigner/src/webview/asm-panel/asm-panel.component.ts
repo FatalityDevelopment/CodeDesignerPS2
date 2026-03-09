@@ -76,6 +76,8 @@ export class AsmPanelComponent implements OnInit, OnDestroy {
         }
       })
     );
+    // Signal readiness so providers can safely send init/state data.
+    this.bridge.postMessage({ command: 'ready' });
   }
 
   ngOnDestroy(): void {

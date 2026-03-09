@@ -203,6 +203,14 @@ export class DisasmEditorComponent implements AfterViewInit {
   }
 
   private initEditorLogic(): void {
+    // ── Early message buffer ─────────────────────────────────────────────────
+    // VS Code may deliver the 'init' message (and follow-up 'disasmPage') before
+    // Angular has finished bootstrapping.  Capture every message that arrives
+    // before the real switch-handler is registered so none are lost.
+    const _earlyMessageBuffer: unknown[] = [];
+    const _earlyCapture = ({ data }: MessageEvent) => { _earlyMessageBuffer.push(data); };
+    window.addEventListener('message', _earlyCapture);
+
     const vscode = getVsCodeApi();
 
     const SCAN_TIMEOUT_MS = 120_000;
@@ -377,7 +385,17 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
     });
 
-    // ── Edit overlay ──────────────────────────────────────────────────────────
+    // ── Replace early capture, replay buffered messages, signal ready ─────────
+    // Remove the early capture listener now that the real handler is registered.
+    window.removeEventListener('message', _earlyCapture);
+    // Replay any messages that arrived during Angular bootstrap so they are
+    // processed by the real handler above.
+    for (const data of _earlyMessageBuffer) {
+      window.dispatchEvent(new MessageEvent('message', { data }));
+    }
+    // Tell the extension host we are ready; it will (re-)send init + first page.
+    vscode.postMessage({ type: 'ready' });
+
     function openEditOverlay(address: number, addressHex: string, op: string, args: string, bytes: string, currentLabel: string, currentComment: string) {
       _editOverlayAddr = address;
       _editOverlayAddrHex = addressHex;

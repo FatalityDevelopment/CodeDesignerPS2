@@ -150,6 +150,9 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         if (msg.connectedEmulatorPath) { this.selectedEmulator = msg.connectedEmulatorPath; }
       })
     );
+    // Signal to the provider that subscriptions are set up and we are ready
+    // to receive messages (especially the initial 'init' payload).
+    this.bridge.postMessage({ command: 'ready' });
   }
 
   ngOnDestroy(): void {
