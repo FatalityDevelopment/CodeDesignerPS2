@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
+import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 
 interface EmuSettings {
@@ -220,6 +221,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'disasm-panel.js')
         );
+        const nonce = getNonce();
         return `<!DOCTYPE html>
 <html>
 <head>
@@ -227,7 +229,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
                style-src 'unsafe-inline';
-               script-src ${webview.cspSource};">
+               script-src ${webview.cspSource} 'nonce-${nonce}';">
+<script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
 <body>
 <app-disasm-panel><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-disasm-panel>

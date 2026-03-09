@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getSocketClient, getOutputChannel } from '../../extension';
+import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 
 export class AsmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
@@ -88,6 +89,7 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'asm-panel.js')
         );
+        const nonce = getNonce();
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -95,8 +97,9 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
                style-src 'unsafe-inline';
-               script-src ${webview.cspSource};">
+               script-src ${webview.cspSource} 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
 <body>
 <app-asm-panel><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-asm-panel>

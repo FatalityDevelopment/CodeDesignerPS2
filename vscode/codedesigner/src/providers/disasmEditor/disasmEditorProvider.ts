@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import { SocketClient, LabelEntry, StringEntry, FunctionEntry, SearchMatch } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
+import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
 /**
  * Structure for disassembled instruction row
@@ -161,6 +162,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'disasm-editor.js')
     );
+    const nonce = getNonce();
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -168,7 +170,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
                style-src 'unsafe-inline';
-               script-src ${webview.cspSource};">
+               script-src ${webview.cspSource} 'nonce-${nonce}';">
+<script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
 <body>
 <app-disasm-editor><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-disasm-editor>
