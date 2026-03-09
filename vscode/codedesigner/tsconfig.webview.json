@@ -5,12 +5,14 @@
     "moduleResolution": "node",
     "strict": true,
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "lib": ["ES2020", "DOM"],
     "outDir": "./out-webview",
     "rootDir": "./src/webview",
     "skipLibCheck": true,
     "sourceMap": true
+  },
+  "angularCompilerOptions": {
+    "compilationMode": "full"
   },
   "include": ["src/webview/**/*"]
 }

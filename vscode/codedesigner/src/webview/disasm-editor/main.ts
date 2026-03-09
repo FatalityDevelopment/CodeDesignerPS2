@@ -1,4 +1,3 @@
-import '@angular/compiler';
 import 'zone.js';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { DisasmEditorComponent } from './disasm-editor.component';

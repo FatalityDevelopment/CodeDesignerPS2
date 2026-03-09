@@ -108,6 +108,8 @@
     "test": "vscode-test"
   },
   "devDependencies": {
+    "@angular/compiler-cli": "^19.2.19",
+    "@ngtools/webpack": "^19.2.22",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.108.1",
@@ -118,7 +120,7 @@
     "eslint": "^9.39.2",
     "style-loader": "^4.0.0",
     "ts-loader": "^9.5.4",
-    "typescript": "^5.9.3",
+    "typescript": "^5.8.3",
     "typescript-eslint": "^8.52.0",
     "webpack": "^5.104.1",
     "webpack-cli": "^6.0.1"

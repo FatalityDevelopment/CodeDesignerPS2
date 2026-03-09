@@ -1,4 +1,3 @@
-import '@angular/compiler';
 import 'zone.js';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { AsmPanelComponent } from './asm-panel.component';

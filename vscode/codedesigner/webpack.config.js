@@ -4,6 +4,7 @@
 
 const path = require('path');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+const { AngularWebpackPlugin } = require('@ngtools/webpack');
 
 //@ts-check
 /** @typedef {import('webpack').Configuration} WebpackConfig **/
@@ -87,9 +88,11 @@ const webviewConfig = {
   module: {
     rules: [
       {
-        test: /\.ts$/,
-        loader: 'ts-loader',
-        options: { configFile: 'tsconfig.webview.json', transpileOnly: true },
+        // @ngtools/webpack handles all TypeScript files for the webview (AOT compilation).
+        // This pre-compiles Angular templates at build time, eliminating the need for
+        // the JIT compiler at runtime and avoiding 'unsafe-eval' CSP violations.
+        test: /\.[cm]?[jt]sx?$/,
+        loader: '@ngtools/webpack',
         exclude: /node_modules/,
       },
       {
@@ -99,6 +102,13 @@ const webviewConfig = {
       },
     ],
   },
+  plugins: [
+    // AngularWebpackPlugin drives AOT compilation for all three webview entry points.
+    new AngularWebpackPlugin({
+      tsconfig: path.resolve(__dirname, 'tsconfig.webview.json'),
+      jitMode: false,
+    }),
+  ],
   devtool: 'nosources-source-map',
 };
 
