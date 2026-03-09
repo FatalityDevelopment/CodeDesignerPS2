@@ -355,6 +355,13 @@ window.addEventListener("message", ({ data: msg }) => {
             // can fire immediately after a reconnect.
             state.loadedPages.clear();
             state.disasmRows = [];
+            // Always reset cursor to the first instruction so the direct
+            // sendLiveDisasmPage(startIndex=0) call from the provider always
+            // matches getPageStart(cursor) and triggers renderDisassembly().
+            // Without this reset a non-zero cursor (e.g. from a previous scroll
+            // within the same VS Code session) causes the page-0 disasmPage
+            // to be cached but never rendered, leaving the grid blank.
+            state.cursor = 0;
             liveRefreshPending = false;
             if (state.regionLabel) {
                 const rl = document.getElementById('sym-region-label');
