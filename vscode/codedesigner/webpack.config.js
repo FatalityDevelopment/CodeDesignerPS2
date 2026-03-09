@@ -38,6 +38,14 @@ const extensionConfig = {
             loader: 'ts-loader'
           }
         ]
+      },
+      {
+        // Load .html and .css files as raw string content (no processing).
+        // Import them in TypeScript as: import template from './foo.html';
+        // See src/declarations.d.ts for the TypeScript module declarations.
+        test: /\.(html|css)$/,
+        exclude: /node_modules/,
+        type: 'asset/source'
       }
     ]
   },

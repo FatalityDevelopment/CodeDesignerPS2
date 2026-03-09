@@ -1,9 +1,3 @@
-/**
- * Styles for the Assembler Panel
- */
-
-export function getAsmPanelStyles(): string {
-    return `<style>
 body {
     margin: 0;
     padding: 10px;
@@ -84,6 +78,4 @@ button:disabled {
 .status.error {
     background: var(--vscode-testing-iconFailed);
     color: white;
-}
-</style>`;
 }

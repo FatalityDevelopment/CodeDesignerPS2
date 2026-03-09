@@ -2,7 +2,7 @@
  * Template for the Disassembly Panel
  */
 
-import { getDisasmPanelStyles } from './disasmPanelStyles';
+import disasmPanelCss from './disasmPanel.css';
 
 export interface EmuOption {
     name?: string;
@@ -37,7 +37,7 @@ export function getDisasmPanelHtml(data: DisasmPanelData, nonce: string): string
                style-src 'unsafe-inline';
                script-src 'nonce-${nonce}';">
 
-${getDisasmPanelStyles()}
+<style>${disasmPanelCss}</style>
 
 </head>
 <body>

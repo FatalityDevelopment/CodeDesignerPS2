@@ -1,9 +1,4 @@
-/**
- * Styles for the Disassembly Editor
- */
-
-export function getDisasmEditorStyles(): string {
-    return `<style> 
+ 
 body { 
     margin: 0; 
     font-family: monospace; 
@@ -985,5 +980,3 @@ body {
     background: #505050;
 }
 
-</style>`;
-}

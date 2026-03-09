@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getNonce } from '../../helpers';
+import { getNonce } from '../../utils/nonce';
 import { getDisasmPanelHtml, DisasmPanelData, EmuOption, SnapshotEntry } from './disasmPanelTemplate';
 import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';

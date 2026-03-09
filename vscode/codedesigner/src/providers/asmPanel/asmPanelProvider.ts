@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getNonce } from '../../helpers';
+import { getNonce } from '../../utils/nonce';
 import { getAsmPanelHtml, AsmPanelData } from './asmPanelTemplate';
 import { getSocketClient } from '../../extension';
 

@@ -3,7 +3,7 @@
  * Separated from component logic for better organization (Angular-style)
  */
 
-import { getAsmPanelStyles } from './asmPanelStyles';
+import asmPanelCss from './asmPanel.css';
 
 export interface AsmPanelData {
     code?: string;
@@ -26,7 +26,7 @@ export function getAsmPanelHtml(data: AsmPanelData, nonce: string): string {
                script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-${getAsmPanelStyles()}
+<style>${asmPanelCss}</style>
 
 </head>
 <body>

@@ -3,7 +3,7 @@
  * Large complex HTML moved from external file to TypeScript module
  */
 
-import { getDisasmEditorStyles } from './disasmEditorStyles';
+import disasmEditorCss from './disasmEditor.css';
 
 export interface DisasmEditorData {
     // Empty for now - can add initialization data later
@@ -19,7 +19,7 @@ export function getDisasmEditorHtml(data: DisasmEditorData, nonce: string): stri
                style-src 'unsafe-inline';
                script-src 'nonce-${nonce}';">
 
-${getDisasmEditorStyles()}
+<style>${disasmEditorCss}</style>
 
 </head> 
  

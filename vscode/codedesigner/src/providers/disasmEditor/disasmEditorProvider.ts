@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
-import { getNonce } from "../../helpers";
+import { getNonce } from "../../utils/nonce";
 import { getDisasmEditorHtml, DisasmEditorData } from "./disasmEditorTemplate";
 import { SocketClient, LabelEntry, StringEntry, FunctionEntry, SearchMatch } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
