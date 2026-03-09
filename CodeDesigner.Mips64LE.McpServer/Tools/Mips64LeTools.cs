@@ -101,7 +101,7 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
 
     [McpServerTool(Name = "read_memory")]
     [Description("Read raw bytes from the live PS2 emulator memory and return them as hex. " +
-                 "Requires the emulator to be running (start with `dotnet run -- --server`). " +
+                 "Requires the emulator to be running (start with `dotnet run -- --run`). " +
                  "Address supports hex (0x prefix) or decimal. Region is 'ee' (main EE RAM, default) or 'iop'.")]
     public async Task<string> ReadMemory(
         [Description("Virtual address to read from (hex or decimal).")] string address,
@@ -306,7 +306,7 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pause_emulator")]
-    [Description("Pause PS2 emulator execution. The emulator must be running in --server mode.")]
+    [Description("Pause PS2 emulator execution. The emulator must be running via `dotnet run -- --run`.")]
     public async Task<string> PauseEmulator(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "PAUSE" }, cancellationToken);

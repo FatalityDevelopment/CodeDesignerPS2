@@ -17,23 +17,21 @@ cd CodeDesigner.Mips64LE
 dotnet build
 ```
 
-### 2. Start the Socket Server
+### 2. Start the Emulator
 
 ```bash
-dotnet run -- --server
+dotnet run -- --run
 ```
 
 You should see:
 ```
 MIPS64 Emotion Engine - CodeDesigner
 
-Starting socket server mode...
 Socket server started on port 8765
 Waiting for VSCode extension to connect...
-Press 'q' to quit the server...
 ```
 
-Keep this terminal open - the server must be running for the extension to work.
+Keep this terminal open — the emulator must be running for the extension to work. The VS Code extension can also start the emulator automatically via its **Connect** button.
 
 ### 3. Install and Run the VSCode Extension
 
@@ -157,7 +155,7 @@ jr $ra
 ### "Not connected to C# server"
 
 **Solution:** 
-1. Make sure the C# server is running (`dotnet run -- --server`)
+1. Make sure the emulator is running (`dotnet run -- --run`), or use the extension's **Connect** button
 2. Use the "Connect to Server" command in VSCode
 3. Check that port 8765 is not blocked by firewall
 
@@ -181,14 +179,14 @@ jr $ra
 
 The Live Disassembler lets you pause EE execution at any instruction address and inspect state, without modifying the program.
 
-### Step 1 — Ensure the emulator is running with the server
+### Step 1 — Ensure the emulator is running
 
 ```bash
 cd CodeDesigner.Mips64LE
-dotnet run -- --server
+dotnet run -- --run
 ```
 
-The C# server must be running and the VSCode extension must be connected before breakpoints work.
+The emulator must be running and the VSCode extension must be connected before breakpoints work.
 
 ### Step 2 — Open a Live Memory panel
 

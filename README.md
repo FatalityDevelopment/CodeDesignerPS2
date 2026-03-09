@@ -43,7 +43,15 @@ cd CodeDesigner.Mips64LE
 dotnet run
 ```
 
-To start the socket server for the VSCode extension:
+To start the emulator with the embedded socket server (port 8765) for the VS Code extension and MCP bridge:
+
+```bash
+dotnet run -- --run
+```
+
+The VS Code extension can also start the emulator automatically via its **Connect** button.
+
+To start the standalone socket server (port 8766, assembler/disassembler only, no live emulator):
 
 ```bash
 dotnet run -- --server

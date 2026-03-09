@@ -8,6 +8,11 @@ namespace CodeDesigner.Mips64LE.McpServer;
 /// Thin TCP client that forwards JSON commands to the CodeDesigner.Mips64LE
 /// socket server running on localhost:8765 and returns the raw JSON response.
 /// Each call opens a fresh connection so there is no shared mutable state.
+///
+/// Port 8765 is the embedded socket server started by the emulator's --run
+/// mode, which the VS Code extension also uses.  Both clients (extension and
+/// MCP bridge) connect to that same server; the server handles each connection
+/// independently so there is no port conflict.
 /// </summary>
 public sealed class SocketBridgeClient
 {
@@ -61,7 +66,7 @@ public sealed class SocketBridgeClient
             {
                 Success = false,
                 Error = $"Cannot connect to emulator socket server at {_host}:{_port} — " +
-                        $"make sure it is running (`dotnet run -- --server`). Detail: {ex.Message}"
+                        $"start the emulator with `dotnet run -- --run` in `CodeDesigner.Mips64LE/`. Detail: {ex.Message}"
             });
         }
     }

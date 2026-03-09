@@ -1189,8 +1189,13 @@ namespace CodeDesigner.Mips64LE
 
         private static async Task StartSocketServer()
         {
-            Console.WriteLine("Starting socket server on port 8765...");
-            var server = new SocketServer(8765);
+            // Port 8766 is the dedicated port for the standalone --server mode.
+            // The VS Code extension uses the embedded server started by --run on
+            // port 8765, so the two must not share the same port or the extension
+            // will connect to a server that has no live emulator (Scheduler == null).
+            const int StandaloneServerPort = 8766;
+            Console.WriteLine($"Starting socket server on port {StandaloneServerPort}...");
+            var server = new SocketServer(StandaloneServerPort);
 
             server.MessageReceived += (_, message) =>
                 Console.WriteLine($"[Server] Received: {message[..Math.Min(100, message.Length)]}...");
@@ -1232,7 +1237,10 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine("      Run the PS2 emulator with a real BIOS (and optionally a game disc).");
             Console.WriteLine();
             Console.WriteLine("  dotnet run -- --server");
-            Console.WriteLine("      Start the TCP socket server for the VSCode extension (port 8765).");
+            Console.WriteLine("      Start the standalone TCP socket server (port 8766).");
+            Console.WriteLine("      Use this for assembler/disassembler access without a live emulator.");
+            Console.WriteLine("      NOTE: the VS Code extension uses port 8765 (embedded in --run mode);");
+            Console.WriteLine("      the MCP server (CodeDesigner.Mips64LE.McpServer) connects to 8765");
             Console.WriteLine();
             Console.WriteLine("  dotnet run -- --graphics-info");
             Console.WriteLine("      Print information about adding a graphical display window.");
