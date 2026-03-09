@@ -258,19 +258,60 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
         const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
 
+        // Verify the executable actually exists before trying to launch it.
+        // Using shellPath: resolvedExe directly fails silently on some VS Code
+        // versions when the file is missing; this gives the user a clear message.
+        if (!fs.existsSync(resolvedExe)) {
+            out.appendLine(`[ERROR] Emulator executable not found: ${resolvedExe}`);
+            vscode.window.showErrorMessage(
+                `Emulator not found: ${resolvedExe}\n` +
+                'Build the project first: cd CodeDesigner.Mips64LE && dotnet build'
+            );
+            this.cleanupProcess();
+            return;
+        }
+
         const cliArgs: string[] = ['--run'];
         if (resolvedBios) { cliArgs.push('--bios', resolvedBios); }
         if (resolvedDisc) { cliArgs.push('--disc', resolvedDisc); }
 
         out.appendLine(`[INFO] Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
 
-        // Use shellPath/shellArgs to pass the exe and its arguments directly to
-        // the OS without any shell quoting — this avoids shell-injection concerns
-        // and works cross-platform regardless of the user's default shell.
+        // Run the emulator through the platform's system shell.  Passing the
+        // .NET exe directly as shellPath can fail silently on some VS Code
+        // versions because VS Code treats shellPath as an interactive shell and
+        // sends PTY initialisation sequences that a .NET console app may not
+        // handle correctly, causing the terminal to appear but do nothing.
+        let shellPath: string;
+        let shellArgs: string[];
+
+        if (process.platform === 'win32') {
+            // cmd /c runs the command and exits cleanly when the process ends.
+            // Each argument is wrapped in double-quotes; internal " escaped as "".
+            // COMSPEC is the canonical env-var for cmd.exe; fall back to the
+            // well-known absolute path so the launch still works if COMSPEC is
+            // missing from the environment.
+            const sysRoot = process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows';
+            shellPath = process.env.COMSPEC ?? path.join(sysRoot, 'System32', 'cmd.exe');
+            const quotedArgs = [resolvedExe, ...cliArgs]
+                .map(a => `"${a.replace(/"/g, '""')}"`)
+                .join(' ');
+            shellArgs = ['/c', quotedArgs];
+        } else {
+            // POSIX: /bin/sh is required by POSIX and always present; it is
+            // more portable than $SHELL which may be fish, xonsh, or another
+            // shell that doesn't accept standard -c syntax.
+            shellPath = '/bin/sh';
+            const shArgs = [resolvedExe, ...cliArgs]
+                .map(a => `'${a.replace(/'/g, "'\\''")}'`)
+                .join(' ');
+            shellArgs = ['-c', shArgs];
+        }
+
         const terminal = vscode.window.createTerminal({
-            name:      'PS2 Emulator',
-            shellPath: resolvedExe,
-            shellArgs: cliArgs,
+            name: 'PS2 Emulator',
+            shellPath,
+            shellArgs,
         });
         terminal.show(true);          // reveal but keep editor focus
 

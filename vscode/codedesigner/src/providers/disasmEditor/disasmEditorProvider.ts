@@ -311,9 +311,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             totalBytes,
         });
 
+        // Always send the first page immediately. When not connected this
+        // returns address-only placeholder rows so the grid is visible right
+        // away instead of showing a perpetual loading bar. When connected it
+        // sends real disassembly data. This direct call is belt-and-suspenders
+        // alongside the requestPage roundtrip that fires from the webview's
+        // own init handler.
+        await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
         if (connected) {
-            // Send first page and hex view
-            await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
             await this.sendLiveHexView(panel, region, baseAddress, baseAddress,
                 DisasmEditorProvider.INSTRUCTION_SIZE);
         }
