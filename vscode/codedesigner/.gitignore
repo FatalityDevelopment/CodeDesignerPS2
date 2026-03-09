@@ -3,11 +3,4 @@ node_modules
 .vscode-test/
 *.vsix
 obj*/
-
-# Build output — ignore everything in dist/ except the committed Angular webview bundles
-dist/*
-!dist/webview/
-dist/webview/*
-!dist/webview/asm-panel.js
-!dist/webview/disasm-panel.js
-!dist/webview/disasm-editor.js
+dist/
