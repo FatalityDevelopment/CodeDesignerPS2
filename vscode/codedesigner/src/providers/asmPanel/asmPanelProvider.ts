@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { getNonce } from '../../utils/nonce';
-import { getAsmPanelHtml, AsmPanelData } from './asmPanelTemplate';
 import { getSocketClient } from '../../extension';
 
 export class AsmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
+
+    constructor(private readonly _extensionUri: vscode.Uri) {}
 
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
@@ -18,15 +18,11 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
 
         // Setup webview options
         webviewView.webview.options = {
-            enableScripts: true
+            enableScripts: true,
+            localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
         };
 
-        // Generate HTML from template
-        const templateData: AsmPanelData = {
-            code: '',
-            emulators: ['Project64', 'Mupen64Plus', 'RetroArch']
-        };
-        webviewView.webview.html = getAsmPanelHtml(templateData, getNonce());
+        webviewView.webview.html = this.getHtml(webviewView.webview);
 
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async message => {
@@ -80,5 +76,26 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
                 error: error
             });
         }
+    }
+
+    private getHtml(webview: vscode.Webview): string {
+        const scriptUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'asm-panel.js')
+        );
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'unsafe-inline';
+               script-src ${webview.cspSource};">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+<app-asm-panel></app-asm-panel>
+<script src="${scriptUri}"></script>
+</body>
+</html>`;
     }
 }

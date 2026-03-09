@@ -1,7 +1,5 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
-import { getNonce } from "../../utils/nonce";
-import { getDisasmEditorHtml, DisasmEditorData } from "./disasmEditorTemplate";
 import { SocketClient, LabelEntry, StringEntry, FunctionEntry, SearchMatch } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 
@@ -42,7 +40,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public onPauseStateChange?: (paused: boolean) => void;
 
-  constructor(socketClient: SocketClient | null) {
+  constructor(socketClient: SocketClient | null, private readonly _extensionUri: vscode.Uri) {
     this.socketClient = socketClient;
   }
 
@@ -159,18 +157,36 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     return { uri, dispose: () => {} };
   }
 
+  private getHtml(webview: vscode.Webview): string {
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'disasm-editor.js')
+    );
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'unsafe-inline';
+               script-src ${webview.cspSource};">
+</head>
+<body>
+<app-disasm-editor></app-disasm-editor>
+<script src="${scriptUri}"></script>
+</body>
+</html>`;
+  }
+
   async resolveCustomEditor(
     document: vscode.CustomDocument,
     webviewPanel: vscode.WebviewPanel
   ): Promise<void> {
-    // Setup webview options
+    // Set HTML from Angular bundle
     webviewPanel.webview.options = {
-      enableScripts: true
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
     };
-
-    // Set HTML from template
-    const templateData: DisasmEditorData = {};
-    webviewPanel.webview.html = getDisasmEditorHtml(templateData, getNonce());
+    webviewPanel.webview.html = this.getHtml(webviewPanel.webview);
     fs.readFile(document.uri.fsPath, (err, fileData) => {
       if (err) {
         console.error(`[DISASM] Failed to read file: ${err.message}`);
@@ -282,7 +298,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             'disasm.liveMemory',
             label,
             vscode.ViewColumn.One,
-            { enableScripts: true, retainContextWhenHidden: true }
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+            }
         );
 
         // Track this panel for pause/resume broadcast and address lookup.
@@ -297,7 +317,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             this._livePanelInfo = this._livePanelInfo.filter(info => info.panel !== panel);
         });
 
-        panel.webview.html = getDisasmEditorHtml({} as DisasmEditorData, getNonce());
+        panel.webview.html = this.getHtml(panel.webview);
 
         const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
 

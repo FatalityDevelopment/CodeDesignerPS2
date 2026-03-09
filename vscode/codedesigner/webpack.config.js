@@ -68,4 +68,38 @@ const extensionConfig = {
     })
   ]
 };
-module.exports = [ extensionConfig ];
+/** @type WebpackConfig */
+const webviewConfig = {
+  target: 'web',
+  mode: 'none',
+  entry: {
+    'asm-panel':     './src/webview/asm-panel/main.ts',
+    'disasm-panel':  './src/webview/disasm-panel/main.ts',
+    'disasm-editor': './src/webview/disasm-editor/main.ts',
+  },
+  output: {
+    path: path.resolve(__dirname, 'dist/webview'),
+    filename: '[name].js',
+  },
+  resolve: {
+    extensions: ['.ts', '.js'],
+  },
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        loader: 'ts-loader',
+        options: { configFile: 'tsconfig.webview.json', transpileOnly: true },
+        exclude: /node_modules/,
+      },
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader'],
+        exclude: /node_modules/,
+      },
+    ],
+  },
+  devtool: 'nosources-source-map',
+};
+
+module.exports = [ extensionConfig, webviewConfig ];

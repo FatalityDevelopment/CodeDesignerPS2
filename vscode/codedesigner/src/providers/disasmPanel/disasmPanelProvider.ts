@@ -1,11 +1,21 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getNonce } from '../../utils/nonce';
-import { getDisasmPanelHtml, DisasmPanelData, EmuOption, SnapshotEntry } from './disasmPanelTemplate';
 import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
+
+interface EmuSettings {
+    bios?: Array<{ name: string; path: string }>;
+    games?: Array<{ name: string; path: string }>;
+    emulators?: Array<{ type: string; path: string }>;
+}
+
+interface SnapshotEntry {
+    label: string;
+    timestamp: string;
+    path: string;
+}
 
 interface EmuSettings {
     bios?: Array<{ name: string; path: string }>;
@@ -44,7 +54,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     constructor(
         private readonly socketClient: SocketClient,
-        private readonly editorProvider: DisasmEditorProvider
+        private readonly editorProvider: DisasmEditorProvider,
+        private readonly _extensionUri: vscode.Uri
     ) {}
 
     // Register the provider with VS Code
@@ -87,10 +98,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.loadEmuSettings();
 
         // Setup webview options
-        webviewView.webview.options = { enableScripts: true };
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview')]
+        };
 
-        // Render the panel with settings data
-        webviewView.webview.html = this.buildHtml();
+        // Render the Angular shell (settings data sent via postMessage below)
+        webviewView.webview.html = this.getHtml(webviewView.webview);
+
+        // Send initial settings to Angular component
+        this.postInitMessage();
 
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async msg => {
@@ -174,33 +191,44 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Reload settings and re-render the webview panel. */
+    /** Reload settings and update the Angular component via postMessage. */
     private reloadAndRefresh(): void {
         this.loadEmuSettings();
-        if (this.webview) {
-            this.webview.html = this.buildHtml();
-        }
+        this.postInitMessage();
     }
 
-    private buildHtml(): string {
-        const emulators: EmuOption[] = (this.settings.emulators ?? []).map(e => ({
-            type: e.type, path: e.path
-        }));
-        const biosOptions: EmuOption[] = (this.settings.bios ?? []).map(b => ({
-            name: b.name, path: b.path
-        }));
-        const gameOptions: EmuOption[] = (this.settings.games ?? []).map(g => ({
-            name: g.name, path: g.path
-        }));
-
-        const templateData: DisasmPanelData = {
-            connected:   this.emulatorTerminal != null || this.socketClient.isConnected(),
+    private postInitMessage(): void {
+        if (!this.webview) { return; }
+        const emulators = (this.settings.emulators ?? []).map(e => ({ label: e.type, value: e.path }));
+        const biosOptions = (this.settings.bios ?? []).map(b => ({ label: b.name, value: b.path }));
+        const gameOptions = (this.settings.games ?? []).map(g => ({ label: g.name, value: g.path }));
+        this.webview.postMessage({
+            command: 'init',
             emulators,
             biosOptions,
             gameOptions,
-            snapshots:   this.snapshots,
-        };
-        return getDisasmPanelHtml(templateData, getNonce());
+            snapshots: this.snapshots,
+        });
+    }
+
+    private getHtml(webview: vscode.Webview): string {
+        const scriptUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'disasm-panel.js')
+        );
+        return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'unsafe-inline';
+               script-src ${webview.cspSource};">
+</head>
+<body>
+<app-disasm-panel></app-disasm-panel>
+<script src="${scriptUri}"></script>
+</body>
+</html>`;
     }
 
     // ── Emulator launch ───────────────────────────────────────────────────────

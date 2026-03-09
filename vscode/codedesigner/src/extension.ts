@@ -35,7 +35,7 @@ export function activate(context: vscode.ExtensionContext) {
 	socketClient = new SocketClient('localhost', 8765);
 
 	// Register custom editor for disassembly (after socket client is initialized)
-	const editorProvider = new DisasmEditorProvider(socketClient);
+	const editorProvider = new DisasmEditorProvider(socketClient, context.extensionUri);
 	context.subscriptions.push(
 		vscode.window.registerCustomEditorProvider('disasm.disasmEditor', editorProvider)
 	);
@@ -68,10 +68,10 @@ export function activate(context: vscode.ExtensionContext) {
 	setTimeout(checkForOpenBinFiles, 500);
 
 	// Register webview panels — pass socketClient so the panel can auto-connect
-	const disasmPanelProvider = new DisasmPanelProvider(socketClient, editorProvider);
+	const disasmPanelProvider = new DisasmPanelProvider(socketClient, editorProvider, context.extensionUri);
 	disasmPanelProvider.register(context);
 
-	const asmPanelProvider = new AsmPanelProvider();
+	const asmPanelProvider = new AsmPanelProvider(context.extensionUri);
 	asmPanelProvider.register(context);
 
 	// Wire pause-state propagation: when a breakpoint/step pause is detected in the
