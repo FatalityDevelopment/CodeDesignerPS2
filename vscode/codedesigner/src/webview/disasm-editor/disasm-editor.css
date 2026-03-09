@@ -154,13 +154,19 @@ body {
     color: #fff;
 }
 
+#hex-header {
+    font-family: monospace;
+    background: #2d2d30;
+    padding: 4px 4px 0;
+}
+
 #hex-container {
     font-family: monospace;
-    overflow: auto;
+    overflow-y: auto;
     max-height: 120px;
     background: #2d2d30;
     border-bottom: 1px solid #3e3e42;
-    padding: 4px;
+    padding: 0 4px 4px;
 }
 
 .hex-row {

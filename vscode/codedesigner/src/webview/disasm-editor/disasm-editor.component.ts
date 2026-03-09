@@ -95,6 +95,7 @@ interface RegisterData {
         <button class="close-search" id="close-search" title="Close (Escape)">&#xD7;</button>
     </div>
 </div>
+<div id="hex-header"></div>
 <div id="hex-container"></div>
 </div>
 <div id="content-wrapper">
@@ -216,6 +217,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const SCAN_TIMEOUT_MS = 120_000;
 
     // ── DOM refs ──────────────────────────────────────────────────────────────
+    const hexHeader      = document.getElementById('hex-header')!;
     const hexContainer   = document.getElementById('hex-container')!;
     const grid           = document.getElementById('grid')!;
     const searchPanel    = document.getElementById('search-panel')!;
@@ -664,8 +666,9 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     // ── Hex view ──────────────────────────────────────────────────────────────
     function renderHexView(data: number[], offset: number, highlightAddr = -1, highlightLength = 4) {
+      hexHeader.innerHTML = '';
+      hexHeader.appendChild(buildHexHeader());
       hexContainer.innerHTML = '';
-      hexContainer.appendChild(buildHexHeader());
       for (let i = 0; i < data.length; i += 16) {
         hexContainer.appendChild(buildHexRow(data, offset, i, highlightAddr, highlightLength));
       }
@@ -674,7 +677,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     function buildHexHeader(): HTMLElement {
       const header = document.createElement('div');
       header.className = 'hex-row';
-      header.style.cssText = 'border-bottom: 1px solid #3e3e42; padding-bottom: 4px; margin-bottom: 2px; position: sticky; top: 0; background: #2d2d30; z-index: 1;';
+      header.style.cssText = 'border-bottom: 1px solid #3e3e42; padding-bottom: 4px; margin-bottom: 2px;';
       let bytes = '';
       for (let i = 0; i < 16; i++) {
         if (i && i % 4 === 0) { bytes += '<span style="width:8px"></span>'; }
