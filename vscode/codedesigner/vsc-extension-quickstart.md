@@ -24,10 +24,10 @@ npm run compile
 
 ## Run / Debug
 
-1. Start the C# backend:
+1. Start the C# emulator (embedded server on port 8765):
    ```bash
    cd CodeDesigner.Mips64LE
-   dotnet run -- --server
+   dotnet run -- --run
    ```
 2. In VS Code, press **F5** to launch the Extension Development Host.
 3. Open the Command Palette and run `CodeDesigner: Connect to Server`.

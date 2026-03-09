@@ -149,10 +149,10 @@ Disassemble hex instructions into MIPS assembly.
 
 ```bash
 cd CodeDesigner.Mips64LE
-dotnet run -- --server
+dotnet run -- --run
 ```
 
-The server will start on port 8765 and wait for connections.
+The emulator starts on port 8765 and waits for connections. The VS Code extension can also start it automatically via its **Connect** button.
 
 ### Using the VSCode Extension
 
@@ -276,8 +276,8 @@ npm run compile
 
 **C# Server Test:**
 ```bash
-# Start server
-dotnet run --project CodeDesigner.Mips64LE/CodeDesigner.Mips64LE.csproj -- --server
+# Start emulator (embedded server on port 8765)
+dotnet run --project CodeDesigner.Mips64LE/CodeDesigner.Mips64LE.csproj -- --run
 
 # In another terminal, connect with any TCP client and send a JSON PING command:
 # {"command":"PING"}
@@ -297,7 +297,8 @@ dotnet run --project CodeDesigner.Mips64LE/CodeDesigner.Mips64LE.csproj -- --ser
 
 ### Cannot Connect from Extension
 
-- Verify server is running with `--server` flag
+- Verify the emulator is running with `--run` (port 8765)
+- Do **not** run `--server` when the extension is active; `--server` uses port 8766 and has no live emulator
 - Check firewall settings for port 8765
 - Look at VSCode Developer Tools console for errors (Help → Toggle Developer Tools)
 

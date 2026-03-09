@@ -15,23 +15,35 @@ GitHub Copilot Chat
 CodeDesigner.Mips64LE.McpServer  ← this project
        │  JSON over TCP :8765
        ▼
-CodeDesigner.Mips64LE (--server mode)
+CodeDesigner.Mips64LE (--run mode, embedded socket server)
        │
        ▼
 PS2 Emulator / Disassembler engine
 ```
+
+### Port assignment
+
+| Port | Purpose |
+|------|---------|
+| **8765** | Embedded socket server started by `--run`. Used by the **VS Code extension** *and* the **MCP bridge** simultaneously. Each client gets its own connection; there is no conflict. |
+| **8766** | Standalone socket server started by `--server`. Provides assembler/disassembler without a live emulator. **Not used by the MCP bridge or the VS Code extension.** |
+
+> **Important — do not run `--server` when using the VS Code extension or the MCP server.**
+> The VS Code extension auto-connects to port 8765. If `--server` occupies 8765 (old default),
+> the extension connects to a scheduler-less server and emulator commands fail.
+> `--server` now uses port **8766** specifically to prevent this conflict.
 
 ---
 
 ## Prerequisites
 
 1. **.NET 8 SDK** – `dotnet --version` should print `8.x.x` or later.
-2. The **backend socket server** must be running:
+2. The **emulator** must be running with `--run` (which starts the embedded socket server on port 8765):
    ```bash
    cd CodeDesigner.Mips64LE
-   dotnet run -- --server
+   dotnet run -- --run
    ```
-   It listens on `localhost:8765` by default.
+   The VS Code extension can also start the emulator for you via the **Connect** button in the Disasm panel.
 
 ---
 
@@ -126,6 +138,7 @@ Once registered you can ask Copilot things like:
 
 | Symptom | Fix |
 |---|---|
-| `Cannot connect to emulator socket server` | Start the backend: `dotnet run -- --server` in `CodeDesigner.Mips64LE/` |
+| `Cannot connect to emulator socket server` | Start the emulator: `dotnet run -- --run` in `CodeDesigner.Mips64LE/`. The VS Code extension can also start it via the **Connect** button. |
 | `Emulator not running — no scheduler attached` | The socket server is up but no emulator session is active; start a session with `--run` |
 | MCP server not listed in Copilot | Reload VS Code after editing `settings.json`; check **Output → MCP** log |
+| Extension connects but memory/register reads fail | Do **not** run `--server` while the extension is active. Use `--run` instead; both the extension and the MCP bridge share the embedded server on port 8765. |

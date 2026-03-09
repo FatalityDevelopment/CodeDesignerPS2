@@ -10,10 +10,17 @@ The project now includes a TCP socket-based communication channel that allows th
 
 ### 1. C# Socket Server (`CodeDesigner.Mips64LE/SocketServer.cs`)
 
-The socket server runs on port `8765` by default and provides:
+The socket server runs on port `8765` (embedded in `--run` mode) or `8766` (standalone `--server` mode) and provides:
 - TCP connection handling
 - Message receiving and echo responses
 - Event-based notification system for messages, connections, and disconnections
+
+**Port assignment:**
+
+| Port | Mode | Used by |
+|------|------|---------|
+| **8765** | `--run` (embedded) | VS Code extension **and** MCP bridge (both connect simultaneously) |
+| **8766** | `--server` (standalone) | Standalone assembler/disassembler only — no live emulator |
 
 ### 2. VSCode Extension Socket Client (`vscode/codedesigner/src/socketClient.ts`)
 
@@ -33,14 +40,25 @@ The extension now includes three new commands:
 
 ### Starting the C# Server
 
-To start the socket server in the C# console application:
+To use the VS Code extension or MCP bridge with a live emulator, start in `--run` mode (embedded server on port 8765):
+
+```bash
+cd CodeDesigner.Mips64LE
+dotnet run -- --run
+```
+
+The server will start listening on `localhost:8765`. The VS Code extension can also start the emulator automatically via the **Connect** button in the Disasm panel.
+
+For assembler/disassembler use only (no live emulator), start the standalone server on port 8766:
 
 ```bash
 cd CodeDesigner.Mips64LE
 dotnet run -- --server
 ```
 
-The server will start listening on `localhost:8765` and wait for connections.
+> **Do not run `--server` while the VS Code extension is active.** The extension uses port 8765; `--server` now runs on port 8766 to avoid conflicts.
+
+The standalone `--server` (port 8766) will start listening and wait for connections.
 
 ### Using the VSCode Extension
 
@@ -55,9 +73,9 @@ The server will start listening on `localhost:8765` and wait for connections.
 
 A simple test can be performed:
 
-1. Start the C# server:
+1. Start the emulator:
    ```bash
-   dotnet run --project CodeDesigner.Mips64LE/CodeDesigner.Mips64LE.csproj -- --server
+   dotnet run --project CodeDesigner.Mips64LE/CodeDesigner.Mips64LE.csproj -- --run
    ```
 
 2. In the VSCode extension, run the "Connect to Server" command
@@ -71,11 +89,11 @@ A simple test can be performed:
 ### Communication Flow
 
 ```
-VSCode Extension (TypeScript)
-        ↓↑
-    TCP Socket (Port 8765)
-        ↓↑
-C# Console App (SocketServer)
+VSCode Extension (TypeScript)  /  MCP bridge (Copilot)
+            ↓↑                            ↓↑
+       TCP Socket (Port 8765 — --run embedded server)
+                       ↓↑
+          C# Console App (SocketServer + PS2 Emulator)
 ```
 
 ### Message Format
@@ -282,18 +300,18 @@ npm run compile
 
 ### Connection Refused Error
 
-- Ensure the C# server is running with the `--server` flag
+- Ensure the emulator is running with `--run` (port 8765). The VS Code extension starts it automatically via the **Connect** button.
 - Check that port 8765 is not blocked by a firewall
 - Verify the server started successfully without errors
+- Do **not** run `--server` (port 8766) and expect the extension or MCP bridge to connect to it
 
 ### Extension Not Connecting
 
 - Check VSCode Developer Tools console for errors (`Help > Toggle Developer Tools`)
 - Verify the socketClient is properly initialized
-- Ensure the server is running before attempting to connect
+- Ensure the emulator is running (`--run`) before attempting to connect
 
 ### Port Already in Use
 
-If port 8765 is already in use, you can modify the port in:
-- `SocketServer.cs`: Change the default port in the constructor
-- `socketClient.ts`: Change the port parameter in the SocketClient constructor
+If port 8765 is already in use, ensure you are not running two emulator instances simultaneously.
+If port 8766 is already in use, check for a stray `--server` process.

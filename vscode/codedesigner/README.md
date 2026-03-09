@@ -26,11 +26,15 @@ PlayStation 2 Emotion Engine (EE) via a connection to the CodeDesigner C# backen
 
 ## Getting Started
 
-### 1. Start the C# backend server
+### 1. Start the C# backend
+
+The recommended way is to use the **Connect** button in the Disasm panel — the extension will start the emulator automatically.
+
+Alternatively, start it manually:
 
 ```bash
 cd CodeDesigner.Mips64LE
-dotnet run -- --server
+dotnet run -- --run
 ```
 
 You should see:
@@ -38,6 +42,10 @@ You should see:
 Socket server started on port 8765
 Waiting for VSCode extension to connect...
 ```
+
+> **Note:** Do not use `--server` when working with the extension. `--server` runs a
+> standalone assembler/disassembler-only server on port **8766** and does **not** start the
+> PS2 emulator. Use `--run` (port **8765**) for full functionality.
 
 ### 2. Connect the extension
 
@@ -77,7 +85,7 @@ The Live Disassembler panel has a built-in breakpoint system that lets you pause
 
 ### Prerequisites
 
-- The C# backend must be running in server mode (`dotnet run -- --server`).
+- The C# backend must be running with the emulator (`dotnet run -- --run`), or started via the extension's **Connect** button.
 - The extension must be connected (run **CodeDesigner: Connect to Server**).
 - A **Live Memory** disassembler panel must be open (opened automatically when a live session is started).
 
