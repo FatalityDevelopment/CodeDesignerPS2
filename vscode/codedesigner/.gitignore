@@ -3,4 +3,7 @@ node_modules
 .vscode-test/
 *.vsix
 obj*/
-dist/
+dist/extension.js
+dist/extension.js.map
+dist/resources/
+dist/webview/*.js.map
