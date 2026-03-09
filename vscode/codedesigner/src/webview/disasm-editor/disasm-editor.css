@@ -168,7 +168,9 @@ app-disasm-editor {
 #hex-header {
     font-family: monospace;
     background: #2d2d30;
-    padding: 4px 4px 0;
+    padding: 4px 4px 4px;
+    border-bottom: 2px solid #3e3e42;
+    overflow: hidden;
 }
 
 #hex-container {
@@ -177,7 +179,7 @@ app-disasm-editor {
     max-height: 120px;
     background: #2d2d30;
     border-bottom: 1px solid #3e3e42;
-    padding: 0 4px 4px;
+    padding: 2px 4px 4px;
 }
 
 .hex-row {
@@ -231,6 +233,7 @@ app-disasm-editor {
 #grid { 
     outline: none;
     flex: 1;
+    min-height: 0;
     overflow-y: scroll;
     scrollbar-width: none; /* Firefox */
 }
@@ -241,6 +244,7 @@ app-disasm-editor {
 
 #content-wrapper {
     flex: 1;
+    min-height: 0;
     display: flex;
     overflow: hidden;
 }

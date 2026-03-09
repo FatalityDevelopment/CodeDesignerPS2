@@ -681,7 +681,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     function buildHexHeader(): HTMLElement {
       const header = document.createElement('div');
       header.className = 'hex-row';
-      header.style.cssText = 'border-bottom: 1px solid #3e3e42; padding-bottom: 4px; margin-bottom: 2px;';
       let bytes = '';
       for (let i = 0; i < 16; i++) {
         if (i && i % 4 === 0) { bytes += '<span style="width:8px"></span>'; }
