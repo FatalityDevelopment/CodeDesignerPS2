@@ -299,6 +299,17 @@ export class DisasmEditorComponent implements AfterViewInit {
     const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
     const getPageStart = (index: number) => Math.floor(index / state.pageSize) * state.pageSize;
     const getLocalIndex = (index: number) => index - getPageStart(index);
+    // Returns the 0-based index of the current PC within the page that starts at
+    // `pageStart`, or -1 if the PC is not on that page (or not set).
+    const getPcLocalIndex = (pageStart: number): number => {
+      if (state.pcAddress === undefined) { return -1; }
+      const physPc    = toPhysAddr(state.pcAddress);
+      const physBase  = toPhysAddr(state.baseAddress);
+      const pcInstrIdx = Math.floor((physPc - physBase) / 4);
+      if (pcInstrIdx < 0 || pcInstrIdx >= state.totalInstructions) { return -1; }
+      if (getPageStart(pcInstrIdx) !== pageStart) { return -1; }
+      return pcInstrIdx - pageStart;
+    };
 
     // ── Navigation history ────────────────────────────────────────────────────
     const navHistory: number[] = [];
@@ -843,6 +854,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       grid.innerHTML = '';
       const pageStart = getPageStart(state.cursor);
       const localCursor = getLocalIndex(state.cursor);
+      // Pre-compute the local index of the PC so each row can add current-pc class.
+      const pcLocalIndex = getPcLocalIndex(pageStart);
       state.disasmRows.forEach((rowData, i) => {
         const globalIndex = pageStart + i;
         const row = document.createElement('div');
@@ -850,6 +863,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         row.dataset['index'] = String(i);
         row.dataset['globalIndex'] = String(globalIndex);
         if (i === localCursor) { row.classList.add('active'); }
+        if (i === pcLocalIndex) { row.classList.add('current-pc'); }
         if (isRowSearchMatch(globalIndex)) { row.classList.add('search-match'); }
         if (isRowCurrentMatch(globalIndex)) { row.classList.add('search-current'); }
         const rowAddr = parseInt(rowData.addr, 16);
@@ -1021,8 +1035,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       const breakpointHitPhys = state.breakpointHitAddress !== undefined
         ? toPhysAddr(state.breakpointHitAddress)
         : undefined;
+      // Compute the local index of the current PC so we can keep the PC
+      // arrow visible even when the user has navigated the cursor elsewhere.
+      const pcLocalIndex = getPcLocalIndex(getPageStart(state.cursor));
       Array.from(grid.children).forEach((r, i) => {
-        r.classList.remove('active', 'branch-highlight', 'breakpoint-hit');
+        r.classList.remove('active', 'branch-highlight', 'breakpoint-hit', 'current-pc');
         if (breakpointHitPhys !== undefined) {
           const rowData = state.disasmRows[i];
           if (rowData) {
@@ -1030,6 +1047,7 @@ export class DisasmEditorComponent implements AfterViewInit {
             if (breakpointHitPhys === rowPhys) { (r as Element).classList.add('breakpoint-hit'); }
           }
         }
+        if (i === pcLocalIndex) { (r as Element).classList.add('current-pc'); }
       });
       const rowEl = grid.children[localIndex] as HTMLElement | undefined;
       if (!rowEl) { return; }
@@ -1115,8 +1133,14 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
       if (paused) {
         state.breakpointHitAddress = breakpointHitAddress;
+        // Track the actual PC separately from the cursor so the PC arrow
+        // indicator stays visible even after the user navigates elsewhere.
+        if (pc !== undefined && pc !== null) {
+          state.pcAddress = pc;
+        }
       } else {
         state.breakpointHitAddress = undefined;
+        state.pcAddress = undefined;
       }
       if (paused && pc !== undefined && pc !== null) {
         const physPc    = toPhysAddr(pc);
@@ -1131,11 +1155,12 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (!paused && livePaused) {
         livePaused = false;
         state.breakpointHitAddress = undefined;
+        state.pcAddress = undefined;
         setLivePausedUi(false);
         startLiveRefresh();
         hideDebugPanel();
-        // Immediately clear the yellow breakpoint-hit highlight from all visible rows.
-        Array.from(grid.children).forEach(r => r.classList.remove('breakpoint-hit'));
+        // Immediately clear the yellow breakpoint-hit and current-pc highlights.
+        Array.from(grid.children).forEach(r => r.classList.remove('breakpoint-hit', 'current-pc'));
         return;
       }
       if (paused && registers) {
@@ -1150,6 +1175,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       state.breakpointHitAddress = undefined;
       navHistory.length = 0;
       navBackBtn.disabled = true;
+      state.pcAddress = undefined;
       const startIndex = getPageStart(state.cursor);
       const zeroRows = generateZeroPage(startIndex);
       state.loadedPages.set(startIndex, zeroRows);
