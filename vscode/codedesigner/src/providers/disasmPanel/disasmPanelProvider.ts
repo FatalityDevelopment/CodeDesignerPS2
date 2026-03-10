@@ -152,6 +152,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'gameChanged':
                     this.selectedGamePath = msg.gamePath ?? '';
                     break;
+                case 'applyCheats':
+                    await this.handleApplyCheats(msg.cheatText ?? '');
+                    break;
             }
         });
     }
@@ -559,6 +562,23 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private resolvePath(p: string): string {
         if (path.isAbsolute(p)) { return p; }
         return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
+    }
+
+    /** Apply cheat codes to live emulator memory via the APPLYCHEATS socket command. */
+    private async handleApplyCheats(cheatText: string): Promise<void> {
+        const out = getOutputChannel();
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        try {
+            await this.socketClient.applyCheats(cheatText);
+            out.appendLine('[INFO] Cheats applied successfully.');
+            this.webview?.postMessage({ command: 'cheatsApplied', success: true });
+        } catch (err: any) {
+            out.appendLine(`[ERROR] ApplyCheats error: ${err?.message ?? err}`);
+            this.webview?.postMessage({ command: 'cheatsApplied', success: false, error: err?.message ?? String(err) });
+        }
     }
 
     /**

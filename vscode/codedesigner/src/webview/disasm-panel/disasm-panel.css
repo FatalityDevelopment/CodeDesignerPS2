@@ -5,6 +5,83 @@ body {
     background: var(--vscode-editor-background);
 }
 
+/* ── Panel tabs ──────────────────────────────────────────────────────────── */
+
+#panel-tabs {
+    display: flex;
+    gap: 0;
+    margin: 0 -10px 10px;
+    border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+    background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d30);
+}
+
+.panel-tab {
+    flex: 1;
+    background: transparent;
+    color: var(--vscode-tab-inactiveForeground, #969696);
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family);
+    outline: none;
+    white-space: nowrap;
+    transition: color 0.1s;
+}
+
+.panel-tab:hover {
+    color: var(--vscode-tab-activeForeground, #ffffff);
+    background: rgba(255,255,255,0.05);
+}
+
+.panel-tab.active {
+    color: var(--vscode-tab-activeForeground, #ffffff);
+    border-bottom-color: var(--vscode-focusBorder, #007acc);
+    background: transparent;
+}
+
+.tab-content {
+    padding: 0;
+}
+
+/* ── Cheats tab ──────────────────────────────────────────────────────────── */
+
+.cheats-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#cheats-input {
+    width: 100%;
+    min-height: 200px;
+    resize: vertical;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 6px;
+    font-family: monospace;
+    font-size: 12px;
+    box-sizing: border-box;
+}
+
+#cheats-input::placeholder {
+    color: var(--vscode-input-placeholderForeground, #888);
+}
+
+.cheat-message {
+    font-size: 12px;
+    padding: 4px 6px;
+    border-radius: 2px;
+    color: #4ec94e;
+}
+
+.cheat-message.cheat-error {
+    color: #e07070;
+}
+
+
 #emu-status-bar {
     display: flex;
     align-items: center;

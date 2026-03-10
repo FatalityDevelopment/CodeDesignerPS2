@@ -1074,4 +1074,19 @@ export class SocketClient {
 
         return response.Message || 'PONG';
     }
+
+    /**
+     * Apply PS2 GameShark/Action Replay cheat codes to live emulator memory.
+     * @param cheatText  Multi-line cheat code text (blocks separated by blank lines).
+     */
+    public async applyCheats(cheatText: string): Promise<void> {
+        const command: CommandMessage = {
+            Command: 'APPLYCHEATS',
+            Data:    cheatText,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ApplyCheats failed');
+        }
+    }
 }

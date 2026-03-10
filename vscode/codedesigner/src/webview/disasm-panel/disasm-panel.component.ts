@@ -34,6 +34,13 @@ interface UpdateSnapshotsMsg {
   snapshots: SnapshotEntry[];
 }
 
+/** Message sent by the provider after applying cheats. */
+interface CheatsAppliedMsg {
+  command: 'cheatsApplied';
+  success: boolean;
+  error?: string;
+}
+
 /** Message sent by the provider with initial panel data (options, existing snapshots). */
 interface InitMsg {
   type: 'init';
@@ -64,53 +71,70 @@ interface InitMsg {
   </button>
 </div>
 
-<h3>Emulator</h3>
-<div class="container">
+<div id="panel-tabs">
+  <button class="panel-tab" [class.active]="activeTab === 'settings'" (click)="setTab('settings')">Emulator Settings</button>
+  <button class="panel-tab" [class.active]="activeTab === 'cheats'" (click)="setTab('cheats')">Cheats</button>
+</div>
 
-  <div class="row">
-    <select id="emulatorSelect" [(ngModel)]="selectedEmulator" (change)="onEmulatorChange()">
-      <option value="">Select Emulator...</option>
-      <option *ngFor="let e of emulators" [value]="e.value">{{e.label}}</option>
-    </select>
-  </div>
+<div id="tab-settings" class="tab-content" [style.display]="activeTab === 'settings' ? 'block' : 'none'">
+  <div class="container">
 
-  <div class="row">
-    <select id="biosSelect" [(ngModel)]="selectedBios" (change)="onBiosChange()">
-      <option value="">Select BIOS...</option>
-      <option *ngFor="let b of biosOptions" [value]="b.value">{{b.label}}</option>
-    </select>
-  </div>
-
-  <div class="row">
-    <select id="gameSelect" [(ngModel)]="selectedGame" (change)="onGameChange()">
-      <option value="">Select Game...</option>
-      <option *ngFor="let g of gameOptions" [value]="g.value">{{g.label}}</option>
-    </select>
-  </div>
-
-  <div class="row">
-    <button id="connectBtn" (click)="connect()">
-      {{isConnected ? 'Disconnect' : 'Connect'}}
-    </button>
-  </div>
-
-  <div class="row">
-    <button id="restartBtn" (click)="restart()" [disabled]="!isConnected">⟳ Restart</button>
-  </div>
-
-  <div class="row">
-    <button id="snapshotBtn" (click)="snapshot()" [disabled]="!isConnected">Take Snapshot</button>
-  </div>
-
-  <div *ngIf="snapshots.length > 0" class="snapshot-list">
-    <h4>Snapshots</h4>
-    <div *ngFor="let snap of snapshots" class="snapshot-item">
-      <span class="snapshot-label">{{snap.label}}</span>
-      <span class="snapshot-time">{{snap.timestamp}}</span>
-      <button class="open-snapshot-btn" (click)="openSnapshot(snap)">Open</button>
+    <div class="row">
+      <select id="emulatorSelect" [(ngModel)]="selectedEmulator" (change)="onEmulatorChange()">
+        <option value="">Select Emulator...</option>
+        <option *ngFor="let e of emulators" [value]="e.value">{{e.label}}</option>
+      </select>
     </div>
-  </div>
 
+    <div class="row">
+      <select id="biosSelect" [(ngModel)]="selectedBios" (change)="onBiosChange()">
+        <option value="">Select BIOS...</option>
+        <option *ngFor="let b of biosOptions" [value]="b.value">{{b.label}}</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <select id="gameSelect" [(ngModel)]="selectedGame" (change)="onGameChange()">
+        <option value="">Select Game...</option>
+        <option *ngFor="let g of gameOptions" [value]="g.value">{{g.label}}</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <button id="connectBtn" (click)="connect()">
+        {{isConnected ? 'Disconnect' : 'Connect'}}
+      </button>
+    </div>
+
+    <div class="row">
+      <button id="restartBtn" (click)="restart()" [disabled]="!isConnected">⟳ Restart</button>
+    </div>
+
+    <div class="row">
+      <button id="snapshotBtn" (click)="snapshot()" [disabled]="!isConnected">Take Snapshot</button>
+    </div>
+
+    <div *ngIf="snapshots.length > 0" class="snapshot-list">
+      <h4>Snapshots</h4>
+      <div *ngFor="let snap of snapshots" class="snapshot-item">
+        <span class="snapshot-label">{{snap.label}}</span>
+        <span class="snapshot-time">{{snap.timestamp}}</span>
+        <button class="open-snapshot-btn" (click)="openSnapshot(snap)">Open</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="tab-cheats" class="tab-content" [style.display]="activeTab === 'cheats' ? 'block' : 'none'">
+  <div class="cheats-container">
+    <textarea id="cheats-input" [(ngModel)]="cheatText"
+      placeholder="Paste cheat codes here (GameShark/Action Replay format)&#10;&#10;Example:&#10;#Infinite Health&#10;20123456 000003E8"></textarea>
+    <div class="row">
+      <button id="cheatsUpdateBtn" (click)="applyCheats()" [disabled]="!isConnected">Update</button>
+    </div>
+    <div *ngIf="cheatMessage" class="cheat-message" [class.cheat-error]="cheatError">{{cheatMessage}}</div>
+  </div>
 </div>
   `
 })
@@ -124,6 +148,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   selectedEmulator = '';
   selectedBios = '';
   selectedGame = '';
+  activeTab: 'settings' | 'cheats' = 'settings';
+  cheatText = '';
+  cheatMessage = '';
+  cheatError = false;
   private subs: Subscription[] = [];
 
   get statusText(): string {
@@ -151,6 +179,11 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         if (msg.gameOptions?.length){ this.gameOptions   = msg.gameOptions;  }
         if (msg.snapshots?.length)  { this.snapshots     = msg.snapshots;    }
         if (msg.connectedEmulatorPath) { this.selectedEmulator = msg.connectedEmulatorPath; }
+      }),
+      this.bridge.on<CheatsAppliedMsg>('cheatsApplied').subscribe(msg => {
+        this.cheatError   = !msg.success;
+        this.cheatMessage = msg.success ? 'Cheats applied!' : (msg.error ?? 'Failed to apply cheats.');
+        setTimeout(() => { this.cheatMessage = ''; }, 4000);
       })
     );
     // Signal to the provider that subscriptions are set up and we are ready
@@ -201,5 +234,13 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   onGameChange(): void {
     this.bridge.postMessage({ command: 'gameChanged', gamePath: this.selectedGame });
+  }
+
+  setTab(tab: 'settings' | 'cheats'): void {
+    this.activeTab = tab;
+  }
+
+  applyCheats(): void {
+    this.bridge.postMessage({ command: 'applyCheats', cheatText: this.cheatText });
   }
 }
