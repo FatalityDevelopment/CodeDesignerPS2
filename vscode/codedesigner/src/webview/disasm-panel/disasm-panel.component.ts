@@ -128,6 +128,10 @@ interface InitMsg {
     </div>
 
     <div class="row">
+      <button id="runBtn" (click)="run()">▶ Run</button>
+    </div>
+
+    <div class="row">
       <button id="restartBtn" (click)="restart()" [disabled]="!isConnected">⟳ Restart</button>
     </div>
 
@@ -154,14 +158,6 @@ interface InitMsg {
       </div>
     </div>
 
-    <div class="section-label">Disassembler Regions</div>
-    <div class="row">
-      <select id="regionSelect" [(ngModel)]="selectedRegion" (change)="onRegionChange()">
-        <option value="">Navigate to region…</option>
-        <option *ngFor="let r of regions" [value]="r">{{r}}</option>
-      </select>
-    </div>
-
   </div>
 </div>
 
@@ -176,15 +172,11 @@ interface InitMsg {
   </div>
 </div>
 
-<div id="tab-cds" class="tab-content" [style.display]="activeTab === 'cds' ? 'block' : 'none'">
+<div id="tab-cds" class="tab-content" [style.display]="activeTab === 'cds' ? 'flex' : 'none'">
   <div class="cds-container">
     <div class="section-label">Compiled GameShark Codes</div>
     <textarea id="cds-output" [(ngModel)]="cdsOutput" readonly
       placeholder="Compiled GameShark codes will appear here after pressing Compile.&#10;&#10;Add an address directive in your .cds file:&#10;  address 0x20123456&#10;  nop&#10;  add $t0, $s0, $s1"></textarea>
-    <div *ngFor="let e of cdsErrors" class="cds-error-line">
-      <span class="cds-error-lineno">Line {{e.lineNumber}}:</span> {{e.message}}
-    </div>
-    <div *ngIf="cdsMessage" class="cds-message" [class.cds-error]="cdsMessageError">{{cdsMessage}}</div>
     <div class="row">
       <button id="cdsCompileBtn" (click)="compileCds()" [disabled]="!isConnected">Compile</button>
       <button id="cdsAddPatchBtn" (click)="addPatch()" [disabled]="!isConnected || !cdsOutput">Add Patch</button>
@@ -211,13 +203,8 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   cheatMessage = '';
   cheatError = false;
   currentGameName = '';
-  regions: string[] = ['EE Main RAM', 'IOP RAM', 'BIOS ROM', 'Scratchpad'];
-  selectedRegion = '';
   // CDS tab state
   cdsOutput = '';
-  cdsErrors: Array<{ lineNumber: number; message: string }> = [];
-  cdsMessage = '';
-  cdsMessageError = false;
   private subs: Subscription[] = [];
 
   get statusText(): string {
@@ -255,28 +242,14 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         setTimeout(() => { this.cheatMessage = ''; }, 4000);
       }),
       this.bridge.on<CdsCompileResultMsg>('cdsCompileResult').subscribe(msg => {
-        this.cdsErrors = msg.errors ?? [];
         if (msg.success && msg.codes) {
-          this.cdsOutput       = msg.codes;
-          this.cdsMessage      = 'Compiled successfully!';
-          this.cdsMessageError = false;
+          this.cdsOutput = msg.codes;
         } else {
-          this.cdsOutput       = '';
-          this.cdsMessage      = this.cdsErrors.length > 0
-            ? `${this.cdsErrors.length} error(s) — see lines above`
-            : (this.cdsErrors[0]?.message ?? 'Compilation failed');
-          this.cdsMessageError = true;
+          this.cdsOutput = '';
         }
-        setTimeout(() => { this.cdsMessage = ''; }, 5000);
       }),
-      this.bridge.on<CdsPatchAppliedMsg>('cdsPatchApplied').subscribe(msg => {
-        this.cdsMessageError = !msg.success;
-        this.cdsMessage      = msg.success ? 'Patch applied to memory!' : (msg.error ?? 'Failed to apply patch.');
-        setTimeout(() => { this.cdsMessage = ''; }, 4000);
-      }),
-      this.bridge.on<Record<string, unknown>>('updateRegions').subscribe(msg => {
-        const labels = msg['labels'] as string[] | undefined;
-        if (labels) { this.regions = labels; }
+      this.bridge.on<CdsPatchAppliedMsg>('cdsPatchApplied').subscribe(_msg => {
+        // Patch results are logged to the Debug output channel server-side
       })
     );
     this.bridge.postMessage({ command: 'ready' });
@@ -289,6 +262,15 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   connect(): void {
     this.bridge.postMessage({
       command: 'connect',
+      emulatorPath: this.selectedEmulator,
+      biosPath: this.selectedBios,
+      gamePath: this.selectedGame,
+    });
+  }
+
+  run(): void {
+    this.bridge.postMessage({
+      command: 'run',
       emulatorPath: this.selectedEmulator,
       biosPath: this.selectedBios,
       gamePath: this.selectedGame,
@@ -344,9 +326,6 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   }
 
   compileCds(): void {
-    this.cdsErrors  = [];
-    this.cdsMessage = 'Compiling…';
-    this.cdsMessageError = false;
     this.bridge.postMessage({ command: 'compileCds' });
   }
 
@@ -361,16 +340,6 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
     this.cheatText = this.cheatText
       ? this.cheatText.trimEnd() + '\n' + this.cdsOutput
       : this.cdsOutput;
-    this.cdsMessageError = false;
-    this.cdsMessage      = 'Codes added to Cheats tab.';
-    setTimeout(() => { this.cdsMessage = ''; }, 3000);
     this.activeTab = 'cheats';
-  }
-
-  onRegionChange(): void {
-    if (!this.selectedRegion) { return; }
-    this.bridge.postMessage({ command: 'focusRegion', label: this.selectedRegion });
-    // Reset so the dropdown can be used again for the same selection
-    setTimeout(() => { this.selectedRegion = ''; }, 0);
   }
 }

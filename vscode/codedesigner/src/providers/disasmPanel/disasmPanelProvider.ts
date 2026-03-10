@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getOutputChannel } from '../../extension';
+import { getOutputChannel, getDebugChannel } from '../../extension';
 import { SocketClient, LabelEntry } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
@@ -181,6 +181,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'connect':
                     this.handleConnect(msg.emulatorPath, msg.biosPath, msg.gamePath);
                     break;
+                case 'run':
+                    this.handleRun(
+                        msg.emulatorPath ?? this.selectedEmulatorPath,
+                        msg.biosPath ?? this.selectedBiosPath,
+                        msg.gamePath ?? this.selectedGamePath
+                    );
+                    break;
                 case 'snapshot':
                     await this.handleSnapshot();
                     break;
@@ -344,28 +351,33 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        out.show(true);
+
+        // Only connect to the socket — do NOT spawn a new process.
+        // Use the Run button to start the emulator.
+        this.socketClient.connect().then(() => {
+            out.info('Connected to server.');
+        }).catch(() => {
+            out.warn('Could not connect to server. Make sure the server is running or press Run to start it.');
+            vscode.window.showWarningMessage('Could not connect to server. Press Run to start the emulator.');
+        });
+    }
+
+    /** Launch the emulator in a VS Code terminal tab and, once the server is up, connect. */
+    private handleRun(emulatorPath: string, biosPath: string, gamePath: string): void {
+        const out = getOutputChannel();
+
+        this.selectedEmulatorPath = emulatorPath;
+        this.selectedBiosPath = biosPath;
+        this.selectedGamePath = gamePath;
+
         if (!emulatorPath) {
             vscode.window.showWarningMessage('Please select an emulator.');
             return;
         }
 
         out.show(true);
-
-        // Try connecting to an already-running server first. If the C# server
-        // was started manually (e.g. `dotnet run -- --server` or `--run`), we
-        // can reuse it without spawning a new process.
-        // NOTE: do NOT open memory views here — the socketClient.onConnected
-        // event (registered in extension.ts) will fire onSocketConnected() which
-        // opens/reinits all panels.  Duplicating that work here would queue two
-        // concurrent sets of READMEM requests against the server, which (before
-        // the _pendingResponses fix) caused response mis-routing and is still
-        // wasteful.
-        this.socketClient.connect().then(() => {
-            out.info('Connected to existing emulator server. Memory views will open via onSocketConnected.');
-        }).catch(() => {
-            // No existing server — spawn the emulator and then connect
-            this.spawnAndConnect(emulatorPath, biosPath, gamePath);
-        });
+        this.spawnAndConnect(emulatorPath, biosPath, gamePath);
     }
 
     /** Launch the emulator in a VS Code terminal tab and, once the server is up, connect. */
@@ -1011,8 +1023,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     codeLines.push(r.Hex);
                 } else if (!r.Success && r.Error) {
                     const ln = r.LineNumber ?? 0;
-                    // Log to output with severity so the Output panel shows a red entry
-                    out.error(`Line ${ln}: ${r.Error}`);
+                    // Log to the Debug channel with error severity (shows in red)
+                    getDebugChannel().error(`Line ${ln}: ${r.Error}`);
                     errors.push({ lineNumber: ln, message: r.Error });
 
                     // Build a diagnostic that highlights the offending line in the editor
@@ -1044,8 +1056,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
             if (errors.length > 0) {
                 out.warn(`CDS compilation finished with ${errors.length} error(s).`);
-                // Reveal the output channel so the user sees the red error entries
-                out.show(true);
+                // Reveal the Debug channel so the user sees the red error entries
+                getDebugChannel().show(true);
                 this.webview?.postMessage({ command: 'cdsCompileResult', success: false, errors });
             } else {
                 const codes = codeLines.join('\n');
@@ -1054,8 +1066,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         } catch (err: any) {
             const msg = err?.message ?? String(err);
-            out.error(`CDS compile error: ${msg}`);
-            out.show(true);
+            getDebugChannel().error(`CDS compile error: ${msg}`);
+            getDebugChannel().show(true);
             this.webview?.postMessage({
                 command: 'cdsCompileResult',
                 success: false,
@@ -1116,5 +1128,59 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
+    }
+
+    /**
+     * Auto-start the CodeDesigner console app with --server in a VS Code terminal.
+     * Called at extension activation when auto-connect fails.
+     * Looks for the first non-PCSX2 emulator configured in emu-settings.json.
+     * Returns true if a terminal was spawned (or was already running), false otherwise.
+     */
+    public async autoStartServer(): Promise<boolean> {
+        // Load settings if not yet done (workspaceRoot is set by loadEmuSettings)
+        if (!this.workspaceRoot) {
+            this.loadEmuSettings();
+        }
+
+        const emulators = this.settings.emulators ?? [];
+        if (emulators.length === 0) {
+            return false;
+        }
+
+        // Prefer the CodeDesigner app over PCSX2
+        const emu = emulators.find(e =>
+            !e.path.toLowerCase().includes('pcsx2') &&
+            !e.type?.toLowerCase().includes('pcsx2')
+        );
+
+        if (!emu) {
+            getOutputChannel().warn('Auto-start: no CodeDesigner emulator found in emu-settings.json (only PCSX2 entries). Use the Run button to start manually.');
+            return false;
+        }
+
+        const resolvedExe = this.resolvePath(emu.path);
+
+        if (!fs.existsSync(resolvedExe)) {
+            getOutputChannel().warn(`Auto-start: CodeDesigner executable not found at ${resolvedExe}`);
+            return false;
+        }
+
+        // Don't spawn a second terminal if one is already open
+        if (this.emulatorTerminal) {
+            getOutputChannel().info('Auto-start: server terminal is already running.');
+            return true;
+        }
+
+        getOutputChannel().info(`Auto-starting CodeDesigner server: ${resolvedExe} --server`);
+
+        const terminal = vscode.window.createTerminal({
+            name: 'PS2 Emulator',
+            shellPath: resolvedExe,
+            shellArgs: ['--server'],
+        });
+        terminal.show(false);   // reveal terminal but keep editor focus
+        this.emulatorTerminal = terminal;
+
+        return true;
     }
 }

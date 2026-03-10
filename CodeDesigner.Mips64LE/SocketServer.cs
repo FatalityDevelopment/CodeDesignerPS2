@@ -39,6 +39,15 @@ namespace CodeDesigner.Mips64LE
                 System.Text.RegularExpressions.RegexOptions.Compiled);
 
         /// <summary>
+        /// Matches an absolute-address label reference: "@Name".
+        /// Replaced with the raw hex address of the label (e.g. 0x80010018),
+        /// suitable for use with jump instructions or absolute address operands.
+        /// </summary>
+        private static readonly System.Text.RegularExpressions.Regex CdsAbsLabelRefRegex =
+            new(@"@([A-Za-z_][A-Za-z0-9_]*)",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>
         /// Symbol/label database loaded from ps2MemMap.json at construction time.
         /// Key = virtual address (uint), Value = (Label, optional Comment).
         /// </summary>
@@ -409,7 +418,12 @@ namespace CodeDesigner.Mips64LE
                 var rawLines = sourceCode.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
 
                 // ── Pass 1: collect label → address mapping ───────────────────────
+                // Pre-populate with all emulator/server labels so CDS source can use them
+                // directly. CDS-defined labels (Name:) take precedence if names collide.
                 var labelAddresses = new Dictionary<string, uint>(StringComparer.Ordinal);
+                foreach (var kv in _labels)
+                    labelAddresses[kv.Value.Label] = kv.Key;
+
                 uint scanAddress   = 0;
 
                 foreach (var rawLine in rawLines)
@@ -420,7 +434,13 @@ namespace CodeDesigner.Mips64LE
                     if (scan.StartsWith("address", StringComparison.OrdinalIgnoreCase))
                     {
                         var p = scan.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (p.Length >= 2 && TryParseCdsUInt32(p[1], out uint addr)) { scanAddress = addr; }
+                        if (p.Length >= 2)
+                        {
+                            if (TryParseCdsUInt32(p[1], out uint addr))
+                                scanAddress = addr;
+                            else if (labelAddresses.TryGetValue(StripLabelPrefix(p[1]), out addr))
+                                scanAddress = addr;
+                        }
                         continue;
                     }
                     if (scan.StartsWith("hexcode", StringComparison.OrdinalIgnoreCase)) { scanAddress += 4; continue; }
@@ -455,7 +475,12 @@ namespace CodeDesigner.Mips64LE
                         var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
                         if (parts.Length >= 2)
                         {
+                            var addrToken = StripLabelPrefix(parts[1]);
                             if (TryParseCdsUInt32(parts[1], out uint addr))
+                            {
+                                currentAddress = addr;
+                            }
+                            else if (labelAddresses.TryGetValue(addrToken, out addr))
                             {
                                 currentAddress = addr;
                             }
@@ -475,7 +500,7 @@ namespace CodeDesigner.Mips64LE
                             results.Add(new InstructionResult
                             {
                                 Assembly   = trimmed,
-                                Error      = "address directive requires a value (e.g. address 0x20123456 or address $20123456)",
+                                Error      = "address directive requires a value (e.g. address 0x20123456 or address EE_BIOS_PUTS)",
                                 Success    = false,
                                 LineNumber = lineNumber
                             });
@@ -550,12 +575,13 @@ namespace CodeDesigner.Mips64LE
                         string regName = parts[1];
                         string valStr  = parts[2];
 
-                        if (!TryParseCdsUInt32(valStr, out uint setVal))
+                        if (!TryParseCdsUInt32(valStr, out uint setVal) &&
+                            !labelAddresses.TryGetValue(StripLabelPrefix(valStr), out setVal))
                         {
                             results.Add(new InstructionResult
                             {
                                 Assembly   = trimmed,
-                                Error      = $"Invalid setreg value '{valStr}'",
+                                Error      = $"Invalid setreg value '{valStr}' — expected a number or a known label",
                                 Success    = false,
                                 LineNumber = lineNumber
                             });
@@ -605,7 +631,9 @@ namespace CodeDesigner.Mips64LE
                     // ── MIPS instruction (resolve label references first) ─────────────
                     try
                     {
-                        // Replace :LabelName branch targets with computed word offsets
+                        // Replace :LabelName with computed branch word offset.
+                        // These work for branch instructions (beq, bne, blez, etc.) and also
+                        // for CDS-defined local labels or emulator-label based branches.
                         string resolved = CdsLabelRefRegex.Replace(
                             trimmed,
                             m =>
@@ -618,6 +646,21 @@ namespace CodeDesigner.Mips64LE
                                 // Use long arithmetic to avoid overflow when addresses exceed 0x7FFFFFFF
                                 long branchOff = ((long)labelAddr - (long)(currentAddress + 4)) / 4;
                                 return ((int)branchOff).ToString();
+                            });
+
+                        // Replace @LabelName with the raw absolute hex address.
+                        // Use this for jump/call targets and any operand that requires an
+                        // absolute address (e.g. j @EE_BIOS_PUTS, jal @InitHeap,
+                        // setreg $a0, @EE_SCRATCHPAD).
+                        resolved = CdsAbsLabelRefRegex.Replace(
+                            resolved,
+                            m =>
+                            {
+                                var name = m.Groups[1].Value;
+                                if (!labelAddresses.TryGetValue(name, out uint labelAddr))
+                                    throw new ArgumentException(
+                                        $"Undefined label '@{name}' in '{trimmed}' (line {lineNumber})");
+                                return $"0x{labelAddr:X8}";
                             });
 
                         uint encoded  = MipsAssembler.Assemble(resolved);
@@ -681,6 +724,13 @@ namespace CodeDesigner.Mips64LE
 
             return cutAt != int.MaxValue ? line[..cutAt].TrimEnd() : line;
         }
+
+        /// <summary>
+        /// Strip an optional leading '@' from a CDS label token, so both
+        /// "EE_BIOS_PUTS" and "@EE_BIOS_PUTS" resolve to the same label name.
+        /// </summary>
+        private static string StripLabelPrefix(string token) =>
+            token.Length > 0 && token[0] == '@' ? token[1..] : token;
 
         /// <summary>
         /// Parse a CDS numeric literal that may be prefixed with $, 0x, or neither.
