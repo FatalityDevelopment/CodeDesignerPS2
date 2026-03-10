@@ -60,7 +60,7 @@ interface InitMsg {
     {{isPaused ? '▶ Resume' : '⏸ Pause'}}
   </button>
   <button id="emu-step-btn" (click)="step()" [disabled]="!isConnected || !isPaused" title="Single step one EE instruction (only while paused)">
-    ⏭ Step
+    ▷| Step
   </button>
 </div>
 

@@ -351,75 +351,6 @@ app-hex-view {
     display: block;
 }
 
-/* ── Live mode indicator (inside header-toolbar) ─────────────────────── */
-
-.live-indicator {
-    color: #4ec94e;
-    font-size: 11px;
-    font-weight: bold;
-    animation: live-pulse 1.5s ease-in-out infinite;
-}
-
-.live-indicator.paused {
-    color: #e05555;
-    animation: none;
-}
-
-@keyframes live-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
-}
-
-#play-pause-btn {
-    background: #3c3c3c;
-    border: 1px solid #3e3e42;
-    color: #cccccc;
-    padding: 2px 10px;
-    cursor: pointer;
-    font-family: monospace;
-    font-size: 11px;
-    outline: none;
-}
-
-#play-pause-btn:hover {
-    background: #505050;
-}
-
-#step-btn {
-    background: #3c3c3c;
-    border: 1px solid #3e3e42;
-    color: #cccccc;
-    padding: 2px 10px;
-    cursor: pointer;
-    font-family: monospace;
-    font-size: 11px;
-    outline: none;
-}
-
-#step-btn:hover:not(:disabled) {
-    background: #505050;
-}
-
-#step-btn:disabled {
-    opacity: 0.4;
-    cursor: default;
-}
-
-#interval-select {
-    background: #3c3c3c;
-    border: 1px solid #3e3e42;
-    color: #cccccc;
-    padding: 2px 6px;
-    cursor: pointer;
-    font-family: monospace;
-    font-size: 11px;
-    outline: none;
-}
-
-#interval-select:hover {
-    background: #505050;
-}
-
 /* ── Debug Panel (Registers + Stack) ─────────────────────────────────── */
 
 #debug-panel {
@@ -549,23 +480,6 @@ app-hex-view {
     background: #252526;
     border-bottom: 1px solid #3e3e42;
     padding: 2px 8px;
-}
-
-#header-toolbar.live-active {
-}
-
-#header-toolbar.live-paused {
-}
-
-#live-controls {
-    display: none;
-    align-items: center;
-    gap: 8px;
-    margin-left: auto;
-}
-
-#live-controls.visible {
-    display: flex;
 }
 
 .header-tool-btn {
