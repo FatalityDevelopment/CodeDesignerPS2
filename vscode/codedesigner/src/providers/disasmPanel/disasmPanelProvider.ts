@@ -171,6 +171,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'gameChanged':
                     await this.handleGameChanged(msg.gamePath ?? '');
                     break;
+                case 'applyCheats':
+                    await this.handleApplyCheats(msg.cheatText ?? '');
+                    break;
             }
         });
     }
@@ -851,6 +854,22 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
     }
 
+    /** Apply cheat codes to live emulator memory via the APPLYCHEATS socket command. */
+    private async handleApplyCheats(cheatText: string): Promise<void> {
+        const out = getOutputChannel();
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        try {
+            await this.socketClient.applyCheats(cheatText);
+            out.appendLine('[INFO] Cheats applied successfully.');
+            this.webview?.postMessage({ command: 'cheatsApplied', success: true });
+        } catch (err: any) {
+            out.appendLine(`[ERROR] ApplyCheats error: ${err?.message ?? err}`);
+            this.webview?.postMessage({ command: 'cheatsApplied', success: false, error: err?.message ?? String(err) });
+        }
+    }
 
     /**
      * Called when the socket connects (including auto-connect on VS Code startup).

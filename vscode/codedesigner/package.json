@@ -41,7 +41,7 @@
         {
           "type": "webview",
           "id": "disasm.disasmPanel",
-          "name": "Disasm Panel"
+          "name": "Emulator"
         }
       ],
       "asmSidebar": [

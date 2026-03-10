@@ -10,6 +10,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CodeDesigner.Mips64LE.Common;
+using CodeDesigner.Mips64LE.Common.CheatEngine;
 using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
@@ -285,6 +286,9 @@ namespace CodeDesigner.Mips64LE
 
                     case "WRITEMEM":
                         return HandleWriteMem(command.Address ?? 0, command.Data, command.Region);
+
+                    case "APPLYCHEATS":
+                        return HandleApplyCheats(command.Data);
 
                     case "RESTART":
                         return HandleRestart();
@@ -1312,7 +1316,31 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle RESTART command — signals the emulator run-loop to perform a
+        /// Handle APPLYCHEATS command — parses PS2 GameShark/Action Replay cheat codes
+        /// from the supplied text and writes them into the live emulator RAM.
+        /// </summary>
+        private string HandleApplyCheats(string? cheatText)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (string.IsNullOrWhiteSpace(cheatText))
+                return CreateErrorResponse("No cheat data provided");
+
+            try
+            {
+                var byteEditor = new PS2ByteEditor(Scheduler);
+                var engine = new CodeDesigner.Mips64LE.Common.CheatEngine.CheatEngine(byteEditor);
+                var cheatList = new CheatList(cheatText);
+                engine.PatchMemory(cheatList);
+                return CreateSuccessResponse("Cheats applied successfully");
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ApplyCheats error: {ex.Message}");
+            }
+        }
+
+
         /// full hardware reset (equivalent to killing and restarting the process)
         /// without dropping the socket connection.  The run-loop will re-create
         /// the scheduler, reload the BIOS and disc image, preserve existing
