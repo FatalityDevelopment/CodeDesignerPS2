@@ -554,6 +554,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'editLabel') {
                 await this.handleEditLabel(panel, message.address, message.addressHex,
                     message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
+            } else if (message.type === 'getThreads') {
+                if (!this.socketClient?.isConnected()) {
+                    panel.webview.postMessage({ type: 'threads', threads: [] });
+                    return;
+                }
+                try {
+                    const threads = await this.socketClient!.getThreads();
+                    panel.webview.postMessage({ type: 'threads', threads });
+                } catch (err: any) {
+                    getOutputChannel().appendLine(`[LIVE] Failed to get threads: ${err?.message ?? err}`);
+                    panel.webview.postMessage({ type: 'threads', threads: [] });
+                }
             } else if (message.type === 'gotoRegion') {
                 // The webview could not find the address in its own region.
                 // Find which live panel owns the address and instruct it to navigate.

@@ -36,6 +36,15 @@ export interface SymFunction {
   label: string;
 }
 
+export interface ThreadEntry {
+  id: number;
+  status: string;
+  pc: number;
+  sp: number;
+  priority: number;
+  entryPc: number;
+}
+
 export interface RegisterData {
   pc?: number;
   hi?: number; lo?: number;
@@ -161,6 +170,8 @@ export class DisasmEditorService implements OnDestroy {
   readonly syncGotoInputReceived$   = new Subject<{ value: string }>();
   /** Fired when the extension host reports that no region was found for the requested address. */
   readonly gotoRegionNotFoundReceived$ = new Subject<{ address: number }>();
+  /** Fired when the extension host returns the EE OS thread list. */
+  readonly threadsReceived$ = new Subject<ThreadEntry[]>();
 
   private readonly _subs: Subscription[] = [];
 
@@ -179,6 +190,7 @@ export class DisasmEditorService implements OnDestroy {
       this._bridge.on<Record<string, unknown>>('gotoAddress').subscribe(msg => this.gotoAddressReceived$.next({ address: msg['address'] as number })),
       this._bridge.on<Record<string, unknown>>('syncGotoInput').subscribe(msg => this.syncGotoInputReceived$.next({ value: msg['value'] as string })),
       this._bridge.on<Record<string, unknown>>('gotoRegionNotFound').subscribe(msg => this.gotoRegionNotFoundReceived$.next({ address: msg['address'] as number })),
+      this._bridge.on<Record<string, unknown>>('threads').subscribe(msg => this.threadsReceived$.next((msg['threads'] as ThreadEntry[] | undefined) ?? [])),
     );
   }
 

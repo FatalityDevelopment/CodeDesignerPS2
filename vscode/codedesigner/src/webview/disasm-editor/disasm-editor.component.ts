@@ -5,6 +5,7 @@ import {
   DisasmRow,
   SearchMatch,
   RegisterData,
+  ThreadEntry,
 } from './disasm-editor.service';
 import { HexViewComponent } from './components/hex-view.component';
 import './disasm-editor.css';
@@ -119,6 +120,39 @@ import './disasm-editor.css';
     <div id="gs-content" class="debug-tab-content"></div>
     <div id="stack-content" class="debug-tab-content"></div>
 </div>
+</div>
+<div id="bottom-panel">
+    <div id="bottom-panel-header">
+        <div id="bottom-tabs">
+            <button class="bottom-tab active" data-btab="callstack">Call Stack</button>
+            <button class="bottom-tab" data-btab="threads">Threads</button>
+            <button class="bottom-tab" data-btab="breakpoints">Breakpoints</button>
+        </div>
+        <div id="bottom-panel-actions">
+            <button id="bottom-refresh-btn" class="bottom-action-btn" title="Refresh">&#8635;</button>
+        </div>
+    </div>
+    <div id="callstack-content" class="bottom-tab-content active">
+        <table class="dbg-table">
+            <thead><tr><th class="dbg-th">#</th><th class="dbg-th">PC</th><th class="dbg-th">Function</th></tr></thead>
+            <tbody id="callstack-body"></tbody>
+        </table>
+    </div>
+    <div id="threads-content" class="bottom-tab-content">
+        <table class="dbg-table">
+            <thead><tr><th class="dbg-th">TID</th><th class="dbg-th">Status</th><th class="dbg-th">PC</th><th class="dbg-th">SP</th><th class="dbg-th">Priority</th><th class="dbg-th">Entry</th></tr></thead>
+            <tbody id="threads-body"></tbody>
+        </table>
+    </div>
+    <div id="breakpoints-content" class="bottom-tab-content">
+        <div id="breakpoints-toolbar">
+            <button id="bp-clear-all-btn" class="bottom-action-btn" title="Remove all breakpoints">Clear All</button>
+        </div>
+        <table class="dbg-table">
+            <thead><tr><th class="dbg-th">Address</th><th class="dbg-th">Type</th><th class="dbg-th">Condition</th><th class="dbg-th">Enabled</th><th class="dbg-th"></th></tr></thead>
+            <tbody id="breakpoints-body"></tbody>
+        </table>
+    </div>
 </div>
 <div id="edit-overlay">
     <div id="edit-overlay-box">
@@ -238,6 +272,9 @@ export class DisasmEditorComponent implements AfterViewInit {
     let liveStatusTimer:  ReturnType<typeof setInterval> | null = null;
     let liveRefreshPending = false;
     let livePaused = false;
+    // Callback set later by the bottom-panel section to update call-stack
+    // and breakpoints when the emulator pauses.
+    let onDebugPanelShown: ((regs: RegisterData, stackBytes: number[], stackBase: number) => void) | null = null;
 
     const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
     const getPageStart = (index: number) => Math.floor(index / state.pageSize) * state.pageSize;
@@ -968,6 +1005,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
       if (paused && registers) {
         showDebugPanel(registers, stackBytes, stackBase);
+        onDebugPanelShown?.(registers, stackBytes, stackBase);
       }
     }
 
@@ -1384,6 +1422,215 @@ export class DisasmEditorComponent implements AfterViewInit {
         document.getElementById(tab + '-content')?.classList.add('active');
       });
     });
+
+    // ── Bottom panel (Call Stack / Threads / Breakpoints) ─────────────────────
+    const callstackBody  = document.getElementById('callstack-body')!;
+    const threadsBody    = document.getElementById('threads-body')!;
+    const breakpointsBody = document.getElementById('breakpoints-body')!;
+    const bpClearAllBtn  = document.getElementById('bp-clear-all-btn')!;
+    const bottomRefreshBtn = document.getElementById('bottom-refresh-btn')!;
+
+    // Track latest stack data so the call-stack tab can re-render on tab switch.
+    let _lastStackRegs:  RegisterData | null = null;
+    let _lastStackBytes: number[] = [];
+    let _lastStackBase:  number = 0;
+
+    // ── Bottom panel tab switching ─────────────────────────────────────────────
+    document.querySelectorAll('.bottom-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.bottom-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = (btn as HTMLElement).dataset['btab'] ?? '';
+        document.querySelectorAll('.bottom-tab-content').forEach(c => c.classList.remove('active'));
+        document.getElementById(tab + '-content')?.classList.add('active');
+        if (tab === 'threads' && state.isLive) { requestThreads(); }
+        if (tab === 'breakpoints') { renderBreakpointsPanel(); }
+        if (tab === 'callstack' && _lastStackRegs) {
+          renderCallStackPanel(_lastStackRegs, _lastStackBytes, _lastStackBase);
+        }
+      });
+    });
+
+    bottomRefreshBtn.addEventListener('click', () => {
+      const activeTab = (document.querySelector('.bottom-tab.active') as HTMLElement | null)?.dataset['btab'] ?? '';
+      if (activeTab === 'threads' && state.isLive) { requestThreads(); }
+      if (activeTab === 'callstack' && _lastStackRegs) {
+        renderCallStackPanel(_lastStackRegs, _lastStackBytes, _lastStackBase);
+      }
+      if (activeTab === 'breakpoints') { renderBreakpointsPanel(); }
+    });
+
+    // ── Call Stack panel ───────────────────────────────────────────────────────
+    // Mimics PCSX2's call stack display:
+    //   Frame 0  = current PC (always the executing instruction)
+    //   Frame 1+ = code pointers found on the stack (return addresses)
+    // Each row shows: frame #, address, function/label name (or "Unknown").
+    function renderCallStackPanel(regs: RegisterData, stackBytes: number[], stackBase: number) {
+      _lastStackRegs  = regs;
+      _lastStackBytes = stackBytes;
+      _lastStackBase  = stackBase;
+
+      if (!regs) {
+        callstackBody.innerHTML = '<tr><td colspan="3" class="dbg-td-empty">No register data</td></tr>';
+        return;
+      }
+
+      const frames: Array<{ pc: number }> = [];
+
+      // Frame 0: current PC
+      const currentPc = (regs.pc ?? 0) >>> 0;
+      frames.push({ pc: currentPc });
+
+      // Remaining frames: scan stack for code pointers
+      if (stackBytes && stackBytes.length > 0) {
+        for (let i = 0; i < Math.min(stackBytes.length, 512); i += 4) {
+          const word = ((stackBytes[i+3] << 24) | (stackBytes[i+2] << 16) | (stackBytes[i+1] << 8) | stackBytes[i]) >>> 0;
+          // PS2 code addresses: KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1 (0xA0000000–0xBFFFFFFF)
+          if (word >= 0x80000000 && word < 0xC0000000) {
+            frames.push({ pc: word });
+          }
+        }
+      }
+
+      if (frames.length === 0) {
+        callstackBody.innerHTML = '<tr><td colspan="3" class="dbg-td-empty">No stack frames available</td></tr>';
+        return;
+      }
+
+      callstackBody.innerHTML = frames.map((f, idx) => {
+        const addrHex = hex32(f.pc);
+        // Try to find a function label for this address
+        const label = lookupLabel(f.pc);
+        const funcName = label || 'Unknown';
+        const cls = idx === 0 ? ' class="dbg-tr-current"' : '';
+        return `<tr${cls} data-addr="${addrHex}">
+          <td class="dbg-td-num">${idx}</td>
+          <td class="dbg-td-addr">${addrHex}</td>
+          <td class="dbg-td-func">${escHtml(funcName)}</td>
+        </tr>`;
+      }).join('');
+
+      // Navigate to address on row click
+      callstackBody.querySelectorAll('tr[data-addr]').forEach(row => {
+        row.addEventListener('click', () => {
+          const addr = parseInt((row as HTMLElement).dataset['addr'] ?? '0', 16);
+          if (!isNaN(addr)) { navigateToAddress(addr); }
+        });
+      });
+    }
+
+    // Look up the nearest label at or before `pc` from the symbol table.
+    function lookupLabel(pc: number): string | null {
+      const labels = state.symLabels;
+      if (!labels || labels.length === 0) { return null; }
+      let best: string | null = null;
+      let bestDist = Infinity;
+      for (const item of labels) {
+        const addr = parseInt(String(item.address).replace(/^0x/i, ''), 16);
+        if (!isNaN(addr) && addr <= pc && pc - addr < bestDist) {
+          bestDist = pc - addr;
+          best = item.label;
+        }
+      }
+      return best;
+    }
+
+    // ── Threads panel ──────────────────────────────────────────────────────────
+    // Mimics PCSX2's thread view: TID, Status, PC, SP, Priority, Entry.
+    function requestThreads() {
+      threadsBody.innerHTML = '<tr><td colspan="6" class="dbg-td-empty">Loading…</td></tr>';
+      vscode.postMessage({ type: 'getThreads' });
+    }
+
+    function renderThreadsPanel(threads: ThreadEntry[]) {
+      if (!threads || threads.length === 0) {
+        threadsBody.innerHTML = '<tr><td colspan="6" class="dbg-td-empty">No thread data available</td></tr>';
+        return;
+      }
+      threadsBody.innerHTML = threads.map(t => {
+        const statusCls = t.status === 'Running' ? ' class="dbg-tr-running"' : '';
+        return `<tr${statusCls} data-addr="${hex32(t.pc)}">
+          <td class="dbg-td-num">${t.id}</td>
+          <td class="dbg-td-status">${escHtml(t.status)}</td>
+          <td class="dbg-td-addr">${hex32(t.pc)}</td>
+          <td class="dbg-td-addr">${hex32(t.sp)}</td>
+          <td class="dbg-td-num">${t.priority}</td>
+          <td class="dbg-td-addr">${hex32(t.entryPc)}</td>
+        </tr>`;
+      }).join('');
+
+      // Navigate to thread PC on click
+      threadsBody.querySelectorAll('tr[data-addr]').forEach(row => {
+        row.addEventListener('click', () => {
+          const addr = parseInt((row as HTMLElement).dataset['addr'] ?? '0', 16);
+          if (!isNaN(addr)) { navigateToAddress(addr); }
+        });
+      });
+    }
+
+    // ── Breakpoints panel ──────────────────────────────────────────────────────
+    // Mimics PCSX2's breakpoints view: Address, Type, Condition, Enabled, Delete.
+    function renderBreakpointsPanel() {
+      if (state.breakpoints.size === 0) {
+        breakpointsBody.innerHTML = '<tr><td colspan="5" class="dbg-td-empty">No breakpoints set</td></tr>';
+        return;
+      }
+      const sorted = Array.from(state.breakpoints).sort((a, b) => a - b);
+      breakpointsBody.innerHTML = sorted.map(addr => {
+        const addrHex = hex32(addr);
+        return `<tr data-addr="${addrHex}">
+          <td class="dbg-td-addr dbg-bp-addr">${addrHex}</td>
+          <td class="dbg-td-type">Execute</td>
+          <td class="dbg-td-cond">—</td>
+          <td class="dbg-td-enabled"><input type="checkbox" class="dbg-bp-enabled" checked data-addr="${addrHex}" title="Enabled" /></td>
+          <td class="dbg-td-del"><button class="dbg-bp-del-btn" data-addr="${addrHex}" title="Remove breakpoint">×</button></td>
+        </tr>`;
+      }).join('');
+
+      // Navigate to address on row click (but not on checkbox/button)
+      breakpointsBody.querySelectorAll('tr[data-addr]').forEach(row => {
+        row.addEventListener('click', (e: Event) => {
+          const t = e.target as HTMLElement;
+          if (t.classList.contains('dbg-bp-del-btn') || t.classList.contains('dbg-bp-enabled')) { return; }
+          const addr = parseInt((row as HTMLElement).dataset['addr'] ?? '0', 16);
+          if (!isNaN(addr)) { navigateToAddress(addr); }
+        });
+      });
+
+      // Delete button
+      breakpointsBody.querySelectorAll('.dbg-bp-del-btn').forEach(btn => {
+        btn.addEventListener('click', (e: Event) => {
+          e.stopPropagation();
+          const addrHex = (btn as HTMLElement).dataset['addr'] ?? '0';
+          const addr = parseInt(addrHex, 16);
+          if (!isNaN(addr)) {
+            state.breakpoints.delete(addr);
+            vscode.postMessage({ type: 'clearBreakpoint', address: addr });
+            renderBreakpointsPanel();
+            renderDisassembly();
+          }
+        });
+      });
+    }
+
+    bpClearAllBtn.addEventListener('click', () => {
+      if (state.breakpoints.size === 0) { return; }
+      state.breakpoints.clear();
+      vscode.postMessage({ type: 'clearAllBreakpoints' });
+      renderBreakpointsPanel();
+      renderDisassembly();
+    });
+
+    // Subscribe to threads response from extension host
+    svc.threadsReceived$.subscribe(threads => {
+      renderThreadsPanel(threads);
+    });
+
+    // Wire the callback so handleStatusUpdate updates the bottom panel on pause.
+    onDebugPanelShown = (regs, stackBytes, stackBase) => {
+      renderCallStackPanel(regs, stackBytes, stackBase);
+      renderBreakpointsPanel();
+    };
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
     window.addEventListener('unload', () => {
