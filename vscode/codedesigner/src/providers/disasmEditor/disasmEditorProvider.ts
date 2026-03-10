@@ -356,7 +356,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             existingInfo.panel.reveal(vscode.ViewColumn.One, true);
             // Update the stored base address and physical base so that
             // _revealPanelForAddress uses the correct range after an address change
-            // (e.g. BIOS ROM moved from 0x1FC00000 to 0xBFC00000).
+            // (e.g. BIOS ROM shown at KSEG0 0x9FC00000 instead of physical 0x1FC00000).
             existingInfo.baseAddress = baseAddress;
             existingInfo.physBaseAddress = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
                 ? (baseAddress & 0x1FFFFFFF) >>> 0
