@@ -230,7 +230,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal <= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
@@ -302,7 +302,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal > 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
@@ -374,7 +374,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal < 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
@@ -446,7 +446,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal >= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
@@ -880,7 +880,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 uint returnAddr = pc.Value + 8;
                 bool taken = rsVal < 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
@@ -957,7 +957,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 uint returnAddr = pc.Value + 8;
                 bool taken = rsVal >= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
@@ -1034,7 +1034,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 uint returnAddr = pc.Value + 8;
                 bool taken = rsVal < 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
@@ -1111,7 +1111,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 uint returnAddr = pc.Value + 8;
                 bool taken = rsVal >= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
 
             if (pc.HasValue)
@@ -1177,7 +1177,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal < 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
             }
             if (pc.HasValue)
             {
@@ -1241,7 +1241,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal >= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
             }
             if (pc.HasValue)
             {
@@ -1305,7 +1305,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal <= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
             }
             if (pc.HasValue)
             {
@@ -1369,7 +1369,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
                 int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
                 uint target = (uint)((int)pc.Value + 4 + offset);
                 bool taken = rsVal > 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}={rsVal}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
             }
             if (pc.HasValue)
             {

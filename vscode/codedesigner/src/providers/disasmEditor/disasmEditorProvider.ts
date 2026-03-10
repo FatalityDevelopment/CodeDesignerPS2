@@ -70,8 +70,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public async stepAndBroadcast(): Promise<void> {
     if (!this.socketClient?.isConnected()) { return; }
+    let stepResult: { paused: boolean; pc: number; breakpointHitAddress?: number; instructionAnalysis?: Record<string, string> } | undefined;
     try {
-      await this.socketClient.step();
+      stepResult = await this.socketClient.step();
     } catch (err: any) {
       getOutputChannel().appendLine(`[STEP] Error: ${err?.message ?? err}`);
       return;
@@ -80,6 +81,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     try {
       const status = await this.socketClient!.getPC();
       const statusMsg: any = { type: 'status', ...status };
+      // Attach any live analysis comments produced for the stepped instruction.
+      if (stepResult?.instructionAnalysis) {
+        statusMsg.instructionAnalysis = stepResult.instructionAnalysis;
+      }
       if (status.paused) {
         try {
           const regs = await this.socketClient!.getRegisters();

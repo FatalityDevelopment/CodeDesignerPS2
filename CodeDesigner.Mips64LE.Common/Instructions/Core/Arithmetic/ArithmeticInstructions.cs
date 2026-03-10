@@ -77,7 +77,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
                 int rtVal = CpuHelpers.GetReg32(cpu, args.Rt);
-                return $"{eq} => {rsVal} + {rtVal} = {rsVal + rtVal}";
+                return $"{eq} => 0x{(uint)rsVal:X8} + 0x{(uint)rtVal:X8} = 0x{(uint)(rsVal + rtVal):X8}";
             }
             return eq;
         }
@@ -177,7 +177,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 long rsVal = (long)cpu.RegsLo[args.Rs];
                 long rtVal = (long)cpu.RegsLo[args.Rt];
-                return $"{eq} => {rsVal} + {rtVal} = {rsVal + rtVal}";
+                return $"{eq} => 0x{(ulong)rsVal:X16} + 0x{(ulong)rtVal:X16} = 0x{(ulong)(rsVal + rtVal):X16}";
             }
             return eq;
         }
@@ -277,7 +277,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
                 int rtVal = CpuHelpers.GetReg32(cpu, args.Rt);
-                return $"{eq} => {rsVal} - {rtVal} = {rsVal - rtVal}";
+                return $"{eq} => 0x{(uint)rsVal:X8} - 0x{(uint)rtVal:X8} = 0x{(uint)(rsVal - rtVal):X8}";
             }
             return eq;
         }
@@ -377,7 +377,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 long rsVal = (long)cpu.RegsLo[args.Rs];
                 long rtVal = (long)cpu.RegsLo[args.Rt];
-                return $"{eq} => {rsVal} - {rtVal} = {rsVal - rtVal}";
+                return $"{eq} => 0x{(ulong)rsVal:X16} - 0x{(ulong)rtVal:X16} = 0x{(ulong)(rsVal - rtVal):X16}";
             }
             return eq;
         }
@@ -472,12 +472,12 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             string eq = Equation
                 .Replace("rt", CpuHelpers.RegName(args.Rt))
                 .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("SignExt(imm)", $"{imm}");
+                .Replace("SignExt(imm)", $"0x{(uint)imm:X8}");
             
             if (cpu != null)
             {
                 int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
-                return $"{eq} => {rsVal} + {imm} = {rsVal + imm}";
+                return $"{eq} => 0x{(uint)rsVal:X8} + 0x{(uint)imm:X8} = 0x{(uint)(rsVal + imm):X8}";
             }
             return eq;
         }

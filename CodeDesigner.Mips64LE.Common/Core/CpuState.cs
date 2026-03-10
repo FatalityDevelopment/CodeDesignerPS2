@@ -83,5 +83,26 @@ namespace CodeDesigner.Mips64LE.Common.CPU
             RegsLo[0] = 0;
             RegsHi[0] = 0;
         }
+
+        /// <summary>
+        /// Creates a lightweight snapshot of the current register state suitable for
+        /// analysis (Analyze calls).  Only GPR, FPR, HI/LO/SA and the FPU accumulator
+        /// are copied; the memory bus, COP0, VU0/VU1 wiring is intentionally left empty
+        /// because Analyze() implementations never access those fields.
+        /// </summary>
+        public CpuState CreateAnalysisSnapshot()
+        {
+            var snap = new CpuState();
+            Array.Copy(RegsLo, snap.RegsLo, 32);
+            Array.Copy(RegsHi, snap.RegsHi, 32);
+            snap.HI   = HI;
+            snap.LO   = LO;
+            snap.HI1  = HI1;
+            snap.LO1  = LO1;
+            snap.SA   = SA;
+            snap.FACC = FACC;
+            Array.Copy(FPR, snap.FPR, 32);
+            return snap;
+        }
     }
 }

@@ -71,5 +71,33 @@ namespace CodeDesigner.Mips64LE.Common
 
             return comments;
         }
+
+        /// <summary>
+        /// Analyze a single instruction using the supplied (pre-execution) CPU state.
+        /// Returns the analysis comment string, or an empty string when no analysis
+        /// is available for the given instruction.
+        /// </summary>
+        /// <param name="instruction">The 32-bit instruction word.</param>
+        /// <param name="pc">The virtual address of the instruction.</param>
+        /// <param name="cpu">CPU state captured immediately before the instruction executed.</param>
+        public static string AnalyzeSingleInstruction(uint instruction, uint pc, CpuState cpu)
+        {
+            try
+            {
+                var (instrObj, args) = MipsDisassembler.GetInstructionObject(instruction);
+                if (instrObj == null || args == null)
+                    return string.Empty;
+
+                string analysis = instrObj.AnalyzeGeneric(args, cpu, pc);
+                if (string.IsNullOrWhiteSpace(analysis))
+                    return string.Empty;
+
+                return $"; {analysis}";
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
     }
 }

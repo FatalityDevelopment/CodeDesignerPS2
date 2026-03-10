@@ -117,6 +117,7 @@ export interface StatusUpdatePayload {
   registers: RegisterData;
   stackBytes: number[];
   stackBase: number;
+  instructionAnalysis?: Record<string, string>;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -169,6 +170,8 @@ export class DisasmEditorService implements OnDestroy {
   readonly labelsUpdated$           = new Subject<void>();
   readonly stringsUpdated$          = new Subject<void>();
   readonly functionsUpdated$        = new Subject<void>();
+  /** Fired when live analysis comments arrive for one or more addresses. */
+  readonly analysisUpdated$         = new Subject<Record<string, string>>();
   /** Fired when the extension host instructs this panel to navigate to an address. */
   readonly gotoAddressReceived$     = new Subject<{ address: number }>();
   /** Fired when another panel syncs its goto-input value to this panel. */
@@ -286,6 +289,14 @@ export class DisasmEditorService implements OnDestroy {
   }
 
   private _onStatus(msg: Record<string, unknown>): void {
+    const instructionAnalysis = msg['instructionAnalysis'] as Record<string, string> | undefined;
+
+    // If the status carries live analysis comments, patch the affected rows in
+    // every loaded page so the analysis column reflects real register values.
+    if (instructionAnalysis) {
+      this._applyAnalysisUpdates(instructionAnalysis);
+    }
+
     this.statusReceived$.next({
       paused:               msg['paused']               as boolean,
       pc:                   msg['pc']                   as number,
@@ -293,7 +304,46 @@ export class DisasmEditorService implements OnDestroy {
       registers:            msg['registers']            as RegisterData,
       stackBytes:           msg['stackBytes']           as number[],
       stackBase:            msg['stackBase']            as number,
+      instructionAnalysis,
     });
+  }
+
+  /**
+   * Update loaded page rows whose address matches an entry in `analysis`.
+   * The address key uses the 8-digit upper-case hex form (e.g. "80001234").
+   * After patching, fires `analysisUpdated$` so the component can re-render.
+   */
+  private _applyAnalysisUpdates(analysis: Record<string, string>): void {
+    let anyUpdated = false;
+    const activePageStart = this.getPageStart(this.state.cursor);
+    for (const [addrHex, comment] of Object.entries(analysis)) {
+      const addr = parseInt(addrHex, 16);
+      // Compute the instruction index relative to the base address.
+      const physAddr  = this._toPhysAddr(addr);
+      const physBase  = this._toPhysAddr(this.state.baseAddress);
+      const instrIdx  = Math.floor((physAddr - physBase) / 4);
+      if (instrIdx < 0 || instrIdx >= this.state.totalInstructions) { continue; }
+      const pageStart = this.getPageStart(instrIdx);
+      const page      = this.state.loadedPages.get(pageStart);
+      if (!page) { continue; }
+      const local = instrIdx - pageStart;
+      if (local >= 0 && local < page.length) {
+        page[local] = { ...page[local], comment };
+        // Keep the active disasmRows array in sync when this is the current page.
+        if (pageStart === activePageStart) {
+          this.state.disasmRows[local] = page[local];
+        }
+        anyUpdated = true;
+      }
+    }
+    if (anyUpdated) {
+      this.analysisUpdated$.next(analysis);
+    }
+  }
+
+  /** Strip KSEG0/KSEG1 virtual-address bits to get the physical address. */
+  private _toPhysAddr(addr: number): number {
+    return (addr >= 0x80000000 && addr <= 0xBFFFFFFF) ? (addr & 0x1FFFFFFF) : addr;
   }
 
   private _onReset(): void {
