@@ -867,6 +867,10 @@ app-hex-view {
     font-size: 12px;
 }
 
+#bottom-panel.hidden {
+    display: none;
+}
+
 #bottom-panel-header {
     display: flex;
     align-items: center;
