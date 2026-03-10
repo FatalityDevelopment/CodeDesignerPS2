@@ -417,6 +417,30 @@ Each entry in `Regions` has `Label`, `File`, `BaseAddress`, and `Size`.
 
 ---
 
+#### LOADSNAPSHOT
+Reloads a previously saved snapshot as a save state.  
+Reads the four binary files from `InputPath` and copies them back into the running
+emulator's memory.  The emulator is paused automatically before the restore and
+**remains paused** afterwards so the caller can inspect state or resume explicitly.
+
+Files read (missing files are silently skipped):
+- `EEmem.bin` — EE main RAM
+- `BIOSrom.bin` — BIOS ROM
+- `Scratchpad.bin` — Scratchpad RAM
+- `IOPmem.bin` — IOP RAM
+
+```json
+{
+    "Command": "LOADSNAPSHOT",
+    "InputPath": "/tmp/ps2-snapshot"
+}
+```
+
+Response: `{ "Success": true, "Command": "LOADSNAPSHOT", "Regions": [ … ] }`  
+Each entry in `Regions` has `Label`, `File`, `BaseAddress`, and `Size`.
+
+---
+
 #### GETLABELS
 Returns all symbol labels from the `ps2-labels.json` database, sorted by address.
 

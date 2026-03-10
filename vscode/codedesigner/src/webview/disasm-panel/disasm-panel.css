@@ -305,3 +305,15 @@ button:disabled {
     font-size: 11px;
     flex-shrink: 0;
 }
+
+.reload-snapshot-btn {
+    padding: 2px 8px;
+    font-size: 11px;
+    flex-shrink: 0;
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #cccccc);
+}
+
+.reload-snapshot-btn:hover:not(:disabled) {
+    background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}

@@ -133,6 +133,7 @@ interface InitMsg {
             <span class="snapshot-date-time">{{snap.date}} {{snap.timestamp}}</span>
           </div>
           <button class="open-snapshot-btn" (click)="openSnapshot(snap)">Open</button>
+          <button class="reload-snapshot-btn" (click)="reloadSnapshot(snap)" [disabled]="!isConnected" title="Restore this snapshot into the live emulator">Reload</button>
         </div>
       </div>
     </div>
@@ -244,6 +245,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   openSnapshot(snap: SnapshotEntry): void {
     this.bridge.postMessage({ command: 'openSnapshot', path: snap.path });
+  }
+
+  reloadSnapshot(snap: SnapshotEntry): void {
+    this.bridge.postMessage({ command: 'reloadSnapshot', path: snap.path });
   }
 
   onEmulatorChange(): void {

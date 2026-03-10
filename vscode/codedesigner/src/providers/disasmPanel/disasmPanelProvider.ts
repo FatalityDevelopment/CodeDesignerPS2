@@ -152,6 +152,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'openSnapshot':
                     await this.handleOpenSnapshot(msg.path);
                     break;
+                case 'reloadSnapshot':
+                    await this.handleLoadSnapshot(msg.path);
+                    break;
                 case 'restart':
                     await this.handleRestart();
                     break;
@@ -691,6 +694,33 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         } catch (err: any) {
             vscode.window.showErrorMessage(`Could not open snapshot: ${err?.message ?? err}`);
+        }
+    }
+
+    /** Reload a snapshot as a save state — writes memory back into the live emulator. */
+    private async handleLoadSnapshot(snapshotPath: string): Promise<void> {
+        const out = getOutputChannel();
+
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+
+        const answer = await vscode.window.showWarningMessage(
+            'Reload this snapshot? The emulator will be paused and all current memory will be overwritten.',
+            { modal: true },
+            'Reload'
+        );
+        if (answer !== 'Reload') { return; }
+
+        out.appendLine(`[INFO] Reloading snapshot from ${snapshotPath}`);
+        try {
+            const regions = await this.socketClient.loadSnapshot(snapshotPath);
+            out.appendLine(`[INFO] Snapshot reloaded — ${regions.length} region(s) restored.`);
+            vscode.window.showInformationMessage(`Snapshot restored (${regions.length} region(s)). Emulator is paused.`);
+        } catch (err: any) {
+            out.appendLine(`[ERROR] Reload snapshot failed: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`Reload snapshot failed: ${err?.message ?? err}`);
         }
     }
 
