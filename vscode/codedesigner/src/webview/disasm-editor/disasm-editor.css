@@ -21,6 +21,12 @@ app-disasm-editor {
     overflow: hidden;
 }
 
+/* <app-hex-view> wraps #hex-header and #hex-container.  Override the default
+   inline display so it behaves identically to a plain <div> wrapper. */
+app-hex-view {
+    display: block;
+}
+
 #header {
     flex-shrink: 0;
 }

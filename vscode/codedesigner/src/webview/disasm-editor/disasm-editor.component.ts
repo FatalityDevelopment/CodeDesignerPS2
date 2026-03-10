@@ -1,61 +1,19 @@
 import { Component, AfterViewInit, NgZone, ViewEncapsulation } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
+import {
+  DisasmEditorService,
+  DisasmRow,
+  SearchMatch,
+  RegisterData,
+} from './disasm-editor.service';
+import { HexViewComponent } from './components/hex-view.component';
 import './disasm-editor.css';
-
-// Disassembled instruction row as received from the extension host
-interface DisasmRow {
-  addr: string;
-  bytes: string;
-  label: string;
-  op: string;
-  args: string;
-  comment: string;
-}
-
-interface SearchMatch {
-  instructionIndex: number;
-  field: string;
-  start: number;
-  length: number;
-}
-
-interface SymLabel {
-  address: string;
-  label: string;
-  comment?: string;
-}
-
-interface SymString {
-  address: string;
-  value: string;
-}
-
-interface SymFunction {
-  address: string;
-  label: string;
-}
-
-interface RegisterData {
-  pc?: number;
-  hi?: number; lo?: number;
-  hi1?: number; lo1?: number;
-  sa?: number;
-  gpr?: number[];
-  cop0Regs?: number[];
-  fpr?: number[];
-  fprAcc?: number;
-  fcr0?: number; fcr31?: number;
-  vu0fX?: number[]; vu0fY?: number[]; vu0fZ?: number[]; vu0fW?: number[];
-  vu0AccX?: number; vu0AccY?: number; vu0AccZ?: number; vu0AccW?: number;
-  vu0Q?: number; vu0P?: number; vu0I?: number;
-  vu0Status?: number; vu0Mac?: number; vu0Clip?: number;
-  vu0i?: number[];
-  gsPriv?: number[];
-}
 
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
+  imports: [HexViewComponent],
+  providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   template: `
 <div id="header">
@@ -95,8 +53,12 @@ interface RegisterData {
         <button class="close-search" id="close-search" title="Close (Escape)">&#xD7;</button>
     </div>
 </div>
-<div id="hex-header"></div>
-<div id="hex-container"></div>
+<app-hex-view
+    [data]="hexViewData"
+    [offset]="hexViewOffset"
+    [highlightAddr]="hexViewHighlightAddr"
+    [highlightLength]="hexViewHighlightLength">
+</app-hex-view>
 </div>
 <div id="content-wrapper">
 <div id="grid" tabindex="0"></div>
@@ -182,43 +144,40 @@ interface RegisterData {
 })
 export class DisasmEditorComponent implements AfterViewInit {
 
-  constructor(private zone: NgZone) {}
+  // ── Hex view @Input() bindings ─────────────────────────────────────────────
+  // Updated via NgZone.run() from the outside-zone editor logic so Angular
+  // change detection propagates them to HexViewComponent.ngOnChanges().
+  hexViewData: number[] = [];
+  hexViewOffset = 0;
+  hexViewHighlightAddr = -1;
+  hexViewHighlightLength = 4;
+
+  constructor(private zone: NgZone, private svc: DisasmEditorService) {}
 
   ngAfterViewInit(): void {
-    // The disassembly editor is a port of a large (~1,350-line) vanilla-JS
-    // implementation that manipulates the DOM directly and relies on
-    // setInterval timers for live refresh.  Running all of this inside
-    // Angular's zone would trigger a change-detection cycle on *every* timer
-    // tick and every keyboard event, causing perceptible jank when the live
-    // refresh fires at 250 ms intervals.
+    // The disassembly editor uses direct DOM manipulation for the instruction
+    // grid and sets up setInterval timers for live refresh.  Running these
+    // inside Angular's zone would trigger change-detection on every timer tick
+    // and keyboard event, causing perceptible jank when live refresh fires at
+    // 250 ms intervals.
     //
-    // Because no Angular template bindings or @Input/@Output are used (the
-    // component is purely a scaffold that boots the vanilla logic), there is
-    // nothing for the change detector to check.  Running outside the zone is
-    // therefore both safe and necessary for performance.
-    //
-    // Future work: once the editor is split into proper sub-components with
-    // @Input signals (see ARCHITECTURE.md), each sub-component can run inside
-    // the zone while heavy polling logic (live refresh timer) stays outside.
+    // VS Code message handling has been moved to DisasmEditorService, which runs
+    // in-zone via VsCodeBridgeService.  A single CD cycle per incoming message is
+    // acceptable.  The timer and keyboard handlers (high-frequency) remain outside
+    // the zone.  HexViewComponent runs in-zone and receives data through Angular
+    // @Input() bindings updated via NgZone.run().
     this.zone.runOutsideAngular(() => this.initEditorLogic());
   }
 
   private initEditorLogic(): void {
-    // ── Early message buffer ─────────────────────────────────────────────────
-    // VS Code may deliver the 'init' message (and follow-up 'disasmPage') before
-    // Angular has finished bootstrapping.  Capture every message that arrives
-    // before the real switch-handler is registered so none are lost.
-    const _earlyMessageBuffer: unknown[] = [];
-    const _earlyCapture = ({ data }: MessageEvent) => { _earlyMessageBuffer.push(data); };
-    window.addEventListener('message', _earlyCapture);
-
+    const svc    = this.svc;
     const vscode = getVsCodeApi();
 
     const SCAN_TIMEOUT_MS = 120_000;
 
     // ── DOM refs ──────────────────────────────────────────────────────────────
-    const hexHeader      = document.getElementById('hex-header')!;
-    const hexContainer   = document.getElementById('hex-container')!;
+    // Note: hex-header and hex-container are rendered by <app-hex-view> and
+    // are not accessed directly from this component.
     const grid           = document.getElementById('grid')!;
     const searchPanel    = document.getElementById('search-panel')!;
     const searchInput    = document.getElementById('search-input') as HTMLInputElement;
@@ -268,32 +227,10 @@ export class DisasmEditorComponent implements AfterViewInit {
     let _editOverlayAddr = 0;
     let _editOverlayAddrHex = '';
 
-    // ── State ─────────────────────────────────────────────────────────────────
-    const state = {
-      cursor: 0,
-      disasmRows: [] as DisasmRow[],
-      totalInstructions: 0,
-      pageSize: 1000,
-      baseAddress: 0,
-      totalBytes: 0,
-      regionLabel: '',
-      hexData: [] as number[],
-      hexOffset: 0,
-      loadedPages: new Map<number, DisasmRow[]>(),
-      searchMode: 'text',
-      searchQuery: '',
-      searchMatches: [] as SearchMatch[],
-      currentMatch: -1,
-      searchActive: false,
-      gotoActive: false,
-      symbolsActive: false,
-      isLive: false,
-      breakpoints: new Set<number>(),
-      breakpointHitAddress: undefined as number | undefined,
-      symLabels:    [] as SymLabel[],
-      symStrings:   [] as SymString[],
-      symFunctions: [] as SymFunction[],
-    };
+    // ── State reference ───────────────────────────────────────────────────────
+    // Alias the service state so all existing `state.xxx` references remain
+    // unchanged.  The service owns and initialises the state object.
+    const state = svc.state;
 
     let liveRefreshTimer: ReturnType<typeof setInterval> | null = null;
     let liveStatusTimer:  ReturnType<typeof setInterval> | null = null;
@@ -304,6 +241,19 @@ export class DisasmEditorComponent implements AfterViewInit {
     const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
     const getPageStart = (index: number) => Math.floor(index / state.pageSize) * state.pageSize;
     const getLocalIndex = (index: number) => index - getPageStart(index);
+
+    // ── Hex view helper ───────────────────────────────────────────────────────
+    // Updates the <app-hex-view> @Input() bindings from outside-zone code.
+    // Calling zone.run() triggers a single Angular CD cycle which propagates
+    // the new values to HexViewComponent.ngOnChanges() for re-rendering.
+    const updateHexView = (data: number[], offset: number, highlightAddr = -1, highlightLength = 4) => {
+      this.zone.run(() => {
+        this.hexViewData          = data;
+        this.hexViewOffset        = offset;
+        this.hexViewHighlightAddr = highlightAddr;
+        this.hexViewHighlightLength = highlightLength;
+      });
+    };
 
     // ── Placeholder data ──────────────────────────────────────────────────────
     // Pre-populate both panels with fake data that exactly mimics the format the
@@ -341,101 +291,87 @@ export class DisasmEditorComponent implements AfterViewInit {
       state.disasmRows = placeholderRows;
       state.loadedPages.set(0, placeholderRows);
 
-      renderHexView(state.hexData, state.hexOffset);
+      updateHexView(state.hexData, state.hexOffset);
       renderDisassembly();
     }
 
-    // ── Message handler ───────────────────────────────────────────────────────
-    window.addEventListener('message', ({ data: msg }: MessageEvent) => {
-      switch (msg.type) {
-        case 'init': {
-          state.totalInstructions = msg.totalInstructions;
-          state.pageSize = msg.pageSize;
-          state.baseAddress = msg.baseAddress;
-          state.totalBytes = msg.totalBytes ?? (msg.totalInstructions * 4);
-          state.regionLabel = msg.regionLabel ?? '';
-          state.loadedPages.clear();
-          state.disasmRows = [];
-          state.cursor = 0;
-          liveRefreshPending = false;
-          if (state.regionLabel) {
-            const rl = document.getElementById('sym-region-label');
-            if (rl) { rl.textContent = `— ${state.regionLabel}`; }
-          }
-          if (msg.isLive) {
-            state.isLive = true;
-            headerToolbar.classList.add('live-active');
-            startLiveRefresh();
-          }
-          if (state.totalInstructions > 0) {
-            vscode.postMessage({ type: 'requestPage', startIndex: getPageStart(state.cursor) });
-          }
-          break;
-        }
-        case 'disasmPage':
-          liveRefreshPending = false;
-          state.loadedPages.set(msg.startIndex, msg.rows);
-          if (msg.startIndex === getPageStart(state.cursor)) {
-            state.disasmRows = msg.rows;
-            renderDisassembly();
-          }
-          break;
-        case 'hexview':
-          state.hexData = msg.data;
-          state.hexOffset = msg.offset || 0;
-          renderHexView(msg.data, state.hexOffset, msg.highlight_addr, msg.highlight_length);
-          break;
-        case 'searchResults':
-          handleSearchResults(msg.matches);
-          break;
-        case 'status':
-          handleStatusUpdate(msg.paused, msg.pc, msg.breakpointHitAddress, msg.registers, msg.stackBytes, msg.stackBase);
-          break;
-        case 'reset':
-          handleReset();
-          break;
-        case 'symbols':
-          state.symLabels    = msg.labels    ?? [];
-          state.symStrings   = msg.strings   ?? [];
-          state.symFunctions = msg.functions ?? [];
-          renderSymLabels();
-          renderSymStrings();
-          renderSymFunctions();
-          break;
-        case 'labelsUpdated':
-          state.symLabels = msg.labels ?? [];
-          renderSymLabels();
-          state.loadedPages.delete(getPageStart(state.cursor));
-          checkAndLoadPage();
-          break;
-        case 'stringsUpdated':
-          state.symStrings = msg.strings ?? [];
-          renderSymStrings();
-          if (symStringsStatus) {
-            symStringsStatus.textContent = state.symStrings.length > 0 ? `${state.symStrings.length} found` : 'None found';
-          }
-          if (symScanStringsBtn) { symScanStringsBtn.disabled = false; }
-          break;
-        case 'functionsUpdated':
-          state.symFunctions = msg.functions ?? [];
-          renderSymFunctions();
-          if (symFunctionsStatus) {
-            symFunctionsStatus.textContent = state.symFunctions.length > 0 ? `${state.symFunctions.length} found` : 'None found';
-          }
-          if (symScanFunctionsBtn) { symScanFunctionsBtn.disabled = false; }
-          break;
+    // ── Service event subscriptions ───────────────────────────────────────────
+    // The DisasmEditorService handles all VS Code message parsing and state
+    // updates.  We subscribe here to react with DOM rendering and timer control.
+    // Subscriptions are set up before sending 'ready' so no messages are lost.
+    svc.initReceived$.subscribe(({ isLive, regionLabel }) => {
+      liveRefreshPending = false;
+      if (regionLabel) {
+        const rl = document.getElementById('sym-region-label');
+        if (rl) { rl.textContent = `— ${regionLabel}`; }
+      }
+      if (isLive) {
+        headerToolbar.classList.add('live-active');
+        startLiveRefresh();
       }
     });
 
-    // ── Replace early capture, replay buffered messages, signal ready ─────────
-    // Remove the early capture listener now that the real handler is registered.
-    window.removeEventListener('message', _earlyCapture);
-    // Replay any messages that arrived during Angular bootstrap so they are
-    // processed by the real handler above.
-    for (const data of _earlyMessageBuffer) {
-      window.dispatchEvent(new MessageEvent('message', { data }));
-    }
+    svc.pageLoaded$.subscribe(({ startIndex }) => {
+      liveRefreshPending = false;
+      if (startIndex === getPageStart(state.cursor)) {
+        // Grid is rebuilt with fresh data — centre the cursor so the view
+        // doesn't abruptly jump to the top of the newly loaded page.
+        renderDisassembly('center');
+      }
+    });
+
+    svc.hexUpdated$.subscribe(event => {
+      updateHexView(
+        event.data,
+        event.offset,
+        event.highlightAddr  ?? -1,
+        event.highlightLength ?? 4,
+      );
+    });
+
+    svc.searchResultsReceived$.subscribe(matches => {
+      handleSearchResults(matches);
+    });
+
+    svc.statusReceived$.subscribe(({ paused, pc, breakpointHitAddress, registers, stackBytes, stackBase }) => {
+      handleStatusUpdate(paused, pc, breakpointHitAddress, registers, stackBytes, stackBase);
+    });
+
+    svc.resetReceived$.subscribe(() => {
+      handleReset();
+    });
+
+    svc.symbolsReceived$.subscribe(() => {
+      renderSymLabels();
+      renderSymStrings();
+      renderSymFunctions();
+    });
+
+    svc.labelsUpdated$.subscribe(() => {
+      renderSymLabels();
+      state.loadedPages.delete(getPageStart(state.cursor));
+      checkAndLoadPage();
+    });
+
+    svc.stringsUpdated$.subscribe(() => {
+      renderSymStrings();
+      if (symStringsStatus) {
+        symStringsStatus.textContent = state.symStrings.length > 0 ? `${state.symStrings.length} found` : 'None found';
+      }
+      if (symScanStringsBtn) { symScanStringsBtn.disabled = false; }
+    });
+
+    svc.functionsUpdated$.subscribe(() => {
+      renderSymFunctions();
+      if (symFunctionsStatus) {
+        symFunctionsStatus.textContent = state.symFunctions.length > 0 ? `${state.symFunctions.length} found` : 'None found';
+      }
+      if (symScanFunctionsBtn) { symScanFunctionsBtn.disabled = false; }
+    });
+
     // Tell the extension host we are ready; it will (re-)send init + first page.
+    // VsCodeBridgeService buffers any messages that arrive before subscriptions
+    // are set up, so no messages are lost.
     vscode.postMessage({ type: 'ready' });
 
     function openEditOverlay(address: number, addressHex: string, op: string, args: string, bytes: string, currentLabel: string, currentComment: string) {
@@ -704,56 +640,15 @@ export class DisasmEditorComponent implements AfterViewInit {
     gotoClear.addEventListener('click', () => { gotoInput.value = ''; gotoInfo.textContent = ''; gotoInput.focus(); });
     closeGoto.addEventListener('click', () => { toggleGoto(); grid.focus(); });
 
-    // ── Hex view ──────────────────────────────────────────────────────────────
-    function renderHexView(data: number[], offset: number, highlightAddr = -1, highlightLength = 4) {
-      hexHeader.innerHTML = '';
-      hexHeader.appendChild(buildHexHeader());
-      hexContainer.innerHTML = '';
-      for (let i = 0; i < data.length; i += 16) {
-        hexContainer.appendChild(buildHexRow(data, offset, i, highlightAddr, highlightLength));
-      }
-    }
-
-    function buildHexHeader(): HTMLElement {
-      const header = document.createElement('div');
-      header.className = 'hex-row';
-      let bytes = '';
-      for (let i = 0; i < 16; i++) {
-        if (i && i % 4 === 0) { bytes += '<span style="width:8px"></span>'; }
-        bytes += `<span class="hex-byte">+${i.toString(16).toUpperCase()}</span>`;
-      }
-      header.innerHTML = `<span class="hex-addr">Address:</span><span class="hex-bytes">${bytes}</span><span class="hex-ascii">0123456789ABCDEF</span>`;
-      return header;
-    }
-
-    function buildHexRow(data: number[], offset: number, rowOffset: number, highlightAddr: number, highlightLength: number): HTMLElement {
-      const row = document.createElement('div');
-      row.className = 'hex-row';
-      const addr = (offset + rowOffset).toString(16).padStart(8, '0').toUpperCase();
-      let bytesHtml = '';
-      let asciiHtml = '';
-      for (let i = 0; i < 16; i++) {
-        if (i && i % 4 === 0) { bytesHtml += '<span style="width:8px"></span>'; }
-        let byteStr = '  ';
-        let char = ' ';
-        let highlight = false;
-        const index = rowOffset + i;
-        if (index < data.length) {
-          const byte = data[index];
-          const byteAddr = offset + index;
-          byteStr = byte.toString(16).padStart(2, '0').toUpperCase();
-          char = byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.';
-          highlight = highlightAddr !== -1 && byteAddr >= highlightAddr && byteAddr < highlightAddr + highlightLength;
-        }
-        bytesHtml += `<span class="hex-byte${highlight ? ' highlight' : ''}">${byteStr}</span>`;
-        asciiHtml += `<span class="hex-char${highlight ? ' highlight' : ''}">${char}</span>`;
-      }
-      row.innerHTML = `<span class="hex-addr">${addr}</span><span class="hex-bytes">${bytesHtml}</span><span class="hex-ascii">${asciiHtml}</span>`;
-      return row;
-    }
-
     // ── Disassembly grid ──────────────────────────────────────────────────────
-    function renderDisassembly() {
+    // scrollBlock controls where the cursor row appears in the viewport after
+    // a scrollIntoView call:
+    //   'center'  – used when the grid is fully rebuilt (page change / reset) so
+    //               the cursor appears in the middle of the visible area instead
+    //               of jumping to the top of the new page data.
+    //   'nearest' – used for single-step keyboard navigation; only scrolls if
+    //               the cursor row is already out of view.
+    function renderDisassembly(scrollBlock: ScrollLogicalPosition = 'nearest') {
       grid.innerHTML = '';
       const pageStart = getPageStart(state.cursor);
       const localCursor = getLocalIndex(state.cursor);
@@ -788,7 +683,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         };
         grid.appendChild(row);
       });
-      updateCursor();
+      updateCursor(scrollBlock);
     }
 
     function highlightSearchInText(text: string, globalIndex: number, field: string): string {
@@ -885,7 +780,9 @@ export class DisasmEditorComponent implements AfterViewInit {
         const cachedRows = state.loadedPages.get(startIndex)!;
         if (state.disasmRows !== cachedRows) {
           state.disasmRows = cachedRows;
-          renderDisassembly();
+          // Page switched from cache — centre the cursor so it doesn't jump
+          // to the top of the newly displayed page.
+          renderDisassembly('center');
         }
         return true;
       }
@@ -900,13 +797,17 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
     });
 
-    function updateCursor() {
+    // Highlights the cursor row and scrolls it into view.
+    // `scrollBlock` should be 'center' after a full grid rebuild (page change)
+    // so the cursor is not stranded at the top of new data; use the default
+    // 'nearest' for single-step navigation to avoid jarring jumps.
+    function updateCursor(scrollBlock: ScrollLogicalPosition = 'nearest') {
       const localIndex = getLocalIndex(state.cursor);
       Array.from(grid.children).forEach(r => r.classList.remove('active', 'branch-highlight'));
       const rowEl = grid.children[localIndex] as HTMLElement | undefined;
       if (!rowEl) { return; }
       rowEl.classList.add('active');
-      rowEl.scrollIntoView({ block: 'nearest', behavior: 'instant' as ScrollBehavior });
+      rowEl.scrollIntoView({ block: scrollBlock, behavior: 'instant' as ScrollBehavior });
       const row = state.disasmRows[localIndex];
       if (!row) { return; }
       handleBranchHighlight(row, localIndex);
@@ -919,7 +820,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       const length = byteStr.length > 0 ? Math.floor(byteStr.length / 2) : 4;
       const inView = addr >= state.hexOffset && addr + length <= state.hexOffset + state.hexData.length;
       if (inView) {
-        renderHexView(state.hexData, state.hexOffset, addr, length);
+        updateHexView(state.hexData, state.hexOffset, addr, length);
       } else {
         vscode.postMessage({ type: 'updateHex', address: addr, length });
       }
