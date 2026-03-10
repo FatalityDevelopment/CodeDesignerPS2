@@ -1,9 +1,3 @@
-/**
- * Styles for the Disassembly Panel
- */
-
-export function getDisasmPanelStyles(): string {
-    return `<style>
 body {
     padding: 10px;
     font-family: var(--vscode-editor-font-family);
@@ -169,6 +163,4 @@ button:disabled {
 .open-snapshot-btn {
     padding: 2px 8px;
     font-size: 11px;
-}
-</style>`;
 }

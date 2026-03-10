@@ -1,9 +1,8 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
-import { getNonce } from "../../helpers";
-import { getDisasmEditorHtml, DisasmEditorData } from "./disasmEditorTemplate";
 import { SocketClient, LabelEntry, StringEntry, FunctionEntry, SearchMatch } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
+import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
 /**
  * Structure for disassembled instruction row
@@ -42,7 +41,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public onPauseStateChange?: (paused: boolean) => void;
 
-  constructor(socketClient: SocketClient | null) {
+  constructor(socketClient: SocketClient | null, private readonly _extensionUri: vscode.Uri) {
     this.socketClient = socketClient;
   }
 
@@ -159,85 +158,120 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     return { uri, dispose: () => {} };
   }
 
+  private getHtml(webview: vscode.Webview): string {
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'disasm-editor.js')
+    );
+    const nonce = getNonce();
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'unsafe-inline';
+               script-src ${webview.cspSource} 'nonce-${nonce}';">
+<script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
+</head>
+<body>
+<app-disasm-editor><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-disasm-editor>
+<script src="${scriptUri}"></script>
+</body>
+</html>`;
+  }
+
   async resolveCustomEditor(
     document: vscode.CustomDocument,
     webviewPanel: vscode.WebviewPanel
   ): Promise<void> {
-    // Setup webview options
     webviewPanel.webview.options = {
-      enableScripts: true
+      enableScripts: true,
+      localResourceRoots: [this._extensionUri]
     };
 
-    // Set HTML from template
-    const templateData: DisasmEditorData = {};
-    webviewPanel.webview.html = getDisasmEditorHtml(templateData, getNonce());
-    fs.readFile(document.uri.fsPath, (err, fileData) => {
-      if (err) {
-        console.error(`[DISASM] Failed to read file: ${err.message}`);
-        webviewPanel.webview.postMessage({
-          type: "error",
-          message: err.message,
-        });
-        return;
-      }
+    // Track both async preconditions: file loaded + webview ready.
+    // init is sent only when both are satisfied (order-independent).
+    let fileData: Buffer | null = null;
+    let readyReceived = false;
 
-      console.log(`[DISASM] File loaded: ${fileData.length} bytes`);
-      const totalInstructions = Math.floor(
-        fileData.length / DisasmEditorProvider.INSTRUCTION_SIZE
-      );
-
-      console.log(`[DISASM] Sending init message: ${totalInstructions} total instructions, page size: ${DisasmEditorProvider.PAGE_SIZE}`);
+    const sendInit = async (data: Buffer) => {
+      const totalInstructions = Math.floor(data.length / DisasmEditorProvider.INSTRUCTION_SIZE);
+      console.log(`[DISASM] Sending init: ${totalInstructions} instructions`);
       webviewPanel.webview.postMessage({
-        type: "init",
+        type: 'init',
         totalInstructions,
         pageSize: DisasmEditorProvider.PAGE_SIZE,
         baseAddress: DisasmEditorProvider.BASE_ADDRESS,
       });
-
-      console.log(`[DISASM] Requesting first page (startIndex: 0)`);
-      this.sendDisasmPage(webviewPanel, fileData, 0);
-
-      console.log(`[DISASM] Sending initial hex view`);
-      this.sendHexView(
-        webviewPanel,
-        fileData,
+      console.log(`[DISASM] Sending first page and hex view`);
+      await this.sendDisasmPage(webviewPanel, data, 0);
+      this.sendHexView(webviewPanel, data,
         DisasmEditorProvider.BASE_ADDRESS,
         DisasmEditorProvider.BASE_ADDRESS,
-        DisasmEditorProvider.INSTRUCTION_SIZE
-      );
+        DisasmEditorProvider.INSTRUCTION_SIZE);
+    };
 
-      webviewPanel.webview.onDidReceiveMessage(async (message) => {
-        console.log(`[DISASM] Received message from webview:`, message.type);
-        if (message.type === "updateHex") {
-          this.sendHexView(
-            webviewPanel,
-            fileData,
-            DisasmEditorProvider.BASE_ADDRESS,
-            message.address,
-            message.length || DisasmEditorProvider.INSTRUCTION_SIZE
-          );
-        } else if (message.type === "requestPage") {
-          await this.sendDisasmPage(webviewPanel, fileData, message.startIndex);
-        } else if (message.type === "search") {
-          await this.handleSearch(webviewPanel, message.query, message.mode,
-            DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
-        } else if (message.type === "scanStrings") {
-          await this.handleFileScan('strings', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-        } else if (message.type === "scanFunctions") {
-          await this.handleFileScan('functions', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-        } else if (message.type === "getSymbols") {
-          await this.handleGetSymbols(webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-        } else if (message.type === "addLabel") {
-          await this.handleAddLabel(webviewPanel, message.address, message.labelName, message.comment);
-        } else if (message.type === "deleteLabel") {
-          await this.handleDeleteLabel(webviewPanel, message.address);
-        } else if (message.type === "editLabel") {
-          await this.handleEditLabel(webviewPanel, message.address, message.addressHex,
-            message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
-        } else if (message.type === "saveLabel") {
-          await this.handleSaveLabel(webviewPanel, message.address, message.newLabel ?? '', message.newComment ?? '');
-        }
-      });
+    // Register the message handler BEFORE setting html so that any 'ready'
+    // message from the webview is never missed.
+    webviewPanel.webview.onDidReceiveMessage(async (message) => {
+      console.log(`[DISASM] Received message from webview:`, message.type);
+      if (message.type === 'ready') {
+        // Webview has bootstrapped and its listener is registered.
+        readyReceived = true;
+        if (fileData) { await sendInit(fileData); }
+        return;
+      }
+      if (message.type === 'bootstrapError') {
+        getOutputChannel().appendLine(
+          `[ERROR] Disasm editor Angular bootstrap failed: ${message.error ?? '(no details)'}`
+        );
+        return;
+      }
+      if (!fileData) { return; }
+      if (message.type === "updateHex") {
+        this.sendHexView(
+          webviewPanel,
+          fileData,
+          DisasmEditorProvider.BASE_ADDRESS,
+          message.address,
+          message.length || DisasmEditorProvider.INSTRUCTION_SIZE
+        );
+      } else if (message.type === "requestPage") {
+        await this.sendDisasmPage(webviewPanel, fileData, message.startIndex);
+      } else if (message.type === "search") {
+        await this.handleSearch(webviewPanel, message.query, message.mode,
+          DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
+      } else if (message.type === "scanStrings") {
+        await this.handleFileScan('strings', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+      } else if (message.type === "scanFunctions") {
+        await this.handleFileScan('functions', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+      } else if (message.type === "getSymbols") {
+        await this.handleGetSymbols(webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+      } else if (message.type === "addLabel") {
+        await this.handleAddLabel(webviewPanel, message.address, message.labelName, message.comment);
+      } else if (message.type === "deleteLabel") {
+        await this.handleDeleteLabel(webviewPanel, message.address);
+      } else if (message.type === "editLabel") {
+        await this.handleEditLabel(webviewPanel, message.address, message.addressHex,
+          message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
+      } else if (message.type === "saveLabel") {
+        await this.handleSaveLabel(webviewPanel, message.address, message.newLabel ?? '', message.newComment ?? '');
+      }
+    });
+
+    // Set HTML after registering the message handler.
+    webviewPanel.webview.html = this.getHtml(webviewPanel.webview);
+
+    fs.readFile(document.uri.fsPath, async (err, data) => {
+      if (err) {
+        console.error(`[DISASM] Failed to read file: ${err.message}`);
+        webviewPanel.webview.postMessage({ type: 'error', message: err.message });
+        return;
+      }
+      console.log(`[DISASM] File loaded: ${data.length} bytes`);
+      fileData = data;
+      // Send init if the webview already signalled ready before the file was read.
+      if (readyReceived) { await sendInit(fileData); }
     });
   }
 
@@ -282,7 +316,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             'disasm.liveMemory',
             label,
             vscode.ViewColumn.One,
-            { enableScripts: true, retainContextWhenHidden: true }
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [this._extensionUri]
+            }
         );
 
         // Track this panel for pause/resume broadcast and address lookup.
@@ -297,33 +335,37 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             this._livePanelInfo = this._livePanelInfo.filter(info => info.panel !== panel);
         });
 
-        panel.webview.html = getDisasmEditorHtml({} as DisasmEditorData, getNonce());
-
         const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
 
-        panel.webview.postMessage({
-            type: 'init',
-            totalInstructions,
-            pageSize: DisasmEditorProvider.PAGE_SIZE,
-            baseAddress,
-            isLive: true,
-            regionLabel: label,
-            totalBytes,
-        });
-
-        // Always send the first page immediately. When not connected this
-        // returns address-only placeholder rows so the grid is visible right
-        // away instead of showing a perpetual loading bar. When connected it
-        // sends real disassembly data. This direct call is belt-and-suspenders
-        // alongside the requestPage roundtrip that fires from the webview's
-        // own init handler.
-        await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
-        if (connected) {
-            await this.sendLiveHexView(panel, region, baseAddress, baseAddress,
-                DisasmEditorProvider.INSTRUCTION_SIZE);
-        }
-
+        // Register the message handler BEFORE setting html so 'ready' is never missed.
         panel.webview.onDidReceiveMessage(async (message) => {
+            if (message.type === 'ready') {
+                // Webview has bootstrapped — safe to send init and the first page.
+                panel.webview.postMessage({
+                    type: 'init',
+                    totalInstructions,
+                    pageSize: DisasmEditorProvider.PAGE_SIZE,
+                    baseAddress,
+                    isLive: true,
+                    regionLabel: label,
+                    totalBytes,
+                });
+                await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, 0);
+                // Check live connection state at ready-time (more accurate than a
+                // snapshot taken at panel-creation time, since Angular bootstrap can
+                // take several hundred ms during which the socket state may change).
+                if (this.socketClient?.isConnected()) {
+                    await this.sendLiveHexView(panel, region, baseAddress, baseAddress,
+                        DisasmEditorProvider.INSTRUCTION_SIZE);
+                }
+                return;
+            }
+            if (message.type === 'bootstrapError') {
+                getOutputChannel().appendLine(
+                    `[ERROR] Live memory view Angular bootstrap failed (${label}): ${message.error ?? '(no details)'}`
+                );
+                return;
+            }
             if (message.type === 'requestPage') {
                 await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, message.startIndex);
             } else if (message.type === 'updateHex') {
@@ -369,6 +411,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     console.error(`[LIVE] Failed to clear all breakpoints: ${err?.message ?? err}`);
                 }
             } else if (message.type === 'getStatus') {
+                if (!this.socketClient?.isConnected()) { return; }
                 try {
                     const status = await this.socketClient!.getPC();
                     const statusMsg: any = { type: 'status', ...status };
@@ -418,6 +461,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
             }
         });
+
+        // Set html AFTER registering the message handler so 'ready' is captured.
+        panel.webview.html = this.getHtml(panel.webview);
     }
 
     /**

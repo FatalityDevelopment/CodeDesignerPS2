@@ -4,6 +4,31 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "npm-install",
+			"type": "npm",
+			"script": "install",
+			"presentation": {
+				"reveal": "silent",
+				"showReuseMessage": false
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "compile",
+			"type": "npm",
+			"script": "compile",
+			"dependsOn": ["npm-install"],
+			"dependsOrder": "sequence",
+			"problemMatcher": "$ts-webpack",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"reveal": "silent"
+			}
+		},
+		{
 			"type": "npm",
 			"script": "watch",
 			"problemMatcher": "$ts-webpack-watch",
@@ -12,10 +37,7 @@
 				"reveal": "never",
 				"group": "watchers"
 			},
-			"group": {
-				"kind": "build",
-				"isDefault": true
-			}
+			"group": "build"
 		},
 		{
 			"type": "npm",
@@ -27,14 +49,6 @@
 				"group": "watchers"
 			},
 			"group": "build"
-		},
-		{
-			"label": "tasks: watch-tests",
-			"dependsOn": [
-				"npm: watch",
-				"npm: watch-tests"
-			],
-			"problemMatcher": []
 		}
 	]
 }

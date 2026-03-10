@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
-import { getNonce } from '../../helpers';
-import { getAsmPanelHtml, AsmPanelData } from './asmPanelTemplate';
-import { getSocketClient } from '../../extension';
+import { getSocketClient, getOutputChannel } from '../../extension';
+import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 
 export class AsmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
+
+    constructor(private readonly _extensionUri: vscode.Uri) {}
 
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
@@ -18,18 +19,20 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
 
         // Setup webview options
         webviewView.webview.options = {
-            enableScripts: true
+            enableScripts: true,
+            localResourceRoots: [this._extensionUri]
         };
 
-        // Generate HTML from template
-        const templateData: AsmPanelData = {
-            code: '',
-            emulators: ['Project64', 'Mupen64Plus', 'RetroArch']
-        };
-        webviewView.webview.html = getAsmPanelHtml(templateData, getNonce());
+        webviewView.webview.html = this.getHtml(webviewView.webview);
 
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async message => {
+            if (message.type === 'bootstrapError') {
+                getOutputChannel().appendLine(
+                    `[ERROR] Asm panel Angular bootstrap failed: ${message.error ?? '(no details)'}`
+                );
+                return;
+            }
             switch (message.command) {
                 case 'connect':
                     vscode.window.showInformationMessage(
@@ -80,5 +83,28 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
                 error: error
             });
         }
+    }
+
+    private getHtml(webview: vscode.Webview): string {
+        const scriptUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'asm-panel.js')
+        );
+        const nonce = getNonce();
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'unsafe-inline';
+               script-src ${webview.cspSource} 'nonce-${nonce}';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
+</head>
+<body>
+<app-asm-panel><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-asm-panel>
+<script src="${scriptUri}"></script>
+</body>
+</html>`;
     }
 }

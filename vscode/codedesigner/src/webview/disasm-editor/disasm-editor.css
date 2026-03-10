@@ -1,9 +1,4 @@
-/**
- * Styles for the Disassembly Editor
- */
-
-export function getDisasmEditorStyles(): string {
-    return `<style> 
+ 
 body { 
     margin: 0; 
     font-family: monospace; 
@@ -13,6 +8,17 @@ body {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+}
+
+/* Angular renders the component inside <app-disasm-editor>.
+   Make it a flex column that fills the full viewport so that the
+   flex-shrink / flex-grow rules on #header and #content-wrapper work. */
+app-disasm-editor {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 #header {
@@ -159,13 +165,21 @@ body {
     color: #fff;
 }
 
+#hex-header {
+    font-family: monospace;
+    background: #2d2d30;
+    padding: 4px 4px 4px;
+    border-bottom: 2px solid #3e3e42;
+    overflow: hidden;
+}
+
 #hex-container {
     font-family: monospace;
-    overflow: auto;
+    overflow-y: auto;
     max-height: 120px;
     background: #2d2d30;
     border-bottom: 1px solid #3e3e42;
-    padding: 4px;
+    padding: 2px 4px 4px;
 }
 
 .hex-row {
@@ -219,6 +233,7 @@ body {
 #grid { 
     outline: none;
     flex: 1;
+    min-height: 0;
     overflow-y: scroll;
     scrollbar-width: none; /* Firefox */
 }
@@ -229,6 +244,7 @@ body {
 
 #content-wrapper {
     flex: 1;
+    min-height: 0;
     display: flex;
     overflow: hidden;
 }
@@ -985,5 +1001,3 @@ body {
     background: #505050;
 }
 
-</style>`;
-}
