@@ -1,8 +1,26 @@
+/* Make the entire webview fill available sidebar height */
+html {
+    height: 100%;
+}
+
 body {
     padding: 10px;
     font-family: var(--vscode-editor-font-family);
     color: var(--vscode-editor-foreground);
     background: var(--vscode-editor-background);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-sizing: border-box;
+    margin: 0;
+}
+
+app-disasm-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 /* ── Panel tabs ──────────────────────────────────────────────────────────── */
@@ -13,6 +31,7 @@ body {
     margin: 0 -10px 10px;
     border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
     background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d30);
+    flex-shrink: 0;
 }
 
 .panel-tab {
@@ -43,6 +62,9 @@ body {
 
 .tab-content {
     padding: 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 /* ── Cheats tab ──────────────────────────────────────────────────────────── */
@@ -92,6 +114,7 @@ body {
     font-size: 12px;
     font-weight: bold;
     letter-spacing: 0.04em;
+    flex-shrink: 0;
 }
 
 #emu-status-bar.status-connected {
@@ -329,16 +352,24 @@ button:disabled {
 
 /* ── CDS tab ─────────────────────────────────────────────────────────────── */
 
+/* When active the tab-content div uses display:flex (set via Angular binding) */
+#tab-cds {
+    flex-direction: column;
+    overflow: hidden;
+}
+
 .cds-container {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    flex: 1;
+    min-height: 0;
 }
 
 #cds-output {
-    width: 100%;
-    min-height: 200px;
-    resize: vertical;
+    flex: 1;
+    min-height: 0;
+    resize: none;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
@@ -346,33 +377,9 @@ button:disabled {
     font-family: monospace;
     font-size: 12px;
     box-sizing: border-box;
+    overflow-y: auto;
 }
 
 #cds-output::placeholder {
     color: var(--vscode-input-placeholderForeground, #888);
-}
-
-.cds-error-line {
-    font-size: 11px;
-    color: #e07070;
-    padding: 2px 4px;
-    background: rgba(224, 112, 112, 0.08);
-    border-left: 2px solid #e07070;
-    font-family: monospace;
-}
-
-.cds-error-lineno {
-    font-weight: bold;
-    margin-right: 4px;
-}
-
-.cds-message {
-    font-size: 12px;
-    padding: 4px 6px;
-    border-radius: 2px;
-    color: #4ec94e;
-}
-
-.cds-message.cds-error {
-    color: #e07070;
 }

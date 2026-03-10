@@ -7,6 +7,7 @@ import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
 let outputChannel: vscode.LogOutputChannel;
+let debugOutputChannel: vscode.LogOutputChannel;
 
 /**
  * Get the socket client instance
@@ -22,6 +23,13 @@ export function getOutputChannel(): vscode.LogOutputChannel {
     return outputChannel;
 }
 
+/**
+ * Get the debug channel instance — used for CDS compilation errors shown with red text.
+ */
+export function getDebugChannel(): vscode.LogOutputChannel {
+    return debugOutputChannel;
+}
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -30,6 +38,10 @@ export function activate(context: vscode.ExtensionContext) {
 	// levels (info/warn/error) with icons rendered in the Output panel.
 	outputChannel = vscode.window.createOutputChannel('CodeDesigner', { log: true });
 	context.subscriptions.push(outputChannel);
+
+	// Create a separate debug channel for CDS compilation errors (shown in red).
+	debugOutputChannel = vscode.window.createOutputChannel('CodeDesigner - Debug', { log: true });
+	context.subscriptions.push(debugOutputChannel);
 
 	// Initialize socket client
 	socketClient = new SocketClient('localhost', 8765);
@@ -140,7 +152,8 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(openLiveMemoryCommand);
 
-	// Auto-connect on activation
+	// Auto-connect on activation — try to reach an already-running server first;
+	// if that fails, auto-start the CodeDesigner console app with --server.
 	outputChannel.info('Extension activated, attempting to connect to server...');
 	setTimeout(() => {
 		socketClient?.connect().then(() => {
@@ -148,8 +161,19 @@ export function activate(context: vscode.ExtensionContext) {
 		}).catch(err => {
 			const errorMsg = err?.message || err?.toString() || 'Unknown error';
 			outputChannel.warn(`Failed to auto-connect: ${errorMsg}`);
-			outputChannel.info('You can manually connect using "CodeDesigner: Connect to Server" command');
-			outputChannel.info('Make sure the C# server is running on localhost:8765');
+			outputChannel.info('Auto-starting CodeDesigner server...');
+			disasmPanelProvider.autoStartServer().then(started => {
+				if (started) {
+					// Give the server ~2 s to start listening, then retry
+					setTimeout(() => {
+						socketClient?.connect().catch(err2 => {
+							outputChannel.warn(`Retry auto-connect failed: ${err2?.message ?? err2}`);
+						});
+					}, 2000);
+				} else {
+					outputChannel.info('No CodeDesigner executable found for auto-start. Use "Run" to start manually.');
+				}
+			});
 		});
 	}, 1000);
 
