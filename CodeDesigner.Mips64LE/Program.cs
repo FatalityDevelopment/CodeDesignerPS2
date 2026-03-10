@@ -180,9 +180,16 @@ namespace CodeDesigner.Mips64LE
             embeddedServer.ClientDisconnected += (_, _) => Console.WriteLine("[Server] Client disconnected");
             var serverTask = Task.Run(() => embeddedServer.StartAsync());
 
+            Console.WriteLine("Emulator starting at reset vector — paused, waiting for client.");
+
+            // Start paused so that a connecting client can register breakpoints before
+            // the first instruction executes.  The extension sends RESUME after the
+            // live memory views have initialised and re-sent all stored breakpoints.
+            scheduler.Paused = true;
+
             // ── Run loop ──────────────────────────────────────────────────────
             Console.WriteLine();
-            Console.WriteLine("Emulator running. Press Ctrl+C to stop.");
+            Console.WriteLine("Emulator ready. Waiting for client to resume…");
             if (maxSteps != long.MaxValue)
                 Console.WriteLine($"Step limit: {maxSteps:N0} EE steps.");
             Console.WriteLine();
@@ -922,6 +929,105 @@ namespace CodeDesigner.Mips64LE
             {
                 while (!cts.Token.IsCancellationRequested && totalSteps < maxSteps)
                 {
+                    // ── Restart check ─────────────────────────────────────────────
+                    // HandleRestart() signals this flag and unblocks WaitForResumeAsync.
+                    // We check it before the pause check so the run-loop immediately
+                    // reinitialises the scheduler instead of executing more instructions
+                    // on the old state.
+                    if (embeddedServer.PendingRestart)
+                    {
+                        embeddedServer.PendingRestart = false;
+                        Console.WriteLine("[Restart] Reinitialising emulator...");
+
+                        // Preserve breakpoints set by the client across the restart.
+                        var savedBreakpoints = new System.Collections.Generic.HashSet<uint>(
+                            scheduler.Breakpoints);
+
+                        // Save the IOP step hook so diagnostic logging continues after
+                        // restart.  The hook closure captures the 'scheduler' variable
+                        // (not its value), so after 'scheduler = newScheduler' all
+                        // references inside the hook automatically target the new instance.
+                        var savedIopStepHook = scheduler.IOP.StepHook;
+
+                        // Build a completely fresh scheduler — this is equivalent to
+                        // killing and restarting the emulator process.
+                        var newScheduler = new DualCpuScheduler();
+
+                        BiosLoader.Load(biosData, newScheduler);
+
+                        if (isoStream != null)
+                        {
+                            isoStream.Seek(0, SeekOrigin.Begin);
+                            string bootPath = GameLoader.InsertDisc(isoStream, newScheduler);
+                            if (bootPath.Length > 0)
+                                Console.WriteLine($"[Restart] Disc inserted. BIOS will boot: {bootPath}");
+                        }
+
+                        // Re-subscribe EE events directly on the new instance so the
+                        // handlers always read from the correct scheduler, regardless
+                        // of when 'scheduler' is reassigned.
+                        newScheduler.EE.UnknownInstruction += (_, opcode) =>
+                        {
+                            uint eepc = (uint)(newScheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+                            Console.WriteLine($"EE: Unknown opcode 0x{opcode:x8}  pc=0x{eepc:x8}");
+                        };
+                        newScheduler.EE.SyscallRaised += (_, pc) =>
+                        {
+                            uint v1  = (uint)(newScheduler.EE.Cpu.RegsLo[3] & 0xFF);
+                            string fn = BiosCallName((int)v1);
+                            Console.WriteLine($"EE: HLE bios[0x{v1:x}]: {fn}  (pc=0x{pc:x8})");
+                        };
+
+                        // Restore breakpoints and the IOP hook.
+                        foreach (var bp in savedBreakpoints)
+                            newScheduler.Breakpoints.Add(bp);
+
+                        // Replace the local variable so every subsequent use of
+                        // 'scheduler' in this scope (including the hook closure)
+                        // references the new instance.
+                        scheduler = newScheduler;
+                        newScheduler.IOP.StepHook = savedIopStepHook;
+
+                        embeddedServer.Scheduler = newScheduler;
+
+                        // Start paused so the client can re-register breakpoints
+                        // before execution resumes from the reset vector.
+                        scheduler.Paused = true;
+
+                        // Unblock HandleRestart() now that the new scheduler is fully
+                        // installed and paused.  Only after this point will the socket
+                        // handler thread return "Restarted" to the client, so all
+                        // subsequent SETBP/RESUME commands are guaranteed to target
+                        // the new scheduler.
+                        embeddedServer.SignalRestartComplete();
+
+                        // Reset run-loop diagnostics.
+                        totalSteps        = 0;
+                        nextReport        = ReportEvery;
+                        startTime         = DateTime.UtcNow;
+                        lastEePc          = uint.MaxValue;
+                        lastIopPc         = uint.MaxValue;
+                        spinCount         = 0;
+                        iopSpinCount      = 0;
+                        eeLeftBios        = false;
+                        iopBootDumped     = false;
+                        iopLeftBootZone   = false;
+                        eeSyscallDetected = false;
+                        eeInterruptsEnabled = false;
+                        lastEeRegion      = uint.MaxValue;
+                        eeSpinDumpedPcs.Clear();
+                        iopSpinDumpedPcs.Clear();
+                        eeSpinReminderCounts.Clear();
+                        iopRamEntryDumped   = false;
+                        iopRamFirstPc       = uint.MaxValue;
+                        iopMemmoveCallCount = 0;
+                        iopICtrlPollCount   = 0;
+                        iopSeenPcs.Clear();
+
+                        Console.WriteLine("[Restart] Emulator reinitialised — paused at reset vector, waiting for client to resume.");
+                        continue;
+                    }
+
                     // When paused, wait efficiently for a resume signal rather than busy-polling.
                     if (scheduler.Paused)
                     {

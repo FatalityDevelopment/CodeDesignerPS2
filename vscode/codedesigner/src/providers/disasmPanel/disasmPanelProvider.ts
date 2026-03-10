@@ -20,18 +20,19 @@ interface SnapshotEntry {
 
 /** Memory regions exposed as separate editor windows when the emulator is running. */
 const LIVE_REGIONS = [
-    // EE Main RAM: show via the uncached direct-mapped window (0x20000000–0x21FFFFFF).
-    // The PS2 kernel TLB maps physical RAM here without caching, so user-mode code
-    // typically accesses / patches memory through this range.
-    { region: 'ee',  address: 0x20000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
+    // EE Main RAM: shown at KSEG0 (0x80000000–0x81FFFFFF) so that row addresses
+    // match the virtual PC the CPU actually executes from.  Kernel and game code
+    // run in KSEG0, so a breakpoint set on a row at 0x80001234 matches the CPU PC
+    // directly.  HandleReadMem strips the top 3 bits (KSEG0→physical) server-side.
+    { region: 'ee',  address: 0x80000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
     // IOP RAM: show via the EE VTLB mirror at 0x1C000000–0x1DFFFFFF (2 MB window).
     // PCSX2 vtlb.cpp maps psxM (IOP RAM) to EE virtual 0x1C000000; the server
     // translates this virtual address back to a physical IOP RAM offset.
-    // Size is capped at 2 MB to match EeIopMirrorEnd (0x1E000000) and avoid the
-    // range overlapping with BIOS ROM at 0x1FC00000 which would cause the wrong
-    // panel to be revealed on breakpoints.
     { region: 'iop', address: 0x1C000000, size:  2 * 1024 * 1024, label: 'IOP RAM'       },
-    { region: 'ee',  address: 0x1FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
+    // BIOS ROM: shown at KSEG1 (0xBFC00000) so row addresses match the CPU PC.
+    // The PS2 EE reset vector is 0xBFC00000 (KSEG1 uncached alias of physical
+    // 0x1FC00000).  HandleReadMem strips the top 3 bits server-side.
+    { region: 'ee',  address: 0xBFC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
     { region: 'ee',  address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad'    },
 ];
 
@@ -129,6 +130,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'restart':
                     await this.handleRestart();
+                    break;
+                case 'step':
+                    await this.handleStep();
                     break;
                 case 'togglePause':
                     await this.handleTogglePause();
@@ -406,6 +410,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.webview?.postMessage({ command: 'paused', paused });
     }
 
+    /**
+     * Execute one EE instruction (single-step) while staying paused.
+     * Delegates to DisasmEditorProvider.stepAndBroadcast() which fetches the
+     * new PC + registers and broadcasts to all live panels.
+     */
+    private async handleStep(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        await this.editorProvider.stepAndBroadcast();
+    }
+
     /** Restart the emulator: send RESTART command via socket, keeping the connection alive. */
     private async handleRestart(): Promise<void> {
         const out = getOutputChannel();
@@ -422,15 +439,54 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         try {
             await this.socketClient.restart();
-            out.appendLine('[INFO] Emulator restarted — paused at reset vector.');
-            // After restart, emulator is paused; reflect that in the sidebar
-            this._paused = true;
-            this.webview?.postMessage({ command: 'paused', paused: true });
-            this.editorProvider.notifyPauseState(true);
+            out.appendLine('[INFO] Emulator restarted — re-opening views and registering breakpoints…');
+
+            // Re-initialize every live panel with fresh data from the restarted
+            // scheduler (RAM is freshly zeroed, BIOS ROM is reloaded).
+            for (const r of LIVE_REGIONS) {
+                await this.editorProvider.openLiveMemoryView(
+                    r.region, r.address, r.size, r.label);
+            }
+
+            // Re-register all known breakpoints then resume deterministically.
+            await this._registerBreakpointsAndResume();
         } catch (err: any) {
             out.appendLine(`[ERROR] Restart failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Restart failed: ${err?.message ?? err}`);
         }
+    }
+
+    /**
+     * Re-sends every breakpoint the user has set (tracked in the extension process,
+     * not the Angular webview) to the C# server, then sends RESUME.
+     *
+     * Because each SETBP is awaited, the server has processed all of them before
+     * RESUME arrives — the emulator is guaranteed to start with all BPs armed.
+     * This replaces the fragile fixed-delay approach that raced Angular bootstrap.
+     */
+    private async _registerBreakpointsAndResume(): Promise<void> {
+        const out = getOutputChannel();
+        if (!this.socketClient.isConnected()) { return; }
+        const bps = this.editorProvider.getKnownBreakpoints();
+        for (const bp of bps) {
+            try {
+                await this.socketClient.setBreakpoint(bp);
+            } catch (err: any) {
+                // Socket dropped mid-loop — stop registering; the next connect will retry.
+                out.appendLine(`[WARN] Breakpoint registration interrupted at 0x${bp.toString(16).toUpperCase()}: ${err?.message ?? err}`);
+                return;
+            }
+        }
+        if (bps.size > 0) {
+            out.appendLine(`[INFO] Registered ${bps.size} breakpoint(s) on server.`);
+        }
+        this.socketClient.resume().catch((err: any) => {
+            // Ignore "already running" responses; log anything unexpected.
+            const msg: string = err?.message ?? String(err);
+            if (!msg.toLowerCase().includes('already')) {
+                out.appendLine(`[WARN] Resume after BP registration: ${msg}`);
+            }
+        });
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────
@@ -510,6 +566,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
+        // The emulator starts paused.  Re-register every breakpoint the user has
+        // set (tracked in the extension process, no Angular roundtrip needed), then
+        // immediately resume.  Because the SETBP commands are awaited, the server
+        // has acknowledged all of them before RESUME is sent — no timing dependency.
+        await this._registerBreakpointsAndResume();
     }
 
     /**

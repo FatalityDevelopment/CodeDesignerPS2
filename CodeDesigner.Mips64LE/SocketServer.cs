@@ -37,9 +37,35 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         public DualCpuScheduler? Scheduler { get; set; }
 
+        /// <summary>
+        /// Set to <c>true</c> by <see cref="HandleRestart"/> to ask the emulator
+        /// run-loop (in Program.cs) to perform a full hardware reset: create a
+        /// fresh <see cref="DualCpuScheduler"/>, re-load the BIOS and disc, and
+        /// leave the emulator paused at the reset vector.  The run-loop clears this
+        /// flag once the new scheduler is installed.
+        /// </summary>
+        public volatile bool PendingRestart;
+
+        /// <summary>
+        /// Signalled by the emulator run-loop once the new scheduler is fully installed
+        /// after a restart.  <see cref="HandleRestart"/> waits on this gate so that it
+        /// does not return "Restarted" to the client until <see cref="Scheduler"/> is
+        /// the new instance — guaranteeing that subsequent SETBP and RESUME commands
+        /// operate on the correct scheduler.
+        /// </summary>
+        private readonly ManualResetEventSlim _restartComplete = new ManualResetEventSlim(false);
+
         public event EventHandler<string>? MessageReceived;
         public event EventHandler<string>? ClientConnected;
         public event EventHandler? ClientDisconnected;
+
+        /// <summary>
+        /// Called by the emulator run-loop after a restart is fully complete (new
+        /// scheduler installed and paused at the reset vector).  Unblocks
+        /// <see cref="HandleRestart"/> so it can return the "Restarted" response to
+        /// the client only once SETBP/RESUME will target the correct scheduler.
+        /// </summary>
+        public void SignalRestartComplete() => _restartComplete.Set();
 
         public SocketServer(int port = 8765)
         {
@@ -232,6 +258,9 @@ namespace CodeDesigner.Mips64LE
 
                     case "RESUME":
                         return HandleResume();
+
+                    case "STEP":
+                        return HandleStep();
 
                     case "SETBP":
                         return HandleSetBreakpoint(command.BreakpointAddress);
@@ -637,8 +666,33 @@ namespace CodeDesigner.Mips64LE
         {
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            // If the emulator is paused at a breakpoint, execute the breakpoint
+            // instruction once before releasing the run gate.  This advances PC
+            // past the breakpoint address so the same breakpoint does not
+            // immediately re-fire the moment execution resumes.
+            // Snapshot the flag while the scheduler is paused (run-loop thread is
+            // blocked on WaitForResumeAsync, so no concurrent write to LastBreakpointHit).
+            bool wasAtBreakpoint = Scheduler.LastBreakpointHit.HasValue;
+            if (wasAtBreakpoint)
+                Scheduler.StepOne();
+
             Scheduler.Paused = false;
             return CreateSuccessResponse("Resumed");
+        }
+
+        /// <summary>
+        /// Handle STEP command — executes exactly one EE instruction while
+        /// keeping the emulator paused, then returns the new PC state.
+        /// </summary>
+        private string HandleStep()
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (!Scheduler.Paused)
+                return CreateErrorResponse("Emulator must be paused to single-step");
+            Scheduler.StepOne();
+            return HandleGetPC();
         }
 
         /// <summary>
@@ -828,20 +882,38 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle RESTART command — resets both CPUs to their power-on states and
-        /// leaves the emulator paused so the client can set breakpoints before resuming.
-        /// Unpauses first in case the emulator was already halted; Reset() restores
-        /// all registers and clears counters regardless of Paused state, then we
-        /// set Paused=true so the scheduler stops at the reset vector.
+        /// Handle RESTART command — signals the emulator run-loop to perform a
+        /// full hardware reset (equivalent to killing and restarting the process)
+        /// without dropping the socket connection.  The run-loop will re-create
+        /// the scheduler, reload the BIOS and disc image, preserve existing
+        /// breakpoints, and leave the emulator paused at the reset vector.
         /// </summary>
         private string HandleRestart()
         {
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
-            Scheduler.Paused = false;   // ungate the run-gate so Reset() can run cleanly
-            Scheduler.Reset();
-            Scheduler.Paused = true;    // halt at reset vector; client resumes when ready
+            // Arm the gate BEFORE setting the flag so the run-loop can't signal it
+            // before we start waiting.
+            _restartComplete.Reset();
+
+            // Signal the run-loop to reinitialise everything from scratch.
+            PendingRestart = true;
+
+            // Wake the run-loop from WaitForResumeAsync (in case it was already paused)
+            // so it processes PendingRestart immediately instead of waiting for a
+            // manual Resume from the client.  The run-loop checks PendingRestart
+            // before calling RunSlice(), so no instructions execute on the old
+            // scheduler after this unblock.
+            Scheduler.Paused = false;
+
+            // Block this socket-handler thread until the run-loop has fully replaced
+            // the scheduler.  Without this wait, SETBP/RESUME commands that arrive
+            // immediately after the "Restarted" response would target the old scheduler
+            // — RESUME would unpause the old instance while the new scheduler's Paused
+            // flag stayed true, leaving the emulator frozen forever.
+            _restartComplete.Wait();
+
             return CreateSuccessResponse("Restarted");
         }
 

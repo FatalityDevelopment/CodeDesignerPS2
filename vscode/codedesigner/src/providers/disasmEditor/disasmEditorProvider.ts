@@ -36,6 +36,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }> = [];
 
   /**
+   * All breakpoints the user has toggled across all live panels.  Persisted here
+   * in the extension process so they can be reliably re-sent to the C# server on
+   * every connect/reconnect/restart — without depending on the Angular webview
+   * being bootstrapped or having processed an 'init' message first.
+   */
+  private _knownBreakpoints: Set<number> = new Set();
+
+  /**
    * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
    * Set by DisasmPanelProvider so it can update the sidebar status bar.
    */
@@ -51,6 +59,59 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public notifyPauseState(paused: boolean): void {
     this._broadcastStatus(paused);
+  }
+
+  /**
+   * Execute one EE instruction via the STEP socket command, fetch the updated
+   * PC + register state, broadcast it to every live panel, and notify the
+   * sidebar of the continued paused state.  Called by DisasmPanelProvider
+   * (sidebar Step button) and by the live-panel message handler (toolbar
+   * Step button).
+   */
+  public async stepAndBroadcast(): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      await this.socketClient.step();
+    } catch (err: any) {
+      getOutputChannel().appendLine(`[STEP] Error: ${err?.message ?? err}`);
+      return;
+    }
+    // Fetch and broadcast the full post-step status (same path as getStatus).
+    try {
+      const status = await this.socketClient!.getPC();
+      const statusMsg: any = { type: 'status', ...status };
+      if (status.paused) {
+        try {
+          const regs = await this.socketClient!.getRegisters();
+          statusMsg.registers = regs;
+          const sp = regs.gpr[29];
+          if (sp !== undefined) {
+            try {
+              const stackBuf = await this.socketClient!.readMemory(sp, 128, 'ee');
+              statusMsg.stackBytes = Array.from(stackBuf);
+              statusMsg.stackBase  = sp;
+            } catch { /* ignore stack read errors */ }
+          }
+        } catch { /* ignore register fetch errors */ }
+        const hitAddr = status.breakpointHitAddress ?? status.pc;
+        this._revealPanelForAddress(hitAddr);
+      }
+      this._broadcastFullStatus(statusMsg);
+      // Always notify the sidebar so it stays in sync (step keeps emulator paused).
+      this.onPauseStateChange?.(status.paused);
+    } catch (err: any) {
+      getOutputChannel().appendLine(`[STEP] Status error: ${err?.message ?? err}`);
+    }
+  }
+
+  /**
+   * Returns a snapshot of all breakpoints the user has set across all live
+   * panels.  Used by DisasmPanelProvider to re-register BPs with the C# server
+   * on every connect/restart — before sending RESUME — so no timing dependency
+   * on Angular bootstrap.
+   */
+  public getKnownBreakpoints(): ReadonlySet<number> {
+    return this._knownBreakpoints;
   }
 
   /**
@@ -293,6 +354,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const existingInfo = this._livePanelInfo.find(i => i.label === label);
         if (existingInfo) {
             existingInfo.panel.reveal(vscode.ViewColumn.One, true);
+            // Update the stored base address and physical base so that
+            // _revealPanelForAddress uses the correct range after an address change
+            // (e.g. BIOS ROM moved from 0x1FC00000 to 0xBFC00000).
+            existingInfo.baseAddress = baseAddress;
+            existingInfo.physBaseAddress = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
+                ? (baseAddress & 0x1FFFFFFF) >>> 0
+                : baseAddress >>> 0;
             // Re-initialize with live data now that we have a connection
             if (connected) {
                 const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -393,22 +461,47 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     vscode.window.showWarningMessage(`Could not resume emulator: ${msg}`);
                 }
             } else if (message.type === 'setBreakpoint') {
+                this._knownBreakpoints.add(message.address);
                 try {
                     await this.socketClient!.setBreakpoint(message.address);
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to set breakpoint: ${err?.message ?? err}`);
                 }
             } else if (message.type === 'clearBreakpoint') {
+                this._knownBreakpoints.delete(message.address);
                 try {
                     await this.socketClient!.clearBreakpoint(message.address);
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to clear breakpoint: ${err?.message ?? err}`);
                 }
             } else if (message.type === 'clearAllBreakpoints') {
+                this._knownBreakpoints.clear();
                 try {
                     await this.socketClient!.clearAllBreakpoints();
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to clear all breakpoints: ${err?.message ?? err}`);
+                }
+            } else if (message.type === 'step') {
+                await this.stepAndBroadcast();
+            } else if (message.type === 'pause') {
+                if (this.socketClient?.isConnected()) {
+                    try {
+                        await this.socketClient!.pause();
+                        this._broadcastStatus(true);
+                        this.onPauseStateChange?.(true);
+                    } catch (err: any) {
+                        console.error(`[LIVE] Pause failed: ${err?.message ?? err}`);
+                    }
+                }
+            } else if (message.type === 'resume') {
+                if (this.socketClient?.isConnected()) {
+                    try {
+                        await this.socketClient!.resume();
+                        this._broadcastStatus(false);
+                        this.onPauseStateChange?.(false);
+                    } catch (err: any) {
+                        console.error(`[LIVE] Resume failed: ${err?.message ?? err}`);
+                    }
                 }
             } else if (message.type === 'getStatus') {
                 if (!this.socketClient?.isConnected()) { return; }
@@ -436,6 +529,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         const hitAddr = status.breakpointHitAddress ?? status.pc;
                         this._revealPanelForAddress(hitAddr);
                         this._broadcastFullStatus(statusMsg);
+                        // Notify the sidebar so it flips to PAUSED immediately.
+                        this.onPauseStateChange?.(true);
                     } else {
                         panel.webview.postMessage(statusMsg);
                     }

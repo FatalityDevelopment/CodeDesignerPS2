@@ -59,6 +59,9 @@ interface InitMsg {
   <button id="emu-play-pause-btn" (click)="togglePause()" title="Pause/Resume emulator">
     {{isPaused ? '▶ Resume' : '⏸ Pause'}}
   </button>
+  <button id="emu-step-btn" (click)="step()" [disabled]="!isConnected || !isPaused" title="Single step one EE instruction (only while paused)">
+    ▷| Step
+  </button>
 </div>
 
 <h3>Emulator</h3>
@@ -178,6 +181,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   togglePause(): void {
     this.bridge.postMessage({ command: 'togglePause' });
+  }
+
+  step(): void {
+    this.bridge.postMessage({ command: 'step' });
   }
 
   openSnapshot(snap: SnapshotEntry): void {

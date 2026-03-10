@@ -142,6 +142,43 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             return Task.Run(() => _runGate.Wait(ct), ct);
         }
 
+        /// <summary>
+        /// Executes exactly one EE instruction while keeping the scheduler
+        /// paused.  Must only be called while <see cref="Paused"/> is
+        /// <c>true</c>.  After execution:
+        /// <list type="bullet">
+        ///   <item><see cref="LastBreakpointHit"/> is set to the new PC if
+        ///   that address coincides with a registered breakpoint, otherwise
+        ///   it is cleared.</item>
+        ///   <item>The scheduler remains paused.</item>
+        /// </list>
+        /// </summary>
+        public void StepOne()
+        {
+            if (!Paused) return;
+
+            LastBreakpointHit = null;
+
+            // Execute exactly one EE instruction.
+            EE.Step();
+            TotalEeSteps++;
+
+            // Check whether the new PC lands on a registered breakpoint.
+            if (Breakpoints.Count > 0)
+            {
+                uint newPc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
+                uint bpKey = ((newPc & 0xC0000000u) == 0x80000000u)
+                    ? (newPc & 0x1FFFFFFFu)
+                    : newPc;
+                uint hitKey = Breakpoints.Contains(bpKey) ? bpKey
+                            : (bpKey != newPc && Breakpoints.Contains(newPc)) ? newPc
+                            : 0u;
+                if (hitKey != 0u)
+                    LastBreakpointHit = newPc;
+            }
+            // Scheduler stays paused — caller is responsible for keeping it that way.
+        }
+
         // Gate used to implement efficient pause/resume without busy-polling.
         // Set = running (not paused); Reset = paused.
         private readonly System.Threading.ManualResetEventSlim _runGate =
@@ -611,21 +648,44 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             for (int i = 0; i < eeSteps; i++)
             {
-                // ── EE step ───────────────────────────────────────────────────
-                EE.Step();
-                TotalEeSteps++;
-
-                // ── Breakpoint check ─────────────────────────────────────────
+                // ── Breakpoint check (pre-execution) ─────────────────────────
+                // Check BEFORE stepping so a breakpoint at the reset vector
+                // (0xBFC00000) or any address that is the very first instruction
+                // executed is caught correctly.  The emulator halts before the
+                // instruction at the breakpoint address has been run, which is
+                // the standard debugger behaviour ("break before executing X").
                 if (Breakpoints.Count > 0)
                 {
                     uint eePc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
-                    if (Breakpoints.Contains(eePc))
+
+                    // Normalise to physical for KSEG0 (0x80000000–0x9FFFFFFF) and
+                    // KSEG1 (0xA0000000–0xBFFFFFFF) by stripping the top 3 bits.
+                    // This ensures a breakpoint stored as a physical address (e.g.
+                    // 0x1FC00008) still fires when the CPU runs from the KSEG1 alias
+                    // (0xBFC00008), and vice-versa — providing robustness regardless
+                    // of which address form the client used when calling SETBP.
+                    uint bpKey = ((eePc & 0xC0000000u) == 0x80000000u)
+                        ? (eePc & 0x1FFFFFFFu)
+                        : eePc;
+
+                    // Check both the normalised key and the raw virtual PC so BPs
+                    // stored under either form are found.  The second Contains call
+                    // is skipped when bpKey == eePc (non-KSEG address) to avoid a
+                    // redundant hash-set lookup.
+                    uint hitKey = Breakpoints.Contains(bpKey) ? bpKey
+                                : (bpKey != eePc && Breakpoints.Contains(eePc)) ? eePc
+                                : 0u;
+                    if (hitKey != 0u)
                     {
                         LastBreakpointHit = eePc;
                         Paused = true;
                         return;
                     }
                 }
+
+                // ── EE step ───────────────────────────────────────────────────
+                EE.Step();
+                TotalEeSteps++;
 
                 // ── IOP step(s) (proportional, interleaved after each EE step) ─
                 _iopAccumulator++;

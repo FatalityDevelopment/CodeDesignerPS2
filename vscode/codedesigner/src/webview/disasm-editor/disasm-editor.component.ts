@@ -19,6 +19,7 @@ import './disasm-editor.css';
 <div id="header">
 <div id="header-toolbar">
     <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">&#8862; Symbols</button>
+
 </div>
 <div id="goto-panel">
     <div class="search-row">
@@ -193,6 +194,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const gotoInfo       = document.getElementById('goto-info')!;
     const closeGoto      = document.getElementById('close-goto')!;
     const headerToolbar  = document.getElementById('header-toolbar')!;
+
     const debugPanel     = document.getElementById('debug-panel')!;
     const regContent     = document.getElementById('registers-content')!;
     const stackContent   = document.getElementById('stack-content')!;
@@ -235,7 +237,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     let liveRefreshTimer: ReturnType<typeof setInterval> | null = null;
     let liveStatusTimer:  ReturnType<typeof setInterval> | null = null;
     let liveRefreshPending = false;
-    let liveRefreshInterval = 1000;
     let livePaused = false;
 
     const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
@@ -803,7 +804,19 @@ export class DisasmEditorComponent implements AfterViewInit {
     // 'nearest' for single-step navigation to avoid jarring jumps.
     function updateCursor(scrollBlock: ScrollLogicalPosition = 'nearest') {
       const localIndex = getLocalIndex(state.cursor);
-      Array.from(grid.children).forEach(r => r.classList.remove('active', 'branch-highlight'));
+      const breakpointHitPhys = state.breakpointHitAddress !== undefined
+        ? toPhysAddr(state.breakpointHitAddress)
+        : undefined;
+      Array.from(grid.children).forEach((r, i) => {
+        r.classList.remove('active', 'branch-highlight', 'breakpoint-hit');
+        if (breakpointHitPhys !== undefined) {
+          const rowData = state.disasmRows[i];
+          if (rowData) {
+            const rowPhys = toPhysAddr(parseInt(rowData.addr, 16));
+            if (breakpointHitPhys === rowPhys) { (r as Element).classList.add('breakpoint-hit'); }
+          }
+        }
+      });
       const rowEl = grid.children[localIndex] as HTMLElement | undefined;
       if (!rowEl) { return; }
       rowEl.classList.add('active');
@@ -846,7 +859,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     // ── Live refresh ──────────────────────────────────────────────────────────
     function startLiveRefresh() {
       if (liveRefreshTimer !== null || livePaused) { return; }
-      liveRefreshTimer = setInterval(doLiveRefresh, liveRefreshInterval);
+      liveRefreshTimer = setInterval(doLiveRefresh, 1000);
       if (liveStatusTimer === null) {
         liveStatusTimer = setInterval(() => vscode.postMessage({ type: 'getStatus' }), 800);
       }
@@ -882,7 +895,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         setLivePausedUi(true);
       }
       if (paused) {
-        state.breakpointHitAddress = breakpointHitAddress ?? pc;
+        state.breakpointHitAddress = breakpointHitAddress;
       } else {
         state.breakpointHitAddress = undefined;
       }
@@ -902,6 +915,8 @@ export class DisasmEditorComponent implements AfterViewInit {
         setLivePausedUi(false);
         startLiveRefresh();
         hideDebugPanel();
+        // Immediately clear the yellow breakpoint-hit highlight from all visible rows.
+        Array.from(grid.children).forEach(r => r.classList.remove('breakpoint-hit'));
         return;
       }
       if (paused && registers) {

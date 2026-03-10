@@ -200,6 +200,13 @@ export class SocketClient {
      * front of the queue in FIFO order — matching the order commands were sent.
      */
     private _pendingResponses: Array<(message: string) => void> = [];
+    /**
+     * If a connection attempt is in progress, this holds the shared Promise so
+     * concurrent callers (e.g. extension auto-connect + connectSocketAndOpenViews)
+     * both await the same attempt rather than creating a second socket that
+     * destroys the first one's listeners and leaves its Promise permanently pending.
+     */
+    private _connectingPromise: Promise<void> | null = null;
 
     constructor(host: string = 'localhost', port: number = 8765) {
         this.host = host;
@@ -210,13 +217,31 @@ export class SocketClient {
      * Connect to the C# server
      */
     public connect(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            if (this.connected) {
-                console.log('Already connected to server');
-                resolve();
-                return;
-            }
+        if (this.connected) {
+            console.log('Already connected to server');
+            return Promise.resolve();
+        }
 
+        // If a connection attempt is already in progress, return the shared
+        // promise so concurrent callers wait on the same attempt rather than
+        // each spawning a new socket that would destroy the other's listeners
+        // and leave its Promise permanently pending.
+        if (this._connectingPromise) {
+            console.log('[SOCKET] Connection already in progress, sharing existing attempt');
+            return this._connectingPromise;
+        }
+
+        // Destroy any previous socket that may still be open (e.g. a
+        // failed prior connection attempt that was never cleaned up).
+        // This prevents a stale 'close' event from resetting state after
+        // the new socket has connected successfully.
+        if (this.client) {
+            this.client.removeAllListeners();
+            this.client.destroy();
+            this.client = null;
+        }
+
+        this._connectingPromise = new Promise<void>((resolve, reject) => {
             this.client = new net.Socket();
             let isResolved = false;
 
@@ -290,7 +315,11 @@ export class SocketClient {
                     reject(new Error('Connection timeout'));
                 }
             });
+        }).finally(() => {
+            this._connectingPromise = null;
         });
+
+        return this._connectingPromise;
     }
 
     /**
@@ -589,6 +618,23 @@ export class SocketClient {
         }
         return {
             paused: response.Paused ?? false,
+            pc: response.PC ?? 0,
+            breakpointHitAddress: response.BreakpointHitAddress,
+        };
+    }
+
+    /**
+     * Execute exactly one EE instruction while keeping the emulator paused.
+     * Returns the new PC / paused / breakpoint state.
+     */
+    public async step(): Promise<{ paused: boolean; pc: number; breakpointHitAddress?: number }> {
+        const command: CommandMessage = { Command: 'STEP' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Step failed');
+        }
+        return {
+            paused: response.Paused ?? true,
             pc: response.PC ?? 0,
             breakpointHitAddress: response.BreakpointHitAddress,
         };
