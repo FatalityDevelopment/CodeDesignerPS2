@@ -6,7 +6,7 @@ import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
-let outputChannel: vscode.OutputChannel;
+let outputChannel: vscode.LogOutputChannel;
 
 /**
  * Get the socket client instance
@@ -18,7 +18,7 @@ export function getSocketClient(): SocketClient | null {
 /**
  * Get the output channel instance
  */
-export function getOutputChannel(): vscode.OutputChannel {
+export function getOutputChannel(): vscode.LogOutputChannel {
     return outputChannel;
 }
 
@@ -26,8 +26,9 @@ export function getOutputChannel(): vscode.OutputChannel {
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-	// Create output channel for logging
-	outputChannel = vscode.window.createOutputChannel('CodeDesigner');
+	// Create output channel for logging — log: true gives colour-coded severity
+	// levels (info/warn/error) with icons rendered in the Output panel.
+	outputChannel = vscode.window.createOutputChannel('CodeDesigner', { log: true });
 	context.subscriptions.push(outputChannel);
 
 	// Initialize socket client
@@ -51,11 +52,11 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 
 		if (binTabs.length > 0) {
-			outputChannel.appendLine(`[INFO] Found ${binTabs.length} already-open .bin file(s)`);
+			outputChannel.info(`Found ${binTabs.length} already-open .bin file(s)`);
 			binTabs.forEach(tab => {
 				if (tab.input instanceof vscode.TabInputText) {
 					const uri = tab.input.uri;
-					outputChannel.appendLine(`[INFO] Reopening ${uri.fsPath} with disassembler`);
+					outputChannel.info(`Reopening ${uri.fsPath} with disassembler`);
 					// Close the text editor and reopen with custom editor
 					vscode.commands.executeCommand('vscode.openWith', uri, 'disasm.disasmEditor');
 				}
@@ -83,14 +84,14 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Register socket event handlers
 	socketClient.onConnected(() => {
-		outputChannel.appendLine('[INFO] Connected to C# server');
+		outputChannel.info('Connected to C# server');
 		vscode.window.showInformationMessage('Connected to C# server');
 		// Auto-open all live memory views (reuses existing panels if already open)
 		disasmPanelProvider.onSocketConnected();
 	});
 
 	socketClient.onDisconnected(() => {
-		outputChannel.appendLine('[WARN] Disconnected from C# server');
+		outputChannel.warn('Disconnected from C# server');
 		vscode.window.showWarningMessage('Disconnected from C# server');
 	});
 
@@ -140,15 +141,15 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(openLiveMemoryCommand);
 
 	// Auto-connect on activation
-	outputChannel.appendLine('[INFO] Extension activated, attempting to connect to server...');
+	outputChannel.info('Extension activated, attempting to connect to server...');
 	setTimeout(() => {
 		socketClient?.connect().then(() => {
-			outputChannel.appendLine('[SUCCESS] Auto-connected to server');
+			outputChannel.info('Auto-connected to server');
 		}).catch(err => {
 			const errorMsg = err?.message || err?.toString() || 'Unknown error';
-			outputChannel.appendLine(`[ERROR] Failed to auto-connect: ${errorMsg}`);
-			outputChannel.appendLine('[INFO] You can manually connect using "CodeDesigner: Connect to Server" command');
-			outputChannel.appendLine('[INFO] Make sure the C# server is running on localhost:8765');
+			outputChannel.warn(`Failed to auto-connect: ${errorMsg}`);
+			outputChannel.info('You can manually connect using "CodeDesigner: Connect to Server" command');
+			outputChannel.info('Make sure the C# server is running on localhost:8765');
 		});
 	}, 1000);
 
@@ -157,7 +158,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// they are re-initialized with live data.
 	setTimeout(() => {
 		disasmPanelProvider.openAllLivePanels().catch(err => {
-			outputChannel.appendLine(`[WARN] Could not open live panels at startup: ${err?.message ?? err}`);
+			outputChannel.warn(`Could not open live panels at startup: ${err?.message ?? err}`);
 		});
 	}, 600);
 }

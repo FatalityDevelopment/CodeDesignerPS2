@@ -612,10 +612,12 @@ namespace CodeDesigner.Mips64LE
                             {
                                 var name = m.Groups[1].Value;
                                 if (!labelAddresses.TryGetValue(name, out uint labelAddr))
-                                    throw new ArgumentException($"Undefined label '{name}' (line {lineNumber})");
+                                    throw new ArgumentException(
+                                        $"Undefined label '{name}' in '{trimmed}' (line {lineNumber})");
                                 // Branch offset = (label_addr - (current_addr + 4)) / 4
-                                int branchOff = ((int)labelAddr - (int)(currentAddress + 4)) / 4;
-                                return branchOff.ToString();
+                                // Use long arithmetic to avoid overflow when addresses exceed 0x7FFFFFFF
+                                long branchOff = ((long)labelAddr - (long)(currentAddress + 4)) / 4;
+                                return ((int)branchOff).ToString();
                             });
 
                         uint encoded  = MipsAssembler.Assemble(resolved);
