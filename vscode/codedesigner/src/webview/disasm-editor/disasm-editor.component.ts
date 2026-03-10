@@ -19,6 +19,18 @@ import './disasm-editor.css';
 <div id="header">
 <div id="header-toolbar">
     <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">&#8862; Symbols</button>
+    <div id="live-controls">
+        <span class="live-indicator" id="live-indicator">&#9679; LIVE</span>
+        <button id="play-pause-btn" title="Pause / Resume emulator">&#9646;&#9646; Pause</button>
+        <button id="step-btn" title="Single step one EE instruction (only while paused)">&#9193; Step</button>
+        <select id="interval-select" title="Live refresh interval">
+            <option value="250">250ms</option>
+            <option value="500">500ms</option>
+            <option value="1000" selected>1s</option>
+            <option value="2000">2s</option>
+            <option value="5000">5s</option>
+        </select>
+    </div>
 </div>
 <div id="goto-panel">
     <div class="search-row">
@@ -193,6 +205,11 @@ export class DisasmEditorComponent implements AfterViewInit {
     const gotoInfo       = document.getElementById('goto-info')!;
     const closeGoto      = document.getElementById('close-goto')!;
     const headerToolbar  = document.getElementById('header-toolbar')!;
+    const liveControls   = document.getElementById('live-controls')!;
+    const liveIndicator  = document.getElementById('live-indicator')!;
+    const playPauseBtn   = document.getElementById('play-pause-btn') as HTMLButtonElement;
+    const stepBtn        = document.getElementById('step-btn') as HTMLButtonElement;
+    const intervalSelect = document.getElementById('interval-select') as HTMLSelectElement;
     const debugPanel     = document.getElementById('debug-panel')!;
     const regContent     = document.getElementById('registers-content')!;
     const stackContent   = document.getElementById('stack-content')!;
@@ -307,6 +324,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
       if (isLive) {
         headerToolbar.classList.add('live-active');
+        liveControls.classList.add('visible');
         startLiveRefresh();
       }
     });
@@ -373,6 +391,27 @@ export class DisasmEditorComponent implements AfterViewInit {
     // VsCodeBridgeService buffers any messages that arrive before subscriptions
     // are set up, so no messages are lost.
     vscode.postMessage({ type: 'ready' });
+
+    // ── Live-controls button wiring ────────────────────────────────────────
+    // Play/Pause: toggle emulator pause state via the extension host.
+    playPauseBtn.addEventListener('click', () => {
+      if (livePaused) {
+        vscode.postMessage({ type: 'resume' });
+      } else {
+        vscode.postMessage({ type: 'pause' });
+      }
+    });
+
+    // Step: execute one EE instruction while staying paused.
+    stepBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'step' });
+    });
+
+    // Interval selector: adjust the live-refresh polling rate.
+    intervalSelect.addEventListener('change', () => {
+      liveRefreshInterval = parseInt(intervalSelect.value, 10);
+      restartLiveRefresh();
+    });
 
     function openEditOverlay(address: number, addressHex: string, op: string, args: string, bytes: string, currentLabel: string, currentComment: string) {
       _editOverlayAddr = address;
@@ -873,6 +912,10 @@ export class DisasmEditorComponent implements AfterViewInit {
     function setLivePausedUi(paused: boolean) {
       headerToolbar.classList.toggle('live-active', !paused);
       headerToolbar.classList.toggle('live-paused', paused);
+      liveIndicator.textContent  = paused ? '● PAUSED' : '● LIVE';
+      liveIndicator.classList.toggle('paused', paused);
+      playPauseBtn.textContent   = paused ? '▶ Resume' : '⏸ Pause';
+      stepBtn.disabled           = !paused;
     }
 
     function handleStatusUpdate(paused: boolean, pc: number, breakpointHitAddress: number | undefined, registers: RegisterData, stackBytes: number[], stackBase: number) {

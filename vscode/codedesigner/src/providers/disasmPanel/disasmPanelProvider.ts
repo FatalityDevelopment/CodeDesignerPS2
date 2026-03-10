@@ -131,6 +131,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'restart':
                     await this.handleRestart();
                     break;
+                case 'step':
+                    await this.handleStep();
+                    break;
                 case 'togglePause':
                     await this.handleTogglePause();
                     break;
@@ -405,6 +408,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public notifyPauseState(paused: boolean): void {
         this._paused = paused;
         this.webview?.postMessage({ command: 'paused', paused });
+    }
+
+    /**
+     * Execute one EE instruction (single-step) while staying paused.
+     * Delegates to DisasmEditorProvider.stepAndBroadcast() which fetches the
+     * new PC + registers and broadcasts to all live panels.
+     */
+    private async handleStep(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        await this.editorProvider.stepAndBroadcast();
     }
 
     /** Restart the emulator: send RESTART command via socket, keeping the connection alive. */

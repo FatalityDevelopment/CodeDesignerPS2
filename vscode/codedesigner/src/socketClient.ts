@@ -624,6 +624,23 @@ export class SocketClient {
     }
 
     /**
+     * Execute exactly one EE instruction while keeping the emulator paused.
+     * Returns the new PC / paused / breakpoint state.
+     */
+    public async step(): Promise<{ paused: boolean; pc: number; breakpointHitAddress?: number }> {
+        const command: CommandMessage = { Command: 'STEP' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'Step failed');
+        }
+        return {
+            paused: response.Paused ?? true,
+            pc: response.PC ?? 0,
+            breakpointHitAddress: response.BreakpointHitAddress,
+        };
+    }
+
+    /**
      * Restart the emulator (reset both CPUs to power-on state, then pause)
      */
     public async restart(): Promise<void> {

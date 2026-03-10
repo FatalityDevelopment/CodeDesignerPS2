@@ -259,6 +259,9 @@ namespace CodeDesigner.Mips64LE
                     case "RESUME":
                         return HandleResume();
 
+                    case "STEP":
+                        return HandleStep();
+
                     case "SETBP":
                         return HandleSetBreakpoint(command.BreakpointAddress);
 
@@ -665,6 +668,20 @@ namespace CodeDesigner.Mips64LE
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             Scheduler.Paused = false;
             return CreateSuccessResponse("Resumed");
+        }
+
+        /// <summary>
+        /// Handle STEP command — executes exactly one EE instruction while
+        /// keeping the emulator paused, then returns the new PC state.
+        /// </summary>
+        private string HandleStep()
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (!Scheduler.Paused)
+                return CreateErrorResponse("Emulator must be paused to single-step");
+            Scheduler.StepOne();
+            return HandleGetPC();
         }
 
         /// <summary>

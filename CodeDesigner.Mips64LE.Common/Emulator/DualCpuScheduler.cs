@@ -167,6 +167,50 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             return Task.Run(() => _runGate.Wait(ct), ct);
         }
 
+        /// <summary>
+        /// Executes exactly one EE instruction while keeping the scheduler
+        /// paused.  Must only be called while <see cref="Paused"/> is
+        /// <c>true</c>.  After execution:
+        /// <list type="bullet">
+        ///   <item>Any pending step-over state is cleared.</item>
+        ///   <item><see cref="LastBreakpointHit"/> is set to the new PC if
+        ///   that address coincides with a registered breakpoint, otherwise
+        ///   it is cleared.</item>
+        ///   <item>The scheduler remains paused.</item>
+        /// </list>
+        /// </summary>
+        public void StepOne()
+        {
+            if (!Paused) return;
+
+            // Clear leftover step-over / breakpoint-hit state so the step is clean.
+            _resumingFromBp   = null;
+            _resumingBpKey    = null;
+            LastBreakpointHit = null;
+
+            // Execute exactly one EE instruction.
+            EE.Step();
+            TotalEeSteps++;
+
+            // Check whether the new PC lands on a registered breakpoint.
+            if (Breakpoints.Count > 0)
+            {
+                uint newPc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
+                uint bpKey = ((newPc & 0xC0000000u) == 0x80000000u)
+                    ? (newPc & 0x1FFFFFFFu)
+                    : newPc;
+                uint hitKey = Breakpoints.Contains(bpKey) ? bpKey
+                            : (bpKey != newPc && Breakpoints.Contains(newPc)) ? newPc
+                            : 0u;
+                if (hitKey != 0u)
+                {
+                    LastBreakpointHit = newPc;
+                    _resumingBpKey    = hitKey;
+                }
+            }
+            // Scheduler stays paused — caller is responsible for keeping it that way.
+        }
+
         // Gate used to implement efficient pause/resume without busy-polling.
         // Set = running (not paused); Reset = paused.
         private readonly System.Threading.ManualResetEventSlim _runGate =

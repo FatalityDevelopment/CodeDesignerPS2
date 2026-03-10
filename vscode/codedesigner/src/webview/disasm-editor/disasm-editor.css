@@ -385,6 +385,26 @@ app-hex-view {
     background: #505050;
 }
 
+#step-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 10px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+#step-btn:hover:not(:disabled) {
+    background: #505050;
+}
+
+#step-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
 #interval-select {
     background: #3c3c3c;
     border: 1px solid #3e3e42;
