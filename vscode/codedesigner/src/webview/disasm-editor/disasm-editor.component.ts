@@ -367,12 +367,23 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.hexUpdated$.subscribe(event => {
-      updateHexView(
-        event.data,
-        event.offset,
-        event.highlightAddr  ?? -1,
-        event.highlightLength ?? 4,
-      );
+      // Prefer the current cursor position for the highlight so that a stale
+      // address from an in-flight request does not flash on screen when the
+      // cursor has already moved on.
+      const localIndex = getLocalIndex(state.cursor);
+      const curRow     = state.disasmRows[localIndex];
+      let hiAddr   = event.highlightAddr   ?? -1;
+      let hiLength = event.highlightLength ?? 4;
+      if (curRow) {
+        const curAddr   = parseInt(curRow.addr, 16);
+        const curBytes  = curRow.bytes?.trim() || '';
+        const curLength = curBytes.length > 0 ? Math.floor(curBytes.length / 2) : 4;
+        if (curAddr >= event.offset && curAddr + curLength <= event.offset + event.data.length) {
+          hiAddr   = curAddr;
+          hiLength = curLength;
+        }
+      }
+      updateHexView(event.data, event.offset, hiAddr, hiLength);
     });
 
     svc.searchResultsReceived$.subscribe(matches => {
@@ -949,13 +960,26 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
 
     function updateHexForRow(row: DisasmRow) {
-      const addr = parseInt(row.addr, 16);
+      const addr    = parseInt(row.addr, 16);
       const byteStr = row.bytes?.trim() || '';
-      const length = byteStr.length > 0 ? Math.floor(byteStr.length / 2) : 4;
-      const inView = addr >= state.hexOffset && addr + length <= state.hexOffset + state.hexData.length;
+      const length  = byteStr.length > 0 ? Math.floor(byteStr.length / 2) : 4;
+      const inView  = addr >= state.hexOffset && addr + length <= state.hexOffset + state.hexData.length;
       if (inView) {
         updateHexView(state.hexData, state.hexOffset, addr, length);
       } else {
+        // Cursor moved outside the current hex window.  Immediately synthesise
+        // a zero-filled placeholder so the highlight follows the cursor even
+        // before the extension host responds with real bytes (important for the
+        // placeholder / no-socket state and for reducing visual latency in live
+        // mode).  The host will overwrite this with authentic data when it
+        // responds to the 'updateHex' message below.
+        const windowSize  = state.hexData.length || 48;
+        const alignedAddr = Math.floor(addr / 16) * 16;
+        const newOffset   = Math.max(state.baseAddress, alignedAddr >= 16 ? alignedAddr - 16 : 0);
+        const synthetic   = new Array(windowSize).fill(0);
+        state.hexData     = synthetic;
+        state.hexOffset   = newOffset;
+        updateHexView(synthetic, newOffset, addr, length);
         vscode.postMessage({ type: 'updateHex', address: addr, length });
       }
     }
