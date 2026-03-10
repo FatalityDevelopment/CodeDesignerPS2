@@ -891,6 +891,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public getAddressHistory(address: number): Array<{ name: string; date: string; value: string }> {
         const results: Array<{ name: string; date: string; value: string }> = [];
 
+        // Snapshots store physical base addresses (e.g. 0x00000000 for EE Main RAM).
+        // The live editor uses virtual addresses (KSEG0/KSEG1, 0x80000000–0xBFFFFFFF).
+        // Strip the segment bits so the offset calculation works correctly.
+        const addrU32 = address >>> 0;
+        const physAddress = (addrU32 >= 0x80000000 && addrU32 < 0xC0000000)
+            ? (address & 0x1FFFFFFF) >>> 0
+            : addrU32;
+
         for (const snap of this.snapshots) {
             const infoPath = path.join(snap.path, 'snapshot-info.json');
             if (!fs.existsSync(infoPath)) { continue; }
@@ -899,7 +907,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 for (const region of info.regions) {
                     const base = region.BaseAddress >>> 0;
                     const size = region.Size >>> 0;
-                    const offset = (address >>> 0) - base;
+                    const offset = physAddress - base;
                     if (offset < 0 || offset + 4 > size) { continue; }
 
                     const binPath = path.join(snap.path, region.File);
