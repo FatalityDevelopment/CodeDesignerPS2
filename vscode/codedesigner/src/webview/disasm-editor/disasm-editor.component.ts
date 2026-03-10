@@ -24,6 +24,7 @@ import './disasm-editor.css';
     <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)">&#8693; Stack</button>
     <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
     <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
+    <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
 
 </div>
 <div id="goto-panel">
@@ -242,6 +243,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const bottomPanelToggleBtn = document.getElementById('bottom-panel-toggle-btn')!;
     const searchToggleBtn      = document.getElementById('search-toggle-btn')!;
     const gotoToggleBtn        = document.getElementById('goto-toggle-btn')!;
+    const navBackBtn           = document.getElementById('nav-back-btn') as HTMLButtonElement;
 
     const bottomPanel    = document.getElementById('bottom-panel')!;
     const debugPanel     = document.getElementById('debug-panel')!;
@@ -309,6 +311,26 @@ export class DisasmEditorComponent implements AfterViewInit {
       return pcInstrIdx - pageStart;
     };
 
+    // ── Navigation history ────────────────────────────────────────────────────
+    const navHistory: number[] = [];
+    const MAX_NAV_HISTORY = 100;
+
+    function pushNavHistory(): void {
+      navHistory.push(state.cursor);
+      if (navHistory.length > MAX_NAV_HISTORY) { navHistory.shift(); }
+      navBackBtn.disabled = false;
+    }
+
+    function navigateBack(): void {
+      const prev = navHistory.pop();
+      if (prev === undefined) { return; }
+      state.cursor = prev;
+      navBackBtn.disabled = navHistory.length === 0;
+      const pageReady = checkAndLoadPage();
+      if (pageReady) { updateCursor('center'); }
+      grid.focus();
+    }
+
     // ── Hex view helper ───────────────────────────────────────────────────────
     // Updates the <app-hex-view> @Input() bindings from outside-zone code.
     // Calling zone.run() triggers a single Angular CD cycle which propagates
@@ -368,6 +390,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     // Subscriptions are set up before sending 'ready' so no messages are lost.
     svc.initReceived$.subscribe(({ isLive, regionLabel }) => {
       liveRefreshPending = false;
+      navHistory.length = 0;
+      navBackBtn.disabled = true;
       if (regionLabel) {
         const rl = document.getElementById('sym-region-label');
         if (rl) { rl.textContent = `— ${regionLabel}`; }
@@ -753,6 +777,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         gotoInfo.textContent = `Navigating to 0x${addr.toString(16).toUpperCase()}...`;
         return;
       }
+      pushNavHistory();
       state.cursor = instrIndex;
       state.searchActive = false;
       searchPanel.classList.remove('visible');
@@ -769,6 +794,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
     gotoClear.addEventListener('click', () => { gotoInput.value = ''; gotoInfo.textContent = ''; gotoInput.focus(); });
     closeGoto.addEventListener('click', () => { toggleGoto(); grid.focus(); });
+    navBackBtn.addEventListener('click', () => navigateBack());
 
     // Broadcast every keystroke to the other region panels so their goto
     // input stays in sync with this one.  A guard flag prevents the echo
@@ -797,6 +823,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       const instrIndex = Math.floor((physAddr - physBase) / 4);
       if (instrIndex < 0 || instrIndex >= state.totalInstructions) { return; }
 
+      pushNavHistory();
       // Show the goto panel with the destination address and a confirmation.
       gotoInput.value = `0x${address.toString(16).toUpperCase()}`;
       if (!state.gotoActive) { toggleGoto(); }
@@ -896,6 +923,11 @@ export class DisasmEditorComponent implements AfterViewInit {
         navigateToCurrentRowTarget();
         return;
       }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navigateBack();
+        return;
+      }
       if (e.key === 'F9') {
         e.preventDefault();
         toggleBreakpointAtCursor();
@@ -929,6 +961,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       const physBase   = toPhysAddr(state.baseAddress);
       const instrIndex = Math.floor((physAddr - physBase) / 4);
       if (instrIndex < 0 || instrIndex >= state.totalInstructions) { return; }
+      pushNavHistory();
       state.cursor = instrIndex;
       const pageReady = checkAndLoadPage();
       if (pageReady) { updateCursor(); }
@@ -978,6 +1011,18 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
       if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyT') {
         e.preventDefault(); e.stopPropagation(); toggleBottomPanel();
+      }
+      if (e.altKey && !e.ctrlKey && !e.shiftKey && e.code === 'ArrowLeft') {
+        // Only fire when no editable element is focused, so the shortcut
+        // does not interfere with text input or contenteditable regions.
+        const active = document.activeElement as HTMLElement | null;
+        const isEditing = active && (
+          active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' ||
+          active.tagName === 'SELECT' || active.isContentEditable
+        );
+        if (!isEditing) {
+          e.preventDefault(); e.stopPropagation(); navigateBack();
+        }
       }
     });
 
@@ -1128,6 +1173,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       state.loadedPages.clear();
       state.disasmRows = [];
       state.breakpointHitAddress = undefined;
+      navHistory.length = 0;
+      navBackBtn.disabled = true;
       state.pcAddress = undefined;
       const startIndex = getPageStart(state.cursor);
       const zeroRows = generateZeroPage(startIndex);
@@ -1196,6 +1243,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       const physBase   = toPhysAddr(state.baseAddress);
       const instrIndex = Math.floor((physAddr - physBase) / 4);
       if (instrIndex < 0 || instrIndex >= state.totalInstructions) { return; }
+      pushNavHistory();
       state.cursor = instrIndex;
       const pageReady = checkAndLoadPage();
       if (pageReady) { updateCursor(); }
