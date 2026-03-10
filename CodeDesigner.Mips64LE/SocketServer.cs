@@ -39,6 +39,29 @@ namespace CodeDesigner.Mips64LE
         public DualCpuScheduler? Scheduler { get; set; }
 
         /// <summary>
+        /// When set, memory and debugger commands are routed through the PCSX2 PINE
+        /// IPC socket instead of the internal emulator.  Requires PCSX2 to have PINE
+        /// enabled (Settings → Advanced → Enable PINE).
+        /// <para>
+        /// Basic commands (READMEM, WRITEMEM, APPLYCHEATS, ASSEMBLE, DISASSEMBLE, …)
+        /// work with the standard upstream PINE protocol.
+        /// </para>
+        /// <para>
+        /// Debugger commands (PAUSE, RESUME, STEP, SETBP, GETPC, GETREGS) require
+        /// the PINE protocol extension — see <c>PINE_EXTENSION_PROPOSAL.md</c> for
+        /// the C++ implementation to submit as a PCSX2 pull request.
+        /// </para>
+        /// </summary>
+        public PineClient? PineClient { get; set; }
+
+        /// <summary>
+        /// Returns <c>true</c> when the server should route memory operations
+        /// through PINE (a <see cref="PineClient"/> is attached and no internal
+        /// <see cref="Scheduler"/> is present).
+        /// </summary>
+        private bool IsPineMode => PineClient != null && Scheduler == null;
+
+        /// <summary>
         /// Set to <c>true</c> by <see cref="HandleRestart"/> to ask the emulator
         /// run-loop (in Program.cs) to perform a full hardware reset: create a
         /// fresh <see cref="DualCpuScheduler"/>, re-load the BIOS and disc, and
@@ -342,6 +365,12 @@ namespace CodeDesigner.Mips64LE
 
                     case "PING":
                         return CreateSuccessResponse("PONG");
+
+                    case "PCSX2STATUS":
+                        return HandlePcsx2Status();
+
+                    case "PCSX2GAMEINFO":
+                        return HandlePcsx2GameInfo();
                     
                     default:
                         // Echo for unknown commands
@@ -555,14 +584,15 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle READMEM command — reads raw bytes from the live emulator memory.
+        /// In PINE mode the bytes are read from PCSX2 via the PINE IPC socket.
         /// </summary>
         /// <param name="address">Start virtual address (EE or IOP address space).</param>
         /// <param name="length">Number of bytes to read (capped at MaxReadMemLength).</param>
-        /// <param name="region">"ee" for EE bus, "iop" for IOP bus.</param>
+        /// <param name="region">"ee" for EE bus, "iop" for IOP bus (IOP only in internal mode).</param>
         private string HandleReadMem(uint address, int length, string? region)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
 
             if (length <= 0 || length > MaxReadMemLength)
                 return CreateErrorResponse($"Invalid length {length} — must be 1–{MaxReadMemLength} bytes");
@@ -571,52 +601,55 @@ namespace CodeDesigner.Mips64LE
 
             try
             {
-                var bytes = new byte[length];
+                byte[] bytes;
 
-                for (int i = 0; i < length; i++)
+                if (IsPineMode)
                 {
-                    uint vaddr = address + (uint)i;
+                    // ── PINE path: forward read to PCSX2 ─────────────────────
+                    // PINE addresses the EE virtual memory map directly.
+                    // IOP region is not separately accessible; callers should use
+                    // EE physical addresses in that case.
+                    bytes = PineClient!.ReadBytes(address, length);
+                }
+                else
+                {
+                    // ── Internal emulator path ────────────────────────────────
+                    bytes = new byte[length];
 
-                    if (useIop)
+                    for (int i = 0; i < length; i++)
                     {
-                        // Translate IOP virtual address to a physical RAM offset.
-                        // Supported windows:
-                        //   0x00000000–0x003FFFFF  physical IOP RAM (direct)
-                        //   0x80000000–0xBFFFFFFF  KSEG0/KSEG1 — strip top 3 bits
-                        //   0x1C000000–0x1DFFFFFF  EE VTLB mirror of IOP RAM
-                        uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
-                        if (physAddr >= EeIopMirrorBase && physAddr < EeIopMirrorEnd)
-                            physAddr -= EeIopMirrorBase;
+                        uint vaddr = address + (uint)i;
 
-                        bytes[i] = physAddr < (uint)IopMemoryBus.RamSize
-                            ? Scheduler.IOP.Bus.Ram[physAddr]
-                            : (byte)0;
-                    }
-                    else
-                    {
-                        // EE: translate virtual address to physical.
-                        // Supported windows:
-                        //   0x80000000–0xBFFFFFFF  KSEG0/KSEG1 — strip top 3 bits
-                        //   0x20000000–0x21FFFFFF  uncached user mirror of EE main RAM
-                        //   0x70000000             scratchpad (handled below by vaddr)
-                        uint physAddr;
-                        if (vaddr >= 0x80000000u && vaddr < 0xC0000000u)
-                            physAddr = vaddr & 0x1FFFFFFFu;
-                        else if (vaddr >= EeUncachedRamBase && vaddr < EeUncachedRamEnd)
-                            physAddr = vaddr - EeUncachedRamBase;
+                        if (useIop)
+                        {
+                            uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
+                            if (physAddr >= EeIopMirrorBase && physAddr < EeIopMirrorEnd)
+                                physAddr -= EeIopMirrorBase;
+                            bytes[i] = physAddr < (uint)IopMemoryBus.RamSize
+                                ? Scheduler!.IOP.Bus.Ram[physAddr]
+                                : (byte)0;
+                        }
                         else
-                            physAddr = vaddr;
+                        {
+                            uint physAddr;
+                            if (vaddr >= 0x80000000u && vaddr < 0xC0000000u)
+                                physAddr = vaddr & 0x1FFFFFFFu;
+                            else if (vaddr >= EeUncachedRamBase && vaddr < EeUncachedRamEnd)
+                                physAddr = vaddr - EeUncachedRamBase;
+                            else
+                                physAddr = vaddr;
 
-                        if (physAddr < (uint)PS2MemoryBus.MainRamSize)
-                            bytes[i] = Scheduler.EE.Bus.Ram[physAddr];
-                        else if (physAddr >= PS2MemoryBus.BiosRomPhysBase &&
-                                 physAddr <  PS2MemoryBus.BiosRomPhysBase + (uint)PS2MemoryBus.BiosRomSize)
-                            bytes[i] = Scheduler.EE.Bus.Bios[physAddr - PS2MemoryBus.BiosRomPhysBase];
-                        else if (vaddr >= 0x70000000u &&
-                                 vaddr <  0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
-                            bytes[i] = Scheduler.EE.Bus.Scratchpad[vaddr - 0x70000000u];
-                        else
-                            bytes[i] = 0;
+                            if (physAddr < (uint)PS2MemoryBus.MainRamSize)
+                                bytes[i] = Scheduler!.EE.Bus.Ram[physAddr];
+                            else if (physAddr >= PS2MemoryBus.BiosRomPhysBase &&
+                                     physAddr <  PS2MemoryBus.BiosRomPhysBase + (uint)PS2MemoryBus.BiosRomSize)
+                                bytes[i] = Scheduler!.EE.Bus.Bios[physAddr - PS2MemoryBus.BiosRomPhysBase];
+                            else if (vaddr >= 0x70000000u &&
+                                     vaddr <  0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                                bytes[i] = Scheduler!.EE.Bus.Scratchpad[vaddr - 0x70000000u];
+                            else
+                                bytes[i] = 0;
+                        }
                     }
                 }
 
@@ -688,9 +721,15 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle PAUSE command — halts emulator execution.
+        /// In PINE mode, pauses PCSX2 via the extended PINE protocol (MsgPause).
         /// </summary>
         private string HandlePause()
         {
+            if (IsPineMode)
+            {
+                try   { PineClient!.Pause(); return CreateSuccessResponse("Paused"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE Pause error: {ex.Message}"); }
+            }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             Scheduler.Paused = true;
@@ -699,9 +738,15 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle RESUME command — resumes emulator execution.
+        /// In PINE mode, resumes PCSX2 via the extended PINE protocol (MsgResume).
         /// </summary>
         private string HandleResume()
         {
+            if (IsPineMode)
+            {
+                try   { PineClient!.Resume(); return CreateSuccessResponse("Resumed"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE Resume error: {ex.Message}"); }
+            }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
@@ -709,8 +754,6 @@ namespace CodeDesigner.Mips64LE
             // instruction once before releasing the run gate.  This advances PC
             // past the breakpoint address so the same breakpoint does not
             // immediately re-fire the moment execution resumes.
-            // Snapshot the flag while the scheduler is paused (run-loop thread is
-            // blocked on WaitForResumeAsync, so no concurrent write to LastBreakpointHit).
             bool wasAtBreakpoint = Scheduler.LastBreakpointHit.HasValue;
             if (wasAtBreakpoint)
                 Scheduler.StepOne();
@@ -722,9 +765,26 @@ namespace CodeDesigner.Mips64LE
         /// <summary>
         /// Handle STEP command — executes exactly one EE instruction while
         /// keeping the emulator paused, then returns the new PC state.
+        /// In PINE mode, steps PCSX2 via the extended PINE protocol (MsgStep).
         /// </summary>
         private string HandleStep()
         {
+            if (IsPineMode)
+            {
+                try
+                {
+                    uint newPc = PineClient!.Step();
+                    var pine_resp = new CommandResponse
+                    {
+                        Success = true,
+                        Command = "STEP",
+                        Paused  = true,
+                        PC      = newPc,
+                    };
+                    return JsonSerializer.Serialize(pine_resp);
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE Step error: {ex.Message}"); }
+            }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (!Scheduler.Paused)
@@ -793,37 +853,55 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle SETBP command — adds a breakpoint at the given EE address.
+        /// In PINE mode, registers the breakpoint via the extended PINE protocol (MsgSetBreakpoint).
         /// </summary>
         private string HandleSetBreakpoint(uint? address)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (address == null)
                 return CreateErrorResponse("BreakpointAddress is required for SETBP");
             uint normalized = NormalizePcToKseg0(address.Value);
+            if (IsPineMode)
+            {
+                try   { PineClient!.SetBreakpoint(normalized); return CreateSuccessResponse($"Breakpoint set at 0x{normalized:X8}"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE SetBreakpoint error: {ex.Message}"); }
+            }
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
             Scheduler.Breakpoints.Add(normalized);
             return CreateSuccessResponse($"Breakpoint set at 0x{normalized:X8}");
         }
 
         /// <summary>
         /// Handle CLEARBP command — removes the breakpoint at the given EE address.
+        /// In PINE mode, clears the breakpoint via the extended PINE protocol (MsgClearBreakpoint).
         /// </summary>
         private string HandleClearBreakpoint(uint? address)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (address == null)
                 return CreateErrorResponse("BreakpointAddress is required for CLEARBP");
             uint normalized = NormalizePcToKseg0(address.Value);
+            if (IsPineMode)
+            {
+                try   { PineClient!.ClearBreakpoint(normalized); return CreateSuccessResponse($"Breakpoint cleared at 0x{normalized:X8}"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE ClearBreakpoint error: {ex.Message}"); }
+            }
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
             Scheduler.Breakpoints.Remove(normalized);
             return CreateSuccessResponse($"Breakpoint cleared at 0x{normalized:X8}");
         }
 
         /// <summary>
         /// Handle CLEARBP_ALL command — removes all breakpoints.
+        /// In PINE mode, clears all breakpoints via the extended PINE protocol (MsgClearAllBreakpoints).
         /// </summary>
         private string HandleClearAllBreakpoints()
         {
+            if (IsPineMode)
+            {
+                try   { PineClient!.ClearAllBreakpoints(); return CreateSuccessResponse("All breakpoints cleared"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE ClearAllBreakpoints error: {ex.Message}"); }
+            }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             Scheduler.Breakpoints.Clear();
@@ -832,15 +910,31 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle GETPC command — returns current EE PC and paused/breakpoint state.
+        /// In PINE mode, reads PC from PCSX2 via the extended PINE protocol (MsgGetProgramCounter).
         /// The PC is normalized to KSEG0 (0x80000000–0x9FFFFFFF) so the client
         /// always sees a consistent address regardless of whether the CPU executed
         /// the instruction via the KSEG0 or KSEG1 virtual-address window.
         /// </summary>
         private string HandleGetPC()
         {
+            if (IsPineMode)
+            {
+                try
+                {
+                    uint pc = PineClient!.GetProgramCounter(out bool paused);
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = true,
+                        Command = "GETPC",
+                        Paused  = paused,
+                        PC      = pc,
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE GetPC error: {ex.Message}"); }
+            }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
-            uint pc = NormalizePcToKseg0((uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL));
+            uint normalizedPc = NormalizePcToKseg0((uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL));
             uint? bpHit = Scheduler.LastBreakpointHit.HasValue
                 ? NormalizePcToKseg0(Scheduler.LastBreakpointHit.Value)
                 : (uint?)null;
@@ -849,7 +943,7 @@ namespace CodeDesigner.Mips64LE
                 Success = true,
                 Command = "GETPC",
                 Paused  = Scheduler.Paused,
-                PC      = pc,
+                PC      = normalizedPc,
                 BreakpointHitAddress = bpHit,
             };
             return JsonSerializer.Serialize(response);
@@ -859,9 +953,37 @@ namespace CodeDesigner.Mips64LE
         /// Handle GETREGS command — returns the full EE CPU register state including
         /// GPR, all 32 COP0 registers, FPR/FCR (COP1), VU0 float/integer registers,
         /// and key GS privileged registers.
+        /// In PINE mode, returns the register snapshot from PCSX2 via the extended
+        /// PINE protocol (MsgGetRegisters — GPRs, PC, HI, LO only).
         /// </summary>
         private string HandleGetRegisters()
         {
+            if (IsPineMode)
+            {
+                try
+                {
+                    var snap = PineClient!.GetRegisters();
+                    var pineGpr     = snap.GPR.Select(v => (ulong)v).ToList();
+                    var pineGprLo32 = snap.GPR.ToList();
+                    // PINE MsgGetRegisters only returns lower 32-bit halves of each GPR.
+                    // Hi32 / UpLo32 / UpHi32 are unavailable and filled with zeros.
+                    var pineZeros   = Enumerable.Repeat(0u, 32).ToList();
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success   = true,
+                        Command   = "GETREGS",
+                        GPR       = pineGpr,
+                        GPR_Lo32  = pineGprLo32,
+                        GPR_Hi32  = pineZeros,
+                        GPR_UpLo32 = pineZeros,
+                        GPR_UpHi32 = pineZeros,
+                        GPR_PC    = snap.PC,
+                        GPR_HI    = snap.HI,
+                        GPR_LO    = snap.LO,
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE GetRegisters error: {ex.Message}"); }
+            }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
@@ -1034,8 +1156,63 @@ namespace CodeDesigner.Mips64LE
             return JsonSerializer.Serialize(response);
         }
 
+        // ── PINE-specific commands ────────────────────────────────────────────
+
         /// <summary>
-        /// Handle GETTHREADS command — returns EE OS thread information.
+        /// Handle PCSX2STATUS — queries the PCSX2 emulator status via PINE (MsgStatus).
+        /// Returns Running, Paused, or Shutdown.
+        /// </summary>
+        private string HandlePcsx2Status()
+        {
+            if (PineClient == null)
+                return CreateErrorResponse("PCSX2STATUS requires --pcsx2 mode");
+            try
+            {
+                var status = PineClient.GetStatus();
+                return CreateSuccessResponse(status.ToString());
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"PINE Status error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle PCSX2GAMEINFO — queries the running game title, serial ID, UUID,
+        /// and version from PCSX2 via PINE (MsgTitle, MsgID, MsgUUID, MsgGameVersion).
+        /// </summary>
+        private string HandlePcsx2GameInfo()
+        {
+            if (PineClient == null)
+                return CreateErrorResponse("PCSX2GAMEINFO requires --pcsx2 mode");
+            try
+            {
+                string title   = PineClient.GetGameTitle();
+                string id      = PineClient.GetGameID();
+                string uuid    = PineClient.GetGameUUID();
+                string version = PineClient.GetGameVersion();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "PCSX2GAMEINFO",
+                    Message = $"Title={title} ID={id} UUID={uuid} Version={version}",
+                    Data    = JsonSerializer.Serialize(new
+                    {
+                        Title   = title,
+                        ID      = id,
+                        UUID    = uuid,
+                        Version = version,
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"PINE GameInfo error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Reads the current running thread from CPU state and attempts to walk
         /// the PS2 EE OS thread control block list in EE RAM.  Each TCB is 128
         /// bytes; status byte at offset 0: 0x01=running, 0x02=ready, 0x04=wait,
@@ -1044,6 +1221,8 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         private string HandleGetThreads()
         {
+            if (IsPineMode)
+                return CreateErrorResponse("GETTHREADS is not available in PINE mode (thread introspection requires the internal emulator).");
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
@@ -1264,11 +1443,12 @@ namespace CodeDesigner.Mips64LE
         /// <summary>
         /// Handle WRITEMEM command — write arbitrary bytes to live EE or IOP memory.
         /// The bytes are supplied as a hex string (spaces, commas and "0x" prefixes are ignored).
+        /// In PINE mode, writes are forwarded to PCSX2 via the PINE IPC socket.
         /// </summary>
         private string HandleWriteMem(uint address, string? hexData, string? region)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (string.IsNullOrWhiteSpace(hexData))
                 return CreateErrorResponse("No data provided");
 
@@ -1286,6 +1466,12 @@ namespace CodeDesigner.Mips64LE
                 return CreateErrorResponse("Invalid hex data — expected pairs of hex digits");
             }
 
+            if (IsPineMode)
+            {
+                try   { PineClient!.WriteBytes(address, bytes); return CreateSuccessResponse($"Wrote {bytes.Length} byte(s) to 0x{address:X8}"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE WriteMem error: {ex.Message}"); }
+            }
+
             bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
             for (int i = 0; i < bytes.Length; i++)
             {
@@ -1294,7 +1480,7 @@ namespace CodeDesigner.Mips64LE
                 {
                     uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
                     if (physAddr < (uint)IopMemoryBus.RamSize)
-                        Scheduler.IOP.Bus.Ram[physAddr] = bytes[i];
+                        Scheduler!.IOP.Bus.Ram[physAddr] = bytes[i];
                 }
                 else
                 {
@@ -1307,9 +1493,9 @@ namespace CodeDesigner.Mips64LE
                         physAddr = vaddr;
 
                     if (physAddr < (uint)PS2MemoryBus.MainRamSize)
-                        Scheduler.EE.Bus.Ram[physAddr] = bytes[i];
+                        Scheduler!.EE.Bus.Ram[physAddr] = bytes[i];
                     else if (vaddr >= 0x70000000u && vaddr < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
-                        Scheduler.EE.Bus.Scratchpad[vaddr - 0x70000000u] = bytes[i];
+                        Scheduler!.EE.Bus.Scratchpad[vaddr - 0x70000000u] = bytes[i];
                 }
             }
             return CreateSuccessResponse($"Wrote {bytes.Length} byte(s) to 0x{address:X8}");
@@ -1318,17 +1504,20 @@ namespace CodeDesigner.Mips64LE
         /// <summary>
         /// Handle APPLYCHEATS command — parses PS2 GameShark/Action Replay cheat codes
         /// from the supplied text and writes them into the live emulator RAM.
+        /// In PINE mode, patches are written to PCSX2 memory via the PINE IPC socket.
         /// </summary>
         private string HandleApplyCheats(string? cheatText)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (string.IsNullOrWhiteSpace(cheatText))
                 return CreateErrorResponse("No cheat data provided");
 
             try
             {
-                var byteEditor = new PS2ByteEditor(Scheduler);
+                IByteEditor byteEditor = IsPineMode
+                    ? (IByteEditor)new PinePcsx2ByteEditor(PineClient!)
+                    : new PS2ByteEditor(Scheduler!);
                 var engine = new CodeDesigner.Mips64LE.Common.CheatEngine.CheatEngine(byteEditor);
                 var cheatList = new CheatList(cheatText);
                 engine.PatchMemory(cheatList);
@@ -1701,12 +1890,16 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Read <paramref name="length"/> bytes starting at <paramref name="startAddress"/>
-        /// directly from the live emulator RAM arrays.  Used by SCANSTRINGS,
-        /// SCANFUNCTIONS, and SEARCH so they can scan whole regions without the
-        /// 64 KB cap that READMEM enforces.
+        /// directly from the live emulator RAM arrays.  In PINE mode the bytes are
+        /// fetched from PCSX2 via the PINE IPC socket.
+        /// Used by SCANSTRINGS, SCANFUNCTIONS, and SEARCH so they can scan whole
+        /// regions without the 64 KB cap that READMEM enforces.
         /// </summary>
         private byte[] ReadLiveBytes(uint startAddress, int length, bool useIop)
         {
+            if (IsPineMode)
+                return PineClient!.ReadBytes(startAddress, length);
+
             var bytes = new byte[length];
             for (int i = 0; i < length; i++)
             {
@@ -1751,8 +1944,8 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         private string HandleScanStrings(uint address, int length, string? region)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANSTRINGS");
 
@@ -1807,8 +2000,8 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         private string HandleScanFunctions(uint address, int length, string? region)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANFUNCTIONS");
 
@@ -1874,8 +2067,8 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         private string HandleScanPointers(uint address, int length, string? region)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANPOINTERS");
 
@@ -1936,8 +2129,8 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         private string HandleScanFloats(uint address, int length, string? region)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANFLOATS");
 
@@ -1993,8 +2186,8 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         private string HandleScanIntegers(uint address, int length, string? region)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANINTEGERS");
 
@@ -2056,8 +2249,8 @@ namespace CodeDesigner.Mips64LE
                 }
                 else
                 {
-                    if (Scheduler == null)
-                        return CreateErrorResponse("Emulator not running — no scheduler attached");
+                    if (Scheduler == null && PineClient == null)
+                        return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
                     if (length <= 0)
                         return CreateErrorResponse("Length is required when searching live memory");
                     bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
