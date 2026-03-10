@@ -373,9 +373,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 await new Promise<void>(resolve => setTimeout(resolve, 1000));
                 try {
                     await this.socketClient.resume();
-                    this._paused = false;
-                    this.webview?.postMessage({ command: 'paused', paused: false });
-                    this.editorProvider.notifyPauseState(false);
+                    // Do NOT broadcast paused=false here.  The 800ms status poll
+                    // (started by startLiveRefresh on init) will query GETPC and
+                    // reflect the true state — which may already be paused again
+                    // if a breakpoint at 0xBFC00000 fired immediately.
                     out.appendLine('[INFO] Emulator resumed — running from reset vector.');
                 } catch {
                     // Resume can fail if the server was already running (e.g.

@@ -115,6 +115,16 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public uint? LastBreakpointHit { get; private set; }
 
         /// <summary>
+        /// When non-null, the next <see cref="RunSlice"/> call will execute exactly
+        /// one instruction at this address before re-enabling the breakpoint check.
+        /// This is set automatically by <see cref="Paused"/> when resuming (<c>set
+        /// to false</c>) while <see cref="LastBreakpointHit"/> is non-null, so the
+        /// user can step past the hit address without the same breakpoint
+        /// immediately re-firing.
+        /// </summary>
+        private uint? _resumingFromBp;
+
+        /// <summary>
         /// When <c>true</c>, <see cref="RunSlice"/> returns immediately without
         /// executing any instructions.  Set via the socket PAUSE/RESUME commands.
         /// </summary>
@@ -126,6 +136,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 if (value) _runGate.Reset();
                 else
                 {
+                    // When resuming from a breakpoint, record the hit address so
+                    // RunSlice can step over it once before re-arming the check.
+                    _resumingFromBp = LastBreakpointHit;
                     LastBreakpointHit = null;
                     _runGate.Set();
                 }
@@ -617,14 +630,33 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // executed is caught correctly.  The emulator halts before the
                 // instruction at the breakpoint address has been run, which is
                 // the standard debugger behaviour ("break before executing X").
+                //
+                // Step-over: if this is the very first instruction after resuming
+                // from a breakpoint at this same address, skip the check once so
+                // the instruction can execute and the PC can advance.  This
+                // prevents the BP from immediately re-firing when the user
+                // resumes, allowing execution to continue past the hit address.
                 if (Breakpoints.Count > 0)
                 {
                     uint eePc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
                     if (Breakpoints.Contains(eePc))
                     {
-                        LastBreakpointHit = eePc;
-                        Paused = true;
-                        return;
+                        if (_resumingFromBp == eePc)
+                        {
+                            // One-time step-over: execute the instruction normally.
+                            _resumingFromBp = null;
+                        }
+                        else
+                        {
+                            LastBreakpointHit = eePc;
+                            Paused = true;
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        // PC has moved away from the resume-step address — clear.
+                        _resumingFromBp = null;
                     }
                 }
 
