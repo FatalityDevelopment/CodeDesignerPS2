@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
+import * as path from "path";
 import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
@@ -42,6 +43,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * being bootstrapped or having processed an 'init' message first.
    */
   private _knownBreakpoints: Set<number> = new Set();
+
+  /**
+   * Remembered load addresses for binary file panels, keyed by URI string.
+   * Populated when the user sets a base address via the import prompt so the
+   * same file always reopens at the same virtual address.
+   */
+  private _binaryBaseAddresses: Map<string, number> = new Map();
 
   /**
    * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
@@ -224,6 +232,34 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     return { uri, dispose: () => {} };
   }
 
+  /**
+   * Retrieves the stored base address for a binary file URI, or prompts the
+   * user to enter one (defaulting to 0x00000000). The choice is remembered for
+   * the lifetime of the extension session so reopening the file is seamless.
+   */
+  private async _getOrAskBaseAddress(uri: vscode.Uri): Promise<number> {
+    const key = uri.toString();
+    const stored = this._binaryBaseAddresses.get(key);
+    if (stored !== undefined) { return stored; }
+
+    const input = await vscode.window.showInputBox({
+      title:          'Binary File — Load Address',
+      prompt:         'Virtual address where this binary is loaded (hex). Press Enter for 0x00000000.',
+      placeHolder:    '0x00000000',
+      value:          '0x00000000',
+      ignoreFocusOut: true,
+      validateInput:  v => {
+        const c = v.trim().replace(/^0x/i, '');
+        return c === '' || /^[0-9a-f]+$/i.test(c) ? null : 'Enter a valid hex address (e.g. 0x80010000)';
+      },
+    });
+    const addr = (input !== undefined && input.trim() !== '')
+      ? (parseInt(input.trim().replace(/^0x/i, ''), 16) >>> 0)
+      : 0;
+    this._binaryBaseAddresses.set(key, addr);
+    return addr;
+  }
+
   private getHtml(webview: vscode.Webview): string {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'disasm-editor.js')
@@ -259,28 +295,38 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     // init is sent only when both are satisfied (order-independent).
     let fileData: Buffer | null = null;
     let readyReceived = false;
+    // The virtual load address for this binary.  Set once (via user prompt) and
+    // stored in _binaryBaseAddresses so subsequent opens of the same file skip
+    // the prompt.  All page/hex/search operations use this address.
+    let baseAddress = 0;
 
-    const sendInit = async (data: Buffer) => {
+    const sendInitWithData = async (data: Buffer) => {
       const totalInstructions = Math.floor(data.length / DisasmEditorProvider.INSTRUCTION_SIZE);
-      console.log(`[DISASM] Sending init: ${totalInstructions} instructions`);
+      const regionLabel = path.basename(document.uri.fsPath);
+      getOutputChannel().appendLine(`[DISASM] Sending init: ${totalInstructions} instructions @ 0x${baseAddress.toString(16)}`);
       webviewPanel.webview.postMessage({
-        type: 'init',
+        type:             'init',
         totalInstructions,
-        pageSize: DisasmEditorProvider.PAGE_SIZE,
-        baseAddress: DisasmEditorProvider.BASE_ADDRESS,
+        pageSize:         DisasmEditorProvider.PAGE_SIZE,
+        baseAddress,
+        totalBytes:       data.length,
+        regionLabel,
+        isLive:           false,
       });
-      console.log(`[DISASM] Sending first page and hex view`);
-      await this.sendDisasmPage(webviewPanel, data, 0);
-      this.sendHexView(webviewPanel, data,
-        DisasmEditorProvider.BASE_ADDRESS,
-        DisasmEditorProvider.BASE_ADDRESS,
-        DisasmEditorProvider.INSTRUCTION_SIZE);
+      await this.sendDisasmPage(webviewPanel, data, 0, baseAddress);
+      this.sendHexView(webviewPanel, data, baseAddress, baseAddress, DisasmEditorProvider.INSTRUCTION_SIZE);
+    };
+
+    // sendInit asks for a base address on the very first open (or reuses the
+    // previously remembered value) then calls sendInitWithData.
+    const sendInit = async (data: Buffer) => {
+      baseAddress = await this._getOrAskBaseAddress(document.uri);
+      await sendInitWithData(data);
     };
 
     // Register the message handler BEFORE setting html so that any 'ready'
     // message from the webview is never missed.
     webviewPanel.webview.onDidReceiveMessage(async (message) => {
-      console.log(`[DISASM] Received message from webview:`, message.type);
       if (message.type === 'ready') {
         // Webview has bootstrapped and its listener is registered.
         readyReceived = true;
@@ -293,41 +339,88 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         );
         return;
       }
+      if (message.type === 'requestImportBinary') {
+        // User clicked "Import" in the binary controls bar — show a file picker
+        // and reload with the new file.
+        const uris = await vscode.window.showOpenDialog({
+          title:       'Load Binary File',
+          openLabel:   'Load',
+          canSelectMany: false,
+          filters: { 'Binary Files': ['bin', 'raw', 'elf'], 'All Files': ['*'] },
+        });
+        if (!uris || uris.length === 0) { return; }
+        const newPath = uris[0].fsPath;
+        try {
+          const newData = fs.readFileSync(newPath);
+          fileData = newData;
+          // Clear the remembered base address so the user is prompted for the
+          // new file's load address.
+          this._binaryBaseAddresses.delete(document.uri.toString());
+          await sendInit(fileData);
+        } catch (err: any) {
+          vscode.window.showErrorMessage(`Could not read file: ${err?.message ?? err}`);
+        }
+        return;
+      }
       if (!fileData) { return; }
-      if (message.type === "updateHex") {
-        this.sendHexView(
-          webviewPanel,
-          fileData,
-          DisasmEditorProvider.BASE_ADDRESS,
-          message.address,
-          message.length || DisasmEditorProvider.INSTRUCTION_SIZE
-        );
-      } else if (message.type === "requestPage") {
-        await this.sendDisasmPage(webviewPanel, fileData, message.startIndex);
-      } else if (message.type === "search") {
+      if (message.type === 'updateHex') {
+        this.sendHexView(webviewPanel, fileData, baseAddress, message.address,
+          message.length || DisasmEditorProvider.INSTRUCTION_SIZE);
+      } else if (message.type === 'requestPage') {
+        await this.sendDisasmPage(webviewPanel, fileData, message.startIndex, baseAddress);
+      } else if (message.type === 'search') {
         await this.handleSearch(webviewPanel, message.query, message.mode,
-          DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
-      } else if (message.type === "scanStrings") {
-        await this.handleFileScan('strings', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-      } else if (message.type === "scanFunctions") {
-        await this.handleFileScan('functions', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-      } else if (message.type === "scanPointers") {
-        await this.handleFileScan('pointers', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-      } else if (message.type === "scanFloats") {
-        await this.handleFileScan('floats', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-      } else if (message.type === "scanIntegers") {
-        await this.handleFileScan('integers', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-      } else if (message.type === "getSymbols") {
-        await this.handleGetSymbols(webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
-      } else if (message.type === "addLabel") {
+          baseAddress, fileData.length, undefined, fileData);
+      } else if (message.type === 'scanStrings') {
+        await this.handleFileScan('strings', webviewPanel, fileData, baseAddress);
+      } else if (message.type === 'scanFunctions') {
+        await this.handleFileScan('functions', webviewPanel, fileData, baseAddress);
+      } else if (message.type === 'scanPointers') {
+        await this.handleFileScan('pointers', webviewPanel, fileData, baseAddress);
+      } else if (message.type === 'scanFloats') {
+        await this.handleFileScan('floats', webviewPanel, fileData, baseAddress);
+      } else if (message.type === 'scanIntegers') {
+        await this.handleFileScan('integers', webviewPanel, fileData, baseAddress);
+      } else if (message.type === 'getSymbols') {
+        await this.handleGetSymbols(webviewPanel, fileData, baseAddress);
+      } else if (message.type === 'addLabel') {
         await this.handleAddLabel(webviewPanel, message.address, message.labelName, message.comment);
-      } else if (message.type === "deleteLabel") {
+      } else if (message.type === 'deleteLabel') {
         await this.handleDeleteLabel(webviewPanel, message.address);
-      } else if (message.type === "editLabel") {
+      } else if (message.type === 'editLabel') {
         await this.handleEditLabel(webviewPanel, message.address, message.addressHex,
           message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
-      } else if (message.type === "saveLabel") {
+      } else if (message.type === 'saveLabel') {
         await this.handleSaveLabel(webviewPanel, message.address, message.newLabel ?? '', message.newComment ?? '');
+      } else if (message.type === 'patchBytes') {
+        // Patch bytes directly in the in-memory buffer and reload the page.
+        const addr    = message.address as number;
+        const hexStr  = (message.hexBytes as string).replace(/\s+/g, '');
+        const offset  = addr - baseAddress;
+        if (offset >= 0 && offset + hexStr.length / 2 <= fileData.length) {
+          for (let i = 0; i < hexStr.length; i += 2) {
+            fileData[offset + i / 2] = parseInt(hexStr.slice(i, i + 2), 16);
+          }
+          const instrIndex = Math.floor(offset / DisasmEditorProvider.INSTRUCTION_SIZE);
+          const pageStart  = Math.floor(instrIndex / DisasmEditorProvider.PAGE_SIZE) * DisasmEditorProvider.PAGE_SIZE;
+          await this.sendDisasmPage(webviewPanel, fileData, pageStart, baseAddress);
+        }
+      } else if (message.type === 'disasmBytes') {
+        // Quick disassembly preview for the edit overlay bytes field.
+        if (this.socketClient?.isConnected()) {
+          try {
+            const results = await this.socketClient.disassemble(
+              message.hexBytes as string, message.address as number);
+            const first = results?.[0];
+            webviewPanel.webview.postMessage({
+              type:    'disasmBytesResult',
+              preview: first?.Success && first.Assembly ? first.Assembly.trim() : '(invalid)',
+            });
+          } catch { /* ignore */ }
+        }
+      } else if (message.type === 'gotoRegion') {
+        // Binary panels have only one region — no cross-panel navigation.
+        webviewPanel.webview.postMessage({ type: 'gotoRegionNotFound', address: message.address });
       }
     });
 
@@ -336,11 +429,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
     fs.readFile(document.uri.fsPath, async (err, data) => {
       if (err) {
-        console.error(`[DISASM] Failed to read file: ${err.message}`);
+        getOutputChannel().appendLine(`[DISASM] Failed to read file: ${err.message}`);
         webviewPanel.webview.postMessage({ type: 'error', message: err.message });
         return;
       }
-      console.log(`[DISASM] File loaded: ${data.length} bytes`);
+      getOutputChannel().appendLine(`[DISASM] File loaded: ${data.length} bytes`);
       fileData = data;
       // Send init if the webview already signalled ready before the file was read.
       if (readyReceived) { await sendInit(fileData); }
@@ -902,7 +995,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     fileData: Buffer,
     baseAddress: number
   ): Promise<void> {
-    if (!this.socketClient?.isConnected()) { return; }
+    if (!this.socketClient?.isConnected()) {
+      // Re-enable the scan button by sending an empty result and show a warning.
+      const typeKey = kind as string;
+      panel.webview.postMessage({ type: `${typeKey}Updated`, [typeKey]: [] });
+      vscode.window.showWarningMessage(
+        'Scanner requires a connection to the C# backend. Start the emulator server first.'
+      );
+      return;
+    }
     try {
       if (kind === 'strings') {
         const strings = await this.socketClient.getStrings(fileData, baseAddress);
@@ -1071,32 +1172,22 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private async sendDisasmPage(
     webviewPanel: vscode.WebviewPanel,
     fileData: Buffer,
-    startIndex: number
+    startIndex: number,
+    baseAddress: number = DisasmEditorProvider.BASE_ADDRESS
   ): Promise<void> {
-    console.log(`[DISASM] sendDisasmPage called: startIndex=${startIndex}`);
     const startOffset = startIndex * DisasmEditorProvider.INSTRUCTION_SIZE;
     const endOffset = Math.min(
       fileData.length,
       startOffset + DisasmEditorProvider.PAGE_SIZE * DisasmEditorProvider.INSTRUCTION_SIZE
     );
 
-    console.log(`[DISASM] Extracting bytes ${startOffset}-${endOffset} (${endOffset - startOffset} bytes)`);
     const slice = fileData.slice(startOffset, endOffset);
-    const startAddr = DisasmEditorProvider.BASE_ADDRESS + startOffset;
+    const startAddr = baseAddress + startOffset;
 
-    console.log(`[DISASM] Calling disassembleWithBackend...`);
     const rows = await this.disassembleWithBackend(startAddr, slice);
-    console.log(`[DISASM] Got ${rows.length} disassembled rows`);
 
-    // Comments are now provided by the backend analyzer, no need to call analyzePointers
-    // The backend already includes analysis in the Comment field
-
-    console.log(`[DISASM] Sending disasmPage message with ${rows.length} rows, startIndex: ${startIndex}`);
-    if (rows.length > 0) {
-      console.log(`[DISASM] First row sample:`, rows[0]);
-    }
     webviewPanel.webview.postMessage({
-      type: "disasmPage",
+      type: 'disasmPage',
       rows,
       startIndex,
     });

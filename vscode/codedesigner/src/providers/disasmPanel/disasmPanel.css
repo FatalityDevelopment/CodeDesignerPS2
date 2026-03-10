@@ -164,3 +164,32 @@ button:disabled {
     padding: 2px 8px;
     font-size: 11px;
 }
+
+/* ── Binary-focused state ────────────────────────────────────────────────── */
+
+#emu-status-bar.status-binary {
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    color: #858585;
+}
+
+#emu-status-bar.status-binary #emu-status-dot {
+    animation: none;
+    color: #858585;
+}
+
+#binary-mode-notice {
+    background: #1e1e2e;
+    border: 1px solid #3e3e5e;
+    border-radius: 3px;
+    color: #7070a0;
+    font-size: 11px;
+    font-family: monospace;
+    padding: 5px 8px;
+    margin-bottom: 8px;
+}
+
+.controls-disabled {
+    opacity: 0.55;
+    pointer-events: none;
+}

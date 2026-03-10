@@ -30,6 +30,13 @@ import './disasm-editor.css';
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
 
 </div>
+<div id="binary-controls">
+    <span class="binary-indicator">&#9679; BINARY</span>
+    <button class="header-tool-btn" id="bin-set-pc-btn" title="Set virtual PC to the currently selected row">&#8618; Set PC</button>
+    <button class="header-tool-btn" id="bin-step-btn" title="Advance virtual PC by one instruction" disabled>&#9655;| Step</button>
+    <span id="bin-pc-display" class="bin-pc-display"></span>
+    <button class="header-tool-btn" id="bin-import-btn" title="Load a binary file into this panel" style="margin-left:auto;">&#8679; Import</button>
+</div>
 <div id="goto-panel">
     <div class="search-row">
         <div class="search-input-wrapper">
@@ -272,6 +279,13 @@ export class DisasmEditorComponent implements AfterViewInit {
     const gotoToggleBtn        = document.getElementById('goto-toggle-btn')!;
     const navBackBtn           = document.getElementById('nav-back-btn') as HTMLButtonElement;
 
+    // Binary controls bar
+    const binaryControls = document.getElementById('binary-controls')!;
+    const binSetPcBtn    = document.getElementById('bin-set-pc-btn') as HTMLButtonElement;
+    const binStepBtn     = document.getElementById('bin-step-btn')   as HTMLButtonElement;
+    const binImportBtn   = document.getElementById('bin-import-btn') as HTMLButtonElement;
+    const binPcDisplay   = document.getElementById('bin-pc-display')!;
+
     const bottomPanel    = document.getElementById('bottom-panel')!;
     const debugPanel     = document.getElementById('debug-panel')!;
     const regContent     = document.getElementById('registers-content')!;
@@ -434,6 +448,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
       if (isLive) {
         headerToolbar.classList.add('live-active');
+        binaryControls.classList.remove('visible');
         startLiveRefresh();
         // Pre-populate the register panel with zeroed placeholder data so
         // that when the user opens the panel before the first breakpoint is
@@ -447,6 +462,13 @@ export class DisasmEditorComponent implements AfterViewInit {
         renderVu0iPanel(ph);
         renderGsPanel(ph);
         renderStackPanel(ph, [], 0);
+      } else {
+        // Binary file mode — show the binary controls bar, reset virtual PC.
+        headerToolbar.classList.remove('live-active');
+        binaryControls.classList.add('visible');
+        state.pcAddress = undefined;
+        binStepBtn.disabled = true;
+        binPcDisplay.textContent = '';
       }
     });
 
@@ -1466,6 +1488,39 @@ export class DisasmEditorComponent implements AfterViewInit {
     bottomPanelToggleBtn.addEventListener('click', () => toggleBottomPanel());
     searchToggleBtn.addEventListener('click', () => toggleSearch());
     gotoToggleBtn.addEventListener('click', () => toggleGoto());
+
+    // ── Binary controls ───────────────────────────────────────────────────────
+    const formatBinPc = (addr: number) =>
+      `PC: 0x${(addr >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+
+    binSetPcBtn.addEventListener('click', () => {
+      const localIndex = getLocalIndex(state.cursor);
+      const row = state.disasmRows[localIndex];
+      if (!row) { return; }
+      const addr = parseInt(row.addr, 16) >>> 0;
+      state.pcAddress = addr;
+      binStepBtn.disabled = false;
+      binPcDisplay.textContent = formatBinPc(addr);
+      updateCursor();
+    });
+
+    binStepBtn.addEventListener('click', () => {
+      if (state.pcAddress === undefined) { return; }
+      const newPc = (state.pcAddress + 4) >>> 0;
+      const physPc   = toPhysAddr(newPc);
+      const physBase = toPhysAddr(state.baseAddress);
+      const instrIndex = Math.floor((physPc - physBase) / 4);
+      if (instrIndex < 0 || instrIndex >= state.totalInstructions) { return; }
+      state.pcAddress = newPc;
+      state.cursor    = instrIndex;
+      binPcDisplay.textContent = formatBinPc(newPc);
+      const pageReady = checkAndLoadPage();
+      if (pageReady) { updateCursor('nearest'); }
+    });
+
+    binImportBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'requestImportBinary' });
+    });
 
     document.querySelectorAll('.sym-tab').forEach(btn => {
       btn.addEventListener('click', () => {

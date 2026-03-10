@@ -34,7 +34,11 @@ interface UpdateSnapshotsMsg {
   snapshots: SnapshotEntry[];
 }
 
-/** Message sent by the provider with initial panel data (options, existing snapshots). */
+/** Message sent by the provider when a binary file tab gains or loses focus. */
+interface BinaryFocusedMsg {
+  type: 'binaryFocused';
+  focused: boolean;
+}
 interface InitMsg {
   type: 'init';
   emulators: EmuOption[];
@@ -53,57 +57,61 @@ interface InitMsg {
 <div id="emu-status-bar"
      [class.status-connected]="isConnected && !isPaused"
      [class.status-disconnected]="!isConnected && !isPaused"
-     [class.status-paused]="isPaused">
+     [class.status-paused]="isPaused"
+     [class.status-binary]="isBinaryFocused">
   <span id="emu-status-dot">●</span>
   <span id="emu-status-text">{{statusText}}</span>
-  <button id="emu-play-pause-btn" (click)="togglePause()" title="Pause/Resume emulator">
+  <button id="emu-play-pause-btn" (click)="togglePause()" [disabled]="isBinaryFocused" title="Pause/Resume emulator">
     {{isPaused ? '▶ Resume' : '⏸ Pause'}}
   </button>
-  <button id="emu-step-btn" (click)="step()" [disabled]="!isConnected || !isPaused" title="Single step one EE instruction (only while paused)">
+  <button id="emu-step-btn" (click)="step()" [disabled]="!isConnected || !isPaused || isBinaryFocused" title="Single step one EE instruction (only while paused)">
     ▷| Step
   </button>
 </div>
+<div *ngIf="isBinaryFocused" id="binary-mode-notice">
+  ℹ Binary file focused — use the editor toolbar to step &amp; import.
+</div>
 
 <h3>Emulator</h3>
-<div class="container">
+<div class="container" [class.controls-disabled]="isBinaryFocused">
 
   <div class="row">
-    <select id="emulatorSelect" [(ngModel)]="selectedEmulator" (change)="onEmulatorChange()">
+    <select id="emulatorSelect" [(ngModel)]="selectedEmulator" (change)="onEmulatorChange()" [disabled]="isBinaryFocused">
       <option value="">Select Emulator...</option>
       <option *ngFor="let e of emulators" [value]="e.value">{{e.label}}</option>
     </select>
   </div>
 
   <div class="row">
-    <select id="biosSelect" [(ngModel)]="selectedBios" (change)="onBiosChange()">
+    <select id="biosSelect" [(ngModel)]="selectedBios" (change)="onBiosChange()" [disabled]="isBinaryFocused">
       <option value="">Select BIOS...</option>
       <option *ngFor="let b of biosOptions" [value]="b.value">{{b.label}}</option>
     </select>
   </div>
 
   <div class="row">
-    <select id="gameSelect" [(ngModel)]="selectedGame" (change)="onGameChange()">
+    <select id="gameSelect" [(ngModel)]="selectedGame" (change)="onGameChange()" [disabled]="isBinaryFocused">
       <option value="">Select Game...</option>
       <option *ngFor="let g of gameOptions" [value]="g.value">{{g.label}}</option>
     </select>
   </div>
 
   <div class="row">
-    <button id="connectBtn" (click)="connect()">
+    <button id="connectBtn" (click)="connect()" [disabled]="isBinaryFocused">
       {{isConnected ? 'Disconnect' : 'Connect'}}
     </button>
   </div>
 
   <div class="row">
-    <button id="restartBtn" (click)="restart()" [disabled]="!isConnected">⟳ Restart</button>
+    <button id="restartBtn" (click)="restart()" [disabled]="!isConnected || isBinaryFocused">⟳ Restart</button>
   </div>
 
   <div class="row">
-    <button id="importBinBtn" (click)="importBin()" [disabled]="!isConnected">⬆ Import Binary</button>
+    <button id="importBinBtn" (click)="importBin()" [disabled]="!isConnected || isBinaryFocused">⬆ Import Binary</button>
   </div>
 
   <div class="row">
-    <button id="snapshotBtn" (click)="snapshot()" [disabled]="!isConnected">Take Snapshot</button>
+    <button id="snapshotBtn" (click)="snapshot()" [disabled]="!isConnected || isBinaryFocused">Take Snapshot</button>
   </div>
 
   <div *ngIf="snapshots.length > 0" class="snapshot-list">
@@ -111,7 +119,7 @@ interface InitMsg {
     <div *ngFor="let snap of snapshots" class="snapshot-item">
       <span class="snapshot-label">{{snap.label}}</span>
       <span class="snapshot-time">{{snap.timestamp}}</span>
-      <button class="open-snapshot-btn" (click)="openSnapshot(snap)">Open</button>
+      <button class="open-snapshot-btn" (click)="openSnapshot(snap)" [disabled]="isBinaryFocused">Open</button>
     </div>
   </div>
 
@@ -119,8 +127,9 @@ interface InitMsg {
   `
 })
 export class DisasmPanelComponent implements OnInit, OnDestroy {
-  isConnected = false;
-  isPaused = false;
+  isConnected    = false;
+  isPaused       = false;
+  isBinaryFocused = false;
   emulators: EmuOption[] = [];
   biosOptions: EmuOption[] = [];
   gameOptions: EmuOption[] = [];
@@ -131,6 +140,7 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   private subs: Subscription[] = [];
 
   get statusText(): string {
+    if (this.isBinaryFocused) { return '● BINARY'; }
     if (this.isPaused) { return '⏸ PAUSED'; }
     return this.isConnected ? 'LIVE' : 'STOPPED';
   }
@@ -145,6 +155,9 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       }),
       this.bridge.on<PausedMsg>('paused').subscribe(msg => {
         this.isPaused = msg.paused;
+      }),
+      this.bridge.on<BinaryFocusedMsg>('binaryFocused').subscribe(msg => {
+        this.isBinaryFocused = msg.focused;
       }),
       this.bridge.on<UpdateSnapshotsMsg>('updateSnapshots').subscribe(msg => {
         this.snapshots = msg.snapshots ?? [];

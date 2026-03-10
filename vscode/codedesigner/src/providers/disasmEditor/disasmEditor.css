@@ -542,6 +542,35 @@ body {
     display: flex;
 }
 
+/* ── Binary file mode control bar ────────────────────────────────────────── */
+
+#binary-controls {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    padding: 2px 8px;
+}
+
+#binary-controls.visible {
+    display: flex;
+}
+
+.binary-indicator {
+    color: #858585;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.bin-pc-display {
+    color: #9cdcfe;
+    font-size: 11px;
+    font-family: monospace;
+    white-space: nowrap;
+}
+
 .header-tool-btn {
     background: #3c3c3c;
     border: 1px solid #3e3e42;

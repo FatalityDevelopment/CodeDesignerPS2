@@ -80,6 +80,24 @@ export function activate(context: vscode.ExtensionContext) {
 		disasmPanelProvider.notifyPauseState(paused);
 	};
 
+	// ── Binary tab focus tracking ─────────────────────────────────────────────
+	// When the user focuses a binary-file disasm editor tab (registered with
+	// viewType 'disasm.disasmEditor' via registerCustomEditorProvider), the sidebar
+	// emulator controls should be disabled to avoid confusion.  Live memory view
+	// panels use a different viewType ('disasm.liveMemory') created via
+	// createWebviewPanel, so they appear as TabInputWebview — not TabInputCustom —
+	// and will NOT trigger the binary-focused state.
+	const syncBinaryFocus = () => {
+		const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+		const isBinary = activeTab?.input instanceof vscode.TabInputCustom &&
+			activeTab.input.viewType === 'disasm.disasmEditor';
+		disasmPanelProvider.notifyBinaryFocused(isBinary);
+	};
+	context.subscriptions.push(
+		vscode.window.tabGroups.onDidChangeTabGroups(syncBinaryFocus),
+		vscode.window.tabGroups.onDidChangeTabs(syncBinaryFocus),
+	);
+
 	// Register socket event handlers
 	socketClient.onConnected(() => {
 		outputChannel.appendLine('[INFO] Connected to C# server');

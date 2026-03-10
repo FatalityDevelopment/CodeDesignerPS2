@@ -419,6 +419,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
+     * Called by extension.ts when the user focuses or unfocuses a binary file
+     * disasm editor tab.  Sends `binaryFocused` to the Angular panel component
+     * so it can disable the live-emulator controls while binary mode is active.
+     */
+    public notifyBinaryFocused(focused: boolean): void {
+        this.webview?.postMessage({ command: 'binaryFocused', focused });
+    }
+
+    /**
      * Execute one EE instruction (single-step) while staying paused.
      * Delegates to DisasmEditorProvider.stepAndBroadcast() which fetches the
      * new PC + registers and broadcasts to all live panels.
