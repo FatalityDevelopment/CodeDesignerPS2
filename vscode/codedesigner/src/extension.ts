@@ -85,6 +85,11 @@ export function activate(context: vscode.ExtensionContext) {
 	editorProvider.onGetAddressHistory = (address: number) =>
 		disasmPanelProvider.getAddressHistory(address);
 
+	// Wire "Send to Cheat List" from any live disasm panel to the cheats tab.
+	editorProvider.onSendToCheatList = (entry: string) => {
+		disasmPanelProvider.appendToCheatList(entry);
+	};
+
 	// Register socket event handlers
 	socketClient.onConnected(() => {
 		outputChannel.appendLine('[INFO] Connected to C# server');

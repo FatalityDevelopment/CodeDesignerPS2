@@ -7,22 +7,21 @@ body {
     color: var(--vscode-editor-foreground);
 }
 
-select, textarea, button {
+select, textarea, button, input[type="text"] {
     font-family: var(--vscode-editor-font-family);
     font-size: var(--vscode-editor-font-size);
 }
 
-select, textarea {
+textarea, input[type="text"] {
     width: 100%;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
-    margin-bottom: 8px;
     padding: 4px;
+    box-sizing: border-box;
 }
 
 textarea {
-    height: 150px;
     resize: vertical;
     font-family: var(--vscode-editor-font-family);
     font-size: var(--vscode-editor-font-size);
@@ -31,20 +30,26 @@ textarea {
 label {
     display: block;
     font-weight: bold;
-    margin-top: 10px;
+    margin-top: 8px;
     margin-bottom: 4px;
+}
+
+.file-row {
+    margin-bottom: 8px;
 }
 
 .textarea-container {
     display: flex;
     flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
 }
 
 button {
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
     border: none;
-    padding: 6px 12px;
+    padding: 6px 14px;
     cursor: pointer;
 }
 
@@ -64,9 +69,8 @@ button:disabled {
 }
 
 .status {
-    padding: 8px;
-    margin-top: 10px;
-    border-radius: 4px;
+    padding: 6px 8px;
+    border-radius: 3px;
     font-size: 12px;
 }
 
