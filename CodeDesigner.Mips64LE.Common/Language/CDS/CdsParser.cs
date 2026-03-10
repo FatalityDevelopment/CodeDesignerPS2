@@ -378,7 +378,7 @@ namespace CodeDesigner.Mips64LE.Common.Language.CDS
                     string text = strMatch.Groups[1].Value;
                     byte[] bytes = Encoding.ASCII.GetBytes(text + "\0");
                     int paddedLen = ((bytes.Length + 3) / 4) * 4;
-                    currentAddress += (uint)(paddedLen / 4 * 4);
+                    currentAddress += (uint)paddedLen;
                     continue;
                 }
 
@@ -635,10 +635,31 @@ namespace CodeDesigner.Mips64LE.Common.Language.CDS
         /// <summary>
         /// Resolve a label reference to its fully-qualified name.
         /// Tries (in order):
-        /// 1. Exact key (handles already-qualified references like <c>outer.loop</c>).
-        /// 2. Current scope path + name (innermost).
-        /// 3. Each parent scope path + name, widening outward.
+        /// 1. Exact key (handles already-qualified references like <c>outer.loop</c>
+        ///    and global labels).
+        /// 2. Current scope path (all levels) + name — innermost-first search.
+        /// 3. Each parent scope path + name, widening outward by removing the innermost
+        ///    scope component one at a time.
         /// </summary>
+        /// <remarks>
+        /// <para><b>Why <c>scopes[skip..]</c> works correctly:</b></para>
+        /// <para>
+        /// <c>Stack.ToArray()</c> yields the stack top-first, so element [0] is the
+        /// innermost (most-recently-pushed) scope and element [^1] is the outermost.
+        /// </para>
+        /// <para>
+        /// At <c>skip=0</c> we take the full array and reverse it to produce the
+        /// complete scope path (outermost.…innermost). At <c>skip=1</c> we drop the
+        /// innermost component, giving the parent path, and so on. This correctly
+        /// widens the search from the current scope outward to the root.
+        /// </para>
+        /// <para>
+        /// Example: scopes = ["inner","outer"] (inner is current), labelRef = "loop"</para>
+        /// <para>
+        ///   skip=0 → prefix = "outer.inner" → tries "outer.inner.loop"<br/>
+        ///   skip=1 → prefix = "outer"        → tries "outer.loop"      ← parent label found
+        /// </para>
+        /// </remarks>
         private static string? ResolveLabel(
             string labelRef,
             Stack<string> scopeStack,
@@ -649,12 +670,12 @@ namespace CodeDesigner.Mips64LE.Common.Language.CDS
                 return labelRef;
 
             // Stack.ToArray() gives innermost-first; e.g., Push("outer") then Push("inner")
-            // → ["inner", "outer"].
-            // Build scope prefixes from innermost outward by skipping the innermost N levels.
+            // → scopes = ["inner", "outer"].
+            // At skip=0: take full array, reverse → "outer.inner" (current scope prefix).
+            // At skip=1: drop innermost, reverse → "outer" (parent scope prefix).
             string[] scopes = scopeStack.ToArray();
             for (int skip = 0; skip < scopes.Length; skip++)
             {
-                // Remaining components (outermost part only): scopes[skip..], reversed to get outermost-first
                 string prefix = string.Join(".", scopes[skip..].Reverse());
                 string candidate = string.IsNullOrEmpty(prefix) ? labelRef : $"{prefix}.{labelRef}";
                 if (labelMap.ContainsKey(candidate))

@@ -231,10 +231,10 @@ loop:
         public void Branch_WithLabelRef_EncodesCorrectOffset()
         {
             // Layout:
-            //   $00500000: beq $t0, $t1, :target   (branch to 0x0050000C)
+            //   $00500000: beq $t0, $t1, :target   (branch forward)
             //   $00500004: nop
             //   $00500008: nop
-            //   $00500010: target:
+            //   $0050000C: target:
             var src = @"
 address $00500000
 beq $t0, $t1, :target
@@ -462,6 +462,28 @@ scope Outer {
             var inner = outer.Body.OfType<ScopeSyntaxItem>().First();
             var branch = inner.Body.OfType<OperationSyntaxItem>().First(o => o.Mnemonic == "beq");
             Assert.AreEqual("outer.inner.end", branch.ResolvedLabel);
+        }
+
+        [TestMethod]
+        public void NestedScope_LabelRef_ResolvedToParentScope()
+        {
+            // Branch inside Inner references a label defined in Outer (not Inner)
+            // Resolution should widen to parent scope and find "outer.shared"
+            var src = @"
+address $00800000
+scope Outer {
+    shared:
+    scope Inner {
+        j :shared
+    }
+}
+";
+            var items = Parse(src);
+            var outer = FindItem<ScopeSyntaxItem>(items);
+            var inner = outer.Body.OfType<ScopeSyntaxItem>().First();
+            var jump = inner.Body.OfType<OperationSyntaxItem>().First(o => o.Mnemonic == "j");
+            // "shared" should be resolved to the parent scope label "outer.shared"
+            Assert.AreEqual("outer.shared", jump.ResolvedLabel);
         }
 
         [TestMethod]
