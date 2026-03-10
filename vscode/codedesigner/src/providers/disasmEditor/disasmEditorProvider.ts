@@ -57,12 +57,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public onGetAddressHistory?: (address: number) => Array<{ name: string; date: string; value: string }>;
 
-  /**
-   * Optional callback invoked when the user clicks "Send to Cheat List" in a live panel.
-   * Wired to DisasmPanelProvider.appendToCheatList() in extension.ts.
-   */
-  public onSendToCheatList?: (entry: string) => void;
-
   // ── Public helpers ──────────────────────────────────────────────────────────
 
   /**
@@ -808,8 +802,6 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     ? this.onGetAddressHistory(message.address as number)
                     : [];
                 panel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
-            } else if (message.type === 'sendToCheatList') {
-                this.onSendToCheatList?.(message.entry as string);
             }
         });
 

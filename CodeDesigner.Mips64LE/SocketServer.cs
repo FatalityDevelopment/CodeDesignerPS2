@@ -366,8 +366,17 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle COMPILECDS command — compiles a .cds (Code Designer Script) assembly file.
-        /// Accepts the raw source text forwarded from the VS Code extension.
+        /// Handle COMPILECDS command — compiles a .cds (Code Designer Script) assembly file
+        /// into PS2 GameShark / Action Replay cheat codes.
+        ///
+        /// Accepted directives in the source:
+        ///   address 0xXXXXXXXX  — set the current target address for subsequent instructions.
+        ///   hexcode 0xXXXXXXXX  — emit a raw 32-bit word at the current address.
+        ///
+        /// Each successfully assembled 32-bit MIPS instruction is emitted as a GameShark
+        /// type-2 code (32-bit write):  2AAAAAAA VVVVVVVV
+        /// where AAAAAAA is the low 28 bits of the target address and VVVVVVVV is the
+        /// encoded instruction word.  The address advances by 4 for each instruction.
         /// </summary>
         private string HandleCompileCds(string? sourceCode)
         {
@@ -378,53 +387,150 @@ namespace CodeDesigner.Mips64LE
                     return CreateErrorResponse("No source code provided");
                 }
 
-                var lines = sourceCode.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                var results = new List<InstructionResult>();
+                // Split preserving original line numbers (1-based).
+                var rawLines = sourceCode.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                var results  = new List<InstructionResult>();
+                uint currentAddress = 0;
 
-                foreach (var line in lines)
+                for (int i = 0; i < rawLines.Length; i++)
                 {
-                    var trimmed = line.Trim();
+                    int lineNumber = i + 1;
+                    var trimmed   = rawLines[i].Trim();
 
-                    // Skip empty lines and comment lines; strip inline comments
-                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#") || trimmed.StartsWith("//"))
+                    // Skip blank lines and comment-only lines
+                    if (string.IsNullOrWhiteSpace(trimmed)
+                        || trimmed.StartsWith("#", StringComparison.Ordinal)
+                        || trimmed.StartsWith("//", StringComparison.Ordinal)
+                        || trimmed.StartsWith(";", StringComparison.Ordinal))
                     {
                         continue;
                     }
 
-                    // Strip inline comments (e.g. "add $t0, $s0, $s1 // note")
-                    var commentIdx = trimmed.IndexOf("//", StringComparison.Ordinal);
-                    if (commentIdx > 0)
+                    // Strip inline comments — find the earliest marker and cut from there once
+                    var cutAt = int.MaxValue;
+                    foreach (var marker in new[] { "//", ";", "#" })
                     {
-                        trimmed = trimmed[..commentIdx].TrimEnd();
+                        var ci = trimmed.IndexOf(marker, StringComparison.Ordinal);
+                        if (ci > 0 && ci < cutAt) { cutAt = ci; }
                     }
+                    if (cutAt != int.MaxValue) { trimmed = trimmed[..cutAt].TrimEnd(); }
                     if (string.IsNullOrWhiteSpace(trimmed)) { continue; }
 
+                    // ── address directive ────────────────────────────────────────────
+                    if (trimmed.StartsWith("address", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 2)
+                        {
+                            var addrStr = parts[1].Trim();
+                            try
+                            {
+                                currentAddress = addrStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                                    ? Convert.ToUInt32(addrStr, 16)
+                                    : uint.Parse(addrStr);
+                            }
+                            catch
+                            {
+                                results.Add(new InstructionResult
+                                {
+                                    Assembly   = trimmed,
+                                    Error      = $"Invalid address value '{parts[1]}'",
+                                    Success    = false,
+                                    LineNumber = lineNumber
+                                });
+                            }
+                        }
+                        else
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = "address directive requires a value (e.g. address 0x20123456)",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                        }
+                        continue;
+                    }
+
+                    // ── hexcode directive (raw 32-bit word) ──────────────────────────
+                    if (trimmed.StartsWith("hexcode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 2)
+                        {
+                            var valStr = parts[1].Trim();
+                            try
+                            {
+                                uint raw = valStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                                    ? Convert.ToUInt32(valStr, 16)
+                                    : uint.Parse(valStr);
+
+                                string gsCode = FormatGameSharkCode(currentAddress, raw);
+                                results.Add(new InstructionResult
+                                {
+                                    Assembly   = trimmed,
+                                    Hex        = gsCode,
+                                    Success    = true,
+                                    LineNumber = lineNumber
+                                });
+                                currentAddress += 4;
+                            }
+                            catch
+                            {
+                                results.Add(new InstructionResult
+                                {
+                                    Assembly   = trimmed,
+                                    Error      = $"Invalid hex value '{parts[1]}'",
+                                    Success    = false,
+                                    LineNumber = lineNumber
+                                });
+                            }
+                        }
+                        else
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = "hexcode directive requires a value (e.g. hexcode 0xABCD1234)",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                        }
+                        continue;
+                    }
+
+                    // ── MIPS instruction ─────────────────────────────────────────────
                     try
                     {
-                        uint encoded = MipsAssembler.Assemble(trimmed);
+                        uint encoded  = MipsAssembler.Assemble(trimmed);
+                        string gsCode = FormatGameSharkCode(currentAddress, encoded);
                         results.Add(new InstructionResult
                         {
-                            Assembly = trimmed,
-                            Hex      = $"0x{encoded:X8}",
-                            Success  = true
+                            Assembly   = trimmed,
+                            Hex        = gsCode,
+                            Success    = true,
+                            LineNumber = lineNumber
                         });
+                        currentAddress += 4;
                     }
                     catch (Exception ex)
                     {
                         results.Add(new InstructionResult
                         {
-                            Assembly = trimmed,
-                            Error    = ex.Message,
-                            Success  = false
+                            Assembly   = trimmed,
+                            Error      = ex.Message,
+                            Success    = false,
+                            LineNumber = lineNumber
                         });
                     }
                 }
 
                 var response = new CommandResponse
                 {
-                    Success  = true,
-                    Command  = "COMPILECDS",
-                    Results  = results
+                    Success = true,
+                    Command = "COMPILECDS",
+                    Results = results
                 };
 
                 return JsonSerializer.Serialize(response);
@@ -433,6 +539,17 @@ namespace CodeDesigner.Mips64LE
             {
                 return CreateErrorResponse($"Compile error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Format a 32-bit address/value pair as a PS2 GameShark type-2 (32-bit write) code.
+        /// Format: 2AAAAAAA VVVVVVVV  (address low 28 bits, value 32 bits).
+        /// </summary>
+        private static string FormatGameSharkCode(uint address, uint value)
+        {
+            // Type-2 prefix (0x20000000) ORed with the low 28 bits of the target address.
+            uint codeAddr = 0x20000000u | (address & 0x0FFFFFFFu);
+            return $"{codeAddr:X8} {value:X8}";
         }
 
         /// <summary>
@@ -2565,6 +2682,7 @@ namespace CodeDesigner.Mips64LE
         public string? Error { get; set; }
         public string? Comment { get; set; }  // Added for analyzer-generated comments
         public string? Label { get; set; }    // Symbol label from ps2MemMap.json
+        public int? LineNumber { get; set; }  // 1-based source line number
     }
 
     /// <summary>One entry in the label/symbol database.</summary>

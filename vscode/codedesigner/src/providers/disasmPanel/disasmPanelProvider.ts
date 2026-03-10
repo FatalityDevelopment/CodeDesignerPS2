@@ -63,6 +63,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private selectedGamePath: string = '';
     private selectedGameName: string = '';
     private _paused: boolean = false;
+    private _activeCdsFilePath: string = '';
+    private _activeCdsContent: string = '';
 
     /** Returns the workspace root directory (used by DisasmEditorProvider for history lookup). */
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
@@ -102,6 +104,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     getOutputChannel().appendLine('[INFO] Emulator terminal closed.');
                     try { this.socketClient.disconnect(); } catch { /* ignore */ }
                     this.cleanupProcess();
+                }
+            })
+        );
+
+        // Track active .cds file so the CDS tab can compile it on demand
+        context.subscriptions.push(
+            vscode.window.onDidChangeActiveTextEditor(editor => {
+                this._syncActiveCdsEditor(editor);
+            })
+        );
+        // Sync content when the document is modified
+        context.subscriptions.push(
+            vscode.workspace.onDidChangeTextDocument(e => {
+                if (e.document.uri.fsPath === this._activeCdsFilePath) {
+                    this._activeCdsContent = e.document.getText();
                 }
             })
         );
@@ -176,6 +193,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'applyCheats':
                     await this.handleApplyCheats(msg.cheatText ?? '');
+                    break;
+                case 'compileCds':
+                    await this.handleCompileCds();
+                    break;
+                case 'addPatch':
+                    await this.handleAddPatch(msg.codes ?? '');
                     break;
                 case 'focusRegion':
                     this.editorProvider.focusLivePanelByLabel(msg.label ?? '');
@@ -887,14 +910,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
     }
 
-    /**
-     * Append a cheat-list entry (e.g. from the disasm editor "Send to Cheat List" button)
-     * to the cheat textarea in the cheats tab and switch to that tab.
-     */
-    public appendToCheatList(entry: string): void {
-        this.webview?.postMessage({ command: 'appendToCheatList', entry });
-    }
-
     /** Apply cheat codes to live emulator memory via the APPLYCHEATS socket command. */
     private async handleApplyCheats(cheatText: string): Promise<void> {
         const out = getOutputChannel();
@@ -910,6 +925,104 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             out.appendLine(`[ERROR] ApplyCheats error: ${err?.message ?? err}`);
             this.webview?.postMessage({ command: 'cheatsApplied', success: false, error: err?.message ?? String(err) });
         }
+    }
+
+    /** Compile the active .cds file and return GameShark codes to the CDS tab. */
+    private async handleCompileCds(): Promise<void> {
+        const out = getOutputChannel();
+
+        // Prefer the cached content; fall back to whatever is in the active editor
+        let sourceCode = this._activeCdsContent;
+        if (!sourceCode) {
+            const editor = vscode.window.activeTextEditor;
+            if (editor && editor.document.uri.fsPath.toLowerCase().endsWith('.cds')) {
+                sourceCode = editor.document.getText();
+                this._activeCdsFilePath = editor.document.uri.fsPath;
+                this._activeCdsContent  = sourceCode;
+            }
+        }
+
+        if (!sourceCode) {
+            const msg = 'No .cds file is open. Open a Code Designer Source file to compile.';
+            out.appendLine(`[WARN] CDS compile: ${msg}`);
+            this.webview?.postMessage({
+                command: 'cdsCompileResult',
+                success: false,
+                errors: [{ lineNumber: 0, message: msg }]
+            });
+            return;
+        }
+
+        if (!this.socketClient.isConnected()) {
+            const msg = 'Not connected to emulator server.';
+            out.appendLine(`[WARN] CDS compile: ${msg}`);
+            this.webview?.postMessage({
+                command: 'cdsCompileResult',
+                success: false,
+                errors: [{ lineNumber: 0, message: msg }]
+            });
+            return;
+        }
+
+        try {
+            const results = await this.socketClient.compileCds(sourceCode);
+            const errors: Array<{ lineNumber: number; message: string }> = [];
+            const codeLines: string[] = [];
+
+            for (const r of results) {
+                if (r.Success && r.Hex) {
+                    codeLines.push(r.Hex);
+                } else if (!r.Success && r.Error) {
+                    const ln = r.LineNumber ?? 0;
+                    const msg = `Line ${ln}: ${r.Error}`;
+                    out.appendLine(`[ERROR] CDS: ${msg}`);
+                    errors.push({ lineNumber: ln, message: r.Error });
+                }
+            }
+
+            if (errors.length > 0) {
+                out.appendLine(`[INFO] CDS compilation finished with ${errors.length} error(s).`);
+                this.webview?.postMessage({ command: 'cdsCompileResult', success: false, errors });
+            } else {
+                const codes = codeLines.join('\n');
+                out.appendLine(`[INFO] CDS compilation succeeded — ${codeLines.length} code(s) generated.`);
+                this.webview?.postMessage({ command: 'cdsCompileResult', success: true, codes, errors: [] });
+            }
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            out.appendLine(`[ERROR] CDS compile error: ${msg}`);
+            this.webview?.postMessage({
+                command: 'cdsCompileResult',
+                success: false,
+                errors: [{ lineNumber: 0, message: msg }]
+            });
+        }
+    }
+
+    /** Apply compiled GameShark codes to live memory (Add Patch). */
+    private async handleAddPatch(codes: string): Promise<void> {
+        const out = getOutputChannel();
+        if (!this.socketClient.isConnected()) {
+            this.webview?.postMessage({ command: 'cdsPatchApplied', success: false, error: 'Not connected to emulator.' });
+            return;
+        }
+        try {
+            await this.socketClient.applyCheats(codes);
+            out.appendLine('[INFO] CDS patch applied to memory successfully.');
+            this.webview?.postMessage({ command: 'cdsPatchApplied', success: true });
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            out.appendLine(`[ERROR] CDS add-patch error: ${msg}`);
+            this.webview?.postMessage({ command: 'cdsPatchApplied', success: false, error: msg });
+        }
+    }
+
+    /** Sync the tracked active CDS file when the editor focus changes. */
+    private _syncActiveCdsEditor(editor: vscode.TextEditor | undefined): void {
+        if (!editor) { return; }
+        if (!editor.document.uri.fsPath.toLowerCase().endsWith('.cds')) { return; }
+        this._activeCdsFilePath = editor.document.uri.fsPath;
+        this._activeCdsContent  = editor.document.getText();
     }
 
     /**

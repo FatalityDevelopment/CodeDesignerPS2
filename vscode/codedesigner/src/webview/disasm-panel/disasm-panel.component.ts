@@ -45,6 +45,21 @@ interface CheatsAppliedMsg {
   error?: string;
 }
 
+/** Message sent by the provider after a CDS compile. */
+interface CdsCompileResultMsg {
+  command: 'cdsCompileResult';
+  success: boolean;
+  codes?: string;
+  errors?: Array<{ lineNumber: number; message: string }>;
+}
+
+/** Message sent by the provider after Add Patch. */
+interface CdsPatchAppliedMsg {
+  command: 'cdsPatchApplied';
+  success: boolean;
+  error?: string;
+}
+
 /** Message sent by the provider with initial panel data (options, existing snapshots). */
 interface InitMsg {
   type: 'init';
@@ -79,6 +94,7 @@ interface InitMsg {
 <div id="panel-tabs">
   <button class="panel-tab" [class.active]="activeTab === 'settings'" (click)="setTab('settings')">Emulator Settings</button>
   <button class="panel-tab" [class.active]="activeTab === 'cheats'" (click)="setTab('cheats')">Cheats</button>
+  <button class="panel-tab" [class.active]="activeTab === 'cds'" (click)="setTab('cds')">CDS</button>
 </div>
 
 <div id="tab-settings" class="tab-content" [style.display]="activeTab === 'settings' ? 'block' : 'none'">
@@ -159,6 +175,25 @@ interface InitMsg {
     <div *ngIf="cheatMessage" class="cheat-message" [class.cheat-error]="cheatError">{{cheatMessage}}</div>
   </div>
 </div>
+
+<div id="tab-cds" class="tab-content" [style.display]="activeTab === 'cds' ? 'block' : 'none'">
+  <div class="cds-container">
+    <div class="section-label">Compiled GameShark Codes</div>
+    <textarea id="cds-output" [(ngModel)]="cdsOutput" readonly
+      placeholder="Compiled GameShark codes will appear here after pressing Compile.&#10;&#10;Add an address directive in your .cds file:&#10;  address 0x20123456&#10;  nop&#10;  add $t0, $s0, $s1"></textarea>
+    <div *ngFor="let e of cdsErrors" class="cds-error-line">
+      <span class="cds-error-lineno">Line {{e.lineNumber}}:</span> {{e.message}}
+    </div>
+    <div *ngIf="cdsMessage" class="cds-message" [class.cds-error]="cdsMessageError">{{cdsMessage}}</div>
+    <div class="row">
+      <button id="cdsCompileBtn" (click)="compileCds()" [disabled]="!isConnected">Compile</button>
+      <button id="cdsAddPatchBtn" (click)="addPatch()" [disabled]="!isConnected || !cdsOutput">Add Patch</button>
+    </div>
+    <div class="row">
+      <button id="cdsAddCheatBtn" (click)="addCheat()" [disabled]="!cdsOutput">Add Cheat</button>
+    </div>
+  </div>
+</div>
   `
 })
 export class DisasmPanelComponent implements OnInit, OnDestroy {
@@ -171,13 +206,18 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   selectedEmulator = '';
   selectedBios = '';
   selectedGame = '';
-  activeTab: 'settings' | 'cheats' = 'settings';
+  activeTab: 'settings' | 'cheats' | 'cds' = 'settings';
   cheatText = '';
   cheatMessage = '';
   cheatError = false;
   currentGameName = '';
   regions: string[] = ['EE Main RAM', 'IOP RAM', 'BIOS ROM', 'Scratchpad'];
   selectedRegion = '';
+  // CDS tab state
+  cdsOutput = '';
+  cdsErrors: Array<{ lineNumber: number; message: string }> = [];
+  cdsMessage = '';
+  cdsMessageError = false;
   private subs: Subscription[] = [];
 
   get statusText(): string {
@@ -214,13 +254,25 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         this.cheatMessage = msg.success ? 'Cheats applied!' : (msg.error ?? 'Failed to apply cheats.');
         setTimeout(() => { this.cheatMessage = ''; }, 4000);
       }),
-      this.bridge.on<Record<string, unknown>>('appendToCheatList').subscribe(msg => {
-        const entry = (msg['entry'] as string) ?? '';
-        if (!entry) { return; }
-        this.cheatText = this.cheatText
-            ? this.cheatText.trimEnd() + '\n' + entry
-            : entry;
-        this.activeTab = 'cheats';
+      this.bridge.on<CdsCompileResultMsg>('cdsCompileResult').subscribe(msg => {
+        this.cdsErrors = msg.errors ?? [];
+        if (msg.success && msg.codes) {
+          this.cdsOutput       = msg.codes;
+          this.cdsMessage      = 'Compiled successfully!';
+          this.cdsMessageError = false;
+        } else {
+          this.cdsOutput       = '';
+          this.cdsMessage      = this.cdsErrors.length > 0
+            ? `${this.cdsErrors.length} error(s) — see lines above`
+            : (this.cdsErrors[0]?.message ?? 'Compilation failed');
+          this.cdsMessageError = true;
+        }
+        setTimeout(() => { this.cdsMessage = ''; }, 5000);
+      }),
+      this.bridge.on<CdsPatchAppliedMsg>('cdsPatchApplied').subscribe(msg => {
+        this.cdsMessageError = !msg.success;
+        this.cdsMessage      = msg.success ? 'Patch applied to memory!' : (msg.error ?? 'Failed to apply patch.');
+        setTimeout(() => { this.cdsMessage = ''; }, 4000);
       }),
       this.bridge.on<Record<string, unknown>>('updateRegions').subscribe(msg => {
         const labels = msg['labels'] as string[] | undefined;
@@ -283,12 +335,36 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
     this.bridge.postMessage({ command: 'gameChanged', gamePath: this.selectedGame });
   }
 
-  setTab(tab: 'settings' | 'cheats'): void {
+  setTab(tab: 'settings' | 'cheats' | 'cds'): void {
     this.activeTab = tab;
   }
 
   applyCheats(): void {
     this.bridge.postMessage({ command: 'applyCheats', cheatText: this.cheatText });
+  }
+
+  compileCds(): void {
+    this.cdsErrors  = [];
+    this.cdsMessage = 'Compiling…';
+    this.cdsMessageError = false;
+    this.bridge.postMessage({ command: 'compileCds' });
+  }
+
+  addPatch(): void {
+    if (!this.cdsOutput) { return; }
+    this.bridge.postMessage({ command: 'addPatch', codes: this.cdsOutput });
+  }
+
+  addCheat(): void {
+    if (!this.cdsOutput) { return; }
+    // Append compiled codes to the cheats tab list and switch to it
+    this.cheatText = this.cheatText
+      ? this.cheatText.trimEnd() + '\n' + this.cdsOutput
+      : this.cdsOutput;
+    this.cdsMessageError = false;
+    this.cdsMessage      = 'Codes added to Cheats tab.';
+    setTimeout(() => { this.cdsMessage = ''; }, 3000);
+    this.activeTab = 'cheats';
   }
 
   onRegionChange(): void {

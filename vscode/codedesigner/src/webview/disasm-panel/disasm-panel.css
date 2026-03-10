@@ -326,3 +326,53 @@ button:disabled {
     color: var(--vscode-descriptionForeground);
     margin: 12px 0 4px;
 }
+
+/* ── CDS tab ─────────────────────────────────────────────────────────────── */
+
+.cds-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#cds-output {
+    width: 100%;
+    min-height: 200px;
+    resize: vertical;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 6px;
+    font-family: monospace;
+    font-size: 12px;
+    box-sizing: border-box;
+}
+
+#cds-output::placeholder {
+    color: var(--vscode-input-placeholderForeground, #888);
+}
+
+.cds-error-line {
+    font-size: 11px;
+    color: #e07070;
+    padding: 2px 4px;
+    background: rgba(224, 112, 112, 0.08);
+    border-left: 2px solid #e07070;
+    font-family: monospace;
+}
+
+.cds-error-lineno {
+    font-weight: bold;
+    margin-right: 4px;
+}
+
+.cds-message {
+    font-size: 12px;
+    padding: 4px 6px;
+    border-radius: 2px;
+    color: #4ec94e;
+}
+
+.cds-message.cds-error {
+    color: #e07070;
+}

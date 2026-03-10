@@ -3,7 +3,6 @@
 import * as vscode from 'vscode';
 import { DisasmEditorProvider } from './providers/disasmEditor/disasmEditorProvider';
 import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider';
-import { AsmPanelProvider } from './providers/asmPanel/asmPanelProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
@@ -71,9 +70,6 @@ export function activate(context: vscode.ExtensionContext) {
 	const disasmPanelProvider = new DisasmPanelProvider(socketClient, editorProvider, context.extensionUri);
 	disasmPanelProvider.register(context);
 
-	const asmPanelProvider = new AsmPanelProvider(context.extensionUri);
-	asmPanelProvider.register(context);
-
 	// Wire pause-state propagation: when a breakpoint/step pause is detected in the
 	// editor panels, the sidebar status bar needs to update too.
 	editorProvider.onPauseStateChange = (paused: boolean) => {
@@ -84,11 +80,6 @@ export function activate(context: vscode.ExtensionContext) {
 	// delegate to the panel provider which manages snapshots.
 	editorProvider.onGetAddressHistory = (address: number) =>
 		disasmPanelProvider.getAddressHistory(address);
-
-	// Wire "Send to Cheat List" from any live disasm panel to the cheats tab.
-	editorProvider.onSendToCheatList = (entry: string) => {
-		disasmPanelProvider.appendToCheatList(entry);
-	};
 
 	// Register socket event handlers
 	socketClient.onConnected(() => {
