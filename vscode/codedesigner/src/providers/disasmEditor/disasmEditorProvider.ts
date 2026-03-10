@@ -728,6 +728,55 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         console.error(`[LIVE] SetRegister failed: ${err?.message ?? err}`);
                     }
                 }
+            } else if (message.type === 'setPC') {
+                // Set the CPU program counter to the requested address, pause the
+                // emulator, broadcast the new state to every live panel (so all PC
+                // arrows update), reveal the panel that owns the address, and
+                // navigate the cursor there.
+                if (!this.socketClient?.isConnected()) { return; }
+                const addr: number = message.address as number;
+                const addrHex = `0x${addr.toString(16).toUpperCase()}`;
+                try {
+                    // Ensure the emulator is paused before we change the PC.
+                    await this.socketClient.pause();
+                    // Write the new PC value via the existing SETREG mechanism.
+                    await this.socketClient.setRegister('PC', 0, addrHex);
+                    // Fetch the fresh status + full register state.
+                    const status = await this.socketClient.getPC();
+                    const statusMsg: any = { type: 'status', ...status };
+                    statusMsg.paused = true;
+                    try {
+                        const regs = await this.socketClient.getRegisters();
+                        statusMsg.registers = regs;
+                        const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29] ?? 0;
+                        if (sp) {
+                            try {
+                                const buf = await this.socketClient.readMemory(sp, 128, 'ee');
+                                statusMsg.stackBytes = Array.from(buf);
+                                statusMsg.stackBase  = sp;
+                            } catch { /* ignore stack read errors */ }
+                        }
+                    } catch { /* ignore register fetch errors */ }
+                    // Broadcast the new PC state to ALL live panels so every panel's
+                    // PC arrow indicator and register panel update simultaneously.
+                    this._broadcastFullStatus(statusMsg);
+                    // Reveal and navigate the panel that owns this address.
+                    this._revealPanelForAddress(addr);
+                    const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
+                        ? (addr & 0x1FFFFFFF) >>> 0
+                        : addr >>> 0;
+                    const target = this._livePanelInfo.find(info =>
+                        physAddr >= info.physBaseAddress &&
+                        physAddr < info.physBaseAddress + info.totalBytes
+                    );
+                    if (target) {
+                        target.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
+                    }
+                    // Notify the sidebar so it stays in PAUSED state.
+                    this.onPauseStateChange?.(true);
+                } catch (err: any) {
+                    getOutputChannel().appendLine(`[SETPC] Error: ${err?.message ?? err}`);
+                }
             } else if (message.type === 'disasmBytes') {
                 // Quick disassembly preview for the bytes editor in the edit overlay.
                 if (this.socketClient?.isConnected()) {

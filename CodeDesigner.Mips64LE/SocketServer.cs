@@ -259,6 +259,9 @@ namespace CodeDesigner.Mips64LE
 
                     case "SNAPSHOT":
                         return HandleSnapshot(command.OutputPath);
+
+                    case "LOADSNAPSHOT":
+                        return HandleLoadSnapshot(command.InputPath);
                     
                     case "PAUSE":
                         return HandlePause();
@@ -756,6 +759,74 @@ namespace CodeDesigner.Mips64LE
             catch (Exception ex)
             {
                 return CreateErrorResponse($"Snapshot error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle LOADSNAPSHOT command — restores all memory regions from .bin files
+        /// previously written by a SNAPSHOT command.  The emulator must be paused
+        /// before calling this; if it is not paused it will be paused automatically
+        /// and left paused after the restore completes.
+        /// </summary>
+        private string HandleLoadSnapshot(string? inputPath)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            if (string.IsNullOrWhiteSpace(inputPath))
+                return CreateErrorResponse("InputPath is required for LOADSNAPSHOT");
+
+            if (!Directory.Exists(inputPath))
+                return CreateErrorResponse($"Snapshot directory not found: {inputPath}");
+
+            // Pause the emulator while we swap memory so it does not race with
+            // the run-loop reading/writing the same arrays.
+            bool wasPaused = Scheduler.Paused;
+            Scheduler.Paused = true;
+            try
+            {
+                var regions = new[]
+                {
+                    (File: "EEmem.bin",     Label: "EE Main RAM",  Bytes: Scheduler.EE.Bus.Ram,        MaxSize: PS2MemoryBus.MainRamSize,        Base: 0x00000000u),
+                    (File: "BIOSrom.bin",   Label: "BIOS ROM",     Bytes: Scheduler.EE.Bus.Bios,       MaxSize: Scheduler.EE.Bus.Bios.Length,   Base: PS2MemoryBus.BiosRomPhysBase),
+                    (File: "Scratchpad.bin",Label: "Scratchpad",   Bytes: Scheduler.EE.Bus.Scratchpad, MaxSize: PS2MemoryBus.ScratchpadSize,     Base: 0x70000000u),
+                    (File: "IOPmem.bin",    Label: "IOP RAM",      Bytes: Scheduler.IOP.Bus.Ram,       MaxSize: Scheduler.IOP.Bus.Ram.Length,   Base: 0x00000000u),
+                };
+
+                var loaded = new List<SnapshotRegion>();
+                foreach (var (file, label, dest, maxSize, baseAddr) in regions)
+                {
+                    string filePath = Path.Combine(inputPath, file);
+                    if (!File.Exists(filePath))
+                        continue;
+
+                    byte[] src = File.ReadAllBytes(filePath);
+                    int count = Math.Min(src.Length, maxSize);
+                    Array.Copy(src, dest, count);
+
+                    loaded.Add(new SnapshotRegion
+                    {
+                        Label       = label,
+                        File        = filePath,
+                        BaseAddress = baseAddr,
+                        Size        = count,
+                    });
+                }
+
+                // Leave emulator paused so the caller can inspect state or resume
+                // explicitly.
+                var response = new CommandResponse
+                {
+                    Success = true,
+                    Command = "LOADSNAPSHOT",
+                    Regions = loaded,
+                };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                if (!wasPaused) Scheduler.Paused = false;
+                return CreateErrorResponse($"LoadSnapshot error: {ex.Message}");
             }
         }
 
@@ -2373,6 +2444,7 @@ namespace CodeDesigner.Mips64LE
         public int? Length { get; set; }
         public string? Region { get; set; }
         public string? OutputPath { get; set; }
+        public string? InputPath { get; set; }
         public uint? BreakpointAddress { get; set; }
         public string? Label { get; set; }
         public string? Comment { get; set; }

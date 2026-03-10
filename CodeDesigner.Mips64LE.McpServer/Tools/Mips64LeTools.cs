@@ -521,6 +521,22 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
         return FormatSnapshot(json);
     }
 
+    [McpServerTool(Name = "load_snapshot")]
+    [Description("Reload a previously saved memory snapshot as a save state into the running PS2 emulator. " +
+                 "Reads EEmem.bin, BIOSrom.bin, Scratchpad.bin, and IOPmem.bin from the given directory " +
+                 "and restores them into the live emulator memory. " +
+                 "The emulator is paused automatically before the restore and remains paused afterwards.")]
+    public async Task<string> LoadSnapshot(
+        [Description("Absolute path to the snapshot directory containing the .bin files to restore.")] string inputPath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "LOADSNAPSHOT", InputPath = inputPath },
+            cancellationToken);
+
+        return FormatLoadSnapshot(json);
+    }
+
     // -------------------------------------------------------------------------
     // Private formatting helpers
     // -------------------------------------------------------------------------
@@ -899,6 +915,37 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
                 uint baseA = item.TryGetProperty("baseAddress", out var bProp) ? bProp.GetUInt32() : 0u;
                 int size = item.TryGetProperty("size", out var sProp) ? sProp.GetInt32() : 0;
                 sb.AppendLine($"  [{label}]  base=0x{baseA:X8}  size={size / 1024} KB  → {file}");
+            }
+
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private static string FormatLoadSnapshot(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var errProp))
+                return $"Error: {errProp.GetString()}";
+
+            if (!root.TryGetProperty("Regions", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Snapshot restored (emulator paused):");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string label = item.TryGetProperty("Label", out var lProp) ? (lProp.GetString() ?? "?") : "?";
+                string file  = item.TryGetProperty("File",  out var fProp) ? (fProp.GetString() ?? "?") : "?";
+                int    size  = item.TryGetProperty("Size",  out var sProp) ? sProp.GetInt32() : 0;
+                sb.AppendLine($"  [{label}]  size={size / 1024} KB  ← {file}");
             }
 
             return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);

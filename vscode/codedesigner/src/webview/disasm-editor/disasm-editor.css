@@ -372,6 +372,20 @@ app-hex-view {
     display: block;
 }
 
+#setpc-panel {
+    display: none;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    padding: 8px 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+#setpc-panel.visible {
+    display: block;
+}
+
 /* ── Debug Panel (Registers + Stack) ─────────────────────────────────── */
 
 #debug-panel {
@@ -568,6 +582,16 @@ app-hex-view {
     background: #007acc;
     border-color: #007acc;
     color: #fff;
+}
+
+/* Live-only buttons are hidden for binary files; shown in live panels. */
+.header-tool-btn.live-only {
+    display: none;
+}
+
+#header-toolbar.live-active .header-tool-btn.live-only,
+#header-toolbar.live-paused .header-tool-btn.live-only {
+    display: inline-block;
 }
 
 /* ── Symbols Panel ────────────────────────────────────────────────────── */

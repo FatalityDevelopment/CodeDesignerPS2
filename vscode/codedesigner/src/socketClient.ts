@@ -10,6 +10,7 @@ interface CommandMessage {
     Length?: number;
     Region?: string;
     OutputPath?: string;
+    InputPath?: string;
     BreakpointAddress?: number;
     Label?: string;
     Comment?: string;
@@ -625,6 +626,27 @@ export class SocketClient {
 
         if (!response.Success) {
             throw new Error(response.Error || 'Snapshot failed');
+        }
+
+        return response.Regions || [];
+    }
+
+    /**
+     * Reload a snapshot as a save state: read .bin files from inputPath and
+     * restore them into the live emulator memory.  The emulator is paused
+     * automatically and remains paused after the restore completes.
+     * Returns the list of restored region descriptors.
+     */
+    public async loadSnapshot(inputPath: string): Promise<SnapshotRegion[]> {
+        const command: CommandMessage = {
+            Command: 'LOADSNAPSHOT',
+            InputPath: inputPath,
+        };
+
+        const response = await this.sendCommand(command);
+
+        if (!response.Success) {
+            throw new Error(response.Error || 'Load snapshot failed');
         }
 
         return response.Regions || [];
