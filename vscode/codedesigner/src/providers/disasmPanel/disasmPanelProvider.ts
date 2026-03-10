@@ -1189,6 +1189,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         terminal.show(false);   // reveal terminal but keep editor focus
         this.emulatorTerminal = terminal;
 
+        // Poll until the socket server is ready (up to ~10 s), then connect.
+        this.connectSocketAndOpenViews();
+
         return true;
     }
 }
