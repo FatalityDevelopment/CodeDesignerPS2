@@ -130,6 +130,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'snapshot':
                     await this.handleSnapshot();
                     break;
+                case 'importBin':
+                    await this.handleImportBin();
+                    break;
                 case 'openSnapshot':
                     await this.handleOpenSnapshot(msg.path);
                     break;
@@ -492,6 +495,94 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 out.appendLine(`[WARN] Resume after BP registration: ${msg}`);
             }
         });
+    }
+
+    // ── Import Binary ─────────────────────────────────────────────────────────
+
+    /**
+     * Prompt the user for a .bin/.raw file and a target address, then write
+     * the file contents into live emulator memory via WRITEMEM.
+     */
+    private async handleImportBin(): Promise<void> {
+        const out = getOutputChannel();
+
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+
+        // Step 1: Pick a file
+        const uris = await vscode.window.showOpenDialog({
+            title: 'Import Binary File into Emulator Memory',
+            openLabel: 'Import',
+            canSelectMany: false,
+            filters: {
+                'Binary Files': ['bin', 'raw'],
+                'All Files':    ['*'],
+            },
+        });
+        if (!uris || uris.length === 0) { return; }
+        const filePath = uris[0].fsPath;
+
+        // Step 2: Prompt for target address (same style as handleEditLabel)
+        const addrInput = await vscode.window.showInputBox({
+            title:          'Import Binary — Target Address',
+            prompt:         'Enter the memory address to load the file at (hex, e.g. 0x80010000)',
+            placeHolder:    '0x80010000',
+            ignoreFocusOut: true,
+            validateInput:  (v) => {
+                const cleaned = v.trim().toLowerCase().replace(/^0x/, '');
+                return /^[0-9a-f]+$/.test(cleaned) ? null : 'Enter a valid hex address (e.g. 0x80010000)';
+            },
+        });
+        if (addrInput === undefined) { return; } // cancelled
+
+        // Step 3: Prompt for memory region
+        const region = await vscode.window.showQuickPick(
+            [
+                { label: 'EE (Emotion Engine)',  description: 'Main RAM, BIOS, Scratchpad', value: 'ee'  },
+                { label: 'IOP (I/O Processor)', description: 'IOP RAM',                    value: 'iop' },
+            ],
+            {
+                title:        'Import Binary — Memory Region',
+                placeHolder:  'Select target memory region',
+                ignoreFocusOut: true,
+            }
+        );
+        if (!region) { return; } // cancelled
+
+        // Parse address
+        const address = parseInt(addrInput.trim().replace(/^0x/i, ''), 16);
+        if (isNaN(address)) {
+            vscode.window.showErrorMessage('Invalid address.');
+            return;
+        }
+
+        // Read file and convert to hex string
+        let fileBytes: Buffer;
+        try {
+            fileBytes = fs.readFileSync(filePath);
+        } catch (err: any) {
+            vscode.window.showErrorMessage(`Could not read file: ${err?.message ?? err}`);
+            return;
+        }
+
+        const hexData   = fileBytes.toString('hex');
+        const label     = path.basename(filePath);
+        const addrStr   = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
+
+        out.appendLine(`[INFO] Importing ${label} (${fileBytes.length} bytes) → ${addrStr} (${region.value})`);
+
+        try {
+            await this.socketClient.writeMemory(address, hexData, region.value);
+            out.appendLine(`[INFO] Import complete — ${fileBytes.length} byte(s) written.`);
+            vscode.window.showInformationMessage(
+                `Imported ${label} (${fileBytes.length} bytes) at ${addrStr}.`
+            );
+        } catch (err: any) {
+            out.appendLine(`[ERROR] Import failed: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`Import failed: ${err?.message ?? err}`);
+        }
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────

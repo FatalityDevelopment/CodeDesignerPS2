@@ -99,6 +99,10 @@ interface InitMsg {
   </div>
 
   <div class="row">
+    <button id="importBinBtn" (click)="importBin()" [disabled]="!isConnected">⬆ Import Binary</button>
+  </div>
+
+  <div class="row">
     <button id="snapshotBtn" (click)="snapshot()" [disabled]="!isConnected">Take Snapshot</button>
   </div>
 
@@ -177,6 +181,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   snapshot(): void {
     this.bridge.postMessage({ command: 'snapshot' });
+  }
+
+  importBin(): void {
+    this.bridge.postMessage({ command: 'importBin' });
   }
 
   togglePause(): void {
