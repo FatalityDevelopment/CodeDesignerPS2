@@ -63,6 +63,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private selectedGamePath: string = '';
     private selectedGameName: string = '';
     private _paused: boolean = false;
+    private _activeCdsFilePath: string = '';
+    private _activeCdsContent: string = '';
+    /** Diagnostic collection for CDS compilation errors — shows red squiggles in the editor. */
+    private _cdsDiagnostics!: vscode.DiagnosticCollection;
 
     /** Returns the workspace root directory (used by DisasmEditorProvider for history lookup). */
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
@@ -78,6 +82,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
         this.extensionPath = context.extensionPath;
+
+        // Create the diagnostic collection for CDS compilation errors.
+        // Adding it to context.subscriptions ensures it is disposed (and all
+        // markers cleared) when the extension is deactivated.
+        this._cdsDiagnostics = vscode.languages.createDiagnosticCollection('cds');
+        context.subscriptions.push(this._cdsDiagnostics);
 
         context.subscriptions.push(
             vscode.window.registerWebviewViewProvider('disasm.disasmPanel', this)
@@ -99,9 +109,37 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         context.subscriptions.push(
             vscode.window.onDidCloseTerminal(t => {
                 if (t === this.emulatorTerminal) {
-                    getOutputChannel().appendLine('[INFO] Emulator terminal closed.');
+                    getOutputChannel().info('Emulator terminal closed.');
                     try { this.socketClient.disconnect(); } catch { /* ignore */ }
                     this.cleanupProcess();
+                }
+            })
+        );
+
+        // Track active .cds file so the CDS tab can compile it on demand
+        context.subscriptions.push(
+            vscode.window.onDidChangeActiveTextEditor(editor => {
+                this._syncActiveCdsEditor(editor);
+            })
+        );
+        // Sync content when the document is modified
+        context.subscriptions.push(
+            vscode.workspace.onDidChangeTextDocument(e => {
+                if (e.document.uri.fsPath === this._activeCdsFilePath) {
+                    this._activeCdsContent = e.document.getText();
+                }
+            })
+        );
+        // Clear stale diagnostics when a .cds file is closed
+        context.subscriptions.push(
+            vscode.workspace.onDidCloseTextDocument(doc => {
+                if (doc.uri.fsPath.toLowerCase().endsWith('.cds')) {
+                    this._cdsDiagnostics.delete(doc.uri);
+                    // If this was the cached file, reset the cache too
+                    if (doc.uri.fsPath === this._activeCdsFilePath) {
+                        this._activeCdsFilePath = '';
+                        this._activeCdsContent  = '';
+                    }
                 }
             })
         );
@@ -129,8 +167,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async msg => {
             if (msg.type === 'bootstrapError') {
-                getOutputChannel().appendLine(
-                    `[ERROR] Disasm panel Angular bootstrap failed: ${msg.error ?? '(no details)'}`
+                getOutputChannel().error(
+                    `Disasm panel Angular bootstrap failed: ${msg.error ?? '(no details)'}`
                 );
                 return;
             }
@@ -177,6 +215,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'applyCheats':
                     await this.handleApplyCheats(msg.cheatText ?? '');
                     break;
+                case 'compileCds':
+                    await this.handleCompileCds();
+                    break;
+                case 'addPatch':
+                    await this.handleAddPatch(msg.codes ?? '');
+                    break;
                 case 'focusRegion':
                     this.editorProvider.focusLivePanelByLabel(msg.label ?? '');
                     break;
@@ -212,7 +256,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        getOutputChannel().appendLine('[WARN] Could not find emu-settings.json in any workspace folder or extension directory tree.');
+        getOutputChannel().warn('Could not find emu-settings.json in any workspace folder or extension directory tree.');
         this.settings = {};
     }
 
@@ -228,7 +272,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             // ENOENT (file not found) is expected during the directory walk; only
             // log unexpected errors (e.g. parse failure, permission denied).
             if (err?.code !== 'ENOENT') {
-                getOutputChannel().appendLine(`[DEBUG] Could not read ${settingsPath}: ${err?.message ?? err}`);
+                getOutputChannel().debug(`Could not read ${settingsPath}: ${err?.message ?? err}`);
             }
             return false;
         }
@@ -291,9 +335,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (this.emulatorTerminal || this.socketClient.isConnected()) {
             if (this.emulatorTerminal) {
                 this.emulatorTerminal.dispose();
-                out.appendLine('[INFO] Emulator stopped by user.');
+                out.info('Emulator stopped by user.');
             } else {
-                out.appendLine('[INFO] Disconnected from server.');
+                out.info('Disconnected from server.');
             }
             this.socketClient.disconnect();
             this.cleanupProcess();
@@ -317,7 +361,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // the _pendingResponses fix) caused response mis-routing and is still
         // wasteful.
         this.socketClient.connect().then(() => {
-            out.appendLine('[INFO] Connected to existing emulator server. Memory views will open via onSocketConnected.');
+            out.info('Connected to existing emulator server. Memory views will open via onSocketConnected.');
         }).catch(() => {
             // No existing server — spawn the emulator and then connect
             this.spawnAndConnect(emulatorPath, biosPath, gamePath);
@@ -336,7 +380,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Using shellPath: resolvedExe directly fails silently on some VS Code
         // versions when the file is missing; this gives the user a clear message.
         if (!fs.existsSync(resolvedExe)) {
-            out.appendLine(`[ERROR] Emulator executable not found: ${resolvedExe}`);
+            out.error(`Emulator executable not found: ${resolvedExe}`);
             vscode.window.showErrorMessage(
                 `Emulator not found: ${resolvedExe}\n` +
                 'Build the project first: cd CodeDesigner.Mips64LE && dotnet build'
@@ -349,7 +393,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (resolvedBios) { cliArgs.push('--bios', resolvedBios); }
         if (resolvedDisc) { cliArgs.push('--disc', resolvedDisc); }
 
-        out.appendLine(`[INFO] Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
+        out.info(`Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
 
         // Use shellPath/shellArgs to pass the exe and its arguments directly to
         // the OS without any shell quoting — this avoids shell-injection concerns
@@ -389,7 +433,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 if (!this.socketClient.isConnected()) {
                     await this.socketClient.connect();
                 }
-                out.appendLine('[INFO] Socket connected to emulator. Opening memory views…');
+                out.info('Socket connected to emulator. Opening memory views…');
                 for (const r of LIVE_REGIONS) {
                     await this.editorProvider.openLiveMemoryView(
                         r.region, r.address, r.size, r.label);
@@ -398,7 +442,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 if (attempts < maxAttempts) {
                     setTimeout(tryConnect, 500);
                 } else {
-                    out.appendLine('[WARN] Could not connect to emulator socket server.');
+                    out.warn('Could not connect to emulator socket server.');
                 }
             }
         };
@@ -431,7 +475,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             this.webview?.postMessage({ command: 'paused', paused: this._paused });
             this.editorProvider.notifyPauseState(this._paused);
         } catch (err: any) {
-            out.appendLine(`[ERROR] Pause/Resume failed: ${err?.message ?? err}`);
+            out.error(`Pause/Resume failed: ${err?.message ?? err}`);
         }
     }
 
@@ -466,14 +510,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        out.appendLine('[INFO] Restarting emulator via socket…');
+        out.info('Restarting emulator via socket…');
 
         // Blank live panels so stale content is not shown during the restart
         this.editorProvider.resetLivePanels();
 
         try {
             await this.socketClient.restart();
-            out.appendLine('[INFO] Emulator restarted — re-opening views and registering breakpoints…');
+            out.info('Emulator restarted — re-opening views and registering breakpoints…');
 
             // Re-initialize every live panel with fresh data from the restarted
             // scheduler (RAM is freshly zeroed, BIOS ROM is reloaded).
@@ -485,7 +529,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             // Re-register all known breakpoints then resume deterministically.
             await this._registerBreakpointsAndResume();
         } catch (err: any) {
-            out.appendLine(`[ERROR] Restart failed: ${err?.message ?? err}`);
+            out.error(`Restart failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Restart failed: ${err?.message ?? err}`);
         }
     }
@@ -507,18 +551,18 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 await this.socketClient.setBreakpoint(bp);
             } catch (err: any) {
                 // Socket dropped mid-loop — stop registering; the next connect will retry.
-                out.appendLine(`[WARN] Breakpoint registration interrupted at 0x${bp.toString(16).toUpperCase()}: ${err?.message ?? err}`);
+                out.warn(`Breakpoint registration interrupted at 0x${bp.toString(16).toUpperCase()}: ${err?.message ?? err}`);
                 return;
             }
         }
         if (bps.size > 0) {
-            out.appendLine(`[INFO] Registered ${bps.size} breakpoint(s) on server.`);
+            out.info(`Registered ${bps.size} breakpoint(s) on server.`);
         }
         this.socketClient.resume().catch((err: any) => {
             // Ignore "already running" responses; log anything unexpected.
             const msg: string = err?.message ?? String(err);
             if (!msg.toLowerCase().includes('already')) {
-                out.appendLine(`[WARN] Resume after BP registration: ${msg}`);
+                out.warn(`Resume after BP registration: ${msg}`);
             }
         });
     }
@@ -597,16 +641,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const label     = path.basename(filePath);
         const addrStr   = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
 
-        out.appendLine(`[INFO] Importing ${label} (${fileBytes.length} bytes) → ${addrStr} (${region.value})`);
+        out.info(`Importing ${label} (${fileBytes.length} bytes) → ${addrStr} (${region.value})`);
 
         try {
             await this.socketClient.writeMemory(address, hexData, region.value);
-            out.appendLine(`[INFO] Import complete — ${fileBytes.length} byte(s) written.`);
+            out.info(`Import complete — ${fileBytes.length} byte(s) written.`);
             vscode.window.showInformationMessage(
                 `Imported ${label} (${fileBytes.length} bytes) at ${addrStr}.`
             );
         } catch (err: any) {
-            out.appendLine(`[ERROR] Import failed: ${err?.message ?? err}`);
+            out.error(`Import failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Import failed: ${err?.message ?? err}`);
         }
     }
@@ -640,11 +684,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             : path.join(require('os').tmpdir(), 'ps2snapshots');
         const snapshotsDir = path.join(baseDir, isoName, dateStr, safeName);
 
-        out.appendLine(`[INFO] Taking snapshot → ${snapshotsDir}`);
+        out.info(`Taking snapshot → ${snapshotsDir}`);
 
         try {
             const regions = await this.socketClient.snapshot(snapshotsDir);
-            out.appendLine(`[INFO] Snapshot complete — ${regions.length} region(s) written.`);
+            out.info(`Snapshot complete — ${regions.length} region(s) written.`);
 
             // Save snapshot metadata so we can look up history later
             const info: SnapshotInfoFile = {
@@ -679,7 +723,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 snapshots: this.snapshots,
             });
         } catch (err: any) {
-            out.appendLine(`[ERROR] Snapshot failed: ${err?.message ?? err}`);
+            out.error(`Snapshot failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Snapshot failed: ${err?.message ?? err}`);
         }
     }
@@ -716,13 +760,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         );
         if (answer !== 'Reload') { return; }
 
-        out.appendLine(`[INFO] Reloading snapshot from ${snapshotPath}`);
+        out.info(`Reloading snapshot from ${snapshotPath}`);
         try {
             const regions = await this.socketClient.loadSnapshot(snapshotPath);
-            out.appendLine(`[INFO] Snapshot reloaded — ${regions.length} region(s) restored.`);
+            out.info(`Snapshot reloaded — ${regions.length} region(s) restored.`);
             vscode.window.showInformationMessage(`Snapshot restored (${regions.length} region(s)). Emulator is paused.`);
         } catch (err: any) {
-            out.appendLine(`[ERROR] Reload snapshot failed: ${err?.message ?? err}`);
+            out.error(`Reload snapshot failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Reload snapshot failed: ${err?.message ?? err}`);
         }
     }
@@ -805,7 +849,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 }
             }
         } catch (err: any) {
-            getOutputChannel().appendLine(`[WARN] Could not load snapshots for ${isoName}: ${err?.message ?? err}`);
+            getOutputChannel().warn(`Could not load snapshots for ${isoName}: ${err?.message ?? err}`);
         }
 
         this.snapshots = entries;
@@ -833,9 +877,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             const doc = JSON.parse(raw) as { symbol?: LabelEntry[] };
             const labels = doc.symbol ?? (Array.isArray(doc) ? doc as LabelEntry[] : []);
             this.editorProvider.setGameLabels(labels);
-            getOutputChannel().appendLine(`[INFO] Loaded ${labels.length} game label(s) from ${labelsPath}`);
+            getOutputChannel().info(`Loaded ${labels.length} game label(s) from ${labelsPath}`);
         } catch (err: any) {
-            getOutputChannel().appendLine(`[WARN] Could not load game labels: ${err?.message ?? err}`);
+            getOutputChannel().warn(`Could not load game labels: ${err?.message ?? err}`);
             this.editorProvider.setGameLabels([]);
         }
     }
@@ -887,14 +931,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
     }
 
-    /**
-     * Append a cheat-list entry (e.g. from the disasm editor "Send to Cheat List" button)
-     * to the cheat textarea in the cheats tab and switch to that tab.
-     */
-    public appendToCheatList(entry: string): void {
-        this.webview?.postMessage({ command: 'appendToCheatList', entry });
-    }
-
     /** Apply cheat codes to live emulator memory via the APPLYCHEATS socket command. */
     private async handleApplyCheats(cheatText: string): Promise<void> {
         const out = getOutputChannel();
@@ -904,12 +940,154 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
         try {
             await this.socketClient.applyCheats(cheatText);
-            out.appendLine('[INFO] Cheats applied successfully.');
+            out.info('Cheats applied successfully.');
             this.webview?.postMessage({ command: 'cheatsApplied', success: true });
         } catch (err: any) {
-            out.appendLine(`[ERROR] ApplyCheats error: ${err?.message ?? err}`);
+            out.error(`ApplyCheats error: ${err?.message ?? err}`);
             this.webview?.postMessage({ command: 'cheatsApplied', success: false, error: err?.message ?? String(err) });
         }
+    }
+
+    /** Compile the active .cds file and return GameShark codes to the CDS tab. */
+    private async handleCompileCds(): Promise<void> {
+        const out = getOutputChannel();
+
+        // Always read from the currently active text editor first so clicking
+        // Compile always uses whichever .cds tab the user has open.  VS Code
+        // preserves vscode.window.activeTextEditor even after a sidebar panel
+        // gains focus, so this reliably reflects the file the user had visible
+        // before clicking the button.
+        const activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor?.document.uri.fsPath.toLowerCase().endsWith('.cds')) {
+            this._activeCdsFilePath = activeEditor.document.uri.fsPath;
+            this._activeCdsContent  = activeEditor.document.getText();
+        }
+
+        const sourceCode = this._activeCdsContent;
+        const filePath   = this._activeCdsFilePath;
+        const fileUri    = filePath ? vscode.Uri.file(filePath) : undefined;
+
+        // Clear any previous diagnostics for this file before every compile run
+        if (fileUri) { this._cdsDiagnostics.delete(fileUri); }
+
+        if (!sourceCode) {
+            const msg = 'No .cds file is open. Open a Code Designer Source file to compile.';
+            out.warn(`CDS compile: ${msg}`);
+            this.webview?.postMessage({
+                command: 'cdsCompileResult',
+                success: false,
+                errors: [{ lineNumber: 0, message: msg }]
+            });
+            return;
+        }
+
+        out.info(`CDS compiling: ${filePath ? path.basename(filePath) : '(unknown)'}`);
+
+        if (!this.socketClient.isConnected()) {
+            const msg = 'Not connected to emulator server.';
+            out.warn(`CDS compile: ${msg}`);
+            this.webview?.postMessage({
+                command: 'cdsCompileResult',
+                success: false,
+                errors: [{ lineNumber: 0, message: msg }]
+            });
+            return;
+        }
+
+        try {
+            const results = await this.socketClient.compileCds(sourceCode);
+            const errors: Array<{ lineNumber: number; message: string }> = [];
+            const codeLines: string[] = [];
+            const diagnostics: vscode.Diagnostic[] = [];
+
+            // Look up the open document so we can get exact line lengths for ranges.
+            // Use URI string comparison (toString()) for reliable cross-platform matching.
+            const openDoc = fileUri
+                ? vscode.workspace.textDocuments.find(d => d.uri.toString() === fileUri.toString())
+                : undefined;
+
+            for (const r of results) {
+                if (r.Success && r.Hex) {
+                    codeLines.push(r.Hex);
+                } else if (!r.Success && r.Error) {
+                    const ln = r.LineNumber ?? 0;
+                    // Log to output with severity so the Output panel shows a red entry
+                    out.error(`Line ${ln}: ${r.Error}`);
+                    errors.push({ lineNumber: ln, message: r.Error });
+
+                    // Build a diagnostic that highlights the offending line in the editor
+                    if (fileUri && ln > 0) {
+                        const lineIndex = ln - 1;   // VS Code ranges are 0-based
+                        // Guard against line numbers that exceed the document length
+                        const safeIndex = openDoc
+                            ? Math.min(lineIndex, openDoc.lineCount - 1)
+                            : lineIndex;
+                        const lineLen = (openDoc && safeIndex < openDoc.lineCount)
+                            ? openDoc.lineAt(safeIndex).text.length
+                            : 512;
+                        const range = new vscode.Range(safeIndex, 0, safeIndex, lineLen);
+                        const diag  = new vscode.Diagnostic(
+                            range,
+                            `${r.Error}`,
+                            vscode.DiagnosticSeverity.Error
+                        );
+                        diag.source = 'CDS';
+                        diagnostics.push(diag);
+                    }
+                }
+            }
+
+            // Push all diagnostics to VS Code so squiggles and gutter icons appear
+            if (fileUri) {
+                this._cdsDiagnostics.set(fileUri, diagnostics.length > 0 ? diagnostics : []);
+            }
+
+            if (errors.length > 0) {
+                out.warn(`CDS compilation finished with ${errors.length} error(s).`);
+                // Reveal the output channel so the user sees the red error entries
+                out.show(true);
+                this.webview?.postMessage({ command: 'cdsCompileResult', success: false, errors });
+            } else {
+                const codes = codeLines.join('\n');
+                out.info(`CDS compilation succeeded — ${codeLines.length} code(s) generated.`);
+                this.webview?.postMessage({ command: 'cdsCompileResult', success: true, codes, errors: [] });
+            }
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            out.error(`CDS compile error: ${msg}`);
+            out.show(true);
+            this.webview?.postMessage({
+                command: 'cdsCompileResult',
+                success: false,
+                errors: [{ lineNumber: 0, message: msg }]
+            });
+        }
+    }
+
+    /** Apply compiled GameShark codes to live memory (Add Patch). */
+    private async handleAddPatch(codes: string): Promise<void> {
+        const out = getOutputChannel();
+        if (!this.socketClient.isConnected()) {
+            this.webview?.postMessage({ command: 'cdsPatchApplied', success: false, error: 'Not connected to emulator.' });
+            return;
+        }
+        try {
+            await this.socketClient.applyCheats(codes);
+            out.info('CDS patch applied to memory successfully.');
+            this.webview?.postMessage({ command: 'cdsPatchApplied', success: true });
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            out.error(`CDS add-patch error: ${msg}`);
+            this.webview?.postMessage({ command: 'cdsPatchApplied', success: false, error: msg });
+        }
+    }
+
+    /** Sync the tracked active CDS file when the editor focus changes. */
+    private _syncActiveCdsEditor(editor: vscode.TextEditor | undefined): void {
+        if (!editor) { return; }
+        if (!editor.document.uri.fsPath.toLowerCase().endsWith('.cds')) { return; }
+        this._activeCdsFilePath = editor.document.uri.fsPath;
+        this._activeCdsContent  = editor.document.getText();
     }
 
     /**

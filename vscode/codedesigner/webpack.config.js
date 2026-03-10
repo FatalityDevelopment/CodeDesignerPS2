@@ -80,7 +80,6 @@ const webviewConfig = {
   target: 'web',
   mode: 'none',
   entry: {
-    'asm-panel':     './src/webview/asm-panel/main.ts',
     'disasm-panel':  './src/webview/disasm-panel/main.ts',
     'disasm-editor': './src/webview/disasm-editor/main.ts',
   },

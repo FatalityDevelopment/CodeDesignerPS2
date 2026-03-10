@@ -27,6 +27,17 @@ namespace CodeDesigner.Mips64LE
         private readonly int _port;
         private CancellationTokenSource? _cancellationTokenSource;
 
+        // ── Compiled regexes for CDS compilation (avoid per-line recompilation) ──
+        /// <summary>Matches a bare label definition line: "Name:"  (identifier + colon, optional trailing whitespace).</summary>
+        private static readonly System.Text.RegularExpressions.Regex CdsLabelDefRegex =
+            new(@"^([A-Za-z_][A-Za-z0-9_]*):\s*$",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>Matches a label reference inside an instruction operand: ":Name".</summary>
+        private static readonly System.Text.RegularExpressions.Regex CdsLabelRefRegex =
+            new(@":([A-Za-z_][A-Za-z0-9_]*)",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
         /// <summary>
         /// Symbol/label database loaded from ps2MemMap.json at construction time.
         /// Key = virtual address (uint), Value = (Label, optional Comment).
@@ -366,8 +377,24 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle COMPILECDS command — compiles a .cds (Code Designer Script) assembly file.
-        /// Accepts the raw source text forwarded from the VS Code extension.
+        /// Handle COMPILECDS command — compiles a .cds (Code Designer Script) assembly file
+        /// into PS2 GameShark / Action Replay cheat codes.
+        ///
+        /// Supported directives:
+        ///   address 0xXXXXXXXX  or  address $XXXXXXXX  — set the current target address.
+        ///   hexcode 0xXXXXXXXX  or  hexcode $XXXXXXXX  — emit a raw 32-bit word.
+        ///   print   "string"                            — ignored (no instruction output).
+        ///
+        /// Supported pseudo-instruction:
+        ///   setreg  reg, value   — expands to lui reg, upper16 + ori reg, reg, lower16.
+        ///
+        /// Label definitions (Name:) and branch label references (:Name) are supported
+        /// via a two-pass approach.
+        ///
+        /// Registers may be written with or without the $ prefix ($v0 or v0).
+        /// Numeric immediates may be decimal (1), 0x-hex (0x0001), or $-hex ($0001).
+        ///
+        /// Each instruction is emitted as a GameShark type-2 code: 2AAAAAAA VVVVVVVV
         /// </summary>
         private string HandleCompileCds(string? sourceCode)
         {
@@ -378,61 +405,322 @@ namespace CodeDesigner.Mips64LE
                     return CreateErrorResponse("No source code provided");
                 }
 
-                var lines = sourceCode.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                var results = new List<InstructionResult>();
+                // Split preserving original line numbers (1-based).
+                var rawLines = sourceCode.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
 
-                foreach (var line in lines)
+                // ── Pass 1: collect label → address mapping ───────────────────────
+                var labelAddresses = new Dictionary<string, uint>(StringComparer.Ordinal);
+                uint scanAddress   = 0;
+
+                foreach (var rawLine in rawLines)
                 {
-                    var trimmed = line.Trim();
+                    var scan = StripCdsComments(rawLine.Trim());
+                    if (string.IsNullOrWhiteSpace(scan)) { continue; }
 
-                    // Skip empty lines and comment lines; strip inline comments
-                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#") || trimmed.StartsWith("//"))
+                    if (scan.StartsWith("address", StringComparison.OrdinalIgnoreCase))
                     {
+                        var p = scan.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (p.Length >= 2 && TryParseCdsUInt32(p[1], out uint addr)) { scanAddress = addr; }
+                        continue;
+                    }
+                    if (scan.StartsWith("hexcode", StringComparison.OrdinalIgnoreCase)) { scanAddress += 4; continue; }
+                    if (scan.StartsWith("print",   StringComparison.OrdinalIgnoreCase)) { continue; }
+                    if (scan.StartsWith("setreg",  StringComparison.OrdinalIgnoreCase)) { scanAddress += 8; continue; }
+
+                    // Label definition: "Name:" at start of line (identifier + colon, optional trailing ws)
+                    var labelMatch = CdsLabelDefRegex.Match(scan);
+                    if (labelMatch.Success)
+                    {
+                        labelAddresses[labelMatch.Groups[1].Value] = scanAddress;
                         continue;
                     }
 
-                    // Strip inline comments (e.g. "add $t0, $s0, $s1 // note")
-                    var commentIdx = trimmed.IndexOf("//", StringComparison.Ordinal);
-                    if (commentIdx > 0)
-                    {
-                        trimmed = trimmed[..commentIdx].TrimEnd();
-                    }
+                    // Everything else is a regular instruction (4 bytes)
+                    scanAddress += 4;
+                }
+
+                // ── Pass 2: assemble ──────────────────────────────────────────────
+                var results        = new List<InstructionResult>();
+                uint currentAddress = 0;
+
+                for (int i = 0; i < rawLines.Length; i++)
+                {
+                    int lineNumber = i + 1;
+                    var trimmed    = StripCdsComments(rawLines[i].Trim());
                     if (string.IsNullOrWhiteSpace(trimmed)) { continue; }
 
+                    // ── address directive ────────────────────────────────────────────
+                    if (trimmed.StartsWith("address", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 2)
+                        {
+                            if (TryParseCdsUInt32(parts[1], out uint addr))
+                            {
+                                currentAddress = addr;
+                            }
+                            else
+                            {
+                                results.Add(new InstructionResult
+                                {
+                                    Assembly   = trimmed,
+                                    Error      = $"Invalid address value '{parts[1]}'",
+                                    Success    = false,
+                                    LineNumber = lineNumber
+                                });
+                            }
+                        }
+                        else
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = "address directive requires a value (e.g. address 0x20123456 or address $20123456)",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                        }
+                        continue;
+                    }
+
+                    // ── hexcode directive (raw 32-bit word) ──────────────────────────
+                    if (trimmed.StartsWith("hexcode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 2)
+                        {
+                            if (TryParseCdsUInt32(parts[1], out uint raw))
+                            {
+                                results.Add(new InstructionResult
+                                {
+                                    Assembly   = trimmed,
+                                    Hex        = FormatGameSharkCode(currentAddress, raw),
+                                    Success    = true,
+                                    LineNumber = lineNumber
+                                });
+                                currentAddress += 4;
+                            }
+                            else
+                            {
+                                results.Add(new InstructionResult
+                                {
+                                    Assembly   = trimmed,
+                                    Error      = $"Invalid hex value '{parts[1]}'",
+                                    Success    = false,
+                                    LineNumber = lineNumber
+                                });
+                            }
+                        }
+                        else
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = "hexcode directive requires a value (e.g. hexcode 0xABCD1234 or hexcode $ABCD1234)",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                        }
+                        continue;
+                    }
+
+                    // ── print directive — no instruction output ──────────────────────
+                    if (trimmed.StartsWith("print", StringComparison.OrdinalIgnoreCase)) { continue; }
+
+                    // ── label definition — no instruction output ─────────────────────
+                    if (CdsLabelDefRegex.IsMatch(trimmed)) { continue; }
+
+                    // ── setreg pseudo-instruction ────────────────────────────────────
+                    // setreg reg, value  →  lui reg, upper16 ; ori reg, reg, lower16
+                    if (trimmed.StartsWith("setreg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts = trimmed.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length < 3)
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = "setreg requires two operands: setreg reg, value",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                            continue;
+                        }
+
+                        string regName = parts[1];
+                        string valStr  = parts[2];
+
+                        if (!TryParseCdsUInt32(valStr, out uint setVal))
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = $"Invalid setreg value '{valStr}'",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                            continue;
+                        }
+
+                        uint upper16 = (setVal >> 16) & 0xFFFF;
+                        uint lower16 = setVal & 0xFFFF;
+
+                        try
+                        {
+                            // lui reg, upper16
+                            uint luiEncoded = MipsAssembler.Assemble($"lui {regName}, 0x{upper16:X4}");
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = $"lui {regName}, 0x{upper16:X4}",
+                                Hex        = FormatGameSharkCode(currentAddress, luiEncoded),
+                                Success    = true,
+                                LineNumber = lineNumber
+                            });
+                            currentAddress += 4;
+
+                            // ori reg, reg, lower16
+                            uint oriEncoded = MipsAssembler.Assemble($"ori {regName}, {regName}, 0x{lower16:X4}");
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = $"ori {regName}, {regName}, 0x{lower16:X4}",
+                                Hex        = FormatGameSharkCode(currentAddress, oriEncoded),
+                                Success    = true,
+                                LineNumber = lineNumber
+                            });
+                            currentAddress += 4;
+                        }
+                        catch (Exception ex)
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = ex.Message,
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                        }
+                        continue;
+                    }
+
+                    // ── MIPS instruction (resolve label references first) ─────────────
                     try
                     {
-                        uint encoded = MipsAssembler.Assemble(trimmed);
+                        // Replace :LabelName branch targets with computed word offsets
+                        string resolved = CdsLabelRefRegex.Replace(
+                            trimmed,
+                            m =>
+                            {
+                                var name = m.Groups[1].Value;
+                                if (!labelAddresses.TryGetValue(name, out uint labelAddr))
+                                    throw new ArgumentException(
+                                        $"Undefined label '{name}' in '{trimmed}' (line {lineNumber})");
+                                // Branch offset = (label_addr - (current_addr + 4)) / 4
+                                // Use long arithmetic to avoid overflow when addresses exceed 0x7FFFFFFF
+                                long branchOff = ((long)labelAddr - (long)(currentAddress + 4)) / 4;
+                                return ((int)branchOff).ToString();
+                            });
+
+                        uint encoded  = MipsAssembler.Assemble(resolved);
                         results.Add(new InstructionResult
                         {
-                            Assembly = trimmed,
-                            Hex      = $"0x{encoded:X8}",
-                            Success  = true
+                            Assembly   = trimmed,
+                            Hex        = FormatGameSharkCode(currentAddress, encoded),
+                            Success    = true,
+                            LineNumber = lineNumber
                         });
+                        currentAddress += 4;
                     }
                     catch (Exception ex)
                     {
                         results.Add(new InstructionResult
                         {
-                            Assembly = trimmed,
-                            Error    = ex.Message,
-                            Success  = false
+                            Assembly   = trimmed,
+                            Error      = ex.Message,
+                            Success    = false,
+                            LineNumber = lineNumber
                         });
                     }
                 }
 
-                var response = new CommandResponse
+                return JsonSerializer.Serialize(new CommandResponse
                 {
-                    Success  = true,
-                    Command  = "COMPILECDS",
-                    Results  = results
-                };
-
-                return JsonSerializer.Serialize(response);
+                    Success = true,
+                    Command = "COMPILECDS",
+                    Results = results
+                });
             }
             catch (Exception ex)
             {
                 return CreateErrorResponse($"Compile error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Strip inline comments from a CDS source line, finding the earliest
+        /// occurrence of //, ;, or # and cutting from there.
+        /// Lines that are entirely a comment (start with the marker) are left empty.
+        /// </summary>
+        private static string StripCdsComments(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) { return line; }
+
+            // Skip entirely-comment lines fast
+            if (line.StartsWith("//", StringComparison.Ordinal)
+                || line.StartsWith(";",  StringComparison.Ordinal)
+                || line.StartsWith("#",  StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+
+            int cutAt = int.MaxValue;
+            foreach (var marker in new[] { "//", ";", "#" })
+            {
+                int ci = line.IndexOf(marker, StringComparison.Ordinal);
+                if (ci > 0 && ci < cutAt) { cutAt = ci; }
+            }
+
+            return cutAt != int.MaxValue ? line[..cutAt].TrimEnd() : line;
+        }
+
+        /// <summary>
+        /// Parse a CDS numeric literal that may be prefixed with $, 0x, or neither.
+        ///   $XXXX  → hexadecimal (CDS / PS2 assembler style)
+        ///   0xXXXX → hexadecimal
+        ///   DDDDD  → decimal
+        /// Returns false if the string cannot be parsed.
+        /// </summary>
+        private static bool TryParseCdsUInt32(string s, out uint value)
+        {
+            value = 0;
+            if (string.IsNullOrWhiteSpace(s)) { return false; }
+            s = s.Trim();
+            try
+            {
+                if (s.StartsWith("$", StringComparison.Ordinal))
+                {
+                    value = Convert.ToUInt32(s[1..], 16);
+                    return true;
+                }
+                if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = Convert.ToUInt32(s, 16);
+                    return true;
+                }
+                value = uint.Parse(s);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Format a 32-bit address/value pair as a PS2 GameShark type-2 (32-bit write) code.
+        /// Format: 2AAAAAAA VVVVVVVV  (address low 28 bits, value 32 bits).
+        /// </summary>
+        private static string FormatGameSharkCode(uint address, uint value)
+        {
+            // Type-2 prefix (0x20000000) ORed with the low 28 bits of the target address.
+            uint codeAddr = 0x20000000u | (address & 0x0FFFFFFFu);
+            return $"{codeAddr:X8} {value:X8}";
         }
 
         /// <summary>
@@ -2565,6 +2853,7 @@ namespace CodeDesigner.Mips64LE
         public string? Error { get; set; }
         public string? Comment { get; set; }  // Added for analyzer-generated comments
         public string? Label { get; set; }    // Symbol label from ps2MemMap.json
+        public int? LineNumber { get; set; }  // 1-based source line number
     }
 
     /// <summary>One entry in the label/symbol database.</summary>

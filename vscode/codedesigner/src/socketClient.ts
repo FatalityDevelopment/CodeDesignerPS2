@@ -213,6 +213,7 @@ interface InstructionResult {
     Error?: string;
     Comment?: string;
     Label?: string;
+    LineNumber?: number;
 }
 
 /**

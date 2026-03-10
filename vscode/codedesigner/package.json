@@ -26,13 +26,8 @@
       "activitybar": [
         {
           "id": "disasmSidebar",
-          "title": "disasm",
+          "title": "CodeDesigner",
           "icon": "dist/resources/disasm-icon.svg"
-        },
-        {
-          "id": "asmSidebar",
-          "title": "asm",
-          "icon": "dist/resources/asm-icon.svg"
         }
       ]
     },
@@ -43,23 +38,12 @@
           "id": "disasm.disasmPanel",
           "name": "Emulator"
         }
-      ],
-      "asmSidebar": [
-        {
-          "type": "webview",
-          "id": "asm.asmPanel",
-          "name": "Asm Panel"
-        }
       ]
     },
     "commands": [
       {
         "command": "disasm.showPanel",
         "title": "Show Disasm Panel"
-      },
-      {
-        "command": "asm.showPanel",
-        "title": "Show Asm Panel"
       },
       {
         "command": "codedesigner.connectServer",
