@@ -164,16 +164,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             TotalEeSteps++;
 
             // Check whether the new PC lands on a registered breakpoint.
+            // Normalize KSEG1 (0xA0000000–0xBFFFFFFF) to its KSEG0 equivalent
+            // (0x80000000–0x9FFFFFFF) so that breakpoints stored under either
+            // form fire correctly regardless of which segment the CPU jumped to.
             if (Breakpoints.Count > 0)
             {
-                uint newPc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
-                uint bpKey = ((newPc & 0xC0000000u) == 0x80000000u)
-                    ? (newPc & 0x1FFFFFFFu)
-                    : newPc;
-                uint hitKey = Breakpoints.Contains(bpKey) ? bpKey
-                            : (bpKey != newPc && Breakpoints.Contains(newPc)) ? newPc
-                            : 0u;
-                if (hitKey != 0u)
+                uint newPc = NormalizeToKseg0((uint)(EE.Cpu.PC & 0xFFFFFFFFUL));
+                if (Breakpoints.Contains(newPc))
                     LastBreakpointHit = newPc;
             }
             // Scheduler stays paused — caller is responsible for keeping it that way.
@@ -656,26 +653,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // the standard debugger behaviour ("break before executing X").
                 if (Breakpoints.Count > 0)
                 {
-                    uint eePc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
+                    // Normalize KSEG1 (0xA0000000–0xBFFFFFFF) to its KSEG0 equivalent
+                    // (0x80000000–0x9FFFFFFF) before checking against stored breakpoints.
+                    // Breakpoints are always stored in KSEG0 form (set via HandleSetBreakpoint
+                    // which normalizes the input), so this ensures the check fires even when
+                    // the internal EE PC is currently in the KSEG1 window (e.g. 0xBFC00000).
+                    uint eePc = NormalizeToKseg0((uint)(EE.Cpu.PC & 0xFFFFFFFFUL));
 
-                    // Normalise to physical for KSEG0 (0x80000000–0x9FFFFFFF) and
-                    // KSEG1 (0xA0000000–0xBFFFFFFF) by stripping the top 3 bits.
-                    // This ensures a breakpoint stored as a physical address (e.g.
-                    // 0x1FC00008) still fires when the CPU runs from the KSEG1 alias
-                    // (0xBFC00008), and vice-versa — providing robustness regardless
-                    // of which address form the client used when calling SETBP.
-                    uint bpKey = ((eePc & 0xC0000000u) == 0x80000000u)
-                        ? (eePc & 0x1FFFFFFFu)
-                        : eePc;
-
-                    // Check both the normalised key and the raw virtual PC so BPs
-                    // stored under either form are found.  The second Contains call
-                    // is skipped when bpKey == eePc (non-KSEG address) to avoid a
-                    // redundant hash-set lookup.
-                    uint hitKey = Breakpoints.Contains(bpKey) ? bpKey
-                                : (bpKey != eePc && Breakpoints.Contains(eePc)) ? eePc
-                                : 0u;
-                    if (hitKey != 0u)
+                    if (Breakpoints.Contains(eePc))
                     {
                         LastBreakpointHit = eePc;
                         Paused = true;
@@ -797,6 +782,23 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             uint iopCycles = eeCycles / (uint)EeToIopRatio;
             if (iopCycles > 0)
                 IOP.TickHardware(iopCycles);
+        }
+
+        // ── Address normalization ──────────────────────────────────────────────
+
+        /// <summary>
+        /// Normalize a virtual EE address to its KSEG0 representation.
+        /// KSEG1 (0xA0000000–0xBFFFFFFF, uncached) is remapped to the equivalent
+        /// KSEG0 address (0x80000000–0x9FFFFFFF, cached). Both regions map to
+        /// the same physical memory; using KSEG0 as the canonical form makes
+        /// breakpoint comparisons and PC display consistent for the client.
+        /// </summary>
+        private static uint NormalizeToKseg0(uint vaddr)
+        {
+            // KSEG1: bits[31:29] == 101 (0xA0000000–0xBFFFFFFF)
+            if ((vaddr & 0xE0000000u) == 0xA0000000u)
+                return (vaddr & 0x1FFFFFFFu) | 0x80000000u;
+            return vaddr;
         }
     }
 }

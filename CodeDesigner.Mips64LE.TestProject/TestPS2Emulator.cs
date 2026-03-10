@@ -922,6 +922,67 @@ namespace CodeDesigner.Mips64LE.TestProject
                 "EE:IOP ratio must be 4 (147.456 MHz / 36.864 MHz)");
         }
 
+        [TestMethod]
+        public void DualCpuScheduler_Breakpoint_Kseg0_FiresWhenPcIsKseg1()
+        {
+            // Breakpoint stored as KSEG0 address (0x9FC00010) must fire when the
+            // internal EE PC lands on the KSEG1 alias (0xBFC00010) — both map to
+            // the same physical BIOS ROM byte.
+            var sched = new DualCpuScheduler();
+
+            // Place NOPs in BIOS ROM so the instruction fetch succeeds.
+            uint nop = 0x00000000u;
+            sched.EE.Bus.Bios[0x10] = 0x00; // NOP word at physical 0x1FC00010
+            sched.EE.Bus.Bios[0x11] = 0x00;
+            sched.EE.Bus.Bios[0x12] = 0x00;
+            sched.EE.Bus.Bios[0x13] = 0x00;
+
+            // Start execution from the KSEG1 mirror of the same byte.
+            sched.EE.Cpu.PC = 0xBFC00010UL;
+            sched.Paused = true;
+
+            // Set breakpoint using the KSEG0 form of the address.
+            sched.Breakpoints.Add(0x9FC00010u);
+
+            // StepOne: executes one NOP and then checks whether new PC hits a BP.
+            // The BP is set one instruction ahead (0x9FC00014 ≡ 0xBFC00014);
+            // so first step advances to 0xBFC00014 — set BP there too.
+            sched.Breakpoints.Add(0x9FC00014u);
+            sched.StepOne();
+
+            // After the step the new PC should be the KSEG0-normalized form.
+            Assert.IsNotNull(sched.LastBreakpointHit,
+                "LastBreakpointHit must be set when the KSEG0-normalized PC matches a stored breakpoint");
+            Assert.AreEqual(0x9FC00014u, sched.LastBreakpointHit,
+                "LastBreakpointHit must be the KSEG0-normalized form of 0xBFC00014");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_Breakpoint_Kseg1Input_NormalizedToKseg0()
+        {
+            // A breakpoint added directly as a KSEG1 address fires when the
+            // PC lands on it via KSEG0 after NormalizePcToKseg0 canonicalizes both.
+            // This tests that the KSEG0-normalization is symmetric.
+            var sched = new DualCpuScheduler();
+
+            sched.EE.Bus.Bios[0x20] = 0x00;
+            sched.EE.Bus.Bios[0x21] = 0x00;
+            sched.EE.Bus.Bios[0x22] = 0x00;
+            sched.EE.Bus.Bios[0x23] = 0x00;
+
+            sched.EE.Cpu.PC = 0xBFC00020UL; // KSEG1
+            sched.Paused = true;
+
+            // Add breakpoint at next instruction (KSEG0 form — as SocketServer.HandleSetBreakpoint would store it).
+            sched.Breakpoints.Add(0x9FC00024u);
+            sched.StepOne();
+
+            Assert.IsNotNull(sched.LastBreakpointHit,
+                "Breakpoint at KSEG0 0x9FC00024 must fire when PC arrives at KSEG1 0xBFC00024");
+            Assert.AreEqual(0x9FC00024u, sched.LastBreakpointHit.Value,
+                "LastBreakpointHit must be returned as KSEG0-normalized 0x9FC00024");
+        }
+
         // =====================================================================
         // SIF DMA transfer (IOP↔EE handshake) tests
         // =====================================================================

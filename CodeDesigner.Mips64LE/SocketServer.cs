@@ -696,6 +696,22 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
+        /// Normalize a virtual EE address to its KSEG0 representation.
+        /// KSEG1 (0xA0000000–0xBFFFFFFF, uncached) is remapped to the equivalent
+        /// KSEG0 address (0x80000000–0x9FFFFFFF, cached) so that all PC values
+        /// and breakpoint addresses presented to the client are consistent and use
+        /// the 0x8xxxxxxx / 0x9xxxxxxx form regardless of which segment the CPU
+        /// is physically executing from.
+        /// </summary>
+        private static uint NormalizePcToKseg0(uint vaddr)
+        {
+            // KSEG1: bits[31:29] == 101 (0xA0000000–0xBFFFFFFF)
+            if ((vaddr & 0xE0000000u) == 0xA0000000u)
+                return (vaddr & 0x1FFFFFFFu) | 0x80000000u;
+            return vaddr;
+        }
+
+        /// <summary>
         /// Handle SETBP command — adds a breakpoint at the given EE address.
         /// </summary>
         private string HandleSetBreakpoint(uint? address)
@@ -704,8 +720,9 @@ namespace CodeDesigner.Mips64LE
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (address == null)
                 return CreateErrorResponse("BreakpointAddress is required for SETBP");
-            Scheduler.Breakpoints.Add(address.Value);
-            return CreateSuccessResponse($"Breakpoint set at 0x{address.Value:X8}");
+            uint normalized = NormalizePcToKseg0(address.Value);
+            Scheduler.Breakpoints.Add(normalized);
+            return CreateSuccessResponse($"Breakpoint set at 0x{normalized:X8}");
         }
 
         /// <summary>
@@ -717,8 +734,9 @@ namespace CodeDesigner.Mips64LE
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (address == null)
                 return CreateErrorResponse("BreakpointAddress is required for CLEARBP");
-            Scheduler.Breakpoints.Remove(address.Value);
-            return CreateSuccessResponse($"Breakpoint cleared at 0x{address.Value:X8}");
+            uint normalized = NormalizePcToKseg0(address.Value);
+            Scheduler.Breakpoints.Remove(normalized);
+            return CreateSuccessResponse($"Breakpoint cleared at 0x{normalized:X8}");
         }
 
         /// <summary>
@@ -734,18 +752,25 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle GETPC command — returns current EE PC and paused/breakpoint state.
+        /// The PC is normalized to KSEG0 (0x80000000–0x9FFFFFFF) so the client
+        /// always sees a consistent address regardless of whether the CPU executed
+        /// the instruction via the KSEG0 or KSEG1 virtual-address window.
         /// </summary>
         private string HandleGetPC()
         {
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
+            uint pc = NormalizePcToKseg0((uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL));
+            uint? bpHit = Scheduler.LastBreakpointHit.HasValue
+                ? NormalizePcToKseg0(Scheduler.LastBreakpointHit.Value)
+                : (uint?)null;
             var response = new CommandResponse
             {
                 Success = true,
                 Command = "GETPC",
                 Paused  = Scheduler.Paused,
-                PC      = (uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL),
-                BreakpointHitAddress = Scheduler.LastBreakpointHit,
+                PC      = pc,
+                BreakpointHitAddress = bpHit,
             };
             return JsonSerializer.Serialize(response);
         }
@@ -844,7 +869,7 @@ namespace CodeDesigner.Mips64LE
                 Success  = true,
                 Command  = "GETREGS",
                 GPR      = gpr,
-                GPR_PC   = cpu.PC & 0xFFFFFFFFUL,
+                GPR_PC   = NormalizePcToKseg0((uint)(cpu.PC & 0xFFFFFFFFUL)),
                 GPR_HI   = cpu.HI,
                 GPR_LO   = cpu.LO,
                 GPR_HI1  = cpu.HI1,
