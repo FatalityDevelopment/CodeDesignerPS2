@@ -276,6 +276,72 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
+        public void Emulator_ProblemStatement_COP2_Unknown_HandledGracefully()
+        {
+            // 0x49202300: opcode=0x12 (COP2), rs=0x09, funct=0x00
+            // COP2 rs=0x09 is not defined on the PS2 EE. The emulator must fire
+            // UnknownInstruction and advance PC without crashing.
+            uint cop2Unknown = 0x49202300u;
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000000, new[] { cop2Unknown });
+            emu.Cpu.PC = 0x00000000;
+
+            bool eventFired = false;
+            uint capturedWord = 0;
+            emu.UnknownInstruction += (_, w) => { eventFired = true; capturedWord = w; };
+
+            emu.Step();
+
+            Assert.IsTrue(eventFired, "UnknownInstruction event should fire for undefined COP2 rs=0x09");
+            Assert.AreEqual(cop2Unknown, capturedWord, "Captured word should match the undefined COP2 encoding");
+            Assert.AreEqual(4UL, emu.Cpu.PC, "PC should advance by 4 after undefined COP2 instruction");
+        }
+
+        [TestMethod]
+        public void Emulator_ProblemStatement_COP0_Unknown_HandledGracefully()
+        {
+            // 0x43414D44: opcode=0x10 (COP0), rs=0x1A, funct=0x04
+            // COP0 rs=0x1A is not a defined sub-operation on the PS2 EE. The emulator
+            // must fire UnknownInstruction and advance PC without crashing.
+            uint cop0Unknown = 0x43414D44u;
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000000, new[] { cop0Unknown });
+            emu.Cpu.PC = 0x00000000;
+
+            bool eventFired = false;
+            uint capturedWord = 0;
+            emu.UnknownInstruction += (_, w) => { eventFired = true; capturedWord = w; };
+
+            emu.Step();
+
+            Assert.IsTrue(eventFired, "UnknownInstruction event should fire for undefined COP0 rs=0x1A");
+            Assert.AreEqual(cop0Unknown, capturedWord, "Captured word should match the undefined COP0 encoding");
+            Assert.AreEqual(4UL, emu.Cpu.PC, "PC should advance by 4 after undefined COP0 instruction");
+        }
+
+        [TestMethod]
+        public void Emulator_ProblemStatement_COP1X_Unknown_HandledGracefully()
+        {
+            // 0x4E49203A: opcode=0x13 (COP1X), rs=0x12, funct=0x3A
+            // COP1X funct=0x3A is not defined on the PS2 EE. The emulator must fire
+            // UnknownInstruction and advance PC without crashing.
+            uint cop1xUnknown = 0x4E49203Au;
+            var emu = new PS2Emulator();
+            emu.LoadProgram(0x00000000, new[] { cop1xUnknown });
+            emu.Cpu.PC = 0x00000000;
+
+            bool eventFired = false;
+            uint capturedWord = 0;
+            emu.UnknownInstruction += (_, w) => { eventFired = true; capturedWord = w; };
+
+            emu.Step();
+
+            Assert.IsTrue(eventFired, "UnknownInstruction event should fire for undefined COP1X funct=0x3A");
+            Assert.AreEqual(cop1xUnknown, capturedWord, "Captured word should match the undefined COP1X encoding");
+            Assert.AreEqual(4UL, emu.Cpu.PC, "PC should advance by 4 after undefined COP1X instruction");
+        }
+
+        [TestMethod]
         public void Emulator_LoadProgram_StoresWordsCorrectly()
         {
             var emu = new PS2Emulator();

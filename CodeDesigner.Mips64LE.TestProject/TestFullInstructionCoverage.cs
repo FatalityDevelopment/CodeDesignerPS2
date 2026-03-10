@@ -2271,5 +2271,33 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.IsFalse(jDisasm.Contains(".word"),
                 $"0x0A72656D should NOT disassemble as .word (unknown), got: {jDisasm}");
         }
+
+        [TestMethod]
+        public void Test_Unknown_COP2_COP0_ProblemStatement()
+        {
+            // 0x49202300: opcode=0x12 (COP2), rs=0x09, funct=0x00
+            // COP2 rs=0x09 is not defined on the PS2 EE (PCSX2 COP2 table index 9 = COP2_Unknown).
+            // The disassembler must report it as .word with an "Unknown COP2" comment.
+            uint cop2Unknown = 0x49202300u;
+            string cop2Disasm = MipsDisassembler.Disassemble(cop2Unknown);
+            Assert.IsTrue(cop2Disasm.Contains(".word"),
+                $"0x49202300 (COP2 rs=0x09) should disassemble as .word, got: {cop2Disasm}");
+            Assert.IsTrue(cop2Disasm.Contains("COP2"),
+                $"0x49202300 unknown COP2 should mention COP2 in comment, got: {cop2Disasm}");
+            Assert.IsTrue(cop2Disasm.Contains("0x09"),
+                $"0x49202300 unknown COP2 comment should include rs=0x09, got: {cop2Disasm}");
+
+            // 0x43414D44: opcode=0x10 (COP0), rs=0x1A, funct=0x04
+            // rs=0x1A (26) is not a defined COP0 sub-operation on the PS2 EE.
+            // The disassembler must report it as .word with an "Unknown COP0" comment.
+            uint cop0Unknown = 0x43414D44u;
+            string cop0Disasm = MipsDisassembler.Disassemble(cop0Unknown);
+            Assert.IsTrue(cop0Disasm.Contains(".word"),
+                $"0x43414D44 (COP0 rs=0x1A) should disassemble as .word, got: {cop0Disasm}");
+            Assert.IsTrue(cop0Disasm.Contains("COP0"),
+                $"0x43414D44 unknown COP0 should mention COP0 in comment, got: {cop0Disasm}");
+            Assert.IsTrue(cop0Disasm.Contains("0x1A"),
+                $"0x43414D44 unknown COP0 comment should include rs=0x1A, got: {cop0Disasm}");
+        }
     }
 }
