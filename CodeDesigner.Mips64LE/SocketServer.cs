@@ -700,8 +700,48 @@ namespace CodeDesigner.Mips64LE
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (!Scheduler.Paused)
                 return CreateErrorResponse("Emulator must be paused to single-step");
+
+            // Capture the PC and instruction word *before* stepping so we can
+            // analyze the instruction with the actual pre-execution register state.
+            uint prePc = (uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+            uint instrWord = 0;
+            string? analysisComment = null;
+            try
+            {
+                instrWord = Scheduler.EE.Bus.ReadWord(prePc);
+                // Snapshot register state before execution; Bus/COP0 are not needed for analysis.
+                var cpuSnap = Scheduler.EE.Cpu.CreateAnalysisSnapshot();
+                analysisComment = MipsAnalyzer.AnalyzeSingleInstruction(instrWord, prePc, cpuSnap);
+            }
+            catch { /* If we can't read the instruction, skip analysis */ }
+
             Scheduler.StepOne();
-            return HandleGetPC();
+
+            // Build the response with the PC update and the live analysis.
+            uint pc = NormalizePcToKseg0((uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL));
+            uint? bpHit = Scheduler.LastBreakpointHit.HasValue
+                ? NormalizePcToKseg0(Scheduler.LastBreakpointHit.Value)
+                : (uint?)null;
+            var response = new CommandResponse
+            {
+                Success = true,
+                Command = "STEP",
+                Paused  = Scheduler.Paused,
+                PC      = pc,
+                BreakpointHitAddress = bpHit,
+            };
+
+            // Attach analysis if we produced a non-empty comment.
+            if (!string.IsNullOrEmpty(analysisComment))
+            {
+                uint normalizedPrePc = NormalizePcToKseg0(prePc);
+                response.InstructionAnalysis = new Dictionary<string, string>
+                {
+                    [normalizedPrePc.ToString("X8")] = analysisComment
+                };
+            }
+
+            return JsonSerializer.Serialize(response);
         }
 
         /// <summary>
@@ -1979,6 +2019,14 @@ namespace CodeDesigner.Mips64LE
         public List<SearchMatch>?   Matches   { get; set; }
         // GETTHREADS
         public List<ThreadEntry>?   Threads   { get; set; }
+
+        /// <summary>
+        /// Per-address analysis comments produced when an instruction executes with
+        /// the real register state (keyed by hex address string, e.g. "80001234").
+        /// Populated by STEP to let the frontend update the analysis column
+        /// without reloading the full disassembly page.
+        /// </summary>
+        public Dictionary<string, string>? InstructionAnalysis { get; set; }
     }
 
     /// <summary>

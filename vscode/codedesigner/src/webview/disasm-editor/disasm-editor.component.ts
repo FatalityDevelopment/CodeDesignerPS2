@@ -436,6 +436,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (symScanFunctionsBtn) { symScanFunctionsBtn.disabled = false; }
     });
 
+    svc.analysisUpdated$.subscribe(() => {
+      // Re-render so the updated analysis comments are visible immediately.
+      renderDisassembly();
+    });
+
     // Tell the extension host we are ready; it will (re-)send init + first page.
     // VsCodeBridgeService buffers any messages that arrive before subscriptions
     // are set up, so no messages are lost.

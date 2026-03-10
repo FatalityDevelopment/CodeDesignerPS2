@@ -168,6 +168,9 @@ interface CommandResponse {
     Matches?:   SearchMatch[];
     // GETTHREADS
     Threads?: ThreadEntry[];
+    // Per-address analysis comments produced when an instruction executes.
+    // Keyed by hex address string (e.g. "80001234"), value is the analysis comment.
+    InstructionAnalysis?: Record<string, string>;
 }
 
 /**
@@ -652,9 +655,11 @@ export class SocketClient {
 
     /**
      * Execute exactly one EE instruction while keeping the emulator paused.
-     * Returns the new PC / paused / breakpoint state.
+     * Returns the new PC / paused / breakpoint state and any per-address
+     * analysis comments produced by executing the instruction with the real
+     * register state.
      */
-    public async step(): Promise<{ paused: boolean; pc: number; breakpointHitAddress?: number }> {
+    public async step(): Promise<{ paused: boolean; pc: number; breakpointHitAddress?: number; instructionAnalysis?: Record<string, string> }> {
         const command: CommandMessage = { Command: 'STEP' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -664,6 +669,7 @@ export class SocketClient {
             paused: response.Paused ?? true,
             pc: response.PC ?? 0,
             breakpointHitAddress: response.BreakpointHitAddress,
+            instructionAnalysis: response.InstructionAnalysis,
         };
     }
 
