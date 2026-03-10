@@ -586,6 +586,70 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     // No region found — tell the requesting panel so it can show "out of range".
                     panel.webview.postMessage({ type: 'gotoRegionNotFound', address: addr });
                 }
+            } else if (message.type === 'patchBytes') {
+                if (this.socketClient?.isConnected()) {
+                    try {
+                        await this.socketClient.writeMemory(
+                            message.address as number,
+                            message.hexBytes as string,
+                            'ee'
+                        );
+                        // Recompute the page that contains this address and refresh it.
+                        const instrIndex = Math.floor(
+                            ((message.address as number) - baseAddress) / DisasmEditorProvider.INSTRUCTION_SIZE
+                        );
+                        const pageStart = Math.floor(instrIndex / DisasmEditorProvider.PAGE_SIZE)
+                            * DisasmEditorProvider.PAGE_SIZE;
+                        await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, pageStart);
+                    } catch (err: any) {
+                        console.error(`[LIVE] PatchBytes failed: ${err?.message ?? err}`);
+                    }
+                }
+            } else if (message.type === 'setRegister') {
+                if (this.socketClient?.isConnected()) {
+                    try {
+                        await this.socketClient.setRegister(
+                            message.regType as string,
+                            message.regIdx as number,
+                            message.regValue as string
+                        );
+                        // Re-fetch and broadcast the updated register state.
+                        const regs = await this.socketClient.getRegisters();
+                        const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29] ?? 0;
+                        let stackBytes: number[] = [];
+                        let stackBase  = 0;
+                        if (sp) {
+                            try {
+                                const buf = await this.socketClient.readMemory(sp, 128, 'ee');
+                                stackBytes = Array.from(buf);
+                                stackBase  = sp;
+                            } catch { /* ignore */ }
+                        }
+                        panel.webview.postMessage({
+                            type: 'status', paused: true, pc: regs.pc,
+                            registers: regs, stackBytes, stackBase,
+                        });
+                    } catch (err: any) {
+                        console.error(`[LIVE] SetRegister failed: ${err?.message ?? err}`);
+                    }
+                }
+            } else if (message.type === 'disasmBytes') {
+                // Quick disassembly preview for the bytes editor in the edit overlay.
+                if (this.socketClient?.isConnected()) {
+                    try {
+                        const results = await this.socketClient.disassemble(
+                            message.hexBytes as string,
+                            message.address as number
+                        );
+                        const first = results?.[0];
+                        panel.webview.postMessage({
+                            type: 'disasmBytesResult',
+                            preview: first?.Success && first.Assembly ? first.Assembly.trim() : '(invalid)',
+                        });
+                    } catch { /* ignore */ }
+                }
+            } else if (message.type === 'saveLabel') {
+                await this.handleSaveLabel(panel, message.address, message.newLabel ?? '', message.newComment ?? '');
             } else if (message.type === 'syncGotoInput') {
                 // Propagate the goto-input value to all other live panels so every
                 // region panel stays in sync when the user types an address.

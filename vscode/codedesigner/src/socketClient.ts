@@ -15,6 +15,9 @@ interface CommandMessage {
     Comment?: string;
     Query?: string;
     SearchMode?: string;
+    RegisterName?: string;
+    RegisterIndex?: number;
+    RegisterValue?: string;
 }
 
 /**
@@ -57,8 +60,13 @@ export interface SearchMatch {
  * Register dump returned by GETREGS
  */
 export interface RegisterDump {
-    // GPR
-    gpr: number[];       // 32 GPR values (lower 64 bits as JS number)
+    // GPR (lower 32 bits only — use gprLo32/gprHi32 for full 64-bit precision)
+    gpr: number[];
+    // 128-bit GPR precise representation as four uint32 arrays
+    gprLo32: number[];    // bits[31:0]  of RegsLo[i]
+    gprHi32: number[];    // bits[63:32] of RegsLo[i]
+    gprUpLo32: number[];  // bits[31:0]  of RegsHi[i] (upper 64-bit lane)
+    gprUpHi32: number[];  // bits[63:32] of RegsHi[i]
     pc: number;
     hi: number;
     lo: number;
@@ -117,6 +125,11 @@ interface CommandResponse {
     BreakpointHitAddress?: number;
     // GETREGS fields
     GPR?: number[];
+    // Precise 32-bit halves of each 128-bit GPR (no floating-point precision loss)
+    GPR_Lo32?: number[];
+    GPR_Hi32?: number[];
+    GPR_UpLo32?: number[];
+    GPR_UpHi32?: number[];
     GPR_PC?: number;
     GPR_HI?: number;
     GPR_LO?: number;
@@ -676,6 +689,10 @@ export class SocketClient {
         }
         return {
             gpr:        response.GPR        ?? new Array(32).fill(0),
+            gprLo32:    response.GPR_Lo32   ?? new Array(32).fill(0),
+            gprHi32:    response.GPR_Hi32   ?? new Array(32).fill(0),
+            gprUpLo32:  response.GPR_UpLo32 ?? new Array(32).fill(0),
+            gprUpHi32:  response.GPR_UpHi32 ?? new Array(32).fill(0),
             pc:         response.GPR_PC     ?? 0,
             hi:         response.GPR_HI     ?? 0,
             lo:         response.GPR_LO     ?? 0,
@@ -708,6 +725,44 @@ export class SocketClient {
             vu0Clip:    response.VU0_Clip   ?? 0,
             gsPriv:     response.GS_Priv    ?? new Array(19).fill(0),
         };
+    }
+
+    /**
+     * Write raw bytes to live EE or IOP memory.
+     * @param address  Target virtual address
+     * @param hexBytes Byte data as a hex string (e.g. "24020005" or "24 02 00 05")
+     * @param region   'ee' (default) or 'iop'
+     */
+    public async writeMemory(address: number, hexBytes: string, region: string = 'ee'): Promise<void> {
+        const command: CommandMessage = {
+            Command: 'WRITEMEM',
+            Address: address,
+            Data:    hexBytes,
+            Region:  region,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'WriteMemory failed');
+        }
+    }
+
+    /**
+     * Update a single EE CPU register.
+     * @param name   Register type: 'GPR', 'PC', 'HI', 'LO', 'HI1', 'LO1', 'SA', 'COP0', 'FPR'
+     * @param index  Register index (0-31 for GPR/COP0/FPR; ignored for PC/HI/LO/…)
+     * @param value  New value as a decimal string or "0x"-prefixed hex string
+     */
+    public async setRegister(name: string, index: number, value: string): Promise<void> {
+        const command: CommandMessage = {
+            Command:       'SETREG',
+            RegisterName:  name,
+            RegisterIndex: index,
+            RegisterValue: value,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'SetRegister failed');
+        }
     }
 
     /**

@@ -51,6 +51,11 @@ export interface RegisterData {
   hi1?: number; lo1?: number;
   sa?: number;
   gpr?: number[];
+  // Precise 32-bit halves of each 128-bit GPR (see RegisterDump for field semantics)
+  gprLo32?: number[];
+  gprHi32?: number[];
+  gprUpLo32?: number[];
+  gprUpHi32?: number[];
   cop0Regs?: number[];
   fpr?: number[];
   fprAcc?: number;

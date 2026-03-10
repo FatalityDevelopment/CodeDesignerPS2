@@ -1181,3 +1181,21 @@ app-hex-view {
     background: #505050;
 }
 
+
+/* Edit overlay preview line (shows disassembled instruction for current bytes) */
+.edit-overlay-preview {
+    font-family: monospace;
+    font-size: 11px;
+    color: #569cd6;
+    padding: 2px 0 4px 0;
+    min-height: 14px;
+    white-space: pre;
+}
+
+/* Register value editable indicator */
+.dbg-editable {
+    cursor: pointer;
+}
+.dbg-editable:hover {
+    color: #569cd6;
+}
