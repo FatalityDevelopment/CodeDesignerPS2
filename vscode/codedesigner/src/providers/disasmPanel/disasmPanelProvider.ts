@@ -888,7 +888,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Append a cheat-list entry (from a live disasm panel "Send to Cheat List" click)
+     * Append a cheat-list entry (e.g. from the disasm editor "Send to Cheat List" button)
      * to the cheat textarea in the cheats tab and switch to that tab.
      */
     public appendToCheatList(entry: string): void {

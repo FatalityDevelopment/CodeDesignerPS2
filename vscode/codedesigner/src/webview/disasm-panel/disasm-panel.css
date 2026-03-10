@@ -300,12 +300,6 @@ button:disabled {
     white-space: nowrap;
 }
 
-.open-snapshot-btn {
-    padding: 2px 8px;
-    font-size: 11px;
-    flex-shrink: 0;
-}
-
 .reload-snapshot-btn {
     padding: 2px 8px;
     font-size: 11px;
@@ -318,11 +312,8 @@ button:disabled {
     background: var(--vscode-button-secondaryHoverBackground, #45494e);
 }
 
-.section-label {
+.open-snapshot-btn {
+    padding: 2px 8px;
     font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--vscode-descriptionForeground);
-    margin: 12px 0 4px;
+    flex-shrink: 0;
 }
