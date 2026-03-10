@@ -2010,5 +2010,266 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.IsTrue(cpu.COP1.GetConditionCode(),
                 "C.LE.S: denormal <= denormal should be 0 <= 0 = true after flush");
         }
+
+        // -----------------------------------------------------------------------
+        // COP1X (opcode=0x13) instructions — indexed FPR load/store and fused FP ops
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Test_LWXC1()
+        {
+            // lwxc1 $f2, $t1($t0): opcode=0x13, base=$t0(8), index=$t1(9), fd=$f2, funct=0x00
+            uint enc = (uint)((0x13 << 26) | (8 << 21) | (9 << 16) | (2 << 11) | 0x00);
+            AssertDisasm(enc, "lwxc1");
+            byte[] mem = new byte[256];
+            // Store float 2.5 at offset 0x08 (base=0, index=8)
+            uint floatBits = BitConverter.SingleToUInt32Bits(2.5f);
+            mem[8] = (byte)(floatBits & 0xFF); mem[9] = (byte)((floatBits >> 8) & 0xFF);
+            mem[10] = (byte)((floatBits >> 16) & 0xFF); mem[11] = (byte)((floatBits >> 24) & 0xFF);
+            var cpu = MakeCpu(mem);
+            cpu.RegsLo[8] = 0;  // base = 0
+            cpu.RegsLo[9] = 8;  // index = 8
+            Exec(cpu, enc);
+            Assert.AreEqual(2.5f, cpu.FPR[2], 0.001f, "LWXC1: loaded 2.5 from base+index");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_LDXC1()
+        {
+            // ldxc1 $f4, $t1($t0): opcode=0x13, base=$t0(8), index=$t1(9), fd=$f4, funct=0x01
+            uint enc = (uint)((0x13 << 26) | (8 << 21) | (9 << 16) | (4 << 11) | 0x01);
+            AssertDisasm(enc, "ldxc1");
+            byte[] mem = new byte[256];
+            uint lo = BitConverter.SingleToUInt32Bits(1.5f);
+            uint hi = BitConverter.SingleToUInt32Bits(3.5f);
+            for (int i = 0; i < 4; i++) mem[8 + i] = (byte)((lo >> (i * 8)) & 0xFF);
+            for (int i = 0; i < 4; i++) mem[12 + i] = (byte)((hi >> (i * 8)) & 0xFF);
+            var cpu = MakeCpu(mem);
+            cpu.RegsLo[8] = 0; cpu.RegsLo[9] = 8;
+            Exec(cpu, enc);
+            Assert.AreEqual(1.5f, cpu.FPR[4], 0.001f, "LDXC1: loaded low word into fd");
+            Assert.AreEqual(3.5f, cpu.FPR[5], 0.001f, "LDXC1: loaded high word into fd+1");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_LUXC1()
+        {
+            // luxc1 $f2, $t1($t0): opcode=0x13, base=$t0(8), index=$t1(9), fd=$f2, funct=0x05
+            // This is also the encoding of the first value from the problem statement (with different registers/fd)
+            uint enc = (uint)((0x13 << 26) | (8 << 21) | (9 << 16) | (2 << 11) | 0x05);
+            AssertDisasm(enc, "luxc1");
+            byte[] mem = new byte[256];
+            uint floatBits = BitConverter.SingleToUInt32Bits(4.0f);
+            // LUXC1 aligns to word boundary; base=0, index=8 → addr=8 (already aligned)
+            for (int i = 0; i < 4; i++) mem[8 + i] = (byte)((floatBits >> (i * 8)) & 0xFF);
+            var cpu = MakeCpu(mem);
+            cpu.RegsLo[8] = 0; cpu.RegsLo[9] = 8;
+            Exec(cpu, enc);
+            Assert.AreEqual(4.0f, cpu.FPR[2], 0.001f, "LUXC1: loaded 4.0 from aligned base+index");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_SWXC1()
+        {
+            // swxc1 $f3, $t1($t0): opcode=0x13, base=$t0(8), index=$t1(9), fs=$f3(shamt), funct=0x08
+            uint enc = (uint)((0x13 << 26) | (8 << 21) | (9 << 16) | (3 << 6) | 0x08);
+            AssertDisasm(enc, "swxc1");
+            byte[] mem = new byte[256];
+            var cpu = MakeCpu(mem);
+            cpu.RegsLo[8] = 0; cpu.RegsLo[9] = 8;
+            cpu.FPR[3] = 7.0f;
+            Exec(cpu, enc);
+            uint stored = BitConverter.ToUInt32(mem, 8);
+            Assert.AreEqual(7.0f, BitConverter.UInt32BitsToSingle(stored), 0.001f, "SWXC1: stored 7.0 at base+index");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_SDXC1()
+        {
+            // sdxc1 $f4, $t1($t0): opcode=0x13, base=$t0(8), index=$t1(9), fs=$f4(shamt), funct=0x09
+            uint enc = (uint)((0x13 << 26) | (8 << 21) | (9 << 16) | (4 << 6) | 0x09);
+            AssertDisasm(enc, "sdxc1");
+            byte[] mem = new byte[256];
+            var cpu = MakeCpu(mem);
+            cpu.RegsLo[8] = 0; cpu.RegsLo[9] = 8;
+            cpu.FPR[4] = 5.0f; cpu.FPR[5] = 6.0f;
+            Exec(cpu, enc);
+            float lo = BitConverter.UInt32BitsToSingle(BitConverter.ToUInt32(mem, 8));
+            float hi = BitConverter.UInt32BitsToSingle(BitConverter.ToUInt32(mem, 12));
+            Assert.AreEqual(5.0f, lo, 0.001f, "SDXC1: stored FPR[4] at base+index");
+            Assert.AreEqual(6.0f, hi, 0.001f, "SDXC1: stored FPR[5] at base+index+4");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_SUXC1()
+        {
+            // suxc1 $f3, $t1($t0): opcode=0x13, base=$t0(8), index=$t1(9), fs=$f3(shamt), funct=0x0D
+            uint enc = (uint)((0x13 << 26) | (8 << 21) | (9 << 16) | (3 << 6) | 0x0D);
+            AssertDisasm(enc, "suxc1");
+            byte[] mem = new byte[256];
+            var cpu = MakeCpu(mem);
+            cpu.RegsLo[8] = 0; cpu.RegsLo[9] = 8;  // aligned address
+            cpu.FPR[3] = 9.0f;
+            Exec(cpu, enc);
+            uint stored = BitConverter.ToUInt32(mem, 8);
+            Assert.AreEqual(9.0f, BitConverter.UInt32BitsToSingle(stored), 0.001f, "SUXC1: stored 9.0 at aligned base+index");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_PREFX()
+        {
+            // prefx 0, $t1($t0): opcode=0x13, base=$t0(8), index=$t1(9), hint=0, funct=0x0F
+            uint enc = (uint)((0x13 << 26) | (8 << 21) | (9 << 16) | 0x0F);
+            AssertDisasm(enc, "prefx");
+            var cpu = MakeCpu();
+            ulong pcBefore = cpu.PC;
+            Exec(cpu, enc);  // no-op; CPU state unchanged
+            Assert.AreEqual(pcBefore, cpu.PC, "PREFX: PC unchanged (hint/nop)");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_COP1X_MADD_S()
+        {
+            // madd.s $f4, $f0, $f1, $f2: fr=$f0(rs=0), ft=$f2(rt=2), fd=$f4(rd=4), fs=$f1(shamt=1), funct=0x20
+            // fd = fr*fs + ft => $f4 = $f0*$f1 + $f2
+            uint enc = (uint)((0x13 << 26) | (0 << 21) | (2 << 16) | (4 << 11) | (1 << 6) | 0x20);
+            AssertDisasm(enc, "madd.s");
+            var cpu = MakeCpu();
+            cpu.FPR[0] = 3.0f;  // fr
+            cpu.FPR[1] = 2.0f;  // fs
+            cpu.FPR[2] = 1.0f;  // ft
+            Exec(cpu, enc);
+            Assert.AreEqual(7.0f, cpu.FPR[4], 0.001f, "MADD.S: 3*2+1=7");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_COP1X_MADD_D()
+        {
+            // madd.d $f4, $f0, $f1, $f2: funct=0x21
+            uint enc = (uint)((0x13 << 26) | (0 << 21) | (2 << 16) | (4 << 11) | (1 << 6) | 0x21);
+            AssertDisasm(enc, "madd.d");
+            var cpu = MakeCpu();
+            cpu.FPR[0] = 2.0f; cpu.FPR[1] = 4.0f; cpu.FPR[2] = 0.5f;
+            Exec(cpu, enc);
+            Assert.AreEqual(8.5f, cpu.FPR[4], 0.001f, "MADD.D: 2*4+0.5=8.5");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_COP1X_MSUB_S()
+        {
+            // msub.s $f4, $f0, $f1, $f2: funct=0x28 — fd = fr*fs - ft
+            uint enc = (uint)((0x13 << 26) | (0 << 21) | (2 << 16) | (4 << 11) | (1 << 6) | 0x28);
+            AssertDisasm(enc, "msub.s");
+            var cpu = MakeCpu();
+            cpu.FPR[0] = 3.0f; cpu.FPR[1] = 2.0f; cpu.FPR[2] = 1.0f;
+            Exec(cpu, enc);
+            Assert.AreEqual(5.0f, cpu.FPR[4], 0.001f, "MSUB.S: 3*2-1=5");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_COP1X_MSUB_D()
+        {
+            // msub.d $f4, $f0, $f1, $f2: funct=0x29
+            uint enc = (uint)((0x13 << 26) | (0 << 21) | (2 << 16) | (4 << 11) | (1 << 6) | 0x29);
+            AssertDisasm(enc, "msub.d");
+            var cpu = MakeCpu();
+            cpu.FPR[0] = 5.0f; cpu.FPR[1] = 3.0f; cpu.FPR[2] = 4.0f;
+            Exec(cpu, enc);
+            Assert.AreEqual(11.0f, cpu.FPR[4], 0.001f, "MSUB.D: 5*3-4=11");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_COP1X_NMADD_S()
+        {
+            // nmadd.s $f4, $f0, $f1, $f2: funct=0x30 — fd = -(fr*fs + ft)
+            uint enc = (uint)((0x13 << 26) | (0 << 21) | (2 << 16) | (4 << 11) | (1 << 6) | 0x30);
+            AssertDisasm(enc, "nmadd.s");
+            var cpu = MakeCpu();
+            cpu.FPR[0] = 3.0f; cpu.FPR[1] = 2.0f; cpu.FPR[2] = 1.0f;
+            Exec(cpu, enc);
+            Assert.AreEqual(-7.0f, cpu.FPR[4], 0.001f, "NMADD.S: -(3*2+1)=-7");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_COP1X_NMADD_D()
+        {
+            // nmadd.d funct=0x31
+            uint enc = (uint)((0x13 << 26) | (0 << 21) | (2 << 16) | (4 << 11) | (1 << 6) | 0x31);
+            AssertDisasm(enc, "nmadd.d");
+            var cpu = MakeCpu();
+            cpu.FPR[0] = 2.0f; cpu.FPR[1] = 4.0f; cpu.FPR[2] = 0.5f;
+            Exec(cpu, enc);
+            Assert.AreEqual(-8.5f, cpu.FPR[4], 0.001f, "NMADD.D: -(2*4+0.5)=-8.5");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_COP1X_NMSUB_S()
+        {
+            // nmsub.s $f4, $f0, $f1, $f2: funct=0x38 — fd = -(fr*fs - ft)
+            uint enc = (uint)((0x13 << 26) | (0 << 21) | (2 << 16) | (4 << 11) | (1 << 6) | 0x38);
+            AssertDisasm(enc, "nmsub.s");
+            var cpu = MakeCpu();
+            cpu.FPR[0] = 3.0f; cpu.FPR[1] = 2.0f; cpu.FPR[2] = 1.0f;
+            Exec(cpu, enc);
+            Assert.AreEqual(-5.0f, cpu.FPR[4], 0.001f, "NMSUB.S: -(3*2-1)=-5");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_COP1X_NMSUB_D()
+        {
+            // nmsub.d funct=0x39
+            uint enc = (uint)((0x13 << 26) | (0 << 21) | (2 << 16) | (4 << 11) | (1 << 6) | 0x39);
+            AssertDisasm(enc, "nmsub.d");
+            var cpu = MakeCpu();
+            cpu.FPR[0] = 5.0f; cpu.FPR[1] = 3.0f; cpu.FPR[2] = 4.0f;
+            Exec(cpu, enc);
+            Assert.AreEqual(-11.0f, cpu.FPR[4], 0.001f, "NMSUB.D: -(5*3-4)=-11");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_ProblemStatement_Hex_Values()
+        {
+            // Verify the three hex values from the problem statement are now properly decoded.
+
+            // 0x4F4C4545: opcode=0x13 (COP1X), funct=0x05 => LUXC1
+            uint luxc1Enc = 0x4F4C4545u;
+            string luxc1Disasm = MipsDisassembler.Disassemble(luxc1Enc);
+            Assert.IsTrue(luxc1Disasm.ToLowerInvariant().Contains("luxc1"),
+                $"0x4F4C4545 should disassemble as luxc1, got: {luxc1Disasm}");
+            Assert.IsFalse(luxc1Disasm.Contains(".word"),
+                $"0x4F4C4545 should NOT disassemble as .word (unknown), got: {luxc1Disasm}");
+
+            // 0x4E49203A: opcode=0x13 (COP1X), funct=0x3A => no defined COP1X instruction
+            // Should disassemble as .word with Unknown COP1X comment (not a valid instruction)
+            uint unknownEnc = 0x4E49203Au;
+            string unknownDisasm = MipsDisassembler.Disassemble(unknownEnc);
+            Assert.IsTrue(unknownDisasm.Contains(".word"),
+                $"0x4E49203A has undefined COP1X funct=0x3A and should disassemble as .word, got: {unknownDisasm}");
+            Assert.IsTrue(unknownDisasm.Contains("COP1X"),
+                $"0x4E49203A unknown COP1X should mention COP1X in comment, got: {unknownDisasm}");
+
+            // 0x0A72656D: opcode=0x02 => J instruction (already supported)
+            uint jEnc = 0x0A72656Du;
+            string jDisasm = MipsDisassembler.Disassemble(jEnc);
+            Assert.IsTrue(jDisasm.ToLowerInvariant().Contains("j ") || jDisasm.ToLowerInvariant().StartsWith("j "),
+                $"0x0A72656D should disassemble as j (jump), got: {jDisasm}");
+            Assert.IsFalse(jDisasm.Contains(".word"),
+                $"0x0A72656D should NOT disassemble as .word (unknown), got: {jDisasm}");
+        }
     }
 }

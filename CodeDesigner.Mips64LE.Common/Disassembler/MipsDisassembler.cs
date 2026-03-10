@@ -27,6 +27,8 @@ namespace CodeDesigner.Mips64LE.Common
         private static readonly Dictionary<int, Instruction<Args_I>> Bc1BranchInstructions = new();
         // MMI sub-instructions (opcode=0x1C, funct=MMI group, shamt=sub-opcode)
         private static readonly Dictionary<(int funct, int shamt), Instruction<Args_R>> MmiSubInstructions = new();
+        // COP1X instructions (opcode=0x13): funct alone selects the instruction; rs/rt are variable registers
+        private static readonly Dictionary<int, Instruction<Args_R>> Cop1XInstructions = new();
 
         static MipsDisassembler()
         {
@@ -453,6 +455,23 @@ namespace CodeDesigner.Mips64LE.Common
             RegisterMmiSub(new PNOR(),    0x29, 0x13);
             RegisterMmiSub(new PEXCH(),   0x29, 0x1A);
             RegisterMmiSub(new PEXCW(),   0x29, 0x1E);
+
+            // COP1X instructions (opcode = 0x13): indexed FPR load/store and fused multiply ops
+            RegisterCop1X(new LWXC1());          // funct=0x00: Load Word Indexed to FPR
+            RegisterCop1X(new LDXC1());          // funct=0x01: Load Doubleword Indexed to FPR
+            RegisterCop1X(new LUXC1());          // funct=0x05: Load Unaligned Word Indexed to FPR
+            RegisterCop1X(new SWXC1());          // funct=0x08: Store Word Indexed from FPR
+            RegisterCop1X(new SDXC1());          // funct=0x09: Store Doubleword Indexed from FPR
+            RegisterCop1X(new SUXC1());          // funct=0x0D: Store Unaligned Word Indexed from FPR
+            RegisterCop1X(new PREFX());          // funct=0x0F: Prefetch Indexed (hint/NOP)
+            RegisterCop1X(new COP1X_MADD_S());   // funct=0x20: Fused Multiply-Add Single
+            RegisterCop1X(new COP1X_MADD_D());   // funct=0x21: Fused Multiply-Add Double
+            RegisterCop1X(new COP1X_MSUB_S());   // funct=0x28: Fused Multiply-Subtract Single
+            RegisterCop1X(new COP1X_MSUB_D());   // funct=0x29: Fused Multiply-Subtract Double
+            RegisterCop1X(new COP1X_NMADD_S());  // funct=0x30: Negative Fused Multiply-Add Single
+            RegisterCop1X(new COP1X_NMADD_D());  // funct=0x31: Negative Fused Multiply-Add Double
+            RegisterCop1X(new COP1X_NMSUB_S());  // funct=0x38: Negative Fused Multiply-Subtract Single
+            RegisterCop1X(new COP1X_NMSUB_D());  // funct=0x39: Negative Fused Multiply-Subtract Double
         }
 
         private static void RegisterR(Instruction<Args_R> instr)
@@ -483,6 +502,11 @@ namespace CodeDesigner.Mips64LE.Common
         private static void RegisterMmiSub(Instruction<Args_R> instr, int funct, int shamt)
         {
             MmiSubInstructions[(funct, shamt)] = instr;
+        }
+
+        private static void RegisterCop1X(Instruction<Args_R> instr)
+        {
+            Cop1XInstructions[instr.Funct ?? 0] = instr;
         }
 
         /// <summary>
@@ -578,7 +602,14 @@ namespace CodeDesigner.Mips64LE.Common
                     }
                 }
 
-                return $".word 0x{instruction:X8}  # Unknown COP{opcode - 0x10} (rs=0x{rs:X2}, funct=0x{funct:X2})";
+                // COP1X (opcode=0x13): funct alone selects the instruction; rs/rt are variable registers
+                if (opcode == 0x13 && Cop1XInstructions.TryGetValue(funct, out var cop1xInstr))
+                {
+                    var args = MipsDecoder.DecodeR(instruction);
+                    return cop1xInstr.Disasm(args, pc);
+                }
+
+                return $".word 0x{instruction:X8}  # Unknown {(opcode == 0x13 ? "COP1X" : $"COP{opcode - 0x10}")} (rs=0x{rs:X2}, funct=0x{funct:X2})";
             }
 
             // Check for J-type instructions
@@ -696,6 +727,13 @@ namespace CodeDesigner.Mips64LE.Common
                         var args = MipsDecoder.DecodeI(instruction);
                         return (bc1Instr, args);
                     }
+                }
+
+                // COP1X (opcode=0x13): funct alone selects the instruction; rs/rt are variable registers
+                if (op == 0x13 && Cop1XInstructions.TryGetValue(funct, out var cop1xInstr))
+                {
+                    var args = MipsDecoder.DecodeR(instruction);
+                    return (cop1xInstr, args);
                 }
 
                 return (null, null);
