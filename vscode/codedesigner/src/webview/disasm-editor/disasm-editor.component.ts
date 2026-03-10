@@ -268,12 +268,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     let _editOverlayAddr = 0;
     let _editOverlayAddrHex = '';
 
-    // Render the hex view immediately with placeholder all-zero data so the
-    // panel looks populated at launch before the emulator connects.
-    // Using renderHexView() ensures the placeholder uses the identical rendering
-    // path as live data (same CSS classes, same highlight logic, same structure).
-    renderHexView(new Array(128).fill(0), 0);
-
     // ── State ─────────────────────────────────────────────────────────────────
     const state = {
       cursor: 0,
@@ -310,6 +304,46 @@ export class DisasmEditorComponent implements AfterViewInit {
     const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
     const getPageStart = (index: number) => Math.floor(index / state.pageSize) * state.pageSize;
     const getLocalIndex = (index: number) => index - getPageStart(index);
+
+    // ── Placeholder data ──────────────────────────────────────────────────────
+    // Pre-populate both panels with fake data that exactly mimics the format the
+    // extension host sends.  This makes the view look correct at launch (before
+    // the emulator connects) and ensures cursor navigation + byte highlighting
+    // work with the placeholder.  Real data from 'init'/'disasmPage'/'hexview'
+    // messages seamlessly replaces the placeholder when the emulator connects.
+    //
+    // Constants mirror the provider:
+    //   HEX_VIEW_SIZE   = 0x30 (48 bytes = 3 rows)
+    //   PAGE_SIZE       = 1000 rows
+    //   BASE_ADDRESS    = 0x00000000
+    {
+      const PLACEHOLDER_HEX_SIZE   = 0x30;  // matches DisasmEditorProvider.HEX_VIEW_SIZE
+      const PLACEHOLDER_PAGE_SIZE  = 1000;  // matches DisasmEditorProvider.PAGE_SIZE
+      const PLACEHOLDER_BASE       = 0x00000000;
+      const PLACEHOLDER_INSTR_SIZE = 4;     // 4 bytes per MIPS instruction
+
+      state.hexData   = new Array(PLACEHOLDER_HEX_SIZE).fill(0);
+      state.hexOffset = PLACEHOLDER_BASE;
+      state.totalInstructions = PLACEHOLDER_PAGE_SIZE;
+      state.baseAddress = PLACEHOLDER_BASE;
+
+      const placeholderRows: DisasmRow[] = [];
+      for (let i = 0; i < PLACEHOLDER_PAGE_SIZE; i++) {
+        placeholderRows.push({
+          addr:    (PLACEHOLDER_BASE + i * PLACEHOLDER_INSTR_SIZE).toString(16).toUpperCase().padStart(8, '0'),
+          bytes:   '00000000',
+          label:   '',
+          op:      'nop',
+          args:    '',
+          comment: '',
+        });
+      }
+      state.disasmRows = placeholderRows;
+      state.loadedPages.set(0, placeholderRows);
+
+      renderHexView(state.hexData, state.hexOffset);
+      renderDisassembly();
+    }
 
     // ── Message handler ───────────────────────────────────────────────────────
     window.addEventListener('message', ({ data: msg }: MessageEvent) => {
