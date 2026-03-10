@@ -180,11 +180,16 @@ namespace CodeDesigner.Mips64LE
             embeddedServer.ClientDisconnected += (_, _) => Console.WriteLine("[Server] Client disconnected");
             var serverTask = Task.Run(() => embeddedServer.StartAsync());
 
-            Console.WriteLine("Emulator starting at reset vector.");
+            Console.WriteLine("Emulator starting at reset vector — paused, waiting for client.");
+
+            // Start paused so that a connecting client can register breakpoints before
+            // the first instruction executes.  The extension sends RESUME after the
+            // live memory views have initialised and re-sent all stored breakpoints.
+            scheduler.Paused = true;
 
             // ── Run loop ──────────────────────────────────────────────────────
             Console.WriteLine();
-            Console.WriteLine("Emulator running. Press Ctrl+C to stop.");
+            Console.WriteLine("Emulator ready. Waiting for client to resume…");
             if (maxSteps != long.MaxValue)
                 Console.WriteLine($"Step limit: {maxSteps:N0} EE steps.");
             Console.WriteLine();
@@ -985,6 +990,10 @@ namespace CodeDesigner.Mips64LE
 
                         embeddedServer.Scheduler = newScheduler;
 
+                        // Start paused so the client can re-register breakpoints
+                        // before execution resumes from the reset vector.
+                        scheduler.Paused = true;
+
                         // Reset run-loop diagnostics.
                         totalSteps        = 0;
                         nextReport        = ReportEvery;
@@ -1008,7 +1017,7 @@ namespace CodeDesigner.Mips64LE
                         iopICtrlPollCount   = 0;
                         iopSeenPcs.Clear();
 
-                        Console.WriteLine("[Restart] Emulator reinitialised — running from reset vector.");
+                        Console.WriteLine("[Restart] Emulator reinitialised — paused at reset vector, waiting for client to resume.");
                         continue;
                     }
 
