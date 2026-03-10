@@ -19,11 +19,6 @@ interface SnapshotEntry {
 }
 
 /** Memory regions exposed as separate editor windows when the emulator is running. */
-/** Milliseconds to wait after opening views before sending RESUME.
- *  Gives the Angular webview time to bootstrap, process the 'init' message,
- *  and re-send stored breakpoints to the server before execution starts. */
-const BREAKPOINT_REGISTRATION_DELAY_MS = 800;
-
 const LIVE_REGIONS = [
     // EE Main RAM: show via the uncached direct-mapped window (0x20000000–0x21FFFFFF).
     // The PS2 kernel TLB maps physical RAM here without caching, so user-mode code
@@ -427,30 +422,54 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         try {
             await this.socketClient.restart();
-            out.appendLine('[INFO] Emulator restarted — paused at reset vector, re-opening views…');
+            out.appendLine('[INFO] Emulator restarted — re-opening views and registering breakpoints…');
 
             // Re-initialize every live panel with fresh data from the restarted
             // scheduler (RAM is freshly zeroed, BIOS ROM is reloaded).
-            // openLiveMemoryView() reuses existing panels and sends them a new
-            // 'init' message, which triggers the webview to re-register any
-            // stored breakpoints with the new server-side scheduler.
             for (const r of LIVE_REGIONS) {
                 await this.editorProvider.openLiveMemoryView(
                     r.region, r.address, r.size, r.label);
             }
 
-            // After a short pause to allow Angular to process the 'init' message
-            // and re-send breakpoints, auto-resume from the reset vector.
-            setTimeout(() => {
-                if (this.socketClient.isConnected()) {
-                    this.socketClient.resume().catch(() => { /* ignore */ });
-                    out.appendLine('[INFO] Emulator resumed from reset vector.');
-                }
-            }, BREAKPOINT_REGISTRATION_DELAY_MS);
+            // Re-register all known breakpoints then resume deterministically.
+            await this._registerBreakpointsAndResume();
         } catch (err: any) {
             out.appendLine(`[ERROR] Restart failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Restart failed: ${err?.message ?? err}`);
         }
+    }
+
+    /**
+     * Re-sends every breakpoint the user has set (tracked in the extension process,
+     * not the Angular webview) to the C# server, then sends RESUME.
+     *
+     * Because each SETBP is awaited, the server has processed all of them before
+     * RESUME arrives — the emulator is guaranteed to start with all BPs armed.
+     * This replaces the fragile fixed-delay approach that raced Angular bootstrap.
+     */
+    private async _registerBreakpointsAndResume(): Promise<void> {
+        const out = getOutputChannel();
+        if (!this.socketClient.isConnected()) { return; }
+        const bps = this.editorProvider.getKnownBreakpoints();
+        for (const bp of bps) {
+            try {
+                await this.socketClient.setBreakpoint(bp);
+            } catch (err: any) {
+                // Socket dropped mid-loop — stop registering; the next connect will retry.
+                out.appendLine(`[WARN] Breakpoint registration interrupted at 0x${bp.toString(16).toUpperCase()}: ${err?.message ?? err}`);
+                return;
+            }
+        }
+        if (bps.size > 0) {
+            out.appendLine(`[INFO] Registered ${bps.size} breakpoint(s) on server.`);
+        }
+        this.socketClient.resume().catch((err: any) => {
+            // Ignore "already running" responses; log anything unexpected.
+            const msg: string = err?.message ?? String(err);
+            if (!msg.toLowerCase().includes('already')) {
+                out.appendLine(`[WARN] Resume after BP registration: ${msg}`);
+            }
+        });
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────
@@ -530,16 +549,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
-        // The emulator starts paused at the reset vector.  Wait long enough
-        // for the webview Angular app to bootstrap, process the 'init' message,
-        // and re-send any stored breakpoints to the server, then auto-resume.
-        // This ensures breakpoints set before connecting are registered before
-        // the first instruction executes.
-        setTimeout(() => {
-            if (this.socketClient.isConnected()) {
-                this.socketClient.resume().catch(() => { /* ignore if already running */ });
-            }
-        }, BREAKPOINT_REGISTRATION_DELAY_MS);
+        // The emulator starts paused.  Re-register every breakpoint the user has
+        // set (tracked in the extension process, no Angular roundtrip needed), then
+        // immediately resume.  Because the SETBP commands are awaited, the server
+        // has acknowledged all of them before RESUME is sent — no timing dependency.
+        await this._registerBreakpointsAndResume();
     }
 
     /**

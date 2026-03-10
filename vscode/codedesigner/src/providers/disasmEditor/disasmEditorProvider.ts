@@ -36,6 +36,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }> = [];
 
   /**
+   * All breakpoints the user has toggled across all live panels.  Persisted here
+   * in the extension process so they can be reliably re-sent to the C# server on
+   * every connect/reconnect/restart — without depending on the Angular webview
+   * being bootstrapped or having processed an 'init' message first.
+   */
+  private _knownBreakpoints: Set<number> = new Set();
+
+  /**
    * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
    * Set by DisasmPanelProvider so it can update the sidebar status bar.
    */
@@ -51,6 +59,16 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public notifyPauseState(paused: boolean): void {
     this._broadcastStatus(paused);
+  }
+
+  /**
+   * Returns a snapshot of all breakpoints the user has set across all live
+   * panels.  Used by DisasmPanelProvider to re-register BPs with the C# server
+   * on every connect/restart — before sending RESUME — so no timing dependency
+   * on Angular bootstrap.
+   */
+  public getKnownBreakpoints(): ReadonlySet<number> {
+    return this._knownBreakpoints;
   }
 
   /**
@@ -393,18 +411,21 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     vscode.window.showWarningMessage(`Could not resume emulator: ${msg}`);
                 }
             } else if (message.type === 'setBreakpoint') {
+                this._knownBreakpoints.add(message.address);
                 try {
                     await this.socketClient!.setBreakpoint(message.address);
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to set breakpoint: ${err?.message ?? err}`);
                 }
             } else if (message.type === 'clearBreakpoint') {
+                this._knownBreakpoints.delete(message.address);
                 try {
                     await this.socketClient!.clearBreakpoint(message.address);
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to clear breakpoint: ${err?.message ?? err}`);
                 }
             } else if (message.type === 'clearAllBreakpoints') {
+                this._knownBreakpoints.clear();
                 try {
                     await this.socketClient!.clearAllBreakpoints();
                 } catch (err: any) {
