@@ -931,7 +931,6 @@ namespace CodeDesigner.Mips64LE.TestProject
             var sched = new DualCpuScheduler();
 
             // Place NOPs in BIOS ROM so the instruction fetch succeeds.
-            uint nop = 0x00000000u;
             sched.EE.Bus.Bios[0x10] = 0x00; // NOP word at physical 0x1FC00010
             sched.EE.Bus.Bios[0x11] = 0x00;
             sched.EE.Bus.Bios[0x12] = 0x00;

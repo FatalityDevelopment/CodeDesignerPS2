@@ -155,6 +155,12 @@ export class DisasmEditorService implements OnDestroy {
   readonly labelsUpdated$           = new Subject<void>();
   readonly stringsUpdated$          = new Subject<void>();
   readonly functionsUpdated$        = new Subject<void>();
+  /** Fired when the extension host instructs this panel to navigate to an address. */
+  readonly gotoAddressReceived$     = new Subject<{ address: number }>();
+  /** Fired when another panel syncs its goto-input value to this panel. */
+  readonly syncGotoInputReceived$   = new Subject<{ value: string }>();
+  /** Fired when the extension host reports that no region was found for the requested address. */
+  readonly gotoRegionNotFoundReceived$ = new Subject<{ address: number }>();
 
   private readonly _subs: Subscription[] = [];
 
@@ -170,6 +176,9 @@ export class DisasmEditorService implements OnDestroy {
       this._bridge.on<Record<string, unknown>>('labelsUpdated').subscribe(msg => this._onLabelsUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('stringsUpdated').subscribe(msg => this._onStringsUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('functionsUpdated').subscribe(msg => this._onFunctionsUpdated(msg)),
+      this._bridge.on<Record<string, unknown>>('gotoAddress').subscribe(msg => this.gotoAddressReceived$.next({ address: msg['address'] as number })),
+      this._bridge.on<Record<string, unknown>>('syncGotoInput').subscribe(msg => this.syncGotoInputReceived$.next({ value: msg['value'] as string })),
+      this._bridge.on<Record<string, unknown>>('gotoRegionNotFound').subscribe(msg => this.gotoRegionNotFoundReceived$.next({ address: msg['address'] as number })),
     );
   }
 
