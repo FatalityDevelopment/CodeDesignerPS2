@@ -107,18 +107,26 @@ Then reference the binary in settings:
 | `disassemble` | Disassemble hex opcodes to MIPS EE assembly |
 | `assemble` | Assemble MIPS EE instructions to hex opcodes |
 | `read_memory` | Read raw bytes from live emulator memory |
+| `write_memory` | Write arbitrary bytes to live emulator memory |
 | `disassemble_memory` | Read + disassemble a range of emulator memory |
 | `get_pc` | Get current program counter and pause state |
 | `get_registers` | Dump all GPRs, COP0, COP1 FPU, and VU0 registers |
+| `set_register` | Write a new value to any EE CPU register |
 | `get_labels` | List all symbols from the PS2 symbol database |
-| `scan_strings` | Scan a memory region for ASCII strings |
-| `scan_functions` | Detect function entry points in a memory region |
-| `search` | Search memory/disassembly for text or regex |
+| `add_label` | Insert or update a symbol label |
+| `delete_label` | Remove a symbol label |
+| `get_threads` | Enumerate EE OS threads (status, PC, SP, priority) |
+| `scan_strings` | Scan live memory for null-terminated ASCII strings |
+| `scan_functions` | Detect function entry points in live memory |
+| `search` | Search live memory or disassembly for text/regex/bytes |
 | `pause_emulator` | Pause CPU execution |
 | `resume_emulator` | Resume CPU execution |
+| `step` | Execute one EE instruction while paused |
+| `restart_emulator` | Full hardware reset without dropping the connection |
 | `set_breakpoint` | Set a breakpoint at a virtual address |
 | `clear_breakpoint` | Remove a breakpoint |
 | `clear_all_breakpoints` | Remove all breakpoints |
+| `snapshot` | Save a full memory snapshot (EE RAM, BIOS, IOP RAM) to disk |
 
 ---
 
@@ -131,6 +139,13 @@ Once registered you can ask Copilot things like:
 - *"Show me the current register state"*
 - *"Assemble: `addiu $sp,$sp,-0x30 / sw $ra,0x28($sp)`"*
 - *"Scan memory from 0x80000000 for 0x10000 bytes and find all strings"*
+- *"Step through the next 5 instructions and show me the PC after each one"*
+- *"Set register $a0 to 0x80010000"*
+- *"Write the bytes `27 BD FF D0 AF BF 00 1C` to address 0x80010000"*
+- *"Add a label 'scePadRead' at 0x800112F4"*
+- *"Show me all currently running threads"*
+- *"Take a memory snapshot and save it to /tmp/ps2-snapshot"*
+- *"Restart the emulator and set a breakpoint at 0x80010000"*
 
 ---
 

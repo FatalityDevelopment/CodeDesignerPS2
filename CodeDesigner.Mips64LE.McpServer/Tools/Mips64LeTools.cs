@@ -364,6 +364,163 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
         return SimpleMessage(json);
     }
 
+    [McpServerTool(Name = "step")]
+    [Description("Execute exactly one EE instruction while keeping the emulator paused. " +
+                 "The emulator must already be paused (use pause_emulator or set a breakpoint first). " +
+                 "Returns the new program counter and pause state after the step.")]
+    public async Task<string> Step(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "STEP" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+
+            var pc = root.TryGetProperty("PC", out var pcProp) ? pcProp.GetUInt32() : 0u;
+            var paused = root.TryGetProperty("Paused", out var pProp) && pProp.GetBoolean();
+            return $"Stepped → PC = 0x{pc:X8} | Paused = {paused}";
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    [McpServerTool(Name = "restart_emulator")]
+    [Description("Perform a full hardware reset of the PS2 emulator without dropping the socket connection. " +
+                 "The BIOS and disc image are reloaded, existing breakpoints are preserved, " +
+                 "and the emulator is left paused at the reset vector (0xBFC00000).")]
+    public async Task<string> RestartEmulator(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "RESTART" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Register and memory writes
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "set_register")]
+    [Description("Write a new value to a named EE CPU register. " +
+                 "RegisterName: GPR (requires RegisterIndex 1–31), PC, HI, LO, HI1, LO1, SA, " +
+                 "COP0 (requires RegisterIndex 0–31), FPR (requires RegisterIndex 0–31), " +
+                 "FCR (only FCR31/FCSR is writable), VU0I (requires RegisterIndex 0–15), " +
+                 "VU0F (requires RegisterIndex 0–31, writes the X component). " +
+                 "Values may be decimal or 0x-prefixed hex.")]
+    public async Task<string> SetRegister(
+        [Description("Register type: GPR, PC, HI, LO, HI1, LO1, SA, COP0, FPR, FCR, VU0I, or VU0F.")] string registerName,
+        [Description("New register value (decimal or 0x-prefixed hex).")] string value,
+        [Description("Register index (required for GPR 1–31, COP0 0–31, FPR 0–31, VU0I 0–15, VU0F 0–31).")] int? index = null,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "SETREG", RegisterName = registerName, RegisterIndex = index, RegisterValue = value },
+            cancellationToken);
+
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "write_memory")]
+    [Description("Write arbitrary bytes to live PS2 emulator memory. " +
+                 "Bytes are supplied as a hex string (spaces, commas, and '0x' prefixes are accepted). " +
+                 "Supports EE main RAM, scratchpad, and IOP RAM.")]
+    public async Task<string> WriteMemory(
+        [Description("Virtual address to write to (hex or decimal).")] string address,
+        [Description("Hex-encoded bytes to write, e.g. '27BD FFD0 AFBF 001C' or '0x27,0xBD,0xFF,0xD0'.")] string hexData,
+        [Description("Memory region: 'ee' for EE main RAM/scratchpad (default) or 'iop' for IOP RAM.")] string region = "ee",
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedAddress = TryParseAddress(address);
+        if (parsedAddress is null)
+            return $"Error: invalid address '{address}'. Use hex (0x80010000) or decimal.";
+
+        var json = await bridge.SendAsync(
+            new { Command = "WRITEMEM", Address = parsedAddress.Value, Data = hexData, Region = region },
+            cancellationToken);
+
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Label management
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "add_label")]
+    [Description("Insert or update a symbol label in the PS2 label database (ps2-labels.json). " +
+                 "If a label already exists at the given address it is overwritten. " +
+                 "Changes are persisted to disk immediately.")]
+    public async Task<string> AddLabel(
+        [Description("Virtual address to label (hex or decimal).")] string address,
+        [Description("Label name (e.g. 'scePadRead' or 'FNC_0x80011234').")] string label,
+        [Description("Optional comment to attach to the label.")] string? comment = null,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedAddress = TryParseAddress(address);
+        if (parsedAddress is null)
+            return $"Error: invalid address '{address}'.";
+
+        var json = await bridge.SendAsync(
+            new { Command = "ADDLABEL", Address = parsedAddress.Value, Label = label, Comment = comment },
+            cancellationToken);
+
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "delete_label")]
+    [Description("Remove a symbol label from the PS2 label database (ps2-labels.json). " +
+                 "Changes are persisted to disk immediately.")]
+    public async Task<string> DeleteLabel(
+        [Description("Virtual address of the label to remove (hex or decimal).")] string address,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedAddress = TryParseAddress(address);
+        if (parsedAddress is null)
+            return $"Error: invalid address '{address}'.";
+
+        var json = await bridge.SendAsync(
+            new { Command = "DELETELABEL", Address = parsedAddress.Value },
+            cancellationToken);
+
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Thread inspection
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "get_threads")]
+    [Description("Enumerate PS2 EE OS threads by walking the kernel thread control block (TCB) pool. " +
+                 "Returns thread ID, status (Running/Ready/Waiting/Suspended/Dormant), " +
+                 "current PC, stack pointer, priority, and entry point for each thread found. " +
+                 "If no OS threads are found a single synthetic entry for the live CPU state is returned.")]
+    public async Task<string> GetThreads(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETTHREADS" }, cancellationToken);
+        return FormatThreads(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Snapshot
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "snapshot")]
+    [Description("Save a full memory snapshot of the running PS2 emulator to a directory on disk. " +
+                 "Writes four binary files: EEmem.bin (32 MB EE RAM), BIOSrom.bin (4 MB BIOS), " +
+                 "Scratchpad.bin (16 KB), and IOPmem.bin (IOP RAM). " +
+                 "The output directory is created if it does not exist.")]
+    public async Task<string> Snapshot(
+        [Description("Absolute path to the output directory where snapshot files will be written.")] string outputPath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "SNAPSHOT", OutputPath = outputPath },
+            cancellationToken);
+
+        return FormatSnapshot(json);
+    }
+
     // -------------------------------------------------------------------------
     // Private formatting helpers
     // -------------------------------------------------------------------------
@@ -679,6 +836,72 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
             }
 
             return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no matches)";
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private static string FormatThreads(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var errProp))
+                return $"Error: {errProp.GetString()}";
+
+            if (!root.TryGetProperty("Threads", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== EE Threads ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                int id = item.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : -1;
+                string status = item.TryGetProperty("status", out var stProp) ? (stProp.GetString() ?? "?") : "?";
+                uint pc = item.TryGetProperty("pc", out var pcProp) ? pcProp.GetUInt32() : 0u;
+                uint sp = item.TryGetProperty("sp", out var spProp) ? spProp.GetUInt32() : 0u;
+                int pri = item.TryGetProperty("priority", out var priProp) ? priProp.GetInt32() : 0;
+                uint entry = item.TryGetProperty("entryPc", out var eProp) ? eProp.GetUInt32() : 0u;
+                sb.AppendLine($"  Thread {id,-3}  [{status,-9}]  PC=0x{pc:X8}  SP=0x{sp:X8}  Pri={pri,-3}  Entry=0x{entry:X8}");
+            }
+
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no threads found)";
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private static string FormatSnapshot(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var errProp))
+                return $"Error: {errProp.GetString()}";
+
+            if (!root.TryGetProperty("Regions", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Snapshot written:");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string label = item.TryGetProperty("label", out var lProp) ? (lProp.GetString() ?? "?") : "?";
+                string file = item.TryGetProperty("file", out var fProp) ? (fProp.GetString() ?? "?") : "?";
+                uint baseA = item.TryGetProperty("baseAddress", out var bProp) ? bProp.GetUInt32() : 0u;
+                int size = item.TryGetProperty("size", out var sProp) ? sProp.GetInt32() : 0;
+                sb.AppendLine($"  [{label}]  base=0x{baseA:X8}  size={size / 1024} KB  → {file}");
+            }
+
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
         }
         catch
         {
