@@ -14,6 +14,9 @@ interface SnapshotEntry {
   label: string;
   timestamp: string;
   path: string;
+  name: string;
+  date: string;
+  isoName: string;
 }
 
 /** Message sent by the provider when connection state changes. */
@@ -32,6 +35,7 @@ interface PausedMsg {
 interface UpdateSnapshotsMsg {
   type: 'updateSnapshots';
   snapshots: SnapshotEntry[];
+  gameName?: string;
 }
 
 /** Message sent by the provider with initial panel data (options, existing snapshots). */
@@ -42,6 +46,7 @@ interface InitMsg {
   gameOptions: EmuOption[];
   snapshots: SnapshotEntry[];
   connectedEmulatorPath?: string;
+  selectedGameName?: string;
 }
 
 @Component({
@@ -106,12 +111,17 @@ interface InitMsg {
     <button id="snapshotBtn" (click)="snapshot()" [disabled]="!isConnected">Take Snapshot</button>
   </div>
 
-  <div *ngIf="snapshots.length > 0" class="snapshot-list">
-    <h4>Snapshots</h4>
-    <div *ngFor="let snap of snapshots" class="snapshot-item">
-      <span class="snapshot-label">{{snap.label}}</span>
-      <span class="snapshot-time">{{snap.timestamp}}</span>
-      <button class="open-snapshot-btn" (click)="openSnapshot(snap)">Open</button>
+  <div class="snapshot-list">
+    <h4>Snapshots<span *ngIf="currentGameName" class="snapshot-game-name"> — {{currentGameName}}</span></h4>
+    <div *ngIf="snapshots.length === 0" class="snapshot-empty">No snapshots yet</div>
+    <div class="snapshot-scroll">
+      <div *ngFor="let snap of snapshots" class="snapshot-item">
+        <div class="snapshot-item-info">
+          <span class="snapshot-label">{{snap.name || snap.label}}</span>
+          <span class="snapshot-date-time">{{snap.date}} {{snap.timestamp}}</span>
+        </div>
+        <button class="open-snapshot-btn" (click)="openSnapshot(snap)">Open</button>
+      </div>
     </div>
   </div>
 
@@ -128,6 +138,7 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   selectedEmulator = '';
   selectedBios = '';
   selectedGame = '';
+  currentGameName = '';
   private subs: Subscription[] = [];
 
   get statusText(): string {
@@ -148,13 +159,16 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       }),
       this.bridge.on<UpdateSnapshotsMsg>('updateSnapshots').subscribe(msg => {
         this.snapshots = msg.snapshots ?? [];
+        if (msg.gameName !== undefined) { this.currentGameName = msg.gameName; }
       }),
       this.bridge.on<InitMsg>('init').subscribe(msg => {
         if (msg.emulators?.length)  { this.emulators    = msg.emulators;    }
         if (msg.biosOptions?.length){ this.biosOptions   = msg.biosOptions;  }
         if (msg.gameOptions?.length){ this.gameOptions   = msg.gameOptions;  }
-        if (msg.snapshots?.length)  { this.snapshots     = msg.snapshots;    }
+        // Always sync snapshot list (may be empty array to clear old entries)
+        if (msg.snapshots !== undefined) { this.snapshots = msg.snapshots; }
         if (msg.connectedEmulatorPath) { this.selectedEmulator = msg.connectedEmulatorPath; }
+        if (msg.selectedGameName !== undefined) { this.currentGameName = msg.selectedGameName; }
       })
     );
     // Signal to the provider that subscriptions are set up and we are ready

@@ -27,7 +27,7 @@ namespace CodeDesigner.Mips64LE
         private CancellationTokenSource? _cancellationTokenSource;
 
         /// <summary>
-        /// Symbol/label database loaded from ps2-labels.json at construction time.
+        /// Symbol/label database loaded from ps2MemMap.json at construction time.
         /// Key = virtual address (uint), Value = (Label, optional Comment).
         /// </summary>
         private readonly Dictionary<uint, (string Label, string? Comment)> _labels = new();
@@ -74,7 +74,7 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Load PS2 symbol labels from ps2-labels.json.
+        /// Load PS2 symbol labels from ps2MemMap.json.
         /// Searches the application base directory first, then the current working
         /// directory, so the file can be placed next to the built executable or in
         /// the directory from which the process was launched.
@@ -83,6 +83,9 @@ namespace CodeDesigner.Mips64LE
         {
             var searchPaths = new[]
             {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
+                Path.Combine(Directory.GetCurrentDirectory(), "ps2MemMap.json"),
+                // backward-compat: also check old filename
                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2-labels.json"),
                 Path.Combine(Directory.GetCurrentDirectory(), "ps2-labels.json")
             };
@@ -2180,15 +2183,15 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Persist the current in-memory label dictionary back to the first ps2-labels.json
+        /// Persist the current in-memory label dictionary back to the first ps2MemMap.json
         /// file that was found at startup (or the base-directory path as a fallback).
         /// </summary>
         private void SaveLabels()
         {
             var searchPaths = new[]
             {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2-labels.json"),
-                Path.Combine(Directory.GetCurrentDirectory(),       "ps2-labels.json")
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
+                Path.Combine(Directory.GetCurrentDirectory(),       "ps2MemMap.json")
             };
 
             string savePath = searchPaths[0];
@@ -2388,7 +2391,7 @@ namespace CodeDesigner.Mips64LE
         public string? Hex { get; set; }
         public string? Error { get; set; }
         public string? Comment { get; set; }  // Added for analyzer-generated comments
-        public string? Label { get; set; }    // Symbol label from ps2-labels.json
+        public string? Label { get; set; }    // Symbol label from ps2MemMap.json
     }
 
     /// <summary>One entry in the label/symbol database.</summary>

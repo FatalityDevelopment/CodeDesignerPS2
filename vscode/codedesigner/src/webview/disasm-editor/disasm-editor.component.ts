@@ -193,22 +193,33 @@ import './disasm-editor.css';
             <button id="edit-overlay-close" title="Close (Escape)">&#xD7;</button>
         </div>
         <div id="edit-overlay-info"></div>
-        <div class="edit-overlay-field">
-            <label class="edit-overlay-label" for="edit-overlay-bytes-in">Bytes (hex)</label>
-            <input type="text" id="edit-overlay-bytes-in" class="edit-overlay-input" placeholder="e.g. 24020005" spellcheck="false" />
+        <div id="edit-overlay-tabs">
+            <button class="edit-overlay-tab active" data-tab="edit">Edit</button>
+            <button class="edit-overlay-tab" data-tab="history">History</button>
         </div>
-        <div id="edit-overlay-disasm-preview" class="edit-overlay-preview"></div>
-        <div class="edit-overlay-field">
-            <label class="edit-overlay-label" for="edit-overlay-label-input">Label</label>
-            <input type="text" id="edit-overlay-label-input" class="edit-overlay-input" placeholder="Label name (leave empty to remove)" />
+        <div id="edit-overlay-tab-edit" class="edit-overlay-tab-content active">
+            <div class="edit-overlay-field">
+                <label class="edit-overlay-label" for="edit-overlay-bytes-in">Bytes (hex)</label>
+                <input type="text" id="edit-overlay-bytes-in" class="edit-overlay-input" placeholder="e.g. 24020005" spellcheck="false" />
+            </div>
+            <div id="edit-overlay-disasm-preview" class="edit-overlay-preview"></div>
+            <div class="edit-overlay-field">
+                <label class="edit-overlay-label" for="edit-overlay-label-input">Label</label>
+                <input type="text" id="edit-overlay-label-input" class="edit-overlay-input" placeholder="Label name (leave empty to remove)" />
+            </div>
+            <div class="edit-overlay-field">
+                <label class="edit-overlay-label" for="edit-overlay-comment-input">Comment</label>
+                <input type="text" id="edit-overlay-comment-input" class="edit-overlay-input" placeholder="Comment (leave empty to remove)" />
+            </div>
+            <div id="edit-overlay-actions">
+                <button id="edit-overlay-save">Save</button>
+                <button id="edit-overlay-cancel">Cancel</button>
+            </div>
         </div>
-        <div class="edit-overlay-field">
-            <label class="edit-overlay-label" for="edit-overlay-comment-input">Comment</label>
-            <input type="text" id="edit-overlay-comment-input" class="edit-overlay-input" placeholder="Comment (leave empty to remove)" />
-        </div>
-        <div id="edit-overlay-actions">
-            <button id="edit-overlay-save">Save</button>
-            <button id="edit-overlay-cancel">Cancel</button>
+        <div id="edit-overlay-tab-history" class="edit-overlay-tab-content">
+            <div id="edit-overlay-history-list" class="edit-overlay-history-list">
+                <div class="edit-overlay-history-empty">Loading history...</div>
+            </div>
         </div>
     </div>
 </div>
@@ -314,6 +325,18 @@ export class DisasmEditorComponent implements AfterViewInit {
     const editOverlaySave      = document.getElementById('edit-overlay-save')!;
     const editOverlayCancel    = document.getElementById('edit-overlay-cancel')!;
     const editOverlayClose     = document.getElementById('edit-overlay-close')!;
+    const editOverlayHistoryList = document.getElementById('edit-overlay-history-list')!;
+
+    // Tab switching in the edit overlay
+    editOverlay.querySelectorAll('.edit-overlay-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = (btn as HTMLElement).dataset['tab'];
+            editOverlay.querySelectorAll('.edit-overlay-tab').forEach(b => b.classList.remove('active'));
+            editOverlay.querySelectorAll('.edit-overlay-tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('edit-overlay-tab-' + tab)?.classList.add('active');
+        });
+    });
 
     let _editOverlayAddr = 0;
     let _editOverlayAddrHex = '';
@@ -569,6 +592,14 @@ export class DisasmEditorComponent implements AfterViewInit {
       editOverlayDisasmPreview.textContent = '';
       editOverlayLabelIn.value = currentLabel || '';
       editOverlayCommentIn.value = currentComment || '';
+      // Switch to the Edit tab by default
+      editOverlay.querySelectorAll('.edit-overlay-tab').forEach(b => b.classList.remove('active'));
+      editOverlay.querySelectorAll('.edit-overlay-tab-content').forEach(c => c.classList.remove('active'));
+      editOverlay.querySelector('.edit-overlay-tab[data-tab="edit"]')?.classList.add('active');
+      document.getElementById('edit-overlay-tab-edit')?.classList.add('active');
+      // Reset history tab to loading state and request history
+      editOverlayHistoryList.innerHTML = '<div class="edit-overlay-history-empty">Loading history...</div>';
+      vscode.postMessage({ type: 'getAddressHistory', address });
       editOverlay.classList.add('visible');
       editOverlayBytesIn.focus();
       editOverlayBytesIn.select();
@@ -619,6 +650,21 @@ export class DisasmEditorComponent implements AfterViewInit {
       const data = e.data as Record<string, unknown>;
       if (data?.['type'] === 'disasmBytesResult') {
         editOverlayDisasmPreview.textContent = (data['preview'] as string) ?? '';
+      } else if (data?.['type'] === 'addressHistoryResult') {
+        const history = data['history'] as Array<{ name: string; date: string; value: string }> | undefined;
+        if (!history || history.length === 0) {
+          editOverlayHistoryList.innerHTML = '<div class="edit-overlay-history-empty">No snapshot history for this address.</div>';
+        } else {
+          let html = '';
+          for (const h of history) {
+            html += `<div class="edit-overlay-history-row">`;
+            html += `<span class="edit-overlay-history-value">${h.value}</span>`;
+            html += `<span class="edit-overlay-history-name">${h.name}</span>`;
+            html += `<span class="edit-overlay-history-date">${h.date}</span>`;
+            html += `</div>`;
+          }
+          editOverlayHistoryList.innerHTML = html;
+        }
       }
     });
     editOverlay.addEventListener('click', (e: MouseEvent) => {
