@@ -272,6 +272,13 @@ export class DisasmEditorComponent implements AfterViewInit {
     // even before hex data arrives from the extension host.
     hexHeader.appendChild(buildHexHeader());
 
+    // Populate the hex container with placeholder all-zero rows so the hex
+    // panel shows data immediately at launch (before the emulator connects).
+    const placeholderBytes = new Array(128).fill(0);
+    for (let pi = 0; pi < placeholderBytes.length; pi += 16) {
+      hexContainer.appendChild(buildHexRow(placeholderBytes, 0, pi, -1, 4));
+    }
+
     // ── State ─────────────────────────────────────────────────────────────────
     const state = {
       cursor: 0,
