@@ -2299,5 +2299,21 @@ namespace CodeDesigner.Mips64LE.TestProject
             Assert.IsTrue(cop0Disasm.Contains("0x1A"),
                 $"0x43414D44 unknown COP0 comment should include rs=0x1A, got: {cop0Disasm}");
         }
+
+        [TestMethod]
+        public void Test_OpCode1D_ProblemStatement_Disassembly()
+        {
+            // 0x74726574: opcode=0x1D — undefined in the PS2 EE R5900 standard opcode
+            // table (confirmed via PCSX2 R5900OpcodeTables.cpp: tbl_Standard[0x1D] = Unknown).
+            // The disassembler must report it as .word with an "Unknown" and opcode comment.
+            uint enc = 0x74726574u;
+            string disasm = MipsDisassembler.Disassemble(enc);
+            Assert.IsTrue(disasm.Contains(".word"),
+                $"0x74726574 (opcode=0x1D) should disassemble as .word, got: {disasm}");
+            Assert.IsTrue(disasm.Contains("0x74726574"),
+                $"0x74726574 output should echo the raw encoding, got: {disasm}");
+            Assert.IsTrue(disasm.Contains("1D") || disasm.Contains("0x1D"),
+                $"0x74726574 output should identify opcode 0x1D, got: {disasm}");
+        }
     }
 }

@@ -253,92 +253,89 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
-        public void Emulator_UnknownInstruction_RaisesEvent()
+        public void Emulator_UnknownInstruction_RaisesEventAndDispatchesRI()
         {
             uint unknownWord = 0;
             var emu = new PS2Emulator();
 
-            // Write a clearly invalid opcode at a RAM address.
-            // Opcode 0x1D is reserved and not used by any PS2 instruction,
-            // guaranteeing GetInstructionObject returns (null, null).
+            // Write a clearly invalid opcode at a known address.
+            // Opcode 0x1D is reserved and has no defined PS2 EE instruction.
             uint badWord = 0x74000000u; // opcode = 0x1D (= 29)
-            emu.LoadProgram(0x00000000, new[] { badWord });
-            emu.Cpu.PC = 0x00000000;
+            emu.LoadProgram(0x00000200, new[] { badWord });
+            emu.Cpu.PC = 0x00000200;
+
+            // Ensure BEV=0 so we can predict the exception vector (0x80000080).
+            emu.Cpu.COP0.WriteRegister32(12, 0u); // Status = 0 → BEV=0
 
             bool eventFired = false;
             emu.UnknownInstruction += (_, w) => { unknownWord = w; eventFired = true; };
 
             emu.Step();
 
+            // The UnknownInstruction event must still fire to allow external notification.
             Assert.IsTrue(eventFired, "UnknownInstruction event should fire");
-            Assert.AreEqual(badWord, unknownWord);
-            Assert.AreEqual(4UL, emu.Cpu.PC, "PC should still advance after unknown instruction");
+            Assert.AreEqual(badWord, unknownWord, "Event payload should be the offending word");
+
+            // Per MIPS architecture, executing an undefined opcode raises a
+            // Reserved Instruction exception (ExcCode = 10).
+            uint cause = emu.Cpu.COP0.ReadRegister32(13);
+            uint excCode = (cause >> 2) & 0x1Fu;
+            Assert.AreEqual(10u, excCode, "Cause.ExcCode must be 10 (ReservedInstr)");
+
+            // EPC should point to the faulting instruction.
+            ulong epc = emu.Cpu.COP0.ReadRegister64(14);
+            Assert.AreEqual(0x200UL, epc, "EPC must point to the faulting instruction");
+
+            // Status.EXL must be set (we are now in exception mode).
+            uint status = emu.Cpu.COP0.ReadRegister32(12);
+            Assert.IsTrue((status & (1u << 1)) != 0, "Status.EXL must be set after RI exception");
+
+            // With BEV=0, the general exception vector is 0x80000080.
+            Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
+                "PC must be redirected to the general exception vector (BEV=0 → 0x80000080)");
         }
 
+        /// <summary>
+        /// Verifies that each encoding from the problem statement raises a proper
+        /// Reserved Instruction exception (ExcCode=10) per MIPS architecture.
+        /// </summary>
         [TestMethod]
-        public void Emulator_ProblemStatement_COP2_Unknown_HandledGracefully()
+        public void Emulator_UndefinedOpcodes_DispatchReservedInstructionException()
         {
-            // 0x49202300: opcode=0x12 (COP2), rs=0x09, funct=0x00
-            // COP2 rs=0x09 is not defined on the PS2 EE. The emulator must fire
-            // UnknownInstruction and advance PC without crashing.
-            uint cop2Unknown = 0x49202300u;
-            var emu = new PS2Emulator();
-            emu.LoadProgram(0x00000000, new[] { cop2Unknown });
-            emu.Cpu.PC = 0x00000000;
+            // All four problem-statement encodings are undefined in the PS2 EE:
+            //   0x74726574 — opcode=0x1D  (reserved in PS2 EE standard table)
+            //   0x4E49203A — COP1X funct=0x3A  (no such COP1X on R5900)
+            //   0x49202300 — COP2  rs=0x09      (COP2_Unknown in PCSX2)
+            //   0x43414D44 — COP0  rs=0x1A      (COP0_Unknown in PCSX2)
+            uint[] undefinedWords = { 0x74726574u, 0x4E49203Au, 0x49202300u, 0x43414D44u };
 
-            bool eventFired = false;
-            uint capturedWord = 0;
-            emu.UnknownInstruction += (_, w) => { eventFired = true; capturedWord = w; };
+            foreach (uint word in undefinedWords)
+            {
+                var emu = new PS2Emulator();
+                emu.LoadProgram(0x00000100, new[] { word });
+                emu.Cpu.PC = 0x00000100;
+                emu.Cpu.COP0.WriteRegister32(12, 0u); // Status = 0 → BEV=0, EXL=0
 
-            emu.Step();
+                bool fired = false;
+                emu.UnknownInstruction += (_, _) => fired = true;
 
-            Assert.IsTrue(eventFired, "UnknownInstruction event should fire for undefined COP2 rs=0x09");
-            Assert.AreEqual(cop2Unknown, capturedWord, "Captured word should match the undefined COP2 encoding");
-            Assert.AreEqual(4UL, emu.Cpu.PC, "PC should advance by 4 after undefined COP2 instruction");
-        }
+                emu.Step();
 
-        [TestMethod]
-        public void Emulator_ProblemStatement_COP0_Unknown_HandledGracefully()
-        {
-            // 0x43414D44: opcode=0x10 (COP0), rs=0x1A, funct=0x04
-            // COP0 rs=0x1A is not a defined sub-operation on the PS2 EE. The emulator
-            // must fire UnknownInstruction and advance PC without crashing.
-            uint cop0Unknown = 0x43414D44u;
-            var emu = new PS2Emulator();
-            emu.LoadProgram(0x00000000, new[] { cop0Unknown });
-            emu.Cpu.PC = 0x00000000;
+                Assert.IsTrue(fired,
+                    $"UnknownInstruction event should fire for undefined encoding 0x{word:X8}");
 
-            bool eventFired = false;
-            uint capturedWord = 0;
-            emu.UnknownInstruction += (_, w) => { eventFired = true; capturedWord = w; };
+                uint cause = emu.Cpu.COP0.ReadRegister32(13);
+                uint excCode = (cause >> 2) & 0x1Fu;
+                Assert.AreEqual(10u, excCode,
+                    $"Cause.ExcCode must be 10 (ReservedInstr) for 0x{word:X8}, got ExcCode={excCode}");
 
-            emu.Step();
+                ulong epc = emu.Cpu.COP0.ReadRegister64(14);
+                Assert.AreEqual(0x100UL, epc,
+                    $"EPC must point to faulting instruction (0x100) for 0x{word:X8}");
 
-            Assert.IsTrue(eventFired, "UnknownInstruction event should fire for undefined COP0 rs=0x1A");
-            Assert.AreEqual(cop0Unknown, capturedWord, "Captured word should match the undefined COP0 encoding");
-            Assert.AreEqual(4UL, emu.Cpu.PC, "PC should advance by 4 after undefined COP0 instruction");
-        }
-
-        [TestMethod]
-        public void Emulator_ProblemStatement_COP1X_Unknown_HandledGracefully()
-        {
-            // 0x4E49203A: opcode=0x13 (COP1X), rs=0x12, funct=0x3A
-            // COP1X funct=0x3A is not defined on the PS2 EE. The emulator must fire
-            // UnknownInstruction and advance PC without crashing.
-            uint cop1xUnknown = 0x4E49203Au;
-            var emu = new PS2Emulator();
-            emu.LoadProgram(0x00000000, new[] { cop1xUnknown });
-            emu.Cpu.PC = 0x00000000;
-
-            bool eventFired = false;
-            uint capturedWord = 0;
-            emu.UnknownInstruction += (_, w) => { eventFired = true; capturedWord = w; };
-
-            emu.Step();
-
-            Assert.IsTrue(eventFired, "UnknownInstruction event should fire for undefined COP1X funct=0x3A");
-            Assert.AreEqual(cop1xUnknown, capturedWord, "Captured word should match the undefined COP1X encoding");
-            Assert.AreEqual(4UL, emu.Cpu.PC, "PC should advance by 4 after undefined COP1X instruction");
+                Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
+                    $"PC must redirect to exception vector for 0x{word:X8}");
+            }
         }
 
         [TestMethod]
