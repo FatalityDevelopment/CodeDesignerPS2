@@ -25,10 +25,12 @@ const LIVE_REGIONS = [
     // run in KSEG0, so a breakpoint set on a row at 0x80001234 matches the CPU PC
     // directly.  HandleReadMem strips the top 3 bits (KSEG0→physical) server-side.
     { region: 'ee',  address: 0x80000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
-    // IOP RAM: show via the EE VTLB mirror at 0x1C000000–0x1DFFFFFF (2 MB window).
-    // PCSX2 vtlb.cpp maps psxM (IOP RAM) to EE virtual 0x1C000000; the server
-    // translates this virtual address back to a physical IOP RAM offset.
-    { region: 'iop', address: 0x1C000000, size:  2 * 1024 * 1024, label: 'IOP RAM'       },
+    // IOP RAM: shown at its native physical base (0x00000000–0x003FFFFF, 4 MB).
+    // Using native addresses keeps row addresses consistent with the IOP CPU's PC
+    // register and the console debug output, so addresses like 0x0000ae94 map
+    // directly to the matching row in the IOP RAM panel.  HandleReadMem reads
+    // directly from IopMemoryBus.Ram[] when region='iop' and address < RamSize.
+    { region: 'iop', address: 0x00000000, size:  4 * 1024 * 1024, label: 'IOP RAM'       },
     // BIOS ROM: shown at KSEG0 (0x9FC00000) so row addresses match the kernel
     // PC.  After the initial uncached reset (0xBFC00000), the EE kernel runs
     // almost entirely from the cached KSEG0 alias (0x9FC00000–0x9FFFFFFF).

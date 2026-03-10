@@ -573,10 +573,20 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
                     ? (addr & 0x1FFFFFFF) >>> 0
                     : addr >>> 0;
-                const target = this._livePanelInfo.find(info =>
-                    physAddr >= info.physBaseAddress &&
-                    physAddr < info.physBaseAddress + info.totalBytes
-                );
+                // Prefer a panel in the same region first.  This disambiguates the
+                // overlap between EE Main RAM and IOP RAM, which both start at
+                // physical address 0x0: a native IOP address like 0x0000ae94 sent
+                // from the IOP panel should land in the IOP panel, not EE Main RAM.
+                const target =
+                    this._livePanelInfo.find(info =>
+                        info.region === region &&
+                        physAddr >= info.physBaseAddress &&
+                        physAddr < info.physBaseAddress + info.totalBytes
+                    ) ??
+                    this._livePanelInfo.find(info =>
+                        physAddr >= info.physBaseAddress &&
+                        physAddr < info.physBaseAddress + info.totalBytes
+                    );
                 if (target) {
                     // Reveal the panel in its current column (undefined preserves the
                     // panel's existing position rather than forcing it into column one).
