@@ -804,7 +804,19 @@ export class DisasmEditorComponent implements AfterViewInit {
     // 'nearest' for single-step navigation to avoid jarring jumps.
     function updateCursor(scrollBlock: ScrollLogicalPosition = 'nearest') {
       const localIndex = getLocalIndex(state.cursor);
-      Array.from(grid.children).forEach(r => r.classList.remove('active', 'branch-highlight'));
+      const breakpointHitPhys = state.breakpointHitAddress !== undefined
+        ? toPhysAddr(state.breakpointHitAddress)
+        : undefined;
+      Array.from(grid.children).forEach((r, i) => {
+        r.classList.remove('active', 'branch-highlight', 'breakpoint-hit');
+        if (breakpointHitPhys !== undefined) {
+          const rowData = state.disasmRows[i];
+          if (rowData) {
+            const rowPhys = toPhysAddr(parseInt(rowData.addr, 16));
+            if (breakpointHitPhys === rowPhys) { (r as Element).classList.add('breakpoint-hit'); }
+          }
+        }
+      });
       const rowEl = grid.children[localIndex] as HTMLElement | undefined;
       if (!rowEl) { return; }
       rowEl.classList.add('active');
@@ -903,6 +915,8 @@ export class DisasmEditorComponent implements AfterViewInit {
         setLivePausedUi(false);
         startLiveRefresh();
         hideDebugPanel();
+        // Immediately clear the yellow breakpoint-hit highlight from all visible rows.
+        Array.from(grid.children).forEach(r => r.classList.remove('breakpoint-hit'));
         return;
       }
       if (paused && registers) {
