@@ -255,6 +255,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private bool _cdvdDiscInterruptFired;
 
         /// <summary>
+        /// BIOS ROM bytes saved when
+        /// <see cref="BiosLoader.Load(System.ReadOnlySpan{byte}, DualCpuScheduler)"/>
+        /// calls <see cref="SetBiosData"/>.  Updated on every BIOS load so that a
+        /// BIOS swap followed by <see cref="HardReset"/> always uses the most recently
+        /// loaded image.
+        /// </summary>
+        private byte[]? _biosData;
+
+        /// <summary>
         /// Construct a scheduler, optionally supplying a pre-configured EE emulator.
         /// The IOP is always constructed fresh and wired to the EE's SIF.
         /// </summary>
@@ -387,6 +396,61 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             _sifmanSmflagInjected = false;
             _sifmanPatchedAtIopStep = 0;
             _cdvdDiscInterruptFired = false;
+        }
+
+        /// <summary>
+        /// Perform a full hardware reset — equivalent to pressing the physical reset
+        /// button on a PS2.  All EE RAM, IOP RAM, and Scratchpad are zeroed; the BIOS
+        /// ROM is re-copied from the image that was supplied to
+        /// <see cref="BiosLoader.Load"/>; the CDVD controller is reset to its
+        /// power-on idle state (disc image preserved); and the SIF is cleared.
+        /// Both CPUs and all scheduler state are reset via <see cref="Reset"/>.
+        ///
+        /// <para>Requires that the BIOS was previously loaded with
+        /// <see cref="BiosLoader.Load(System.ReadOnlySpan{byte}, DualCpuScheduler)"/>
+        /// so that the BIOS image is cached internally.  If no BIOS data has been
+        /// cached this method falls back to a soft <see cref="Reset"/> only.</para>
+        /// </summary>
+        public void HardReset()
+        {
+            // ── Clear main memories ───────────────────────────────────────────
+            System.Array.Clear(EE.Bus.Ram,        0, EE.Bus.Ram.Length);
+            System.Array.Clear(IOP.Bus.Ram,       0, IOP.Bus.Ram.Length);
+            System.Array.Clear(EE.Bus.Scratchpad, 0, EE.Bus.Scratchpad.Length);
+
+            // ── Re-copy BIOS ROM ──────────────────────────────────────────────
+            if (_biosData != null)
+            {
+                int len = System.Math.Min(_biosData.Length, EE.Bus.Bios.Length);
+                System.Array.Copy(_biosData, EE.Bus.Bios,  len);
+                System.Array.Copy(_biosData, IOP.Bus.Bios, len);
+                // Zero-fill any remainder (e.g. BIOS image smaller than 4 MB buffer).
+                if (len < EE.Bus.Bios.Length)
+                {
+                    System.Array.Clear(EE.Bus.Bios,  len, EE.Bus.Bios.Length  - len);
+                    System.Array.Clear(IOP.Bus.Bios, len, IOP.Bus.Bios.Length - len);
+                }
+            }
+
+            // ── Reset SIF (FIFOs + registers) ─────────────────────────────────
+            EE.Bus.Sif.Reset();
+
+            // ── Reset CDVD controller (keeps disc image intact) ───────────────
+            IOP.Bus.Cdvd?.Reset();
+
+            // ── Reset CPUs and scheduler counters ─────────────────────────────
+            Reset();
+        }
+
+        /// <summary>
+        /// Store a copy of <paramref name="biosData"/> so that
+        /// <see cref="HardReset"/> can re-copy it into both memory buses on every
+        /// subsequent restart.  Called automatically by
+        /// <see cref="BiosLoader.Load(System.ReadOnlySpan{byte}, DualCpuScheduler)"/>.
+        /// </summary>
+        internal void SetBiosData(System.ReadOnlySpan<byte> biosData)
+        {
+            _biosData = biosData.ToArray();
         }
 
         /// <summary>

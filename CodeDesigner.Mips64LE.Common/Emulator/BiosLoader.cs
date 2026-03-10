@@ -76,6 +76,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             BiosInfo info = Validate(biosData);
             CopyInto(biosData, scheduler.EE.Bus.Bios);
             CopyInto(biosData, scheduler.IOP.Bus.Bios);
+            scheduler.SetBiosData(biosData);
             scheduler.Reset();
             return info;
         }

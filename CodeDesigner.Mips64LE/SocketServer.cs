@@ -839,8 +839,8 @@ namespace CodeDesigner.Mips64LE
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
-            Scheduler.Paused = false;   // ungate the run-gate so Reset() can run cleanly
-            Scheduler.Reset();
+            Scheduler.Paused = false;   // ungate the run-gate so HardReset() can run cleanly
+            Scheduler.HardReset();
             Scheduler.Paused = true;    // halt at reset vector; client resumes when ready
             return CreateSuccessResponse("Restarted");
         }
