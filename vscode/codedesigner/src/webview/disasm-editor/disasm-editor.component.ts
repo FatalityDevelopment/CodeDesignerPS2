@@ -882,7 +882,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         setLivePausedUi(true);
       }
       if (paused) {
-        state.breakpointHitAddress = breakpointHitAddress ?? pc;
+        state.breakpointHitAddress = breakpointHitAddress;
       } else {
         state.breakpointHitAddress = undefined;
       }

@@ -217,6 +217,16 @@ export class SocketClient {
                 return;
             }
 
+            // Destroy any previous socket that may still be open (e.g. a
+            // failed prior connection attempt that was never cleaned up).
+            // This prevents a stale 'close' event from resetting state after
+            // the new socket has connected successfully.
+            if (this.client) {
+                this.client.removeAllListeners();
+                this.client.destroy();
+                this.client = null;
+            }
+
             this.client = new net.Socket();
             let isResolved = false;
 
