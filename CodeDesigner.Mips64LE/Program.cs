@@ -180,6 +180,16 @@ namespace CodeDesigner.Mips64LE
             embeddedServer.ClientDisconnected += (_, _) => Console.WriteLine("[Server] Client disconnected");
             var serverTask = Task.Run(() => embeddedServer.StartAsync());
 
+            // ── Start paused at the reset vector ─────────────────────────────
+            // The emulator waits for the VS Code client to connect and send a
+            // RESUME (or trigger a breakpoint-aware resume) before executing any
+            // instructions.  This ensures breakpoints set before connecting are
+            // registered with the scheduler before the first instruction runs at
+            // 0xBFC00000.  The extension's connectSocketAndOpenViews() sends a
+            // RESUME after re-syncing breakpoints.
+            scheduler.Paused = true;
+            Console.WriteLine("Emulator paused at reset vector — waiting for debugger to connect.");
+
             // ── Run loop ──────────────────────────────────────────────────────
             Console.WriteLine();
             Console.WriteLine("Emulator running. Press Ctrl+C to stop.");

@@ -611,11 +611,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
             for (int i = 0; i < eeSteps; i++)
             {
-                // ── EE step ───────────────────────────────────────────────────
-                EE.Step();
-                TotalEeSteps++;
-
-                // ── Breakpoint check ─────────────────────────────────────────
+                // ── Breakpoint check (pre-execution) ─────────────────────────
+                // Check BEFORE stepping so a breakpoint at the reset vector
+                // (0xBFC00000) or any address that is the very first instruction
+                // executed is caught correctly.  The emulator halts before the
+                // instruction at the breakpoint address has been run, which is
+                // the standard debugger behaviour ("break before executing X").
                 if (Breakpoints.Count > 0)
                 {
                     uint eePc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
@@ -626,6 +627,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                         return;
                     }
                 }
+
+                // ── EE step ───────────────────────────────────────────────────
+                EE.Step();
+                TotalEeSteps++;
 
                 // ── IOP step(s) (proportional, interleaved after each EE step) ─
                 _iopAccumulator++;

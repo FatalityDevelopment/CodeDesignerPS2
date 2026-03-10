@@ -356,6 +356,31 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.editorProvider.openLiveMemoryView(
                         r.region, r.address, r.size, r.label);
                 }
+
+                // The freshly spawned emulator starts paused at the reset vector
+                // so the user's breakpoints can be registered before execution
+                // begins.  Wait for the webview init→setBreakpoint roundtrip to
+                // complete before sending RESUME.
+                //
+                // Timing budget (conservative, modern machine):
+                //   Angular bootstrap:     50–200 ms
+                //   init message + _onInit: ~10 ms
+                //   setBreakpoint TCP RPC:  ~5 ms each
+                //
+                // 1000 ms gives 3–5× headroom for slow machines.  A proper
+                // acknowledgement-based sync would be cleaner but requires a
+                // new webview message type; this is the pragmatic tradeoff.
+                await new Promise<void>(resolve => setTimeout(resolve, 1000));
+                try {
+                    await this.socketClient.resume();
+                    this._paused = false;
+                    this.webview?.postMessage({ command: 'paused', paused: false });
+                    this.editorProvider.notifyPauseState(false);
+                    out.appendLine('[INFO] Emulator resumed — running from reset vector.');
+                } catch {
+                    // Resume can fail if the server was already running (e.g.
+                    // re-connect to an existing session).  Not an error.
+                }
             } catch {
                 if (attempts < maxAttempts) {
                     setTimeout(tryConnect, 500);
