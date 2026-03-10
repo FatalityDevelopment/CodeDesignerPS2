@@ -278,6 +278,27 @@ body {
     background: #6a5000;
 }
 
+/* Current PC indicator — shown while paused (single-step or breakpoint).
+   Uses a hollow arrow so it remains distinguishable from the filled breakpoint
+   arrow and still visible on top of the blue active-cursor background. */
+.row.current-pc .addr::before {
+    content: '▷';
+    color: #4fc1ff;
+    margin-right: 4px;
+    font-size: 10px;
+}
+
+.row.active.current-pc .addr::before {
+    color: #9cdcfe;
+}
+
+/* When PC is stopped exactly at a breakpoint, keep the filled amber arrow. */
+.row.breakpoint-hit.current-pc .addr::before,
+.row.active.breakpoint-hit.current-pc .addr::before {
+    content: '▶';
+    color: #f0c040;
+}
+
 .row.search-match {
     background: #613214;
 }
