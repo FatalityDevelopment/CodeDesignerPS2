@@ -163,16 +163,11 @@ export function activate(context: vscode.ExtensionContext) {
 			outputChannel.warn(`Failed to auto-connect: ${errorMsg}`);
 			outputChannel.info('Auto-starting CodeDesigner server...');
 			disasmPanelProvider.autoStartServer().then(started => {
-				if (started) {
-					// Give the server ~2 s to start listening, then retry
-					setTimeout(() => {
-						socketClient?.connect().catch(err2 => {
-							outputChannel.warn(`Retry auto-connect failed: ${err2?.message ?? err2}`);
-						});
-					}, 2000);
-				} else {
+				if (!started) {
 					outputChannel.info('No CodeDesigner executable found for auto-start. Use "Run" to start manually.');
 				}
+				// connectSocketAndOpenViews() is called inside autoStartServer() when
+				// a terminal is spawned, so no additional retry is needed here.
 			});
 		});
 	}, 1000);
