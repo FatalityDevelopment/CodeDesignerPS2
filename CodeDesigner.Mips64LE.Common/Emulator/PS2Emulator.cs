@@ -118,9 +118,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
 
         private void ICacheClear() => Array.Clear(_iCacheValid, 0, ICacheSets);
 
-        /// <summary>Flush the instruction cache (call after bulk-writing RAM, e.g. loading a snapshot).</summary>
-        public void InvalidateICache() => ICacheClear();
-
         // ── TLB miss state (replaces TlbMissException throw/catch) ───────────────
         // TryFetchWord sets _pendingTlbMissVA instead of throwing, allowing Step()
         // to handle instruction-fetch TLB misses (both the primary PC fetch and the

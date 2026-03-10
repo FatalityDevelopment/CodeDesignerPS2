@@ -28,7 +28,6 @@ import './disasm-editor.css';
     <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
     <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
-    <button class="header-tool-btn" id="live-set-pc-btn" title="Set emulator PC to the currently selected row (only active while paused)">&#8618; Set PC</button>
 
 </div>
 <div id="binary-controls">
@@ -290,7 +289,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     const searchToggleBtn      = document.getElementById('search-toggle-btn')!;
     const gotoToggleBtn        = document.getElementById('goto-toggle-btn')!;
     const navBackBtn           = document.getElementById('nav-back-btn') as HTMLButtonElement;
-    const liveSetPcBtn         = document.getElementById('live-set-pc-btn') as HTMLButtonElement;
 
     // Binary controls bar
     const binaryControls = document.getElementById('binary-controls')!;

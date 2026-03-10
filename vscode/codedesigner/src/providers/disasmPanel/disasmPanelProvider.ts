@@ -687,38 +687,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Load a snapshot's memory state into the running emulator, then refresh all live panels. */
+    /** Re-open all .bin files from an earlier snapshot folder. */
     private async handleOpenSnapshot(snapshotPath: string): Promise<void> {
-        const out = getOutputChannel();
-
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage(
-                'Connect to the emulator first, then open the snapshot to restore its state.');
-            return;
-        }
-
         try {
-            out.appendLine(`[INFO] Loading snapshot from ${snapshotPath}…`);
-            const regions = await this.socketClient.loadSnapshot(snapshotPath);
-            out.appendLine(`[INFO] Snapshot loaded — ${regions.length} region(s). Emulator paused.`);
+            const files = fs.readdirSync(snapshotPath)
+                .filter(f => f.endsWith('.bin'))
+                .map(f => path.join(snapshotPath, f));
 
-            // Track the paused state so the sidebar reflects it.
-            this._paused = true;
-            this.webview?.postMessage({ command: 'paused', paused: true });
-            this.editorProvider.notifyPauseState(true);
-
-            // Refresh / open all live panels so they show the restored memory contents.
-            for (const r of LIVE_REGIONS) {
-                await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+            for (const f of files) {
+                const uri = vscode.Uri.file(f);
+                await vscode.commands.executeCommand('vscode.openWith', uri, 'disasm.disasmEditor');
             }
-
-            vscode.window.showInformationMessage(
-                `Snapshot restored (${regions.length} region${regions.length !== 1 ? 's' : ''}). ` +
-                `Emulator paused — use Step or Resume to continue.`
-            );
         } catch (err: any) {
-            out.appendLine(`[ERROR] Load snapshot failed: ${err?.message ?? err}`);
-            vscode.window.showErrorMessage(`Could not load snapshot: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`Could not open snapshot: ${err?.message ?? err}`);
         }
     }
 

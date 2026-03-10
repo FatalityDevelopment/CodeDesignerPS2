@@ -256,9 +256,6 @@ namespace CodeDesigner.Mips64LE
 
                     case "SNAPSHOT":
                         return HandleSnapshot(command.OutputPath);
-
-                    case "LOADSNAPSHOT":
-                        return HandleLoadSnapshot(command.OutputPath);
                     
                     case "PAUSE":
                         return HandlePause();
@@ -690,94 +687,9 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle LOADSNAPSHOT command — reads region .bin files from a snapshot folder
-        /// and copies them into the running emulator's RAM arrays, then pauses the emulator.
-        /// This restores the exact memory state of a previous SNAPSHOT, acting as a save-state
-        /// restore.  All live panels will reflect the loaded state on their next page fetch.
+        /// Handle PAUSE command — halts emulator execution.
         /// </summary>
-        private string HandleLoadSnapshot(string? folderPath)
-        {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-
-            if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
-                return CreateErrorResponse($"Snapshot folder not found: {folderPath}");
-
-            // Pause first so no instructions execute while we're replacing RAM contents.
-            Scheduler.Paused = true;
-
-            try
-            {
-                // Fixed mapping: filename → (target key, base address used in SnapshotRegion).
-                // These match the filenames emitted by HandleSnapshot.
-                var regionDefs = new[]
-                {
-                    (File: "EEmem.bin",     Target: "ee_ram",    Label: "EE Main RAM",  Base: 0x00000000u),
-                    (File: "BIOSrom.bin",   Target: "bios_rom",  Label: "BIOS ROM",     Base: PS2MemoryBus.BiosRomPhysBase),
-                    (File: "Scratchpad.bin",Target: "scratchpad",Label: "Scratchpad",   Base: 0x70000000u),
-                    (File: "IOPmem.bin",    Target: "iop_ram",   Label: "IOP RAM",      Base: 0x00000000u),
-                };
-
-                var loaded = new List<SnapshotRegion>();
-
-                foreach (var (file, target, label, baseAddr) in regionDefs)
-                {
-                    var filePath = Path.Combine(folderPath, file);
-                    if (!File.Exists(filePath)) continue;
-
-                    var bytes = File.ReadAllBytes(filePath);
-
-                    switch (target)
-                    {
-                        case "ee_ram":
-                            Array.Copy(bytes, 0, Scheduler.EE.Bus.Ram,
-                                       0, Math.Min(bytes.Length, Scheduler.EE.Bus.Ram.Length));
-                            // Flush i-cache so stale pre-snapshot instructions are not replayed.
-                            Scheduler.EE.InvalidateICache();
-                            break;
-
-                        case "bios_rom":
-                            Array.Copy(bytes, 0, Scheduler.EE.Bus.Bios,
-                                       0, Math.Min(bytes.Length, Scheduler.EE.Bus.Bios.Length));
-                            break;
-
-                        case "scratchpad":
-                            Array.Copy(bytes, 0, Scheduler.EE.Bus.Scratchpad,
-                                       0, Math.Min(bytes.Length, Scheduler.EE.Bus.Scratchpad.Length));
-                            break;
-
-                        case "iop_ram":
-                            Array.Copy(bytes, 0, Scheduler.IOP.Bus.Ram,
-                                       0, Math.Min(bytes.Length, Scheduler.IOP.Bus.Ram.Length));
-                            break;
-                    }
-
-                    loaded.Add(new SnapshotRegion
-                    {
-                        Label       = label,
-                        File        = filePath,
-                        BaseAddress = baseAddr,
-                        Size        = bytes.Length,
-                    });
-                }
-
-                if (loaded.Count == 0)
-                    return CreateErrorResponse("No recognised region files found in snapshot folder");
-
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success = true,
-                    Command = "LOADSNAPSHOT",
-                    Regions = loaded,
-                });
-            }
-            catch (Exception ex)
-            {
-                return CreateErrorResponse($"LoadSnapshot error: {ex.Message}");
-            }
-        }
-
-
+        private string HandlePause()
         {
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");

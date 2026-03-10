@@ -612,25 +612,9 @@ export class SocketClient {
     }
 
     /**
-     * Load a snapshot folder's .bin region files into the running emulator's RAM arrays.
-     * The emulator is paused automatically.  All live panels will reflect the restored
-     * state on their next page fetch.  Reuses the same SnapshotRegion response shape as
-     * snapshot() so callers can display which regions were loaded.
-     * @param folderPath  Absolute path to the snapshot folder (must contain EEmem.bin etc.)
+     * Pause emulator execution
      */
-    public async loadSnapshot(folderPath: string): Promise<SnapshotRegion[]> {
-        const command: CommandMessage = {
-            Command: 'LOADSNAPSHOT',
-            OutputPath: folderPath,
-        };
-        const response = await this.sendCommand(command, 60000);
-        if (!response.Success) {
-            throw new Error(response.Error || 'LoadSnapshot failed');
-        }
-        return response.Regions || [];
-    }
-
-
+    public async pause(): Promise<void> {
         const command: CommandMessage = { Command: 'PAUSE' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
