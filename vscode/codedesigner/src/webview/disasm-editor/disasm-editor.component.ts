@@ -20,6 +20,10 @@ import './disasm-editor.css';
 <div id="header">
 <div id="header-toolbar">
     <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">&#8862; Symbols</button>
+    <button class="header-tool-btn" id="registers-toggle-btn" title="Toggle Registers Panel (Ctrl+Alt+R)">&#8863; Regs</button>
+    <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)">&#8693; Stack</button>
+    <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
+    <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
 
 </div>
 <div id="goto-panel">
@@ -234,6 +238,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     const closeGoto      = document.getElementById('close-goto')!;
     const headerToolbar  = document.getElementById('header-toolbar')!;
 
+    const registersToggleBtn   = document.getElementById('registers-toggle-btn')!;
+    const bottomPanelToggleBtn = document.getElementById('bottom-panel-toggle-btn')!;
+    const searchToggleBtn      = document.getElementById('search-toggle-btn')!;
+    const gotoToggleBtn        = document.getElementById('goto-toggle-btn')!;
+
+    const bottomPanel    = document.getElementById('bottom-panel')!;
     const debugPanel     = document.getElementById('debug-panel')!;
     const regContent     = document.getElementById('registers-content')!;
     const stackContent   = document.getElementById('stack-content')!;
@@ -515,6 +525,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     function toggleSearch() {
       state.searchActive = !state.searchActive;
       searchPanel.classList.toggle('visible', state.searchActive);
+      searchToggleBtn.classList.toggle('active', state.searchActive);
       if (state.searchActive) {
         searchInput.focus();
         searchInput.select();
@@ -685,6 +696,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     function toggleGoto() {
       state.gotoActive = !state.gotoActive;
       gotoPanel.classList.toggle('visible', state.gotoActive);
+      gotoToggleBtn.classList.toggle('active', state.gotoActive);
       if (state.gotoActive) {
         gotoInput.focus();
         gotoInput.select();
@@ -716,6 +728,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       state.cursor = instrIndex;
       state.searchActive = false;
       searchPanel.classList.remove('visible');
+      searchToggleBtn.classList.remove('active');
       const pageReady = checkAndLoadPage();
       if (pageReady) { updateCursor(); }
       gotoInfo.textContent = `Moved to 0x${addr.toString(16).toUpperCase()}`;
@@ -765,6 +778,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       state.cursor = instrIndex;
       state.searchActive = false;
       searchPanel.classList.remove('visible');
+      searchToggleBtn.classList.remove('active');
       const pageReady = checkAndLoadPage();
       if (pageReady) { updateCursor('center'); }
     });
@@ -927,6 +941,12 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
       if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyS') {
         e.preventDefault(); e.stopPropagation(); toggleSymbolsPanel();
+      }
+      if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyR') {
+        e.preventDefault(); e.stopPropagation(); toggleRegistersPanel();
+      }
+      if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyT') {
+        e.preventDefault(); e.stopPropagation(); toggleBottomPanel();
       }
     });
 
@@ -1103,6 +1123,34 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (state.symbolsActive) { loadSymbols(); }
     }
 
+    // ── Registers panel toggle ────────────────────────────────────────────────
+    function toggleRegistersPanel() {
+      const isVisible = debugPanel.classList.contains('visible');
+      if (isVisible) {
+        hideDebugPanel();
+      } else {
+        debugPanel.classList.add('visible');
+        registersToggleBtn.classList.add('active');
+        if (_lastStackRegs) {
+          renderGprPanel(_lastStackRegs, _lastStackBytes, _lastStackBase);
+          renderCop0Panel(_lastStackRegs);
+          renderFprPanel(_lastStackRegs);
+          renderFcrPanel(_lastStackRegs);
+          renderVu0fPanel(_lastStackRegs);
+          renderVu0iPanel(_lastStackRegs);
+          renderGsPanel(_lastStackRegs);
+          renderStackPanel(_lastStackRegs, _lastStackBytes, _lastStackBase);
+        }
+      }
+    }
+
+    // ── Bottom panel toggle ───────────────────────────────────────────────────
+    function toggleBottomPanel() {
+      const isHidden = bottomPanel.classList.contains('hidden');
+      bottomPanel.classList.toggle('hidden', !isHidden);
+      bottomPanelToggleBtn.classList.toggle('active', isHidden);
+    }
+
     function loadSymbols() {
       vscode.postMessage({ type: 'getSymbols' });
     }
@@ -1214,6 +1262,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       symbolsToggleBtn.classList.remove('active');
     });
     symbolsRefreshBtn.addEventListener('click', () => loadSymbols());
+
+    registersToggleBtn.addEventListener('click', () => toggleRegistersPanel());
+    bottomPanelToggleBtn.addEventListener('click', () => toggleBottomPanel());
+    searchToggleBtn.addEventListener('click', () => toggleSearch());
+    gotoToggleBtn.addEventListener('click', () => toggleGoto());
 
     document.querySelectorAll('.sym-tab').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1344,6 +1397,7 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     function showDebugPanel(regs: RegisterData, stackBytes: number[], stackBase: number) {
       debugPanel.classList.add('visible');
+      registersToggleBtn.classList.add('active');
       renderGprPanel(regs, stackBytes, stackBase);
       renderCop0Panel(regs);
       renderFprPanel(regs);
@@ -1356,6 +1410,7 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     function hideDebugPanel() {
       debugPanel.classList.remove('visible');
+      registersToggleBtn.classList.remove('active');
     }
 
     function renderGprPanel(regs: RegisterData, stackBytes?: number[], stackBase?: number) {
