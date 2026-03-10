@@ -42,6 +42,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * being bootstrapped or having processed an 'init' message first.
    */
   private _knownBreakpoints: Set<number> = new Set();
+  /** Game-specific labels loaded from snapshots/<isoName>/labels.json. Merged with server labels. */
+  private _gameLabels: LabelEntry[] = [];
 
   /**
    * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
@@ -49,8 +51,50 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public onPauseStateChange?: (paused: boolean) => void;
 
+  /**
+   * Optional callback for retrieving address history from snapshots.
+   * Wired to DisasmPanelProvider.getAddressHistory() in extension.ts.
+   */
+  public onGetAddressHistory?: (address: number) => Array<{ name: string; date: string; value: string }>;
+
   constructor(socketClient: SocketClient | null, private readonly _extensionUri: vscode.Uri) {
     this.socketClient = socketClient;
+  }
+
+  /**
+   * Set game-specific labels (from the ISO's labels.json file).
+   * Broadcasts the merged label list to all open live panels.
+   */
+  public setGameLabels(labels: LabelEntry[]): void {
+    this._gameLabels = labels;
+    // Broadcast updated merged labels to all live panels
+    if (this._livePanels.length > 0) {
+      // If connected, fetch server labels and merge; otherwise just send game labels
+      if (this.socketClient?.isConnected()) {
+        this.socketClient.getLabels().then(serverLabels => {
+          const merged = this._mergeLabels(serverLabels, this._gameLabels);
+          for (const p of this._livePanels) {
+            p.webview.postMessage({ type: 'labelsUpdated', labels: merged });
+          }
+        }).catch(() => {
+          for (const p of this._livePanels) {
+            p.webview.postMessage({ type: 'labelsUpdated', labels: this._gameLabels });
+          }
+        });
+      } else {
+        for (const p of this._livePanels) {
+          p.webview.postMessage({ type: 'labelsUpdated', labels: this._gameLabels });
+        }
+      }
+    }
+  }
+
+  /** Merge server labels with game-specific labels. Game labels take priority on conflicts. */
+  private _mergeLabels(serverLabels: LabelEntry[], gameLabels: LabelEntry[]): LabelEntry[] {
+    const map = new Map<string, LabelEntry>();
+    for (const l of serverLabels) { map.set(l.address.toLowerCase(), l); }
+    for (const l of gameLabels)   { map.set(l.address.toLowerCase(), l); }
+    return Array.from(map.values());
   }
 
   /**
@@ -328,6 +372,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
       } else if (message.type === "saveLabel") {
         await this.handleSaveLabel(webviewPanel, message.address, message.newLabel ?? '', message.newComment ?? '');
+      } else if (message.type === "getAddressHistory") {
+        const history = this.onGetAddressHistory
+            ? this.onGetAddressHistory(message.address as number)
+            : [];
+        webviewPanel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
       }
     });
 
@@ -686,6 +735,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         info.panel.webview.postMessage({ type: 'syncGotoInput', value });
                     }
                 }
+            } else if (message.type === 'getAddressHistory') {
+                const history = this.onGetAddressHistory
+                    ? this.onGetAddressHistory(message.address as number)
+                    : [];
+                panel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
             }
         });
 
@@ -960,6 +1014,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       }
     }
 
+    // Merge game-specific labels with server labels
+    if (this._gameLabels.length > 0) {
+      labels = this._mergeLabels(labels, this._gameLabels);
+    }
+
     panel.webview.postMessage({ type: 'symbols', labels, strings, functions });
   }
 
@@ -1044,7 +1103,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     if (!this.socketClient?.isConnected()) { return; }
     try {
       await this.socketClient.addLabel(address, labelName, comment);
-      const labels = await this.socketClient.getLabels();
+      let labels = await this.socketClient.getLabels();
+      if (this._gameLabels.length > 0) { labels = this._mergeLabels(labels, this._gameLabels); }
       panel.webview.postMessage({ type: 'labelsUpdated', labels });
     } catch (err: any) {
       console.error(`[SYMBOLS] AddLabel failed: ${err?.message ?? err}`);
@@ -1061,7 +1121,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     if (!this.socketClient?.isConnected()) { return; }
     try {
       await this.socketClient.deleteLabel(address);
-      const labels = await this.socketClient.getLabels();
+      let labels = await this.socketClient.getLabels();
+      if (this._gameLabels.length > 0) { labels = this._mergeLabels(labels, this._gameLabels); }
       panel.webview.postMessage({ type: 'labelsUpdated', labels });
     } catch (err: any) {
       console.error(`[SYMBOLS] DeleteLabel failed: ${err?.message ?? err}`);

@@ -243,6 +243,34 @@ button:disabled {
     letter-spacing: 0.05em;
 }
 
+.snapshot-game-name {
+    font-weight: normal;
+    text-transform: none;
+    color: var(--vscode-foreground);
+    opacity: 0.75;
+}
+
+.snapshot-empty {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    padding: 4px 0;
+    font-style: italic;
+}
+
+.snapshot-scroll {
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.snapshot-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.snapshot-scroll::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background);
+    border-radius: 3px;
+}
+
 .snapshot-item {
     display: flex;
     align-items: center;
@@ -251,14 +279,23 @@ button:disabled {
     font-size: 12px;
 }
 
-.snapshot-label {
+.snapshot-item-info {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.snapshot-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: 500;
 }
 
-.snapshot-time {
+.snapshot-date-time {
+    font-size: 10px;
     color: var(--vscode-descriptionForeground);
     white-space: nowrap;
 }
@@ -266,4 +303,5 @@ button:disabled {
 .open-snapshot-btn {
     padding: 2px 8px;
     font-size: 11px;
+    flex-shrink: 0;
 }

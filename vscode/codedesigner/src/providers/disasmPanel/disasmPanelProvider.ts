@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getOutputChannel } from '../../extension';
-import { SocketClient } from '../../socketClient';
+import { SocketClient, LabelEntry } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 
@@ -16,6 +16,16 @@ interface SnapshotEntry {
     label: string;
     timestamp: string;
     path: string;
+    name: string;
+    date: string;
+    isoName: string;
+}
+
+interface SnapshotInfoFile {
+    name: string;
+    timestamp: string;
+    isoName: string;
+    regions: Array<{ Label: string; File: string; BaseAddress: number; Size: number }>;
 }
 
 /** Memory regions exposed as separate editor windows when the emulator is running. */
@@ -51,7 +61,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private selectedEmulatorPath: string = '';
     private selectedBiosPath: string = '';
     private selectedGamePath: string = '';
+    private selectedGameName: string = '';
     private _paused: boolean = false;
+
+    /** Returns the workspace root directory (used by DisasmEditorProvider for history lookup). */
+    public getWorkspaceRoot(): string { return this.workspaceRoot; }
+    /** Returns the ISO name derived from the currently selected game path. */
+    public getSelectedGameName(): string { return this.selectedGameName; }
 
     constructor(
         private readonly socketClient: SocketClient,
@@ -130,6 +146,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'snapshot':
                     await this.handleSnapshot();
                     break;
+                case 'importBin':
+                    await this.handleImportBin();
+                    break;
                 case 'openSnapshot':
                     await this.handleOpenSnapshot(msg.path);
                     break;
@@ -150,7 +169,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     this.selectedBiosPath = msg.biosPath ?? '';
                     break;
                 case 'gameChanged':
-                    this.selectedGamePath = msg.gamePath ?? '';
+                    await this.handleGameChanged(msg.gamePath ?? '');
                     break;
                 case 'applyCheats':
                     await this.handleApplyCheats(msg.cheatText ?? '');
@@ -226,6 +245,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             biosOptions,
             gameOptions,
             snapshots: this.snapshots,
+            selectedGameName: this.selectedGameName,
         });
     }
 
@@ -497,6 +517,94 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    // ── Import Binary ─────────────────────────────────────────────────────────
+
+    /**
+     * Prompt the user for a .bin/.raw file and a target address, then write
+     * the file contents into live emulator memory via WRITEMEM.
+     */
+    private async handleImportBin(): Promise<void> {
+        const out = getOutputChannel();
+
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+
+        // Step 1: Pick a file
+        const uris = await vscode.window.showOpenDialog({
+            title: 'Import Binary File into Emulator Memory',
+            openLabel: 'Import',
+            canSelectMany: false,
+            filters: {
+                'Binary Files': ['bin', 'raw'],
+                'All Files':    ['*'],
+            },
+        });
+        if (!uris || uris.length === 0) { return; }
+        const filePath = uris[0].fsPath;
+
+        // Step 2: Prompt for target address (same style as handleEditLabel)
+        const addrInput = await vscode.window.showInputBox({
+            title:          'Import Binary — Target Address',
+            prompt:         'Enter the memory address to load the file at (hex, e.g. 0x80010000)',
+            placeHolder:    '0x80010000',
+            ignoreFocusOut: true,
+            validateInput:  (v) => {
+                const cleaned = v.trim().toLowerCase().replace(/^0x/, '');
+                return /^[0-9a-f]+$/.test(cleaned) ? null : 'Enter a valid hex address (e.g. 0x80010000)';
+            },
+        });
+        if (addrInput === undefined) { return; } // cancelled
+
+        // Step 3: Prompt for memory region
+        const region = await vscode.window.showQuickPick(
+            [
+                { label: 'EE (Emotion Engine)',  description: 'Main RAM, BIOS, Scratchpad', value: 'ee'  },
+                { label: 'IOP (I/O Processor)', description: 'IOP RAM',                    value: 'iop' },
+            ],
+            {
+                title:        'Import Binary — Memory Region',
+                placeHolder:  'Select target memory region',
+                ignoreFocusOut: true,
+            }
+        );
+        if (!region) { return; } // cancelled
+
+        // Parse address
+        const address = parseInt(addrInput.trim().replace(/^0x/i, ''), 16);
+        if (isNaN(address)) {
+            vscode.window.showErrorMessage('Invalid address.');
+            return;
+        }
+
+        // Read file and convert to hex string
+        let fileBytes: Buffer;
+        try {
+            fileBytes = fs.readFileSync(filePath);
+        } catch (err: any) {
+            vscode.window.showErrorMessage(`Could not read file: ${err?.message ?? err}`);
+            return;
+        }
+
+        const hexData   = fileBytes.toString('hex');
+        const label     = path.basename(filePath);
+        const addrStr   = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
+
+        out.appendLine(`[INFO] Importing ${label} (${fileBytes.length} bytes) → ${addrStr} (${region.value})`);
+
+        try {
+            await this.socketClient.writeMemory(address, hexData, region.value);
+            out.appendLine(`[INFO] Import complete — ${fileBytes.length} byte(s) written.`);
+            vscode.window.showInformationMessage(
+                `Imported ${label} (${fileBytes.length} bytes) at ${addrStr}.`
+            );
+        } catch (err: any) {
+            out.appendLine(`[ERROR] Import failed: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`Import failed: ${err?.message ?? err}`);
+        }
+    }
+
     // ── Snapshot ──────────────────────────────────────────────────────────────
 
     private async handleSnapshot(): Promise<void> {
@@ -507,11 +615,24 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        // Ask user for a name for this snapshot
+        const snapName = await vscode.window.showInputBox({
+            title: 'Name this snapshot',
+            prompt: 'Enter a name for this snapshot',
+            placeHolder: 'e.g. Before Boss Fight',
+            ignoreFocusOut: true,
+        });
+        if (snapName === undefined) { return; } // cancelled
+        const safeName = (snapName.trim() || 'snapshot').replace(/[^a-zA-Z0-9_\-]/g, '_');
+
+        const isoName = this.selectedGameName || 'unknown_game';
+        const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
         const timestamp = DisasmPanelProvider.formatSnapshotTimestamp(new Date());
 
-        const snapshotsDir = this.workspaceRoot
-            ? path.join(this.workspaceRoot, 'snapshots', timestamp)
-            : path.join(require('os').tmpdir(), 'ps2snapshots', timestamp);
+        const baseDir = this.workspaceRoot
+            ? path.join(this.workspaceRoot, 'snapshots')
+            : path.join(require('os').tmpdir(), 'ps2snapshots');
+        const snapshotsDir = path.join(baseDir, isoName, dateStr, safeName);
 
         out.appendLine(`[INFO] Taking snapshot → ${snapshotsDir}`);
 
@@ -519,23 +640,38 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             const regions = await this.socketClient.snapshot(snapshotsDir);
             out.appendLine(`[INFO] Snapshot complete — ${regions.length} region(s) written.`);
 
+            // Save snapshot metadata so we can look up history later
+            const info: SnapshotInfoFile = {
+                name:      safeName,
+                timestamp: new Date().toISOString(),
+                isoName,
+                regions:   regions.map(r => ({
+                    Label:       r.Label,
+                    File:        path.basename(r.File),
+                    BaseAddress: r.BaseAddress,
+                    Size:        r.Size,
+                })),
+            };
+            fs.writeFileSync(
+                path.join(snapshotsDir, 'snapshot-info.json'),
+                JSON.stringify(info, null, 2),
+                'utf-8'
+            );
+
             // Record in the panel's snapshot list
             const entry: SnapshotEntry = {
-                label:     timestamp,
+                label:     safeName,
+                name:      safeName,
                 timestamp: new Date().toLocaleTimeString(),
                 path:      snapshotsDir,
+                date:      dateStr,
+                isoName,
             };
             this.snapshots.unshift(entry);
             this.webview?.postMessage({
                 command:   'updateSnapshots',
                 snapshots: this.snapshots,
             });
-
-            // Open each dumped .bin in the disassembler editor
-            for (const r of regions) {
-                const uri = vscode.Uri.file(r.File);
-                await vscode.commands.executeCommand('vscode.openWith', uri, 'disasm.disasmEditor');
-            }
         } catch (err: any) {
             out.appendLine(`[ERROR] Snapshot failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Snapshot failed: ${err?.message ?? err}`);
@@ -556,6 +692,160 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         } catch (err: any) {
             vscode.window.showErrorMessage(`Could not open snapshot: ${err?.message ?? err}`);
         }
+    }
+
+    /**
+     * Called when the user changes the selected game.
+     * Updates selectedGamePath/selectedGameName, loads snapshots for the game,
+     * and loads game-specific labels.
+     */
+    private async handleGameChanged(gamePath: string): Promise<void> {
+        this.selectedGamePath = gamePath;
+        this.selectedGameName = gamePath
+            ? path.basename(gamePath, path.extname(gamePath))
+            : '';
+
+        this.loadSnapshotsForGame(this.selectedGameName);
+        this.loadGameLabels(this.selectedGameName);
+    }
+
+    /**
+     * Scan the snapshots/<isoName>/ directory and populate this.snapshots.
+     * Snapshot entries are stored in snapshot-info.json inside each snapshot folder.
+     */
+    private loadSnapshotsForGame(isoName: string): void {
+        if (!isoName || !this.workspaceRoot) {
+            this.snapshots = [];
+            this.webview?.postMessage({ command: 'updateSnapshots', snapshots: [], gameName: '' });
+            return;
+        }
+
+        const isoFolder = path.join(this.workspaceRoot, 'snapshots', isoName);
+        const entries: SnapshotEntry[] = [];
+
+        try {
+            if (!fs.existsSync(isoFolder)) {
+                this.snapshots = [];
+                this.webview?.postMessage({ command: 'updateSnapshots', snapshots: [], gameName: isoName });
+                return;
+            }
+
+            // Walk: <isoFolder>/<date>/<name>/snapshot-info.json
+            const dateDirs = fs.readdirSync(isoFolder, { withFileTypes: true })
+                .filter(d => d.isDirectory())
+                .map(d => d.name)
+                .sort()
+                .reverse();  // newest date first
+
+            for (const dateDir of dateDirs) {
+                const datePath = path.join(isoFolder, dateDir);
+                const nameDirs = fs.readdirSync(datePath, { withFileTypes: true })
+                    .filter(d => d.isDirectory())
+                    .map(d => d.name);
+
+                for (const nameDir of nameDirs) {
+                    const snapPath = path.join(datePath, nameDir);
+                    const infoPath = path.join(snapPath, 'snapshot-info.json');
+                    if (fs.existsSync(infoPath)) {
+                        try {
+                            const info = JSON.parse(fs.readFileSync(infoPath, 'utf-8')) as SnapshotInfoFile;
+                            entries.push({
+                                label:     info.name,
+                                name:      info.name,
+                                timestamp: new Date(info.timestamp).toLocaleTimeString(),
+                                path:      snapPath,
+                                date:      dateDir,
+                                isoName:   info.isoName,
+                            });
+                        } catch { /* skip malformed info files */ }
+                    } else {
+                        // Fallback for snapshots without info file (legacy)
+                        entries.push({
+                            label:     nameDir,
+                            name:      nameDir,
+                            timestamp: '',
+                            path:      snapPath,
+                            date:      dateDir,
+                            isoName,
+                        });
+                    }
+                }
+            }
+        } catch (err: any) {
+            getOutputChannel().appendLine(`[WARN] Could not load snapshots for ${isoName}: ${err?.message ?? err}`);
+        }
+
+        this.snapshots = entries;
+        this.webview?.postMessage({ command: 'updateSnapshots', snapshots: entries, gameName: isoName });
+    }
+
+    /**
+     * Load game-specific labels from snapshots/<isoName>/labels.json and
+     * push them to the editor provider for display in the Labels tab.
+     */
+    private loadGameLabels(isoName: string): void {
+        if (!isoName || !this.workspaceRoot) {
+            this.editorProvider.setGameLabels([]);
+            return;
+        }
+
+        const labelsPath = path.join(this.workspaceRoot, 'snapshots', isoName, 'labels.json');
+        if (!fs.existsSync(labelsPath)) {
+            this.editorProvider.setGameLabels([]);
+            return;
+        }
+
+        try {
+            const raw = fs.readFileSync(labelsPath, 'utf-8');
+            const doc = JSON.parse(raw) as { symbol?: LabelEntry[] };
+            const labels = doc.symbol ?? (Array.isArray(doc) ? doc as LabelEntry[] : []);
+            this.editorProvider.setGameLabels(labels);
+            getOutputChannel().appendLine(`[INFO] Loaded ${labels.length} game label(s) from ${labelsPath}`);
+        } catch (err: any) {
+            getOutputChannel().appendLine(`[WARN] Could not load game labels: ${err?.message ?? err}`);
+            this.editorProvider.setGameLabels([]);
+        }
+    }
+
+    /**
+     * Return all historical 4-byte values at the given virtual address, one per snapshot.
+     * Used by DisasmEditorProvider to populate the History tab in the edit overlay.
+     */
+    public getAddressHistory(address: number): Array<{ name: string; date: string; value: string }> {
+        const results: Array<{ name: string; date: string; value: string }> = [];
+
+        for (const snap of this.snapshots) {
+            const infoPath = path.join(snap.path, 'snapshot-info.json');
+            if (!fs.existsSync(infoPath)) { continue; }
+            try {
+                const info = JSON.parse(fs.readFileSync(infoPath, 'utf-8')) as SnapshotInfoFile;
+                for (const region of info.regions) {
+                    const base = region.BaseAddress >>> 0;
+                    const size = region.Size >>> 0;
+                    const offset = (address >>> 0) - base;
+                    if (offset < 0 || offset + 4 > size) { continue; }
+
+                    const binPath = path.join(snap.path, region.File);
+                    if (!fs.existsSync(binPath)) { continue; }
+
+                    const fd = fs.openSync(binPath, 'r');
+                    const buf = Buffer.alloc(4);
+                    const bytesRead = fs.readSync(fd, buf, 0, 4, offset);
+                    fs.closeSync(fd);
+                    if (bytesRead < 4) { continue; }
+
+                    const val = buf.readUInt32LE(0);
+                    results.push({
+                        name:  snap.name || snap.label,
+                        date:  snap.date,
+                        value: '0x' + val.toString(16).toUpperCase().padStart(8, '0'),
+                    });
+                    break; // found region for this address; move to next snapshot
+                }
+            } catch { /* skip on error */ }
+        }
+
+        return results;
     }
 
     /** Resolve a workspace-relative path to an absolute path. */

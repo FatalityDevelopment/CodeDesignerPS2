@@ -813,7 +813,7 @@ export class SocketClient {
 
     /**
      * Add or update a label in the server's symbol database.
-     * The server persists the change to ps2-labels.json immediately.
+     * The server persists the change to ps2MemMap.json immediately.
      */
     public async addLabel(address: number, label: string, comment?: string): Promise<void> {
         const cmd: CommandMessage = { Command: 'ADDLABEL', Address: address, Label: label };
