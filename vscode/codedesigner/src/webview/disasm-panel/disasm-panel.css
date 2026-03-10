@@ -5,6 +5,83 @@ body {
     background: var(--vscode-editor-background);
 }
 
+/* ── Panel tabs ──────────────────────────────────────────────────────────── */
+
+#panel-tabs {
+    display: flex;
+    gap: 0;
+    margin: 0 -10px 10px;
+    border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+    background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d30);
+}
+
+.panel-tab {
+    flex: 1;
+    background: transparent;
+    color: var(--vscode-tab-inactiveForeground, #969696);
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family);
+    outline: none;
+    white-space: nowrap;
+    transition: color 0.1s;
+}
+
+.panel-tab:hover {
+    color: var(--vscode-tab-activeForeground, #ffffff);
+    background: rgba(255,255,255,0.05);
+}
+
+.panel-tab.active {
+    color: var(--vscode-tab-activeForeground, #ffffff);
+    border-bottom-color: var(--vscode-focusBorder, #007acc);
+    background: transparent;
+}
+
+.tab-content {
+    padding: 0;
+}
+
+/* ── Cheats tab ──────────────────────────────────────────────────────────── */
+
+.cheats-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#cheats-input {
+    width: 100%;
+    min-height: 200px;
+    resize: vertical;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 6px;
+    font-family: monospace;
+    font-size: 12px;
+    box-sizing: border-box;
+}
+
+#cheats-input::placeholder {
+    color: var(--vscode-input-placeholderForeground, #888);
+}
+
+.cheat-message {
+    font-size: 12px;
+    padding: 4px 6px;
+    border-radius: 2px;
+    color: #4ec94e;
+}
+
+.cheat-message.cheat-error {
+    color: #e07070;
+}
+
+
 #emu-status-bar {
     display: flex;
     align-items: center;
@@ -195,6 +272,34 @@ button:disabled {
     letter-spacing: 0.05em;
 }
 
+.snapshot-game-name {
+    font-weight: normal;
+    text-transform: none;
+    color: var(--vscode-foreground);
+    opacity: 0.75;
+}
+
+.snapshot-empty {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    padding: 4px 0;
+    font-style: italic;
+}
+
+.snapshot-scroll {
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.snapshot-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.snapshot-scroll::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background);
+    border-radius: 3px;
+}
+
 .snapshot-item {
     display: flex;
     align-items: center;
@@ -203,14 +308,23 @@ button:disabled {
     font-size: 12px;
 }
 
-.snapshot-label {
+.snapshot-item-info {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.snapshot-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: 500;
 }
 
-.snapshot-time {
+.snapshot-date-time {
+    font-size: 10px;
     color: var(--vscode-descriptionForeground);
     white-space: nowrap;
 }
@@ -218,4 +332,5 @@ button:disabled {
 .open-snapshot-btn {
     padding: 2px 8px;
     font-size: 11px;
+    flex-shrink: 0;
 }

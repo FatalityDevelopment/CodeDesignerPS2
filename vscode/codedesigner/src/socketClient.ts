@@ -813,7 +813,7 @@ export class SocketClient {
 
     /**
      * Add or update a label in the server's symbol database.
-     * The server persists the change to ps2-labels.json immediately.
+     * The server persists the change to ps2MemMap.json immediately.
      */
     public async addLabel(address: number, label: string, comment?: string): Promise<void> {
         const cmd: CommandMessage = { Command: 'ADDLABEL', Address: address, Label: label };
@@ -1073,5 +1073,20 @@ export class SocketClient {
         }
 
         return response.Message || 'PONG';
+    }
+
+    /**
+     * Apply PS2 GameShark/Action Replay cheat codes to live emulator memory.
+     * @param cheatText  Multi-line cheat code text (blocks separated by blank lines).
+     */
+    public async applyCheats(cheatText: string): Promise<void> {
+        const command: CommandMessage = {
+            Command: 'APPLYCHEATS',
+            Data:    cheatText,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ApplyCheats failed');
+        }
     }
 }

@@ -10,6 +10,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CodeDesigner.Mips64LE.Common;
+using CodeDesigner.Mips64LE.Common.CheatEngine;
 using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
@@ -27,7 +28,7 @@ namespace CodeDesigner.Mips64LE
         private CancellationTokenSource? _cancellationTokenSource;
 
         /// <summary>
-        /// Symbol/label database loaded from ps2-labels.json at construction time.
+        /// Symbol/label database loaded from ps2MemMap.json at construction time.
         /// Key = virtual address (uint), Value = (Label, optional Comment).
         /// </summary>
         private readonly Dictionary<uint, (string Label, string? Comment)> _labels = new();
@@ -74,7 +75,7 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Load PS2 symbol labels from ps2-labels.json.
+        /// Load PS2 symbol labels from ps2MemMap.json.
         /// Searches the application base directory first, then the current working
         /// directory, so the file can be placed next to the built executable or in
         /// the directory from which the process was launched.
@@ -83,6 +84,9 @@ namespace CodeDesigner.Mips64LE
         {
             var searchPaths = new[]
             {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
+                Path.Combine(Directory.GetCurrentDirectory(), "ps2MemMap.json"),
+                // backward-compat: also check old filename
                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2-labels.json"),
                 Path.Combine(Directory.GetCurrentDirectory(), "ps2-labels.json")
             };
@@ -282,6 +286,9 @@ namespace CodeDesigner.Mips64LE
 
                     case "WRITEMEM":
                         return HandleWriteMem(command.Address ?? 0, command.Data, command.Region);
+
+                    case "APPLYCHEATS":
+                        return HandleApplyCheats(command.Data);
 
                     case "RESTART":
                         return HandleRestart();
@@ -1309,7 +1316,31 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle RESTART command — signals the emulator run-loop to perform a
+        /// Handle APPLYCHEATS command — parses PS2 GameShark/Action Replay cheat codes
+        /// from the supplied text and writes them into the live emulator RAM.
+        /// </summary>
+        private string HandleApplyCheats(string? cheatText)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (string.IsNullOrWhiteSpace(cheatText))
+                return CreateErrorResponse("No cheat data provided");
+
+            try
+            {
+                var byteEditor = new PS2ByteEditor(Scheduler);
+                var engine = new CodeDesigner.Mips64LE.Common.CheatEngine.CheatEngine(byteEditor);
+                var cheatList = new CheatList(cheatText);
+                engine.PatchMemory(cheatList);
+                return CreateSuccessResponse("Cheats applied successfully");
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ApplyCheats error: {ex.Message}");
+            }
+        }
+
+
         /// full hardware reset (equivalent to killing and restarting the process)
         /// without dropping the socket connection.  The run-loop will re-create
         /// the scheduler, reload the BIOS and disc image, preserve existing
@@ -2180,15 +2211,15 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Persist the current in-memory label dictionary back to the first ps2-labels.json
+        /// Persist the current in-memory label dictionary back to the first ps2MemMap.json
         /// file that was found at startup (or the base-directory path as a fallback).
         /// </summary>
         private void SaveLabels()
         {
             var searchPaths = new[]
             {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2-labels.json"),
-                Path.Combine(Directory.GetCurrentDirectory(),       "ps2-labels.json")
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
+                Path.Combine(Directory.GetCurrentDirectory(),       "ps2MemMap.json")
             };
 
             string savePath = searchPaths[0];
@@ -2388,7 +2419,7 @@ namespace CodeDesigner.Mips64LE
         public string? Hex { get; set; }
         public string? Error { get; set; }
         public string? Comment { get; set; }  // Added for analyzer-generated comments
-        public string? Label { get; set; }    // Symbol label from ps2-labels.json
+        public string? Label { get; set; }    // Symbol label from ps2MemMap.json
     }
 
     /// <summary>One entry in the label/symbol database.</summary>

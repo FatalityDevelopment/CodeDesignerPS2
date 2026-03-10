@@ -1211,6 +1211,99 @@ app-hex-view {
     font-family: monospace;
 }
 
+/* ── Edit overlay tabs ── */
+#edit-overlay-tabs {
+    display: flex;
+    border-bottom: 1px solid #3e3e42;
+}
+
+.edit-overlay-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #858585;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    margin-bottom: -1px;
+}
+
+.edit-overlay-tab:hover {
+    color: #cccccc;
+}
+
+.edit-overlay-tab.active {
+    color: #cccccc;
+    border-bottom-color: #007acc;
+}
+
+.edit-overlay-tab-content {
+    display: none;
+}
+
+.edit-overlay-tab-content.active {
+    display: block;
+}
+
+/* ── History tab content ── */
+.edit-overlay-history-list {
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 6px 0;
+}
+
+.edit-overlay-history-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.edit-overlay-history-list::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
+}
+
+.edit-overlay-history-empty {
+    padding: 10px 12px;
+    font-size: 11px;
+    color: #858585;
+    font-style: italic;
+}
+
+.edit-overlay-history-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 12px;
+    font-family: monospace;
+    font-size: 11px;
+    border-bottom: 1px solid #2d2d30;
+}
+
+.edit-overlay-history-row:last-child {
+    border-bottom: none;
+}
+
+.edit-overlay-history-value {
+    color: #9cdcfe;
+    flex-shrink: 0;
+    font-weight: bold;
+}
+
+.edit-overlay-history-name {
+    flex: 1;
+    color: #cccccc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.edit-overlay-history-date {
+    color: #858585;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 .edit-overlay-field {
     display: flex;
     align-items: center;

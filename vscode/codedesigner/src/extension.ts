@@ -98,6 +98,11 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.tabGroups.onDidChangeTabs(syncBinaryFocus),
 	);
 
+	// Wire snapshot history lookup: when the edit overlay requests address history,
+	// delegate to the panel provider which manages snapshots.
+	editorProvider.onGetAddressHistory = (address: number) =>
+		disasmPanelProvider.getAddressHistory(address);
+
 	// Register socket event handlers
 	socketClient.onConnected(() => {
 		outputChannel.appendLine('[INFO] Connected to C# server');
