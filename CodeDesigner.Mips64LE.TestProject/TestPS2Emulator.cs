@@ -253,26 +253,89 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
-        public void Emulator_UnknownInstruction_RaisesEvent()
+        public void Emulator_UnknownInstruction_RaisesEventAndDispatchesRI()
         {
             uint unknownWord = 0;
             var emu = new PS2Emulator();
 
-            // Write a clearly invalid opcode at a RAM address.
-            // Opcode 0x1D is reserved and not used by any PS2 instruction,
-            // guaranteeing GetInstructionObject returns (null, null).
+            // Write a clearly invalid opcode at a known address.
+            // Opcode 0x1D is reserved and has no defined PS2 EE instruction.
             uint badWord = 0x74000000u; // opcode = 0x1D (= 29)
-            emu.LoadProgram(0x00000000, new[] { badWord });
-            emu.Cpu.PC = 0x00000000;
+            emu.LoadProgram(0x00000200, new[] { badWord });
+            emu.Cpu.PC = 0x00000200;
+
+            // Ensure BEV=0 so we can predict the exception vector (0x80000080).
+            emu.Cpu.COP0.WriteRegister32(12, 0u); // Status = 0 → BEV=0
 
             bool eventFired = false;
             emu.UnknownInstruction += (_, w) => { unknownWord = w; eventFired = true; };
 
             emu.Step();
 
+            // The UnknownInstruction event must still fire to allow external notification.
             Assert.IsTrue(eventFired, "UnknownInstruction event should fire");
-            Assert.AreEqual(badWord, unknownWord);
-            Assert.AreEqual(4UL, emu.Cpu.PC, "PC should still advance after unknown instruction");
+            Assert.AreEqual(badWord, unknownWord, "Event payload should be the offending word");
+
+            // Per MIPS architecture, executing an undefined opcode raises a
+            // Reserved Instruction exception (ExcCode = 10).
+            uint cause = emu.Cpu.COP0.ReadRegister32(13);
+            uint excCode = (cause >> 2) & 0x1Fu;
+            Assert.AreEqual(10u, excCode, "Cause.ExcCode must be 10 (ReservedInstr)");
+
+            // EPC should point to the faulting instruction.
+            ulong epc = emu.Cpu.COP0.ReadRegister64(14);
+            Assert.AreEqual(0x200UL, epc, "EPC must point to the faulting instruction");
+
+            // Status.EXL must be set (we are now in exception mode).
+            uint status = emu.Cpu.COP0.ReadRegister32(12);
+            Assert.IsTrue((status & (1u << 1)) != 0, "Status.EXL must be set after RI exception");
+
+            // With BEV=0, the general exception vector is 0x80000080.
+            Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
+                "PC must be redirected to the general exception vector (BEV=0 → 0x80000080)");
+        }
+
+        /// <summary>
+        /// Verifies that each encoding from the problem statement raises a proper
+        /// Reserved Instruction exception (ExcCode=10) per MIPS architecture.
+        /// </summary>
+        [TestMethod]
+        public void Emulator_UndefinedOpcodes_DispatchReservedInstructionException()
+        {
+            // All four problem-statement encodings are undefined in the PS2 EE:
+            //   0x74726574 — opcode=0x1D  (reserved in PS2 EE standard table)
+            //   0x4E49203A — COP1X funct=0x3A  (no such COP1X on R5900)
+            //   0x49202300 — COP2  rs=0x09      (COP2_Unknown in PCSX2)
+            //   0x43414D44 — COP0  rs=0x1A      (COP0_Unknown in PCSX2)
+            uint[] undefinedWords = { 0x74726574u, 0x4E49203Au, 0x49202300u, 0x43414D44u };
+
+            foreach (uint word in undefinedWords)
+            {
+                var emu = new PS2Emulator();
+                emu.LoadProgram(0x00000100, new[] { word });
+                emu.Cpu.PC = 0x00000100;
+                emu.Cpu.COP0.WriteRegister32(12, 0u); // Status = 0 → BEV=0, EXL=0
+
+                bool fired = false;
+                emu.UnknownInstruction += (_, _) => fired = true;
+
+                emu.Step();
+
+                Assert.IsTrue(fired,
+                    $"UnknownInstruction event should fire for undefined encoding 0x{word:X8}");
+
+                uint cause = emu.Cpu.COP0.ReadRegister32(13);
+                uint excCode = (cause >> 2) & 0x1Fu;
+                Assert.AreEqual(10u, excCode,
+                    $"Cause.ExcCode must be 10 (ReservedInstr) for 0x{word:X8}, got ExcCode={excCode}");
+
+                ulong epc = emu.Cpu.COP0.ReadRegister64(14);
+                Assert.AreEqual(0x100UL, epc,
+                    $"EPC must point to faulting instruction (0x100) for 0x{word:X8}");
+
+                Assert.AreEqual(0x80000080UL, emu.Cpu.PC,
+                    $"PC must redirect to exception vector for 0x{word:X8}");
+            }
         }
 
         [TestMethod]

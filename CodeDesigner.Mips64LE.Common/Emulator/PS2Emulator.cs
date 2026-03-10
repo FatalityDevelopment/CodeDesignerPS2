@@ -552,7 +552,10 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             if (instrObj == null)
             {
                 UnknownInstruction?.Invoke(this, word);
-                Cpu.PC = pcBefore + 4;
+                // Per MIPS architecture, executing an undefined opcode raises a
+                // Reserved Instruction exception (ExcCode = 10).
+                COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.ReservedInstr, pcBefore, inDelaySlot: false);
+                InstructionCount++;
                 return;
             }
 
@@ -674,6 +677,15 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 else
                 {
                     UnknownInstruction?.Invoke(this, dsWord);
+                    // An undefined instruction in a delay slot also raises a Reserved
+                    // Instruction exception.  Per convention (matching all other delay-slot
+                    // Dispatch calls in this file) the epc parameter is the delay-slot
+                    // instruction address (pcBefore+4); COP0ExceptionDispatcher subtracts 4
+                    // internally when inDelaySlot=true, storing pcBefore (the branch) in EPC
+                    // and setting Cause.BD=1.
+                    COP0ExceptionDispatcher.Dispatch(Cpu, ExceptionCode.ReservedInstr, pcBefore + 4, inDelaySlot: true);
+                    InstructionCount++;
+                    return;
                 }
 
                 // Transfer to the branch target regardless of what the delay-slot
