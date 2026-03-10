@@ -268,16 +268,11 @@ export class DisasmEditorComponent implements AfterViewInit {
     let _editOverlayAddr = 0;
     let _editOverlayAddrHex = '';
 
-    // Render the hex column-header row immediately so it is always visible,
-    // even before hex data arrives from the extension host.
-    hexHeader.appendChild(buildHexHeader());
-
-    // Populate the hex container with placeholder all-zero rows so the hex
-    // panel shows data immediately at launch (before the emulator connects).
-    const placeholderBytes = new Array(128).fill(0);
-    for (let pi = 0; pi < placeholderBytes.length; pi += 16) {
-      hexContainer.appendChild(buildHexRow(placeholderBytes, 0, pi, -1, 4));
-    }
+    // Render the hex view immediately with placeholder all-zero data so the
+    // panel looks populated at launch before the emulator connects.
+    // Using renderHexView() ensures the placeholder uses the identical rendering
+    // path as live data (same CSS classes, same highlight logic, same structure).
+    renderHexView(new Array(128).fill(0), 0);
 
     // ── State ─────────────────────────────────────────────────────────────────
     const state = {
