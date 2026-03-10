@@ -468,8 +468,8 @@ namespace CodeDesigner.Mips64LE
                 var comments = MipsAnalyzer.AnalyzeInstructions(
                     instructionList, 
                     startAddress ?? 0,
-                    executeInstructions: true  // Execute instructions to track register state
-                );
+                    executeInstructions: true,  // Execute instructions to track register state
+                    lookupLabel: addr => _labels.TryGetValue(addr, out var e) ? e.Label : null);
 
                 // Apply comments and labels to results
                 for (int i = 0; i < results.Count; i++)
@@ -711,7 +711,9 @@ namespace CodeDesigner.Mips64LE
                 instrWord = Scheduler.EE.Bus.ReadWord(prePc);
                 // Snapshot register state before execution; Bus/COP0 are not needed for analysis.
                 var cpuSnap = Scheduler.EE.Cpu.CreateAnalysisSnapshot();
-                analysisComment = MipsAnalyzer.AnalyzeSingleInstruction(instrWord, prePc, cpuSnap);
+                analysisComment = MipsAnalyzer.AnalyzeSingleInstruction(instrWord, prePc, cpuSnap,
+                    Scheduler.EE.Bus,
+                    addr => _labels.TryGetValue(addr, out var e) ? e.Label : null);
             }
             catch { /* If we can't read the instruction, skip analysis */ }
 
