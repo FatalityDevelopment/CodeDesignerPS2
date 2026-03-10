@@ -305,3 +305,12 @@ button:disabled {
     font-size: 11px;
     flex-shrink: 0;
 }
+
+.section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--vscode-descriptionForeground);
+    margin: 12px 0 4px;
+}

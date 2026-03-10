@@ -247,6 +247,9 @@ namespace CodeDesigner.Mips64LE
                 {
                     case "ASSEMBLE":
                         return HandleAssemble(command.Data);
+
+                    case "COMPILECDS":
+                        return HandleCompileCds(command.Data);
                     
                     case "DISASSEMBLE":
                         return HandleDisassemble(command.Data, command.Address);
@@ -356,6 +359,76 @@ namespace CodeDesigner.Mips64LE
             catch (Exception ex)
             {
                 return CreateErrorResponse($"Error processing command: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle COMPILECDS command — compiles a .cds (Code Designer Script) assembly file.
+        /// Accepts the raw source text forwarded from the VS Code extension.
+        /// </summary>
+        private string HandleCompileCds(string? sourceCode)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(sourceCode))
+                {
+                    return CreateErrorResponse("No source code provided");
+                }
+
+                var lines = sourceCode.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                var results = new List<InstructionResult>();
+
+                foreach (var line in lines)
+                {
+                    var trimmed = line.Trim();
+
+                    // Skip empty lines and comment lines; strip inline comments
+                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#") || trimmed.StartsWith("//"))
+                    {
+                        continue;
+                    }
+
+                    // Strip inline comments (e.g. "add $t0, $s0, $s1 // note")
+                    var commentIdx = trimmed.IndexOf("//", StringComparison.Ordinal);
+                    if (commentIdx > 0)
+                    {
+                        trimmed = trimmed[..commentIdx].TrimEnd();
+                    }
+                    if (string.IsNullOrWhiteSpace(trimmed)) { continue; }
+
+                    try
+                    {
+                        uint encoded = MipsAssembler.Assemble(trimmed);
+                        results.Add(new InstructionResult
+                        {
+                            Assembly = trimmed,
+                            Hex      = $"0x{encoded:X8}",
+                            Success  = true
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        results.Add(new InstructionResult
+                        {
+                            Assembly = trimmed,
+                            Error    = ex.Message,
+                            Success  = false
+                        });
+                    }
+                }
+
+                var response = new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "COMPILECDS",
+                    Results  = results
+                };
+
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Compile error: {ex.Message}");
             }
         }
 

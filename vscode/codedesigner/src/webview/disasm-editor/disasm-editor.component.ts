@@ -28,6 +28,7 @@ import './disasm-editor.css';
     <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
     <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
+    <button class="header-tool-btn" id="send-to-cheat-btn" title="Send current instruction to Cheat List">&#9998; Cheat</button>
 
 </div>
 <div id="goto-panel">
@@ -282,6 +283,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const searchToggleBtn      = document.getElementById('search-toggle-btn')!;
     const gotoToggleBtn        = document.getElementById('goto-toggle-btn')!;
     const navBackBtn           = document.getElementById('nav-back-btn') as HTMLButtonElement;
+    const sendToCheatBtn       = document.getElementById('send-to-cheat-btn') as HTMLButtonElement;
 
     const bottomPanel    = document.getElementById('bottom-panel')!;
     const debugPanel     = document.getElementById('debug-panel')!;
@@ -904,6 +906,19 @@ export class DisasmEditorComponent implements AfterViewInit {
     gotoClear.addEventListener('click', () => { gotoInput.value = ''; gotoInfo.textContent = ''; gotoInput.focus(); });
     closeGoto.addEventListener('click', () => { toggleGoto(); grid.focus(); });
     navBackBtn.addEventListener('click', () => navigateBack());
+    sendToCheatBtn.addEventListener('click', () => {
+      const localIndex = getLocalIndex(state.cursor);
+      const row = state.disasmRows[localIndex];
+      if (!row) { return; }
+      const addr = parseInt(row.addr, 16);
+      const byteTokens = row.bytes.trim().split(/\s+/).filter(Boolean);
+      if (byteTokens.length < 4) { return; }
+      // Reconstruct the 32-bit instruction value (bytes are little-endian in memory)
+      const valueHex = (byteTokens[3] + byteTokens[2] + byteTokens[1] + byteTokens[0]).toUpperCase();
+      // GameShark 32-bit write: type nibble 2 + lower 28 bits of address + 8-char value
+      const entry = `2${(addr & 0x0FFFFFFF).toString(16).padStart(7, '0').toUpperCase()} ${valueHex}`;
+      vscode.postMessage({ type: 'sendToCheatList', entry });
+    });
 
     // Broadcast every keystroke to the other region panels so their goto
     // input stays in sync with this one.  A guard flag prevents the echo

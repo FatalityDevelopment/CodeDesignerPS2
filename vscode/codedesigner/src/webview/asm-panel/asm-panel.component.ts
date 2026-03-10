@@ -11,38 +11,32 @@ import './asm-panel.css';
   imports: [CommonModule, FormsModule],
   encapsulation: ViewEncapsulation.None,
   template: `
-<div class="row">
-  <select id="emulatorSelect" [(ngModel)]="selectedEmulator" (change)="onEmulatorChange()">
-    <option value="">Select Emulator...</option>
-    <option *ngFor="let e of emulators" [value]="e">{{e}}</option>
-  </select>
-  <button (click)="connect()">Connect</button>
+<div class="file-row">
+  <input id="fileInput" type="text" [(ngModel)]="currentFile" readonly
+    placeholder="Open a .cds file to compile..." />
 </div>
 
 <div class="textarea-container">
-  <label for="asmInput">Assembly Code:</label>
-  <textarea id="asmInput"
+  <textarea id="codeInput"
     [(ngModel)]="code"
-    placeholder="add \$t0, \$s0, \$s1&#10;addi \$t1, \$t0, 100&#10;j 0x400000"
-    rows="8"></textarea>
-
-  <label for="hexOutput">Hex Output:</label>
-  <textarea id="hexOutput" [value]="output" readonly
-    placeholder="Assembled hex will appear here..."></textarea>
+    placeholder="Open a .cds file — its contents will appear here for compilation."
+    rows="12"></textarea>
 
   <div *ngIf="statusText" class="status" [class.success]="statusSuccess" [class.error]="statusError">
     {{statusText}}
   </div>
+
+  <label *ngIf="output" for="hexOutput">Output:</label>
+  <textarea *ngIf="output" id="hexOutput" [value]="output" readonly></textarea>
 </div>
 
 <div class="row">
-  <button (click)="assemble()">Assemble</button>
+  <button (click)="compile()" [disabled]="!code">Compile</button>
 </div>
   `
 })
 export class AsmPanelComponent implements OnInit, OnDestroy {
-  emulators: string[] = ['Project64', 'Mupen64Plus', 'RetroArch'];
-  selectedEmulator = '';
+  currentFile = '';
   code = '';
   output = '';
   statusText = '';
@@ -54,29 +48,26 @@ export class AsmPanelComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.subs.push(
-      this.bridge.on<Record<string, unknown>>('setCode').subscribe(msg => {
-        this.code = (msg['code'] as string) ?? '';
+      this.bridge.on<Record<string, unknown>>('loadFile').subscribe(msg => {
+        this.currentFile = (msg['filePath'] as string) ?? '';
+        this.code        = (msg['content']  as string) ?? '';
+        this.output      = '';
+        this.statusText  = '';
       }),
-      this.bridge.on<Record<string, unknown>>('assembleResult').subscribe(msg => {
+      this.bridge.on<Record<string, unknown>>('compileResult').subscribe(msg => {
         if (msg['success']) {
-          this.output = (msg['data'] as string) ?? '';
-          this.statusText = 'Assembly complete!';
+          this.output      = (msg['data']  as string) ?? '';
+          this.statusText  = 'Compilation complete!';
           this.statusSuccess = true;
-          this.statusError = false;
+          this.statusError   = false;
         } else {
-          this.statusText = 'Error: ' + (msg['error'] as string ?? 'Unknown error');
+          this.output      = '';
+          this.statusText  = 'Error: ' + ((msg['error'] as string) ?? 'Unknown error');
           this.statusSuccess = false;
-          this.statusError = true;
-        }
-      }),
-      this.bridge.on<Record<string, unknown>>('init').subscribe(msg => {
-        const emulators = msg['emulators'] as string[] | undefined;
-        if (emulators && emulators.length > 0) {
-          this.emulators = emulators;
+          this.statusError   = true;
         }
       })
     );
-    // Signal readiness so providers can safely send init/state data.
     this.bridge.postMessage({ command: 'ready' });
   }
 
@@ -84,18 +75,11 @@ export class AsmPanelComponent implements OnInit, OnDestroy {
     this.subs.forEach(s => s.unsubscribe());
   }
 
-  onEmulatorChange(): void {
-    this.bridge.postMessage({ command: 'emulatorChanged', emulator: this.selectedEmulator });
-  }
-
-  connect(): void {
-    this.bridge.postMessage({ command: 'connect' });
-  }
-
-  assemble(): void {
-    this.statusText = 'Assembling...';
+  compile(): void {
+    if (!this.code) { return; }
+    this.statusText    = 'Compiling…';
     this.statusSuccess = false;
-    this.statusError = false;
-    this.bridge.postMessage({ command: 'assemble', data: this.code });
+    this.statusError   = false;
+    this.bridge.postMessage({ command: 'compile', code: this.code });
   }
 }

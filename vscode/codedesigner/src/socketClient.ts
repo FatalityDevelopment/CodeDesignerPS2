@@ -527,6 +527,25 @@ export class SocketClient {
     }
 
     /**
+     * Compile a .cds (Code Designer Script) assembly file.
+     * Forwards the raw source text to the backend COMPILECDS command.
+     */
+    public async compileCds(sourceCode: string): Promise<InstructionResult[]> {
+        const command: CommandMessage = {
+            Command: 'COMPILECDS',
+            Data: sourceCode
+        };
+
+        const response = await this.sendCommand(command);
+
+        if (!response.Success) {
+            throw new Error(response.Error || 'Compilation failed');
+        }
+
+        return response.Results || [];
+    }
+
+    /**
      * Assemble MIPS assembly code to hex
      */
     public async assemble(asmCode: string): Promise<InstructionResult[]> {
