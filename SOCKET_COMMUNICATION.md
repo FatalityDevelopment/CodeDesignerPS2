@@ -103,9 +103,19 @@ Messages are sent as JSON-encoded strings with the following structure:
 ```typescript
 interface CommandMessage {
     Command: string;             // Command type (see Supported Commands)
-    Data?: string;               // Optional data payload
-    Address?: number;            // Optional starting address (for DISASSEMBLE)
-    BreakpointAddress?: number;  // EE virtual address (for SETBP / CLEARBP)
+    Data?: string;               // Generic data payload (assembly text, hex bytes, base64 binary)
+    Address?: number;            // Virtual address (DISASSEMBLE, READMEM, WRITEMEM, SCANSTRINGS, …)
+    Length?: number;             // Byte count (READMEM, SCANSTRINGS, SCANFUNCTIONS, SEARCH)
+    Region?: string;             // Memory region: "ee" (default) or "iop"
+    OutputPath?: string;         // Output directory path (SNAPSHOT)
+    BreakpointAddress?: number;  // EE virtual address (SETBP / CLEARBP)
+    Label?: string;              // Symbol label name (ADDLABEL)
+    Comment?: string;            // Optional comment (ADDLABEL)
+    Query?: string;              // Search pattern (SEARCH)
+    SearchMode?: string;         // Search mode: "text", "regex", "bytes", "string" (SEARCH)
+    RegisterName?: string;       // Register type (SETREG): GPR, PC, HI, LO, HI1, LO1, SA, COP0, FPR, FCR, VU0I, VU0F
+    RegisterIndex?: number;      // Register index (SETREG, required for GPR/COP0/FPR/VU0I/VU0F)
+    RegisterValue?: string;      // New register value as decimal or "0x"-prefixed hex (SETREG)
 }
 ```
 
@@ -117,74 +127,176 @@ interface CommandResponse {
     Command?: string;
     Message?: string;
     Error?: string;
-    Results?: InstructionResult[];
-    Paused?: boolean;            // Present in GETPC response
-    PC?: number;                 // Current EE PC (GETPC response)
-    BreakpointHitAddress?: number; // Last breakpoint hit address (GETPC response)
+    Data?: string;               // Base64-encoded binary (READMEM response)
+    Results?: InstructionResult[]; // ASSEMBLE / DISASSEMBLE results
+    Regions?: SnapshotRegion[];  // SNAPSHOT: list of written files
+    Paused?: boolean;            // Emulator pause state (GETPC / STEP response)
+    PC?: number;                 // Current EE PC as uint32 (GETPC / STEP response)
+    BreakpointHitAddress?: number; // Last breakpoint hit address, or null (GETPC response)
+    // GETREGS fields (GPRs, COP0, FPU, VU0) — see GETREGS below
+    GPR?: number[];
+    GPR_PC?: number;
+    GPR_HI?: number;
+    GPR_LO?: number;
+    GPR_HI1?: number;
+    GPR_LO1?: number;
+    GPR_SA?: number;
+    COP0_Status?: number;
+    COP0_Cause?: number;
+    COP0_EPC?: number;
+    COP0_Count?: number;
+    COP0_Regs?: number[];
+    FPR?: number[];
+    FPR_ACC?: number;
+    FCR0?: number;
+    FCR31?: number;
+    VU0F_X?: number[];
+    VU0F_Y?: number[];
+    VU0F_Z?: number[];
+    VU0F_W?: number[];
+    VU0I?: number[];
+    // Symbol / scan results
+    Labels?: LabelEntry[];
+    Strings?: StringEntry[];
+    Functions?: FunctionEntry[];
+    Matches?: SearchMatch[];
+    Threads?: ThreadEntry[];
 }
 ```
 
 ### Supported Commands
 
-#### ASSEMBLE
-Assembles MIPS assembly code to hex.
-
-```json
-{
-    "Command": "ASSEMBLE",
-    "Data": "add t0, t1, t2\nori t3, t0, 0x1234"
-}
-```
-
-#### DISASSEMBLE
-Disassembles hex code to MIPS assembly. Optionally accepts a starting address for proper branch target calculation.
-
-```json
-{
-    "Command": "DISASSEMBLE",
-    "Data": "0x02114020 0x35080001",
-    "Address": 4096
-}
-```
-
-When `Address` is provided, branch instructions will show target addresses and offset indicators:
-- `beq zero, zero, $00001008 (+2▼)` instead of just `beq zero, zero, 0x0001`
-
 #### PING
 Tests server connectivity.
 
 ```json
-{
-    "Command": "PING"
-}
+{ "Command": "PING" }
 ```
 
 Response: `{ "Success": true, "Message": "PONG" }`
 
-#### PAUSE
-Manually pauses EE execution.  Returns immediately if the emulator is already paused.
+---
+
+#### ASSEMBLE
+Assembles MIPS EE assembly code to machine-code hex opcodes.
 
 ```json
 {
-    "Command": "PAUSE"
+    "Command": "ASSEMBLE",
+    "Data": "addiu $sp,$sp,-0x30\nsw $ra,0x28($sp)"
 }
+```
+
+Response contains a `Results` array; each entry has `Assembly`, `Hex`, and `Success`.
+
+---
+
+#### DISASSEMBLE
+Disassembles 32-bit hex opcodes to MIPS EE assembly.  
+Optionally accepts a virtual `Address` so branch targets and labels are resolved correctly.
+
+```json
+{
+    "Command": "DISASSEMBLE",
+    "Data": "27BDFFD0 AFBF001C",
+    "Address": 2147549184
+}
+```
+
+When `Address` is provided, branch instructions show resolved target addresses:  
+`beq $zero,$zero,0x80011008 (+2▼)` instead of `beq $zero,$zero,0x0001`.
+
+---
+
+#### READMEM
+Reads raw bytes from live emulator memory and returns them as base64.
+
+```json
+{
+    "Command": "READMEM",
+    "Address": 2147483648,
+    "Length": 256,
+    "Region": "ee"
+}
+```
+
+`Region` is `"ee"` (EE main RAM / scratchpad, default) or `"iop"` (IOP RAM).  
+Response: `{ "Success": true, "Command": "READMEM", "Data": "<base64>" }`
+
+---
+
+#### WRITEMEM
+Writes arbitrary bytes to live emulator memory.  
+`Data` is a hex string — spaces, commas, and `0x` prefixes are stripped automatically.
+
+```json
+{
+    "Command": "WRITEMEM",
+    "Address": 2147483648,
+    "Data": "27BD FFD0 AFBF 001C",
+    "Region": "ee"
+}
+```
+
+Response: `{ "Success": true, "Message": "Wrote N byte(s) to 0x80000000" }`
+
+---
+
+#### PAUSE
+Manually pauses EE execution. Returns immediately if already paused.
+
+```json
+{ "Command": "PAUSE" }
 ```
 
 Response: `{ "Success": true, "Message": "Paused" }`
 
+---
+
 #### RESUME
-Resumes EE execution and clears the last breakpoint hit address.
+Resumes EE execution and clears the last breakpoint hit address.  
+If the emulator is paused at a breakpoint the breakpoint instruction is executed once before releasing execution, so the same breakpoint does not immediately re-fire.
 
 ```json
-{
-    "Command": "RESUME"
-}
+{ "Command": "RESUME" }
 ```
 
 Response: `{ "Success": true, "Message": "Resumed" }`
 
+---
+
+#### STEP
+Executes exactly one EE instruction while keeping the emulator paused.  
+The emulator must already be paused; returns an error if it is running.  
+Returns the same fields as `GETPC` after the step.
+
+```json
+{ "Command": "STEP" }
+```
+
+Example response:
+```json
+{ "Success": true, "Command": "GETPC", "Paused": true, "PC": 2147483908 }
+```
+
+---
+
+#### RESTART
+Performs a full hardware reset without dropping the socket connection.  
+The BIOS and disc image are reloaded, existing breakpoints are preserved,  
+and the emulator is left paused at the reset vector (`0xBFC00000`).
+
+```json
+{ "Command": "RESTART" }
+```
+
+Response: `{ "Success": true, "Message": "Restarted" }`
+
+---
+
 #### SETBP
-Adds a breakpoint at the given EE virtual address.  When the EE program counter reaches this address the scheduler sets `Paused = true` automatically.
+Adds a breakpoint at the given EE virtual address.  
+When the EE program counter reaches this address the scheduler pauses execution automatically.
 
 ```json
 {
@@ -193,8 +305,10 @@ Adds a breakpoint at the given EE virtual address.  When the EE program counter 
 }
 ```
 
-`BreakpointAddress` is a 32-bit unsigned integer (pass as a JSON number).  
+`BreakpointAddress` is a 32-bit unsigned integer (JSON number).  
 Response: `{ "Success": true, "Message": "Breakpoint set at 0x80000000" }`
+
+---
 
 #### CLEARBP
 Removes the breakpoint at a specific EE virtual address.
@@ -208,24 +322,24 @@ Removes the breakpoint at a specific EE virtual address.
 
 Response: `{ "Success": true, "Message": "Breakpoint cleared at 0x80000000" }`
 
+---
+
 #### CLEARBP_ALL
 Removes all active breakpoints.
 
 ```json
-{
-    "Command": "CLEARBP_ALL"
-}
+{ "Command": "CLEARBP_ALL" }
 ```
 
 Response: `{ "Success": true, "Message": "All breakpoints cleared" }`
 
+---
+
 #### GETPC
-Returns the current EE program counter together with the emulator pause state and the address of the most recently hit breakpoint (if any).
+Returns the current EE program counter, emulator pause state, and last breakpoint hit address.
 
 ```json
-{
-    "Command": "GETPC"
-}
+{ "Command": "GETPC" }
 ```
 
 Example response:
@@ -241,6 +355,227 @@ Example response:
 
 `PC` and `BreakpointHitAddress` are 32-bit unsigned integers encoded as JSON numbers.  
 `BreakpointHitAddress` is `null` if no breakpoint has fired since the last `RESUME`.
+
+---
+
+#### GETREGS
+Returns a full register dump: all 32 GPRs (128-bit), HI/LO/HI1/LO1/SA, all COP0 registers, COP1 FPU registers (FPR0–31, FACC, FCR0, FCR31), and VU0 vector registers (VF0–31 × 4 components, VI0–15, status flags).
+
+```json
+{ "Command": "GETREGS" }
+```
+
+Response fields include `GPR` (array of 32 uint64 values), `GPR_PC`, `GPR_HI`, `GPR_LO`, `COP0_Status`, `COP0_Cause`, `COP0_EPC`, `COP0_Count`, `COP0_Regs` (32 × uint64), `FPR` (32 × uint32 IEEE-754 bits), `FPR_ACC`, `FCR0`, `FCR31`, `VU0F_X/Y/Z/W` (32 × uint32 each), `VU0I` (16 × uint16 as uint), `VU0_Status`, `VU0_MAC`, `VU0_Clip`, and `GS_Priv`.
+
+---
+
+#### SETREG
+Writes a new value to a named EE CPU register.
+
+```json
+{
+    "Command": "SETREG",
+    "RegisterName": "GPR",
+    "RegisterIndex": 4,
+    "RegisterValue": "0x80010000"
+}
+```
+
+| `RegisterName` | `RegisterIndex` | Notes |
+|---|---|---|
+| `GPR` | 1–31 | `$zero` (index 0) is read-only |
+| `PC` | — | |
+| `HI` / `LO` / `HI1` / `LO1` / `SA` | — | |
+| `COP0` | 0–31 | |
+| `FPR` | 0–31 | Raw IEEE-754 uint32 bits |
+| `FCR` | 31 | Only FCR31 (FCSR) is writable |
+| `VU0I` | 0–15 | 16-bit integer (VI0 is read-only) |
+| `VU0F` | 0–31 | Writes X component; Y/Z/W unchanged |
+
+`RegisterValue` may be decimal or `"0x"`-prefixed hex.  
+Response: `{ "Success": true, "Message": "Register updated" }`
+
+---
+
+#### SNAPSHOT
+Saves a full memory snapshot of the running emulator to disk.  
+Writes four binary files to `OutputPath` (created if it does not exist):
+- `EEmem.bin` — 32 MB EE main RAM (base `0x00000000`)
+- `BIOSrom.bin` — 4 MB BIOS ROM (base `0x1FC00000`)
+- `Scratchpad.bin` — 16 KB scratchpad (base `0x70000000`)
+- `IOPmem.bin` — IOP RAM (base `0x00000000`)
+
+```json
+{
+    "Command": "SNAPSHOT",
+    "OutputPath": "/tmp/ps2-snapshot"
+}
+```
+
+Response: `{ "Success": true, "Command": "SNAPSHOT", "Regions": [ … ] }`  
+Each entry in `Regions` has `Label`, `File`, `BaseAddress`, and `Size`.
+
+---
+
+#### GETLABELS
+Returns all symbol labels from the `ps2-labels.json` database, sorted by address.
+
+```json
+{ "Command": "GETLABELS" }
+```
+
+Response: `{ "Success": true, "Command": "GETLABELS", "Labels": [ { "address": "0x80011234", "label": "scePadRead", "comment": null }, … ] }`
+
+---
+
+#### ADDLABEL
+Inserts or updates a symbol label at a given address and persists the change to `ps2-labels.json`.
+
+```json
+{
+    "Command": "ADDLABEL",
+    "Address": 2147549748,
+    "Label": "scePadRead",
+    "Comment": "Pad library read function"
+}
+```
+
+`Comment` is optional.  
+Response: `{ "Success": true, "Message": "Label 'scePadRead' set at 0x800112F4" }`
+
+---
+
+#### DELETELABEL
+Removes the label at a given address and persists the change to `ps2-labels.json`.
+
+```json
+{
+    "Command": "DELETELABEL",
+    "Address": 2147549748
+}
+```
+
+Response: `{ "Success": true, "Message": "Label removed at 0x800112F4" }`
+
+---
+
+#### SCANSTRINGS
+Scans a region of live emulator memory for null-terminated ASCII strings (minimum 4 printable characters).
+
+```json
+{
+    "Command": "SCANSTRINGS",
+    "Address": 2147483648,
+    "Length": 65536,
+    "Region": "ee"
+}
+```
+
+Response: `{ "Success": true, "Command": "SCANSTRINGS", "Strings": [ { "address": "0x80001234", "value": "Hello, PS2!" }, … ] }`
+
+---
+
+#### SCANFUNCTIONS
+Scans a region of live emulator memory and detects likely MIPS function entry points using two heuristics:
+1. `ADDIU $sp,$sp,-N` — stack-frame prologue
+2. Target addresses of `JAL` instructions within the scanned block
+
+```json
+{
+    "Command": "SCANFUNCTIONS",
+    "Address": 2147483648,
+    "Length": 131072,
+    "Region": "ee"
+}
+```
+
+Response: `{ "Success": true, "Command": "SCANFUNCTIONS", "Functions": [ { "address": "0x80010100", "label": "FNC_0x80010100" }, … ] }`  
+If a user-defined label exists at a candidate address the database label is used instead of the auto-generated one.
+
+---
+
+#### GETSTRINGS
+Scans caller-supplied base64-encoded binary data for null-terminated ASCII strings.  
+Useful when you have already read memory via `READMEM` and want to scan it offline.
+
+```json
+{
+    "Command": "GETSTRINGS",
+    "Address": 2147483648,
+    "Data": "<base64-encoded binary>"
+}
+```
+
+`Address` is used as the base address for reported string offsets.  
+Response format is identical to `SCANSTRINGS`.
+
+---
+
+#### GETFUNCTIONS
+Scans caller-supplied base64-encoded binary data for MIPS function entry points.  
+Useful when you have already read memory via `READMEM` and want to analyse it offline.
+
+```json
+{
+    "Command": "GETFUNCTIONS",
+    "Address": 2147483648,
+    "Data": "<base64-encoded binary>"
+}
+```
+
+`Address` is used as the base address for reported candidate addresses.  
+Response format is identical to `SCANFUNCTIONS`.
+
+---
+
+#### SEARCH
+Searches live emulator memory (or caller-supplied binary data) for a pattern.
+
+```json
+{
+    "Command": "SEARCH",
+    "Query": "jalr",
+    "Address": 2147483648,
+    "Length": 65536,
+    "SearchMode": "text",
+    "Region": "ee"
+}
+```
+
+| `SearchMode` | Behaviour |
+|---|---|
+| `text` | Case-insensitive substring match against disassembled instruction text (default) |
+| `regex` | Case-insensitive regular expression match against disassembled instruction text |
+| `bytes` | Hex byte pattern search against raw memory (e.g. `"27 BD FF D0"`) |
+| `string` | Raw UTF-8 byte sequence search against raw memory |
+
+Optionally supply `Data` (base64) instead of `Address`/`Length`/`Region` to search offline bytes.
+
+Response: `{ "Success": true, "Command": "SEARCH", "Matches": [ { "address": 2147483652, "field": "Assembly" }, … ] }`
+
+---
+
+#### GETTHREADS
+Enumerates PS2 EE OS threads by walking the kernel thread control block (TCB) pool at physical RAM offset `0x100`.
+
+```json
+{ "Command": "GETTHREADS" }
+```
+
+Example response:
+```json
+{
+    "Success": true,
+    "Command": "GETTHREADS",
+    "Threads": [
+        { "id": 0, "status": "Running",   "pc": 2147484004, "sp": 2147942400, "priority": 0, "entryPc": 2147484004 },
+        { "id": 1, "status": "Waiting",   "pc": 2147500032, "sp": 2147877888, "priority": 16, "entryPc": 2147500032 }
+    ]
+}
+```
+
+Thread status values: `Running`, `Ready`, `Waiting`, `Suspended`, `Dormant`.  
+If no valid TCBs are found a single synthetic entry for the live CPU state is returned.
 
 ### Protocol
 
