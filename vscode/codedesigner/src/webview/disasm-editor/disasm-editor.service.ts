@@ -375,13 +375,16 @@ export class DisasmEditorService implements OnDestroy {
     }
   }
 
-  /** Strip virtual-address prefix bits to get the physical address.
-   *  Handles KSEG0/KSEG1 (0x80000000–0xBFFFFFFF) and the uncached-user
-   *  EE Main RAM mirror (0x20000000–0x21FFFFFF). */
+  /** Translate any virtual/logical EE address to its physical equivalent.
+   *  KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip the top 3 bits.
+   *  EE RAM uncached mirror (0x20100000–0x21FFFFFF): subtract 0x20000000.
+   *  EE RAM uncached+accelerated (0x30100000–0x31FFFFFF): subtract 0x30000000.
+   *  All other addresses (physical or special like scratchpad) pass through. */
   private _toPhysAddr(addr: number): number {
     const v = addr >>> 0;
     if (v >= 0x80000000 && v <= 0xBFFFFFFF) return (v & 0x1FFFFFFF) >>> 0;
-    if (v >= 0x20000000 && v <= 0x21FFFFFF)  return (v - 0x20000000) >>> 0;
+    if (v >= 0x20100000 && v <= 0x21FFFFFF) return (v - 0x20000000) >>> 0;
+    if (v >= 0x30100000 && v <= 0x31FFFFFF) return (v - 0x30000000) >>> 0;
     return v;
   }
 
