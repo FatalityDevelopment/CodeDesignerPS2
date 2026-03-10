@@ -301,11 +301,29 @@ namespace CodeDesigner.Mips64LE
                     case "GETFUNCTIONS":
                         return HandleGetFunctions(command.Address ?? 0, command.Data);
 
+                    case "GETPOINTERS":
+                        return HandleGetPointers(command.Address ?? 0, command.Data);
+
+                    case "GETFLOATS":
+                        return HandleGetFloats(command.Address ?? 0, command.Data);
+
+                    case "GETINTEGERS":
+                        return HandleGetIntegers(command.Address ?? 0, command.Data);
+
                     case "SCANSTRINGS":
                         return HandleScanStrings(command.Address ?? 0, command.Length ?? 0, command.Region);
 
                     case "SCANFUNCTIONS":
                         return HandleScanFunctions(command.Address ?? 0, command.Length ?? 0, command.Region);
+
+                    case "SCANPOINTERS":
+                        return HandleScanPointers(command.Address ?? 0, command.Length ?? 0, command.Region);
+
+                    case "SCANFLOATS":
+                        return HandleScanFloats(command.Address ?? 0, command.Length ?? 0, command.Region);
+
+                    case "SCANINTEGERS":
+                        return HandleScanIntegers(command.Address ?? 0, command.Length ?? 0, command.Region);
 
                     case "SEARCH":
                         return HandleSearch(command.Query ?? "", command.SearchMode ?? "text",
@@ -509,6 +527,10 @@ namespace CodeDesigner.Mips64LE
         }
 
         private const int MaxReadMemLength = 65536;
+
+        // Thresholds used by SCANFLOATS / GETFLOATS to filter plausible game values.
+        private const float FloatScanMinAbs = 0.001f;
+        private const float FloatScanMaxAbs = 1_000_000f;
 
         // ── Address-translation constants for HandleReadMem / scan helpers ────
 
@@ -1502,6 +1524,148 @@ namespace CodeDesigner.Mips64LE
             }
         }
 
+        // ── File-binary helpers (base64 data, no live emulator required) ─────
+
+        /// <summary>
+        /// Handle GETPOINTERS — scans base64-encoded binary data for 4-byte aligned
+        /// values that look like valid EE memory pointers.
+        /// </summary>
+        private string HandleGetPointers(uint startAddress, string? base64Data)
+        {
+            if (string.IsNullOrEmpty(base64Data))
+                return CreateErrorResponse("Data (base64 binary) is required for GETPOINTERS");
+
+            try
+            {
+                var bytes   = Convert.FromBase64String(base64Data);
+                var results = new List<PointerEntry>();
+
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    uint val = BitConverter.ToUInt32(bytes, i);
+                    uint physEquiv = val;
+                    if (val >= 0x80000000u && val < 0xC0000000u)
+                        physEquiv = val & 0x1FFFFFFFu;
+                    bool isValid =
+                        physEquiv < (uint)PS2MemoryBus.MainRamSize ||
+                        (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
+
+                    if (isValid)
+                    {
+                        results.Add(new PointerEntry
+                        {
+                            Address  = $"0x{(startAddress + (uint)i):X8}",
+                            PointsTo = $"0x{val:X8}"
+                        });
+                    }
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "GETPOINTERS",
+                    Pointers = results
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"GetPointers error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle GETFLOATS — scans base64-encoded binary data for 4-byte aligned
+        /// plausible IEEE-754 single-precision floats.
+        /// </summary>
+        private string HandleGetFloats(uint startAddress, string? base64Data)
+        {
+            if (string.IsNullOrEmpty(base64Data))
+                return CreateErrorResponse("Data (base64 binary) is required for GETFLOATS");
+
+            try
+            {
+                var bytes   = Convert.FromBase64String(base64Data);
+                var results = new List<FloatEntry>();
+
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    uint bits = BitConverter.ToUInt32(bytes, i);
+                    float f   = BitConverter.Int32BitsToSingle((int)bits);
+
+                    if (float.IsNaN(f) || float.IsInfinity(f))
+                        continue;
+
+                    uint exp = (bits >> 23) & 0xFFu;
+                    if (exp == 0u)
+                        continue;
+
+                    float absVal = MathF.Abs(f);
+                    if (absVal < FloatScanMinAbs || absVal > FloatScanMaxAbs)
+                        continue;
+
+                    results.Add(new FloatEntry
+                    {
+                        Address = $"0x{(startAddress + (uint)i):X8}",
+                        Value   = f,
+                        Raw     = $"0x{bits:X8}"
+                    });
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "GETFLOATS",
+                    Floats  = results
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"GetFloats error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle GETINTEGERS — scans base64-encoded binary data for non-zero
+        /// 4-byte aligned 32-bit signed integers.
+        /// </summary>
+        private string HandleGetIntegers(uint startAddress, string? base64Data)
+        {
+            if (string.IsNullOrEmpty(base64Data))
+                return CreateErrorResponse("Data (base64 binary) is required for GETINTEGERS");
+
+            try
+            {
+                var bytes   = Convert.FromBase64String(base64Data);
+                var results = new List<IntegerEntry>();
+
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    uint raw = BitConverter.ToUInt32(bytes, i);
+                    if (raw == 0x00000000u || raw == 0xFFFFFFFFu)
+                        continue;
+
+                    int val = (int)raw;
+                    results.Add(new IntegerEntry
+                    {
+                        Address = $"0x{(startAddress + (uint)i):X8}",
+                        Value   = val,
+                        Hex     = $"0x{raw:X8}"
+                    });
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "GETINTEGERS",
+                    Integers = results
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"GetIntegers error: {ex.Message}");
+            }
+        }
+
         // ── Live-memory helpers (no MaxReadMemLength cap) ─────────────────────
 
         /// <summary>
@@ -1666,6 +1830,175 @@ namespace CodeDesigner.Mips64LE
             catch (Exception ex)
             {
                 return CreateErrorResponse($"ScanFunctions error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle SCANPOINTERS — reads <paramref name="length"/> bytes of live emulator
+        /// memory and returns 4-byte aligned values that look like valid EE or IOP
+        /// memory pointers.  For EE scans the valid target ranges are:
+        /// main RAM (physical 0x00000000–0x01FFFFFF), KSEG0 (0x80000000–0x81FFFFFF),
+        /// KSEG1 (0xA0000000–0xA1FFFFFF), and scratchpad (0x70000000–0x70003FFF).
+        /// For IOP scans the valid range is IOP RAM (0x00000000–0x001FFFFF).
+        /// </summary>
+        private string HandleScanPointers(uint address, int length, string? region)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (length <= 0)
+                return CreateErrorResponse("Length is required for SCANPOINTERS");
+
+            try
+            {
+                bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+                var bytes   = ReadLiveBytes(address, length, useIop);
+                var results = new List<PointerEntry>();
+
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    uint val = BitConverter.ToUInt32(bytes, i);
+                    bool isValid;
+                    if (useIop)
+                    {
+                        // IOP: plain RAM range
+                        isValid = val < (uint)IopMemoryBus.RamSize;
+                    }
+                    else
+                    {
+                        // EE: main RAM, KSEG0 mirror, KSEG1 mirror, or scratchpad
+                        uint physEquiv = val;
+                        if (val >= 0x80000000u && val < 0xC0000000u)
+                            physEquiv = val & 0x1FFFFFFFu;
+                        isValid =
+                            physEquiv < (uint)PS2MemoryBus.MainRamSize ||
+                            (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
+                    }
+
+                    if (isValid)
+                    {
+                        results.Add(new PointerEntry
+                        {
+                            Address  = $"0x{(address + (uint)i):X8}",
+                            PointsTo = $"0x{val:X8}"
+                        });
+                    }
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "SCANPOINTERS",
+                    Pointers = results
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ScanPointers error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle SCANFLOATS — reads <paramref name="length"/> bytes of live emulator
+        /// memory and returns 4-byte aligned IEEE-754 single-precision floats whose
+        /// absolute value falls in the range [0.001, 1 000 000] (NaN and ±Inf are
+        /// excluded, as are subnormals and the PS2 zero-flush value).
+        /// </summary>
+        private string HandleScanFloats(uint address, int length, string? region)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (length <= 0)
+                return CreateErrorResponse("Length is required for SCANFLOATS");
+
+            try
+            {
+                bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+                var bytes   = ReadLiveBytes(address, length, useIop);
+                var results = new List<FloatEntry>();
+
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    uint bits = BitConverter.ToUInt32(bytes, i);
+                    float f   = BitConverter.Int32BitsToSingle((int)bits);
+
+                    if (float.IsNaN(f) || float.IsInfinity(f))
+                        continue;
+
+                    // Skip subnormals (exponent bits == 0) — PS2 hardware flushes these to 0.
+                    uint exp = (bits >> 23) & 0xFFu;
+                    if (exp == 0u)
+                        continue;
+
+                    float absVal = MathF.Abs(f);
+                    if (absVal < FloatScanMinAbs || absVal > FloatScanMaxAbs)
+                        continue;
+
+                    results.Add(new FloatEntry
+                    {
+                        Address = $"0x{(address + (uint)i):X8}",
+                        Value   = f,
+                        Raw     = $"0x{bits:X8}"
+                    });
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "SCANFLOATS",
+                    Floats  = results
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ScanFloats error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle SCANINTEGERS — reads <paramref name="length"/> bytes of live emulator
+        /// memory and returns every non-zero 4-byte aligned 32-bit signed integer whose
+        /// absolute value is at most 0x7FFFFFFF.  Values of 0x00000000 and 0xFFFFFFFF
+        /// (common fill/sentinel patterns) are excluded to reduce noise.
+        /// </summary>
+        private string HandleScanIntegers(uint address, int length, string? region)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (length <= 0)
+                return CreateErrorResponse("Length is required for SCANINTEGERS");
+
+            try
+            {
+                bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+                var bytes   = ReadLiveBytes(address, length, useIop);
+                var results = new List<IntegerEntry>();
+
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    uint raw = BitConverter.ToUInt32(bytes, i);
+                    // Skip common fill/sentinel values.
+                    if (raw == 0x00000000u || raw == 0xFFFFFFFFu)
+                        continue;
+
+                    int val = (int)raw;
+                    results.Add(new IntegerEntry
+                    {
+                        Address = $"0x{(address + (uint)i):X8}",
+                        Value   = val,
+                        Hex     = $"0x{raw:X8}"
+                    });
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "SCANINTEGERS",
+                    Integers = results
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ScanIntegers error: {ex.Message}");
             }
         }
 
@@ -2018,6 +2351,9 @@ namespace CodeDesigner.Mips64LE
         public List<LabelEntry>?    Labels    { get; set; }
         public List<StringEntry>?   Strings   { get; set; }
         public List<FunctionEntry>? Functions { get; set; }
+        public List<PointerEntry>?  Pointers  { get; set; }
+        public List<FloatEntry>?    Floats    { get; set; }
+        public List<IntegerEntry>?  Integers  { get; set; }
         public List<SearchMatch>?   Matches   { get; set; }
         // GETTHREADS
         public List<ThreadEntry>?   Threads   { get; set; }
@@ -2082,6 +2418,37 @@ namespace CodeDesigner.Mips64LE
         public string Address { get; set; } = string.Empty;
         [System.Text.Json.Serialization.JsonPropertyName("label")]
         public string Label   { get; set; } = string.Empty;
+    }
+
+    /// <summary>A 4-byte aligned value that looks like a valid EE/IOP memory pointer.</summary>
+    public class PointerEntry
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
+        public string Address  { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("pointsTo")]
+        public string PointsTo { get; set; } = string.Empty;
+    }
+
+    /// <summary>A plausible 32-bit IEEE-754 float found at a 4-byte aligned address.</summary>
+    public class FloatEntry
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
+        public string Address { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public float  Value   { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("raw")]
+        public string Raw     { get; set; } = string.Empty;
+    }
+
+    /// <summary>A non-zero 4-byte aligned 32-bit integer found in memory.</summary>
+    public class IntegerEntry
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
+        public string Address { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public int    Value   { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("hex")]
+        public string Hex     { get; set; } = string.Empty;
     }
 
     /// <summary>One match returned by the SEARCH command.</summary>

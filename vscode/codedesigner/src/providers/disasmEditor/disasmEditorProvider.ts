@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry, SearchMatch } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
@@ -311,6 +311,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this.handleFileScan('strings', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
       } else if (message.type === "scanFunctions") {
         await this.handleFileScan('functions', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+      } else if (message.type === "scanPointers") {
+        await this.handleFileScan('pointers', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+      } else if (message.type === "scanFloats") {
+        await this.handleFileScan('floats', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
+      } else if (message.type === "scanIntegers") {
+        await this.handleFileScan('integers', webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
       } else if (message.type === "getSymbols") {
         await this.handleGetSymbols(webviewPanel, fileData, DisasmEditorProvider.BASE_ADDRESS);
       } else if (message.type === "addLabel") {
@@ -549,6 +555,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.handleLiveScan('strings', panel, region, baseAddress, totalBytes);
             } else if (message.type === 'scanFunctions') {
                 await this.handleLiveScan('functions', panel, region, baseAddress, totalBytes);
+            } else if (message.type === 'scanPointers') {
+                await this.handleLiveScan('pointers', panel, region, baseAddress, totalBytes);
+            } else if (message.type === 'scanFloats') {
+                await this.handleLiveScan('floats', panel, region, baseAddress, totalBytes);
+            } else if (message.type === 'scanIntegers') {
+                await this.handleLiveScan('integers', panel, region, baseAddress, totalBytes);
             } else if (message.type === 'getSymbols') {
                 // Live mode: labels from backend; strings/functions are loaded on-demand via scan buttons
                 await this.handleGetSymbols(panel, undefined, baseAddress);
@@ -833,11 +845,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Scan a live memory region for strings or functions using the C# backend.
-   * Posts a `stringsUpdated` or `functionsUpdated` message to the webview.
+   * Scan a live memory region for strings, functions, pointers, floats, or
+   * integers using the C# backend.
+   * Posts the corresponding `*Updated` message to the webview.
    */
   private async handleLiveScan(
-    kind: 'strings' | 'functions',
+    kind: 'strings' | 'functions' | 'pointers' | 'floats' | 'integers',
     panel: vscode.WebviewPanel,
     region: string,
     baseAddress: number,
@@ -848,27 +861,43 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (kind === 'strings') {
         const strings = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
-      } else {
+      } else if (kind === 'functions') {
         const functions = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
         panel.webview.postMessage({ type: 'functionsUpdated', functions });
+      } else if (kind === 'pointers') {
+        const pointers = await this.socketClient.scanLivePointers(baseAddress, totalBytes, region);
+        panel.webview.postMessage({ type: 'pointersUpdated', pointers });
+      } else if (kind === 'floats') {
+        const floats = await this.socketClient.scanLiveFloats(baseAddress, totalBytes, region);
+        panel.webview.postMessage({ type: 'floatsUpdated', floats });
+      } else {
+        const integers = await this.socketClient.scanLiveIntegers(baseAddress, totalBytes, region);
+        panel.webview.postMessage({ type: 'integersUpdated', integers });
       }
     } catch (err: any) {
       console.error(`[SYMBOLS] LiveScan(${kind}) failed: ${err?.message ?? err}`);
       // Send empty result so the webview re-enables the scan button
       if (kind === 'strings') {
         panel.webview.postMessage({ type: 'stringsUpdated', strings: [] });
-      } else {
+      } else if (kind === 'functions') {
         panel.webview.postMessage({ type: 'functionsUpdated', functions: [] });
+      } else if (kind === 'pointers') {
+        panel.webview.postMessage({ type: 'pointersUpdated', pointers: [] });
+      } else if (kind === 'floats') {
+        panel.webview.postMessage({ type: 'floatsUpdated', floats: [] });
+      } else {
+        panel.webview.postMessage({ type: 'integersUpdated', integers: [] });
       }
     }
   }
 
   /**
-   * Scan file binary data for strings or functions using the C# backend.
-   * Posts a `stringsUpdated` or `functionsUpdated` message to the webview.
+   * Scan file binary data for strings, functions, pointers, floats, or integers
+   * using the C# backend.
+   * Posts the corresponding `*Updated` message to the webview.
    */
   private async handleFileScan(
-    kind: 'strings' | 'functions',
+    kind: 'strings' | 'functions' | 'pointers' | 'floats' | 'integers',
     panel: vscode.WebviewPanel,
     fileData: Buffer,
     baseAddress: number
@@ -878,16 +907,31 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (kind === 'strings') {
         const strings = await this.socketClient.getStrings(fileData, baseAddress);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
-      } else {
+      } else if (kind === 'functions') {
         const functions = await this.socketClient.getFunctions(fileData, baseAddress);
         panel.webview.postMessage({ type: 'functionsUpdated', functions });
+      } else if (kind === 'pointers') {
+        const pointers = await this.socketClient.getPointers(fileData, baseAddress);
+        panel.webview.postMessage({ type: 'pointersUpdated', pointers });
+      } else if (kind === 'floats') {
+        const floats = await this.socketClient.getFloats(fileData, baseAddress);
+        panel.webview.postMessage({ type: 'floatsUpdated', floats });
+      } else {
+        const integers = await this.socketClient.getIntegers(fileData, baseAddress);
+        panel.webview.postMessage({ type: 'integersUpdated', integers });
       }
     } catch (err: any) {
       console.error(`[SYMBOLS] FileScan(${kind}) failed: ${err?.message ?? err}`);
       if (kind === 'strings') {
         panel.webview.postMessage({ type: 'stringsUpdated', strings: [] });
-      } else {
+      } else if (kind === 'functions') {
         panel.webview.postMessage({ type: 'functionsUpdated', functions: [] });
+      } else if (kind === 'pointers') {
+        panel.webview.postMessage({ type: 'pointersUpdated', pointers: [] });
+      } else if (kind === 'floats') {
+        panel.webview.postMessage({ type: 'floatsUpdated', floats: [] });
+      } else {
+        panel.webview.postMessage({ type: 'integersUpdated', integers: [] });
       }
     }
   }

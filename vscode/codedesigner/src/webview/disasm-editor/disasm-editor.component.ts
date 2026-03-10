@@ -6,6 +6,9 @@ import {
   SearchMatch,
   RegisterData,
   ThreadEntry,
+  SymPointer,
+  SymFloat,
+  SymInteger,
 } from './disasm-editor.service';
 import { HexViewComponent } from './components/hex-view.component';
 import './disasm-editor.css';
@@ -80,6 +83,9 @@ import './disasm-editor.css';
         <button class="sym-tab active" data-symtab="labels">Labels</button>
         <button class="sym-tab" data-symtab="strings">Strings</button>
         <button class="sym-tab" data-symtab="functions">Functions</button>
+        <button class="sym-tab" data-symtab="pointers">Pointers</button>
+        <button class="sym-tab" data-symtab="floats">Floats</button>
+        <button class="sym-tab" data-symtab="integers">Integers</button>
     </div>
     <div id="sym-labels-content" class="sym-tab-content active">
         <div id="sym-add-row">
@@ -103,6 +109,27 @@ import './disasm-editor.css';
             <span id="sym-functions-status" class="sym-status"></span>
         </div>
         <div id="sym-functions-list" class="sym-list"></div>
+    </div>
+    <div id="sym-pointers-content" class="sym-tab-content">
+        <div class="sym-scan-row">
+            <button id="sym-scan-pointers-btn" class="sym-scan-btn">Scan for pointers</button>
+            <span id="sym-pointers-status" class="sym-status"></span>
+        </div>
+        <div id="sym-pointers-list" class="sym-list"></div>
+    </div>
+    <div id="sym-floats-content" class="sym-tab-content">
+        <div class="sym-scan-row">
+            <button id="sym-scan-floats-btn" class="sym-scan-btn">Scan for floats</button>
+            <span id="sym-floats-status" class="sym-status"></span>
+        </div>
+        <div id="sym-floats-list" class="sym-list"></div>
+    </div>
+    <div id="sym-integers-content" class="sym-tab-content">
+        <div class="sym-scan-row">
+            <button id="sym-scan-integers-btn" class="sym-scan-btn">Scan for integers</button>
+            <span id="sym-integers-status" class="sym-status"></span>
+        </div>
+        <div id="sym-integers-list" class="sym-list"></div>
     </div>
 </div>
 <div id="debug-panel">
@@ -262,10 +289,19 @@ export class DisasmEditorComponent implements AfterViewInit {
     const symLabelsList       = document.getElementById('sym-labels-list')!;
     const symStringsList      = document.getElementById('sym-strings-list')!;
     const symFunctionsList    = document.getElementById('sym-functions-list')!;
+    const symPointersList     = document.getElementById('sym-pointers-list')!;
+    const symFloatsList       = document.getElementById('sym-floats-list')!;
+    const symIntegersList     = document.getElementById('sym-integers-list')!;
     const symStringsStatus    = document.getElementById('sym-strings-status')!;
     const symFunctionsStatus  = document.getElementById('sym-functions-status')!;
+    const symPointersStatus   = document.getElementById('sym-pointers-status')!;
+    const symFloatsStatus     = document.getElementById('sym-floats-status')!;
+    const symIntegersStatus   = document.getElementById('sym-integers-status')!;
     const symScanStringsBtn   = document.getElementById('sym-scan-strings-btn') as HTMLButtonElement;
     const symScanFunctionsBtn = document.getElementById('sym-scan-functions-btn') as HTMLButtonElement;
+    const symScanPointersBtn  = document.getElementById('sym-scan-pointers-btn') as HTMLButtonElement;
+    const symScanFloatsBtn    = document.getElementById('sym-scan-floats-btn') as HTMLButtonElement;
+    const symScanIntegersBtn  = document.getElementById('sym-scan-integers-btn') as HTMLButtonElement;
 
     // Edit overlay
     const editOverlay          = document.getElementById('edit-overlay')!;
@@ -459,6 +495,9 @@ export class DisasmEditorComponent implements AfterViewInit {
       renderSymLabels();
       renderSymStrings();
       renderSymFunctions();
+      renderSymPointers();
+      renderSymFloats();
+      renderSymIntegers();
     });
 
     svc.labelsUpdated$.subscribe(() => {
@@ -481,6 +520,30 @@ export class DisasmEditorComponent implements AfterViewInit {
         symFunctionsStatus.textContent = state.symFunctions.length > 0 ? `${state.symFunctions.length} found` : 'None found';
       }
       if (symScanFunctionsBtn) { symScanFunctionsBtn.disabled = false; }
+    });
+
+    svc.pointersUpdated$.subscribe(() => {
+      renderSymPointers();
+      if (symPointersStatus) {
+        symPointersStatus.textContent = state.symPointers.length > 0 ? `${state.symPointers.length} found` : 'None found';
+      }
+      if (symScanPointersBtn) { symScanPointersBtn.disabled = false; }
+    });
+
+    svc.floatsUpdated$.subscribe(() => {
+      renderSymFloats();
+      if (symFloatsStatus) {
+        symFloatsStatus.textContent = state.symFloats.length > 0 ? `${state.symFloats.length} found` : 'None found';
+      }
+      if (symScanFloatsBtn) { symScanFloatsBtn.disabled = false; }
+    });
+
+    svc.integersUpdated$.subscribe(() => {
+      renderSymIntegers();
+      if (symIntegersStatus) {
+        symIntegersStatus.textContent = state.symIntegers.length > 0 ? `${state.symIntegers.length} found` : 'None found';
+      }
+      if (symScanIntegersBtn) { symScanIntegersBtn.disabled = false; }
     });
 
     svc.analysisUpdated$.subscribe(() => {
@@ -1337,6 +1400,60 @@ export class DisasmEditorComponent implements AfterViewInit {
       });
     }
 
+    function renderSymPointers() {
+      if (!symPointersList) { return; }
+      const items = (state.symPointers || []).filter(item => isAddrInCurrentRegion(item.address));
+      if (items.length === 0) {
+        symPointersList.innerHTML = '<div class="sym-empty">No pointers found. Click "Scan for pointers".</div>';
+        return;
+      }
+      symPointersList.innerHTML = items.map(item =>
+        `<div class="sym-item" data-addr="${escHtml(item.address)}">
+          <span class="sym-item-addr">${escHtml(item.address)}</span>
+          <span class="sym-item-value" title="→ ${escHtml(item.pointsTo)}">→ ${escHtml(item.pointsTo)}</span>
+        </div>`
+      ).join('');
+      symPointersList.querySelectorAll('.sym-item').forEach(el => {
+        el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
+      });
+    }
+
+    function renderSymFloats() {
+      if (!symFloatsList) { return; }
+      const items = (state.symFloats || []).filter(item => isAddrInCurrentRegion(item.address));
+      if (items.length === 0) {
+        symFloatsList.innerHTML = '<div class="sym-empty">No floats found. Click "Scan for floats".</div>';
+        return;
+      }
+      symFloatsList.innerHTML = items.map(item =>
+        `<div class="sym-item" data-addr="${escHtml(item.address)}">
+          <span class="sym-item-addr">${escHtml(item.address)}</span>
+          <span class="sym-item-value" title="${escHtml(item.raw)}">${rawBitsToFloat(parseInt(item.raw, 16) >>> 0)} (${escHtml(item.raw)})</span>
+        </div>`
+      ).join('');
+      symFloatsList.querySelectorAll('.sym-item').forEach(el => {
+        el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
+      });
+    }
+
+    function renderSymIntegers() {
+      if (!symIntegersList) { return; }
+      const items = (state.symIntegers || []).filter(item => isAddrInCurrentRegion(item.address));
+      if (items.length === 0) {
+        symIntegersList.innerHTML = '<div class="sym-empty">No integers found. Click "Scan for integers".</div>';
+        return;
+      }
+      symIntegersList.innerHTML = items.map(item =>
+        `<div class="sym-item" data-addr="${escHtml(item.address)}">
+          <span class="sym-item-addr">${escHtml(item.address)}</span>
+          <span class="sym-item-value" title="${escHtml(item.hex)}">${item.value} (${escHtml(item.hex)})</span>
+        </div>`
+      ).join('');
+      symIntegersList.querySelectorAll('.sym-item').forEach(el => {
+        el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
+      });
+    }
+
     symbolsToggleBtn.addEventListener('click', () => toggleSymbolsPanel());
     closeSymbolsBtn.addEventListener('click', () => {
       state.symbolsActive = false;
@@ -1396,6 +1513,36 @@ export class DisasmEditorComponent implements AfterViewInit {
       setTimeout(() => {
         symScanFunctionsBtn.disabled = false;
         if (symFunctionsStatus.textContent === 'Scanning…') { symFunctionsStatus.textContent = ''; }
+      }, SCAN_TIMEOUT_MS);
+    });
+
+    symScanPointersBtn.addEventListener('click', () => {
+      symPointersStatus.textContent = 'Scanning…';
+      symScanPointersBtn.disabled = true;
+      vscode.postMessage({ type: 'scanPointers' });
+      setTimeout(() => {
+        symScanPointersBtn.disabled = false;
+        if (symPointersStatus.textContent === 'Scanning…') { symPointersStatus.textContent = ''; }
+      }, SCAN_TIMEOUT_MS);
+    });
+
+    symScanFloatsBtn.addEventListener('click', () => {
+      symFloatsStatus.textContent = 'Scanning…';
+      symScanFloatsBtn.disabled = true;
+      vscode.postMessage({ type: 'scanFloats' });
+      setTimeout(() => {
+        symScanFloatsBtn.disabled = false;
+        if (symFloatsStatus.textContent === 'Scanning…') { symFloatsStatus.textContent = ''; }
+      }, SCAN_TIMEOUT_MS);
+    });
+
+    symScanIntegersBtn.addEventListener('click', () => {
+      symIntegersStatus.textContent = 'Scanning…';
+      symScanIntegersBtn.disabled = true;
+      vscode.postMessage({ type: 'scanIntegers' });
+      setTimeout(() => {
+        symScanIntegersBtn.disabled = false;
+        if (symIntegersStatus.textContent === 'Scanning…') { symIntegersStatus.textContent = ''; }
       }, SCAN_TIMEOUT_MS);
     });
 
