@@ -30,11 +30,14 @@ interface SnapshotInfoFile {
 
 /** Memory regions exposed as separate editor windows when the emulator is running. */
 const LIVE_REGIONS = [
-    // EE Main RAM: shown at KSEG0 (0x80000000–0x81FFFFFF) so that row addresses
-    // match the virtual PC the CPU actually executes from.  Kernel and game code
-    // run in KSEG0, so a breakpoint set on a row at 0x80001234 matches the CPU PC
-    // directly.  HandleReadMem strips the top 3 bits (KSEG0→physical) server-side.
-    { region: 'ee',  address: 0x80000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
+    // EE Main RAM: shown at the uncached-user mirror (0x20000000–0x21FFFFFF) so
+    // that row addresses are predictable from user-facing physical offsets.
+    // Typing a raw physical address like 0x000a0000 is translated to 0x200a0000
+    // by the UI before navigation; typing 0x200a0000 reaches the same row directly.
+    // KSEG0/KSEG1 addresses (0x80000000–0xBFFFFFFF) still route correctly via
+    // toPhysAddr stripping the top bits.  HandleReadMem also accepts 0x20000000
+    // addresses (EeUncachedRamBase) server-side.
+    { region: 'ee',  address: 0x20000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
     // IOP RAM: shown at its native physical base (0x00000000–0x003FFFFF, 4 MB).
     // Using native addresses keeps row addresses consistent with the IOP CPU's PC
     // register and the console debug output, so addresses like 0x0000ae94 map
@@ -904,12 +907,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const results: Array<{ name: string; date: string; value: string }> = [];
 
         // Snapshots store physical base addresses (e.g. 0x00000000 for EE Main RAM).
-        // The live editor uses virtual addresses (KSEG0/KSEG1, 0x80000000–0xBFFFFFFF).
-        // Strip the segment bits so the offset calculation works correctly.
+        // The live editor uses virtual/UI addresses; strip segment bits so the
+        // offset calculation works correctly.
+        //   KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip top 3 bits → physical
+        //   Uncached-user mirror (0x20000000–0x21FFFFFF): subtract 0x20000000 → physical
         const addrU32 = address >>> 0;
         const physAddress = (addrU32 >= 0x80000000 && addrU32 < 0xC0000000)
-            ? (address & 0x1FFFFFFF) >>> 0
-            : addrU32;
+            ? (addrU32 & 0x1FFFFFFF) >>> 0
+            : (addrU32 >= 0x20000000 && addrU32 <= 0x21FFFFFF)
+                ? (addrU32 - 0x20000000) >>> 0
+                : addrU32;
 
         for (const snap of this.snapshots) {
             const infoPath = path.join(snap.path, 'snapshot-info.json');

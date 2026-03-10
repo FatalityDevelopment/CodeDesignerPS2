@@ -446,9 +446,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             // _revealPanelForAddress uses the correct range after an address change
             // (e.g. BIOS ROM shown at KSEG0 0x9FC00000 instead of physical 0x1FC00000).
             existingInfo.baseAddress = baseAddress;
-            existingInfo.physBaseAddress = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
-                ? (baseAddress & 0x1FFFFFFF) >>> 0
-                : baseAddress >>> 0;
+            existingInfo.physBaseAddress = DisasmEditorProvider._toPhysAddr(baseAddress);
             // Re-initialize with live data now that we have a connection
             if (connected) {
                 const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -480,9 +478,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         );
 
         // Track this panel for pause/resume broadcast and address lookup.
-        const physBase = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
-            ? (baseAddress & 0x1FFFFFFF) >>> 0
-            : baseAddress >>> 0;
+        const physBase = DisasmEditorProvider._toPhysAddr(baseAddress);
         const info = { panel, label, region, baseAddress, totalBytes, physBaseAddress: physBase };
         this._livePanels.push(panel);
         this._livePanelInfo.push(info);
@@ -664,9 +660,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 // The webview could not find the address in its own region.
                 // Find which live panel owns the address and instruct it to navigate.
                 const addr = message.address as number;
-                const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
-                    ? (addr & 0x1FFFFFFF) >>> 0
-                    : addr >>> 0;
+                const physAddr = DisasmEditorProvider._toPhysAddr(addr as number);
                 // Prefer a panel in the same region first.  This disambiguates the
                 // overlap between EE Main RAM and IOP RAM, which both start at
                 // physical address 0x0: a native IOP address like 0x0000ae94 sent
@@ -771,9 +765,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     this._broadcastFullStatus(statusMsg);
                     // Reveal and navigate the panel that owns this address.
                     this._revealPanelForAddress(addr);
-                    const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
-                        ? (addr & 0x1FFFFFFF) >>> 0
-                        : addr >>> 0;
+                    const physAddr = DisasmEditorProvider._toPhysAddr(addr);
                     const target = this._livePanelInfo.find(info =>
                         physAddr >= info.physBaseAddress &&
                         physAddr < info.physBaseAddress + info.totalBytes
@@ -878,13 +870,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     /**
      * Find the live panel whose address range contains `addr` and reveal it so
      * the user immediately sees the paused location.  Strips KSEG0/KSEG1 bits
-     * before comparing, matching the MIPS physical-address mapping.
+     * and the uncached-user EE mirror prefix before comparing.
      * Panel base addresses are pre-computed as physBaseAddress at creation time.
      */
     private _revealPanelForAddress(addr: number): void {
-        const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
-            ? (addr & 0x1FFFFFFF) >>> 0
-            : addr >>> 0;
+        const physAddr = DisasmEditorProvider._toPhysAddr(addr);
 
         for (const info of this._livePanelInfo) {
             if (physAddr >= info.physBaseAddress && physAddr < info.physBaseAddress + info.totalBytes) {
@@ -892,6 +882,19 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 return;
             }
         }
+    }
+
+    /**
+     * Convert a virtual/UI address to its physical equivalent.
+     *   KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip top 3 bits.
+     *   Uncached-user EE mirror (0x20000000–0x21FFFFFF): subtract 0x20000000.
+     *   All other addresses: pass through unchanged.
+     */
+    private static _toPhysAddr(addr: number): number {
+        const v = addr >>> 0;
+        if (v >= 0x80000000 && v <= 0xBFFFFFFF) return (v & 0x1FFFFFFF) >>> 0;
+        if (v >= 0x20000000 && v <= 0x21FFFFFF)  return (v - 0x20000000) >>> 0;
+        return v;
     }
 
     private async sendLiveDisasmPage(
