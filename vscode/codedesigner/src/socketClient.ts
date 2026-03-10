@@ -166,6 +166,8 @@ interface CommandResponse {
     Strings?:   StringEntry[];
     Functions?: FunctionEntry[];
     Matches?:   SearchMatch[];
+    // GETTHREADS
+    Threads?: ThreadEntry[];
 }
 
 /**
@@ -188,6 +190,18 @@ export interface SnapshotRegion {
     File: string;
     BaseAddress: number;
     Size: number;
+}
+
+/**
+ * One EE OS thread entry returned by GETTHREADS.
+ */
+export interface ThreadEntry {
+    id: number;
+    status: string;
+    pc: number;
+    sp: number;
+    priority: number;
+    entryPc: number;
 }
 
 /**
@@ -886,6 +900,25 @@ export class SocketClient {
             throw new Error(response.Error || 'Search failed');
         }
         return response.Matches ?? [];
+    }
+
+    /**
+     * Get EE OS thread list from the emulator.
+     */
+    public async getThreads(): Promise<ThreadEntry[]> {
+        const command: CommandMessage = { Command: 'GETTHREADS' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetThreads failed');
+        }
+        return (response.Threads ?? []).map(t => ({
+            id:       t.id       ?? 0,
+            status:   t.status   ?? '',
+            pc:       t.pc       ?? 0,
+            sp:       t.sp       ?? 0,
+            priority: t.priority ?? 0,
+            entryPc:  t.entryPc  ?? 0,
+        }));
     }
 
     /**

@@ -465,6 +465,50 @@ app-hex-view {
     color: #4ec9b0;
 }
 
+/* ── Quad-word (128-bit) GPR column header and value layout ── */
+
+.dbg-qw-header {
+    opacity: 0.45;
+    font-size: 9px;
+    padding-bottom: 2px;
+}
+
+.dbg-qw-hdr-val {
+    display: flex;
+    gap: 0;
+    font-family: monospace;
+    color: #858585;
+}
+
+.dbg-qw-col {
+    width: 8ch;
+    text-align: center;
+}
+
+.dbg-qw-sep {
+    width: 1ch;
+    text-align: center;
+    color: #555;
+}
+
+/* Quad-word value: monospace, fixed-width to align columns */
+.dbg-qw-val {
+    font-family: monospace;
+    letter-spacing: 0;
+    white-space: pre;
+}
+
+/* Upper lane (bits 127:64) rendered dimmer when all zero */
+.dbg-qw-val .dbg-qw-upper {
+    color: #5a5a5a;
+}
+
+.dbg-nonzero .dbg-qw-val .dbg-qw-upper,
+.dbg-qw-val.dbg-qw-upper-nz .dbg-qw-upper {
+    color: #c586c0;
+}
+
+
 .dbg-dim {
     color: #858585;
     font-size: 10px;
@@ -808,7 +852,247 @@ app-hex-view {
     text-align: center;
 }
 
-/* ── Inline address edit overlay ─────────────────────────────────────── */
+/* ── Bottom Panel (Call Stack / Threads / Breakpoints) ───────────────── */
+
+#bottom-panel {
+    flex-shrink: 0;
+    height: 200px;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    background: #1e1e1e;
+    border-top: 1px solid #3e3e42;
+    overflow: hidden;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+#bottom-panel-header {
+    display: flex;
+    align-items: center;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+}
+
+#bottom-tabs {
+    display: flex;
+    flex: 1;
+}
+
+.bottom-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #858585;
+    padding: 5px 14px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+.bottom-tab:hover {
+    color: #d4d4d4;
+}
+
+.bottom-tab.active {
+    color: #d4d4d4;
+    border-bottom-color: #007acc;
+}
+
+#bottom-panel-actions {
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    flex-shrink: 0;
+}
+
+.bottom-action-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.bottom-action-btn:hover {
+    background: #505050;
+    color: #fff;
+}
+
+.bottom-tab-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.bottom-tab-content.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.bottom-tab-content::-webkit-scrollbar {
+    width: 6px;
+}
+.bottom-tab-content::-webkit-scrollbar-thumb {
+    background: #424242;
+}
+
+/* ── Breakpoints toolbar ── */
+
+#breakpoints-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+    background: #252526;
+}
+
+/* ── Shared table styles ── */
+
+.dbg-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.dbg-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #252526;
+}
+
+.dbg-th {
+    color: #858585;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 3px 8px;
+    text-align: left;
+    border-bottom: 1px solid #3e3e42;
+    white-space: nowrap;
+}
+
+.dbg-table tbody tr {
+    cursor: pointer;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.dbg-table tbody tr:hover {
+    background: #2a2d2e;
+}
+
+.dbg-tr-current td {
+    background: #264f78;
+}
+
+.dbg-tr-current:hover td {
+    background: #2d5a8a;
+}
+
+.dbg-tr-running td {
+    color: #4ec9b0;
+}
+
+.dbg-td-num {
+    color: #858585;
+    width: 4ch;
+    padding: 2px 8px;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.dbg-td-addr {
+    color: #c586c0;
+    width: 9ch;
+    padding: 2px 8px;
+    white-space: nowrap;
+    font-family: monospace;
+}
+
+.dbg-td-func {
+    color: #4ec9b0;
+    padding: 2px 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+.dbg-td-status {
+    color: #d4d4d4;
+    padding: 2px 8px;
+    white-space: nowrap;
+    width: 10ch;
+}
+
+.dbg-td-type {
+    color: #dcdcaa;
+    padding: 2px 8px;
+    white-space: nowrap;
+    width: 8ch;
+}
+
+.dbg-td-cond {
+    color: #ce9178;
+    padding: 2px 8px;
+    flex: 1;
+}
+
+.dbg-td-enabled {
+    padding: 2px 8px;
+    text-align: center;
+    width: 6ch;
+}
+
+.dbg-bp-enabled {
+    cursor: pointer;
+    accent-color: #007acc;
+}
+
+.dbg-td-del {
+    padding: 2px 4px;
+    width: 3ch;
+    text-align: center;
+}
+
+.dbg-bp-del-btn {
+    background: none;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 4px;
+    outline: none;
+}
+
+.dbg-bp-del-btn:hover {
+    color: #e05555;
+}
+
+.dbg-bp-addr {
+    color: #c586c0;
+}
+
+.dbg-td-empty {
+    color: #555;
+    font-size: 11px;
+    padding: 12px 8px;
+    text-align: center;
+}
+
+
 
 #edit-overlay {
     display: none;
