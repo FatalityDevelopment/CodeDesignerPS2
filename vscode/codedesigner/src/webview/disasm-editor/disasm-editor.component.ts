@@ -22,7 +22,7 @@ import './disasm-editor.css';
     <div id="live-controls">
         <span class="live-indicator" id="live-indicator">&#9679; LIVE</span>
         <button id="play-pause-btn" title="Pause / Resume emulator">&#9646;&#9646; Pause</button>
-        <button id="step-btn" title="Single step one EE instruction (only while paused)">&#9193; Step</button>
+        <button id="step-btn" title="Single step one EE instruction (only while paused)" disabled>&#9655; Step</button>
         <select id="interval-select" title="Live refresh interval">
             <option value="250">250ms</option>
             <option value="500">500ms</option>

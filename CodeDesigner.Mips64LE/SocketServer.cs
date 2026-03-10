@@ -666,6 +666,17 @@ namespace CodeDesigner.Mips64LE
         {
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            // If the emulator is paused at a breakpoint, execute the breakpoint
+            // instruction once before releasing the run gate.  This advances PC
+            // past the breakpoint address so the same breakpoint does not
+            // immediately re-fire the moment execution resumes.
+            // Snapshot the flag while the scheduler is paused (run-loop thread is
+            // blocked on WaitForResumeAsync, so no concurrent write to LastBreakpointHit).
+            bool wasAtBreakpoint = Scheduler.LastBreakpointHit.HasValue;
+            if (wasAtBreakpoint)
+                Scheduler.StepOne();
+
             Scheduler.Paused = false;
             return CreateSuccessResponse("Resumed");
         }

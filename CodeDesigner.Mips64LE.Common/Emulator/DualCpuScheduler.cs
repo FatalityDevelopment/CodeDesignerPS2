@@ -115,23 +115,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         public uint? LastBreakpointHit { get; private set; }
 
         /// <summary>
-        /// When non-null, the next <see cref="RunSlice"/> call will execute exactly
-        /// one instruction at this address before re-enabling the breakpoint check.
-        /// This is set automatically by <see cref="Paused"/> when resuming (<c>set
-        /// to false</c>) while <see cref="LastBreakpointHit"/> is non-null, so the
-        /// user can step past the hit address without the same breakpoint
-        /// immediately re-firing.
-        /// </summary>
-        private uint? _resumingFromBp;
-
-        /// <summary>
-        /// The normalised (physical/KSEG-stripped) key that last fired a breakpoint.
-        /// Stored by <see cref="RunSlice"/> so <see cref="Paused"/>'s setter can
-        /// restore it as <see cref="_resumingFromBp"/> when the user resumes.
-        /// </summary>
-        private uint? _resumingBpKey;
-
-        /// <summary>
         /// When <c>true</c>, <see cref="RunSlice"/> returns immediately without
         /// executing any instructions.  Set via the socket PAUSE/RESUME commands.
         /// </summary>
@@ -143,14 +126,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 if (value) _runGate.Reset();
                 else
                 {
-                    // When resuming from a breakpoint, arm step-over using the
-                    // normalised key that RunSlice stored in _resumingBpKey.  This
-                    // is the same key (physical/KSEG-stripped) that will be produced
-                    // from the next PC read, so the one-time skip fires correctly
-                    // regardless of whether the BP was stored as a physical or
-                    // virtual address.
-                    _resumingFromBp = _resumingBpKey ?? LastBreakpointHit;
-                    _resumingBpKey = null;
                     LastBreakpointHit = null;
                     _runGate.Set();
                 }
@@ -172,7 +147,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         /// paused.  Must only be called while <see cref="Paused"/> is
         /// <c>true</c>.  After execution:
         /// <list type="bullet">
-        ///   <item>Any pending step-over state is cleared.</item>
         ///   <item><see cref="LastBreakpointHit"/> is set to the new PC if
         ///   that address coincides with a registered breakpoint, otherwise
         ///   it is cleared.</item>
@@ -183,9 +157,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         {
             if (!Paused) return;
 
-            // Clear leftover step-over / breakpoint-hit state so the step is clean.
-            _resumingFromBp   = null;
-            _resumingBpKey    = null;
             LastBreakpointHit = null;
 
             // Execute exactly one EE instruction.
@@ -203,10 +174,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                             : (bpKey != newPc && Breakpoints.Contains(newPc)) ? newPc
                             : 0u;
                 if (hitKey != 0u)
-                {
                     LastBreakpointHit = newPc;
-                    _resumingBpKey    = hitKey;
-                }
             }
             // Scheduler stays paused — caller is responsible for keeping it that way.
         }
@@ -686,12 +654,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // executed is caught correctly.  The emulator halts before the
                 // instruction at the breakpoint address has been run, which is
                 // the standard debugger behaviour ("break before executing X").
-                //
-                // Step-over: if this is the very first instruction after resuming
-                // from a breakpoint at this same address, skip the check once so
-                // the instruction can execute and the PC can advance.  This
-                // prevents the BP from immediately re-firing when the user
-                // resumes, allowing execution to continue past the hit address.
                 if (Breakpoints.Count > 0)
                 {
                     uint eePc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
@@ -715,27 +677,9 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                                 : 0u;
                     if (hitKey != 0u)
                     {
-                        if (_resumingFromBp == hitKey)
-                        {
-                            // One-time step-over: execute the instruction normally.
-                            _resumingFromBp = null;
-                        }
-                        else
-                        {
-                            // Store the raw virtual PC so the client shows the
-                            // correct KSEG address in the disassembly view.
-                            LastBreakpointHit = eePc;
-                            // But remember the normalised key for step-over so the
-                            // Paused setter can restore it correctly.
-                            _resumingBpKey = hitKey;
-                            Paused = true;
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        // PC has moved away from the resume-step address — clear.
-                        _resumingFromBp = null;
+                        LastBreakpointHit = eePc;
+                        Paused = true;
+                        return;
                     }
                 }
 
