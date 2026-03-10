@@ -128,6 +128,11 @@ import './disasm-editor.css';
         </div>
         <div id="edit-overlay-info"></div>
         <div class="edit-overlay-field">
+            <label class="edit-overlay-label" for="edit-overlay-bytes-in">Bytes (hex)</label>
+            <input type="text" id="edit-overlay-bytes-in" class="edit-overlay-input" placeholder="e.g. 24020005" spellcheck="false" />
+        </div>
+        <div id="edit-overlay-disasm-preview" class="edit-overlay-preview"></div>
+        <div class="edit-overlay-field">
             <label class="edit-overlay-label" for="edit-overlay-label-input">Label</label>
             <input type="text" id="edit-overlay-label-input" class="edit-overlay-input" placeholder="Label name (leave empty to remove)" />
         </div>
@@ -220,6 +225,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     const editOverlay          = document.getElementById('edit-overlay')!;
     const editOverlayTitle     = document.getElementById('edit-overlay-title')!;
     const editOverlayInfo      = document.getElementById('edit-overlay-info')!;
+    const editOverlayBytesIn   = document.getElementById('edit-overlay-bytes-in')! as HTMLInputElement;
+    const editOverlayDisasmPreview = document.getElementById('edit-overlay-disasm-preview')!;
     const editOverlayLabelIn   = document.getElementById('edit-overlay-label-input') as HTMLInputElement;
     const editOverlayCommentIn = document.getElementById('edit-overlay-comment-input') as HTMLInputElement;
     const editOverlaySave      = document.getElementById('edit-overlay-save')!;
@@ -228,6 +235,7 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     let _editOverlayAddr = 0;
     let _editOverlayAddrHex = '';
+    let _editOverlayOrigBytes: string = '';
 
     // ── State reference ───────────────────────────────────────────────────────
     // Alias the service state so all existing `state.xxx` references remain
@@ -380,12 +388,17 @@ export class DisasmEditorComponent implements AfterViewInit {
       _editOverlayAddrHex = addressHex;
       editOverlayTitle.textContent = 'Edit Address — 0x' + addressHex.toUpperCase();
       const instrStr = (op || '') + (args ? '  ' + args : '');
-      editOverlayInfo.textContent = (bytes ? bytes + '   ' : '') + instrStr;
+      editOverlayInfo.textContent = instrStr;
+      // Populate the bytes field (strip spaces so it's a clean hex string)
+      const rawBytes = (bytes || '').replace(/\s+/g, '');
+      _editOverlayOrigBytes = rawBytes;
+      editOverlayBytesIn.value = rawBytes;
+      editOverlayDisasmPreview.textContent = '';
       editOverlayLabelIn.value = currentLabel || '';
       editOverlayCommentIn.value = currentComment || '';
       editOverlay.classList.add('visible');
-      editOverlayLabelIn.focus();
-      editOverlayLabelIn.select();
+      editOverlayBytesIn.focus();
+      editOverlayBytesIn.select();
     }
 
     function closeEditOverlay() {
@@ -395,6 +408,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     function saveEditOverlay() {
       const newLabel   = editOverlayLabelIn.value.trim();
       const newComment = editOverlayCommentIn.value.trim();
+      const newBytes   = editOverlayBytesIn.value.replace(/\s+/g, '').toUpperCase();
+      // If bytes were changed, patch the instruction bytes first, then save the label.
+      const origBytes = (_editOverlayOrigBytes || '').toUpperCase();
+      if (newBytes && newBytes !== origBytes && /^[0-9A-F]+$/.test(newBytes) && newBytes.length % 2 === 0) {
+        vscode.postMessage({ type: 'patchBytes', address: _editOverlayAddr, hexBytes: newBytes });
+      }
       vscode.postMessage({ type: 'saveLabel', address: _editOverlayAddr, addressHex: _editOverlayAddrHex, newLabel, newComment });
       closeEditOverlay();
     }
@@ -403,6 +422,18 @@ export class DisasmEditorComponent implements AfterViewInit {
     editOverlayCancel.addEventListener('click', closeEditOverlay);
     editOverlayClose.addEventListener('click', closeEditOverlay);
 
+    editOverlayBytesIn.addEventListener('input', () => {
+      const hex = editOverlayBytesIn.value.replace(/\s+/g, '');
+      if (hex.length === 8 && /^[0-9a-fA-F]{8}$/.test(hex)) {
+        vscode.postMessage({ type: 'disasmBytes', hexBytes: hex, address: _editOverlayAddr });
+      } else {
+        editOverlayDisasmPreview.textContent = '';
+      }
+    });
+    editOverlayBytesIn.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { editOverlayLabelIn.focus(); editOverlayLabelIn.select(); }
+      if (e.key === 'Escape') { closeEditOverlay(); }
+    });
     editOverlayLabelIn.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter') { editOverlayCommentIn.focus(); editOverlayCommentIn.select(); }
       if (e.key === 'Escape') { closeEditOverlay(); }
@@ -410,6 +441,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     editOverlayCommentIn.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter') { saveEditOverlay(); }
       if (e.key === 'Escape') { closeEditOverlay(); }
+    });
+    window.addEventListener('message', (e: MessageEvent) => {
+      const data = e.data as Record<string, unknown>;
+      if (data?.['type'] === 'disasmBytesResult') {
+        editOverlayDisasmPreview.textContent = (data['preview'] as string) ?? '';
+      }
     });
     editOverlay.addEventListener('click', (e: MouseEvent) => {
       if (e.target === editOverlay) { closeEditOverlay(); }
@@ -1173,11 +1210,14 @@ export class DisasmEditorComponent implements AfterViewInit {
       '$t8','$t9','$k0','$k1','$gp','$sp','$fp','$ra',
     ];
 
+    // COP0 register names using standard MIPS descriptive names.
+    // r24 is 'Debug' (PS2 EE hardware debug register, not a reserved slot).
+    // All other names follow standard MIPS / PS2 EE documentation.
     const COP0_REG_NAMES = [
       'Index','Random','EntryLo0','EntryLo1','Context','PageMask','Wired','Reserved7',
       'BadVAddr','Count','EntryHi','Compare','Status','Cause','EPC','PRId',
       'Config','LLAddr','WatchLo','WatchHi','XContext','Reserved21','Reserved22','Reserved23',
-      'Reserved24','PerfCnt','ErrCtl','CacheErr','TagLo','TagHi','ErrorEPC','Reserved31',
+      'Debug','PerfCnt','ErrCtl','CacheErr','TagLo','TagHi','ErrorEPC','Reserved31',
     ];
 
     const GS_PRIV_NAMES = [
@@ -1185,6 +1225,15 @@ export class DisasmEditorComponent implements AfterViewInit {
       'DISPFB1','DISPLAY1','DISPFB2','DISPLAY2',
       'EXTBUF','EXTDATA','EXTWRITE','BGCOLOR',
       'CSR','IMR','BUSDIR','SIGLBLID',
+    ];
+
+    // COP2 (VU0) control register names matching PCSX2 DisR5900asm.cpp COP2_REG_CTL exactly.
+    // Indices 0-15: vi00-vi15 (integer), 16-31: control registers.
+    const COP2_REG_CTL = [
+      'vi00','vi01','vi02','vi03','vi04','vi05','vi06','vi07',
+      'vi08','vi09','vi10','vi11','vi12','vi13','vi14','vi15',
+      'Status','MACflag','ClipFlag','c2c19','R','I','Q','c2c23',
+      'c2c24','c2c25','TPC','CMSAR0','FBRST','VPU-STAT','c2c30','CMSAR1',
     ];
 
     const hex32 = (n: number) => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
@@ -1199,9 +1248,41 @@ export class DisasmEditorComponent implements AfterViewInit {
       return f.toPrecision(6).replace(/\.?0+$/, '');
     }
 
+    // ── Register in-place editor ──────────────────────────────────────────────
+    const stripSeparators = (s: string) => s.replace(/_/g, '');
+
+    function openRegisterEdit(regType: string, regIdx: number, currentVal: string, targetEl: HTMLElement): void {
+      // Replace the value element with an <input> for inline editing.
+      const origText = targetEl.textContent ?? '';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = stripSeparators(currentVal);
+      input.style.cssText =
+        'font-family:monospace;font-size:12px;color:#d4d4d4;background:#3c3c3c;' +
+        'border:1px solid #007acc;outline:none;width:18ch;padding:0 2px;';
+
+      function commitEdit() {
+        const raw = input.value.trim();
+        targetEl.textContent = origText;  // restore immediately
+        if (raw === '' || raw === stripSeparators(origText)) { return; }
+        vscode.postMessage({ type: 'setRegister', regType, regIdx, regValue: raw });
+      }
+      function cancelEdit() { targetEl.textContent = origText; }
+
+      targetEl.textContent = '';
+      targetEl.appendChild(input);
+      input.focus();
+      input.select();
+      input.addEventListener('blur', commitEdit);
+      input.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter')  { input.removeEventListener('blur', commitEdit); commitEdit(); }
+        if (e.key === 'Escape') { input.removeEventListener('blur', commitEdit); cancelEdit(); }
+      });
+    }
+
     function showDebugPanel(regs: RegisterData, stackBytes: number[], stackBase: number) {
       debugPanel.classList.add('visible');
-      renderGprPanel(regs);
+      renderGprPanel(regs, stackBytes, stackBase);
       renderCop0Panel(regs);
       renderFprPanel(regs);
       renderFcrPanel(regs);
@@ -1215,22 +1296,86 @@ export class DisasmEditorComponent implements AfterViewInit {
       debugPanel.classList.remove('visible');
     }
 
-    function renderGprPanel(regs: RegisterData) {
+    function renderGprPanel(regs: RegisterData, stackBytes?: number[], stackBase?: number) {
       if (!regs) { regContent.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
+      const lo32  = regs.gprLo32  ?? [];
+      const hi32  = regs.gprHi32  ?? [];
+      const upLo  = regs.gprUpLo32 ?? [];
+      const upHi  = regs.gprUpHi32 ?? [];
+
+      // Format a 128-bit GPR value: show all 128 bits when the upper lane is non-zero,
+      // show 64 bits when only the upper word of the lower lane is non-zero,
+      // otherwise show the full 32-bit word (the common case on PS2).
+      function gpr128(i: number): string {
+        const l0 = lo32[i] ?? 0; const l1 = hi32[i] ?? 0;
+        const u0 = upLo[i] ?? 0; const u1 = upHi[i] ?? 0;
+        const h32 = (n: number) => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+        if (u0 !== 0 || u1 !== 0)
+          return `${h32(u1)}_${h32(u0)}_${h32(l1)}_${h32(l0)}`;
+        if (l1 !== 0) return `${h32(l1)}_${h32(l0)}`;
+        return h32(l0);
+      }
+
+      function gprNz(i: number): boolean {
+        return (lo32[i] ?? 0) !== 0 || (hi32[i] ?? 0) !== 0 ||
+               (upLo[i] ?? 0) !== 0 || (upHi[i] ?? 0) !== 0;
+      }
+
       let html = '<div class="dbg-section-title">General Purpose Registers</div>';
-      html += `<div class="dbg-row"><span class="dbg-name">PC  </span><span class="dbg-val">${hex32(regs.pc ?? 0)}</span></div>`;
-      html += `<div class="dbg-row"><span class="dbg-name">HI  </span><span class="dbg-val">${hex32(regs.hi ?? 0)}</span><span class="dbg-name" style="margin-left:8px">LO  </span><span class="dbg-val">${hex32(regs.lo ?? 0)}</span></div>`;
-      html += `<div class="dbg-row"><span class="dbg-name">HI1 </span><span class="dbg-val">${hex32(regs.hi1 ?? 0)}</span><span class="dbg-name" style="margin-left:8px">LO1 </span><span class="dbg-val">${hex32(regs.lo1 ?? 0)}</span></div>`;
-      html += `<div class="dbg-row"><span class="dbg-name">SA  </span><span class="dbg-val">${hex32(regs.sa ?? 0)}</span></div>`;
+      html += `<div class="dbg-row" data-reg-type="PC" data-reg-idx="0"><span class="dbg-name">pc   </span><span class="dbg-val dbg-editable" title="Double-click to edit">${hex32(regs.pc ?? 0)}</span></div>`;
+      html += `<div class="dbg-row" data-reg-type="HI"  data-reg-idx="0"><span class="dbg-name">hi   </span><span class="dbg-val dbg-editable" title="Double-click to edit">${hex32(regs.hi ?? 0)}</span>`;
+      html += ` <span class="dbg-name" style="margin-left:8px">lo   </span><span class="dbg-val dbg-editable" data-reg-type="LO" title="Double-click to edit">${hex32(regs.lo ?? 0)}</span></div>`;
+      html += `<div class="dbg-row" data-reg-type="HI1" data-reg-idx="0"><span class="dbg-name">hi1  </span><span class="dbg-val dbg-editable" title="Double-click to edit">${hex32(regs.hi1 ?? 0)}</span>`;
+      html += ` <span class="dbg-name" style="margin-left:8px">lo1  </span><span class="dbg-val dbg-editable" data-reg-type="LO1" title="Double-click to edit">${hex32(regs.lo1 ?? 0)}</span></div>`;
+      html += `<div class="dbg-row" data-reg-type="SA" data-reg-idx="0"><span class="dbg-name">sa   </span><span class="dbg-val dbg-editable" title="Double-click to edit">${hex32(regs.sa ?? 0)}</span></div>`;
       html += '<div class="dbg-divider"></div>';
-      const gpr = regs.gpr ?? [];
       for (let i = 0; i < 32; i++) {
         const name = MIPS_REG_NAMES[i].padEnd(5);
-        const val  = hex32(gpr[i] ?? 0);
-        const nz   = (gpr[i] ?? 0) !== 0;
-        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name">${name}</span><span class="dbg-val">${val}</span></div>`;
+        const val  = gpr128(i);
+        const nz   = gprNz(i);
+        const ro   = i === 0;  // $zero is read-only
+        const editAttr = ro ? '' : ` data-reg-type="GPR" data-reg-idx="${i}"`;
+        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name">${name}</span><span class="dbg-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val}</span></div>`;
       }
+
+      // ── Inline call-stack trace from stack memory ────────────────────────
+      if (stackBytes && stackBytes.length > 0) {
+        const sp = lo32[29] ?? 0;
+        html += '<div class="dbg-divider"></div>';
+        html += `<div class="dbg-section-title">Stack Trace  SP=0x${hex32(sp)}</div>`;
+        const readUInt32LE = (b: number[], off: number) =>
+          ((b[off+3] << 24) | (b[off+2] << 16) | (b[off+1] << 8) | b[off]) >>> 0;
+        const codeAddrs: { addr: number; val: number }[] = [];
+        for (let i = 0; i < Math.min(stackBytes.length, 128); i += 4) {
+          const word = readUInt32LE(stackBytes, i);
+          if (word >= 0x80000000 && word < 0xC0000000) {
+            codeAddrs.push({ addr: (stackBase! + i) >>> 0, val: word });
+          }
+        }
+        if (codeAddrs.length > 0) {
+          for (const { addr, val } of codeAddrs) {
+            html += `<div class="dbg-row dbg-retaddr"><span class="dbg-addr">${hex32(addr)}</span><span class="dbg-val">${hex32(val)}</span><span class="dbg-dim" style="margin-left:6px">← return addr</span></div>`;
+          }
+        } else {
+          html += '<div class="dbg-row dbg-dim">No return addresses on stack</div>';
+        }
+      }
+
       regContent.innerHTML = html;
+
+      // Attach double-click edit handlers to all editable rows.
+      regContent.querySelectorAll('[data-reg-type]').forEach(el => {
+        el.addEventListener('dblclick', () => {
+          const row = el as HTMLElement;
+          const regType  = row.dataset['regType'] ?? '';
+          const regIdxRaw = row.dataset['regIdx'];
+          const regIdx   = regIdxRaw !== undefined ? parseInt(regIdxRaw, 10) : 0;
+          const valEl    = row.querySelector('.dbg-editable') as HTMLElement | null;
+          if (!valEl) { return; }
+          const currentVal = valEl.textContent ?? '';
+          openRegisterEdit(regType, regIdx, currentVal, valEl);
+        });
+      });
     }
 
     function renderCop0Panel(regs: RegisterData) {
@@ -1243,9 +1388,17 @@ export class DisasmEditorComponent implements AfterViewInit {
         const name = ('r' + i + ' ' + COP0_REG_NAMES[i]).substring(0, 14).padEnd(14);
         const val  = hex32(cop0[i] ?? 0);
         const nz   = (cop0[i] ?? 0) !== 0;
-        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name" style="font-size:10px">${name}</span><span class="dbg-val">${val}</span></div>`;
+        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}" data-reg-type="COP0" data-reg-idx="${i}"><span class="dbg-name" style="font-size:10px">${name}</span><span class="dbg-val dbg-editable" title="Double-click to edit">${val}</span></div>`;
       }
       el.innerHTML = html;
+      el.querySelectorAll('[data-reg-type]').forEach(row => {
+        row.addEventListener('dblclick', () => {
+          const r = row as HTMLElement;
+          const valEl = r.querySelector('.dbg-editable') as HTMLElement | null;
+          if (!valEl) { return; }
+          openRegisterEdit('COP0', parseInt(r.dataset['regIdx'] ?? '0', 10), valEl.textContent ?? '', valEl);
+        });
+      });
     }
 
     function renderFprPanel(regs: RegisterData) {
@@ -1258,12 +1411,20 @@ export class DisasmEditorComponent implements AfterViewInit {
         const bits = (fpr[i] ?? 0) >>> 0;
         const fval = rawBitsToFloat(bits);
         const nz   = bits !== 0;
-        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name">f${String(i).padStart(2,'0')} </span><span class="dbg-val">${hex32(bits)}</span><span class="dbg-dim" style="margin-left:6px">${fval}</span></div>`;
+        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}" data-reg-type="FPR" data-reg-idx="${i}"><span class="dbg-name">f${String(i).padStart(2,'0')} </span><span class="dbg-val dbg-editable" title="Double-click to edit">${hex32(bits)}</span><span class="dbg-dim" style="margin-left:6px">${fval}</span></div>`;
       }
       html += '<div class="dbg-divider"></div>';
       const accBits = (regs.fprAcc ?? 0) >>> 0;
       html += `<div class="dbg-row${accBits !== 0 ? ' dbg-nonzero' : ''}"><span class="dbg-name">ACC  </span><span class="dbg-val">${hex32(accBits)}</span><span class="dbg-dim" style="margin-left:6px">${rawBitsToFloat(accBits)}</span></div>`;
       el.innerHTML = html;
+      el.querySelectorAll('[data-reg-type]').forEach(row => {
+        row.addEventListener('dblclick', () => {
+          const r = row as HTMLElement;
+          const valEl = r.querySelector('.dbg-editable') as HTMLElement | null;
+          if (!valEl) { return; }
+          openRegisterEdit('FPR', parseInt(r.dataset['regIdx'] ?? '0', 10), valEl.textContent ?? '', valEl);
+        });
+      });
     }
 
     function renderFcrPanel(regs: RegisterData) {
@@ -1327,14 +1488,47 @@ export class DisasmEditorComponent implements AfterViewInit {
       const el = document.getElementById('vu0i-content');
       if (!el) { return; }
       if (!regs) { el.innerHTML = '<div class="dbg-row">No register data</div>'; return; }
-      let html = '<div class="dbg-section-title">VU0 Integer Registers (vi0–vi15)</div>';
       const vi = regs.vu0i ?? [];
+      // Integer registers vi00–vi15 (16-bit each)
+      let html = '<div class="dbg-section-title">VU0 Integer Registers (COP2_REG_CTL)</div>';
       for (let i = 0; i < 16; i++) {
         const val = (vi[i] ?? 0) & 0xFFFF;
         const nz  = val !== 0;
-        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name">vi${String(i).padStart(2,'0')} </span><span class="dbg-val">${val.toString(16).toUpperCase().padStart(4,'0')}</span><span class="dbg-dim" style="margin-left:6px">${val}</span></div>`;
+        const ro  = i === 0;
+        const editAttr = ro ? '' : ` data-reg-type="VU0I" data-reg-idx="${i}"`;
+        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name" style="font-size:10px">${COP2_REG_CTL[i].padEnd(8)}</span><span class="dbg-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val.toString(16).toUpperCase().padStart(4,'0')}</span><span class="dbg-dim" style="margin-left:6px">${val}</span></div>`;
+      }
+      // Control registers vi16–vi31
+      html += '<div class="dbg-divider"></div>';
+      html += '<div class="dbg-section-title">VU0 Control Registers</div>';
+      for (let i = 16; i < 32; i++) {
+        const raw = vi[i] ?? 0;
+        const nz  = raw !== 0;
+        const name = COP2_REG_CTL[i];
+        // Detect float registers (R=20, I=21, Q=22) and display as both hex and float
+        let valStr: string;
+        let annot = '';
+        if (i === 20 || i === 21 || i === 22) {
+          valStr = hex32(raw);
+          annot = `<span class="dbg-dim" style="margin-left:6px">${rawBitsToFloat(raw)}</span>`;
+        } else if (i === 17) {
+          valStr = (raw & 0xFFFF).toString(16).toUpperCase().padStart(4,'0');
+        } else {
+          valStr = hex32(raw);
+        }
+        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"><span class="dbg-name" style="font-size:10px">${name.padEnd(8)}</span><span class="dbg-val">${valStr}</span>${annot}</div>`;
       }
       el.innerHTML = html;
+
+      // Click-to-edit for vi01–vi15
+      el.querySelectorAll('[data-reg-type]').forEach(row => {
+        row.addEventListener('dblclick', () => {
+          const r = row as HTMLElement;
+          const valEl = r.querySelector('.dbg-editable') as HTMLElement | null;
+          if (!valEl) { return; }
+          openRegisterEdit('VU0I', parseInt(r.dataset['regIdx'] ?? '0', 10), valEl.textContent ?? '', valEl);
+        });
+      });
     }
 
     function renderGsPanel(regs: RegisterData) {
