@@ -1,6 +1,7 @@
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.CPU;
 using CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE;
+using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
 
 namespace CodeDesigner.Mips64LE.TestProject
@@ -2314,6 +2315,139 @@ namespace CodeDesigner.Mips64LE.TestProject
                 $"0x74726574 output should echo the raw encoding, got: {disasm}");
             Assert.IsTrue(disasm.Contains("1D") || disasm.Contains("0x1D"),
                 $"0x74726574 output should identify opcode 0x1D, got: {disasm}");
+        }
+
+        // -----------------------------------------------------------------------
+        // Branch/jump target peek tests (label + string hints)
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void TryGetBranchJumpTarget_J_ComputesTarget()
+        {
+            // J encoding: opcode=0x02, addr field = 0x100000
+            // PC = 0x80000000 → target = (0x80000004 & 0xF0000000) | (0x100000 << 2) = 0x80400000
+            uint enc = MipsEncoder.EncodeJ(0x02, 0x100000);
+            uint? target = MipsAnalyzer.TryGetBranchJumpTarget(enc, 0x80000000u, null);
+            Assert.AreEqual(0x80400000u, target, "J target should be 0x80400000");
+        }
+
+        [TestMethod]
+        public void TryGetBranchJumpTarget_JAL_ComputesTarget()
+        {
+            uint enc = MipsEncoder.EncodeJ(0x03, 0x100000);
+            uint? target = MipsAnalyzer.TryGetBranchJumpTarget(enc, 0x80000000u, null);
+            Assert.AreEqual(0x80400000u, target, "JAL target should be 0x80400000");
+        }
+
+        [TestMethod]
+        public void TryGetBranchJumpTarget_BEQ_ComputesTarget()
+        {
+            // BEQ $t0, $t1, +8  =>  offset=2  => target = PC+4+(2<<2) = PC+12
+            uint enc = MipsEncoder.EncodeI(0x04, 8, 9, 2);
+            uint? target = MipsAnalyzer.TryGetBranchJumpTarget(enc, 0x80001000u, null);
+            Assert.AreEqual(0x8000100Cu, target, "BEQ target = PC+4+(offset<<2)");
+        }
+
+        [TestMethod]
+        public void TryGetBranchJumpTarget_JR_ComputesTargetFromCpu()
+        {
+            // JR $ra — target is cpu.RegsLo[31]
+            uint enc = MipsEncoder.EncodeR(0, 31, 0, 0, 0, 0x08);
+            var cpu = MakeCpu();
+            cpu.RegsLo[31] = 0x80012345u;
+            uint? target = MipsAnalyzer.TryGetBranchJumpTarget(enc, 0x80001000u, cpu);
+            Assert.AreEqual(0x80012345u, target, "JR target = $ra");
+        }
+
+        [TestMethod]
+        public void TryGetBranchJumpTarget_JR_NullWithoutCpu()
+        {
+            uint enc = MipsEncoder.EncodeR(0, 31, 0, 0, 0, 0x08);
+            uint? target = MipsAnalyzer.TryGetBranchJumpTarget(enc, 0x80001000u, null);
+            Assert.IsNull(target, "JR with no CPU state should return null");
+        }
+
+        [TestMethod]
+        public void TryGetBranchJumpTarget_NonBranch_ReturnsNull()
+        {
+            // ADDU $t0, $s0, $s1 — not a branch/jump
+            uint enc = MipsEncoder.EncodeR(0, 16, 17, 8, 0, 0x21);
+            uint? target = MipsAnalyzer.TryGetBranchJumpTarget(enc, 0x80000000u, null);
+            Assert.IsNull(target, "ADDU should return null target");
+        }
+
+        [TestMethod]
+        public void AnalyzeSingleInstruction_J_AppendsStringHint()
+        {
+            // J pointing at an address that contains a string "Hello"
+            uint targetAddr = 0x00001000u;
+            uint enc = (0x02u << 26) | ((targetAddr >> 2) & 0x03FFFFFFu);
+
+            var bus = new PS2MemoryBus();
+            byte[] str = System.Text.Encoding.ASCII.GetBytes("Hello\0");
+            for (int i = 0; i < str.Length; i++)
+                bus.WriteByte(targetAddr + (uint)i, str[i]);
+
+            var cpu = new CpuState { PC = 0x00000000u };
+            // PC upper nibble = 0 so target stays in same region
+            string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x00000000u, cpu, bus);
+
+            Assert.IsTrue(analysis.Contains("\"Hello\""),
+                $"Analysis should contain string hint '\"Hello\"' but got: {analysis}");
+        }
+
+        [TestMethod]
+        public void AnalyzeSingleInstruction_JAL_AppendsLabelHint()
+        {
+            // JAL whose target has a user-defined label
+            uint targetAddr = 0x80400000u;
+            uint enc = MipsEncoder.EncodeJ(0x03, 0x100000); // target = 0x80400000 from PC 0x80000000
+
+            var cpu = new CpuState { PC = 0x80000000u };
+            string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x80000000u, cpu, null,
+                addr => addr == targetAddr ? "scePadRead" : null);
+
+            Assert.IsTrue(analysis.Contains("\"scePadRead\""),
+                $"Analysis should contain label hint '\"scePadRead\"' but got: {analysis}");
+        }
+
+        [TestMethod]
+        public void AnalyzeSingleInstruction_LabelPreferredOverString()
+        {
+            // When both a label and a string are present, the label takes priority
+            uint targetAddr = 0x00001000u;
+            uint enc = (0x02u << 26) | ((targetAddr >> 2) & 0x03FFFFFFu);
+
+            var bus = new PS2MemoryBus();
+            byte[] str = System.Text.Encoding.ASCII.GetBytes("RawStr\0");
+            for (int i = 0; i < str.Length; i++)
+                bus.WriteByte(targetAddr + (uint)i, str[i]);
+
+            var cpu = new CpuState { PC = 0x00000000u };
+            string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x00000000u, cpu, bus,
+                addr => addr == targetAddr ? "MyLabel" : null);
+
+            Assert.IsTrue(analysis.Contains("\"MyLabel\""),
+                $"Analysis should prefer label hint over string, got: {analysis}");
+            Assert.IsFalse(analysis.Contains("\"RawStr\""),
+                $"Analysis should not show raw string when label is available, got: {analysis}");
+        }
+
+        [TestMethod]
+        public void AnalyzeSingleInstruction_NoHintForNonPrintable()
+        {
+            // Target address contains non-printable bytes — no string hint should appear
+            uint targetAddr = 0x00001000u;
+            uint enc = (0x02u << 26) | ((targetAddr >> 2) & 0x03FFFFFFu);
+
+            var bus = new PS2MemoryBus();
+            bus.WriteByte(targetAddr, 0x01); // non-printable
+
+            var cpu = new CpuState { PC = 0x00000000u };
+            string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x00000000u, cpu, bus);
+
+            Assert.IsFalse(analysis.Contains("=>"),
+                $"Analysis should not append a hint for non-printable target bytes, got: {analysis}");
         }
     }
 }
