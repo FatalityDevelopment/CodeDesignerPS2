@@ -218,6 +218,16 @@ export class DisasmEditorService implements OnDestroy {
       this.requestPage(this.getPageStart(0));
     }
 
+    // Re-register any breakpoints the user had set in the editor with the
+    // emulator server.  After a restart or reconnect, the server-side
+    // breakpoint set is empty; re-sending here keeps the webview and the
+    // server in sync without requiring the user to re-add every breakpoint.
+    if (this.state.isLive && this.state.breakpoints.size > 0) {
+      for (const addr of this.state.breakpoints) {
+        this._bridge.postMessage({ type: 'setBreakpoint', address: addr });
+      }
+    }
+
     this.initReceived$.next({ isLive: this.state.isLive, regionLabel: this.state.regionLabel });
   }
 

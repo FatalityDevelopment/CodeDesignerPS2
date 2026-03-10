@@ -139,25 +139,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
         public uint F240 => _f240;
 
         /// <summary>
-        /// Reset the SIF to its power-on state: clear both FIFOs and restore all
-        /// registers to their hardware-reset values.
-        /// Reference: PCSX2 pcsx2/Hw.cpp hwReset() — zeroes all SIF registers
-        /// then sets SBUS_F260 = 0x1D000060.
-        /// </summary>
-        public void Reset()
-        {
-            _sif0Fifo.Clear();
-            _sif1Fifo.Clear();
-            _mscom  = 0u;
-            _smcom  = 0u;
-            _msflag = 0u;
-            _smflag = 0u;
-            _f240   = 0u;
-            _f250   = 0u;
-            _f260   = 0x1D000060u;
-        }
-
-        /// <summary>
         /// Raised when the EE sets new bits in MSFLAG (EE→IOP notification).
         /// The IOP bus subscribes to this to assert IOP INTC bit 1 (SBUS),
         /// waking the IOP from any interrupt-enabled spin loop waiting for EE input.

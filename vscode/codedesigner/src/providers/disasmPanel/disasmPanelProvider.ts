@@ -427,6 +427,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             this._paused = true;
             this.webview?.postMessage({ command: 'paused', paused: true });
             this.editorProvider.notifyPauseState(true);
+
+            // Re-initialize every live panel with fresh data from the restarted
+            // scheduler (RAM is freshly zeroed, BIOS ROM is reloaded).
+            // openLiveMemoryView() reuses existing panels and sends them a new
+            // 'init' message, which also triggers the webview to re-register
+            // any breakpoints with the new server-side scheduler.
+            for (const r of LIVE_REGIONS) {
+                await this.editorProvider.openLiveMemoryView(
+                    r.region, r.address, r.size, r.label);
+            }
         } catch (err: any) {
             out.appendLine(`[ERROR] Restart failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Restart failed: ${err?.message ?? err}`);

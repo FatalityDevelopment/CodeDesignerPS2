@@ -251,33 +251,6 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             _nIntrStat |= INTR_DISC_DETECT;
         }
 
-        // ── Drive reset ──────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Reset the CDVD controller to its power-on state without ejecting the disc.
-        /// All command buffers and result registers are cleared; the drive returns to its
-        /// idle-ready status, exactly as PCSX2 <c>cdvdReset()</c> describes.  The disc
-        /// stream (if any) is preserved so the BIOS can re-read it on the next boot.
-        /// The in-progress DMA sector buffer (<c>_sectorData</c>) is intentionally
-        /// cleared because it holds data from a command that was interrupted by the
-        /// reset; new reads will re-fill it on demand from the preserved stream.
-        /// </summary>
-        public void Reset()
-        {
-            _nReady           = DRIVE_READY | DRIVE_MECHA_INIT | DRIVE_DEV9CON;
-            _sReady           = 0x40;
-            _nCmdActive       = false;
-            _nParamPos        = 0;
-            _nIntrStat        = 0;
-            _sCmdParamPos     = 0;
-            _nCmdResultLen    = 0;
-            _nCmdResultPos    = 0;
-            _sectorData       = Array.Empty<byte>();
-            _sectorDataOffset = 0;
-            _sCmdOutputPos    = 0;
-            _sCmdOutputLen    = 0;
-        }
-
         // ── ISO image loading ─────────────────────────────────────────────────
 
         /// <summary>

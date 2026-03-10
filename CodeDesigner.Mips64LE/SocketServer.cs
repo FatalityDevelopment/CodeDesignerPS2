@@ -37,6 +37,15 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         public DualCpuScheduler? Scheduler { get; set; }
 
+        /// <summary>
+        /// Set to <c>true</c> by <see cref="HandleRestart"/> to ask the emulator
+        /// run-loop (in Program.cs) to perform a full hardware reset: create a
+        /// fresh <see cref="DualCpuScheduler"/>, re-load the BIOS and disc, and
+        /// leave the emulator paused at the reset vector.  The run-loop clears this
+        /// flag once the new scheduler is installed.
+        /// </summary>
+        public volatile bool PendingRestart;
+
         public event EventHandler<string>? MessageReceived;
         public event EventHandler<string>? ClientConnected;
         public event EventHandler? ClientDisconnected;
@@ -828,20 +837,27 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle RESTART command — resets both CPUs to their power-on states and
-        /// leaves the emulator paused so the client can set breakpoints before resuming.
-        /// Unpauses first in case the emulator was already halted; Reset() restores
-        /// all registers and clears counters regardless of Paused state, then we
-        /// set Paused=true so the scheduler stops at the reset vector.
+        /// Handle RESTART command — signals the emulator run-loop to perform a
+        /// full hardware reset (equivalent to killing and restarting the process)
+        /// without dropping the socket connection.  The run-loop will re-create
+        /// the scheduler, reload the BIOS and disc image, preserve existing
+        /// breakpoints, and leave the emulator paused at the reset vector.
         /// </summary>
         private string HandleRestart()
         {
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
-            Scheduler.Paused = false;   // ungate the run-gate so HardReset() can run cleanly
-            Scheduler.HardReset();
-            Scheduler.Paused = true;    // halt at reset vector; client resumes when ready
+            // Signal the run-loop to reinitialise everything from scratch.
+            PendingRestart = true;
+
+            // Wake the run-loop from WaitForResumeAsync (in case it was already paused)
+            // so it processes PendingRestart immediately instead of waiting for a
+            // manual Resume from the client.  The run-loop checks PendingRestart
+            // before calling RunSlice(), so no instructions execute on the old
+            // scheduler after this unblock.
+            Scheduler.Paused = false;
+
             return CreateSuccessResponse("Restarted");
         }
 
