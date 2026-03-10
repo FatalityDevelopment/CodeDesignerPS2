@@ -931,16 +931,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private async handleCompileCds(): Promise<void> {
         const out = getOutputChannel();
 
-        // Prefer the cached content; fall back to whatever is in the active editor
-        let sourceCode = this._activeCdsContent;
-        if (!sourceCode) {
-            const editor = vscode.window.activeTextEditor;
-            if (editor && editor.document.uri.fsPath.toLowerCase().endsWith('.cds')) {
-                sourceCode = editor.document.getText();
-                this._activeCdsFilePath = editor.document.uri.fsPath;
-                this._activeCdsContent  = sourceCode;
-            }
+        // Always read from the currently active text editor first so clicking
+        // Compile always uses whichever .cds tab the user has open.  VS Code
+        // preserves vscode.window.activeTextEditor even after a sidebar panel
+        // gains focus, so this reliably reflects the file the user had visible
+        // before clicking the button.
+        const activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor?.document.uri.fsPath.toLowerCase().endsWith('.cds')) {
+            this._activeCdsFilePath = activeEditor.document.uri.fsPath;
+            this._activeCdsContent  = activeEditor.document.getText();
         }
+
+        const sourceCode = this._activeCdsContent;
+        const filePath   = this._activeCdsFilePath;
 
         if (!sourceCode) {
             const msg = 'No .cds file is open. Open a Code Designer Source file to compile.';
@@ -952,6 +955,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             });
             return;
         }
+
+        out.appendLine(`[INFO] CDS compiling: ${filePath ? path.basename(filePath) : '(unknown)'}`);
 
         if (!this.socketClient.isConnected()) {
             const msg = 'Not connected to emulator server.';
