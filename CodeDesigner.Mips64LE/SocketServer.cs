@@ -1007,7 +1007,7 @@ namespace CodeDesigner.Mips64LE
             // We scan the first portion of EE RAM to find valid TCBs.
 
             const uint TcbSize      = 128u;
-            const uint MaxTcbScan   = 256u;  // cap scan to 256 threads
+            const uint MaxTcbScan   = 256u;  // Cap scan to 256 threads
             // Typical EE OS thread pool base (physical).
             // The BIOS places the TCB array at approximately 0x00000100,
             // immediately after the 256-byte kernel exception vector area.
@@ -1098,7 +1098,8 @@ namespace CodeDesigner.Mips64LE
                         | (bus.Ram[physAddr + 3] << 24));
         }
 
-        /// <summary> — writes a new value to a named EE register.
+        /// <summary>
+        /// Handle SETREG command — writes a new value to a named EE register.
         /// <para>Supported register names: GPR (index 1-31), PC, HI, LO, HI1, LO1, SA, COP0 (index 0-31), FPR (index 0-31).</para>
         /// <para>Values may be supplied as decimal integers or as 0x-prefixed hexadecimal strings.</para>
         /// </summary>

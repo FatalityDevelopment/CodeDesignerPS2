@@ -465,6 +465,50 @@ app-hex-view {
     color: #4ec9b0;
 }
 
+/* ── Quad-word (128-bit) GPR column header and value layout ── */
+
+.dbg-qw-header {
+    opacity: 0.45;
+    font-size: 9px;
+    padding-bottom: 2px;
+}
+
+.dbg-qw-hdr-val {
+    display: flex;
+    gap: 0;
+    font-family: monospace;
+    color: #858585;
+}
+
+.dbg-qw-col {
+    width: 8ch;
+    text-align: center;
+}
+
+.dbg-qw-sep {
+    width: 1ch;
+    text-align: center;
+    color: #555;
+}
+
+/* Quad-word value: monospace, fixed-width to align columns */
+.dbg-qw-val {
+    font-family: monospace;
+    letter-spacing: 0;
+    white-space: pre;
+}
+
+/* Upper lane (bits 127:64) rendered dimmer when all zero */
+.dbg-qw-val .dbg-qw-upper {
+    color: #5a5a5a;
+}
+
+.dbg-nonzero .dbg-qw-val .dbg-qw-upper,
+.dbg-qw-val.dbg-qw-upper-nz .dbg-qw-upper {
+    color: #c586c0;
+}
+
+
 .dbg-dim {
     color: #858585;
     font-size: 10px;

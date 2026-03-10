@@ -1341,17 +1341,19 @@ export class DisasmEditorComponent implements AfterViewInit {
       const upLo  = regs.gprUpLo32 ?? [];
       const upHi  = regs.gprUpHi32 ?? [];
 
-      // Format a 128-bit GPR value: show all 128 bits when the upper lane is non-zero,
-      // show 64 bits when only the upper word of the lower lane is non-zero,
-      // otherwise show the full 32-bit word (the common case on PS2).
+      const h32 = (n: number) => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+
+      // Format a full 128-bit GPR value as four 32-bit words — upper lane first,
+      // matching PCSX2's quad-word register display.
+      // Layout (MSB→LSB): upHi32 upLo32 hi32 lo32
+      // The upper 64-bit lane is dimmed when zero (common during normal PS2 operation)
+      // but always shown to make the 128-bit nature of GPRs visible.
       function gpr128(i: number): string {
         const l0 = lo32[i] ?? 0; const l1 = hi32[i] ?? 0;
         const u0 = upLo[i] ?? 0; const u1 = upHi[i] ?? 0;
-        const h32 = (n: number) => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
-        if (u0 !== 0 || u1 !== 0)
-          return `${h32(u1)}_${h32(u0)}_${h32(l1)}_${h32(l0)}`;
-        if (l1 !== 0) return `${h32(l1)}_${h32(l0)}`;
-        return h32(l0);
+        const upperZero = u0 === 0 && u1 === 0;
+        const upperCls = upperZero ? ' class="dbg-qw-upper"' : '';
+        return `<span${upperCls}>${h32(u1)}_${h32(u0)}</span>_${h32(l1)}_${h32(l0)}`;
       }
 
       function gprNz(i: number): boolean {
@@ -1359,7 +1361,12 @@ export class DisasmEditorComponent implements AfterViewInit {
                (upLo[i] ?? 0) !== 0 || (upHi[i] ?? 0) !== 0;
       }
 
-      let html = '<div class="dbg-section-title">General Purpose Registers</div>';
+      // HI/LO are 64-bit on the PS2 EE. We receive them as the lower 32 bits
+      // from `regs.hi`/`regs.lo`; the socket client maps them from the ulong
+      // field but JavaScript's number type loses precision above 2^53.  For a
+      // faithful PCSX2-style display we show the low 32 bits only since the
+      // full 64-bit value is only meaningful to the pipeline internals.
+      let html = '<div class="dbg-section-title">General Purpose Registers (128-bit)</div>';
       html += `<div class="dbg-row" data-reg-type="PC" data-reg-idx="0"><span class="dbg-name">pc   </span><span class="dbg-val dbg-editable" title="Double-click to edit">${hex32(regs.pc ?? 0)}</span></div>`;
       html += `<div class="dbg-row" data-reg-type="HI"  data-reg-idx="0"><span class="dbg-name">hi   </span><span class="dbg-val dbg-editable" title="Double-click to edit">${hex32(regs.hi ?? 0)}</span>`;
       html += ` <span class="dbg-name" style="margin-left:8px">lo   </span><span class="dbg-val dbg-editable" data-reg-type="LO" title="Double-click to edit">${hex32(regs.lo ?? 0)}</span></div>`;
@@ -1367,13 +1374,15 @@ export class DisasmEditorComponent implements AfterViewInit {
       html += ` <span class="dbg-name" style="margin-left:8px">lo1  </span><span class="dbg-val dbg-editable" data-reg-type="LO1" title="Double-click to edit">${hex32(regs.lo1 ?? 0)}</span></div>`;
       html += `<div class="dbg-row" data-reg-type="SA" data-reg-idx="0"><span class="dbg-name">sa   </span><span class="dbg-val dbg-editable" title="Double-click to edit">${hex32(regs.sa ?? 0)}</span></div>`;
       html += '<div class="dbg-divider"></div>';
+      // Column header mimicking PCSX2's quad-word layout
+      html += '<div class="dbg-row dbg-qw-header"><span class="dbg-name">     </span><span class="dbg-qw-hdr-val"><span class="dbg-qw-col">bits[127:96]</span><span class="dbg-qw-sep"> </span><span class="dbg-qw-col">bits[95:64]</span><span class="dbg-qw-sep"> </span><span class="dbg-qw-col">bits[63:32]</span><span class="dbg-qw-sep"> </span><span class="dbg-qw-col">bits[31:0]</span></span></div>';
       for (let i = 0; i < 32; i++) {
         const name = MIPS_REG_NAMES[i].padEnd(5);
         const val  = gpr128(i);
         const nz   = gprNz(i);
         const ro   = i === 0;  // $zero is read-only
         const editAttr = ro ? '' : ` data-reg-type="GPR" data-reg-idx="${i}"`;
-        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name">${name}</span><span class="dbg-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val}</span></div>`;
+        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name">${name}</span><span class="dbg-val dbg-qw-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val}</span></div>`;
       }
 
       // ── Inline call-stack trace from stack memory ────────────────────────
@@ -1384,7 +1393,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         const readUInt32LE = (b: number[], off: number) =>
           ((b[off+3] << 24) | (b[off+2] << 16) | (b[off+1] << 8) | b[off]) >>> 0;
         const codeAddrs: { addr: number; val: number }[] = [];
-        for (let i = 0; i < Math.min(stackBytes.length, 128); i += 4) {
+        for (let i = 0; i + 4 <= Math.min(stackBytes.length, 128); i += 4) {
           const word = readUInt32LE(stackBytes, i);
           if (word >= 0x80000000 && word < 0xC0000000) {
             codeAddrs.push({ addr: (stackBase! + i) >>> 0, val: word });
