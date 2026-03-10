@@ -364,6 +364,18 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (isLive) {
         headerToolbar.classList.add('live-active');
         startLiveRefresh();
+        // Pre-populate the register panel with zeroed placeholder data so
+        // that when the user opens the panel before the first breakpoint is
+        // hit they see all register fields rather than a blank panel.
+        const ph = makePlaceholderRegs();
+        renderGprPanel(ph, [], 0);
+        renderCop0Panel(ph);
+        renderFprPanel(ph);
+        renderFcrPanel(ph);
+        renderVu0fPanel(ph);
+        renderVu0iPanel(ph);
+        renderGsPanel(ph);
+        renderStackPanel(ph, [], 0);
       }
     });
 
@@ -987,19 +999,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (inView) {
         updateHexView(state.hexData, state.hexOffset, addr, length);
       } else {
-        // Cursor moved outside the current hex window.  Immediately synthesise
-        // a zero-filled placeholder so the highlight follows the cursor even
-        // before the extension host responds with real bytes (important for the
-        // placeholder / no-socket state and for reducing visual latency in live
-        // mode).  The host will overwrite this with authentic data when it
-        // responds to the 'updateHex' message below.
-        const windowSize  = state.hexData.length || 48;
-        const alignedAddr = Math.floor(addr / 16) * 16;
-        const newOffset   = Math.max(state.baseAddress, alignedAddr >= 16 ? alignedAddr - 16 : 0);
-        const synthetic   = new Array(windowSize).fill(0);
-        state.hexData     = synthetic;
-        state.hexOffset   = newOffset;
-        updateHexView(synthetic, newOffset, addr, length);
+        // Cursor moved outside the current hex window.  Request fresh data
+        // from the extension host without overwriting the current display —
+        // showing zeros while waiting causes a visible flicker on every live
+        // refresh cycle.  The hexUpdated$ subscriber updates the view
+        // atomically with real bytes once the host responds.
         vscode.postMessage({ type: 'updateHex', address: addr, length });
       }
     }
@@ -1099,6 +1103,9 @@ export class DisasmEditorComponent implements AfterViewInit {
       state.loadedPages.set(startIndex, zeroRows);
       state.disasmRows = zeroRows;
       renderDisassembly();
+      _lastStackRegs  = null;
+      _lastStackBytes = [];
+      _lastStackBase  = 0;
       hideDebugPanel();
       livePaused = false;
       setLivePausedUi(false);
@@ -1129,18 +1136,14 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (isVisible) {
         hideDebugPanel();
       } else {
-        debugPanel.classList.add('visible');
-        registersToggleBtn.classList.add('active');
-        if (_lastStackRegs) {
-          renderGprPanel(_lastStackRegs, _lastStackBytes, _lastStackBase);
-          renderCop0Panel(_lastStackRegs);
-          renderFprPanel(_lastStackRegs);
-          renderFcrPanel(_lastStackRegs);
-          renderVu0fPanel(_lastStackRegs);
-          renderVu0iPanel(_lastStackRegs);
-          renderGsPanel(_lastStackRegs);
-          renderStackPanel(_lastStackRegs, _lastStackBytes, _lastStackBase);
-        }
+        // Always render content when opening the panel — use the most recent
+        // register snapshot, or zeroed placeholder data if no breakpoint has
+        // been hit yet.  When using placeholder data, pass empty stack state
+        // to avoid showing stale bytes from a previous session.
+        const regs       = _lastStackRegs ?? makePlaceholderRegs();
+        const stackBytes = _lastStackRegs ? _lastStackBytes : [];
+        const stackBase  = _lastStackRegs ? _lastStackBase  : 0;
+        showDebugPanel(regs, stackBytes, stackBase);
       }
     }
 
@@ -1411,6 +1414,36 @@ export class DisasmEditorComponent implements AfterViewInit {
     function hideDebugPanel() {
       debugPanel.classList.remove('visible');
       registersToggleBtn.classList.remove('active');
+    }
+
+    /**
+     * Returns a zero-filled `RegisterData` object covering every register
+     * group (GPR, COP0, FPU, VU0, GS).  Used as placeholder content for the
+     * register panel before the first breakpoint snapshot is received from the
+     * emulator — all values show as 0x00000000, giving the panel a consistent
+     * layout rather than appearing empty.
+     */
+    function makePlaceholderRegs(): RegisterData {
+      return {
+        pc: 0,
+        hi: 0, lo: 0, hi1: 0, lo1: 0, sa: 0,
+        gpr: new Array(32).fill(0),
+        gprLo32:   new Array(32).fill(0),
+        gprHi32:   new Array(32).fill(0),
+        gprUpLo32: new Array(32).fill(0),
+        gprUpHi32: new Array(32).fill(0),
+        cop0Regs: new Array(32).fill(0),
+        fpr: new Array(32).fill(0),
+        fprAcc: 0,
+        fcr0: 0, fcr31: 0,
+        vu0fX: new Array(32).fill(0), vu0fY: new Array(32).fill(0),
+        vu0fZ: new Array(32).fill(0), vu0fW: new Array(32).fill(0),
+        vu0AccX: 0, vu0AccY: 0, vu0AccZ: 0, vu0AccW: 0,
+        vu0Q: 0, vu0P: 0, vu0I: 0,
+        vu0Status: 0, vu0Mac: 0, vu0Clip: 0,
+        vu0i:   new Array(32).fill(0),
+        gsPriv: new Array(64).fill(0),
+      };
     }
 
     function renderGprPanel(regs: RegisterData, stackBytes?: number[], stackBase?: number) {
