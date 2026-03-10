@@ -46,9 +46,26 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         public volatile bool PendingRestart;
 
+        /// <summary>
+        /// Signalled by the emulator run-loop once the new scheduler is fully installed
+        /// after a restart.  <see cref="HandleRestart"/> waits on this gate so that it
+        /// does not return "Restarted" to the client until <see cref="Scheduler"/> is
+        /// the new instance — guaranteeing that subsequent SETBP and RESUME commands
+        /// operate on the correct scheduler.
+        /// </summary>
+        private readonly ManualResetEventSlim _restartComplete = new ManualResetEventSlim(false);
+
         public event EventHandler<string>? MessageReceived;
         public event EventHandler<string>? ClientConnected;
         public event EventHandler? ClientDisconnected;
+
+        /// <summary>
+        /// Called by the emulator run-loop after a restart is fully complete (new
+        /// scheduler installed and paused at the reset vector).  Unblocks
+        /// <see cref="HandleRestart"/> so it can return the "Restarted" response to
+        /// the client only once SETBP/RESUME will target the correct scheduler.
+        /// </summary>
+        public void SignalRestartComplete() => _restartComplete.Set();
 
         public SocketServer(int port = 8765)
         {
@@ -848,6 +865,10 @@ namespace CodeDesigner.Mips64LE
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
+            // Arm the gate BEFORE setting the flag so the run-loop can't signal it
+            // before we start waiting.
+            _restartComplete.Reset();
+
             // Signal the run-loop to reinitialise everything from scratch.
             PendingRestart = true;
 
@@ -857,6 +878,13 @@ namespace CodeDesigner.Mips64LE
             // before calling RunSlice(), so no instructions execute on the old
             // scheduler after this unblock.
             Scheduler.Paused = false;
+
+            // Block this socket-handler thread until the run-loop has fully replaced
+            // the scheduler.  Without this wait, SETBP/RESUME commands that arrive
+            // immediately after the "Restarted" response would target the old scheduler
+            // — RESUME would unpause the old instance while the new scheduler's Paused
+            // flag stayed true, leaving the emulator frozen forever.
+            _restartComplete.Wait();
 
             return CreateSuccessResponse("Restarted");
         }

@@ -994,6 +994,13 @@ namespace CodeDesigner.Mips64LE
                         // before execution resumes from the reset vector.
                         scheduler.Paused = true;
 
+                        // Unblock HandleRestart() now that the new scheduler is fully
+                        // installed and paused.  Only after this point will the socket
+                        // handler thread return "Restarted" to the client, so all
+                        // subsequent SETBP/RESUME commands are guaranteed to target
+                        // the new scheduler.
+                        embeddedServer.SignalRestartComplete();
+
                         // Reset run-loop diagnostics.
                         totalSteps        = 0;
                         nextReport        = ReportEvery;
