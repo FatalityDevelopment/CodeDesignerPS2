@@ -174,6 +174,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'applyCheats':
                     await this.handleApplyCheats(msg.cheatText ?? '');
                     break;
+                case 'focusRegion':
+                    this.editorProvider.focusLivePanelByLabel(msg.label ?? '');
+                    break;
             }
         });
     }
@@ -852,6 +855,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private resolvePath(p: string): string {
         if (path.isAbsolute(p)) { return p; }
         return this.workspaceRoot ? path.join(this.workspaceRoot, p) : p;
+    }
+
+    /**
+     * Append a cheat-list entry (e.g. from the disasm editor "Send to Cheat List" button)
+     * to the cheat textarea in the cheats tab and switch to that tab.
+     */
+    public appendToCheatList(entry: string): void {
+        this.webview?.postMessage({ command: 'appendToCheatList', entry });
     }
 
     /** Apply cheat codes to live emulator memory via the APPLYCHEATS socket command. */

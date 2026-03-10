@@ -137,6 +137,14 @@ interface InitMsg {
       </div>
     </div>
 
+    <div class="section-label">Disassembler Regions</div>
+    <div class="row">
+      <select id="regionSelect" [(ngModel)]="selectedRegion" (change)="onRegionChange()">
+        <option value="">Navigate to region…</option>
+        <option *ngFor="let r of regions" [value]="r">{{r}}</option>
+      </select>
+    </div>
+
   </div>
 </div>
 
@@ -167,6 +175,8 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   cheatMessage = '';
   cheatError = false;
   currentGameName = '';
+  regions: string[] = ['EE Main RAM', 'IOP RAM', 'BIOS ROM', 'Scratchpad'];
+  selectedRegion = '';
   private subs: Subscription[] = [];
 
   get statusText(): string {
@@ -202,10 +212,20 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         this.cheatError   = !msg.success;
         this.cheatMessage = msg.success ? 'Cheats applied!' : (msg.error ?? 'Failed to apply cheats.');
         setTimeout(() => { this.cheatMessage = ''; }, 4000);
+      }),
+      this.bridge.on<Record<string, unknown>>('appendToCheatList').subscribe(msg => {
+        const entry = (msg['entry'] as string) ?? '';
+        if (!entry) { return; }
+        this.cheatText = this.cheatText
+            ? this.cheatText.trimEnd() + '\n' + entry
+            : entry;
+        this.activeTab = 'cheats';
+      }),
+      this.bridge.on<Record<string, unknown>>('updateRegions').subscribe(msg => {
+        const labels = msg['labels'] as string[] | undefined;
+        if (labels) { this.regions = labels; }
       })
     );
-    // Signal to the provider that subscriptions are set up and we are ready
-    // to receive messages (especially the initial 'init' payload).
     this.bridge.postMessage({ command: 'ready' });
   }
 
@@ -264,5 +284,12 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   applyCheats(): void {
     this.bridge.postMessage({ command: 'applyCheats', cheatText: this.cheatText });
+  }
+
+  onRegionChange(): void {
+    if (!this.selectedRegion) { return; }
+    this.bridge.postMessage({ command: 'focusRegion', label: this.selectedRegion });
+    // Reset so the dropdown can be used again for the same selection
+    setTimeout(() => { this.selectedRegion = ''; }, 0);
   }
 }

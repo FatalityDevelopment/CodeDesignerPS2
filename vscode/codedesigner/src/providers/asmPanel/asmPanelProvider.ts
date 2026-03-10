@@ -4,20 +4,27 @@ import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 
 export class AsmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
+    private activeFilePath = '';
 
     constructor(private readonly _extensionUri: vscode.Uri) {}
 
-    // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
         context.subscriptions.push(
             vscode.window.registerWebviewViewProvider('asm.asmPanel', this)
+        );
+
+        // Watch the active editor so the panel auto-loads a .cds file when the
+        // user switches to it.
+        context.subscriptions.push(
+            vscode.window.onDidChangeActiveTextEditor(editor => {
+                this.syncActiveEditor(editor);
+            })
         );
     }
 
     resolveWebviewView(webviewView: vscode.WebviewView): void {
         this.webview = webviewView.webview;
 
-        // Setup webview options
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [this._extensionUri]
@@ -25,7 +32,6 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this.getHtml(webviewView.webview);
 
-        // Listen to messages from the webview
         webviewView.webview.onDidReceiveMessage(async message => {
             if (message.type === 'bootstrapError') {
                 getOutputChannel().appendLine(
@@ -34,56 +40,61 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
                 return;
             }
             switch (message.command) {
-                case 'connect':
-                    vscode.window.showInformationMessage(
-                        'Connect clicked (emulator hookup later)'
-                    );
+                case 'ready':
+                    // Angular is bootstrapped — send current .cds file if one is active.
+                    this.syncActiveEditor(vscode.window.activeTextEditor);
                     break;
-
-                case 'assemble':
-                    await this.handleAssemble(message.data);
+                case 'compile':
+                    await this.handleCompile(message.code as string);
                     break;
             }
         });
     }
 
-    private async handleAssemble(asmCode: string) {
+    // ── Active-editor sync ────────────────────────────────────────────────────
+
+    private syncActiveEditor(editor: vscode.TextEditor | undefined): void {
+        if (!editor) { return; }
+        const uri = editor.document.uri;
+        if (!uri.fsPath.toLowerCase().endsWith('.cds')) { return; }
+
+        this.activeFilePath = uri.fsPath;
+        const content = editor.document.getText();
+        this.webview?.postMessage({
+            command:  'loadFile',
+            filePath: uri.fsPath,
+            content
+        });
+    }
+
+    // ── Compile ───────────────────────────────────────────────────────────────
+
+    private async handleCompile(sourceCode: string): Promise<void> {
         const socketClient = getSocketClient();
-        
         if (!socketClient || !socketClient.isConnected()) {
-            this.sendResult(false, '', 'Not connected to C# server. Use "Connect to Server" command first.');
+            this.sendResult(false, '', 'Not connected to the emulator server.');
             return;
         }
 
         try {
-            const results = await socketClient.assemble(asmCode);
-            
-            // Format results as hex output
-            const hexLines: string[] = [];
-            for (const result of results) {
-                if (result.Success) {
-                    hexLines.push(`${result.Hex}  # ${result.Assembly}`);
-                } else {
-                    hexLines.push(`ERROR: ${result.Error} (${result.Assembly})`);
-                }
+            const results = await socketClient.compileCds(sourceCode);
+            const lines: string[] = [];
+            for (const r of results) {
+                lines.push(r.Success
+                    ? `${r.Hex}  # ${r.Assembly}`
+                    : `ERROR: ${r.Error} (${r.Assembly})`);
             }
-            
-            this.sendResult(true, hexLines.join('\n'), '');
-        } catch (error: any) {
-            this.sendResult(false, '', error.message || 'Assembly failed');
+            this.sendResult(true, lines.join('\n'), '');
+        } catch (err: any) {
+            this.sendResult(false, '', err?.message ?? 'Compilation failed');
         }
     }
 
-    private sendResult(success: boolean, data: string, error: string) {
-        if (this.webview) {
-            this.webview.postMessage({
-                command: 'assembleResult',
-                success: success,
-                data: data,
-                error: error
-            });
-        }
+    private sendResult(success: boolean, data: string, error: string): void {
+        this.webview?.postMessage({ command: 'compileResult', success, data, error });
     }
+
+    // ── HTML ──────────────────────────────────────────────────────────────────
 
     private getHtml(webview: vscode.Webview): string {
         const scriptUri = webview.asWebviewUri(
@@ -102,7 +113,7 @@ export class AsmPanelProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
 </head>
 <body>
-<app-asm-panel><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading...</p></app-asm-panel>
+<app-asm-panel><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading…</p></app-asm-panel>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;
