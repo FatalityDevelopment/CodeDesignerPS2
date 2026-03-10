@@ -1151,7 +1151,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const emu = emulators.find(e =>
             !e.path.toLowerCase().includes('pcsx2') &&
             !e.type?.toLowerCase().includes('pcsx2')
-        ) ?? emulators[0];
+        );
+
+        if (!emu) {
+            getOutputChannel().warn('Auto-start: no CodeDesigner emulator found in emu-settings.json (only PCSX2 entries). Use the Run button to start manually.');
+            return false;
+        }
 
         const resolvedExe = this.resolvePath(emu.path);
 

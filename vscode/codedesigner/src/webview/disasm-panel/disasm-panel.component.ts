@@ -248,10 +248,8 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
           this.cdsOutput = '';
         }
       }),
-      this.bridge.on<CdsPatchAppliedMsg>('cdsPatchApplied').subscribe(msg => {
-        if (!msg.success) {
-          // Patch errors are logged to the Debug output channel server-side
-        }
+      this.bridge.on<CdsPatchAppliedMsg>('cdsPatchApplied').subscribe(_msg => {
+        // Patch results are logged to the Debug output channel server-side
       })
     );
     this.bridge.postMessage({ command: 'ready' });
