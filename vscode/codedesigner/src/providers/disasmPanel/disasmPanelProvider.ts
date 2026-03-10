@@ -20,18 +20,19 @@ interface SnapshotEntry {
 
 /** Memory regions exposed as separate editor windows when the emulator is running. */
 const LIVE_REGIONS = [
-    // EE Main RAM: show via the uncached direct-mapped window (0x20000000–0x21FFFFFF).
-    // The PS2 kernel TLB maps physical RAM here without caching, so user-mode code
-    // typically accesses / patches memory through this range.
-    { region: 'ee',  address: 0x20000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
+    // EE Main RAM: shown at KSEG0 (0x80000000–0x81FFFFFF) so that row addresses
+    // match the virtual PC the CPU actually executes from.  Kernel and game code
+    // run in KSEG0, so a breakpoint set on a row at 0x80001234 matches the CPU PC
+    // directly.  HandleReadMem strips the top 3 bits (KSEG0→physical) server-side.
+    { region: 'ee',  address: 0x80000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
     // IOP RAM: show via the EE VTLB mirror at 0x1C000000–0x1DFFFFFF (2 MB window).
     // PCSX2 vtlb.cpp maps psxM (IOP RAM) to EE virtual 0x1C000000; the server
     // translates this virtual address back to a physical IOP RAM offset.
-    // Size is capped at 2 MB to match EeIopMirrorEnd (0x1E000000) and avoid the
-    // range overlapping with BIOS ROM at 0x1FC00000 which would cause the wrong
-    // panel to be revealed on breakpoints.
     { region: 'iop', address: 0x1C000000, size:  2 * 1024 * 1024, label: 'IOP RAM'       },
-    { region: 'ee',  address: 0x1FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
+    // BIOS ROM: shown at KSEG1 (0xBFC00000) so row addresses match the CPU PC.
+    // The PS2 EE reset vector is 0xBFC00000 (KSEG1 uncached alias of physical
+    // 0x1FC00000).  HandleReadMem strips the top 3 bits server-side.
+    { region: 'ee',  address: 0xBFC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
     { region: 'ee',  address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad'    },
 ];
 

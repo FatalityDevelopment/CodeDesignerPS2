@@ -125,6 +125,13 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         private uint? _resumingFromBp;
 
         /// <summary>
+        /// The normalised (physical/KSEG-stripped) key that last fired a breakpoint.
+        /// Stored by <see cref="RunSlice"/> so <see cref="Paused"/>'s setter can
+        /// restore it as <see cref="_resumingFromBp"/> when the user resumes.
+        /// </summary>
+        private uint? _resumingBpKey;
+
+        /// <summary>
         /// When <c>true</c>, <see cref="RunSlice"/> returns immediately without
         /// executing any instructions.  Set via the socket PAUSE/RESUME commands.
         /// </summary>
@@ -136,9 +143,14 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 if (value) _runGate.Reset();
                 else
                 {
-                    // When resuming from a breakpoint, record the hit address so
-                    // RunSlice can step over it once before re-arming the check.
-                    _resumingFromBp = LastBreakpointHit;
+                    // When resuming from a breakpoint, arm step-over using the
+                    // normalised key that RunSlice stored in _resumingBpKey.  This
+                    // is the same key (physical/KSEG-stripped) that will be produced
+                    // from the next PC read, so the one-time skip fires correctly
+                    // regardless of whether the BP was stored as a physical or
+                    // virtual address.
+                    _resumingFromBp = _resumingBpKey ?? LastBreakpointHit;
+                    _resumingBpKey = null;
                     LastBreakpointHit = null;
                     _runGate.Set();
                 }
@@ -639,16 +651,39 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 if (Breakpoints.Count > 0)
                 {
                     uint eePc = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL);
-                    if (Breakpoints.Contains(eePc))
+
+                    // Normalise to physical for KSEG0 (0x80000000–0x9FFFFFFF) and
+                    // KSEG1 (0xA0000000–0xBFFFFFFF) by stripping the top 3 bits.
+                    // This ensures a breakpoint stored as a physical address (e.g.
+                    // 0x1FC00008) still fires when the CPU runs from the KSEG1 alias
+                    // (0xBFC00008), and vice-versa — providing robustness regardless
+                    // of which address form the client used when calling SETBP.
+                    uint bpKey = ((eePc & 0xC0000000u) == 0x80000000u)
+                        ? (eePc & 0x1FFFFFFFu)
+                        : eePc;
+
+                    // Check both the normalised key and the raw virtual PC so BPs
+                    // stored under either form are found.  The second Contains call
+                    // is skipped when bpKey == eePc (non-KSEG address) to avoid a
+                    // redundant hash-set lookup.
+                    uint hitKey = Breakpoints.Contains(bpKey) ? bpKey
+                                : (bpKey != eePc && Breakpoints.Contains(eePc)) ? eePc
+                                : 0u;
+                    if (hitKey != 0u)
                     {
-                        if (_resumingFromBp == eePc)
+                        if (_resumingFromBp == hitKey)
                         {
                             // One-time step-over: execute the instruction normally.
                             _resumingFromBp = null;
                         }
                         else
                         {
+                            // Store the raw virtual PC so the client shows the
+                            // correct KSEG address in the disassembly view.
                             LastBreakpointHit = eePc;
+                            // But remember the normalised key for step-over so the
+                            // Paused setter can restore it correctly.
+                            _resumingBpKey = hitKey;
                             Paused = true;
                             return;
                         }

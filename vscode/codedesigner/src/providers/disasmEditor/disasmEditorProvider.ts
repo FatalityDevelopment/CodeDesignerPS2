@@ -311,6 +311,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const existingInfo = this._livePanelInfo.find(i => i.label === label);
         if (existingInfo) {
             existingInfo.panel.reveal(vscode.ViewColumn.One, true);
+            // Update the stored base address and physical base so that
+            // _revealPanelForAddress uses the correct range after an address change
+            // (e.g. BIOS ROM moved from 0x1FC00000 to 0xBFC00000).
+            existingInfo.baseAddress = baseAddress;
+            existingInfo.physBaseAddress = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
+                ? (baseAddress & 0x1FFFFFFF) >>> 0
+                : baseAddress >>> 0;
             // Re-initialize with live data now that we have a connection
             if (connected) {
                 const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
