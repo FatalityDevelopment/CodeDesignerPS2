@@ -554,6 +554,35 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'editLabel') {
                 await this.handleEditLabel(panel, message.address, message.addressHex,
                     message.dataBytes, message.currentLabel ?? '', message.currentComment ?? '');
+            } else if (message.type === 'gotoRegion') {
+                // The webview could not find the address in its own region.
+                // Find which live panel owns the address and instruct it to navigate.
+                const addr = message.address as number;
+                const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
+                    ? (addr & 0x1FFFFFFF) >>> 0
+                    : addr >>> 0;
+                const target = this._livePanelInfo.find(info =>
+                    physAddr >= info.physBaseAddress &&
+                    physAddr < info.physBaseAddress + info.totalBytes
+                );
+                if (target) {
+                    // Reveal the panel in its current column (undefined preserves the
+                    // panel's existing position rather than forcing it into column one).
+                    target.panel.reveal(undefined, false);
+                    target.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
+                } else {
+                    // No region found — tell the requesting panel so it can show "out of range".
+                    panel.webview.postMessage({ type: 'gotoRegionNotFound', address: addr });
+                }
+            } else if (message.type === 'syncGotoInput') {
+                // Propagate the goto-input value to all other live panels so every
+                // region panel stays in sync when the user types an address.
+                const value = message.value as string;
+                for (const info of this._livePanelInfo) {
+                    if (info.panel !== panel) {
+                        info.panel.webview.postMessage({ type: 'syncGotoInput', value });
+                    }
+                }
             }
         });
 

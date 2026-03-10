@@ -622,7 +622,10 @@ export class DisasmEditorComponent implements AfterViewInit {
       const physBase   = toPhysAddr(state.baseAddress);
       const instrIndex = Math.floor((physAddr - physBase) / 4);
       if (instrIndex < 0 || instrIndex >= state.totalInstructions) {
-        gotoInfo.textContent = 'Address out of range';
+        // Address is not in the current region — ask the extension host to
+        // reveal the panel that owns this address and navigate there.
+        vscode.postMessage({ type: 'gotoRegion', address: addr });
+        gotoInfo.textContent = `Navigating to 0x${addr.toString(16).toUpperCase()}...`;
         return;
       }
       state.cursor = instrIndex;
@@ -640,6 +643,50 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
     gotoClear.addEventListener('click', () => { gotoInput.value = ''; gotoInfo.textContent = ''; gotoInput.focus(); });
     closeGoto.addEventListener('click', () => { toggleGoto(); grid.focus(); });
+
+    // Broadcast every keystroke to the other region panels so their goto
+    // input stays in sync with this one.  A guard flag prevents the echo
+    // message (from the extension host back to this panel) from looping.
+    let syncingGotoInput = false;
+    gotoInput.addEventListener('input', () => {
+      if (syncingGotoInput) { return; }
+      vscode.postMessage({ type: 'syncGotoInput', value: gotoInput.value });
+    });
+
+    // ── Cross-region goto / input-sync service subscriptions ─────────────────
+    svc.syncGotoInputReceived$.subscribe(({ value }) => {
+      syncingGotoInput = true;
+      gotoInput.value = value;
+      syncingGotoInput = false;
+      if (state.gotoActive) { gotoInfo.textContent = ''; }
+    });
+
+    svc.gotoAddressReceived$.subscribe(({ address }) => {
+      // The extension host has routed navigation to this panel because this
+      // region owns the address.  Navigate directly — do NOT call goToAddress()
+      // here to avoid sending a second gotoRegion message if the arithmetic
+      // produces an unexpected result.
+      const physAddr   = toPhysAddr(address);
+      const physBase   = toPhysAddr(state.baseAddress);
+      const instrIndex = Math.floor((physAddr - physBase) / 4);
+      if (instrIndex < 0 || instrIndex >= state.totalInstructions) { return; }
+
+      // Show the goto panel with the destination address and a confirmation.
+      gotoInput.value = `0x${address.toString(16).toUpperCase()}`;
+      if (!state.gotoActive) { toggleGoto(); }
+      gotoInfo.textContent = `Moved to 0x${address.toString(16).toUpperCase()}`;
+      gotoInput.classList.remove('error');
+
+      state.cursor = instrIndex;
+      state.searchActive = false;
+      searchPanel.classList.remove('visible');
+      const pageReady = checkAndLoadPage();
+      if (pageReady) { updateCursor('center'); }
+    });
+
+    svc.gotoRegionNotFoundReceived$.subscribe(() => {
+      gotoInfo.textContent = 'Address out of range';
+    });
 
     // ── Disassembly grid ──────────────────────────────────────────────────────
     // scrollBlock controls where the cursor row appears in the viewport after
