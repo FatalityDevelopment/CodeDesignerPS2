@@ -277,6 +277,12 @@ namespace CodeDesigner.Mips64LE
                     case "GETREGS":
                         return HandleGetRegisters();
 
+                    case "SETREG":
+                        return HandleSetRegister(command.RegisterName, command.RegisterIndex, command.RegisterValue);
+
+                    case "WRITEMEM":
+                        return HandleWriteMem(command.Address ?? 0, command.Data, command.Region);
+
                     case "RESTART":
                         return HandleRestart();
 
@@ -796,6 +802,23 @@ namespace CodeDesigner.Mips64LE
             for (int i = 0; i < 32; i++)
                 gpr.Add(cpu.RegsLo[i]);
 
+            // GPR precise 32-bit arrays (avoids JavaScript floating-point precision loss
+            // when representing 64-bit values > Number.MAX_SAFE_INTEGER).
+            // Each 128-bit GPR is split into four uint32 fields:
+            //   Lo32 / Hi32  = lower and upper halves of RegsLo[i]  (integer lane)
+            //   UpLo32 / UpHi32 = lower and upper halves of RegsHi[i] (upper 64-bit lane)
+            var gprLo32  = new List<uint>(32);
+            var gprHi32  = new List<uint>(32);
+            var gprUpLo32 = new List<uint>(32);
+            var gprUpHi32 = new List<uint>(32);
+            for (int i = 0; i < 32; i++)
+            {
+                gprLo32.Add((uint)(cpu.RegsLo[i] & 0xFFFFFFFFUL));
+                gprHi32.Add((uint)(cpu.RegsLo[i] >> 32));
+                gprUpLo32.Add((uint)(cpu.RegsHi[i] & 0xFFFFFFFFUL));
+                gprUpHi32.Add((uint)(cpu.RegsHi[i] >> 32));
+            }
+
             // COP0 – all 32 registers (read as 64-bit to preserve high bits where relevant)
             var cop0Regs = new List<ulong>(32);
             for (int i = 0; i < 32; i++)
@@ -835,10 +858,37 @@ namespace CodeDesigner.Mips64LE
             uint vu0P = BitConverter.SingleToUInt32Bits(vu0.P);
             uint vu0I = BitConverter.SingleToUInt32Bits(vu0.I);
 
-            // VU0 integer registers – 16 × 16-bit
-            var vu0i = new List<uint>(16);
+            // VU0 integer registers (vi00–vi15) plus the 16 COP2 control registers (vi16–vi31).
+            // This matches PCSX2's COP2_REG_CTL layout:
+            //   [0-15]  vi00–vi15  (integer registers, 16-bit each)
+            //   [16]    Status     vu0.StatusFlags
+            //   [17]    MACflag    vu0.MACFlags
+            //   [18]    ClipFlag   vu0.ClipFlags
+            //   [19]    c2c19      (reserved, always 0)
+            //   [20]    R          vu0.RngState (LFSR state, 0x3F800000 | mantissa)
+            //   [21]    I          vu0.I (as raw IEEE-754 bits)
+            //   [22]    Q          vu0.Q (as raw IEEE-754 bits)
+            //   [23-25] c2c23–c2c25 (reserved, always 0)
+            //   [26]    TPC        vu0.PC (trigger program counter)
+            //   [27]    CMSAR0     0 (not implemented)
+            //   [28]    FBRST      0 (not implemented)
+            //   [29]    VPU-STAT   IsRunning ? 1 : 0
+            //   [30-31] c2c30–CMSAR1 (reserved, always 0)
+            var vu0i = new List<uint>(32);
             for (int i = 0; i < 16; i++)
                 vu0i.Add(vu0.VI[i]);
+            vu0i.Add(vu0.StatusFlags);                                       // [16] Status
+            vu0i.Add(vu0.MACFlags);                                          // [17] MACflag
+            vu0i.Add(vu0.ClipFlags);                                         // [18] ClipFlag
+            vu0i.Add(0);                                                     // [19] c2c19
+            vu0i.Add(vu0.RngState);                                          // [20] R (LFSR state)
+            vu0i.Add(BitConverter.SingleToUInt32Bits(vu0.I));                // [21] I
+            vu0i.Add(BitConverter.SingleToUInt32Bits(vu0.Q));                // [22] Q
+            vu0i.Add(0); vu0i.Add(0); vu0i.Add(0);                         // [23-25] c2c23–c2c25
+            vu0i.Add(vu0.PC);                                                // [26] TPC
+            vu0i.Add(0); vu0i.Add(0);                                        // [27-28] CMSAR0/FBRST
+            vu0i.Add(vu0.IsRunning ? 1u : 0u);                              // [29] VPU-STAT
+            vu0i.Add(0); vu0i.Add(0);                                        // [30-31] c2c30/CMSAR1
 
             // GS privileged registers
             var gsPriv = new List<ulong>
@@ -869,6 +919,10 @@ namespace CodeDesigner.Mips64LE
                 Success  = true,
                 Command  = "GETREGS",
                 GPR      = gpr,
+                GPR_Lo32  = gprLo32,
+                GPR_Hi32  = gprHi32,
+                GPR_UpLo32 = gprUpLo32,
+                GPR_UpHi32 = gprUpHi32,
                 GPR_PC   = NormalizePcToKseg0((uint)(cpu.PC & 0xFFFFFFFFUL)),
                 GPR_HI   = cpu.HI,
                 GPR_LO   = cpu.LO,
@@ -904,6 +958,152 @@ namespace CodeDesigner.Mips64LE
                 GS_Priv     = gsPriv,
             };
             return JsonSerializer.Serialize(response);
+        }
+
+        /// <summary>
+        /// Handle SETREG command — writes a new value to a named EE register.
+        /// <para>Supported register names: GPR (index 1-31), PC, HI, LO, HI1, LO1, SA, COP0 (index 0-31), FPR (index 0-31).</para>
+        /// <para>Values may be supplied as decimal integers or as 0x-prefixed hexadecimal strings.</para>
+        /// </summary>
+        private string HandleSetRegister(string? regName, int? regIndex, string? regValue)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (string.IsNullOrWhiteSpace(regName) || string.IsNullOrWhiteSpace(regValue))
+                return CreateErrorResponse("Missing parameters");
+
+            if (!TryParseUInt64(regValue!, out ulong value))
+                return CreateErrorResponse("Invalid register value — expected decimal or 0x-prefixed hex");
+
+            var cpu = Scheduler.EE.Cpu;
+            switch (regName!.ToUpperInvariant())
+            {
+                case "GPR":
+                    if (regIndex == null || regIndex < 1 || regIndex > 31)
+                        return CreateErrorResponse("GPR index must be 1–31 ($zero is read-only)");
+                    cpu.RegsLo[regIndex.Value] = value;
+                    // Writing via the integer (lower) lane always clears the upper lane
+                    // so the visible 128-bit value matches the written 64-bit value.
+                    cpu.RegsHi[regIndex.Value] = 0;
+                    break;
+                case "PC":
+                    cpu.PC = value;
+                    break;
+                case "HI":  cpu.HI  = value; break;
+                case "LO":  cpu.LO  = value; break;
+                case "HI1": cpu.HI1 = value; break;
+                case "LO1": cpu.LO1 = value; break;
+                case "SA":  cpu.SA  = (int)(uint)value; break;
+                case "COP0":
+                    if (regIndex == null || regIndex < 0 || regIndex > 31)
+                        return CreateErrorResponse("COP0 index must be 0–31");
+                    cpu.COP0.WriteRegister64(regIndex.Value, value);
+                    break;
+                case "FPR":
+                    if (regIndex == null || regIndex < 0 || regIndex > 31)
+                        return CreateErrorResponse("FPR index must be 0–31");
+                    cpu.FPR[regIndex.Value] = BitConverter.UInt32BitsToSingle((uint)value);
+                    break;
+                case "FCR":
+                    // PS2 EE FPU only has FCR0 (FIR, read-only) and FCR31 (FCSR).
+                    if (regIndex == 31)
+                        cpu.COP1.WriteControlRegister(31, (uint)value);
+                    else
+                        return CreateErrorResponse("FCR: only FCR31 (FCSR) is writable on the PS2 EE");
+                    break;
+                // VU0 integer registers (vi00–vi15) — PCSX2 category EECAT_VU0I index 0-15
+                case "VU0I":
+                    if (regIndex == null || regIndex < 0 || regIndex > 15)
+                        return CreateErrorResponse("VU0I index must be 0–15");
+                    if (regIndex > 0) // vi0 is read-only (hardwired to 0)
+                        cpu.VU0.VI[regIndex.Value] = (ushort)(value & 0xFFFF);
+                    break;
+                // VU0 float registers (vf00–vf31) — PCSX2 category EECAT_VU0F
+                // Value is the X component raw IEEE-754 bits; Y/Z/W remain unchanged.
+                case "VU0F":
+                    if (regIndex == null || regIndex < 0 || regIndex > 31)
+                        return CreateErrorResponse("VU0F index must be 0–31");
+                    if (regIndex > 0) // vf0 is read-only (hardwired)
+                    {
+                        var vf = cpu.VU0.VF[regIndex.Value];
+                        cpu.VU0.VF[regIndex.Value] = new System.Numerics.Vector4(
+                            BitConverter.UInt32BitsToSingle((uint)value),
+                            vf.Y, vf.Z, vf.W);
+                    }
+                    break;
+                default:
+                    return CreateErrorResponse(
+                        $"Unknown register type '{regName}'. " +
+                        "Supported: GPR, PC, HI, LO, HI1, LO1, SA, COP0, FPR, FCR, VU0I, VU0F");
+            }
+            return CreateSuccessResponse("Register updated");
+        }
+
+        /// <summary>
+        /// Parse a register value string that may be decimal or 0x-prefixed hex.
+        /// </summary>
+        private static bool TryParseUInt64(string s, out ulong value)
+        {
+            s = s.Trim();
+            if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                return ulong.TryParse(s[2..], System.Globalization.NumberStyles.HexNumber,
+                                      System.Globalization.CultureInfo.InvariantCulture, out value);
+            return ulong.TryParse(s, System.Globalization.NumberStyles.None,
+                                  System.Globalization.CultureInfo.InvariantCulture, out value);
+        }
+
+        /// <summary>
+        /// Handle WRITEMEM command — write arbitrary bytes to live EE or IOP memory.
+        /// The bytes are supplied as a hex string (spaces, commas and "0x" prefixes are ignored).
+        /// </summary>
+        private string HandleWriteMem(uint address, string? hexData, string? region)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (string.IsNullOrWhiteSpace(hexData))
+                return CreateErrorResponse("No data provided");
+
+            byte[] bytes;
+            try
+            {
+                var cleaned = hexData
+                    .Replace(" ", "").Replace(",", "")
+                    .Replace("0x", "").Replace("0X", "");
+                if (cleaned.Length % 2 != 0) cleaned = "0" + cleaned;
+                bytes = Convert.FromHexString(cleaned);
+            }
+            catch (FormatException)
+            {
+                return CreateErrorResponse("Invalid hex data — expected pairs of hex digits");
+            }
+
+            bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                uint vaddr = address + (uint)i;
+                if (useIop)
+                {
+                    uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
+                    if (physAddr < (uint)IopMemoryBus.RamSize)
+                        Scheduler.IOP.Bus.Ram[physAddr] = bytes[i];
+                }
+                else
+                {
+                    uint physAddr;
+                    if (vaddr >= 0x80000000u && vaddr < 0xC0000000u)
+                        physAddr = vaddr & 0x1FFFFFFFu;
+                    else if (vaddr >= EeUncachedRamBase && vaddr < EeUncachedRamEnd)
+                        physAddr = vaddr - EeUncachedRamBase;
+                    else
+                        physAddr = vaddr;
+
+                    if (physAddr < (uint)PS2MemoryBus.MainRamSize)
+                        Scheduler.EE.Bus.Ram[physAddr] = bytes[i];
+                    else if (vaddr >= 0x70000000u && vaddr < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                        Scheduler.EE.Bus.Scratchpad[vaddr - 0x70000000u] = bytes[i];
+                }
+            }
+            return CreateSuccessResponse($"Wrote {bytes.Length} byte(s) to 0x{address:X8}");
         }
 
         /// <summary>
@@ -1561,6 +1761,10 @@ namespace CodeDesigner.Mips64LE
         public string? Comment { get; set; }
         public string? Query { get; set; }
         public string? SearchMode { get; set; }
+        // SETREG fields
+        public string? RegisterName { get; set; }
+        public int? RegisterIndex { get; set; }
+        public string? RegisterValue { get; set; }
     }
 
     /// <summary>
@@ -1581,6 +1785,13 @@ namespace CodeDesigner.Mips64LE
 
         // GETREGS fields
         public List<ulong>? GPR { get; set; }
+        // Precise 32-bit halves of each 128-bit GPR (avoids JS floating-point loss for 64-bit values).
+        // Lower integer lane: Lo32 = bits[31:0], Hi32 = bits[63:32] of RegsLo[i]
+        // Upper SIMD lane:   UpLo32 = bits[31:0], UpHi32 = bits[63:32] of RegsHi[i]
+        public List<uint>? GPR_Lo32 { get; set; }
+        public List<uint>? GPR_Hi32 { get; set; }
+        public List<uint>? GPR_UpLo32 { get; set; }
+        public List<uint>? GPR_UpHi32 { get; set; }
         public ulong? GPR_PC { get; set; }
         public ulong? GPR_HI { get; set; }
         public ulong? GPR_LO { get; set; }
