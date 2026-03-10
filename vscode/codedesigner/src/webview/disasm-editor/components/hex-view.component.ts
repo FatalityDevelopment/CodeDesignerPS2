@@ -60,7 +60,10 @@ export class HexViewComponent implements OnChanges {
       if (i && i % 4 === 0) { bytes += '<span style="width:8px"></span>'; }
       bytes += `<span class="hex-byte">+${i.toString(16).toUpperCase()}</span>`;
     }
-    header.innerHTML = `<span class="hex-addr">Address:</span><span class="hex-bytes">${bytes}</span><span class="hex-ascii">0123456789ABCDEF</span>`;
+    const rowAddr = this.highlightAddr >= 0
+      ? ((this.highlightAddr & ~0xF) >>> 0).toString(16).padStart(8, '0').toUpperCase()
+      : (this.offset >>> 0).toString(16).padStart(8, '0').toUpperCase();
+    header.innerHTML = `<span class="hex-addr">${rowAddr}</span><span class="hex-bytes">${bytes}</span><span class="hex-ascii">0123456789ABCDEF</span>`;
     return header;
   }
 
