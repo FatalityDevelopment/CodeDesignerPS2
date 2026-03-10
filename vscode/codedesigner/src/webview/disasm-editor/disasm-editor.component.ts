@@ -206,12 +206,15 @@ import './disasm-editor.css';
             <span id="edit-overlay-title">Edit Address</span>
             <button id="edit-overlay-close" title="Close (Escape)">&#xD7;</button>
         </div>
-        <div id="edit-overlay-info"></div>
         <div id="edit-overlay-tabs">
             <button class="edit-overlay-tab active" data-tab="edit">Edit</button>
             <button class="edit-overlay-tab" data-tab="history">History</button>
         </div>
         <div id="edit-overlay-tab-edit" class="edit-overlay-tab-content active">
+            <div class="edit-overlay-field">
+                <label class="edit-overlay-label" for="edit-overlay-instr-in">Instruction</label>
+                <input type="text" id="edit-overlay-instr-in" class="edit-overlay-input" placeholder="e.g. ADDIU $v0, $zero, 5" spellcheck="false" />
+            </div>
             <div class="edit-overlay-field">
                 <label class="edit-overlay-label" for="edit-overlay-bytes-in">Bytes (hex)</label>
                 <input type="text" id="edit-overlay-bytes-in" class="edit-overlay-input" placeholder="e.g. 24020005" spellcheck="false" />
@@ -338,7 +341,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     // Edit overlay
     const editOverlay          = document.getElementById('edit-overlay')!;
     const editOverlayTitle     = document.getElementById('edit-overlay-title')!;
-    const editOverlayInfo      = document.getElementById('edit-overlay-info')!;
+    const editOverlayInstrIn   = document.getElementById('edit-overlay-instr-in')! as HTMLInputElement;
     const editOverlayBytesIn   = document.getElementById('edit-overlay-bytes-in')! as HTMLInputElement;
     const editOverlayDisasmPreview = document.getElementById('edit-overlay-disasm-preview')!;
     const editOverlayLabelIn   = document.getElementById('edit-overlay-label-input') as HTMLInputElement;
@@ -605,7 +608,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       _editOverlayAddrHex = addressHex;
       editOverlayTitle.textContent = 'Edit Address — 0x' + addressHex.toUpperCase();
       const instrStr = (op || '') + (args ? '  ' + args : '');
-      editOverlayInfo.textContent = instrStr;
+      editOverlayInstrIn.value = instrStr;
       // Populate the bytes field (strip spaces so it's a clean hex string)
       const rawBytes = (bytes || '').replace(/\s+/g, '');
       _editOverlayOrigBytes = rawBytes;
@@ -622,8 +625,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       editOverlayHistoryList.innerHTML = '<div class="edit-overlay-history-empty">Loading history...</div>';
       vscode.postMessage({ type: 'getAddressHistory', address });
       editOverlay.classList.add('visible');
-      editOverlayBytesIn.focus();
-      editOverlayBytesIn.select();
+      editOverlayInstrIn.focus();
+      editOverlayInstrIn.select();
     }
 
     function closeEditOverlay() {
@@ -647,6 +650,18 @@ export class DisasmEditorComponent implements AfterViewInit {
     editOverlayCancel.addEventListener('click', closeEditOverlay);
     editOverlayClose.addEventListener('click', closeEditOverlay);
 
+    editOverlayInstrIn.addEventListener('input', () => {
+      const instr = editOverlayInstrIn.value.trim();
+      if (instr) {
+        vscode.postMessage({ type: 'assembleInstr', instruction: instr, address: _editOverlayAddr });
+      } else {
+        editOverlayDisasmPreview.textContent = '';
+      }
+    });
+    editOverlayInstrIn.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { editOverlayBytesIn.focus(); editOverlayBytesIn.select(); }
+      if (e.key === 'Escape') { closeEditOverlay(); }
+    });
     editOverlayBytesIn.addEventListener('input', () => {
       const hex = editOverlayBytesIn.value.replace(/\s+/g, '');
       if (hex.length === 8 && /^[0-9a-fA-F]{8}$/.test(hex)) {
@@ -670,7 +685,23 @@ export class DisasmEditorComponent implements AfterViewInit {
     window.addEventListener('message', (e: MessageEvent) => {
       const data = e.data as Record<string, unknown>;
       if (data?.['type'] === 'disasmBytesResult') {
-        editOverlayDisasmPreview.textContent = (data['preview'] as string) ?? '';
+        const preview = (data['preview'] as string) ?? '';
+        editOverlayDisasmPreview.textContent = preview;
+        // Update instruction field when bytes are edited (avoid feedback loop)
+        if (document.activeElement !== editOverlayInstrIn && preview && preview !== '(invalid)') {
+          editOverlayInstrIn.value = preview;
+        }
+      } else if (data?.['type'] === 'assembleInstrResult') {
+        const hexBytes = data['hexBytes'] as string | undefined;
+        if (hexBytes) {
+          // Update bytes field when instruction is edited (avoid feedback loop)
+          if (document.activeElement !== editOverlayBytesIn) {
+            editOverlayBytesIn.value = hexBytes;
+          }
+          editOverlayDisasmPreview.textContent = '';
+        } else {
+          editOverlayDisasmPreview.textContent = '(assembly error)';
+        }
       } else if (data?.['type'] === 'addressHistoryResult') {
         const history = data['history'] as Array<{ name: string; date: string; value: string }> | undefined;
         if (!history || history.length === 0) {

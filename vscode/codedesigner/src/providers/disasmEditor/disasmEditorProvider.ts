@@ -390,6 +390,21 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             ? this.onGetAddressHistory(message.address as number)
             : [];
         webviewPanel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
+      } else if (message.type === "assembleInstr") {
+        if (this.socketClient?.isConnected()) {
+          try {
+            const results = await this.socketClient.assemble(message.instruction as string);
+            const first = results?.[0];
+            if (first?.Success && first.Hex) {
+              const hexBytes = first.Hex.replace(/^0x/i, '').toUpperCase();
+              webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes });
+            } else {
+              webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
+            }
+          } catch {
+            webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
+          }
+        }
       }
     });
 
@@ -785,6 +800,23 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                             preview: first?.Success && first.Assembly ? first.Assembly.trim() : '(invalid)',
                         });
                     } catch { /* ignore */ }
+                }
+            } else if (message.type === 'assembleInstr') {
+                // Quick assembly for the instruction editor in the edit overlay.
+                if (this.socketClient?.isConnected()) {
+                    try {
+                        const results = await this.socketClient.assemble(message.instruction as string);
+                        const first = results?.[0];
+                        if (first?.Success && first.Hex) {
+                            // Strip the "0x" prefix so patchBytes/saveEditOverlay receive a raw hex string.
+                            const hexBytes = first.Hex.replace(/^0x/i, '').toUpperCase();
+                            panel.webview.postMessage({ type: 'assembleInstrResult', hexBytes });
+                        } else {
+                            panel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
+                        }
+                    } catch {
+                        panel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
+                    }
                 }
             } else if (message.type === 'saveLabel') {
                 await this.handleSaveLabel(panel, message.address, message.newLabel ?? '', message.newComment ?? '');
