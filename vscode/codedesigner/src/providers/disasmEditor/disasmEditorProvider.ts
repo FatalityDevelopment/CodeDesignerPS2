@@ -914,7 +914,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     ): Promise<void> {
         if (!this.socketClient || !this.socketClient.isConnected()) { return; }
 
-        const alignedAddr = Math.max(baseAddress, (highlightAddr & ~0xf) - 0x10);
+        const alignedAddr = Math.max(baseAddress, ((highlightAddr & ~0xf) >>> 0) - 0x10);
         try {
             const buffer = await this.socketClient.readMemory(
                 alignedAddr, DisasmEditorProvider.HEX_VIEW_SIZE, region);
@@ -1232,7 +1232,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     highlightAddr: number,
     highlightLength: number
   ): void {
-    const alignedAddr = Math.max(baseAddr, (highlightAddr & ~0xf) - 0x10);
+    const alignedAddr = Math.max(baseAddr, ((highlightAddr & ~0xf) >>> 0) - 0x10);
     const fileOffset = alignedAddr - baseAddr;
     const endOffset = Math.min(
       fileData.length,
