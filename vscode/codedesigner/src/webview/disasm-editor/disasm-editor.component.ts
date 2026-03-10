@@ -1210,14 +1210,14 @@ export class DisasmEditorComponent implements AfterViewInit {
       '$t8','$t9','$k0','$k1','$gp','$sp','$fp','$ra',
     ];
 
-    // COP0 register names matching PCSX2 DisR5900asm.cpp COP0_REG exactly.
-    // r7=C0r7, r17-r23=C0r17-C0r23, r24=Debug, r25=Perf, r26=C0r26, r27=C0r27,
-    // r30=ErrorPC (ERL-level exception PC), r31=C0r31.
+    // COP0 register names using standard MIPS descriptive names.
+    // r24 is 'Debug' (PS2 EE hardware debug register, not a reserved slot).
+    // All other names follow standard MIPS / PS2 EE documentation.
     const COP0_REG_NAMES = [
-      'Index','Random','EntryLo0','EntryLo1','Context','PageMask','Wired','C0r7',
-      'BadVaddr','Count','EntryHi','Compare','Status','Cause','EPC','PRId',
-      'Config','C0r17','C0r18','C0r19','C0r20','C0r21','C0r22','C0r23',
-      'Debug','Perf','C0r26','C0r27','TagLo','TagHi','ErrorPC','C0r31',
+      'Index','Random','EntryLo0','EntryLo1','Context','PageMask','Wired','Reserved7',
+      'BadVAddr','Count','EntryHi','Compare','Status','Cause','EPC','PRId',
+      'Config','LLAddr','WatchLo','WatchHi','XContext','Reserved21','Reserved22','Reserved23',
+      'Debug','PerfCnt','ErrCtl','CacheErr','TagLo','TagHi','ErrorEPC','Reserved31',
     ];
 
     const GS_PRIV_NAMES = [
