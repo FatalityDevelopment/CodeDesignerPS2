@@ -36,6 +36,23 @@ export interface SymFunction {
   label: string;
 }
 
+export interface SymPointer {
+  address:  string;
+  pointsTo: string;
+}
+
+export interface SymFloat {
+  address: string;
+  value:   number;
+  raw:     string;
+}
+
+export interface SymInteger {
+  address: string;
+  value:   number;
+  hex:     string;
+}
+
 export interface ThreadEntry {
   id: number;
   status: string;
@@ -94,6 +111,9 @@ export interface DisasmEditorState {
   symLabels: SymLabel[];
   symStrings: SymString[];
   symFunctions: SymFunction[];
+  symPointers: SymPointer[];
+  symFloats: SymFloat[];
+  symIntegers: SymInteger[];
 }
 
 // ── Event payloads ────────────────────────────────────────────────────────────
@@ -157,6 +177,9 @@ export class DisasmEditorService implements OnDestroy {
     symLabels: [],
     symStrings: [],
     symFunctions: [],
+    symPointers: [],
+    symFloats: [],
+    symIntegers: [],
   };
 
   // ── Events the component (and future sub-components) subscribe to ─────────
@@ -170,6 +193,9 @@ export class DisasmEditorService implements OnDestroy {
   readonly labelsUpdated$           = new Subject<void>();
   readonly stringsUpdated$          = new Subject<void>();
   readonly functionsUpdated$        = new Subject<void>();
+  readonly pointersUpdated$         = new Subject<void>();
+  readonly floatsUpdated$           = new Subject<void>();
+  readonly integersUpdated$         = new Subject<void>();
   /** Fired when live analysis comments arrive for one or more addresses. */
   readonly analysisUpdated$         = new Subject<Record<string, string>>();
   /** Fired when the extension host instructs this panel to navigate to an address. */
@@ -195,6 +221,9 @@ export class DisasmEditorService implements OnDestroy {
       this._bridge.on<Record<string, unknown>>('labelsUpdated').subscribe(msg => this._onLabelsUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('stringsUpdated').subscribe(msg => this._onStringsUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('functionsUpdated').subscribe(msg => this._onFunctionsUpdated(msg)),
+      this._bridge.on<Record<string, unknown>>('pointersUpdated').subscribe(msg => this._onPointersUpdated(msg)),
+      this._bridge.on<Record<string, unknown>>('floatsUpdated').subscribe(msg => this._onFloatsUpdated(msg)),
+      this._bridge.on<Record<string, unknown>>('integersUpdated').subscribe(msg => this._onIntegersUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('gotoAddress').subscribe(msg => this.gotoAddressReceived$.next({ address: msg['address'] as number })),
       this._bridge.on<Record<string, unknown>>('syncGotoInput').subscribe(msg => this.syncGotoInputReceived$.next({ value: msg['value'] as string })),
       this._bridge.on<Record<string, unknown>>('gotoRegionNotFound').subscribe(msg => this.gotoRegionNotFoundReceived$.next({ address: msg['address'] as number })),
@@ -371,5 +400,20 @@ export class DisasmEditorService implements OnDestroy {
   private _onFunctionsUpdated(msg: Record<string, unknown>): void {
     this.state.symFunctions = (msg['functions'] as SymFunction[] | undefined) ?? [];
     this.functionsUpdated$.next();
+  }
+
+  private _onPointersUpdated(msg: Record<string, unknown>): void {
+    this.state.symPointers = (msg['pointers'] as SymPointer[] | undefined) ?? [];
+    this.pointersUpdated$.next();
+  }
+
+  private _onFloatsUpdated(msg: Record<string, unknown>): void {
+    this.state.symFloats = (msg['floats'] as SymFloat[] | undefined) ?? [];
+    this.floatsUpdated$.next();
+  }
+
+  private _onIntegersUpdated(msg: Record<string, unknown>): void {
+    this.state.symIntegers = (msg['integers'] as SymInteger[] | undefined) ?? [];
+    this.integersUpdated$.next();
   }
 }

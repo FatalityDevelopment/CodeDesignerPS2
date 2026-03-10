@@ -46,6 +46,32 @@ export interface FunctionEntry {
 }
 
 /**
+ * A 4-byte aligned value that looks like a valid EE or IOP memory pointer.
+ */
+export interface PointerEntry {
+    address:  string;
+    pointsTo: string;
+}
+
+/**
+ * A plausible 32-bit IEEE-754 float found at a 4-byte aligned address.
+ */
+export interface FloatEntry {
+    address: string;
+    value:   number;
+    raw:     string;
+}
+
+/**
+ * A non-zero 4-byte aligned 32-bit signed integer found in memory.
+ */
+export interface IntegerEntry {
+    address: string;
+    value:   number;
+    hex:     string;
+}
+
+/**
  * One search match returned by the SEARCH command.
  */
 export interface SearchMatch {
@@ -165,6 +191,9 @@ interface CommandResponse {
     Labels?:    LabelEntry[];
     Strings?:   StringEntry[];
     Functions?: FunctionEntry[];
+    Pointers?:  PointerEntry[];
+    Floats?:    FloatEntry[];
+    Integers?:  IntegerEntry[];
     Matches?:   SearchMatch[];
     // GETTHREADS
     Threads?: ThreadEntry[];
@@ -839,6 +868,54 @@ export class SocketClient {
     }
 
     /**
+     * Scan binary data for 4-byte aligned values that look like valid EE memory pointers.
+     * @param binaryData  Raw binary buffer to scan.
+     * @param startAddress Virtual address of the first byte in the buffer.
+     */
+    public async getPointers(binaryData: Buffer, startAddress: number): Promise<PointerEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'GETPOINTERS', Address: startAddress, Data: binaryData.toString('base64') },
+            60000
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetPointers failed');
+        }
+        return response.Pointers ?? [];
+    }
+
+    /**
+     * Scan binary data for plausible 32-bit IEEE-754 float values.
+     * @param binaryData  Raw binary buffer to scan.
+     * @param startAddress Virtual address of the first byte in the buffer.
+     */
+    public async getFloats(binaryData: Buffer, startAddress: number): Promise<FloatEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'GETFLOATS', Address: startAddress, Data: binaryData.toString('base64') },
+            60000
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetFloats failed');
+        }
+        return response.Floats ?? [];
+    }
+
+    /**
+     * Scan binary data for non-zero 4-byte aligned 32-bit signed integers.
+     * @param binaryData  Raw binary buffer to scan.
+     * @param startAddress Virtual address of the first byte in the buffer.
+     */
+    public async getIntegers(binaryData: Buffer, startAddress: number): Promise<IntegerEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'GETINTEGERS', Address: startAddress, Data: binaryData.toString('base64') },
+            60000
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetIntegers failed');
+        }
+        return response.Integers ?? [];
+    }
+
+    /**
      * Scan a live emulator memory region for null-terminated ASCII strings.
      * The C# server reads the bytes directly — no binary data is transferred.
      * @param address  Virtual start address of the region.
@@ -872,6 +949,60 @@ export class SocketClient {
             throw new Error(response.Error || 'ScanFunctions failed');
         }
         return response.Functions ?? [];
+    }
+
+    /**
+     * Scan a live emulator memory region for values that look like valid memory pointers.
+     * The C# server reads the bytes directly — no binary data is transferred.
+     * @param address  Virtual start address of the region.
+     * @param length   Number of bytes to scan.
+     * @param region   "ee" or "iop".
+     */
+    public async scanLivePointers(address: number, length: number, region: string): Promise<PointerEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'SCANPOINTERS', Address: address, Length: length, Region: region },
+            120000
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanPointers failed');
+        }
+        return response.Pointers ?? [];
+    }
+
+    /**
+     * Scan a live emulator memory region for plausible 32-bit IEEE-754 float values.
+     * The C# server reads the bytes directly — no binary data is transferred.
+     * @param address  Virtual start address of the region.
+     * @param length   Number of bytes to scan.
+     * @param region   "ee" or "iop".
+     */
+    public async scanLiveFloats(address: number, length: number, region: string): Promise<FloatEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'SCANFLOATS', Address: address, Length: length, Region: region },
+            120000
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanFloats failed');
+        }
+        return response.Floats ?? [];
+    }
+
+    /**
+     * Scan a live emulator memory region for non-zero 32-bit signed integers.
+     * The C# server reads the bytes directly — no binary data is transferred.
+     * @param address  Virtual start address of the region.
+     * @param length   Number of bytes to scan.
+     * @param region   "ee" or "iop".
+     */
+    public async scanLiveIntegers(address: number, length: number, region: string): Promise<IntegerEntry[]> {
+        const response = await this.sendCommand(
+            { Command: 'SCANINTEGERS', Address: address, Length: length, Region: region },
+            120000
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanIntegers failed');
+        }
+        return response.Integers ?? [];
     }
 
     /**
