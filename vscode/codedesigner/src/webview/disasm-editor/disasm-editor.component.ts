@@ -27,6 +27,7 @@ import './disasm-editor.css';
     <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)">&#8693; Stack</button>
     <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
     <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
+    <button class="header-tool-btn live-only" id="setpc-toggle-btn" title="Set PC to Address (Ctrl+Alt+P)">&#9655; Set PC</button>
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
 
 </div>
@@ -41,6 +42,19 @@ import './disasm-editor.css';
         </div>
         <span class="search-info" id="goto-info"></span>
         <button class="close-search" id="close-goto" title="Close (Escape)">&#xD7;</button>
+    </div>
+</div>
+<div id="setpc-panel">
+    <div class="search-row">
+        <div class="search-input-wrapper">
+            <input type="text" id="setpc-input" class="search-input" placeholder="New PC address (hex)" />
+            <button class="search-clear" id="setpc-clear">&#xD7;</button>
+        </div>
+        <div class="search-nav">
+            <button class="nav-btn" id="setpc-btn" title="Set PC (Enter)">Set PC</button>
+        </div>
+        <span class="search-info" id="setpc-info"></span>
+        <button class="close-search" id="close-setpc" title="Close (Escape)">&#xD7;</button>
     </div>
 </div>
 <div id="search-panel">
@@ -275,6 +289,13 @@ export class DisasmEditorComponent implements AfterViewInit {
     const gotoBtn        = document.getElementById('goto-btn')!;
     const gotoInfo       = document.getElementById('goto-info')!;
     const closeGoto      = document.getElementById('close-goto')!;
+    const setpcPanel     = document.getElementById('setpc-panel')!;
+    const setpcInput     = document.getElementById('setpc-input') as HTMLInputElement;
+    const setpcClear     = document.getElementById('setpc-clear')!;
+    const setpcBtn       = document.getElementById('setpc-btn')!;
+    const setpcInfo      = document.getElementById('setpc-info')!;
+    const closeSetpc     = document.getElementById('close-setpc')!;
+    const setpcToggleBtn = document.getElementById('setpc-toggle-btn')!;
     const headerToolbar  = document.getElementById('header-toolbar')!;
 
     const registersToggleBtn   = document.getElementById('registers-toggle-btn')!;
@@ -951,6 +972,41 @@ export class DisasmEditorComponent implements AfterViewInit {
       gotoInfo.textContent = 'Address out of range';
     });
 
+    // ── Set PC ────────────────────────────────────────────────────────────────
+    function toggleSetPc() {
+      const active = setpcPanel.classList.toggle('visible');
+      setpcToggleBtn.classList.toggle('active', active);
+      if (active) {
+        setpcInput.focus();
+        setpcInput.select();
+      } else {
+        setpcInput.value = '';
+        setpcInfo.textContent = '';
+      }
+    }
+
+    function doSetPC() {
+      const addr = parseAddress(setpcInput.value);
+      if (addr === null) {
+        setpcInput.classList.add('error');
+        setpcInfo.textContent = 'Invalid hex address';
+        return;
+      }
+      setpcInput.classList.remove('error');
+      setpcInfo.textContent = `Setting PC to 0x${addr.toString(16).toUpperCase()}...`;
+      // Ask the provider to pause, update PC, broadcast status, and navigate.
+      vscode.postMessage({ type: 'setPC', address: addr });
+    }
+
+    setpcBtn.addEventListener('click', doSetPC);
+    setpcInput.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { e.preventDefault(); doSetPC(); }
+      else if (e.key === 'Escape') { toggleSetPc(); grid.focus(); }
+    });
+    setpcClear.addEventListener('click', () => { setpcInput.value = ''; setpcInfo.textContent = ''; setpcInput.focus(); });
+    closeSetpc.addEventListener('click', () => { toggleSetPc(); grid.focus(); });
+    setpcToggleBtn.addEventListener('click', toggleSetPc);
+
     // ── Disassembly grid ──────────────────────────────────────────────────────
     // scrollBlock controls where the cursor row appears in the viewport after
     // a scrollIntoView call:
@@ -1121,6 +1177,10 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyT') {
         e.preventDefault(); e.stopPropagation(); toggleBottomPanel();
       }
+      if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyP') {
+        e.preventDefault(); e.stopPropagation();
+        if (state.isLive) { toggleSetPc(); }
+      }
       if (e.altKey && !e.ctrlKey && !e.shiftKey && e.code === 'ArrowLeft') {
         // Only fire when no editable element is focused, so the shortcut
         // does not interfere with text input or contenteditable regions.
@@ -1246,6 +1306,10 @@ export class DisasmEditorComponent implements AfterViewInit {
         // indicator stays visible even after the user navigates elsewhere.
         if (pc !== undefined && pc !== null) {
           state.pcAddress = pc;
+          // If the Set PC panel is open, confirm the new PC value.
+          if (setpcPanel.classList.contains('visible')) {
+            setpcInfo.textContent = `PC set to 0x${pc.toString(16).toUpperCase()}`;
+          }
         }
       } else {
         state.breakpointHitAddress = undefined;
