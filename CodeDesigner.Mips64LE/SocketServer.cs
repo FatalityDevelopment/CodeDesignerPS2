@@ -425,10 +425,25 @@ namespace CodeDesigner.Mips64LE
                     labelAddresses[kv.Value.Label] = kv.Key;
 
                 uint scanAddress   = 0;
+                bool scanInBlock   = false;
 
                 foreach (var rawLine in rawLines)
                 {
-                    var scan = StripCdsComments(rawLine.Trim());
+                    var raw = rawLine.Trim();
+
+                    // Block comment tracking (/* ... */)
+                    if (scanInBlock)
+                    {
+                        if (raw.Contains("*/")) scanInBlock = false;
+                        continue;
+                    }
+                    if (raw.StartsWith("/*", StringComparison.Ordinal))
+                    {
+                        if (!raw.Contains("*/")) scanInBlock = true;
+                        continue;
+                    }
+
+                    var scan = StripCdsComments(raw);
                     if (string.IsNullOrWhiteSpace(scan)) { continue; }
 
                     if (scan.StartsWith("address", StringComparison.OrdinalIgnoreCase))
@@ -462,11 +477,26 @@ namespace CodeDesigner.Mips64LE
                 // ── Pass 2: assemble ──────────────────────────────────────────────
                 var results        = new List<InstructionResult>();
                 uint currentAddress = 0;
+                bool inBlockComment = false;
 
                 for (int i = 0; i < rawLines.Length; i++)
                 {
                     int lineNumber = i + 1;
-                    var trimmed    = StripCdsComments(rawLines[i].Trim());
+                    var raw2 = rawLines[i].Trim();
+
+                    // Block comment tracking (/* ... */)
+                    if (inBlockComment)
+                    {
+                        if (raw2.Contains("*/")) inBlockComment = false;
+                        continue;
+                    }
+                    if (raw2.StartsWith("/*", StringComparison.Ordinal))
+                    {
+                        if (!raw2.Contains("*/")) inBlockComment = true;
+                        continue;
+                    }
+
+                    var trimmed    = StripCdsComments(raw2);
                     if (string.IsNullOrWhiteSpace(trimmed)) { continue; }
 
                     // ── address directive ────────────────────────────────────────────
@@ -631,9 +661,17 @@ namespace CodeDesigner.Mips64LE
                     // ── MIPS instruction (resolve label references first) ─────────────
                     try
                     {
-                        // Replace :LabelName with computed branch word offset.
-                        // These work for branch instructions (beq, bne, blez, etc.) and also
-                        // for CDS-defined local labels or emulator-label based branches.
+                        // Determine if this is a J-type jump instruction (j/jal) vs a branch.
+                        // Jumps encode an absolute 26-bit word address; branches use a
+                        // PC-relative 16-bit word offset.
+                        string instMnemonic = trimmed
+                            .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)[0]
+                            .ToLowerInvariant();
+                        bool isJumpInstr = instMnemonic == "j" || instMnemonic == "jal";
+
+                        // Replace :LabelName with the computed target value.
+                        // • Jumps (j/jal)   → absolute byte address (0xXXXXXXXX)
+                        // • Branches (beq…) → PC-relative word offset (signed integer)
                         string resolved = CdsLabelRefRegex.Replace(
                             trimmed,
                             m =>
@@ -642,6 +680,8 @@ namespace CodeDesigner.Mips64LE
                                 if (!labelAddresses.TryGetValue(name, out uint labelAddr))
                                     throw new ArgumentException(
                                         $"Undefined label '{name}' in '{trimmed}' (line {lineNumber})");
+                                if (isJumpInstr)
+                                    return $"0x{labelAddr:X8}";
                                 // Branch offset = (label_addr - (current_addr + 4)) / 4
                                 // Use long arithmetic to avoid overflow when addresses exceed 0x7FFFFFFF
                                 long branchOff = ((long)labelAddr - (long)(currentAddress + 4)) / 4;
