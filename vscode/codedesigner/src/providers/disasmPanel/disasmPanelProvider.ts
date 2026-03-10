@@ -29,10 +29,13 @@ const LIVE_REGIONS = [
     // PCSX2 vtlb.cpp maps psxM (IOP RAM) to EE virtual 0x1C000000; the server
     // translates this virtual address back to a physical IOP RAM offset.
     { region: 'iop', address: 0x1C000000, size:  2 * 1024 * 1024, label: 'IOP RAM'       },
-    // BIOS ROM: shown at KSEG1 (0xBFC00000) so row addresses match the CPU PC.
-    // The PS2 EE reset vector is 0xBFC00000 (KSEG1 uncached alias of physical
-    // 0x1FC00000).  HandleReadMem strips the top 3 bits server-side.
-    { region: 'ee',  address: 0xBFC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
+    // BIOS ROM: shown at KSEG0 (0x9FC00000) so row addresses match the kernel
+    // PC.  After the initial uncached reset (0xBFC00000), the EE kernel runs
+    // almost entirely from the cached KSEG0 alias (0x9FC00000–0x9FFFFFFF).
+    // Both KSEG0 and KSEG1 strip to the same physical 0x1FC00000 via toPhysAddr,
+    // so cross-region navigation, cursor highlight and breakpoints all work for
+    // whichever alias the CPU uses.  HandleReadMem strips the top 3 bits server-side.
+    { region: 'ee',  address: 0x9FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
     { region: 'ee',  address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad'    },
 ];
 
