@@ -1405,3 +1405,176 @@ app-hex-view {
 .dbg-editable:hover {
     color: #569cd6;
 }
+
+/* ── Converter overlay ── */
+#converter-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+#converter-overlay.visible {
+    display: flex;
+}
+
+#converter-overlay-box {
+    background: #252526;
+    border: 1px solid #3e3e42;
+    border-radius: 4px;
+    width: 620px;
+    max-width: 92vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    font-family: monospace;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    overflow: hidden;
+}
+
+#converter-overlay-header {
+    display: flex;
+    align-items: center;
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    padding: 8px 12px;
+    flex-shrink: 0;
+}
+
+#converter-overlay-title {
+    color: #d4d4d4;
+    font-size: 12px;
+    font-weight: bold;
+    flex: 1;
+}
+
+#converter-overlay-close {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+}
+
+#converter-overlay-close:hover {
+    color: #fff;
+}
+
+#converter-overlay-body {
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 10px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.converter-overlay-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.converter-overlay-label {
+    color: #9cdcfe;
+    font-size: 11px;
+    font-family: monospace;
+}
+
+.converter-overlay-textarea {
+    background: #1e1e1e;
+    border: 1px solid #3e3e42;
+    color: #d4d4d4;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 6px 8px;
+    resize: vertical;
+    min-height: 130px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.converter-overlay-textarea:focus {
+    border-color: #007acc;
+}
+
+.converter-overlay-textarea[readonly] {
+    background: #181818;
+    color: #b5b5b5;
+}
+
+#converter-overlay-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.converter-format-field {
+    flex: 1;
+}
+
+.converter-overlay-select {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #d4d4d4;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 4px 6px;
+    outline: none;
+    border-radius: 2px;
+    width: 100%;
+}
+
+.converter-overlay-select:focus {
+    border-color: #007acc;
+}
+
+#converter-overlay-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+#converter-to-raw-btn,
+#converter-to-engine-btn {
+    flex: 1;
+    background: #007acc;
+    border: 1px solid #007acc;
+    color: #fff;
+    padding: 5px 12px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+    outline: none;
+    border-radius: 2px;
+}
+
+#converter-to-raw-btn:hover,
+#converter-to-engine-btn:hover {
+    background: #1a88d8;
+}
+
+#converter-to-raw-btn:disabled,
+#converter-to-engine-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.converter-overlay-status {
+    font-family: monospace;
+    font-size: 11px;
+    min-height: 14px;
+    padding: 0 2px;
+}
+
+.converter-status-ok {
+    color: #4ec9b0;
+}
+
+.converter-status-error {
+    color: #f44747;
+}
