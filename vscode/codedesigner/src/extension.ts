@@ -144,6 +144,89 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(connectCommand, disconnectCommand, sendMessageCommand);
 
+	// ── Recompile command ─────────────────────────────────────────────────────
+	// Allows the user to pick a disc image, choose an ELF on the disc (defaulting
+	// to the BOOT2 main executable), pick an output directory, and run the static
+	// recompiler — all from the command palette.
+	const recompileCommand = vscode.commands.registerCommand('codedesigner.recompile', async () => {
+		if (!socketClient?.isConnected()) {
+			vscode.window.showWarningMessage(
+				'Not connected to CodeDesigner server. Start the emulator first.');
+			return;
+		}
+
+		// 1. Pick the ISO file
+		const isoUris = await vscode.window.showOpenDialog({
+			canSelectFiles: true,
+			canSelectFolders: false,
+			canSelectMany: false,
+			filters: { 'Disc Images': ['iso', 'bin', 'img'], 'All Files': ['*'] },
+			title: 'Select PS2 Disc Image',
+		});
+		if (!isoUris || isoUris.length === 0) { return; }
+		const isoPath = isoUris[0].fsPath;
+
+		// 2. Fetch ELF list from the disc
+		let elfFiles: import('./socketClient').DiscElfEntry[] = [];
+		let bootElf = '';
+		try {
+			const result = await socketClient.listDiscElfs(isoPath);
+			elfFiles = result.elfFiles;
+			bootElf  = result.bootElf;
+		} catch (err: any) {
+			vscode.window.showErrorMessage(`Failed to read disc: ${err?.message ?? err}`);
+			return;
+		}
+
+		// 3. Let the user pick which ELF to recompile
+		const items = elfFiles.map(e => ({
+			label:       `${e.IsBootElf ? '★ ' : ''}${e.Name}`,
+			description: `${(e.Size / 1024).toFixed(1)} KB  —  ${e.Path}`,
+			detail:      e.IsBootElf ? 'Main BOOT2 executable (recommended)' : undefined,
+			elfName:     e.Name,
+		}));
+		if (items.length === 0) {
+			vscode.window.showWarningMessage('No ELF or IRX files found on disc.');
+			return;
+		}
+		const picked = await vscode.window.showQuickPick(items, {
+			title:             'Select ELF to Recompile',
+			placeHolder:       'Choose the ELF file you want to recompile (★ = main game executable)',
+			matchOnDescription: true,
+		});
+		if (!picked) { return; }
+
+		// 4. Pick output directory
+		const outUris = await vscode.window.showOpenDialog({
+			canSelectFiles: false,
+			canSelectFolders: true,
+			canSelectMany: false,
+			title: 'Select Output Directory for Generated C++ Files',
+		});
+		const outputDirectory = outUris?.[0]?.fsPath ?? '';
+
+		// 5. Run the recompiler
+		await vscode.window.withProgress(
+			{
+				location: vscode.ProgressLocation.Notification,
+				title:    `Recompiling ${picked.elfName}…`,
+				cancellable: false,
+			},
+			async () => {
+				try {
+					const result = await socketClient!.recompile(
+						isoPath, picked.elfName, outputDirectory);
+					vscode.window.showInformationMessage(
+						`Recompilation complete — ${result.functionCount} function(s) written to ${outputDirectory || 'recomp_out'}.`
+					);
+				} catch (err: any) {
+					vscode.window.showErrorMessage(`Recompilation failed: ${err?.message ?? err}`);
+				}
+			}
+		);
+	});
+	context.subscriptions.push(recompileCommand);
+
 	// ── Live memory view command ──────────────────────────────────────────────
 	// Called by DisasmPanelProvider after the emulator connects.
 	// Opens one editor panel per memory region (EE RAM, IOP RAM, BIOS ROM, Scratchpad).

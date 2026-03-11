@@ -1023,6 +1023,42 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
             }
         }
 
+        /// <summary>
+        /// Recursively enumerate all non-directory entries in the ISO-9660 file
+        /// system, starting from the root directory.
+        /// </summary>
+        /// <returns>
+        /// A sequence of <c>(string DiscPath, IsoEntry Entry)</c> tuples where
+        /// <c>DiscPath</c> is the absolute disc path such as <c>/SCUS_971.98;1</c>
+        /// or <c>/MODULES/CDVD.IRX;1</c>.
+        /// </returns>
+        public IEnumerable<(string DiscPath, IsoEntry Entry)> EnumerateFiles()
+        {
+            if (!HasDisc) yield break;
+            if (!TryReadPvd(out uint rootLba, out uint rootSize)) yield break;
+
+            foreach (var item in WalkDirectory("/", rootLba, rootSize))
+                yield return item;
+        }
+
+        private IEnumerable<(string DiscPath, IsoEntry Entry)> WalkDirectory(
+            string dirPath, uint dirLba, uint dirSize)
+        {
+            foreach (var entry in ListDirectory(dirLba, dirSize))
+            {
+                string fullPath = dirPath.TrimEnd('/') + "/" + entry.Name;
+                if (entry.IsDirectory)
+                {
+                    foreach (var sub in WalkDirectory(fullPath, entry.Lba, entry.Size))
+                        yield return sub;
+                }
+                else
+                {
+                    yield return (fullPath, entry);
+                }
+            }
+        }
+
         private static string StripVersionSuffix(string name)
         {
             int semi = name.IndexOf(';');

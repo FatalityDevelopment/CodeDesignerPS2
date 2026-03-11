@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getOutputChannel, getDebugChannel } from '../../extension';
-import { SocketClient, LabelEntry } from '../../socketClient';
+import { SocketClient, LabelEntry, DiscElfEntry } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 
@@ -243,6 +243,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'focusRegion':
                     this.editorProvider.focusLivePanelByLabel(msg.label ?? '');
+                    break;
+                case 'listDiscElfs':
+                    await this.handleListDiscElfs(msg.gamePath ?? this.selectedGamePath);
+                    break;
+                case 'recompile':
+                    await this.handleRecompile(
+                        msg.gamePath        ?? this.selectedGamePath,
+                        msg.elfName         ?? '',
+                        msg.outputDirectory ?? '',
+                    );
                     break;
             }
         });
@@ -1215,9 +1225,85 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    // ── Recompile tab handlers ─────────────────────────────────────────────────
+
+    /**
+     * List all ELF and IRX files on the disc image selected as the current game.
+     * Posts a 'listDiscElfsResult' message back to the webview.
+     */
+    private async handleListDiscElfs(gamePath: string): Promise<void> {
+        const out = getOutputChannel();
+        if (!gamePath) {
+            this.webview?.postMessage({
+                command: 'listDiscElfsResult',
+                success: false,
+                error:   'No disc image selected. Choose a game ISO first.',
+            });
+            return;
+        }
+        try {
+            const { elfFiles, bootElf } = await this.socketClient.listDiscElfs(gamePath);
+            out.info(`[Recompile] Found ${elfFiles.length} ELF/IRX file(s) on disc. BOOT2: ${bootElf || 'unknown'}`);
+            this.webview?.postMessage({
+                command:  'listDiscElfsResult',
+                success:  true,
+                elfFiles,
+                bootElf,
+            });
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            out.error(`[Recompile] LISTDISCELFS error: ${msg}`);
+            this.webview?.postMessage({ command: 'listDiscElfsResult', success: false, error: msg });
+        }
+    }
+
+    /**
+     * Extract an ELF from the disc image and run the static recompiler on it.
+     * Posts a 'recompileResult' message back to the webview.
+     */
+    private async handleRecompile(
+        gamePath:        string,
+        elfName:         string,
+        outputDirectory: string,
+    ): Promise<void> {
+        const out = getOutputChannel();
+        if (!gamePath) {
+            this.webview?.postMessage({
+                command: 'recompileResult',
+                success: false,
+                error:   'No disc image selected. Choose a game ISO first.',
+            });
+            return;
+        }
+
+        // If no output directory is specified, place generated files next to the ISO.
+        const resolvedOutput = outputDirectory.trim()
+            ? outputDirectory.trim()
+            : require('path').join(require('path').dirname(gamePath), 'recomp_out');
+
+        out.info(`[Recompile] Starting recompilation: iso=${gamePath} elf=${elfName || '(BOOT2)'} out=${resolvedOutput}`);
+        out.show(true);
+
+        try {
+            const result = await this.socketClient.recompile(gamePath, elfName, resolvedOutput);
+            out.info(`[Recompile] Done — ${result.functionCount} function(s) recompiled.`);
+            out.info(`[Recompile] Written files:\n${result.writtenFiles.join('\n')}`);
+            this.webview?.postMessage({
+                command:       'recompileResult',
+                success:       true,
+                functionCount: result.functionCount,
+                writtenFiles:  result.writtenFiles,
+                bootElf:       result.bootElf,
+            });
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            out.error(`[Recompile] Error: ${msg}`);
+            this.webview?.postMessage({ command: 'recompileResult', success: false, error: msg });
+        }
+    }
+
     /** Sync the tracked active CDS file when the editor focus changes. */
-    private _syncActiveCdsEditor(editor: vscode.TextEditor | undefined): void {
-        if (!editor) { return; }
+    private _syncActiveCdsEditor(editor: vscode.TextEditor | undefined): void {        if (!editor) { return; }
         if (!editor.document.uri.fsPath.toLowerCase().endsWith('.cds')) { return; }
         this._activeCdsFilePath = editor.document.uri.fsPath;
         this._activeCdsContent  = editor.document.getText();

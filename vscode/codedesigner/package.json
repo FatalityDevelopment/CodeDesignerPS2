@@ -56,6 +56,10 @@
       {
         "command": "codedesigner.sendMessage",
         "title": "CodeDesigner: Send Message to Server"
+      },
+      {
+        "command": "codedesigner.recompile",
+        "title": "CodeDesigner: Recompile Game ELF from Disc"
       }
     ],
     "languages": [
