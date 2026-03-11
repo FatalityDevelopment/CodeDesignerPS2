@@ -254,6 +254,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         msg.outputDirectory ?? '',
                     );
                     break;
+                case 'browseOutputDirectory':
+                    await this.handleBrowseOutputDirectory();
+                    break;
             }
         });
     }
@@ -1234,15 +1237,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private async handleListDiscElfs(gamePath: string): Promise<void> {
         const out = getOutputChannel();
         if (!gamePath) {
+            const msg = 'No disc image selected. Choose a game ISO first.';
+            out.error(`[Recompile] ${msg}`);
+            out.show(true);
             this.webview?.postMessage({
                 command: 'listDiscElfsResult',
                 success: false,
-                error:   'No disc image selected. Choose a game ISO first.',
+                error:   msg,
             });
             return;
         }
+        const resolvedGamePath = this.resolvePath(gamePath);
         try {
-            const { elfFiles, bootElf } = await this.socketClient.listDiscElfs(gamePath);
+            const { elfFiles, bootElf } = await this.socketClient.listDiscElfs(resolvedGamePath);
             out.info(`[Recompile] Found ${elfFiles.length} ELF/IRX file(s) on disc. BOOT2: ${bootElf || 'unknown'}`);
             this.webview?.postMessage({
                 command:  'listDiscElfsResult',
@@ -1268,24 +1275,29 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     ): Promise<void> {
         const out = getOutputChannel();
         if (!gamePath) {
+            const errMsg = 'No disc image selected. Choose a game ISO first.';
+            out.error(`[Recompile] ${errMsg}`);
+            out.show(true);
             this.webview?.postMessage({
                 command: 'recompileResult',
                 success: false,
-                error:   'No disc image selected. Choose a game ISO first.',
+                error:   errMsg,
             });
             return;
         }
 
+        const resolvedGamePath = this.resolvePath(gamePath);
+
         // If no output directory is specified, place generated files next to the ISO.
         const resolvedOutput = outputDirectory.trim()
             ? outputDirectory.trim()
-            : require('path').join(require('path').dirname(gamePath), 'recomp_out');
+            : require('path').join(require('path').dirname(resolvedGamePath), 'recomp_out');
 
-        out.info(`[Recompile] Starting recompilation: iso=${gamePath} elf=${elfName || '(BOOT2)'} out=${resolvedOutput}`);
+        out.info(`[Recompile] Starting recompilation: iso=${resolvedGamePath} elf=${elfName || '(BOOT2)'} out=${resolvedOutput}`);
         out.show(true);
 
         try {
-            const result = await this.socketClient.recompile(gamePath, elfName, resolvedOutput);
+            const result = await this.socketClient.recompile(resolvedGamePath, elfName, resolvedOutput);
             out.info(`[Recompile] Done — ${result.functionCount} function(s) recompiled.`);
             out.info(`[Recompile] Written files:\n${result.writtenFiles.join('\n')}`);
             this.webview?.postMessage({
@@ -1298,7 +1310,27 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         } catch (err: any) {
             const msg = err?.message ?? String(err);
             out.error(`[Recompile] Error: ${msg}`);
+            out.show(true);
             this.webview?.postMessage({ command: 'recompileResult', success: false, error: msg });
+        }
+    }
+
+    /**
+     * Open a VS Code folder-picker dialog so the user can select an output directory
+     * for the recompiler. Posts 'browseOutputDirectoryResult' back to the webview.
+     */
+    private async handleBrowseOutputDirectory(): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:   false,
+            canSelectFolders: true,
+            canSelectMany:    false,
+            title:            'Select Output Directory for Generated C++ Files',
+        });
+        if (uris && uris.length > 0) {
+            this.webview?.postMessage({
+                command:   'browseOutputDirectoryResult',
+                directory: uris[0].fsPath,
+            });
         }
     }
 

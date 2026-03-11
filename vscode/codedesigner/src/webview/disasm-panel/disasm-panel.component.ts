@@ -87,6 +87,12 @@ interface RecompileResultMsg {
   error?: string;
 }
 
+/** Message sent by the provider after a folder-picker dialog for the output directory. */
+interface BrowseOutputDirectoryResultMsg {
+  command: 'browseOutputDirectoryResult';
+  directory: string;
+}
+
 /** Message sent by the provider with initial panel data (options, existing snapshots). */
 interface InitMsg {
   type: 'init';
@@ -247,6 +253,7 @@ interface InitMsg {
     <div class="row">
       <input id="recompileOutputDir" type="text" [(ngModel)]="recompileOutputDir"
         placeholder="Output directory (default: recomp_out)" />
+      <button id="recompileBrowseBtn" (click)="browseOutputDirectory()" title="Browse for output directory" aria-label="Browse for output directory">…</button>
     </div>
 
     <div class="row">
@@ -374,6 +381,11 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
           this.recompileIsError     = true;
           this.recompileWrittenFiles = [];
         }
+      }),
+      this.bridge.on<BrowseOutputDirectoryResultMsg>('browseOutputDirectoryResult').subscribe(msg => {
+        if (msg.directory) {
+          this.recompileOutputDir = msg.directory;
+        }
       })
     );
     this.bridge.postMessage({ command: 'ready' });
@@ -473,6 +485,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
     this.recompileIsError    = false;
     this.recompileWrittenFiles = [];
     this.bridge.postMessage({ command: 'listDiscElfs', gamePath: this.selectedGame });
+  }
+
+  browseOutputDirectory(): void {
+    this.bridge.postMessage({ command: 'browseOutputDirectory' });
   }
 
   runRecompile(): void {
