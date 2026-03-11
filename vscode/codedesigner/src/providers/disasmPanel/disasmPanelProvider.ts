@@ -353,16 +353,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        if (!emulatorPath) {
+            vscode.window.showWarningMessage('Please select an emulator.');
+            return;
+        }
+
         out.show(true);
 
-        // Only connect to the socket — do NOT spawn a new process.
-        // Use the Run button to start the emulator.
-        this.socketClient.connect().then(() => {
-            out.info('Connected to server.');
-        }).catch(() => {
-            out.warn('Could not connect to server. Make sure the server is running or press Run to start it.');
-            vscode.window.showWarningMessage('Could not connect to server. Press Run to start the emulator.');
-        });
+        // Spawn the emulator and connect when ready (same as Run).
+        this.spawnAndConnect(emulatorPath, biosPath, gamePath);
     }
 
     /** Launch the emulator in a VS Code terminal tab and, once the server is up, connect. */
@@ -1207,12 +1206,24 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return true;
         }
 
-        getOutputChannel().info(`Auto-starting CodeDesigner server: ${resolvedExe} --server`);
+        // Build --run arguments; pass the first configured BIOS path if available.
+        // --run starts the embedded socket server on port 8765 (used by this extension).
+        // --server starts a standalone server on port 8766 and must NOT be used here.
+        const cliArgs: string[] = ['--run'];
+        const bios = this.settings.bios?.[0];
+        if (bios) {
+            const resolvedBios = this.resolvePath(bios.path);
+            if (fs.existsSync(resolvedBios)) {
+                cliArgs.push('--bios', resolvedBios);
+            }
+        }
+
+        getOutputChannel().info(`Auto-starting CodeDesigner emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
 
         const terminal = vscode.window.createTerminal({
             name: 'PS2 Emulator',
             shellPath: resolvedExe,
-            shellArgs: ['--server'],
+            shellArgs: cliArgs,
         });
         terminal.show(false);   // reveal terminal but keep editor focus
         this.emulatorTerminal = terminal;
