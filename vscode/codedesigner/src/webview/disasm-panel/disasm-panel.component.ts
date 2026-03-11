@@ -60,6 +60,33 @@ interface CdsPatchAppliedMsg {
   error?: string;
 }
 
+/** One ELF or IRX file listed on the disc. */
+interface DiscElfEntry {
+  Path: string;
+  Name: string;
+  Size: number;
+  IsBootElf: boolean;
+}
+
+/** Message sent by the provider after a LISTDISCELFS call. */
+interface ListDiscElfsResultMsg {
+  command: 'listDiscElfsResult';
+  success: boolean;
+  elfFiles?: DiscElfEntry[];
+  bootElf?: string;
+  error?: string;
+}
+
+/** Message sent by the provider after a RECOMPILE call. */
+interface RecompileResultMsg {
+  command: 'recompileResult';
+  success: boolean;
+  functionCount?: number;
+  writtenFiles?: string[];
+  bootElf?: string;
+  error?: string;
+}
+
 /** Message sent by the provider with initial panel data (options, existing snapshots). */
 interface InitMsg {
   type: 'init';
@@ -100,6 +127,7 @@ interface InitMsg {
   <button class="panel-tab" [class.active]="activeTab === 'settings'" (click)="setTab('settings')">Emulator Settings</button>
   <button class="panel-tab" [class.active]="activeTab === 'cheats'" (click)="setTab('cheats')">Cheats</button>
   <button class="panel-tab" [class.active]="activeTab === 'cds'" (click)="setTab('cds')">CDS</button>
+  <button class="panel-tab" [class.active]="activeTab === 'recompile'" (click)="setTab('recompile')">Recompile</button>
 </div>
 
 <div id="tab-settings" class="tab-content" [style.display]="activeTab === 'settings' ? 'block' : 'none'">
@@ -191,6 +219,56 @@ interface InitMsg {
     </div>
   </div>
 </div>
+
+<div id="tab-recompile" class="tab-content" [style.display]="activeTab === 'recompile' ? 'block' : 'none'">
+  <div class="container">
+    <div class="section-label">Static Recompiler</div>
+    <p class="recompile-help">
+      Extracts an ELF from the loaded disc image and generates C++ source files.
+      Each game has one main executable (BOOT2, shown with ★); other files are
+      IOP modules (IRX) or game overlays.
+    </p>
+
+    <div class="row">
+      <button id="recompileListBtn" (click)="listDiscElfs()" [disabled]="!selectedGame">
+        Load ELF list from disc
+      </button>
+    </div>
+
+    <div class="row" *ngIf="recompileElfList.length > 0">
+      <select id="recompileElfSelect" [(ngModel)]="recompileSelectedElf">
+        <option value="">Select ELF to recompile…</option>
+        <option *ngFor="let e of recompileElfList" [value]="e.Name">
+          {{e.IsBootElf ? '★ ' : ''}}{{e.Name}} ({{formatBytes(e.Size)}})
+        </option>
+      </select>
+    </div>
+
+    <div class="row">
+      <input id="recompileOutputDir" type="text" [(ngModel)]="recompileOutputDir"
+        placeholder="Output directory (default: recomp_out)" />
+    </div>
+
+    <div class="row">
+      <button id="recompileRunBtn" (click)="runRecompile()"
+        [disabled]="!selectedGame || recompileRunning">
+        {{recompileRunning ? 'Recompiling…' : 'Recompile'}}
+      </button>
+    </div>
+
+    <div *ngIf="recompileStatus" class="recompile-status"
+         [class.recompile-error]="recompileIsError">
+      {{recompileStatus}}
+    </div>
+
+    <div *ngIf="recompileWrittenFiles.length > 0" class="recompile-files">
+      <div class="section-label">Generated files</div>
+      <ul>
+        <li *ngFor="let f of recompileWrittenFiles" class="recompile-file-item">{{f}}</li>
+      </ul>
+    </div>
+  </div>
+</div>
   `
 })
 export class DisasmPanelComponent implements OnInit, OnDestroy {
@@ -203,13 +281,21 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   selectedEmulator = '';
   selectedBios = '';
   selectedGame = '';
-  activeTab: 'settings' | 'cheats' | 'cds' = 'settings';
+  activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' = 'settings';
   cheatText = '';
   cheatMessage = '';
   cheatError = false;
   currentGameName = '';
   // CDS tab state
   cdsOutput = '';
+  // Recompile tab state
+  recompileElfList: DiscElfEntry[] = [];
+  recompileSelectedElf = '';
+  recompileOutputDir = '';
+  recompileRunning = false;
+  recompileStatus = '';
+  recompileIsError = false;
+  recompileWrittenFiles: string[] = [];
   private subs: Subscription[] = [];
 
   get statusText(): string {
@@ -263,6 +349,31 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       }),
       this.bridge.on<CdsPatchAppliedMsg>('cdsPatchApplied').subscribe(_msg => {
         // Patch results are logged to the Debug output channel server-side
+      }),
+      this.bridge.on<ListDiscElfsResultMsg>('listDiscElfsResult').subscribe(msg => {
+        if (msg.success && msg.elfFiles) {
+          this.recompileElfList = msg.elfFiles;
+          // Default to the BOOT2 executable if available
+          const boot = msg.elfFiles.find(e => e.IsBootElf);
+          if (boot) { this.recompileSelectedElf = boot.Name; }
+          this.recompileStatus  = '';
+          this.recompileIsError = false;
+        } else {
+          this.recompileStatus  = msg.error ?? 'Failed to load ELF list.';
+          this.recompileIsError = true;
+        }
+      }),
+      this.bridge.on<RecompileResultMsg>('recompileResult').subscribe(msg => {
+        this.recompileRunning = false;
+        if (msg.success) {
+          this.recompileStatus      = `Done — ${msg.functionCount ?? 0} function(s) recompiled.`;
+          this.recompileIsError     = false;
+          this.recompileWrittenFiles = msg.writtenFiles ?? [];
+        } else {
+          this.recompileStatus      = msg.error ?? 'Recompilation failed.';
+          this.recompileIsError     = true;
+          this.recompileWrittenFiles = [];
+        }
       })
     );
     this.bridge.postMessage({ command: 'ready' });
@@ -330,7 +441,7 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
     this.bridge.postMessage({ command: 'gameChanged', gamePath: this.selectedGame });
   }
 
-  setTab(tab: 'settings' | 'cheats' | 'cds'): void {
+  setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile'): void {
     this.activeTab = tab;
   }
 
@@ -354,5 +465,33 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       ? this.cheatText.trimEnd() + '\n' + this.cdsOutput
       : this.cdsOutput;
     this.activeTab = 'cheats';
+  }
+
+  listDiscElfs(): void {
+    this.recompileElfList    = [];
+    this.recompileStatus     = 'Loading ELF list…';
+    this.recompileIsError    = false;
+    this.recompileWrittenFiles = [];
+    this.bridge.postMessage({ command: 'listDiscElfs', gamePath: this.selectedGame });
+  }
+
+  runRecompile(): void {
+    if (!this.selectedGame || this.recompileRunning) { return; }
+    this.recompileRunning    = true;
+    this.recompileStatus     = 'Recompiling…';
+    this.recompileIsError    = false;
+    this.recompileWrittenFiles = [];
+    this.bridge.postMessage({
+      command:         'recompile',
+      gamePath:        this.selectedGame,
+      elfName:         this.recompileSelectedElf,
+      outputDirectory: this.recompileOutputDir,
+    });
+  }
+
+  formatBytes(bytes: number): string {
+    if (bytes < 1024) { return `${bytes} B`; }
+    if (bytes < 1024 * 1024) { return `${(bytes / 1024).toFixed(1)} KB`; }
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 }

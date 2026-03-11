@@ -383,3 +383,64 @@ button:disabled {
 #cds-output::placeholder {
     color: var(--vscode-input-placeholderForeground, #888);
 }
+
+/* ── Recompile tab ─────────────────────────────────────────────────────────── */
+
+.recompile-help {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    margin: 0 0 8px;
+    line-height: 1.5;
+}
+
+#recompileElfSelect {
+    width: 100%;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 4px 6px;
+    box-sizing: border-box;
+}
+
+#recompileOutputDir {
+    width: 100%;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 4px 6px;
+    box-sizing: border-box;
+    font-size: 12px;
+}
+
+.recompile-status {
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: var(--vscode-notifications-background, #252526);
+    color: var(--vscode-notifications-foreground);
+    margin-top: 4px;
+    word-break: break-all;
+}
+
+.recompile-status.recompile-error {
+    color: var(--vscode-errorForeground, #f48771);
+    background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+    border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+.recompile-files {
+    margin-top: 8px;
+}
+
+.recompile-files ul {
+    padding-left: 16px;
+    margin: 4px 0 0;
+}
+
+.recompile-file-item {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--vscode-foreground);
+    word-break: break-all;
+    margin-bottom: 2px;
+}

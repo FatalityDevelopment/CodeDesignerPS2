@@ -19,6 +19,10 @@ interface CommandMessage {
     RegisterName?: string;
     RegisterIndex?: number;
     RegisterValue?: string;
+    // LISTDISCELFS / RECOMPILE fields
+    IsoPath?: string;
+    ElfName?: string;
+    OutputDirectory?: string;
 }
 
 /**
@@ -201,6 +205,12 @@ interface CommandResponse {
     // Per-address analysis comments produced when an instruction executes.
     // Keyed by hex address string (e.g. "80001234"), value is the analysis comment.
     InstructionAnalysis?: Record<string, string>;
+    // LISTDISCELFS fields
+    ElfFiles?: DiscElfEntry[];
+    BootElf?: string;
+    // RECOMPILE fields
+    FunctionCount?: number;
+    WrittenFiles?: string[];
 }
 
 /**
@@ -236,6 +246,32 @@ export interface ThreadEntry {
     sp: number;
     priority: number;
     entryPc: number;
+}
+
+/**
+ * One ELF or IRX file found on a PS2 disc image.
+ */
+export interface DiscElfEntry {
+    /** Absolute disc path, e.g. "/SCUS_971.98;1" or "/MODULES/CDVD.IRX;1". */
+    Path: string;
+    /** Filename without path or version suffix, e.g. "SCUS_971.98". */
+    Name: string;
+    /** File size in bytes. */
+    Size: number;
+    /** True when this is the BOOT2 executable listed in SYSTEM.CNF. */
+    IsBootElf: boolean;
+}
+
+/**
+ * Result returned by the RECOMPILE socket command.
+ */
+export interface RecompileResult {
+    /** Number of functions that were recompiled. */
+    functionCount: number;
+    /** Absolute paths of all files written by the recompiler. */
+    writtenFiles: string[];
+    /** The ELF path (or name) that was recompiled. */
+    bootElf: string;
 }
 
 /**
@@ -1130,5 +1166,58 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'ApplyCheats failed');
         }
+    }
+
+    /**
+     * List all ELF and IRX files found on a PS2 disc image.
+     * Also identifies which file is the BOOT2 main executable from SYSTEM.CNF.
+     *
+     * @param isoPath Absolute path to the ISO-9660 disc image.
+     */
+    public async listDiscElfs(isoPath: string): Promise<{ elfFiles: DiscElfEntry[]; bootElf: string }> {
+        const command: CommandMessage = {
+            Command: 'LISTDISCELFS',
+            IsoPath: isoPath,
+        };
+        const response = await this.sendCommand(command, 30_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'LISTDISCELFS failed');
+        }
+        return {
+            elfFiles: response.ElfFiles ?? [],
+            bootElf:  response.BootElf  ?? '',
+        };
+    }
+
+    /**
+     * Extract a named ELF from a PS2 disc image and run the static recompiler on it,
+     * generating C++ source files in the specified output directory.
+     *
+     * @param isoPath         Absolute path to the ISO-9660 disc image.
+     * @param elfName         Name of the ELF on the disc (e.g. "SCUS_971.98").
+     *                        Pass an empty string to use the BOOT2 executable from SYSTEM.CNF.
+     * @param outputDirectory Directory where the generated C++ files will be written.
+     */
+    public async recompile(
+        isoPath: string,
+        elfName: string,
+        outputDirectory: string,
+    ): Promise<RecompileResult> {
+        const command: CommandMessage = {
+            Command:         'RECOMPILE',
+            IsoPath:         isoPath,
+            ElfName:         elfName,
+            OutputDirectory: outputDirectory,
+        };
+        // Recompilation can take a while for large game ELFs — allow up to 5 minutes.
+        const response = await this.sendCommand(command, 300_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'RECOMPILE failed');
+        }
+        return {
+            functionCount: response.FunctionCount ?? 0,
+            writtenFiles:  response.WrittenFiles  ?? [],
+            bootElf:       response.BootElf       ?? elfName,
+        };
     }
 }

@@ -366,6 +366,12 @@ namespace CodeDesigner.Mips64LE
                     case "GETTHREADS":
                         return HandleGetThreads();
 
+                    case "LISTDISCELFS":
+                        return HandleListDiscElfs(command.IsoPath);
+
+                    case "RECOMPILE":
+                        return HandleRecompile(command.IsoPath, command.ElfName, command.OutputDirectory);
+
                     case "PING":
                         return CreateSuccessResponse("PONG");
                     
@@ -2785,6 +2791,193 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine($"[Labels] Saved {_labels.Count} symbol(s) to {savePath}");
         }
 
+        // ── LISTDISCELFS ─────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Open an ISO-9660 disc image, walk all files, and return a list of every
+        /// ELF or IRX file found.  Also reads SYSTEM.CNF to mark the BOOT2
+        /// executable with <see cref="DiscElfEntry.IsBootElf"/> = true.
+        /// </summary>
+        private string HandleListDiscElfs(string? isoPath)
+        {
+            if (string.IsNullOrWhiteSpace(isoPath))
+                return CreateErrorResponse("IsoPath is required.");
+
+            if (!File.Exists(isoPath))
+                return CreateErrorResponse($"ISO file not found: {isoPath}");
+
+            try
+            {
+                using var stream = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var cdvd = new CodeDesigner.Mips64LE.Common.Emulator.IOP.Cdvd();
+                cdvd.LoadFromStream(stream);
+
+                // ── Read SYSTEM.CNF to discover the BOOT2 executable ──────────
+                string? bootElfName = null;
+                var cnfEntry = cdvd.FindFile("SYSTEM.CNF");
+                if (cnfEntry != null)
+                {
+                    byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
+                    string cnfText  = System.Text.Encoding.Latin1.GetString(cnfBytes);
+                    string? rawBoot = CodeDesigner.Mips64LE.Common.Emulator.GameLoader.ParseSystemCnf(cnfText);
+                    if (rawBoot != null)
+                    {
+                        // Normalise to bare filename (strip path and version suffix).
+                        int slash = rawBoot.LastIndexOfAny(new[] { '/', '\\' });
+                        bootElfName = slash >= 0 ? rawBoot[(slash + 1)..] : rawBoot;
+                        int semi = bootElfName.IndexOf(';');
+                        if (semi >= 0) bootElfName = bootElfName[..semi];
+                    }
+                }
+
+                // ── Walk all files looking for ELF / IRX ─────────────────────
+                // Helper: strip the ISO-9660 version suffix (";1", ";2", …).
+                static string StripVersion(string n)
+                {
+                    int s = n.IndexOf(';');
+                    return s >= 0 ? n[..s] : n;
+                }
+
+                // PS2 disc-ID pattern: 4 uppercase letters + '_' + 3 digits + '.' + 2 digits
+                // e.g. SCUS_971.98, SLUS_210.40, SLES_123.45
+                var discIdPattern = new System.Text.RegularExpressions.Regex(
+                    @"^[A-Z]{4}_\d{3}\.\d{2}$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+                var elfFiles = new List<DiscElfEntry>();
+                foreach (var (discPath, entry) in cdvd.EnumerateFiles())
+                {
+                    string cleanName = StripVersion(entry.Name);
+                    string ext       = System.IO.Path.GetExtension(cleanName).ToUpperInvariant();
+
+                    // Include: explicit .ELF / .IRX files, or PS2 disc-ID executables
+                    // (e.g. SCUS_971.98 has no .ELF extension but is a valid EE ELF).
+                    bool isElf   = ext == ".ELF" || ext == ".IRX";
+                    bool isDiscId = discIdPattern.IsMatch(cleanName);
+                    if (!isElf && !isDiscId)
+                        continue;
+
+                    bool isBootElf = bootElfName != null &&
+                        cleanName.Equals(bootElfName, StringComparison.OrdinalIgnoreCase);
+
+                    elfFiles.Add(new DiscElfEntry
+                    {
+                        Path      = discPath,
+                        Name      = cleanName,
+                        Size      = entry.Size,
+                        IsBootElf = isBootElf,
+                    });
+                }
+
+                // Sort: BOOT2 first, then by path.
+                elfFiles.Sort((a, b) =>
+                {
+                    if (a.IsBootElf != b.IsBootElf) return a.IsBootElf ? -1 : 1;
+                    return string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase);
+                });
+
+                var response = new CommandResponse
+                {
+                    Success  = true,
+                    Message  = $"Found {elfFiles.Count} ELF/IRX file(s).",
+                    ElfFiles = elfFiles,
+                    BootElf  = bootElfName,
+                };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"LISTDISCELFS failed: {ex.Message}");
+            }
+        }
+
+        // ── RECOMPILE ─────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Extract a named ELF from a disc image and run the static recompiler on it.
+        /// </summary>
+        /// <param name="isoPath">Path to the ISO-9660 disc image.</param>
+        /// <param name="elfName">
+        /// Name of the ELF file on the disc (e.g. "SCUS_971.98" or "/SCUS_971.98;1").
+        /// When <c>null</c> or empty, the BOOT2 executable from SYSTEM.CNF is used.
+        /// </param>
+        /// <param name="outputDirectory">
+        /// Directory where the generated C++ files will be written.
+        /// Defaults to <c>recomp_out</c> in the current directory when <c>null</c>.
+        /// </param>
+        private string HandleRecompile(string? isoPath, string? elfName, string? outputDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(isoPath))
+                return CreateErrorResponse("IsoPath is required.");
+
+            if (!File.Exists(isoPath))
+                return CreateErrorResponse($"ISO file not found: {isoPath}");
+
+            try
+            {
+                using var stream = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var cdvd = new CodeDesigner.Mips64LE.Common.Emulator.IOP.Cdvd();
+                cdvd.LoadFromStream(stream);
+
+                // ── Resolve the ELF path ──────────────────────────────────────
+                string resolvedElfName = elfName?.Trim() ?? string.Empty;
+
+                if (string.IsNullOrEmpty(resolvedElfName))
+                {
+                    // Fall back to BOOT2 from SYSTEM.CNF.
+                    var cnfEntry = cdvd.FindFile("SYSTEM.CNF");
+                    if (cnfEntry == null)
+                        return CreateErrorResponse("SYSTEM.CNF not found on disc.");
+
+                    byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
+                    string cnfText  = System.Text.Encoding.Latin1.GetString(cnfBytes);
+                    resolvedElfName = CodeDesigner.Mips64LE.Common.Emulator.GameLoader.ParseSystemCnf(cnfText)
+                        ?? string.Empty;
+
+                    if (string.IsNullOrEmpty(resolvedElfName))
+                        return CreateErrorResponse("BOOT2 entry not found in SYSTEM.CNF.");
+                }
+
+                // ── Find and read the ELF ─────────────────────────────────────
+                var entry = cdvd.FindFile(resolvedElfName);
+                if (entry == null)
+                    return CreateErrorResponse($"ELF not found on disc: {resolvedElfName}");
+
+                byte[] elfData = cdvd.ReadFile(entry.Value);
+                if (elfData.Length == 0)
+                    return CreateErrorResponse($"ELF is empty: {resolvedElfName}");
+
+                // ── Run the recompiler ────────────────────────────────────────
+                string outDir = string.IsNullOrWhiteSpace(outputDirectory) ? "recomp_out" : outputDirectory;
+
+                var cfg = new CodeDesigner.Mips64LE.Recompiler.RecompilerConfig
+                {
+                    OutputDirectory  = outDir,
+                    SingleFileOutput = true,
+                    PatchSyscalls    = true,
+                    PatchCache       = true,
+                };
+
+                var recompiler = new CodeDesigner.Mips64LE.Recompiler.Ps2StaticRecompiler(cfg);
+                var progressLog = new List<string>();
+                var result = recompiler.Recompile(elfData.AsSpan(), msg => progressLog.Add(msg));
+
+                var response = new CommandResponse
+                {
+                    Success       = true,
+                    Message       = $"Recompiled {result.Functions.Count} function(s) into {outDir}.",
+                    FunctionCount = result.Functions.Count,
+                    WrittenFiles  = result.WrittenFiles,
+                    BootElf       = resolvedElfName,
+                };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"RECOMPILE failed: {ex.Message}");
+            }
+        }
+
         private string CreateSuccessResponse(string message)
         {
             var response = new CommandResponse
@@ -2850,6 +3043,10 @@ namespace CodeDesigner.Mips64LE
         public string? RegisterName { get; set; }
         public int? RegisterIndex { get; set; }
         public string? RegisterValue { get; set; }
+        // LISTDISCELFS / RECOMPILE fields
+        public string? IsoPath { get; set; }
+        public string? ElfName { get; set; }
+        public string? OutputDirectory { get; set; }
     }
 
     /// <summary>
@@ -2937,6 +3134,14 @@ namespace CodeDesigner.Mips64LE
         /// without reloading the full disassembly page.
         /// </summary>
         public Dictionary<string, string>? InstructionAnalysis { get; set; }
+
+        // LISTDISCELFS fields
+        public List<DiscElfEntry>? ElfFiles { get; set; }
+        public string? BootElf { get; set; }
+
+        // RECOMPILE fields
+        public int? FunctionCount { get; set; }
+        public List<string>? WrittenFiles { get; set; }
     }
 
     /// <summary>
@@ -2948,6 +3153,24 @@ namespace CodeDesigner.Mips64LE
         public string File { get; set; } = string.Empty;
         public uint BaseAddress { get; set; }
         public int Size { get; set; }
+    }
+
+    /// <summary>
+    /// Describes one ELF (or IRX) file found on a disc image, returned by LISTDISCELFS.
+    /// </summary>
+    public class DiscElfEntry
+    {
+        /// <summary>Absolute disc path, e.g. "/SCUS_971.98;1" or "/MODULES/CDVD.IRX;1".</summary>
+        public string Path { get; set; } = string.Empty;
+
+        /// <summary>Filename without the path prefix or version suffix, e.g. "SCUS_971.98".</summary>
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>File size in bytes.</summary>
+        public uint Size { get; set; }
+
+        /// <summary>True when this is the BOOT2 executable listed in SYSTEM.CNF.</summary>
+        public bool IsBootElf { get; set; }
     }
 
     /// <summary>
