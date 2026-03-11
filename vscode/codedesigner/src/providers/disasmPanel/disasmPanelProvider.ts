@@ -12,6 +12,12 @@ interface EmuSettings {
     emulators?: Array<{ type: string; path: string }>;
 }
 
+interface UserPreferences {
+    selectedEmulator?: string;
+    selectedBios?: string;
+    selectedGame?: string;
+}
+
 interface SnapshotEntry {
     label: string;
     timestamp: string;
@@ -153,6 +159,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Load emu-settings.json (searches workspace folders then walks up from
         // the extension directory, so this works even when no workspace is open).
         this.loadEmuSettings();
+        // Restore saved dropdown selections from settings.json (written alongside emu-settings.json).
+        this.loadUserPreferences();
 
         // Setup webview options
         webviewView.webview.options = {
@@ -214,12 +222,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // Dropdown change notifications — save current selections
                 case 'emulatorChanged':
                     this.selectedEmulatorPath = msg.emulatorPath ?? '';
+                    this.saveUserPreferences();
                     break;
                 case 'biosChanged':
                     this.selectedBiosPath = msg.biosPath ?? '';
+                    this.saveUserPreferences();
                     break;
                 case 'gameChanged':
                     await this.handleGameChanged(msg.gamePath ?? '');
+                    this.saveUserPreferences();
                     break;
                 case 'applyCheats':
                     await this.handleApplyCheats(msg.cheatText ?? '');
@@ -290,7 +301,51 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /** Reload settings and update the Angular component via postMessage. */
     private reloadAndRefresh(): void {
         this.loadEmuSettings();
+        this.loadUserPreferences();
         this.postInitMessage();
+    }
+
+    /** Returns the path to codedesigner-settings.json in the workspace root directory. */
+    private get settingsJsonPath(): string {
+        return this.workspaceRoot ? path.join(this.workspaceRoot, 'codedesigner-settings.json') : '';
+    }
+
+    /** Load saved dropdown selections from codedesigner-settings.json in the workspace root. */
+    private loadUserPreferences(): void {
+        const settingsPath = this.settingsJsonPath;
+        if (!settingsPath) { return; }
+        try {
+            const raw = fs.readFileSync(settingsPath, 'utf-8');
+            const prefs = JSON.parse(raw) as UserPreferences;
+            this.selectedEmulatorPath = prefs.selectedEmulator ?? '';
+            this.selectedBiosPath     = prefs.selectedBios     ?? '';
+            this.selectedGamePath     = prefs.selectedGame     ?? '';
+            this.selectedGameName     = this.selectedGamePath
+                ? path.basename(this.selectedGamePath, path.extname(this.selectedGamePath))
+                : '';
+            this.loadSnapshotsForGame(this.selectedGameName);
+            this.loadGameLabels(this.selectedGameName);
+        } catch (err: any) {
+            if (err?.code !== 'ENOENT') {
+                getOutputChannel().debug(`Could not read ${settingsPath}: ${err?.message ?? err}`);
+            }
+        }
+    }
+
+    /** Save current dropdown selections to codedesigner-settings.json in the workspace root. */
+    private async saveUserPreferences(): Promise<void> {
+        const settingsPath = this.settingsJsonPath;
+        if (!settingsPath) { return; }
+        const prefs: UserPreferences = {
+            selectedEmulator: this.selectedEmulatorPath,
+            selectedBios:     this.selectedBiosPath,
+            selectedGame:     this.selectedGamePath,
+        };
+        try {
+            await fs.promises.writeFile(settingsPath, JSON.stringify(prefs, null, 2), 'utf-8');
+        } catch (err: any) {
+            getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
+        }
     }
 
     private postInitMessage(): void {
@@ -307,6 +362,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             selectedGameName: this.selectedGameName,
             isConnected: this.socketClient.isConnected(),
             isPaused: this._paused,
+            selectedEmulator: this.selectedEmulatorPath,
+            selectedBios: this.selectedBiosPath,
+            selectedGame: this.selectedGamePath,
         });
     }
 
