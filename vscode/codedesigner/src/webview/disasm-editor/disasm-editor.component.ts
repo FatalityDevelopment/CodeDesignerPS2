@@ -730,8 +730,17 @@ export class DisasmEditorComponent implements AfterViewInit {
       return parseInt(cleaned, 16);
     }
 
+    /** Translate any virtual/logical EE address to its physical equivalent.
+     *  KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip the top 3 bits.
+     *  EE RAM uncached mirror (0x20100000–0x21FFFFFF): subtract 0x20000000.
+     *  EE RAM uncached+accelerated (0x30100000–0x31FFFFFF): subtract 0x30000000.
+     *  All other addresses (physical or special like scratchpad) pass through. */
     function toPhysAddr(va: number): number {
-      return (va >= 0x80000000 && va <= 0xBFFFFFFF) ? ((va & 0x1FFFFFFF) >>> 0) : (va >>> 0);
+      const v = va >>> 0;
+      if (v >= 0x80000000 && v <= 0xBFFFFFFF) return ((v & 0x1FFFFFFF) >>> 0);
+      if (v >= 0x20100000 && v <= 0x21FFFFFF) return ((v - 0x20000000) >>> 0);
+      if (v >= 0x30100000 && v <= 0x31FFFFFF) return ((v - 0x30000000) >>> 0);
+      return v;
     }
 
     // ── Search ────────────────────────────────────────────────────────────────

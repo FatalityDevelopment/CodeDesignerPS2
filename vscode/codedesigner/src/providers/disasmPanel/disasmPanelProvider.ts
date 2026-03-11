@@ -30,24 +30,24 @@ interface SnapshotInfoFile {
 
 /** Memory regions exposed as separate editor windows when the emulator is running. */
 const LIVE_REGIONS = [
-    // EE Main RAM: shown at KSEG0 (0x80000000–0x81FFFFFF) so that row addresses
-    // match the virtual PC the CPU actually executes from.  Kernel and game code
-    // run in KSEG0, so a breakpoint set on a row at 0x80001234 matches the CPU PC
-    // directly.  HandleReadMem strips the top 3 bits (KSEG0→physical) server-side.
-    { region: 'ee',  address: 0x80000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
+    // EE Main RAM: shown at the physical base (0x00000000–0x01FFFFFF, 32 MB).
+    // Using physical addresses keeps rows consistent with the memory map table
+    // regardless of which virtual alias the CPU uses (KSEG0 0x80000000, uncached
+    // 0x20100000, or uncached+accelerated 0x30100000).  HandleReadMem accepts
+    // physical addresses for the EE region directly.
+    { region: 'ee',  address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
     // IOP RAM: shown at its native physical base (0x00000000–0x003FFFFF, 4 MB).
     // Using native addresses keeps row addresses consistent with the IOP CPU's PC
     // register and the console debug output, so addresses like 0x0000ae94 map
     // directly to the matching row in the IOP RAM panel.  HandleReadMem reads
     // directly from IopMemoryBus.Ram[] when region='iop' and address < RamSize.
     { region: 'iop', address: 0x00000000, size:  4 * 1024 * 1024, label: 'IOP RAM'       },
-    // BIOS ROM: shown at KSEG0 (0x9FC00000) so row addresses match the kernel
-    // PC.  After the initial uncached reset (0xBFC00000), the EE kernel runs
-    // almost entirely from the cached KSEG0 alias (0x9FC00000–0x9FFFFFFF).
-    // Both KSEG0 and KSEG1 strip to the same physical 0x1FC00000 via toPhysAddr,
-    // so cross-region navigation, cursor highlight and breakpoints all work for
-    // whichever alias the CPU uses.  HandleReadMem strips the top 3 bits server-side.
-    { region: 'ee',  address: 0x9FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
+    // BIOS ROM: shown at the physical base (0x1FC00000–0x1FFFFFFF, 4 MB).
+    // Both the cached alias (0x9FC00000) and the uncached alias (0xBFC00000) strip
+    // to the same physical address via toPhysAddr, so the PC indicator and
+    // breakpoints work for whichever alias the CPU uses.  HandleReadMem accepts
+    // the physical base directly.
+    { region: 'ee',  address: 0x1FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
     { region: 'ee',  address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad'    },
 ];
 
@@ -904,12 +904,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const results: Array<{ name: string; date: string; value: string }> = [];
 
         // Snapshots store physical base addresses (e.g. 0x00000000 for EE Main RAM).
-        // The live editor uses virtual addresses (KSEG0/KSEG1, 0x80000000–0xBFFFFFFF).
-        // Strip the segment bits so the offset calculation works correctly.
+        // Convert any virtual/logical alias to its physical equivalent before
+        // doing the offset calculation.
+        //   KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip top 3 bits → physical
+        //   EE RAM uncached mirror (0x20100000–0x21FFFFFF): subtract 0x20000000
+        //   EE RAM uncached+accelerated (0x30100000–0x31FFFFFF): subtract 0x30000000
         const addrU32 = address >>> 0;
-        const physAddress = (addrU32 >= 0x80000000 && addrU32 < 0xC0000000)
-            ? (address & 0x1FFFFFFF) >>> 0
-            : addrU32;
+        let physAddress: number;
+        if (addrU32 >= 0x80000000 && addrU32 < 0xC0000000)
+            physAddress = (addrU32 & 0x1FFFFFFF) >>> 0;
+        else if (addrU32 >= 0x20100000 && addrU32 <= 0x21FFFFFF)
+            physAddress = (addrU32 - 0x20000000) >>> 0;
+        else if (addrU32 >= 0x30100000 && addrU32 <= 0x31FFFFFF)
+            physAddress = (addrU32 - 0x30000000) >>> 0;
+        else
+            physAddress = addrU32;
 
         for (const snap of this.snapshots) {
             const infoPath = path.join(snap.path, 'snapshot-info.json');
