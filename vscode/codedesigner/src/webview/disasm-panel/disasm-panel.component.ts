@@ -71,6 +71,9 @@ interface InitMsg {
   selectedGameName?: string;
   isConnected?: boolean;
   isPaused?: boolean;
+  selectedEmulator?: string;
+  selectedBios?: string;
+  selectedGame?: string;
 }
 
 @Component({
@@ -236,6 +239,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         // Always sync snapshot list (may be empty array to clear old entries)
         if (msg.snapshots !== undefined) { this.snapshots = msg.snapshots; }
         if (msg.connectedEmulatorPath) { this.selectedEmulator = msg.connectedEmulatorPath; }
+        // Restore saved dropdown selections from settings.json
+        if (msg.selectedEmulator !== undefined) { this.selectedEmulator = msg.selectedEmulator; }
+        if (msg.selectedBios     !== undefined) { this.selectedBios     = msg.selectedBios;     }
+        if (msg.selectedGame     !== undefined) { this.selectedGame     = msg.selectedGame;     }
         if (msg.selectedGameName !== undefined) { this.currentGameName = msg.selectedGameName; }
         // Restore connection/pause state so the UI is correct if the sidebar
         // opens after auto-connect has already succeeded.
