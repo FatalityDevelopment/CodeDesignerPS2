@@ -303,6 +303,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             gameOptions,
             snapshots: this.snapshots,
             selectedGameName: this.selectedGameName,
+            isConnected: this.socketClient.isConnected(),
+            isPaused: this._paused,
         });
     }
 
