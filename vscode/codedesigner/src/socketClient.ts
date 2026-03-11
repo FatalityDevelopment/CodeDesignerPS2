@@ -23,6 +23,9 @@ interface CommandMessage {
     IsoPath?: string;
     ElfName?: string;
     OutputDirectory?: string;
+    // CONVERTCHEAT fields
+    Format?: string;
+    Direction?: string;
 }
 
 /**
@@ -1166,6 +1169,30 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'ApplyCheats failed');
         }
+    }
+
+    /**
+     * Convert PS2 cheat codes between raw and a device-specific encrypted format.
+     * @param codes      Multi-line cheat code text to convert.
+     * @param direction  'toRaw' — decrypt device codes → raw hex pairs;
+     *                   'toEngine' — encrypt raw hex pairs → device format.
+     * @param format     Cheat engine format name (Raw, ActionReplay1, ActionReplay2,
+     *                   ActionReplayMax, GameSharkV3, CodeBreakerV1, CodeBreakerV7).
+     *                   Required for 'toEngine'; omit for auto-detect on 'toRaw'.
+     * @returns The converted cheat codes as a multi-line string.
+     */
+    public async convertCheat(codes: string, direction: 'toRaw' | 'toEngine', format?: string): Promise<string> {
+        const command: CommandMessage = {
+            Command:   'CONVERTCHEAT',
+            Data:      codes,
+            Direction: direction,
+            Format:    format,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ConvertCheat failed');
+        }
+        return response.Data ?? '';
     }
 
     /**

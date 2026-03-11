@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using CodeDesigner.Mips64LE.CheatConverter;
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.CheatEngine;
 using CodeDesigner.Mips64LE.Common.Emulator;
@@ -371,6 +372,9 @@ namespace CodeDesigner.Mips64LE
 
                     case "RECOMPILE":
                         return HandleRecompile(command.IsoPath, command.ElfName, command.OutputDirectory);
+
+                    case "CONVERTCHEAT":
+                        return HandleConvertCheat(command.Data, command.Format, command.Direction);
 
                     case "PING":
                         return CreateSuccessResponse("PONG");
@@ -1886,6 +1890,64 @@ namespace CodeDesigner.Mips64LE
             }
         }
 
+        /// <summary>
+        /// Handle CONVERTCHEAT command — converts PS2 cheat codes between raw format
+        /// and a device-specific encrypted format using the CheatConverter module.
+        /// </summary>
+        /// <param name="data">Multi-line cheat code text to convert.</param>
+        /// <param name="format">
+        /// Target cheat engine format name. Recognised values (case-insensitive):
+        /// Raw, ActionReplay1, ActionReplay2, ActionReplayMax, GameSharkV3, CodeBreakerV1, CodeBreakerV7.
+        /// </param>
+        /// <param name="direction">
+        /// Conversion direction: "toRaw" decrypts device codes → raw hex pairs;
+        /// "toEngine" encrypts raw hex pairs → device format.
+        /// </param>
+        private string HandleConvertCheat(string? data, string? format, string? direction)
+        {
+            if (string.IsNullOrWhiteSpace(data))
+                return CreateErrorResponse("No cheat data provided");
+
+            try
+            {
+                // Parse the target format (default to auto-detect when not specified)
+                CheatFormat targetFormat = CheatFormat.Raw;
+                if (!string.IsNullOrWhiteSpace(format))
+                {
+                    if (!Enum.TryParse<CheatFormat>(format, ignoreCase: true, out targetFormat))
+                        return CreateErrorResponse($"Unknown cheat format '{format}'. Valid values: Raw, ActionReplay1, ActionReplay2, ActionReplayMax, GameSharkV3, CodeBreakerV1, CodeBreakerV7");
+                }
+
+                string result;
+                if (string.Equals(direction, "toRaw", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Auto-detect source format and decode to raw, or use specified format
+                    ICheatCodeConverter converter = string.IsNullOrWhiteSpace(format)
+                        ? CheatFormatDetector.CreateConverter(CheatFormatDetector.Detect(data))
+                        : CheatFormatDetector.CreateConverter(targetFormat);
+
+                    var rawCodes = converter.Decode(data);
+                    var rawConverter = new RawConverter();
+                    result = rawConverter.Encode(rawCodes);
+                }
+                else
+                {
+                    // "toEngine": decode from raw then encode to target format
+                    var rawConverter = new RawConverter();
+                    var rawCodes = rawConverter.Decode(data);
+                    var targetConverter = CheatFormatDetector.CreateConverter(targetFormat);
+                    result = targetConverter.Encode(rawCodes);
+                }
+
+                var response = new CommandResponse { Success = true, Command = "CONVERTCHEAT", Data = result };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ConvertCheat error: {ex.Message}");
+            }
+        }
+
 
         /// full hardware reset (equivalent to killing and restarting the process)
         /// without dropping the socket connection.  The run-loop will re-create
@@ -3047,6 +3109,9 @@ namespace CodeDesigner.Mips64LE
         public string? IsoPath { get; set; }
         public string? ElfName { get; set; }
         public string? OutputDirectory { get; set; }
+        // CONVERTCHEAT fields
+        public string? Format { get; set; }
+        public string? Direction { get; set; }
     }
 
     /// <summary>

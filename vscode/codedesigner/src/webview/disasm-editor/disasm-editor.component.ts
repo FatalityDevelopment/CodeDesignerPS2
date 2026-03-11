@@ -29,6 +29,7 @@ import './disasm-editor.css';
     <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
     <button class="header-tool-btn live-only" id="setpc-toggle-btn" title="Set PC to Address (Ctrl+Alt+P)">&#9655; Set PC</button>
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
+    <button class="header-tool-btn" id="converter-btn" title="Cheat Code Converter">&#8645; Converter</button>
 
 </div>
 <div id="goto-panel">
@@ -236,6 +237,43 @@ import './disasm-editor.css';
         <div id="edit-overlay-tab-history" class="edit-overlay-tab-content">
             <div id="edit-overlay-history-list" class="edit-overlay-history-list">
                 <div class="edit-overlay-history-empty">Loading history...</div>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="converter-overlay">
+    <div id="converter-overlay-box">
+        <div id="converter-overlay-header">
+            <span id="converter-overlay-title">&#8645; Cheat Code Converter</span>
+            <button id="converter-overlay-close" title="Close (Escape)">&#xD7;</button>
+        </div>
+        <div id="converter-overlay-body">
+            <div class="converter-overlay-field">
+                <label class="converter-overlay-label" for="converter-input">Input Codes</label>
+                <textarea id="converter-input" class="converter-overlay-textarea" spellcheck="false" placeholder="Paste cheat codes here…"></textarea>
+            </div>
+            <div id="converter-overlay-controls">
+                <div class="converter-overlay-field converter-format-field">
+                    <label class="converter-overlay-label" for="converter-format-select">Cheat Engine &amp; Version</label>
+                    <select id="converter-format-select" class="converter-overlay-select">
+                        <option value="Raw">Raw (unencrypted GameShark / Action Replay)</option>
+                        <option value="ActionReplay1">Action Replay 1 (fixed-seed XOR)</option>
+                        <option value="ActionReplay2">Action Replay 2 / GameShark 2 (DEADFACE XOR)</option>
+                        <option value="ActionReplayMax">Action Replay MAX (DES-like, alphanumeric)</option>
+                        <option value="GameSharkV3">GameShark V3 / Xploder 4 / Xterminator (Mersenne Twister)</option>
+                        <option value="CodeBreakerV1">CodeBreaker V1–6 (seed-table XOR)</option>
+                        <option value="CodeBreakerV7">CodeBreaker V7+ (ARCFOUR + modular-inverse)</option>
+                    </select>
+                </div>
+                <div id="converter-overlay-buttons">
+                    <button id="converter-to-raw-btn" title="Decrypt the input codes to the unencrypted raw format">&#8595; Convert to Raw</button>
+                    <button id="converter-to-engine-btn" title="Encrypt the raw input codes to the selected engine format">&#8593; Convert to Engine</button>
+                </div>
+            </div>
+            <div id="converter-overlay-status" class="converter-overlay-status"></div>
+            <div class="converter-overlay-field">
+                <label class="converter-overlay-label" for="converter-output">Output Codes</label>
+                <textarea id="converter-output" class="converter-overlay-textarea" spellcheck="false" readonly placeholder="Converted codes will appear here…"></textarea>
             </div>
         </div>
     </div>
@@ -721,6 +759,80 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
     editOverlay.addEventListener('click', (e: MouseEvent) => {
       if (e.target === editOverlay) { closeEditOverlay(); }
+    });
+
+    // ── Converter overlay ─────────────────────────────────────────────────────
+    const converterOverlay      = document.getElementById('converter-overlay')!;
+    const converterInput        = document.getElementById('converter-input') as HTMLTextAreaElement;
+    const converterOutput       = document.getElementById('converter-output') as HTMLTextAreaElement;
+    const converterFormatSelect = document.getElementById('converter-format-select') as HTMLSelectElement;
+    const converterToRawBtn     = document.getElementById('converter-to-raw-btn')!;
+    const converterToEngineBtn  = document.getElementById('converter-to-engine-btn')!;
+    const converterOverlayClose = document.getElementById('converter-overlay-close')!;
+    const converterStatus       = document.getElementById('converter-overlay-status')!;
+    const converterBtn          = document.getElementById('converter-btn')!;
+
+    function openConverterOverlay() {
+      converterStatus.textContent = '';
+      converterStatus.className = 'converter-overlay-status';
+      converterOverlay.classList.add('visible');
+      converterInput.focus();
+    }
+
+    function closeConverterOverlay() {
+      converterOverlay.classList.remove('visible');
+    }
+
+    function setConverterStatus(msg: string, isError: boolean) {
+      converterStatus.textContent = msg;
+      converterStatus.className = 'converter-overlay-status' + (isError ? ' converter-status-error' : ' converter-status-ok');
+    }
+
+    async function runConvert(direction: 'toRaw' | 'toEngine') {
+      const codes = converterInput.value.trim();
+      if (!codes) {
+        setConverterStatus('Please enter cheat codes in the input box.', true);
+        return;
+      }
+      const format = converterFormatSelect.value;
+      converterOutput.value = '';
+      setConverterStatus('Converting…', false);
+      converterToRawBtn.setAttribute('disabled', 'true');
+      converterToEngineBtn.setAttribute('disabled', 'true');
+      try {
+        vscode.postMessage({ type: 'convertCheat', codes, direction, format });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setConverterStatus('Error: ' + msg, true);
+        converterToRawBtn.removeAttribute('disabled');
+        converterToEngineBtn.removeAttribute('disabled');
+      }
+    }
+
+    converterBtn.addEventListener('click', openConverterOverlay);
+    converterOverlayClose.addEventListener('click', closeConverterOverlay);
+    converterOverlay.addEventListener('click', (e: MouseEvent) => {
+      if (e.target === converterOverlay) { closeConverterOverlay(); }
+    });
+    converterOverlay.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { closeConverterOverlay(); }
+    });
+    converterToRawBtn.addEventListener('click', () => runConvert('toRaw'));
+    converterToEngineBtn.addEventListener('click', () => runConvert('toEngine'));
+
+    // Handle convertCheatResult message from the provider
+    window.addEventListener('message', (e: MessageEvent) => {
+      const data = e.data as Record<string, unknown>;
+      if (data?.['type'] === 'convertCheatResult') {
+        converterToRawBtn.removeAttribute('disabled');
+        converterToEngineBtn.removeAttribute('disabled');
+        if (data['error']) {
+          setConverterStatus('Error: ' + data['error'], true);
+        } else {
+          converterOutput.value = (data['result'] as string) ?? '';
+          setConverterStatus('Conversion complete.', false);
+        }
+      }
     });
 
     // ── Address helpers ───────────────────────────────────────────────────────

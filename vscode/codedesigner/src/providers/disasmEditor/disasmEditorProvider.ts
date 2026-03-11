@@ -405,6 +405,21 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
           }
         }
+      } else if (message.type === "convertCheat") {
+        if (this.socketClient?.isConnected()) {
+          try {
+            const result = await this.socketClient.convertCheat(
+              message.codes as string,
+              message.direction as 'toRaw' | 'toEngine',
+              message.format as string | undefined);
+            webviewPanel.webview.postMessage({ type: 'convertCheatResult', result });
+          } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            webviewPanel.webview.postMessage({ type: 'convertCheatResult', error: errMsg });
+          }
+        } else {
+          webviewPanel.webview.postMessage({ type: 'convertCheatResult', error: 'Not connected to emulator server' });
+        }
       }
     });
 
@@ -826,6 +841,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     ? this.onGetAddressHistory(message.address as number)
                     : [];
                 panel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
+            } else if (message.type === 'convertCheat') {
+                try {
+                    const result = await this.socketClient!.convertCheat(
+                        message.codes as string,
+                        message.direction as 'toRaw' | 'toEngine',
+                        message.format as string | undefined);
+                    panel.webview.postMessage({ type: 'convertCheatResult', result });
+                } catch (err: unknown) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    panel.webview.postMessage({ type: 'convertCheatResult', error: errMsg });
+                }
             }
         });
 
