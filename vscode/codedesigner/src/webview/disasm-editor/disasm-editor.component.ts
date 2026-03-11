@@ -1849,6 +1849,20 @@ export class DisasmEditorComponent implements AfterViewInit {
                (upLo[i] ?? 0) !== 0 || (upHi[i] ?? 0) !== 0;
       }
 
+      // Returns the CSS category class for the given GPR index, used to colour
+      // register names by their MIPS ABI role so different categories are
+      // visually distinct in the debug panel.
+      function gprCatClass(i: number): string {
+        if (i === 0)                            return 'dbg-reg-zero';   // $zero
+        if (i === 1)                            return 'dbg-reg-at';     // $at
+        if (i >= 2  && i <= 3)                  return 'dbg-reg-v';      // $v0-$v1
+        if (i >= 4  && i <= 7)                  return 'dbg-reg-a';      // $a0-$a3
+        if ((i >= 8 && i <= 15) || i === 24 || i === 25) return 'dbg-reg-t'; // $t0-$t9
+        if (i >= 16 && i <= 23)                 return 'dbg-reg-s';      // $s0-$s7
+        if (i === 26 || i === 27)               return 'dbg-reg-k';      // $k0-$k1
+        return 'dbg-reg-special';                                         // $gp $sp $fp $ra
+      }
+
       // HI/LO are 64-bit on the PS2 EE. We receive them as the lower 32 bits
       // from `regs.hi`/`regs.lo`; the socket client maps them from the ulong
       // field but JavaScript's number type loses precision above 2^53.  For a
@@ -1869,8 +1883,9 @@ export class DisasmEditorComponent implements AfterViewInit {
         const val  = gpr128(i);
         const nz   = gprNz(i);
         const ro   = i === 0;  // $zero is read-only
+        const cat  = gprCatClass(i);
         const editAttr = ro ? '' : ` data-reg-type="GPR" data-reg-idx="${i}"`;
-        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name">${name}</span><span class="dbg-val dbg-qw-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val}</span></div>`;
+        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name ${cat}">${name}</span><span class="dbg-val dbg-qw-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val}</span></div>`;
       }
 
       // ── Inline call-stack trace from stack memory ────────────────────────

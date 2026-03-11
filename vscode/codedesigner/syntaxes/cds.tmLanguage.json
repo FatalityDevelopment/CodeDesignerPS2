@@ -98,8 +98,44 @@
     "registers": {
       "patterns": [
         {
-          "name": "variable.register.gpr.cds",
-          "match": "\\b(zero|at|v[0-1]|a[0-3]|t[0-9]|s[0-7]|k[0-1]|gp|sp|fp|ra)\\b"
+          "comment": "$zero — always-zero constant",
+          "name": "variable.register.zero.cds",
+          "match": "\\bzero\\b"
+        },
+        {
+          "comment": "$at — assembler temporary",
+          "name": "variable.register.at.cds",
+          "match": "\\bat\\b"
+        },
+        {
+          "comment": "$v0/$v1 — function return values",
+          "name": "variable.register.value.cds",
+          "match": "\\bv[01]\\b"
+        },
+        {
+          "comment": "$a0-$a3 — call arguments",
+          "name": "variable.register.arg.cds",
+          "match": "\\ba[0-3]\\b"
+        },
+        {
+          "comment": "$t0-$t9 — caller-saved temporaries",
+          "name": "variable.register.temp.cds",
+          "match": "\\bt[0-9]\\b"
+        },
+        {
+          "comment": "$s0-$s7 — callee-saved registers",
+          "name": "variable.register.saved.cds",
+          "match": "\\bs[0-7]\\b"
+        },
+        {
+          "comment": "$k0/$k1 — kernel-reserved registers",
+          "name": "variable.register.kernel.cds",
+          "match": "\\bk[01]\\b"
+        },
+        {
+          "comment": "$gp/$sp/$fp/$ra — architectural special-purpose registers",
+          "name": "variable.register.special.cds",
+          "match": "\\b(?:gp|sp|fp|ra)\\b"
         },
         {
           "name": "variable.register.numeric.cds",
