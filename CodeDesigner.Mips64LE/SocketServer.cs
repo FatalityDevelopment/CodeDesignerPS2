@@ -2831,31 +2831,39 @@ namespace CodeDesigner.Mips64LE
                 }
 
                 // ── Walk all files looking for ELF / IRX ─────────────────────
+                // Helper: strip the ISO-9660 version suffix (";1", ";2", …).
+                static string StripVersion(string n)
+                {
+                    int s = n.IndexOf(';');
+                    return s >= 0 ? n[..s] : n;
+                }
+
+                // PS2 disc-ID pattern: 4 uppercase letters + '_' + 3 digits + '.' + 2 digits
+                // e.g. SCUS_971.98, SLUS_210.40, SLES_123.45
+                var discIdPattern = new System.Text.RegularExpressions.Regex(
+                    @"^[A-Z]{4}_\d{3}\.\d{2}$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
                 var elfFiles = new List<DiscElfEntry>();
                 foreach (var (discPath, entry) in cdvd.EnumerateFiles())
                 {
-                    string nameUpper = System.IO.Path.GetFileNameWithoutExtension(
-                        entry.Name.TrimEnd(';', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0')
-                            .TrimEnd(';')).ToUpperInvariant();
-                    string extRaw = System.IO.Path.GetExtension(entry.Name);
-                    // Strip version suffix from extension, e.g. ".ELF;1" → ".ELF"
-                    int semiExt = extRaw.IndexOf(';');
-                    string ext = (semiExt >= 0 ? extRaw[..semiExt] : extRaw).ToUpperInvariant();
+                    string cleanName = StripVersion(entry.Name);
+                    string ext       = System.IO.Path.GetExtension(cleanName).ToUpperInvariant();
 
-                    if (ext != ".ELF" && ext != ".IRX")
+                    // Include: explicit .ELF / .IRX files, or PS2 disc-ID executables
+                    // (e.g. SCUS_971.98 has no .ELF extension but is a valid EE ELF).
+                    bool isElf   = ext == ".ELF" || ext == ".IRX";
+                    bool isDiscId = discIdPattern.IsMatch(cleanName);
+                    if (!isElf && !isDiscId)
                         continue;
 
-                    string bareName = System.IO.Path.GetFileName(discPath);
-                    int semiBar = bareName.IndexOf(';');
-                    string bareNameClean = semiBar >= 0 ? bareName[..semiBar] : bareName;
-
                     bool isBootElf = bootElfName != null &&
-                        bareNameClean.Equals(bootElfName, StringComparison.OrdinalIgnoreCase);
+                        cleanName.Equals(bootElfName, StringComparison.OrdinalIgnoreCase);
 
                     elfFiles.Add(new DiscElfEntry
                     {
                         Path      = discPath,
-                        Name      = bareNameClean,
+                        Name      = cleanName,
                         Size      = entry.Size,
                         IsBootElf = isBootElf,
                     });
