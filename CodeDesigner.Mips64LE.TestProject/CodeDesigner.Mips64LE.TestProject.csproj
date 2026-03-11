@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CodeDesigner.Mips64LE.Common\CodeDesigner.Mips64LE.Common.csproj" />
     <ProjectReference Include="..\CodeDesigner.Mips64LE.Recompiler\CodeDesigner.Mips64LE.Recompiler.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Mips64LE.CheatConverter\CodeDesigner.Mips64LE.CheatConverter.csproj" />
   </ItemGroup>
 
   <ItemGroup>
