@@ -249,6 +249,70 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
         }
     }
 
+    // MOVCI - Move Conditional on FP Condition (SPECIAL funct=0x01)
+    // Dispatches to MOVF (tf=0) or MOVT (tf=1) based on rt[0]
+    // rt encoding: bits[4:2]=cc, bit[1]=nd(reserved), bit[0]=tf
+    // PS2 EE only has one FP condition code (CC0 = FCR31 bit 23)
+    public sealed class MOVCI : Instruction<Args_R>
+    {
+        public MOVCI()
+        {
+            Opcode = 0x00;
+            Funct = 0x01;
+            Name = "movci";
+            ArgType = InstrArgType.R;
+            // args[0]=rd, args[1]=rs, args[2]=cc, args[3]=tf (0=MOVF, 1=MOVT)
+            ArgNames = ["rd", "rs", "cc", "tf"];
+            Equation = "if (FCC[cc] == tf) rd = rs";
+            Description = "Move Conditional on FP Condition - MOVF (tf=0) or MOVT (tf=1)";
+        }
+
+        public override void Exec(CpuState cpu, Args_R args)
+        {
+            bool tf = (args.Rt & 1) != 0;                // true=MOVT, false=MOVF
+            bool fcc = cpu.COP1.GetConditionCode();      // PS2 EE: only CC0
+            if (tf == fcc)
+            {
+                cpu.RegsLo[args.Rd] = cpu.RegsLo[args.Rs];
+                cpu.RegsHi[args.Rd] = cpu.RegsHi[args.Rs];
+            }
+        }
+
+        public override string Disasm(Args_R args, uint? pc = null)
+        {
+            bool tf = (args.Rt & 1) != 0;
+            int cc = (args.Rt >> 2) & 0x7;
+            string mnemonic = tf ? "movt" : "movf";
+            return $"{mnemonic} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {cc}";
+        }
+
+        public override uint Asm(int[] args)
+        {
+            // args[0]=rd, args[1]=rs, args[2]=cc, args[3]=tf (0=MOVF, 1=MOVT)
+            int rd = args[0];
+            int rs = args[1];
+            int cc = args.Length > 2 ? args[2] : 0;
+            int tf = args.Length > 3 ? args[3] : 0;
+            int rt = (cc << 2) | (tf & 1);
+            return (uint)(rs << 21 | rt << 16 | rd << 11 | (Funct ?? 0x01));
+        }
+
+        public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
+        {
+            bool tf = (args.Rt & 1) != 0;
+            int cc = (args.Rt >> 2) & 0x7;
+            string mnemonic = tf ? "movt" : "movf";
+            string eq = $"{mnemonic} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {cc}";
+            if (cpu != null)
+            {
+                bool fcc = cpu.COP1.GetConditionCode();
+                bool willMove = tf == fcc;
+                return $"{eq} => FCC0={fcc}, move={willMove}";
+            }
+            return eq;
+        }
+    }
+
     // MFSA - Move From SA register (SPECIAL funct=0x28)
     public sealed class MFSA : Instruction<Args_R>
     {

@@ -93,6 +93,7 @@ namespace CodeDesigner.Mips64LE.Common
             // R-type special instructions
             RegisterR(new MOVZ());
             RegisterR(new MOVN());
+            RegisterR(new MOVCI());  // MOVF/MOVT (funct=0x01)
             // Note: NOP is not registered as it conflicts with SLL (both have opcode=0, funct=0)
             // NOP is just SLL $zero, $zero, 0 which will disassemble as "sll zero, zero, 0"
             RegisterR(new SYNC());

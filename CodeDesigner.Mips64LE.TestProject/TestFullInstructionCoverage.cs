@@ -1217,6 +1217,55 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
+        public void Test_MOVT()
+        {
+            // MOVT $t0, $s0, 0 (cc=0, tf=1) => copy $s0 to $t0 if FCC0==true
+            // Encoding: SPECIAL funct=0x01, rs=$s0(16), rt=(cc<<2)|tf=(0<<2)|1=1, rd=$t0(8)
+            uint enc = (uint)(16 << 21 | 1 << 16 | 8 << 11 | 0x01);
+            AssertDisasm(enc, "movt");
+            // FCC0=false => no move
+            var cpu = MakeCpu(); cpu.COP1.SetConditionCode(false); Exec(cpu, enc);
+            Assert.AreEqual(5UL, cpu.RegsLo[8], "MOVT: $t0 unchanged when FCC0=false");
+            // FCC0=true => move
+            cpu = MakeCpu(); cpu.COP1.SetConditionCode(true); Exec(cpu, enc);
+            Assert.AreEqual(10UL, cpu.RegsLo[8], "MOVT: $t0=$s0=10 when FCC0=true");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_MOVF()
+        {
+            // MOVF $t0, $s0, 0 (cc=0, tf=0) => copy $s0 to $t0 if FCC0==false
+            // Encoding: SPECIAL funct=0x01, rs=$s0(16), rt=(cc<<2)|tf=(0<<2)|0=0, rd=$t0(8)
+            uint enc = (uint)(16 << 21 | 0 << 16 | 8 << 11 | 0x01);
+            AssertDisasm(enc, "movf");
+            // FCC0=true => no move
+            var cpu = MakeCpu(); cpu.COP1.SetConditionCode(true); Exec(cpu, enc);
+            Assert.AreEqual(5UL, cpu.RegsLo[8], "MOVF: $t0 unchanged when FCC0=true");
+            // FCC0=false => move
+            cpu = MakeCpu(); cpu.COP1.SetConditionCode(false); Exec(cpu, enc);
+            Assert.AreEqual(10UL, cpu.RegsLo[8], "MOVF: $t0=$s0=10 when FCC0=false");
+            AssertAnalysis(enc);
+        }
+
+        [TestMethod]
+        public void Test_MOVT_KnownEncodings()
+        {
+            // Verify the two specific encodings from the issue are recognised as movt
+            var (obj1, _) = MipsDisassembler.GetInstructionObject(0x00430081u);
+            Assert.IsNotNull(obj1, "0x00430081 must be decoded");
+            Assert.AreEqual("movt zero, v0, 0",
+                MipsDisassembler.Disassemble(0x00430081u),
+                "0x00430081 should disassemble to 'movt zero, v0, 0'");
+
+            var (obj2, _) = MipsDisassembler.GetInstructionObject(0x00030001u);
+            Assert.IsNotNull(obj2, "0x00030001 must be decoded");
+            Assert.AreEqual("movt zero, zero, 0",
+                MipsDisassembler.Disassemble(0x00030001u),
+                "0x00030001 should disassemble to 'movt zero, zero, 0'");
+        }
+
+        [TestMethod]
         public void Test_NOP()
         {
             uint enc = 0x00000000u;
