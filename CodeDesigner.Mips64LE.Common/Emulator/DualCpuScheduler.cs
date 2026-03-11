@@ -164,12 +164,12 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
             TotalEeSteps++;
 
             // Check whether the new PC lands on a registered breakpoint.
-            // Normalize KSEG1 (0xA0000000–0xBFFFFFFF) to its KSEG0 equivalent
-            // (0x80000000–0x9FFFFFFF) so that breakpoints stored under either
-            // form fire correctly regardless of which segment the CPU jumped to.
+            // Normalize to physical so that breakpoints stored as physical
+            // addresses (as set from the live disassembly panels) fire correctly
+            // regardless of which virtual alias (KSEG0, KSEG1) the CPU uses.
             if (Breakpoints.Count > 0)
             {
-                uint newPc = NormalizeToKseg0((uint)(EE.Cpu.PC & 0xFFFFFFFFUL));
+                uint newPc = NormalizeToPhysical((uint)(EE.Cpu.PC & 0xFFFFFFFFUL));
                 if (Breakpoints.Contains(newPc))
                     LastBreakpointHit = newPc;
             }
@@ -653,12 +653,11 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
                 // the standard debugger behaviour ("break before executing X").
                 if (Breakpoints.Count > 0)
                 {
-                    // Normalize KSEG1 (0xA0000000–0xBFFFFFFF) to its KSEG0 equivalent
-                    // (0x80000000–0x9FFFFFFF) before checking against stored breakpoints.
-                    // Breakpoints are always stored in KSEG0 form (set via HandleSetBreakpoint
-                    // which normalizes the input), so this ensures the check fires even when
-                    // the internal EE PC is currently in the KSEG1 window (e.g. 0xBFC00000).
-                    uint eePc = NormalizeToKseg0((uint)(EE.Cpu.PC & 0xFFFFFFFFUL));
+                    // Normalize to physical so that breakpoints stored as physical
+                    // addresses (as set from the live disassembly panels) fire
+                    // correctly regardless of which virtual alias (KSEG0, KSEG1,
+                    // or KUSEG) the CPU is executing from.
+                    uint eePc = NormalizeToPhysical((uint)(EE.Cpu.PC & 0xFFFFFFFFUL));
 
                     if (Breakpoints.Contains(eePc))
                     {
@@ -787,17 +786,20 @@ namespace CodeDesigner.Mips64LE.Common.Emulator
         // ── Address normalization ──────────────────────────────────────────────
 
         /// <summary>
-        /// Normalize a virtual EE address to its KSEG0 representation.
-        /// KSEG1 (0xA0000000–0xBFFFFFFF, uncached) is remapped to the equivalent
-        /// KSEG0 address (0x80000000–0x9FFFFFFF, cached). Both regions map to
-        /// the same physical memory; using KSEG0 as the canonical form makes
-        /// breakpoint comparisons and PC display consistent for the client.
+        /// Normalize a virtual EE address to its physical representation.
+        /// KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1 (0xA0000000–0xBFFFFFFF) both
+        /// strip the top 3 bits to yield the physical address (0x00000000–0x1FFFFFFF).
+        /// KUSEG addresses and PS2-specific regions such as scratchpad (0x70000000)
+        /// pass through unchanged.  Using physical addresses as the canonical form
+        /// for breakpoints means that breakpoints set from the live disassembly
+        /// panels — which display physical base addresses — fire correctly
+        /// regardless of which virtual alias (KSEG0, KSEG1, or KUSEG) the CPU uses.
         /// </summary>
-        private static uint NormalizeToKseg0(uint vaddr)
+        private static uint NormalizeToPhysical(uint vaddr)
         {
-            // KSEG1: bits[31:29] == 101 (0xA0000000–0xBFFFFFFF)
-            if ((vaddr & 0xE0000000u) == 0xA0000000u)
-                return (vaddr & 0x1FFFFFFFu) | 0x80000000u;
+            // KSEG0 (0x80000000–0x9FFFFFFF) or KSEG1 (0xA0000000–0xBFFFFFFF)
+            if (vaddr >= 0x80000000u && vaddr <= 0xBFFFFFFFu)
+                return vaddr & 0x1FFFFFFFu;
             return vaddr;
         }
     }

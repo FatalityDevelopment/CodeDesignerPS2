@@ -1301,15 +1301,33 @@ namespace CodeDesigner.Mips64LE
         /// Normalize a virtual EE address to its KSEG0 representation.
         /// KSEG1 (0xA0000000–0xBFFFFFFF, uncached) is remapped to the equivalent
         /// KSEG0 address (0x80000000–0x9FFFFFFF, cached) so that all PC values
-        /// and breakpoint addresses presented to the client are consistent and use
-        /// the 0x8xxxxxxx / 0x9xxxxxxx form regardless of which segment the CPU
-        /// is physically executing from.
+        /// presented to the client are consistent and use the 0x8xxxxxxx /
+        /// 0x9xxxxxxx form regardless of which segment the CPU is executing from.
         /// </summary>
         private static uint NormalizePcToKseg0(uint vaddr)
         {
             // KSEG1: bits[31:29] == 101 (0xA0000000–0xBFFFFFFF)
             if ((vaddr & 0xE0000000u) == 0xA0000000u)
                 return (vaddr & 0x1FFFFFFFu) | 0x80000000u;
+            return vaddr;
+        }
+
+        /// <summary>
+        /// Normalize a virtual EE address to its physical representation for
+        /// breakpoint storage.  KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1
+        /// (0xA0000000–0xBFFFFFFF) both strip the top 3 bits to yield the
+        /// physical address.  Physical addresses (from the live disassembly panels
+        /// which display EE Main RAM at 0x00000000 and BIOS ROM at 0x1FC00000) and
+        /// KUSEG user-mode addresses pass through unchanged.
+        /// Using physical addresses as the canonical form ensures that a breakpoint
+        /// set from the disassembly panel fires correctly regardless of which
+        /// virtual alias the CPU uses at runtime.
+        /// </summary>
+        private static uint NormalizeBreakpointToPhysical(uint vaddr)
+        {
+            // KSEG0 (0x80000000–0x9FFFFFFF) or KSEG1 (0xA0000000–0xBFFFFFFF)
+            if (vaddr >= 0x80000000u && vaddr <= 0xBFFFFFFFu)
+                return vaddr & 0x1FFFFFFFu;
             return vaddr;
         }
 
@@ -1322,7 +1340,7 @@ namespace CodeDesigner.Mips64LE
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (address == null)
                 return CreateErrorResponse("BreakpointAddress is required for SETBP");
-            uint normalized = NormalizePcToKseg0(address.Value);
+            uint normalized = NormalizeBreakpointToPhysical(address.Value);
             Scheduler.Breakpoints.Add(normalized);
             return CreateSuccessResponse($"Breakpoint set at 0x{normalized:X8}");
         }
@@ -1336,7 +1354,7 @@ namespace CodeDesigner.Mips64LE
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (address == null)
                 return CreateErrorResponse("BreakpointAddress is required for CLEARBP");
-            uint normalized = NormalizePcToKseg0(address.Value);
+            uint normalized = NormalizeBreakpointToPhysical(address.Value);
             Scheduler.Breakpoints.Remove(normalized);
             return CreateSuccessResponse($"Breakpoint cleared at 0x{normalized:X8}");
         }

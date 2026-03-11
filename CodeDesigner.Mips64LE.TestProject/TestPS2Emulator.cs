@@ -986,9 +986,9 @@ namespace CodeDesigner.Mips64LE.TestProject
         }
 
         [TestMethod]
-        public void DualCpuScheduler_Breakpoint_Kseg0_FiresWhenPcIsKseg1()
+        public void DualCpuScheduler_Breakpoint_Physical_FiresWhenPcIsKseg1()
         {
-            // Breakpoint stored as KSEG0 address (0x9FC00010) must fire when the
+            // Breakpoint stored as physical address (0x1FC00010) must fire when the
             // internal EE PC lands on the KSEG1 alias (0xBFC00010) — both map to
             // the same physical BIOS ROM byte.
             var sched = new DualCpuScheduler();
@@ -1003,28 +1003,28 @@ namespace CodeDesigner.Mips64LE.TestProject
             sched.EE.Cpu.PC = 0xBFC00010UL;
             sched.Paused = true;
 
-            // Set breakpoint using the KSEG0 form of the address.
-            sched.Breakpoints.Add(0x9FC00010u);
+            // Set breakpoint using the physical form of the address.
+            sched.Breakpoints.Add(0x1FC00010u);
 
             // StepOne: executes one NOP and then checks whether new PC hits a BP.
-            // The BP is set one instruction ahead (0x9FC00014 ≡ 0xBFC00014);
+            // The BP is set one instruction ahead (physical 0x1FC00014 ≡ KSEG1 0xBFC00014);
             // so first step advances to 0xBFC00014 — set BP there too.
-            sched.Breakpoints.Add(0x9FC00014u);
+            sched.Breakpoints.Add(0x1FC00014u);
             sched.StepOne();
 
-            // After the step the new PC should be the KSEG0-normalized form.
+            // After the step the new PC should be the physical-normalized form.
             Assert.IsNotNull(sched.LastBreakpointHit,
-                "LastBreakpointHit must be set when the KSEG0-normalized PC matches a stored breakpoint");
-            Assert.AreEqual(0x9FC00014u, sched.LastBreakpointHit,
-                "LastBreakpointHit must be the KSEG0-normalized form of 0xBFC00014");
+                "LastBreakpointHit must be set when the physical PC matches a stored breakpoint");
+            Assert.AreEqual(0x1FC00014u, sched.LastBreakpointHit,
+                "LastBreakpointHit must be the physical form of 0xBFC00014");
         }
 
         [TestMethod]
-        public void DualCpuScheduler_Breakpoint_Kseg1Input_NormalizedToKseg0()
+        public void DualCpuScheduler_Breakpoint_Kseg0Input_NormalizedToPhysical()
         {
-            // A breakpoint added directly as a KSEG1 address fires when the
-            // PC lands on it via KSEG0 after NormalizePcToKseg0 canonicalizes both.
-            // This tests that the KSEG0-normalization is symmetric.
+            // A breakpoint added as a KSEG0 address fires when the
+            // PC lands on it via KSEG1 after NormalizeToPhysical canonicalises both.
+            // This tests that the physical-normalization is symmetric across virtual aliases.
             var sched = new DualCpuScheduler();
 
             sched.EE.Bus.Bios[0x20] = 0x00;
@@ -1035,14 +1035,50 @@ namespace CodeDesigner.Mips64LE.TestProject
             sched.EE.Cpu.PC = 0xBFC00020UL; // KSEG1
             sched.Paused = true;
 
-            // Add breakpoint at next instruction (KSEG0 form — as SocketServer.HandleSetBreakpoint would store it).
-            sched.Breakpoints.Add(0x9FC00024u);
+            // Add breakpoint using the KSEG0 form — HandleSetBreakpoint normalises it
+            // to physical (0x9FC00024 → 0x1FC00024) before storing, but here we add it
+            // directly in the same physical form the scheduler expects.
+            sched.Breakpoints.Add(0x1FC00024u);
             sched.StepOne();
 
             Assert.IsNotNull(sched.LastBreakpointHit,
-                "Breakpoint at KSEG0 0x9FC00024 must fire when PC arrives at KSEG1 0xBFC00024");
-            Assert.AreEqual(0x9FC00024u, sched.LastBreakpointHit.Value,
-                "LastBreakpointHit must be returned as KSEG0-normalized 0x9FC00024");
+                "Breakpoint at physical 0x1FC00024 must fire when PC arrives at KSEG1 0xBFC00024");
+            Assert.AreEqual(0x1FC00024u, sched.LastBreakpointHit.Value,
+                "LastBreakpointHit must be returned as physical 0x1FC00024");
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_Breakpoint_PhysicalRam_FiresWhenPcIsKseg0()
+        {
+            // Regression test for the physical-address breakpoint bug: the live
+            // disassembly panel displays EE Main RAM at physical base 0x00000000.
+            // Breakpoints set from that panel arrive as physical addresses (e.g. 0x00010000).
+            // They must fire even though the CPU runs from the KSEG0 alias (0x80010000).
+            var sched = new DualCpuScheduler();
+
+            // Place two NOPs in EE Main RAM so the instruction fetch succeeds.
+            uint addr = 0x00010000u;
+            sched.EE.Bus.Ram[addr]     = 0x00; // NOP word at physical 0x00010000
+            sched.EE.Bus.Ram[addr + 1] = 0x00;
+            sched.EE.Bus.Ram[addr + 2] = 0x00;
+            sched.EE.Bus.Ram[addr + 3] = 0x00;
+            sched.EE.Bus.Ram[addr + 4] = 0x00; // NOP word at physical 0x00010004
+            sched.EE.Bus.Ram[addr + 5] = 0x00;
+            sched.EE.Bus.Ram[addr + 6] = 0x00;
+            sched.EE.Bus.Ram[addr + 7] = 0x00;
+
+            // Start from the KSEG0 alias.
+            sched.EE.Cpu.PC = (ulong)(addr | 0x80000000u); // 0x80010000
+            sched.Paused = true;
+
+            // Set breakpoint using the physical address — exactly as the panel would.
+            sched.Breakpoints.Add(addr + 4); // physical 0x00010004
+            sched.StepOne();
+
+            Assert.IsNotNull(sched.LastBreakpointHit,
+                "Physical breakpoint 0x00010004 must fire when KSEG0 PC arrives at 0x80010004");
+            Assert.AreEqual(addr + 4, sched.LastBreakpointHit.Value,
+                "LastBreakpointHit must be the physical address 0x00010004");
         }
 
         // =====================================================================
