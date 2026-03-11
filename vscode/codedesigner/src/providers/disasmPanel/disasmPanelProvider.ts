@@ -63,6 +63,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private selectedGamePath: string = '';
     private selectedGameName: string = '';
     private _paused: boolean = false;
+    /** Set to true by handleRun() so that onSocketConnected() resumes the emulator. */
+    private _resumeOnConnect: boolean = false;
     private _activeCdsFilePath: string = '';
     private _activeCdsContent: string = '';
     /** Diagnostic collection for CDS compilation errors — shows red squiggles in the editor. */
@@ -364,7 +366,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.spawnAndConnect(emulatorPath, biosPath, gamePath);
     }
 
-    /** Launch the emulator in a VS Code terminal tab and, once the server is up, connect. */
+    /** Launch the emulator in a VS Code terminal tab and, once the server is up, connect and resume. */
     private handleRun(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
 
@@ -378,6 +380,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         out.show(true);
+
+        // If already connected, just register breakpoints and resume immediately.
+        if (this.socketClient.isConnected()) {
+            this._registerBreakpointsAndResume(true);
+            return;
+        }
+
+        // Not yet connected — spawn the emulator and resume once the socket connects.
+        this._resumeOnConnect = true;
         this.spawnAndConnect(emulatorPath, biosPath, gamePath);
     }
 
@@ -497,13 +508,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         try {
             if (this._paused) {
                 await this.socketClient.resume();
-                this._paused = false;
+                this._setPauseState(false);
             } else {
                 await this.socketClient.pause();
-                this._paused = true;
+                this._setPauseState(true);
             }
-            this.webview?.postMessage({ command: 'paused', paused: this._paused });
-            this.editorProvider.notifyPauseState(this._paused);
         } catch (err: any) {
             out.error(`Pause/Resume failed: ${err?.message ?? err}`);
         }
@@ -512,10 +521,22 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
      * Called by DisasmEditorProvider when the emulator's pause state changes
      * (e.g. a breakpoint was hit).  Updates the sidebar status bar accordingly.
+     * Does NOT call back into editorProvider to avoid circular notifications.
      */
     public notifyPauseState(paused: boolean): void {
         this._paused = paused;
         this.webview?.postMessage({ command: 'paused', paused });
+    }
+
+    /**
+     * Update the internal pause flag, post a 'paused' message to the webview,
+     * and notify all live disasm editor panels — all three in sync.
+     * Use this whenever the panel itself drives a pause-state change.
+     */
+    private _setPauseState(paused: boolean): void {
+        this._paused = paused;
+        this.webview?.postMessage({ command: 'paused', paused });
+        this.editorProvider.notifyPauseState(paused);
     }
 
     /**
@@ -566,13 +587,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * Re-sends every breakpoint the user has set (tracked in the extension process,
-     * not the Angular webview) to the C# server, then sends RESUME.
+     * not the Angular webview) to the C# server, then optionally sends RESUME.
      *
      * Because each SETBP is awaited, the server has processed all of them before
      * RESUME arrives — the emulator is guaranteed to start with all BPs armed.
      * This replaces the fragile fixed-delay approach that raced Angular bootstrap.
+     *
+     * @param shouldResume Whether to resume emulator execution after registering BPs.
+     *   Pass false to register BPs while keeping the emulator paused (e.g. on connect).
+     *   Pass true (default) after the user clicks Run or after a Restart.
      */
-    private async _registerBreakpointsAndResume(): Promise<void> {
+    private async _registerBreakpointsAndResume(shouldResume: boolean = true): Promise<void> {
         const out = getOutputChannel();
         if (!this.socketClient.isConnected()) { return; }
         const bps = this.editorProvider.getKnownBreakpoints();
@@ -588,13 +613,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (bps.size > 0) {
             out.info(`Registered ${bps.size} breakpoint(s) on server.`);
         }
-        this.socketClient.resume().catch((err: any) => {
-            // Ignore "already running" responses; log anything unexpected.
-            const msg: string = err?.message ?? String(err);
-            if (!msg.toLowerCase().includes('already')) {
-                out.warn(`Resume after BP registration: ${msg}`);
-            }
-        });
+        if (shouldResume) {
+            this.socketClient.resume().catch((err: any) => {
+                // Ignore "already running" responses; log anything unexpected.
+                const msg: string = err?.message ?? String(err);
+                if (!msg.toLowerCase().includes('already')) {
+                    out.warn(`Resume after BP registration: ${msg}`);
+                }
+            });
+            this._setPauseState(false);
+        }
     }
 
     // ── Import Binary ─────────────────────────────────────────────────────────
@@ -1140,18 +1168,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
      * Called when the socket connects (including auto-connect on VS Code startup).
      * Opens live memory views for all regions, reusing any already-open panels.
+     * The emulator is left paused — call Resume or click ▶ Run to start execution.
      */
     public async onSocketConnected(): Promise<void> {
-        this._paused = false;
+        this._setPauseState(true);
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
         for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
-        // The emulator starts paused.  Re-register every breakpoint the user has
-        // set (tracked in the extension process, no Angular roundtrip needed), then
-        // immediately resume.  Because the SETBP commands are awaited, the server
-        // has acknowledged all of them before RESUME is sent — no timing dependency.
-        await this._registerBreakpointsAndResume();
+        // Register any existing breakpoints on the server.
+        // Only resume if handleRun() set the flag (i.e. the user explicitly clicked Run).
+        const shouldResume = this._resumeOnConnect;
+        this._resumeOnConnect = false;
+        await this._registerBreakpointsAndResume(shouldResume);
     }
 
     /**
