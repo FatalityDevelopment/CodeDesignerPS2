@@ -837,20 +837,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 'utf-8'
             );
 
-            // Record in the panel's snapshot list
-            const entry: SnapshotEntry = {
-                label:     safeName,
-                name:      safeName,
-                timestamp: new Date().toLocaleTimeString(),
-                path:      snapshotsDir,
-                date:      dateStr,
-                isoName,
-            };
-            this.snapshots.unshift(entry);
-            this.webview?.postMessage({
-                command:   'updateSnapshots',
-                snapshots: this.snapshots,
-            });
+            // Re-scan the snapshots directory so the list reflects what is
+            // actually on disk (handles externally deleted snapshots too).
+            this.loadSnapshotsForGame(isoName);
         } catch (err: any) {
             out.error(`Snapshot failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Snapshot failed: ${err?.message ?? err}`);
