@@ -490,22 +490,24 @@ body {
 }
 
 /* ── GPR register category colours ── */
+/* Applied to .dbg-name spans in the debug panel and inline <span> elements   */
+/* injected by colorizeRegisters() in the disassembler args column.            */
 /* $zero — always-zero, muted */
-.dbg-name.dbg-reg-zero   { color: var(--vscode-disabledForeground, #858585); }
+.dbg-reg-zero   { color: var(--vscode-disabledForeground, #858585); }
 /* $at — assembler temporary, amber caution */
-.dbg-name.dbg-reg-at     { color: var(--vscode-editorWarning-foreground, #cca700); }
+.dbg-reg-at     { color: var(--vscode-editorWarning-foreground, #cca700); }
 /* $v0/$v1 — function return values, number/value green */
-.dbg-name.dbg-reg-v      { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
+.dbg-reg-v      { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
 /* $a0-$a3 — call arguments, string/parameter orange */
-.dbg-name.dbg-reg-a      { color: var(--vscode-debugTokenExpression-string, #ce9178); }
+.dbg-reg-a      { color: var(--vscode-debugTokenExpression-string, #ce9178); }
 /* $t0-$t9 — temporaries, function-name yellow */
-.dbg-name.dbg-reg-t      { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
+.dbg-reg-t      { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
 /* $s0-$s7 — saved (callee-saved), variable blue */
-.dbg-name.dbg-reg-s      { color: var(--vscode-debugTokenExpression-name, #9cdcfe); }
+.dbg-reg-s      { color: var(--vscode-debugTokenExpression-name, #9cdcfe); }
 /* $k0/$k1 — kernel-reserved, error red */
-.dbg-name.dbg-reg-k      { color: var(--vscode-debugTokenExpression-error, #f48771); }
+.dbg-reg-k      { color: var(--vscode-debugTokenExpression-error, #f48771); }
 /* $gp/$sp/$fp/$ra — architectural specials, type-param teal */
-.dbg-name.dbg-reg-special { color: var(--vscode-symbolIcon-typeParameterForeground, #4ec9b0); }
+.dbg-reg-special { color: var(--vscode-symbolIcon-typeParameterForeground, #4ec9b0); }
 
 .dbg-addr {
     color: #c586c0;

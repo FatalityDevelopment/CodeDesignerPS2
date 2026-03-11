@@ -1108,9 +1108,56 @@ export class DisasmEditorComponent implements AfterViewInit {
       return `${before}<span class="${highlightClass}">${highlighted}</span>${after}`;
     }
 
+    // Maps a GPR index (0-31) to the CSS category class used both in the debug
+    // panel (.dbg-name spans) and in the disassembler args column (inline spans).
+    function gprCatClass(i: number): string {
+      if (i === 0)                                      return 'dbg-reg-zero';    // $zero
+      if (i === 1)                                      return 'dbg-reg-at';      // $at
+      if (i >= 2  && i <= 3)                            return 'dbg-reg-v';       // $v0-$v1
+      if (i >= 4  && i <= 7)                            return 'dbg-reg-a';       // $a0-$a3
+      if ((i >= 8 && i <= 15) || i === 24 || i === 25) return 'dbg-reg-t';       // $t0-$t9
+      if (i >= 16 && i <= 23)                           return 'dbg-reg-s';       // $s0-$s7
+      if (i === 26 || i === 27)                         return 'dbg-reg-k';       // $k0-$k1
+      return 'dbg-reg-special';                                                    // $gp $sp $fp $ra
+    }
+
+    // Maps a bare GPR name (as produced by the disassembler) to its category
+    // CSS class.  Returns undefined for names that are not GPRs.
+    const GPR_NAME_TO_CAT: Readonly<Record<string, string>> = (() => {
+      const map: Record<string, string> = {};
+      const names = [
+        'zero','at','v0','v1','a0','a1','a2','a3',
+        't0','t1','t2','t3','t4','t5','t6','t7',
+        's0','s1','s2','s3','s4','s5','s6','s7',
+        't8','t9','k0','k1','gp','sp','fp','ra',
+      ];
+      names.forEach((n, i) => { map[n] = gprCatClass(i); });
+      return map;
+    })();
+
+    // Regex that matches a GPR register name optionally preceded by a '$' sign,
+    // at a word boundary, handling both forms emitted by the disassembler and
+    // written in CDS source ('zero' / '$zero', 't0' / '$t0', etc.).
+    // Longer/more-specific names are listed first to avoid partial matches.
+    const GPR_REGEX = /\$?(zero|at|v[01]|a[0-3]|t[0-9]|s[0-7]|k[01]|gp|sp|fp|ra)(?![A-Za-z0-9_])/g;
+
+    // Wraps each GPR register token in `text` with a <span> carrying the
+    // appropriate category colour class.  Safe to call on plain disassembler
+    // text that does not yet contain any HTML.
+    function colorizeRegisters(text: string): string {
+      if (!text) { return text; }
+      return text.replace(GPR_REGEX, (match, name) => {
+        const cls = GPR_NAME_TO_CAT[name];
+        if (!cls) { return match; }
+        const dollar = match.startsWith('$') ? '$' : '';
+        return `<span class="${cls}">${dollar}${name}</span>`;
+      });
+    }
+
     function buildDisasmRowHtml(r: DisasmRow, globalIndex: number): string {
       const branchMatch = r.args.match(/^(.*\$[0-9A-F]{8})\s*(\([+-]\d+[▼▲]\))(.*)$/);
       let args = branchMatch ? `${branchMatch[1]} <span style="color:#6a9955">${branchMatch[2]}</span>${branchMatch[3]}` : r.args;
+      args = colorizeRegisters(args);
       const addr    = highlightSearchInText(r.addr, globalIndex, 'addr');
       const bytes   = highlightSearchInText(r.bytes, globalIndex, 'bytes');
       const label   = highlightSearchInText(r.label || '', globalIndex, 'label');
@@ -1847,20 +1894,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       function gprNz(i: number): boolean {
         return (lo32[i] ?? 0) !== 0 || (hi32[i] ?? 0) !== 0 ||
                (upLo[i] ?? 0) !== 0 || (upHi[i] ?? 0) !== 0;
-      }
-
-      // Returns the CSS category class for the given GPR index, used to colour
-      // register names by their MIPS ABI role so different categories are
-      // visually distinct in the debug panel.
-      function gprCatClass(i: number): string {
-        if (i === 0)                            return 'dbg-reg-zero';   // $zero
-        if (i === 1)                            return 'dbg-reg-at';     // $at
-        if (i >= 2  && i <= 3)                  return 'dbg-reg-v';      // $v0-$v1
-        if (i >= 4  && i <= 7)                  return 'dbg-reg-a';      // $a0-$a3
-        if ((i >= 8 && i <= 15) || i === 24 || i === 25) return 'dbg-reg-t'; // $t0-$t9
-        if (i >= 16 && i <= 23)                 return 'dbg-reg-s';      // $s0-$s7
-        if (i === 26 || i === 27)               return 'dbg-reg-k';      // $k0-$k1
-        return 'dbg-reg-special';                                         // $gp $sp $fp $ra
       }
 
       // HI/LO are 64-bit on the PS2 EE. We receive them as the lower 32 bits
