@@ -69,6 +69,8 @@ interface InitMsg {
   snapshots: SnapshotEntry[];
   connectedEmulatorPath?: string;
   selectedGameName?: string;
+  isConnected?: boolean;
+  isPaused?: boolean;
 }
 
 @Component({
@@ -235,6 +237,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         if (msg.snapshots !== undefined) { this.snapshots = msg.snapshots; }
         if (msg.connectedEmulatorPath) { this.selectedEmulator = msg.connectedEmulatorPath; }
         if (msg.selectedGameName !== undefined) { this.currentGameName = msg.selectedGameName; }
+        // Restore connection/pause state so the UI is correct if the sidebar
+        // opens after auto-connect has already succeeded.
+        if (msg.isConnected !== undefined) { this.isConnected = msg.isConnected; }
+        if (msg.isPaused    !== undefined) { this.isPaused    = msg.isPaused;    }
       }),
       this.bridge.on<CheatsAppliedMsg>('cheatsApplied').subscribe(msg => {
         this.cheatError   = !msg.success;
