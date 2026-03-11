@@ -77,7 +77,53 @@
         "scopeName": "source.cds",
         "path": "./syntaxes/cds.tmLanguage.json"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "variable.register.zero.cds",
+            "settings": { "foreground": "#858585" }
+          },
+          {
+            "scope": "variable.register.at.cds",
+            "settings": { "foreground": "#cca700" }
+          },
+          {
+            "scope": "variable.register.value.cds",
+            "settings": { "foreground": "#b5cea8" }
+          },
+          {
+            "scope": "variable.register.arg.cds",
+            "settings": { "foreground": "#ce9178" }
+          },
+          {
+            "scope": "variable.register.temp.cds",
+            "settings": { "foreground": "#dcdcaa" }
+          },
+          {
+            "scope": "variable.register.saved.cds",
+            "settings": { "foreground": "#9cdcfe" }
+          },
+          {
+            "scope": "variable.register.kernel.cds",
+            "settings": { "foreground": "#f48771" }
+          },
+          {
+            "scope": "variable.register.special.cds",
+            "settings": { "foreground": "#4ec9b0" }
+          },
+          {
+            "scope": "variable.register.fpu.cds",
+            "settings": { "foreground": "#b5cea8" }
+          },
+          {
+            "scope": "variable.register.numeric.cds",
+            "settings": { "foreground": "#9cdcfe" }
+          }
+        ]
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
