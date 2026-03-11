@@ -1,4 +1,4 @@
-namespace CodeDesigner.Mips64LE.Common.CheatEngine.Converter
+namespace CodeDesigner.Mips64LE.CheatConverter
 {
     /// <summary>
     /// A single decoded PS2 memory-write cheat entry in raw (unencrypted) form.

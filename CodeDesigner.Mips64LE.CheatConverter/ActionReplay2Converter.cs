@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace CodeDesigner.Mips64LE.Common.CheatEngine.Converter
+namespace CodeDesigner.Mips64LE.CheatConverter
 {
     /// <summary>
     /// Converter for the <b>Action Replay 1 &amp; 2 / GameShark 2</b> PS2 cheat code format.

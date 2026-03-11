@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace CodeDesigner.Mips64LE.Common.CheatEngine.Converter
+namespace CodeDesigner.Mips64LE.CheatConverter
 {
     /// <summary>
     /// Lists the cheat code formats that <see cref="CheatFormatDetector"/> and the

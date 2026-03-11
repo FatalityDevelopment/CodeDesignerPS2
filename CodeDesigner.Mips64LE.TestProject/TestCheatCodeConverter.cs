@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using CodeDesigner.Mips64LE.Common.CheatEngine.Converter;
+using CodeDesigner.Mips64LE.CheatConverter;
 
 namespace CodeDesigner.Mips64LE.TestProject
 {

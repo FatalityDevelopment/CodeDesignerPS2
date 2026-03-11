@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace CodeDesigner.Mips64LE.Common.CheatEngine.Converter
+namespace CodeDesigner.Mips64LE.CheatConverter
 {
     /// <summary>
     /// Converts PS2 cheat codes between a device-specific format and the canonical
