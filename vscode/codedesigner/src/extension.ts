@@ -105,6 +105,9 @@ export function activate(context: vscode.ExtensionContext) {
 	socketClient.onDisconnected(() => {
 		outputChannel.warn('Disconnected from C# server');
 		vscode.window.showWarningMessage('Disconnected from C# server');
+		// Update the sidebar status bar to STOPPED so the user knows the
+		// connection dropped (covers server crashes / unexpected disconnects).
+		disasmPanelProvider.notifyDisconnected();
 	});
 
 	// Register commands for socket communication

@@ -420,10 +420,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         terminal.show(true);          // reveal but keep editor focus
 
         this.emulatorTerminal = terminal;
-        this.webview?.postMessage({ command: 'connectionStatus', connected: true });
 
         // After the emulator starts the embedded socket server, connect the
         // socket client and open a live memory view for every region.
+        // Do NOT send connectionStatus:true here — send it only once the socket
+        // actually connects (via onSocketConnected / onConnected event) so the
+        // sidebar shows the real connection state and not a premature "LIVE".
         this.connectSocketAndOpenViews();
     }
 
@@ -469,6 +471,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.emulatorTerminal = undefined;
         this._paused = false;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
+    }
+
+    /**
+     * Called when the socket disconnects unexpectedly (server crash / network drop).
+     * Updates the sidebar status bar to STOPPED so the user knows the connection
+     * is gone even without manually clicking Disconnect.
+     *
+     * NOTE: this is NOT called for deliberate disconnects (user clicking the
+     * Connect/Disconnect toggle) because SocketClient.disconnect() sets
+     * wasConnected=false before destroying the socket, which prevents the
+     * disconnectionHandlers from firing.  Deliberate disconnects are handled
+     * inline in handleConnect() which calls cleanupProcess() directly.
+     */
+    public notifyDisconnected(): void {
+        this.cleanupProcess();
     }
 
     /** Toggle emulator pause/resume via the socket connection. */
