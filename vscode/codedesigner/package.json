@@ -37,6 +37,11 @@
           "type": "webview",
           "id": "disasm.disasmPanel",
           "name": "Emulator"
+        },
+        {
+          "type": "tree",
+          "id": "disasm.pointerManager",
+          "name": "Pointer Manager"
         }
       ]
     },
@@ -60,8 +65,74 @@
       {
         "command": "codedesigner.recompile",
         "title": "CodeDesigner: Recompile Game ELF from Disc"
+      },
+      {
+        "command": "codedesigner.pointerManager.addPointer",
+        "title": "Add Pointer",
+        "icon": "$(add)"
+      },
+      {
+        "command": "codedesigner.pointerManager.addChildLabel",
+        "title": "Add Child Label",
+        "icon": "$(add)"
+      },
+      {
+        "command": "codedesigner.pointerManager.editNode",
+        "title": "Edit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "codedesigner.pointerManager.deleteNode",
+        "title": "Delete",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "codedesigner.pointerManager.goToAddress",
+        "title": "Go to Address",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "codedesigner.pointerManager.refresh",
+        "title": "Refresh Pointer Manager",
+        "icon": "$(refresh)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "codedesigner.pointerManager.addPointer",
+          "when": "view == disasm.pointerManager",
+          "group": "navigation"
+        },
+        {
+          "command": "codedesigner.pointerManager.refresh",
+          "when": "view == disasm.pointerManager",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codedesigner.pointerManager.addChildLabel",
+          "when": "view == disasm.pointerManager && viewItem == pointerNode",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "codedesigner.pointerManager.editNode",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode)",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "codedesigner.pointerManager.deleteNode",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode)",
+          "group": "1_modify@3"
+        },
+        {
+          "command": "codedesigner.pointerManager.goToAddress",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode)",
+          "group": "2_navigate@1"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "cds",
