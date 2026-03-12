@@ -142,6 +142,11 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
+	// Wire pointer-manager labels into the CDS compiler: whenever CDS source is
+	// compiled, the current live-resolved labels (e.g. "seal.health") are forwarded
+	// to the backend so they can be referenced as :seal.health or @seal.health.
+	disasmPanelProvider.getPointerLabels = () => pointerManagerProvider.getResolvedLabels();
+
 	// Wire snapshot history lookup: when the edit overlay requests address history,
 	// delegate to the panel provider which manages snapshots.
 	editorProvider.onGetAddressHistory = (address: number) =>

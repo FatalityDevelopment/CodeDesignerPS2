@@ -1293,6 +1293,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       args = colorizeRegisters(args);
       const addr    = highlightSearchInText(r.addr, globalIndex, 'addr');
       const bytes   = highlightSearchInText(r.bytes, globalIndex, 'bytes');
+      // Label precedence: server/user labels (r.label) take priority over
+      // pointer-manager labels so explicit annotations always win.
       const rawLabel = r.label || pointerLabelMap.get(r.addr) || '';
       const label   = highlightSearchInText(rawLabel, globalIndex, 'label');
       const op      = highlightSearchInText(r.op, globalIndex, 'op');
