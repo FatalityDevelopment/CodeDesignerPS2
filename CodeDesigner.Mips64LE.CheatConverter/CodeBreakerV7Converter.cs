@@ -411,7 +411,30 @@ namespace CodeDesigner.Mips64LE.CheatConverter
             var state  = new Cb7State();
             bool active = false;
 
-            foreach (var rawLine in input.Split('\n'))
+            var lines = input.Split('\n');
+
+            // If no BEEFC0DE/BEEFC0DF key line is present, assume the entire input is
+            // CB7-encrypted with the default seed (0).  This matches the output of
+            // Encode() when called without an explicit beefcode, and allows users to
+            // paste raw CB7 code lines without the BEEFC0DE header and still obtain
+            // the correct plaintext.
+            bool hasBeefcode = false;
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.Trim();
+                var m = HexPair.Match(line);
+                if (!m.Success) continue;
+                uint addr = Convert.ToUInt32(m.Groups[1].Value, 16);
+                if (addr == BeefCode || addr == BeefCodeF) { hasBeefcode = true; break; }
+            }
+
+            if (!hasBeefcode)
+            {
+                state.Beefcode(true, 0x00000000);
+                active = true;
+            }
+
+            foreach (var rawLine in lines)
             {
                 var line = rawLine.Trim();
                 var m = HexPair.Match(line);

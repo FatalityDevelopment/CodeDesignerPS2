@@ -196,6 +196,41 @@ namespace CodeDesigner.Mips64LE.TestProject
             AssertRoundTrip(new CodeBreakerV7Converter(), SampleCodes);
         }
 
+        [TestMethod]
+        public void Cb7_Decode_WithoutBeefc0deHeader_UsesDefaultSeed()
+        {
+            // Codes encoded with BEEFC0DE 00000000 (seed=0) should decode identically
+            // whether or not the BEEFC0DE line is included in the input.
+            var conv = new CodeBreakerV7Converter();
+            var src  = new[] { new RawCode(0x200133AC, 0x000003E8) };
+
+            string withHeader    = conv.Encode(src);                                      // BEEFC0DE 00000000\nXXXX XXXX
+            string withoutHeader = string.Join("\n", withHeader.Split('\n').Skip(1));    // strip BEEFC0DE line
+
+            var decodedWith    = conv.Decode(withHeader);
+            var decodedWithout = conv.Decode(withoutHeader);
+
+            Assert.AreEqual(decodedWith.Count, decodedWithout.Count,
+                "Code count should match with and without BEEFC0DE header.");
+            for (int i = 0; i < decodedWith.Count; i++)
+                Assert.AreEqual(decodedWith[i], decodedWithout[i],
+                    $"Code at index {i} should decode identically with or without BEEFC0DE header.");
+        }
+
+        [TestMethod]
+        public void Cb7_Decode_KnownVector_NoHeader()
+        {
+            // Known CB7 code: 90333610 0C0CCD2C was encoded with BEEFC0DE 00000000 (seed=0).
+            // Without the header the converter must still produce the correct plaintext.
+            var conv    = new CodeBreakerV7Converter();
+            var decoded = conv.Decode("90333610 0C0CCD2C");
+            Assert.AreEqual(1, decoded.Count, "Should decode exactly one code.");
+            // The expected raw values come from decoding with the BEEFC0DE 00000000 header.
+            var expected = conv.Decode("BEEFC0DE 00000000\n90333610 0C0CCD2C");
+            Assert.AreEqual(expected[0], decoded[0],
+                $"Expected {expected[0].Address:X8} {expected[0].Value:X8} but got {decoded[0].Address:X8} {decoded[0].Value:X8}.");
+        }
+
         // -----------------------------------------------------------------------
         // GameShark V3
         // -----------------------------------------------------------------------
