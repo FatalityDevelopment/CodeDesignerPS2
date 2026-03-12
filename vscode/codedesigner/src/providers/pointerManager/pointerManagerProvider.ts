@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getOutputChannel, getSocketClient } from '../../extension';
+import { LabelEntry } from '../../socketClient';
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
@@ -465,7 +466,55 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
         this._onDidChangeTreeData.fire();
     }
 
+    /**
+     * Resolve all user-defined pointer labels to their live addresses and return
+     * a flat LabelEntry list suitable for display in the instruction view.
+     *
+     * Top-level pointers are included at their fixed storage address.  Child
+     * labels are resolved by reading the live pointer value from emulator memory
+     * and adding the configured offset.  Sub-pointers are resolved recursively.
+     * Entries whose addresses cannot be resolved are silently omitted.
+     */
+    public async getResolvedLabels(): Promise<LabelEntry[]> {
+        const labels: LabelEntry[] = [];
+        for (const ptr of this._pointers) {
+            labels.push({
+                address: this._normaliseAddress(ptr.address),
+                label:   ptr.name,
+                comment: ptr.comment,
+            });
+            if (ptr.children.length > 0) {
+                const ptrValue = await this._resolvePointerValue(ptr.address);
+                if (ptrValue !== undefined) {
+                    await this._collectChildLabels(ptrValue, ptr.children, labels);
+                }
+            }
+        }
+        return labels;
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /** Recursively resolve child labels and append them to `out`. */
+    private async _collectChildLabels(
+        parentValue: number,
+        children: PointerChildLabel[],
+        out: LabelEntry[]
+    ): Promise<void> {
+        for (const child of children) {
+            const offsetNum = this._parseOffset(child.offset);
+            if (offsetNum === undefined) { continue; }
+            const resolvedAddr = (parentValue + offsetNum) >>> 0;
+            const addrStr = this._normaliseAddress(`0x${resolvedAddr.toString(16)}`);
+            out.push({ address: addrStr, label: child.name, comment: child.comment });
+            if (child.children && child.children.length > 0) {
+                const childValue = await this._resolvePointerValue(addrStr);
+                if (childValue !== undefined) {
+                    await this._collectChildLabels(childValue, child.children, out);
+                }
+            }
+        }
+    }
 
     private _findPointer(address: string): UserPointer | undefined {
         const norm = this._normaliseAddress(address).toUpperCase();

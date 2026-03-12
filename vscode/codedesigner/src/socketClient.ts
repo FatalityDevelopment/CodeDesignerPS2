@@ -26,6 +26,8 @@ interface CommandMessage {
     // CONVERTCHEAT fields
     Format?: string;
     Direction?: string;
+    // COMPILECDS — pre-resolved pointer-manager labels (e.g. { address:'0x80100000', label:'seal.health' })
+    Labels?: LabelEntry[];
 }
 
 /**
@@ -570,12 +572,17 @@ export class SocketClient {
     /**
      * Compile a .cds (Code Designer Script) assembly file.
      * Forwards the raw source text to the backend COMPILECDS command.
+     * @param labels Optional pre-resolved pointer-manager labels (e.g. from PointerManagerProvider.getResolvedLabels()).
+     *               These are injected into the compiler so CDS source can reference them as `:seal.health` or `@seal.health`.
      */
-    public async compileCds(sourceCode: string): Promise<InstructionResult[]> {
+    public async compileCds(sourceCode: string, labels?: LabelEntry[]): Promise<InstructionResult[]> {
         const command: CommandMessage = {
             Command: 'COMPILECDS',
             Data: sourceCode
         };
+        if (labels && labels.length > 0) {
+            command.Labels = labels;
+        }
 
         const response = await this.sendCommand(command);
 

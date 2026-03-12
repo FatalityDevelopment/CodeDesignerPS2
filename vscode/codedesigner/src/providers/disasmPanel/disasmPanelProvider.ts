@@ -80,6 +80,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
     /** Returns the ISO name derived from the currently selected game path. */
     public getSelectedGameName(): string { return this.selectedGameName; }
+    /**
+     * Optional callback invoked during CDS compilation to obtain the current set of
+     * live-resolved Pointer Manager labels (e.g. "seal.health" → 0x8012AB34).
+     * Set by extension.ts after the providers are wired together.
+     */
+    public getPointerLabels?: () => Promise<LabelEntry[]>;
 
     constructor(
         private readonly socketClient: SocketClient,
@@ -1130,7 +1136,18 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         try {
-            const results = await this.socketClient.compileCds(sourceCode);
+            // Resolve pointer-manager labels so CDS source can reference them as
+            // :seal.health or @seal.health. Falls back to an empty array when the
+            // pointer manager is not wired or the emulator is disconnected.
+            let pointerLabels: LabelEntry[] = [];
+            if (this.getPointerLabels) {
+                try { pointerLabels = await this.getPointerLabels(); } catch { /* ignore — not connected */ }
+            }
+
+            const results = await this.socketClient.compileCds(
+                sourceCode,
+                pointerLabels.length > 0 ? pointerLabels : undefined
+            );
             const errors: Array<{ lineNumber: number; message: string }> = [];
             const codeLines: string[] = [];
             const diagnostics: vscode.Diagnostic[] = [];

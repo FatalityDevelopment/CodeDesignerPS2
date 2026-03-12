@@ -34,18 +34,22 @@ namespace CodeDesigner.Mips64LE
             new(@"^([A-Za-z_][A-Za-z0-9_]*):\s*$",
                 System.Text.RegularExpressions.RegexOptions.Compiled);
 
-        /// <summary>Matches a label reference inside an instruction operand: ":Name".</summary>
+        /// <summary>
+        /// Matches a label reference inside an instruction operand: ":Name" or ":scope.name".
+        /// Dots are allowed to support pointer-manager scoped labels (e.g. <c>:seal.health</c>).
+        /// </summary>
         private static readonly System.Text.RegularExpressions.Regex CdsLabelRefRegex =
-            new(@":([A-Za-z_][A-Za-z0-9_]*)",
+            new(@":([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)",
                 System.Text.RegularExpressions.RegexOptions.Compiled);
 
         /// <summary>
-        /// Matches an absolute-address label reference: "@Name".
+        /// Matches an absolute-address label reference: "@Name" or "@scope.name".
+        /// Dots are allowed to support pointer-manager scoped labels (e.g. <c>@seal.health</c>).
         /// Replaced with the raw hex address of the label (e.g. 0x80010018),
         /// suitable for use with jump instructions or absolute address operands.
         /// </summary>
         private static readonly System.Text.RegularExpressions.Regex CdsAbsLabelRefRegex =
-            new(@"@([A-Za-z_][A-Za-z0-9_]*)",
+            new(@"@([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)",
                 System.Text.RegularExpressions.RegexOptions.Compiled);
 
         /// <summary>
@@ -270,7 +274,7 @@ namespace CodeDesigner.Mips64LE
                         return HandleAssemble(command.Data);
 
                     case "COMPILECDS":
-                        return HandleCompileCds(command.Data);
+                        return HandleCompileCds(command.Data, command.Labels);
                     
                     case "DISASSEMBLE":
                         return HandleDisassemble(command.Data, command.Address);
@@ -415,7 +419,7 @@ namespace CodeDesigner.Mips64LE
         ///
         /// Each instruction is emitted as a GameShark type-2 code: 2AAAAAAA VVVVVVVV
         /// </summary>
-        private string HandleCompileCds(string? sourceCode)
+        private string HandleCompileCds(string? sourceCode, List<LabelEntry>? externalLabels = null)
         {
             try
             {
@@ -433,6 +437,25 @@ namespace CodeDesigner.Mips64LE
                 var labelAddresses = new Dictionary<string, uint>(StringComparer.Ordinal);
                 foreach (var kv in _labels)
                     labelAddresses[kv.Value.Label] = kv.Key;
+
+                // Merge pointer-manager labels (pre-resolved by the frontend).
+                // These carry dotted scope names (e.g. "seal.health") and are injected
+                // here so that CDS source can reference them as :seal.health or @seal.health.
+                // Server labels take precedence on name conflicts.
+                if (externalLabels != null)
+                {
+                    foreach (var entry in externalLabels)
+                    {
+                        if (string.IsNullOrWhiteSpace(entry.Label) || string.IsNullOrWhiteSpace(entry.Address))
+                            continue;
+                        var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                            ? entry.Address[2..]
+                            : entry.Address;
+                        if (uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber,
+                                null, out uint addr) && !labelAddresses.ContainsKey(entry.Label))
+                            labelAddresses[entry.Label] = addr;
+                    }
+                }
 
                 uint scanAddress   = 0;
                 bool scanInBlock   = false;
@@ -3112,6 +3135,8 @@ namespace CodeDesigner.Mips64LE
         // CONVERTCHEAT fields
         public string? Format { get; set; }
         public string? Direction { get; set; }
+        // COMPILECDS — pre-resolved pointer-manager labels (dotted names like "seal.health")
+        public List<LabelEntry>? Labels { get; set; }
     }
 
     /// <summary>

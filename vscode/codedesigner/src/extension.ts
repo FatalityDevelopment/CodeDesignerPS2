@@ -131,6 +131,22 @@ export function activate(context: vscode.ExtensionContext) {
 		disasmPanelProvider.notifyPauseState(paused);
 	};
 
+	// Wire pointer-manager label changes to the disasm instruction display.
+	// Whenever the user adds, edits, or deletes a pointer/child label, resolve
+	// all live addresses and push the results to any open live panels.
+	context.subscriptions.push(
+		pointerManagerProvider.onDidChangeTreeData(() => {
+			pointerManagerProvider.getResolvedLabels().then(labels => {
+				editorProvider.setPointerLabels(labels);
+			}).catch(() => { /* ignore — not connected */ });
+		})
+	);
+
+	// Wire pointer-manager labels into the CDS compiler: whenever CDS source is
+	// compiled, the current live-resolved labels (e.g. "seal.health") are forwarded
+	// to the backend so they can be referenced as :seal.health or @seal.health.
+	disasmPanelProvider.getPointerLabels = () => pointerManagerProvider.getResolvedLabels();
+
 	// Wire snapshot history lookup: when the edit overlay requests address history,
 	// delegate to the panel provider which manages snapshots.
 	editorProvider.onGetAddressHistory = (address: number) =>
