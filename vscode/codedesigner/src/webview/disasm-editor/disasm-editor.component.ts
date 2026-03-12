@@ -741,7 +741,7 @@ export class DisasmEditorComponent implements AfterViewInit {
           editOverlayDisasmPreview.textContent = '(assembly error)';
         }
       } else if (data?.['type'] === 'addressHistoryResult') {
-        const history = data['history'] as Array<{ name: string; date: string; value: string }> | undefined;
+        const history = data['history'] as Array<{ name: string; date: string; value: string; disasm?: string }> | undefined;
         if (!history || history.length === 0) {
           editOverlayHistoryList.innerHTML = '<div class="edit-overlay-history-empty">No snapshot history for this address.</div>';
         } else {
@@ -749,6 +749,9 @@ export class DisasmEditorComponent implements AfterViewInit {
           for (const h of history) {
             html += `<div class="edit-overlay-history-row">`;
             html += `<span class="edit-overlay-history-value">${h.value}</span>`;
+            if (h.disasm) {
+              html += `<span class="edit-overlay-history-disasm">${h.disasm}</span>`;
+            }
             html += `<span class="edit-overlay-history-name">${h.name}</span>`;
             html += `<span class="edit-overlay-history-date">${h.date}</span>`;
             html += `</div>`;

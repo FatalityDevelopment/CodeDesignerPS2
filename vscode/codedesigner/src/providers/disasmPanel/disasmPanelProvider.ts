@@ -1006,8 +1006,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * Return all historical 4-byte values at the given virtual address, one per snapshot.
      * Used by DisasmEditorProvider to populate the History tab in the edit overlay.
      */
-    public getAddressHistory(address: number): Array<{ name: string; date: string; value: string }> {
-        const results: Array<{ name: string; date: string; value: string }> = [];
+    public getAddressHistory(address: number): Array<{ name: string; date: string; value: string; disasm?: string }> {
+        const results: Array<{ name: string; date: string; value: string; disasm?: string }> = [];
 
         // Snapshots store physical base addresses (e.g. 0x00000000 for EE Main RAM).
         // Convert any virtual/logical alias to its physical equivalent before
@@ -1050,7 +1050,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     results.push({
                         name:  snap.name || snap.label,
                         date:  snap.date,
-                        value: '0x' + val.toString(16).toUpperCase().padStart(8, '0'),
+                        value: val.toString(16).toUpperCase().padStart(8, '0'),
                     });
                     break; // found region for this address; move to next snapshot
                 }
