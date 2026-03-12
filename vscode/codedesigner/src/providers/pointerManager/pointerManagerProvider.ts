@@ -195,7 +195,7 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
                 const offsetNum = this._parseOffset(c.offset);
                 let resolvedAddr: string | undefined;
                 if (ptrValue !== undefined && offsetNum !== undefined) {
-                    resolvedAddr = this._normaliseAddress((ptrValue + offsetNum) >>> 0);
+                    resolvedAddr = this._normaliseAddress(`0x${((ptrValue + offsetNum) >>> 0).toString(16)}`);
                 }
 
                 // A node is a sub-pointer when its `children` array exists (even if
@@ -286,8 +286,8 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
         // ── Step 1: ask whether this child is a plain label or a pointer itself ──
         const kindPick = await vscode.window.showQuickPick(
             [
-                { label: '$(symbol-field)  Label',   description: 'A plain value at an offset (leaf)',           kind: 'label'   as const },
-                { label: '$(symbol-variable)  Pointer', description: 'A pointer at an offset — can have its own children', kind: 'pointer' as const },
+                { label: '$(symbol-field)  Label',   description: 'A plain value at an offset (leaf)',           itemKind: 'label'   as const },
+                { label: '$(symbol-variable)  Pointer', description: 'A pointer at an offset — can have its own children', itemKind: 'pointer' as const },
             ],
             {
                 title: `Add Child under "${parentLabel}" — Type`,
@@ -296,7 +296,7 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
             }
         );
         if (kindPick === undefined) { return; }
-        const isPointer = kindPick.kind === 'pointer';
+        const isPointer = kindPick.itemKind === 'pointer';
 
         // ── Step 2: offset ────────────────────────────────────────────────────
         const offsetRaw = await vscode.window.showInputBox({
