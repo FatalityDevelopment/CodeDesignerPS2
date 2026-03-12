@@ -113,22 +113,22 @@
       "view/item/context": [
         {
           "command": "codedesigner.pointerManager.addChildLabel",
-          "when": "view == disasm.pointerManager && viewItem == pointerNode",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childPointerNode || viewItem == childLabelNode)",
           "group": "1_modify@1"
         },
         {
           "command": "codedesigner.pointerManager.editNode",
-          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode)",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode || viewItem == childPointerNode)",
           "group": "1_modify@2"
         },
         {
           "command": "codedesigner.pointerManager.deleteNode",
-          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode)",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode || viewItem == childPointerNode)",
           "group": "1_modify@3"
         },
         {
           "command": "codedesigner.pointerManager.goToAddress",
-          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode)",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode || viewItem == childPointerNode)",
           "group": "2_navigate@1"
         }
       ]

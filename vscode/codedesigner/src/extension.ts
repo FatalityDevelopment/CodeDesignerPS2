@@ -95,10 +95,10 @@ export function activate(context: vscode.ExtensionContext) {
 			pointerManagerProvider.addPointer()
 		),
 		vscode.commands.registerCommand('codedesigner.pointerManager.addChildLabel', (item?: PointerTreeItem) => {
-			if (item?.itemType === 'pointer') {
-				pointerManagerProvider.addChildLabel(item.address);
+			if (item && (item.itemType === 'pointer' || item.itemType === 'childPointer' || item.itemType === 'child')) {
+				pointerManagerProvider.addChildLabel(item);
 			} else {
-				vscode.window.showWarningMessage('Select a pointer node first to add a child label.');
+				vscode.window.showWarningMessage('Select a pointer or label node first to add a child.');
 			}
 		}),
 		vscode.commands.registerCommand('codedesigner.pointerManager.editNode', (item?: PointerTreeItem) => {
