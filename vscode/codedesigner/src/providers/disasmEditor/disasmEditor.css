@@ -1084,13 +1084,23 @@ body {
     flex-shrink: 0;
 }
 
-.edit-overlay-history-name {
-    color: #d4d4d4;
+.edit-overlay-history-disasm {
+    color: #ce9178;
+    font-family: monospace;
     font-size: 11px;
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.edit-overlay-history-name {
+    color: #d4d4d4;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
 }
 
 .edit-overlay-history-date {

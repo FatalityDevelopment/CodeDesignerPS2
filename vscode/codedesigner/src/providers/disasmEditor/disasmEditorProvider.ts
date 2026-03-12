@@ -55,7 +55,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * Optional callback for retrieving address history from snapshots.
    * Wired to DisasmPanelProvider.getAddressHistory() in extension.ts.
    */
-  public onGetAddressHistory?: (address: number) => Array<{ name: string; date: string; value: string }>;
+  public onGetAddressHistory?: (address: number) => Array<{ name: string; date: string; value: string; disasm?: string }>;
 
   // ── Public helpers ──────────────────────────────────────────────────────────
 
@@ -389,6 +389,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const history = this.onGetAddressHistory
             ? this.onGetAddressHistory(message.address as number)
             : [];
+        if (this.socketClient?.isConnected()) {
+          await Promise.allSettled(history.map(async entry => {
+            if (!entry.disasm && entry.value) {
+              const results = await this.socketClient!.disassemble(entry.value, message.address as number);
+              if (results?.[0]?.Assembly) { entry.disasm = results[0].Assembly; }
+            }
+          }));
+        }
         webviewPanel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
       } else if (message.type === "assembleInstr") {
         if (this.socketClient?.isConnected()) {
@@ -840,6 +848,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 const history = this.onGetAddressHistory
                     ? this.onGetAddressHistory(message.address as number)
                     : [];
+                if (this.socketClient?.isConnected()) {
+                    await Promise.allSettled(history.map(async entry => {
+                        if (!entry.disasm && entry.value) {
+                            const results = await this.socketClient!.disassemble(entry.value, message.address as number);
+                            if (results?.[0]?.Assembly) { entry.disasm = results[0].Assembly; }
+                        }
+                    }));
+                }
                 panel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
             } else if (message.type === 'convertCheat') {
                 try {
