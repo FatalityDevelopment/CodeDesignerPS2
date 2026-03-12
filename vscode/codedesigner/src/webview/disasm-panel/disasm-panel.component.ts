@@ -200,7 +200,7 @@ interface InitMsg {
   </div>
 </div>
 
-<div id="tab-cheats" class="tab-content" [style.display]="activeTab === 'cheats' ? 'block' : 'none'">
+<div id="tab-cheats" class="tab-content" [style.display]="activeTab === 'cheats' ? 'flex' : 'none'">
   <div class="cheats-container">
     <textarea id="cheats-input" [(ngModel)]="cheatText"
       placeholder="Paste cheat codes here (GameShark/Action Replay format)&#10;&#10;Example:&#10;#Infinite Health&#10;20123456 000003E8"></textarea>

@@ -69,16 +69,23 @@ app-disasm-panel {
 
 /* ── Cheats tab ──────────────────────────────────────────────────────────── */
 
+#tab-cheats {
+    flex-direction: column;
+    overflow: hidden;
+}
+
 .cheats-container {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    flex: 1;
+    min-height: 0;
 }
 
 #cheats-input {
-    width: 100%;
-    min-height: 200px;
-    resize: vertical;
+    flex: 1;
+    min-height: 0;
+    resize: none;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
