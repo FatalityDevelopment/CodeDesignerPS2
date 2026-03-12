@@ -70,6 +70,26 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
   }
 
+  /**
+   * Navigate the appropriate live panel to `address`.
+   * Reveals the panel whose address range contains the address and sends a
+   * `gotoAddress` message so the disassembler cursor jumps there.
+   * The webview handles `gotoAddress` in `disasm-editor.service.ts` via the
+   * `gotoAddressReceived$` subject, which the component uses to move the cursor.
+   * Called by external providers (e.g. the Pointer Manager tree view).
+   */
+  public navigateToAddress(address: number): void {
+    const physAddr = DisasmEditorProvider._toPhysAddr(address);
+    const target = this._livePanelInfo.find(info =>
+        physAddr >= info.physBaseAddress &&
+        physAddr < info.physBaseAddress + info.totalBytes
+    );
+    if (target) {
+        target.panel.reveal(undefined, false);
+        target.panel.webview.postMessage({ type: 'gotoAddress', address });
+    }
+  }
+
   constructor(socketClient: SocketClient | null, private readonly _extensionUri: vscode.Uri) {
     this.socketClient = socketClient;
   }

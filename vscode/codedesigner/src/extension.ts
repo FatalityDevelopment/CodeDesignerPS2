@@ -3,6 +3,7 @@
 import * as vscode from 'vscode';
 import { DisasmEditorProvider } from './providers/disasmEditor/disasmEditorProvider';
 import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider';
+import { PointerManagerProvider, PointerTreeItem } from './providers/pointerManager/pointerManagerProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
@@ -82,6 +83,47 @@ export function activate(context: vscode.ExtensionContext) {
 	// Register webview panels — pass socketClient so the panel can auto-connect
 	const disasmPanelProvider = new DisasmPanelProvider(socketClient, editorProvider, context.extensionUri);
 	disasmPanelProvider.register(context);
+
+	// ── Pointer Manager tree view ─────────────────────────────────────────────
+	const pointerManagerProvider = new PointerManagerProvider(context);
+	context.subscriptions.push(
+		vscode.window.registerTreeDataProvider('disasm.pointerManager', pointerManagerProvider)
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('codedesigner.pointerManager.addPointer', () =>
+			pointerManagerProvider.addPointer()
+		),
+		vscode.commands.registerCommand('codedesigner.pointerManager.addChildLabel', (item?: PointerTreeItem) => {
+			if (item?.itemType === 'pointer') {
+				pointerManagerProvider.addChildLabel(item.address);
+			} else {
+				vscode.window.showWarningMessage('Select a pointer node first to add a child label.');
+			}
+		}),
+		vscode.commands.registerCommand('codedesigner.pointerManager.editNode', (item?: PointerTreeItem) => {
+			if (item) { pointerManagerProvider.editNode(item); }
+		}),
+		vscode.commands.registerCommand('codedesigner.pointerManager.deleteNode', (item?: PointerTreeItem) => {
+			if (item) { pointerManagerProvider.deleteNode(item); }
+		}),
+		vscode.commands.registerCommand('codedesigner.pointerManager.goToAddress', (addressOrItem: string | PointerTreeItem | undefined) => {
+			let addrStr: string | undefined;
+			if (typeof addressOrItem === 'string') {
+				addrStr = addressOrItem;
+			} else if (addressOrItem instanceof PointerTreeItem) {
+				addrStr = addressOrItem.address;
+			}
+			if (!addrStr) { return; }
+			const addr = parseInt(addrStr.replace(/^0x/i, ''), 16);
+			// Validate the parsed value is a 32-bit address before navigating.
+			if (isNaN(addr) || addr < 0 || addr > 0xFFFFFFFF) { return; }
+			editorProvider.navigateToAddress(addr >>> 0);
+		}),
+		vscode.commands.registerCommand('codedesigner.pointerManager.refresh', () =>
+			pointerManagerProvider.refresh()
+		)
+	);
 
 	// Wire pause-state propagation: when a breakpoint/step pause is detected in the
 	// editor panels, the sidebar status bar needs to update too.
