@@ -420,6 +420,19 @@ export class DisasmEditorComponent implements AfterViewInit {
     const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
     const getPageStart = (index: number) => Math.floor(index / state.pageSize) * state.pageSize;
     const getLocalIndex = (index: number) => index - getPageStart(index);
+
+    // ── Pointer-label map ─────────────────────────────────────────────────────
+    // Kept in sync with state.pointerLabels; keyed by 8-digit upper-case hex
+    // address without the "0x" prefix so it can be directly compared with
+    // r.addr values in buildDisasmRowHtml.
+    let pointerLabelMap = new Map<string, string>();
+    function rebuildPointerLabelMap(): void {
+      pointerLabelMap = new Map<string, string>();
+      for (const entry of state.pointerLabels) {
+        const key = entry.address.replace(/^0x/i, '').toUpperCase().padStart(8, '0');
+        pointerLabelMap.set(key, entry.label);
+      }
+    }
     // Returns the 0-based index of the current PC within the page that starts at
     // `pageStart`, or -1 if the PC is not on that page (or not set).
     const getPcLocalIndex = (pageStart: number): number => {
@@ -633,6 +646,11 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     svc.analysisUpdated$.subscribe(() => {
       // Re-render so the updated analysis comments are visible immediately.
+      renderDisassembly();
+    });
+
+    svc.pointerLabelsUpdated$.subscribe(() => {
+      rebuildPointerLabelMap();
       renderDisassembly();
     });
 
@@ -1275,7 +1293,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       args = colorizeRegisters(args);
       const addr    = highlightSearchInText(r.addr, globalIndex, 'addr');
       const bytes   = highlightSearchInText(r.bytes, globalIndex, 'bytes');
-      const label   = highlightSearchInText(r.label || '', globalIndex, 'label');
+      const rawLabel = r.label || pointerLabelMap.get(r.addr) || '';
+      const label   = highlightSearchInText(rawLabel, globalIndex, 'label');
       const op      = highlightSearchInText(r.op, globalIndex, 'op');
       args          = highlightSearchInText(args, globalIndex, 'args');
       const comment = highlightSearchInText(r.comment || '', globalIndex, 'comment');

@@ -44,6 +44,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _knownBreakpoints: Set<number> = new Set();
   /** Game-specific labels loaded from snapshots/<isoName>/labels.json. Merged with server labels. */
   private _gameLabels: LabelEntry[] = [];
+  /** Labels derived from live-resolved Pointer Manager entries. Shown as an overlay in the instruction display. */
+  private _pointerLabels: LabelEntry[] = [];
 
   /**
    * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
@@ -119,6 +121,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           p.webview.postMessage({ type: 'labelsUpdated', labels: this._gameLabels });
         }
       }
+    }
+  }
+
+  /**
+   * Set the live-resolved labels from the Pointer Manager.
+   * Broadcasts a `pointerLabelsUpdated` message to all open live panels so the
+   * instruction display can overlay the label names for matching addresses.
+   */
+  public setPointerLabels(labels: LabelEntry[]): void {
+    this._pointerLabels = labels;
+    for (const p of this._livePanels) {
+      p.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
     }
   }
 
