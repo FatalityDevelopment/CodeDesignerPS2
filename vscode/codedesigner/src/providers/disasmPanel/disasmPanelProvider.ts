@@ -42,12 +42,13 @@ const LIVE_REGIONS = [
     // 0x20100000, or uncached+accelerated 0x30100000).  HandleReadMem accepts
     // physical addresses for the EE region directly.
     { region: 'ee',  address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
-    // IOP RAM: shown at its native physical base (0x00000000–0x003FFFFF, 4 MB).
-    // Using native addresses keeps row addresses consistent with the IOP CPU's PC
-    // register and the console debug output, so addresses like 0x0000ae94 map
-    // directly to the matching row in the IOP RAM panel.  HandleReadMem reads
-    // directly from IopMemoryBus.Ram[] when region='iop' and address < RamSize.
-    { region: 'iop', address: 0x00000000, size:  4 * 1024 * 1024, label: 'IOP RAM'       },
+    // IOP RAM: shown at the EE physical base (0x1C000000–0x1DFFFFFF, 4 MB).
+    // Per the PS2 memory map, IOP RAM is mirrored into EE address space at
+    // 0xBC000000 (logical) → 0x1C000000 (physical).  Using the physical base
+    // keeps row addresses consistent with the documented memory map table.
+    // HandleReadMem translates 0x1C000000+ addresses to IOP RAM offsets via the
+    // EeIopMirrorBase subtraction path.
+    { region: 'iop', address: 0x1C000000, size:  4 * 1024 * 1024, label: 'IOP RAM'       },
     // BIOS ROM: shown at the physical base (0x1FC00000–0x1FFFFFFF, 4 MB).
     // Both the cached alias (0x9FC00000) and the uncached alias (0xBFC00000) strip
     // to the same physical address via toPhysAddr, so the PC indicator and

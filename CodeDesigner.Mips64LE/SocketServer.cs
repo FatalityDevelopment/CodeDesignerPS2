@@ -1143,7 +1143,7 @@ namespace CodeDesigner.Mips64LE
                     (Label: "EE Main RAM",  File: "EEmem.bin",    Bytes: Scheduler.EE.Bus.Ram,        Base: 0x00000000u),
                     (Label: "BIOS ROM",     File: "BIOSrom.bin",   Bytes: Scheduler.EE.Bus.Bios,       Base: PS2MemoryBus.BiosRomPhysBase),
                     (Label: "Scratchpad",   File: "Scratchpad.bin",Bytes: Scheduler.EE.Bus.Scratchpad, Base: 0x70000000u),
-                    (Label: "IOP RAM",      File: "IOPmem.bin",    Bytes: Scheduler.IOP.Bus.Ram,       Base: 0x00000000u),
+                    (Label: "IOP RAM",      File: "IOPmem.bin",    Bytes: Scheduler.IOP.Bus.Ram,       Base: EeIopMirrorBase),
                 };
 
                 var written = new List<SnapshotRegion>();
@@ -1202,7 +1202,7 @@ namespace CodeDesigner.Mips64LE
                     (File: "EEmem.bin",     Label: "EE Main RAM",  Bytes: Scheduler.EE.Bus.Ram,        MaxSize: PS2MemoryBus.MainRamSize,        Base: 0x00000000u),
                     (File: "BIOSrom.bin",   Label: "BIOS ROM",     Bytes: Scheduler.EE.Bus.Bios,       MaxSize: Scheduler.EE.Bus.Bios.Length,   Base: PS2MemoryBus.BiosRomPhysBase),
                     (File: "Scratchpad.bin",Label: "Scratchpad",   Bytes: Scheduler.EE.Bus.Scratchpad, MaxSize: PS2MemoryBus.ScratchpadSize,     Base: 0x70000000u),
-                    (File: "IOPmem.bin",    Label: "IOP RAM",      Bytes: Scheduler.IOP.Bus.Ram,       MaxSize: Scheduler.IOP.Bus.Ram.Length,   Base: 0x00000000u),
+                    (File: "IOPmem.bin",    Label: "IOP RAM",      Bytes: Scheduler.IOP.Bus.Ram,       MaxSize: Scheduler.IOP.Bus.Ram.Length,   Base: EeIopMirrorBase),
                 };
 
                 var loaded = new List<SnapshotRegion>();
@@ -1866,7 +1866,15 @@ namespace CodeDesigner.Mips64LE
                 uint vaddr = address + (uint)i;
                 if (useIop)
                 {
+                    // Supported address windows for IOP writes:
+                    //   0x00000000–0x003FFFFF  physical IOP RAM (direct)
+                    //   0x80000000–0xBFFFFFFF  KSEG0/KSEG1 — strip top 3 bits
+                    //   0x1C000000–0x1DFFFFFF  EE VTLB mirror of IOP RAM
+                    // The IOP RAM panel uses region='iop' and sends addresses starting
+                    // at 0x1C000000, so the EeIopMirrorBase subtraction is essential.
                     uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
+                    if (physAddr >= EeIopMirrorBase && physAddr < EeIopMirrorEnd)
+                        physAddr -= EeIopMirrorBase;
                     if (physAddr < (uint)IopMemoryBus.RamSize)
                         Scheduler.IOP.Bus.Ram[physAddr] = bytes[i];
                 }
