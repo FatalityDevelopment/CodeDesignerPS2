@@ -519,6 +519,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.sendLiveDisasmPage(existingInfo.panel, region, baseAddress, totalBytes, 0);
                 await this.sendLiveHexView(existingInfo.panel, region, baseAddress, baseAddress,
                     DisasmEditorProvider.INSTRUCTION_SIZE);
+                if (this._pointerLabels.length > 0) {
+                    existingInfo.panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
+                }
             }
             return;
         }
@@ -566,6 +569,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 if (this.socketClient?.isConnected()) {
                     await this.sendLiveHexView(panel, region, baseAddress, baseAddress,
                         DisasmEditorProvider.INSTRUCTION_SIZE);
+                }
+                // Send any already-resolved struct labels so they appear immediately.
+                if (this._pointerLabels.length > 0) {
+                    panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
                 }
                 return;
             }

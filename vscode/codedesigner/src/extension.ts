@@ -158,6 +158,11 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage('Connected to C# server');
 		// Auto-open all live memory views (reuses existing panels if already open)
 		disasmPanelProvider.onSocketConnected();
+		// Re-resolve struct labels now that live memory is available (child labels
+		// require reading pointer values from the emulator).
+		pointerManagerProvider.getResolvedLabels().then(labels => {
+			editorProvider.setPointerLabels(labels);
+		}).catch(() => { /* ignore — emulator may not be ready yet */ });
 	});
 
 	socketClient.onDisconnected(() => {

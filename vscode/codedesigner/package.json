@@ -41,7 +41,7 @@
         {
           "type": "tree",
           "id": "disasm.pointerManager",
-          "name": "Pointer Manager"
+          "name": "Structs"
         }
       ]
     },
@@ -68,7 +68,7 @@
       },
       {
         "command": "codedesigner.pointerManager.addPointer",
-        "title": "Add Pointer",
+        "title": "Add Struct",
         "icon": "$(add)"
       },
       {
@@ -93,7 +93,7 @@
       },
       {
         "command": "codedesigner.pointerManager.refresh",
-        "title": "Refresh Pointer Manager",
+        "title": "Refresh Structs",
         "icon": "$(refresh)"
       }
     ],
