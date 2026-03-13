@@ -97,6 +97,21 @@ interface BrowseOutputDirectoryResultMsg {
 interface BrowseGameResultMsg {
   command: 'browseGameResult';
   filePath: string;
+  gameOptions?: EmuOption[];
+}
+
+/** Message sent by the provider after a BIOS file-picker dialog. */
+interface BrowseBiosResultMsg {
+  command: 'browseBiosResult';
+  filePath: string;
+  biosOptions?: EmuOption[];
+}
+
+/** Message sent by the provider after an emulator file-picker dialog. */
+interface BrowseEmulatorResultMsg {
+  command: 'browseEmulatorResult';
+  filePath: string;
+  emulators?: EmuOption[];
 }
 
 /** Message sent by the provider with initial panel data (options, existing snapshots). */
@@ -150,6 +165,7 @@ interface InitMsg {
         <option value="">Select Emulator...</option>
         <option *ngFor="let e of emulators" [value]="e.value">{{e.label}}</option>
       </select>
+      <button class="browse-btn" (click)="browseEmulator()" title="Browse for emulator executable">…</button>
     </div>
 
     <div class="row">
@@ -157,6 +173,7 @@ interface InitMsg {
         <option value="">Select BIOS...</option>
         <option *ngFor="let b of biosOptions" [value]="b.value">{{b.label}}</option>
       </select>
+      <button class="browse-btn" (click)="browseBios()" title="Browse for PS2 BIOS file">…</button>
     </div>
 
     <div class="row">
@@ -396,8 +413,23 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       }),
       this.bridge.on<BrowseGameResultMsg>('browseGameResult').subscribe(msg => {
         if (msg.filePath) {
+          if (msg.gameOptions) { this.gameOptions = msg.gameOptions; }
           this.selectedGame = msg.filePath;
           this.onGameChange();
+        }
+      }),
+      this.bridge.on<BrowseBiosResultMsg>('browseBiosResult').subscribe(msg => {
+        if (msg.filePath) {
+          if (msg.biosOptions) { this.biosOptions = msg.biosOptions; }
+          this.selectedBios = msg.filePath;
+          this.onBiosChange();
+        }
+      }),
+      this.bridge.on<BrowseEmulatorResultMsg>('browseEmulatorResult').subscribe(msg => {
+        if (msg.filePath) {
+          if (msg.emulators) { this.emulators = msg.emulators; }
+          this.selectedEmulator = msg.filePath;
+          this.onEmulatorChange();
         }
       })
     );
@@ -506,6 +538,14 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   browseGame(): void {
     this.bridge.postMessage({ command: 'browseGame' });
+  }
+
+  browseBios(): void {
+    this.bridge.postMessage({ command: 'browseBios' });
+  }
+
+  browseEmulator(): void {
+    this.bridge.postMessage({ command: 'browseEmulator' });
   }
 
   runRecompile(): void {
