@@ -232,8 +232,8 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
     /** Add a new user-defined pointer. */
     async addPointer(): Promise<void> {
         const addressRaw = await vscode.window.showInputBox({
-            title: 'Add Pointer — Address',
-            prompt: 'Enter the virtual address of the pointer (hex)',
+            title: 'Add Struct — Address',
+            prompt: 'Enter the virtual address of the struct pointer (hex)',
             placeHolder: '0x80100000',
             ignoreFocusOut: true,
             validateInput: v => this._validateHexAddress(v),
@@ -241,8 +241,8 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
         if (addressRaw === undefined) { return; }
 
         const name = await vscode.window.showInputBox({
-            title: 'Add Pointer — Name',
-            prompt: 'Enter a name for this pointer',
+            title: 'Add Struct — Name',
+            prompt: 'Enter a name for this struct',
             placeHolder: 'e.g. PlayerStruct',
             ignoreFocusOut: true,
             validateInput: v => v.trim() ? undefined : 'Name cannot be empty',
@@ -250,7 +250,7 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
         if (name === undefined) { return; }
 
         const comment = await vscode.window.showInputBox({
-            title: 'Add Pointer — Comment (optional)',
+            title: 'Add Struct — Comment (optional)',
             prompt: 'Enter an optional comment',
             placeHolder: 'Leave blank to skip',
             ignoreFocusOut: true,
@@ -260,7 +260,7 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
         const address = this._normaliseAddress(addressRaw);
         const existing = this._findPointer(address);
         if (existing) {
-            vscode.window.showWarningMessage(`A pointer already exists at ${address}.`);
+            vscode.window.showWarningMessage(`A struct already exists at ${address}.`);
             return;
         }
 
@@ -370,7 +370,7 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
             if (!ptr) { return; }
 
             const newName = await vscode.window.showInputBox({
-                title: `Edit Pointer "${ptr.name}"`,
+                title: `Edit Struct "${ptr.name}"`,
                 prompt: 'New name',
                 value: ptr.name,
                 ignoreFocusOut: true,
@@ -379,7 +379,7 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
             if (newName === undefined) { return; }
 
             const newComment = await vscode.window.showInputBox({
-                title: `Edit Pointer "${ptr.name}" — Comment`,
+                title: `Edit Struct "${ptr.name}" — Comment`,
                 prompt: 'New comment (leave blank to remove)',
                 value: ptr.comment ?? '',
                 ignoreFocusOut: true,
@@ -425,7 +425,7 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
             const ptr = this._findPointer(item.address);
             const childCount = ptr?.children.length ?? 0;
             const confirmed = await vscode.window.showWarningMessage(
-                `Delete pointer "${item.label}"${childCount > 0 ? ` and its ${childCount} child label(s)` : ''}?`,
+                `Delete struct "${item.label}"${childCount > 0 ? ` and its ${childCount} child label(s)` : ''}?`,
                 { modal: true },
                 'Delete'
             );
