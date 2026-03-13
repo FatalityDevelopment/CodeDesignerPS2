@@ -228,6 +228,12 @@ app-disasm-panel {
     flex: 1;
 }
 
+/* Browse icon button — sits beside a select, stays compact */
+.row .browse-btn {
+    flex: 0 0 auto;
+    padding: 4px 8px;
+}
+
 select, button {
     font-family: var(--vscode-editor-font-family);
     font-size: var(--vscode-editor-font-size);

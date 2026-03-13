@@ -263,6 +263,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'browseOutputDirectory':
                     await this.handleBrowseOutputDirectory();
                     break;
+                case 'browseGame':
+                    await this.handleBrowseGame();
+                    break;
             }
         });
     }
@@ -1336,6 +1339,31 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             this.webview?.postMessage({
                 command:   'browseOutputDirectoryResult',
                 directory: uris[0].fsPath,
+            });
+        }
+    }
+
+    /**
+     * Open a VS Code file-picker dialog so the user can select a disc image directly.
+     * Accepts plain ISO/BIN images and ZIP archives containing a disc image.
+     * Posts 'browseGameResult' back to the webview with the chosen file path.
+     */
+    private async handleBrowseGame(): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:   true,
+            canSelectFolders: false,
+            canSelectMany:    false,
+            filters: {
+                'Disc Images': ['iso', 'bin', 'img'],
+                'ZIP Archives': ['zip'],
+                'All Files':    ['*'],
+            },
+            title: 'Select PS2 Disc Image',
+        });
+        if (uris && uris.length > 0) {
+            this.webview?.postMessage({
+                command:  'browseGameResult',
+                filePath: uris[0].fsPath,
             });
         }
     }

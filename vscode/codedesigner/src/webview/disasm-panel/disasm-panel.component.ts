@@ -93,6 +93,12 @@ interface BrowseOutputDirectoryResultMsg {
   directory: string;
 }
 
+/** Message sent by the provider after an ISO file-picker dialog. */
+interface BrowseGameResultMsg {
+  command: 'browseGameResult';
+  filePath: string;
+}
+
 /** Message sent by the provider with initial panel data (options, existing snapshots). */
 interface InitMsg {
   type: 'init';
@@ -158,6 +164,7 @@ interface InitMsg {
         <option value="">Select Game...</option>
         <option *ngFor="let g of gameOptions" [value]="g.value">{{g.label}}</option>
       </select>
+      <button class="browse-btn" (click)="browseGame()" title="Browse for ISO, BIN, or ZIP disc image">…</button>
     </div>
 
     <div class="row">
@@ -386,6 +393,12 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         if (msg.directory) {
           this.recompileOutputDir = msg.directory;
         }
+      }),
+      this.bridge.on<BrowseGameResultMsg>('browseGameResult').subscribe(msg => {
+        if (msg.filePath) {
+          this.selectedGame = msg.filePath;
+          this.onGameChange();
+        }
       })
     );
     this.bridge.postMessage({ command: 'ready' });
@@ -489,6 +502,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   browseOutputDirectory(): void {
     this.bridge.postMessage({ command: 'browseOutputDirectory' });
+  }
+
+  browseGame(): void {
+    this.bridge.postMessage({ command: 'browseGame' });
   }
 
   runRecompile(): void {
