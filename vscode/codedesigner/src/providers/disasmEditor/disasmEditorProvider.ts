@@ -725,10 +725,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 // Find which live panel owns the address and instruct it to navigate.
                 const addr = message.address as number;
                 const physAddr = DisasmEditorProvider._toPhysAddr(addr as number);
-                // Prefer a panel in the same region first.  This disambiguates the
-                // overlap between EE Main RAM and IOP RAM, which both start at
-                // physical address 0x0: a native IOP address like 0x0000ae94 sent
-                // from the IOP panel should land in the IOP panel, not EE Main RAM.
+                // Prefer a panel in the same region first.  EE Main RAM sits at
+                // physical 0x00000000 and IOP RAM at 0x1C000000, so there is no
+                // address overlap; the region preference is kept as a tiebreaker
+                // for any future regions that might share a physical range.
                 const target =
                     this._livePanelInfo.find(info =>
                         info.region === region &&
