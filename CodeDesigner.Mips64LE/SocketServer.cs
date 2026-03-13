@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -2879,9 +2880,46 @@ namespace CodeDesigner.Mips64LE
         // ── LISTDISCELFS ─────────────────────────────────────────────────────────
 
         /// <summary>
+        /// Open a disc image stream from either a plain ISO/BIN path or a ZIP archive
+        /// that contains an ISO or BIN entry.  The caller owns the returned stream and
+        /// must dispose it.  Throws <see cref="InvalidOperationException"/> when the
+        /// file cannot be opened as a disc image.
+        /// </summary>
+        private static Stream OpenDiscStream(string path)
+        {
+            if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                using var archive = ZipFile.OpenRead(path);
+                var entry = archive.Entries.FirstOrDefault(e =>
+                    e.Name.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) ||
+                    e.Name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase));
+
+                if (entry == null)
+                    throw new InvalidOperationException("No ISO or BIN disc image found inside the ZIP archive.");
+
+                if (entry.Length > (long)int.MaxValue)
+                    throw new InvalidOperationException(
+                        $"Disc image inside ZIP is too large ({entry.Length / 1_048_576.0:F0} MB). " +
+                        "Extract the ISO to disk and select it directly.");
+
+                // Read the compressed entry into a MemoryStream so the archive can be
+                // closed while the caller continues to use the stream.
+                var ms = new MemoryStream((int)entry.Length);
+                using (var entryStream = entry.Open())
+                    entryStream.CopyTo(ms);
+                ms.Position = 0;
+                return ms;
+            }
+
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+
+        /// <summary>
         /// Open an ISO-9660 disc image, walk all files, and return a list of every
         /// ELF or IRX file found.  Also reads SYSTEM.CNF to mark the BOOT2
         /// executable with <see cref="DiscElfEntry.IsBootElf"/> = true.
+        /// The <paramref name="isoPath"/> may be a plain ISO/BIN file or a ZIP
+        /// archive containing an ISO/BIN entry.
         /// </summary>
         private string HandleListDiscElfs(string? isoPath)
         {
@@ -2893,7 +2931,7 @@ namespace CodeDesigner.Mips64LE
 
             try
             {
-                using var stream = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var stream = OpenDiscStream(isoPath);
                 var cdvd = new CodeDesigner.Mips64LE.Common.Emulator.IOP.Cdvd();
                 cdvd.LoadFromStream(stream);
 
@@ -2981,7 +3019,9 @@ namespace CodeDesigner.Mips64LE
         /// <summary>
         /// Extract a named ELF from a disc image and run the static recompiler on it.
         /// </summary>
-        /// <param name="isoPath">Path to the ISO-9660 disc image.</param>
+        /// <param name="isoPath">
+        /// Path to the ISO-9660 disc image (plain ISO/BIN or a ZIP archive containing one).
+        /// </param>
         /// <param name="elfName">
         /// Name of the ELF file on the disc (e.g. "SCUS_971.98" or "/SCUS_971.98;1").
         /// When <c>null</c> or empty, the BOOT2 executable from SYSTEM.CNF is used.
@@ -3000,7 +3040,7 @@ namespace CodeDesigner.Mips64LE
 
             try
             {
-                using var stream = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var stream = OpenDiscStream(isoPath);
                 var cdvd = new CodeDesigner.Mips64LE.Common.Emulator.IOP.Cdvd();
                 cdvd.LoadFromStream(stream);
 
