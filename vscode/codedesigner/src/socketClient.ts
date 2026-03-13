@@ -11,6 +11,7 @@ interface CommandMessage {
     Region?: string;
     OutputPath?: string;
     InputPath?: string;
+    FilePath?: string;
     BreakpointAddress?: number;
     Label?: string;
     Comment?: string;
@@ -697,6 +698,34 @@ export class SocketClient {
         }
 
         return response.Regions || [];
+    }
+
+    /**
+     * Load an arbitrary binary file into EE Main RAM at the given base address.
+     * The emulator is paused automatically and remains paused after the load.
+     * Use setRegister('PC', 0, address) to set the program counter afterwards.
+     * @param filePath    Absolute path to the .bin file on the server's filesystem.
+     * @param baseAddress Physical base address in EE Main RAM to load the file at.
+     * @returns           The loaded region descriptor (label, file, baseAddress, size).
+     */
+    public async loadBinFile(filePath: string, baseAddress: number): Promise<SnapshotRegion> {
+        const command: CommandMessage = {
+            Command:  'LOADBIN',
+            FilePath: filePath,
+            Address:  baseAddress,
+        };
+
+        const response = await this.sendCommand(command);
+
+        if (!response.Success) {
+            throw new Error(response.Error || 'LoadBin failed');
+        }
+
+        const regions = response.Regions || [];
+        if (regions.length === 0) {
+            throw new Error('LoadBin succeeded but returned no region info');
+        }
+        return regions[0];
     }
 
     /**

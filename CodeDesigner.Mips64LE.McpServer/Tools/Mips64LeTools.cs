@@ -621,6 +621,25 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
         return FormatLoadSnapshot(json);
     }
 
+    [McpServerTool(Name = "load_binary_file")]
+    [Description("Load an arbitrary binary file (e.g. an EE memory dump) into EE Main RAM at the specified " +
+                 "base address.  The emulator is paused automatically before the load and remains paused " +
+                 "afterwards so you can inspect state, set registers, add breakpoints, and then resume.  " +
+                 "Use set_register with name='PC' to point the program counter at the load address before stepping. " +
+                 "Returns details about the loaded region including the actual bytes copied and final load address.")]
+    public async Task<string> LoadBinaryFile(
+        [Description("Absolute path to the binary file to load (e.g. /path/to/dump.bin).")] string filePath,
+        [Description("Physical base address in EE Main RAM to load the file at, as a decimal or 0x-prefixed hex string (e.g. '0x00100000'). Defaults to 0x00000000 if omitted.")] string? baseAddress = null,
+        CancellationToken cancellationToken = default)
+    {
+        uint addr = TryParseAddress(baseAddress) ?? 0u;
+        var json = await bridge.SendAsync(
+            new { Command = "LOADBIN", FilePath = filePath, Address = addr },
+            cancellationToken);
+
+        return FormatLoadBin(json);
+    }
+
     // -------------------------------------------------------------------------
     // Private formatting helpers
     // -------------------------------------------------------------------------
@@ -1039,6 +1058,48 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
                 int    size  = item.TryGetProperty("Size",  out var sProp) ? sProp.GetInt32() : 0;
                 sb.AppendLine($"  [{label}]  size={size / 1024} KB  ← {file}");
             }
+
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private static string FormatLoadBin(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var errProp))
+                return $"Error: {errProp.GetString()}";
+
+            if (!root.TryGetProperty("Regions", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Binary file loaded into EE RAM (emulator paused):");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string label   = item.TryGetProperty("Label",       out var lProp) ? (lProp.GetString() ?? "?") : "?";
+                string file    = item.TryGetProperty("File",        out var fProp) ? (fProp.GetString() ?? "?") : "?";
+                uint   baseA   = item.TryGetProperty("BaseAddress", out var bProp) ? bProp.GetUInt32() : 0u;
+                int    size    = item.TryGetProperty("Size",        out var sProp) ? sProp.GetInt32() : 0;
+                sb.AppendLine($"  [{label}]  base=0x{baseA:X8}  size={size / 1024} KB  ← {file}");
+            }
+
+            // Show truncation warning if the server included one
+            if (root.TryGetProperty("Message", out var msgProp) && msgProp.ValueKind == JsonValueKind.String)
+            {
+                var msg = msgProp.GetString();
+                if (!string.IsNullOrWhiteSpace(msg))
+                    sb.AppendLine($"  Warning: {msg}");
+            }
+
+            sb.AppendLine("Tip: use set_register with name='PC' to point the CPU at the load address, then use step or resume.");
 
             return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
         }

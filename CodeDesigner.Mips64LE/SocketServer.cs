@@ -288,6 +288,9 @@ namespace CodeDesigner.Mips64LE
 
                     case "LOADSNAPSHOT":
                         return HandleLoadSnapshot(command.InputPath);
+
+                    case "LOADBIN":
+                        return HandleLoadBin(command.FilePath, command.Address);
                     
                     case "PAUSE":
                         return HandlePause();
@@ -1239,6 +1242,72 @@ namespace CodeDesigner.Mips64LE
             {
                 if (!wasPaused) Scheduler.Paused = false;
                 return CreateErrorResponse($"LoadSnapshot error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle LOADBIN command — loads an arbitrary binary file into EE Main RAM
+        /// at the specified base address (physical).  The emulator is paused before
+        /// the write and remains paused so the caller can inspect state, set the PC,
+        /// and resume explicitly.
+        /// </summary>
+        private string HandleLoadBin(string? filePath, uint? baseAddress)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            if (string.IsNullOrWhiteSpace(filePath))
+                return CreateErrorResponse("FilePath is required for LOADBIN");
+
+            if (!File.Exists(filePath))
+                return CreateErrorResponse($"File not found: {filePath}");
+
+            uint loadBase = baseAddress ?? 0u;
+
+            bool wasPaused = Scheduler.Paused;
+            Scheduler.Paused = true;
+            try
+            {
+                byte[] src = File.ReadAllBytes(filePath);
+
+                // Destination: EE Main RAM.  Clamp so we never write past the end.
+                byte[] ram = Scheduler.EE.Bus.Ram;
+                if (loadBase >= (uint)ram.Length)
+                    return CreateErrorResponse(
+                        $"Base address 0x{loadBase:X8} is beyond EE Main RAM size (0x{ram.Length:X8})");
+
+                int available = ram.Length - (int)loadBase;
+                int count = Math.Min(src.Length, available);
+                if (count < src.Length)
+                    Console.WriteLine($"[LOADBIN] Warning: file is {src.Length} bytes but only {count} bytes fit in EE RAM from 0x{loadBase:X8}. File was truncated.");
+                Array.Copy(src, 0, ram, (int)loadBase, count);
+
+                string? truncationNote = count < src.Length
+                    ? $" (truncated: only {count}/{src.Length} bytes fit in EE RAM)"
+                    : null;
+
+                var response = new CommandResponse
+                {
+                    Success = true,
+                    Command = "LOADBIN",
+                    Message = truncationNote,
+                    Regions = new List<SnapshotRegion>
+                    {
+                        new SnapshotRegion
+                        {
+                            Label       = System.IO.Path.GetFileName(filePath),
+                            File        = filePath,
+                            BaseAddress = loadBase,
+                            Size        = count,
+                        }
+                    },
+                };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                if (!wasPaused) Scheduler.Paused = false;
+                return CreateErrorResponse($"LoadBin error: {ex.Message}");
             }
         }
 
@@ -3167,6 +3236,7 @@ namespace CodeDesigner.Mips64LE
         public string? Region { get; set; }
         public string? OutputPath { get; set; }
         public string? InputPath { get; set; }
+        public string? FilePath { get; set; }
         public uint? BreakpointAddress { get; set; }
         public string? Label { get; set; }
         public string? Comment { get; set; }
