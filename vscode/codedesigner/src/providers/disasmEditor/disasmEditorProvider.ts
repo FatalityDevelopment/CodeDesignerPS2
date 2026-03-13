@@ -751,9 +751,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'patchBytes') {
                 if (this.socketClient?.isConnected()) {
                     try {
+                        // The bytes field (populated by formatBytesForDisplay) shows bytes in
+                        // big-endian (word) order.  Reverse the byte pairs to get the correct
+                        // little-endian layout expected by EE memory before writing.
+                        const hexStr = message.hexBytes as string;
+                        const leHex = (hexStr.match(/.{2}/g) ?? [hexStr]).reverse().join('');
                         await this.socketClient.writeMemory(
                             message.address as number,
-                            message.hexBytes as string,
+                            leHex,
                             'ee'
                         );
                         // Recompute the page that contains this address and refresh it.
