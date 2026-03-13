@@ -489,6 +489,53 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
           }
         }
+      } else if (message.type === "disasmBytes") {
+        // Quick disassembly preview for the bytes editor in the edit overlay.
+        if (this.socketClient?.isConnected()) {
+          try {
+            const results = await this.socketClient.disassemble(
+              message.hexBytes as string,
+              message.address as number
+            );
+            const first = results?.[0];
+            webviewPanel.webview.postMessage({
+              type: 'disasmBytesResult',
+              preview: first?.Success && first.Assembly ? first.Assembly.trim() : '(invalid)',
+            });
+          } catch (err: any) {
+            getOutputChannel().appendLine(`[DISASM] disasmBytes failed: ${err?.message ?? err}`);
+          }
+        }
+      } else if (message.type === "patchBytes") {
+        // Patch the in-memory file buffer and write the change back to disk.
+        // The bytes field shows bytes in big-endian (word) order — reverse pairs
+        // to get the little-endian layout stored in the file.
+        const hexStr = (message.hexBytes as string ?? '').replace(/\s/g, '');
+        // MIPS instructions are always exactly 4 bytes (8 hex chars).
+        if (hexStr.length !== 8) {
+          getOutputChannel().appendLine(`[DISASM] patchBytes: expected 8 hex chars, got "${hexStr}"`);
+        } else {
+          const pairs = hexStr.match(/.{2}/g)!;   // always 4 pairs due to length check
+          const leHex = pairs.reverse().join('');
+          const bytes = Buffer.from(leHex, 'hex');
+          const addr = message.address as number;
+          const fileOffset = addr - baseAddress;
+          if (fileData && fileOffset >= 0 && fileOffset + 4 <= fileData.length && bytes.length === 4) {
+            bytes.copy(fileData, fileOffset);
+            // Persist to disk.
+            try {
+              await fs.promises.writeFile(document.uri.fsPath, fileData);
+            } catch (writeErr: any) {
+              getOutputChannel().appendLine(`[DISASM] Failed to save patch to disk: ${writeErr?.message ?? writeErr}`);
+              vscode.window.showErrorMessage(`Could not save patch: ${writeErr?.message ?? writeErr}`);
+            }
+            // Refresh the page and hex view.
+            const instrIndex = Math.floor(fileOffset / DisasmEditorProvider.INSTRUCTION_SIZE);
+            const pageStart = Math.floor(instrIndex / DisasmEditorProvider.PAGE_SIZE) * DisasmEditorProvider.PAGE_SIZE;
+            await this.sendDisasmPage(webviewPanel, fileData, pageStart, baseAddress);
+            this.sendHexView(webviewPanel, fileData, baseAddress, addr, DisasmEditorProvider.INSTRUCTION_SIZE);
+          }
+        }
       } else if (message.type === "convertCheat") {
         if (this.socketClient?.isConnected()) {
           try {
