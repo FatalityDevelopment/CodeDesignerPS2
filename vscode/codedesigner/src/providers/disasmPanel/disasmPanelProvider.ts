@@ -266,6 +266,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'browseGame':
                     await this.handleBrowseGame();
                     break;
+                case 'browseBios':
+                    await this.handleBrowseBios();
+                    break;
+                case 'browseEmulator':
+                    await this.handleBrowseEmulator();
+                    break;
             }
         });
     }
@@ -351,6 +357,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             if (err?.code !== 'ENOENT') {
                 getOutputChannel().debug(`Could not read ${settingsPath}: ${err?.message ?? err}`);
             }
+        }
+    }
+
+    /** Save the current emu-settings.json back to the workspace root directory. */
+    private async saveEmuSettings(): Promise<void> {
+        if (!this.workspaceRoot) { return; }
+        const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
+        try {
+            await fs.promises.writeFile(settingsPath, JSON.stringify(this.settings, null, 2), 'utf-8');
+        } catch (err: any) {
+            getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
         }
     }
 
@@ -1346,7 +1363,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
      * Open a VS Code file-picker dialog so the user can select a disc image directly.
      * Accepts plain ISO/BIN images and ZIP archives containing a disc image.
-     * Posts 'browseGameResult' back to the webview with the chosen file path.
+     * Adds the chosen path to emu-settings.json if not already listed, then posts
+     * 'browseGameResult' with the updated gameOptions list back to the webview.
      */
     private async handleBrowseGame(): Promise<void> {
         const uris = await vscode.window.showOpenDialog({
@@ -1361,9 +1379,83 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             title: 'Select PS2 Disc Image',
         });
         if (uris && uris.length > 0) {
+            const filePath = uris[0].fsPath;
+            if (!this.settings.games) { this.settings.games = []; }
+            if (!this.settings.games.some(g => g.path === filePath)) {
+                const gameName = path.basename(filePath, path.extname(filePath));
+                this.settings.games.push({ name: gameName, path: filePath });
+                await this.saveEmuSettings();
+            }
+            const gameOptions = this.settings.games.map(g => ({ label: g.name, value: g.path }));
             this.webview?.postMessage({
-                command:  'browseGameResult',
-                filePath: uris[0].fsPath,
+                command:     'browseGameResult',
+                filePath,
+                gameOptions,
+            });
+        }
+    }
+
+    /**
+     * Open a VS Code file-picker dialog so the user can select a BIOS image directly.
+     * Adds the chosen path to emu-settings.json if not already listed, then posts
+     * 'browseBiosResult' with the updated biosOptions list back to the webview.
+     */
+    private async handleBrowseBios(): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:   true,
+            canSelectFolders: false,
+            canSelectMany:    false,
+            filters: {
+                'BIOS Images': ['bin', 'rom'],
+                'All Files':   ['*'],
+            },
+            title: 'Select PS2 BIOS File',
+        });
+        if (uris && uris.length > 0) {
+            const filePath = uris[0].fsPath;
+            if (!this.settings.bios) { this.settings.bios = []; }
+            if (!this.settings.bios.some(b => b.path === filePath)) {
+                const name = path.basename(filePath, path.extname(filePath));
+                this.settings.bios.push({ name, path: filePath });
+                await this.saveEmuSettings();
+            }
+            const biosOptions = this.settings.bios.map(b => ({ label: b.name, value: b.path }));
+            this.webview?.postMessage({
+                command:     'browseBiosResult',
+                filePath,
+                biosOptions,
+            });
+        }
+    }
+
+    /**
+     * Open a VS Code file-picker dialog so the user can select an emulator executable.
+     * Adds the chosen path to emu-settings.json if not already listed, then posts
+     * 'browseEmulatorResult' with the updated emulators list back to the webview.
+     */
+    private async handleBrowseEmulator(): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:   true,
+            canSelectFolders: false,
+            canSelectMany:    false,
+            filters: {
+                'All Files': ['*'],
+            },
+            title: 'Select PS2 Emulator Executable',
+        });
+        if (uris && uris.length > 0) {
+            const filePath = uris[0].fsPath;
+            if (!this.settings.emulators) { this.settings.emulators = []; }
+            if (!this.settings.emulators.some(e => e.path === filePath)) {
+                const emulatorName = path.basename(filePath, path.extname(filePath));
+                this.settings.emulators.push({ type: emulatorName, path: filePath });
+                await this.saveEmuSettings();
+            }
+            const emulators = this.settings.emulators.map(e => ({ label: e.type, value: e.path }));
+            this.webview?.postMessage({
+                command:   'browseEmulatorResult',
+                filePath,
+                emulators,
             });
         }
     }
