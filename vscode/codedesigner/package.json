@@ -36,10 +36,6 @@
     },
     "commands": [
       {
-        "command": "disasm.showPanel",
-        "title": "Show Disasm Panel"
-      },
-      {
         "command": "codedesigner.connectServer",
         "title": "CodeDesigner: Connect to Server"
       },
