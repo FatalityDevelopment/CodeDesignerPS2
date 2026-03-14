@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
+import * as path from "path";
 import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
@@ -387,6 +388,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     let fileData: Buffer | null = null;
     let readyReceived = false;
 
+    // When the emulator is connected at open time, the binary is auto-loaded via
+    // LOADBIN.  isLiveMode gates all live-only features (step/run/breakpoints) and
+    // controls whether pages are fetched from emulator memory or the file buffer.
+    let isLiveMode = false;
+    // Total file size — needed by sendLiveDisasmPage / sendLiveHexView.
+    let totalBytes = 0;
+    // EE is the only region used for binary file panels.
+    const binRegion = 'ee';
+    // Friendly label shown in the live toolbar (filename without path).
+    const binLabel = path.basename(document.uri.fsPath) || 'binary';
+
     // Base address is resolved lazily in the fs.readFile callback via
     // _getOrAskBaseAddress (which prompts the user once and caches the result).
     // Initialise to BASE_ADDRESS here so sendInit always has a valid number;
@@ -394,20 +406,30 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     let baseAddress: number = DisasmEditorProvider.BASE_ADDRESS;
 
     const sendInit = async (data: Buffer) => {
+      totalBytes = data.length;
       const totalInstructions = Math.floor(data.length / DisasmEditorProvider.INSTRUCTION_SIZE);
-      console.log(`[DISASM] Sending init: ${totalInstructions} instructions, base=0x${baseAddress.toString(16).toUpperCase().padStart(8, '0')}`);
+      console.log(`[DISASM] Sending init: ${totalInstructions} instructions, base=0x${baseAddress.toString(16).toUpperCase().padStart(8, '0')}, live=${isLiveMode}`);
       webviewPanel.webview.postMessage({
         type: 'init',
         totalInstructions,
         pageSize: DisasmEditorProvider.PAGE_SIZE,
         baseAddress,
+        // isBinLive is a dedicated flag for binary-file panels backed by the
+        // emulator.  The frontend OR's it with isLive so live toolbar features
+        // activate without touching the existing isLive code path.
+        isBinLive: isLiveMode,
+        ...(isLiveMode ? { regionLabel: binLabel, totalBytes } : {}),
       });
       console.log(`[DISASM] Sending first page and hex view`);
-      await this.sendDisasmPage(webviewPanel, data, 0, baseAddress);
-      this.sendHexView(webviewPanel, data,
-        baseAddress,
-        baseAddress,
-        DisasmEditorProvider.INSTRUCTION_SIZE);
+      if (isLiveMode) {
+        await this.sendLiveDisasmPage(webviewPanel, binRegion, baseAddress, totalBytes, 0);
+        await this.sendLiveHexView(webviewPanel, binRegion, baseAddress, baseAddress,
+          DisasmEditorProvider.INSTRUCTION_SIZE);
+      } else {
+        await this.sendDisasmPage(webviewPanel, data, 0, baseAddress);
+        this.sendHexView(webviewPanel, data, baseAddress, baseAddress,
+          DisasmEditorProvider.INSTRUCTION_SIZE);
+      }
     };
 
     // Register the message handler BEFORE setting html so that any 'ready'
@@ -428,30 +450,227 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       }
       if (!fileData) { return; }
       if (message.type === "updateHex") {
-        this.sendHexView(
-          webviewPanel,
-          fileData,
-          baseAddress,
-          message.address,
-          message.length || DisasmEditorProvider.INSTRUCTION_SIZE
-        );
+        if (isLiveMode) {
+          await this.sendLiveHexView(webviewPanel, binRegion, baseAddress,
+            message.address, message.length || DisasmEditorProvider.INSTRUCTION_SIZE);
+        } else {
+          this.sendHexView(webviewPanel, fileData, baseAddress, message.address,
+            message.length || DisasmEditorProvider.INSTRUCTION_SIZE);
+        }
       } else if (message.type === "requestPage") {
-        await this.sendDisasmPage(webviewPanel, fileData, message.startIndex, baseAddress);
+        if (isLiveMode) {
+          await this.sendLiveDisasmPage(webviewPanel, binRegion, baseAddress, totalBytes, message.startIndex);
+        } else {
+          await this.sendDisasmPage(webviewPanel, fileData, message.startIndex, baseAddress);
+        }
+      // ── Live-only commands ─────────────────────────────────────────────────
+      // These all proxy through the socket client and are only active when the
+      // binary was successfully LOADBIN'd into the emulator at open time.
+      } else if (message.type === 'pause') {
+        if (isLiveMode && this.socketClient?.isConnected()) {
+          try {
+            await this.socketClient.pause();
+            this._broadcastStatus(true);
+          } catch (err: any) {
+            console.error(`[BIN] Pause failed: ${err?.message ?? err}`);
+          }
+        }
+      } else if (message.type === 'resume') {
+        if (isLiveMode && this.socketClient?.isConnected()) {
+          try {
+            await this.socketClient.resume();
+            this._broadcastStatus(false);
+          } catch (err: any) {
+            console.error(`[BIN] Resume failed: ${err?.message ?? err}`);
+          }
+        }
+      } else if (message.type === 'step') {
+        if (isLiveMode) { await this.stepAndBroadcast(); }
+      } else if (message.type === 'setBreakpoint') {
+        if (isLiveMode) {
+          this._knownBreakpoints.add(message.address);
+          try { await this.socketClient!.setBreakpoint(message.address); } catch (err: any) {
+            console.error(`[BIN] setBreakpoint failed: ${err?.message ?? err}`);
+          }
+        }
+      } else if (message.type === 'clearBreakpoint') {
+        if (isLiveMode) {
+          this._knownBreakpoints.delete(message.address);
+          try { await this.socketClient!.clearBreakpoint(message.address); } catch (err: any) {
+            console.error(`[BIN] clearBreakpoint failed: ${err?.message ?? err}`);
+          }
+        }
+      } else if (message.type === 'clearAllBreakpoints') {
+        if (isLiveMode) {
+          this._knownBreakpoints.clear();
+          try { await this.socketClient!.clearAllBreakpoints(); } catch (err: any) {
+            console.error(`[BIN] clearAllBreakpoints failed: ${err?.message ?? err}`);
+          }
+        }
+      } else if (message.type === 'getStatus') {
+        if (!isLiveMode || !this.socketClient?.isConnected()) { return; }
+        try {
+          const status = await this.socketClient.getPC();
+          const statusMsg: any = { type: 'status', ...status };
+          if (status.paused) {
+            try {
+              const regs = await this.socketClient.getRegisters();
+              statusMsg.registers = regs;
+              const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29] ?? 0;
+              if (sp) {
+                try {
+                  const stackBuf = await this.socketClient.readMemory(sp, 128, binRegion);
+                  statusMsg.stackBytes = Array.from(stackBuf);
+                  statusMsg.stackBase = sp;
+                } catch { /* ignore */ }
+              }
+            } catch { /* ignore */ }
+            const hitAddr = status.breakpointHitAddress ?? status.pc;
+            this._revealPanelForAddress(hitAddr);
+            this._broadcastFullStatus(statusMsg);
+            this.onPauseStateChange?.(true);
+          } else {
+            webviewPanel.webview.postMessage(statusMsg);
+          }
+        } catch (err: any) {
+          console.error(`[BIN] getStatus failed: ${err?.message ?? err}`);
+        }
+      } else if (message.type === 'getThreads') {
+        if (!isLiveMode || !this.socketClient?.isConnected()) {
+          webviewPanel.webview.postMessage({ type: 'threads', threads: [] });
+          return;
+        }
+        try {
+          const threads = await this.socketClient.getThreads();
+          webviewPanel.webview.postMessage({ type: 'threads', threads });
+        } catch (err: any) {
+          getOutputChannel().appendLine(`[BIN] getThreads failed: ${err?.message ?? err}`);
+          webviewPanel.webview.postMessage({ type: 'threads', threads: [] });
+        }
+      } else if (message.type === 'gotoRegion') {
+        // The webview could not find the address within its own range.
+        // Search all known panels (live + binary) for one that owns the address.
+        const addr = message.address as number;
+        const physAddr = DisasmEditorProvider._toPhysAddr(addr);
+        const target =
+          this._livePanelInfo.find(info =>
+            info.region === binRegion &&
+            physAddr >= info.physBaseAddress &&
+            physAddr < info.physBaseAddress + info.totalBytes
+          ) ??
+          this._livePanelInfo.find(info =>
+            physAddr >= info.physBaseAddress &&
+            physAddr < info.physBaseAddress + info.totalBytes
+          );
+        if (target) {
+          target.panel.reveal(undefined, false);
+          target.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
+        } else {
+          webviewPanel.webview.postMessage({ type: 'gotoRegionNotFound', address: addr });
+        }
+      } else if (message.type === 'setRegister') {
+        if (isLiveMode && this.socketClient?.isConnected()) {
+          try {
+            await this.socketClient.setRegister(
+              message.regType as string, message.regIdx as number, message.regValue as string);
+            const regs = await this.socketClient.getRegisters();
+            const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29] ?? 0;
+            let stackBytes: number[] = [];
+            let stackBase = 0;
+            if (sp) {
+              try {
+                const buf = await this.socketClient.readMemory(sp, 128, binRegion);
+                stackBytes = Array.from(buf); stackBase = sp;
+              } catch { /* ignore */ }
+            }
+            webviewPanel.webview.postMessage({ type: 'status', paused: true, pc: regs.pc, registers: regs, stackBytes, stackBase });
+          } catch (err: any) {
+            console.error(`[BIN] setRegister failed: ${err?.message ?? err}`);
+          }
+        }
+      } else if (message.type === 'setPC') {
+        if (!isLiveMode || !this.socketClient?.isConnected()) { return; }
+        const addr = message.address as number;
+        const addrHex = `0x${addr.toString(16).toUpperCase()}`;
+        try {
+          await this.socketClient.pause();
+          await this.socketClient.setRegister('PC', 0, addrHex);
+          const status = await this.socketClient.getPC();
+          const statusMsg: any = { type: 'status', ...status, paused: true };
+          try {
+            const regs = await this.socketClient.getRegisters();
+            statusMsg.registers = regs;
+            const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29] ?? 0;
+            if (sp) {
+              try {
+                const buf = await this.socketClient.readMemory(sp, 128, binRegion);
+                statusMsg.stackBytes = Array.from(buf);
+                statusMsg.stackBase = sp;
+              } catch { /* ignore */ }
+            }
+          } catch { /* ignore */ }
+          this._broadcastFullStatus(statusMsg);
+          this._revealPanelForAddress(addr);
+          const physAddr = DisasmEditorProvider._toPhysAddr(addr);
+          const target = this._livePanelInfo.find(i =>
+            physAddr >= i.physBaseAddress && physAddr < i.physBaseAddress + i.totalBytes);
+          if (target) { target.panel.webview.postMessage({ type: 'gotoAddress', address: addr }); }
+          this.onPauseStateChange?.(true);
+        } catch (err: any) {
+          getOutputChannel().appendLine(`[BIN] setPC failed: ${err?.message ?? err}`);
+        }
+      } else if (message.type === 'syncGotoInput') {
+        const value = message.value as string;
+        for (const info of this._livePanelInfo) {
+          if (info.panel !== webviewPanel) {
+            info.panel.webview.postMessage({ type: 'syncGotoInput', value });
+          }
+        }
+      // ── Static-and-live-compatible handlers ────────────────────────────────
       } else if (message.type === "search") {
-        await this.handleSearch(webviewPanel, message.query, message.mode,
-          baseAddress, fileData.length, undefined, fileData);
+        if (isLiveMode) {
+          await this.handleSearch(webviewPanel, message.query, message.mode,
+            baseAddress, totalBytes, binRegion);
+        } else {
+          await this.handleSearch(webviewPanel, message.query, message.mode,
+            baseAddress, fileData.length, undefined, fileData);
+        }
       } else if (message.type === "scanStrings") {
-        await this.handleFileScan('strings', webviewPanel, fileData, baseAddress);
+        if (isLiveMode) {
+          await this.handleLiveScan('strings', webviewPanel, binRegion, baseAddress, totalBytes);
+        } else {
+          await this.handleFileScan('strings', webviewPanel, fileData, baseAddress);
+        }
       } else if (message.type === "scanFunctions") {
-        await this.handleFileScan('functions', webviewPanel, fileData, baseAddress);
+        if (isLiveMode) {
+          await this.handleLiveScan('functions', webviewPanel, binRegion, baseAddress, totalBytes);
+        } else {
+          await this.handleFileScan('functions', webviewPanel, fileData, baseAddress);
+        }
       } else if (message.type === "scanPointers") {
-        await this.handleFileScan('pointers', webviewPanel, fileData, baseAddress);
+        if (isLiveMode) {
+          await this.handleLiveScan('pointers', webviewPanel, binRegion, baseAddress, totalBytes);
+        } else {
+          await this.handleFileScan('pointers', webviewPanel, fileData, baseAddress);
+        }
       } else if (message.type === "scanFloats") {
-        await this.handleFileScan('floats', webviewPanel, fileData, baseAddress);
+        if (isLiveMode) {
+          await this.handleLiveScan('floats', webviewPanel, binRegion, baseAddress, totalBytes);
+        } else {
+          await this.handleFileScan('floats', webviewPanel, fileData, baseAddress);
+        }
       } else if (message.type === "scanIntegers") {
-        await this.handleFileScan('integers', webviewPanel, fileData, baseAddress);
+        if (isLiveMode) {
+          await this.handleLiveScan('integers', webviewPanel, binRegion, baseAddress, totalBytes);
+        } else {
+          await this.handleFileScan('integers', webviewPanel, fileData, baseAddress);
+        }
       } else if (message.type === "getSymbols") {
-        await this.handleGetSymbols(webviewPanel, fileData, baseAddress);
+        if (isLiveMode) {
+          await this.handleGetSymbols(webviewPanel, undefined, baseAddress);
+        } else {
+          await this.handleGetSymbols(webviewPanel, fileData, baseAddress);
+        }
       } else if (message.type === "addLabel") {
         await this.handleAddLabel(webviewPanel, message.address, message.labelName, message.comment);
       } else if (message.type === "deleteLabel") {
@@ -529,11 +748,24 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
               getOutputChannel().appendLine(`[DISASM] Failed to save patch to disk: ${writeErr?.message ?? writeErr}`);
               vscode.window.showErrorMessage(`Could not save patch: ${writeErr?.message ?? writeErr}`);
             }
+            // If live mode, mirror the patch to emulator memory so stepping sees the new code.
+            if (isLiveMode && this.socketClient?.isConnected()) {
+              try {
+                await this.socketClient.writeMemory(addr, leHex, binRegion);
+              } catch (writeMemErr: any) {
+                getOutputChannel().appendLine(`[BIN] Emulator mirror of patch failed: ${writeMemErr?.message ?? writeMemErr}`);
+              }
+            }
             // Refresh the page and hex view.
             const instrIndex = Math.floor(fileOffset / DisasmEditorProvider.INSTRUCTION_SIZE);
             const pageStart = Math.floor(instrIndex / DisasmEditorProvider.PAGE_SIZE) * DisasmEditorProvider.PAGE_SIZE;
-            await this.sendDisasmPage(webviewPanel, fileData, pageStart, baseAddress);
-            this.sendHexView(webviewPanel, fileData, baseAddress, addr, DisasmEditorProvider.INSTRUCTION_SIZE);
+            if (isLiveMode) {
+              await this.sendLiveDisasmPage(webviewPanel, binRegion, baseAddress, totalBytes, pageStart);
+              await this.sendLiveHexView(webviewPanel, binRegion, baseAddress, addr, DisasmEditorProvider.INSTRUCTION_SIZE);
+            } else {
+              await this.sendDisasmPage(webviewPanel, fileData, pageStart, baseAddress);
+              this.sendHexView(webviewPanel, fileData, baseAddress, addr, DisasmEditorProvider.INSTRUCTION_SIZE);
+            }
           }
         }
       } else if (message.type === "convertCheat") {
@@ -568,36 +800,48 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       // Prompt for (or recall) base address now that we have file size info.
       baseAddress = await this._getOrAskBaseAddress(document.uri.toString());
 
+      // When the emulator is connected, auto-load the binary into EE RAM so the
+      // panel can step, run, set breakpoints, and inspect registers.  Only the
+      // loaded region changes; the rest of EE RAM keeps its current (default) data.
+      // fileData is set AFTER LOADBIN so that if the webview's 'ready' fires during
+      // the await, sendInit picks up the correct isLiveMode flag.
+      if (this.socketClient?.isConnected()) {
+        const addrHex = `0x${baseAddress.toString(16).toUpperCase().padStart(8, '0')}`;
+        try {
+          const { Size } = await this.socketClient.loadBinFile(document.uri.fsPath, baseAddress);
+          isLiveMode = true;
+          // Register the binary panel in the live tracking lists so broadcasts
+          // (step, breakpoint-hit, pause/resume) automatically reach this panel.
+          const physBase = DisasmEditorProvider._toPhysAddr(baseAddress);
+          this._livePanels.push(webviewPanel);
+          this._livePanelInfo.push({
+            panel: webviewPanel,
+            label: binLabel,
+            region: binRegion,
+            baseAddress,
+            totalBytes: data.length,
+            physBaseAddress: physBase,
+          });
+          // Register cleanup immediately after push so disposal always runs
+          // even if something throws later in this try block.
+          webviewPanel.onDidDispose(() => {
+            this._livePanels = this._livePanels.filter(p => p !== webviewPanel);
+            this._livePanelInfo = this._livePanelInfo.filter(i => i.panel !== webviewPanel);
+          });
+          const sizeKb = Math.round(Size / 1024);
+          getOutputChannel().appendLine(
+            `[LOADBIN] Auto-loaded ${binLabel} into EE RAM at ${addrHex} (${sizeKb} KB). Emulator paused.`
+          );
+        } catch (loadErr: any) {
+          getOutputChannel().appendLine(
+            `[LOADBIN] Auto-load failed for ${binLabel}, using static view: ${loadErr?.message ?? loadErr}`
+          );
+        }
+      }
+
       fileData = data;
       // Send init if the webview already signalled ready before the file was read.
       if (readyReceived) { await sendInit(fileData); }
-
-      // If the backend is connected, offer to load the binary into the live
-      // emulator so the user can step and run code from the loaded address.
-      if (this.socketClient?.isConnected()) {
-        const addrHex = `0x${baseAddress.toString(16).toUpperCase().padStart(8, '0')}`;
-        const answer = await vscode.window.showInformationMessage(
-          `Load "${document.uri.fsPath.split(/[\\/]/).pop()}" into emulator EE RAM at ${addrHex} for live debugging (step, run, breakpoints)?`,
-          'Load into Emulator',
-          'Static View Only'
-        );
-        if (answer === 'Load into Emulator') {
-          try {
-            const region = await this.socketClient.loadBinFile(document.uri.fsPath, baseAddress);
-            // Also set PC to the load base address so stepping starts at the right place.
-            await this.socketClient.setRegister('PC', 0, `0x${baseAddress.toString(16)}`);
-            const sizeKb = Math.round(region.Size / 1024);
-            vscode.window.showInformationMessage(
-              `Loaded ${sizeKb} KB at ${addrHex}. PC set to ${addrHex}. Emulator is paused — use the EE Main RAM live panel to step and run.`
-            );
-            getOutputChannel().appendLine(
-              `[LOADBIN] ${region.File} → EE RAM at ${addrHex} (${sizeKb} KB). PC = ${addrHex}.`
-            );
-          } catch (loadErr: any) {
-            vscode.window.showErrorMessage(`Load into emulator failed: ${loadErr?.message ?? loadErr}`);
-          }
-        }
-      }
     });
   }
 
