@@ -117,6 +117,7 @@ import './disasm-editor.css';
             <button id="sym-scan-strings-btn" class="sym-scan-btn">Scan for strings</button>
             <span id="sym-strings-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-strings-filter" class="sym-filter-input" placeholder="Filter strings…" />
         <div id="sym-strings-list" class="sym-list"></div>
     </div>
     <div id="sym-functions-content" class="sym-tab-content">
@@ -124,6 +125,7 @@ import './disasm-editor.css';
             <button id="sym-scan-functions-btn" class="sym-scan-btn">Scan for functions</button>
             <span id="sym-functions-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-functions-filter" class="sym-filter-input" placeholder="Filter functions…" />
         <div id="sym-functions-list" class="sym-list"></div>
     </div>
     <div id="sym-pointers-content" class="sym-tab-content">
@@ -131,6 +133,7 @@ import './disasm-editor.css';
             <button id="sym-scan-pointers-btn" class="sym-scan-btn">Scan for pointers</button>
             <span id="sym-pointers-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-pointers-filter" class="sym-filter-input" placeholder="Filter pointers…" />
         <div id="sym-pointers-list" class="sym-list"></div>
     </div>
     <div id="sym-floats-content" class="sym-tab-content">
@@ -138,6 +141,7 @@ import './disasm-editor.css';
             <button id="sym-scan-floats-btn" class="sym-scan-btn">Scan for floats</button>
             <span id="sym-floats-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-floats-filter" class="sym-filter-input" placeholder="Filter floats…" />
         <div id="sym-floats-list" class="sym-list"></div>
     </div>
     <div id="sym-integers-content" class="sym-tab-content">
@@ -145,6 +149,7 @@ import './disasm-editor.css';
             <button id="sym-scan-integers-btn" class="sym-scan-btn">Scan for integers</button>
             <span id="sym-integers-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-integers-filter" class="sym-filter-input" placeholder="Filter integers…" />
         <div id="sym-integers-list" class="sym-list"></div>
     </div>
 </div>
@@ -350,7 +355,9 @@ export class DisasmEditorComponent implements AfterViewInit {
     const svc    = this.svc;
     const vscode = getVsCodeApi();
 
-    const SCAN_TIMEOUT_MS = 120_000;
+    const SCAN_TIMEOUT_MS   = 120_000;
+    /** Maximum number of scanner results shown in the symbols panel at once. */
+    const SYM_DISPLAY_LIMIT = 500;
 
     // ── DOM refs ──────────────────────────────────────────────────────────────
     // Note: hex-header and hex-container are rendered by <app-hex-view> and
@@ -414,6 +421,11 @@ export class DisasmEditorComponent implements AfterViewInit {
     const symScanPointersBtn  = document.getElementById('sym-scan-pointers-btn') as HTMLButtonElement;
     const symScanFloatsBtn    = document.getElementById('sym-scan-floats-btn') as HTMLButtonElement;
     const symScanIntegersBtn  = document.getElementById('sym-scan-integers-btn') as HTMLButtonElement;
+    const symStringsFilter    = document.getElementById('sym-strings-filter')   as HTMLInputElement;
+    const symFunctionsFilter  = document.getElementById('sym-functions-filter') as HTMLInputElement;
+    const symPointersFilter   = document.getElementById('sym-pointers-filter')  as HTMLInputElement;
+    const symFloatsFilter     = document.getElementById('sym-floats-filter')    as HTMLInputElement;
+    const symIntegersFilter   = document.getElementById('sym-integers-filter')  as HTMLInputElement;
 
     // Edit overlay
     const editOverlay          = document.getElementById('edit-overlay')!;
@@ -1974,17 +1986,25 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     function renderSymStrings() {
       if (!symStringsList) { return; }
-      const items = (state.symStrings || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symStringsFilter ? symStringsFilter.value.toLowerCase() : '';
+      const regionItems = (state.symStrings || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.value.toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symStringsList.innerHTML = '<div class="sym-empty">No strings found. Click "Scan for strings".</div>';
         return;
       }
-      symStringsList.innerHTML = items.map(item =>
+      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
+      const overflow  = items.length > SYM_DISPLAY_LIMIT
+        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+        : '';
+      symStringsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.value)}">${escHtml(item.value)}</span>
         </div>`
-      ).join('');
+      ).join('') + overflow;
       symStringsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -1992,17 +2012,25 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     function renderSymFunctions() {
       if (!symFunctionsList) { return; }
-      const items = (state.symFunctions || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symFunctionsFilter ? symFunctionsFilter.value.toLowerCase() : '';
+      const regionItems = (state.symFunctions || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.label.toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symFunctionsList.innerHTML = '<div class="sym-empty">No functions found. Click "Scan for functions".</div>';
         return;
       }
-      symFunctionsList.innerHTML = items.map(item =>
+      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
+      const overflow  = items.length > SYM_DISPLAY_LIMIT
+        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+        : '';
+      symFunctionsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-name" title="${escHtml(item.label)}">${escHtml(item.label)}</span>
         </div>`
-      ).join('');
+      ).join('') + overflow;
       symFunctionsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -2010,17 +2038,25 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     function renderSymPointers() {
       if (!symPointersList) { return; }
-      const items = (state.symPointers || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symPointersFilter ? symPointersFilter.value.toLowerCase() : '';
+      const regionItems = (state.symPointers || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.pointsTo.toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symPointersList.innerHTML = '<div class="sym-empty">No pointers found. Click "Scan for pointers".</div>';
         return;
       }
-      symPointersList.innerHTML = items.map(item =>
+      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
+      const overflow  = items.length > SYM_DISPLAY_LIMIT
+        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+        : '';
+      symPointersList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="→ ${escHtml(item.pointsTo)}">→ ${escHtml(item.pointsTo)}</span>
         </div>`
-      ).join('');
+      ).join('') + overflow;
       symPointersList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -2028,17 +2064,25 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     function renderSymFloats() {
       if (!symFloatsList) { return; }
-      const items = (state.symFloats || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symFloatsFilter ? symFloatsFilter.value.toLowerCase() : '';
+      const regionItems = (state.symFloats || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.raw.toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symFloatsList.innerHTML = '<div class="sym-empty">No floats found. Click "Scan for floats".</div>';
         return;
       }
-      symFloatsList.innerHTML = items.map(item =>
+      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
+      const overflow  = items.length > SYM_DISPLAY_LIMIT
+        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+        : '';
+      symFloatsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.raw)}">${rawBitsToFloat(parseInt(item.raw, 16) >>> 0)} (${escHtml(item.raw)})</span>
         </div>`
-      ).join('');
+      ).join('') + overflow;
       symFloatsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -2046,17 +2090,25 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     function renderSymIntegers() {
       if (!symIntegersList) { return; }
-      const items = (state.symIntegers || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symIntegersFilter ? symIntegersFilter.value.toLowerCase() : '';
+      const regionItems = (state.symIntegers || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.hex.toLowerCase().includes(filterText) || String(item.value).toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symIntegersList.innerHTML = '<div class="sym-empty">No integers found. Click "Scan for integers".</div>';
         return;
       }
-      symIntegersList.innerHTML = items.map(item =>
+      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
+      const overflow  = items.length > SYM_DISPLAY_LIMIT
+        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+        : '';
+      symIntegersList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.hex)}">${item.value} (${escHtml(item.hex)})</span>
         </div>`
-      ).join('');
+      ).join('') + overflow;
       symIntegersList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -2153,6 +2205,13 @@ export class DisasmEditorComponent implements AfterViewInit {
         if (symIntegersStatus.textContent === 'Scanning…') { symIntegersStatus.textContent = ''; }
       }, SCAN_TIMEOUT_MS);
     });
+
+    // Filter inputs — re-render the corresponding list on each keystroke.
+    symStringsFilter?.addEventListener('input',   () => renderSymStrings());
+    symFunctionsFilter?.addEventListener('input', () => renderSymFunctions());
+    symPointersFilter?.addEventListener('input',  () => renderSymPointers());
+    symFloatsFilter?.addEventListener('input',    () => renderSymFloats());
+    symIntegersFilter?.addEventListener('input',  () => renderSymIntegers());
 
     // ── Debug panel ───────────────────────────────────────────────────────────
     const MIPS_REG_NAMES = [

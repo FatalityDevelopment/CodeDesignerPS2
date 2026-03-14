@@ -16,6 +16,15 @@ interface DisassembledRow {
   comment: string;
 }
 
+/** Cached scanner results stored per panel. */
+interface PanelScanCache {
+  strings?:   StringEntry[];
+  functions?: FunctionEntry[];
+  pointers?:  PointerEntry[];
+  floats?:    FloatEntry[];
+  integers?:  IntegerEntry[];
+}
+
 export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private static readonly HEX_VIEW_SIZE = 0x30;
   private static readonly INSTRUCTION_SIZE = 4;
@@ -34,6 +43,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     totalBytes: number;
     physBaseAddress: number;  // pre-computed physical base for fast address lookup
   }> = [];
+
+  /**
+   * Per-panel cache of the most recent scanner results (strings, functions, pointers,
+   * floats, integers).  Populated when a scan completes; re-sent to the webview when
+   * the symbols panel is opened after a page reload without requiring a re-scan.
+   */
+  private _panelScanCache: Map<vscode.WebviewPanel, PanelScanCache> = new Map();
 
   /**
    * All breakpoints the user has toggled across all live panels.  Persisted here
@@ -581,6 +597,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         panel.onDidDispose(() => {
             this._livePanels = this._livePanels.filter(p => p !== panel);
             this._livePanelInfo = this._livePanelInfo.filter(info => info.panel !== panel);
+            this._panelScanCache.delete(panel);
         });
 
         const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -1160,6 +1177,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /**
    * Scan a live memory region for strings, functions, pointers, floats, or
    * integers using the C# backend.
+   * Results are cached per panel; subsequent scans always re-fetch fresh data
+   * and update the cache so the webview can restore them after a page reload.
    * Posts the corresponding `*Updated` message to the webview.
    */
   private async handleLiveScan(
@@ -1171,20 +1190,31 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   ): Promise<void> {
     if (!this.socketClient?.isConnected()) { return; }
     try {
+      const cache = this._panelScanCache.get(panel) ?? {};
       if (kind === 'strings') {
         const strings = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
+        cache.strings = strings;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
       } else if (kind === 'functions') {
         const functions = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
+        cache.functions = functions;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'functionsUpdated', functions });
       } else if (kind === 'pointers') {
         const pointers = await this.socketClient.scanLivePointers(baseAddress, totalBytes, region);
+        cache.pointers = pointers;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'pointersUpdated', pointers });
       } else if (kind === 'floats') {
         const floats = await this.socketClient.scanLiveFloats(baseAddress, totalBytes, region);
+        cache.floats = floats;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'floatsUpdated', floats });
       } else {
         const integers = await this.socketClient.scanLiveIntegers(baseAddress, totalBytes, region);
+        cache.integers = integers;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'integersUpdated', integers });
       }
     } catch (err: any) {
@@ -1207,6 +1237,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /**
    * Scan file binary data for strings, functions, pointers, floats, or integers
    * using the C# backend.
+   * Results are cached per panel; subsequent scans always re-fetch fresh data
+   * and update the cache.
    * Posts the corresponding `*Updated` message to the webview.
    */
   private async handleFileScan(
@@ -1217,20 +1249,31 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   ): Promise<void> {
     if (!this.socketClient?.isConnected()) { return; }
     try {
+      const cache = this._panelScanCache.get(panel) ?? {};
       if (kind === 'strings') {
         const strings = await this.socketClient.getStrings(fileData, baseAddress);
+        cache.strings = strings;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
       } else if (kind === 'functions') {
         const functions = await this.socketClient.getFunctions(fileData, baseAddress);
+        cache.functions = functions;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'functionsUpdated', functions });
       } else if (kind === 'pointers') {
         const pointers = await this.socketClient.getPointers(fileData, baseAddress);
+        cache.pointers = pointers;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'pointersUpdated', pointers });
       } else if (kind === 'floats') {
         const floats = await this.socketClient.getFloats(fileData, baseAddress);
+        cache.floats = floats;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'floatsUpdated', floats });
       } else {
         const integers = await this.socketClient.getIntegers(fileData, baseAddress);
+        cache.integers = integers;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'integersUpdated', integers });
       }
     } catch (err: any) {
@@ -1254,6 +1297,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * back to the webview as a single `symbols` message.
    * For live panels that have no backing fileData, pass `undefined`; in that
    * case strings and functions are returned empty.
+   * Any previously cached scan results (pointers, floats, integers) are replayed
+   * so the webview restores its state without requiring a re-scan.
    */
   private async handleGetSymbols(
     panel: vscode.WebviewPanel,
@@ -1279,6 +1324,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     panel.webview.postMessage({ type: 'symbols', labels, strings, functions });
+
+    // Replay any cached scanner results (pointers, floats, integers) so the
+    // webview restores its previous scan state without requiring a re-scan.
+    const cache = this._panelScanCache.get(panel);
+    if (cache) {
+      if (cache.strings   !== undefined) { panel.webview.postMessage({ type: 'stringsUpdated',   strings:   cache.strings   }); }
+      if (cache.functions !== undefined) { panel.webview.postMessage({ type: 'functionsUpdated', functions: cache.functions }); }
+      if (cache.pointers  !== undefined) { panel.webview.postMessage({ type: 'pointersUpdated',  pointers:  cache.pointers  }); }
+      if (cache.floats    !== undefined) { panel.webview.postMessage({ type: 'floatsUpdated',    floats:    cache.floats    }); }
+      if (cache.integers  !== undefined) { panel.webview.postMessage({ type: 'integersUpdated',  integers:  cache.integers  }); }
+    }
   }
 
   /**
