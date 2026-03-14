@@ -953,11 +953,23 @@ namespace CodeDesigner.Mips64LE
                         // Pass PC to disassembler for proper branch target calculation
                         string disasm = MipsDisassembler.Disassemble(instruction, currentPc);
 
+                        // For unknown instructions the disassembler returns ".word 0xXXXXXXXX  # Unknown ..."
+                        // Per the problem statement, the instruction column should just say "unknown"
+                        // and the details should be placed in the comment column instead.
+                        string assembly = disasm;
+                        string? unknownComment = null;
+                        if (disasm.StartsWith(".word ", StringComparison.Ordinal))
+                        {
+                            assembly = "unknown";
+                            unknownComment = disasm.Substring(".word ".Length);
+                        }
+
                         results.Add(new InstructionResult
                         {
                             Hex = $"0x{instruction:X8}",
-                            Assembly = disasm,
-                            Success = true
+                            Assembly = assembly,
+                            Success = true,
+                            Comment = unknownComment
                         });
                         
                         // Store instruction for analysis
