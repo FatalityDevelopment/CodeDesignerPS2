@@ -1273,7 +1273,7 @@ export class SocketClient {
             SourceDumpPath: sourcePath,
             TargetDumpPath: targetPath,
         };
-        const response = await this.sendCommand(command, 120_000);
+        const response = await this.sendCommand(command, 600_000);
         if (!response.Success) {
             throw new Error(response.Error || 'PortCheats failed');
         }

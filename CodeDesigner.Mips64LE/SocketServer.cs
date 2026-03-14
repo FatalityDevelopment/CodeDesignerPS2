@@ -2088,6 +2088,28 @@ namespace CodeDesigner.Mips64LE
             // Window sizes to try, largest first (most reliable → least).
             int[] windowSizes = { 48, 32, 16 };
 
+            // ── Phase 0: collect all unique physical addresses across every block ──
+            // Many cheat lists include both an ON and an OFF code for the same address.
+            // Consolidating duplicates here means each address is searched only once.
+            var uniqueAddrs = new HashSet<int>();
+            foreach (var b in blocks)
+                foreach (var c in b.Cheats)
+                    uniqueAddrs.Add(c.Address);
+
+            int totalCheats = blocks.Sum(b => b.Cheats.Count);
+            logLines.Add($"[PORTCHEATS] {totalCheats} cheat entr{(totalCheats == 1 ? "y" : "ies")} across {blocks.Count} block{(blocks.Count == 1 ? "" : "s")}, {uniqueAddrs.Count} unique address{(uniqueAddrs.Count == 1 ? "" : "es")} to resolve.");
+            logLines.Add(string.Empty);
+
+            // ── Phase 1: resolve each unique address exactly once ─────────────────
+            var addressCache = new Dictionary<int, AddressSearchResult>(uniqueAddrs.Count);
+            foreach (int addr in uniqueAddrs)
+            {
+                logLines.Add($"Resolving 0x{addr:X6}…");
+                addressCache[addr] = ResolvePhysAddress(sourceData, targetData, addr, logLines, windowSizes);
+                logLines.Add(string.Empty);
+            }
+
+            // ── Phase 2: emit per-block / per-cheat results using the cache ───────
             foreach (var block in blocks)
             {
                 string blockName = block.Label ?? string.Empty;
@@ -2095,278 +2117,39 @@ namespace CodeDesigner.Mips64LE
 
                 foreach (var cheat in block.Cheats)
                 {
-                    // Physical address in the dump file: CheatBlock.Parse stores the lower
-                    // 24 bits of the GameShark address field (e.g. 0x123456 for "20123456").
-                    int physAddr   = cheat.Address;
-                    string typeHex = ((int)cheat.CheatType).ToString("X2");
+                    int    physAddr = cheat.Address;
+                    string typeHex  = ((int)cheat.CheatType).ToString("X2");
                     // Reconstruct the value hex (big-endian as written in the cheat file).
                     byte[] valBytes = (byte[])cheat.Data.Clone();
                     Array.Reverse(valBytes);
                     string valueHex = BitConverter.ToString(valBytes).Replace("-", "");
                     string origCode = $"{typeHex}{physAddr:X6} {valueHex}";
 
-                    logLines.Add($"  Code: {origCode}  (physical 0x{physAddr:X6})");
+                    var cached = addressCache[physAddr];
 
                     var result = new PortCheatResult
                     {
                         BlockName    = blockName,
                         OriginalCode = origCode,
+                        Found        = cached.Found,
+                        Method       = cached.Method,
+                        Confidence   = cached.Confidence,
+                        Ambiguous    = cached.Ambiguous,
                     };
 
-                    // ── Strategy 1: simple before-window (existing) ──────────────────────
-                    bool foundAny = false;
-                    foreach (int windowSize in windowSizes)
+                    if (cached.Found)
                     {
-                        int patternStart = physAddr - windowSize;
-                        if (patternStart < 0 || physAddr >= sourceData.Length)
-                        {
-                            logLines.Add($"    [S1 {windowSize}B window] Address out of range — skipping");
-                            continue;
-                        }
-
-                        int actualWindow = physAddr - patternStart;
-                        if (actualWindow <= 0) continue;
-
-                        byte[] pattern = new byte[actualWindow];
-                        Array.Copy(sourceData, patternStart, pattern, 0, actualWindow);
-
-                        // Skip windows that are all-zero — they match everywhere.
-                        bool allZero = pattern.All(b => b == 0);
-                        if (allZero)
-                        {
-                            logLines.Add($"    [S1 {windowSize}B window] All-zero pattern — skipping");
-                            continue;
-                        }
-
-                        logLines.Add($"    [S1] Trying HexPattern-{actualWindow}: scanning {targetData.Length / 1024 / 1024} MB…");
-                        var matches = FindPattern(targetData, pattern);
-
-                        if (matches.Count == 0)
-                        {
-                            logLines.Add($"    [S1] HexPattern-{actualWindow}: no match");
-                            continue;
-                        }
-
-                        // Filter out static matches (same bytes at same position in source too).
-                        var dynamicMatches = matches
-                            .Where(m => m + actualWindow <= sourceData.Length &&
-                                        !sourceData.AsSpan(m, actualWindow).SequenceEqual(pattern))
-                            .ToList();
-
-                        var usefulMatches = dynamicMatches.Count > 0 ? dynamicMatches : matches;
-
-                        foundAny = true;
-                        bool ambiguous = usefulMatches.Count > 1;
-                        int  bestMatch = usefulMatches[0] + actualWindow;
-
-                        string newAddrHex = $"{typeHex}{bestMatch:X6}";
-                        string newCode    = $"{newAddrHex} {valueHex}";
-
-                        result.Found      = true;
-                        result.NewCode    = newCode;
-                        result.Method     = $"HexPattern-{actualWindow}" + (dynamicMatches.Count > 0 ? "-filtered" : "");
-                        result.Confidence = ambiguous ? Math.Max(20, 100 - (usefulMatches.Count - 1) * 25) : 100;
-                        result.Ambiguous  = ambiguous;
-
-                        if (ambiguous)
-                        {
-                            result.Candidates = usefulMatches
+                        result.NewCode = $"{typeHex}{cached.NewPhysAddr:X6} {valueHex}";
+                        if (cached.Ambiguous && cached.CandidateAddrs != null)
+                            result.Candidates = cached.CandidateAddrs
                                 .Take(8)
-                                .Select(m => $"{typeHex}{(m + actualWindow):X6} {valueHex}")
+                                .Select(a => $"{typeHex}{a:X6} {valueHex}")
                                 .ToList();
-                            logLines.Add($"    [S1] HexPattern-{actualWindow}: {usefulMatches.Count} candidates — best: 0x{bestMatch:X6}");
-                            foreach (var m in usefulMatches.Take(8))
-                                logLines.Add($"      candidate 0x{m + actualWindow:X6}");
-                        }
-                        else
-                        {
-                            logLines.Add($"    [S1] HexPattern-{actualWindow}: unique match → 0x{bestMatch:X6}  ✓");
-                        }
-
-                        break; // Stop at the first window size that gives a result.
-                    }
-
-                    // ── Strategy 2: MIPS code-reference fingerprint ──────────────────────
-                    if (!foundAny || result.Confidence < 100)
-                    {
-                        logLines.Add($"    [S2] Trying MIPS code-reference fingerprint…");
-                        var codeRefs = FindMipsCodeReferences(sourceData, physAddr, logLines);
-                        if (codeRefs.Count > 0)
-                        {
-                            logLines.Add($"    [S2] Found {codeRefs.Count} code reference(s) — building fingerprints");
-                            foreach (var cref in codeRefs)
-                            {
-                                // Build a masked fingerprint centred on the LUI instruction.
-                                int fpBefore  = Math.Min(cref.LuiPos, 32);
-                                int fpAfter   = Math.Min(sourceData.Length - cref.RefPos, 16);
-                                int fpStart   = cref.LuiPos - fpBefore;
-                                int fpLen     = (cref.RefPos + fpAfter) - fpStart;
-                                if (fpLen <= 0 || fpStart + fpLen > sourceData.Length) continue;
-
-                                byte[] fp   = new byte[fpLen];
-                                byte[] mask = new byte[fpLen];
-                                Array.Copy(sourceData, fpStart, fp, 0, fpLen);
-                                Array.Fill(mask, (byte)0xFF);
-
-                                // Mask the load/store offset bytes (bits [15:0] = bytes 0–1 in LE).
-                                int refInFp = cref.RefPos - fpStart;
-                                if (refInFp + 1 < mask.Length)
-                                {
-                                    mask[refInFp]     = 0;
-                                    mask[refInFp + 1] = 0;
-                                }
-                                // Also mask the LUI immediate (bytes 0–1) so it still matches
-                                // even when the high-word happens to differ.
-                                int luiInFp = cref.LuiPos - fpStart;
-                                if (luiInFp + 1 < mask.Length)
-                                {
-                                    mask[luiInFp]     = 0;
-                                    mask[luiInFp + 1] = 0;
-                                }
-
-                                var fpMatches = FindMaskedPattern(targetData, fp, mask, step: 4);
-                                if (fpMatches.Count == 0)
-                                {
-                                    logLines.Add($"    [S2] Fingerprint-{fpLen}B: no match");
-                                    continue;
-                                }
-
-                                var candidates = new List<int>();
-                                foreach (int fm in fpMatches)
-                                {
-                                    // Decode the new load offset from the matched target code.
-                                    int matchRefPos = fm + refInFp;
-                                    if (matchRefPos + 2 > targetData.Length) continue;
-                                    int newLow16 = targetData[matchRefPos] | (targetData[matchRefPos + 1] << 8);
-
-                                    // Decode LUI immediate from the matched target code.
-                                    int matchLuiPos = fm + luiInFp;
-                                    if (matchLuiPos + 4 > targetData.Length) continue;
-                                    int newLuiImm = targetData[matchLuiPos] | (targetData[matchLuiPos + 1] << 8);
-
-                                    // Reconstruct: (LUI_imm << 16) + sign_extend(low16)
-                                    int newAddr = (newLuiImm << 16) + (short)newLow16;
-                                    if (newAddr > 0 && newAddr < targetData.Length)
-                                        candidates.Add(newAddr);
-                                }
-
-                                if (candidates.Count == 0) continue;
-
-                                bool ambig   = candidates.Count > 1;
-                                int  best    = candidates[0];
-                                string nc    = $"{typeHex}{best:X6} {valueHex}";
-                                int   conf   = ambig ? Math.Max(40, 100 - (candidates.Count - 1) * 30) : 100;
-
-                                // Prefer this result if it's better than what we have.
-                                if (!foundAny || conf > result.Confidence)
-                                {
-                                    foundAny          = true;
-                                    result.Found      = true;
-                                    result.NewCode    = nc;
-                                    result.Method     = $"CodeRef-{fpLen}B";
-                                    result.Confidence = conf;
-                                    result.Ambiguous  = ambig;
-                                    result.Candidates = ambig
-                                        ? candidates.Take(8).Select(a => $"{typeHex}{a:X6} {valueHex}").ToList()
-                                        : null;
-
-                                    if (ambig)
-                                        logLines.Add($"    [S2] Fingerprint-{fpLen}B: {candidates.Count} candidates — best 0x{best:X6}");
-                                    else
-                                        logLines.Add($"    [S2] Fingerprint-{fpLen}B: unique match → 0x{best:X6}  ✓");
-                                }
-
-                                if (result.Confidence == 100) break;
-                            }
-                        }
-                        else
-                        {
-                            logLines.Add($"    [S2] No direct MIPS code references found");
-                        }
-                    }
-
-                    // ── Strategy 3: extended anchor search ──────────────────────────────
-                    if (!foundAny || result.Confidence < 100)
-                    {
-                        logLines.Add($"    [S3] Trying extended anchor search (up to 512B scan-back)…");
-                        var anchorCandidates = FindAnchorCandidates(sourceData, targetData, physAddr, logLines);
-
-                        if (anchorCandidates.Count > 0)
-                        {
-                            int  best = anchorCandidates[0].Address;
-                            bool ambig = anchorCandidates.Count > 1;
-                            int  conf  = anchorCandidates[0].Confidence;
-                            string nc  = $"{typeHex}{best:X6} {valueHex}";
-
-                            if (!foundAny || conf > result.Confidence)
-                            {
-                                foundAny          = true;
-                                result.Found      = true;
-                                result.NewCode    = nc;
-                                result.Method     = anchorCandidates[0].Method;
-                                result.Confidence = conf;
-                                result.Ambiguous  = ambig;
-                                result.Candidates = ambig
-                                    ? anchorCandidates.Take(8).Select(c => $"{typeHex}{c.Address:X6} {valueHex}").ToList()
-                                    : null;
-
-                                if (ambig)
-                                    logLines.Add($"    [S3] {anchorCandidates.Count} candidates — best 0x{best:X6} (confidence {conf}%)");
-                                else
-                                    logLines.Add($"    [S3] Unique anchor match → 0x{best:X6}  ✓");
-                            }
-                        }
-                        else
-                        {
-                            logLines.Add($"    [S3] No anchor match found");
-                        }
-                    }
-
-                    // ── Strategy 4: pointer scan ─────────────────────────────────────────
-                    if (!foundAny || result.Confidence < 100)
-                    {
-                        logLines.Add($"    [S4] Trying pointer scan…");
-                        var ptrCandidates = FindViaPointerScan(sourceData, targetData, physAddr, logLines);
-
-                        if (ptrCandidates.Count > 0)
-                        {
-                            int  best = ptrCandidates[0].Address;
-                            bool ambig = ptrCandidates.Count > 1;
-                            int  conf  = ptrCandidates[0].Confidence;
-                            string nc  = $"{typeHex}{best:X6} {valueHex}";
-
-                            if (!foundAny || conf > result.Confidence)
-                            {
-                                foundAny          = true;
-                                result.Found      = true;
-                                result.NewCode    = nc;
-                                result.Method     = ptrCandidates[0].Method;
-                                result.Confidence = conf;
-                                result.Ambiguous  = ambig;
-                                result.Candidates = ambig
-                                    ? ptrCandidates.Take(8).Select(c => $"{typeHex}{c.Address:X6} {valueHex}").ToList()
-                                    : null;
-
-                                if (ambig)
-                                    logLines.Add($"    [S4] {ptrCandidates.Count} pointer candidates — best 0x{best:X6} (confidence {conf}%)");
-                                else
-                                    logLines.Add($"    [S4] Unique pointer match → 0x{best:X6}  ✓");
-                            }
-                        }
-                        else
-                        {
-                            logLines.Add($"    [S4] No pointer match found");
-                        }
-                    }
-
-                    if (!foundAny)
-                    {
-                        result.Method = "No match — all strategies exhausted";
-                        logLines.Add($"    Result: NOT FOUND ✗");
+                        logLines.Add($"  {origCode} → {result.NewCode}  (confidence {cached.Confidence}%, method: {cached.Method})");
                     }
                     else
                     {
-                        logLines.Add($"    Result: {result.NewCode}  (confidence {result.Confidence}%, method: {result.Method})");
+                        logLines.Add($"  {origCode} → NOT FOUND");
                     }
 
                     allResults.Add(result);
@@ -2399,6 +2182,18 @@ namespace CodeDesigner.Mips64LE
             public string Method     { get; set; } = string.Empty;
         }
 
+        /// <summary>Cached resolution result for a single unique physical address.</summary>
+        private sealed class AddressSearchResult
+        {
+            public bool       Found          { get; set; }
+            public int        NewPhysAddr    { get; set; }
+            public string     Method         { get; set; } = string.Empty;
+            public int        Confidence     { get; set; }
+            public bool       Ambiguous      { get; set; }
+            /// <summary>Raw target physical addresses for ambiguous results (no code formatting).</summary>
+            public List<int>? CandidateAddrs { get; set; }
+        }
+
         private sealed class MipsCodeRef
         {
             /// <summary>Byte position of the LUI instruction in the source dump.</summary>
@@ -2408,8 +2203,251 @@ namespace CodeDesigner.Mips64LE
         }
 
         // ════════════════════════════════════════════════════════════════════════
-        // Strategy 2: MIPS code-reference fingerprint
+        // Unified address resolver (runs all four strategies for one physAddr)
         // ════════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Runs the four PORTCHEATS strategies in order for a single physical address
+        /// and returns the best result found.  Called once per unique address; results
+        /// are cached so each address is searched only once even when multiple cheat
+        /// entries share the same address.
+        /// </summary>
+        private static AddressSearchResult ResolvePhysAddress(
+            byte[] sourceData, byte[] targetData, int physAddr,
+            IList<string> logLines, int[] windowSizes)
+        {
+            var result   = new AddressSearchResult();
+            bool foundAny = false;
+
+            // ── Strategy 1: simple before-window ────────────────────────────────
+            foreach (int windowSize in windowSizes)
+            {
+                int patternStart = physAddr - windowSize;
+                if (patternStart < 0 || physAddr >= sourceData.Length)
+                {
+                    logLines.Add($"    [S1 {windowSize}B window] Address out of range — skipping");
+                    continue;
+                }
+
+                int actualWindow = physAddr - patternStart;
+                if (actualWindow <= 0) continue;
+
+                byte[] pattern = new byte[actualWindow];
+                Array.Copy(sourceData, patternStart, pattern, 0, actualWindow);
+
+                bool allZero = pattern.All(b => b == 0);
+                if (allZero)
+                {
+                    logLines.Add($"    [S1 {windowSize}B window] All-zero pattern — skipping");
+                    continue;
+                }
+
+                logLines.Add($"    [S1] Trying HexPattern-{actualWindow}: scanning {targetData.Length / 1024 / 1024} MB…");
+                var matches = FindPattern(targetData, pattern);
+
+                if (matches.Count == 0)
+                {
+                    logLines.Add($"    [S1] HexPattern-{actualWindow}: no match");
+                    continue;
+                }
+
+                var dynamicMatches = matches
+                    .Where(m => m + actualWindow <= sourceData.Length &&
+                                !sourceData.AsSpan(m, actualWindow).SequenceEqual(pattern))
+                    .ToList();
+
+                var usefulMatches = dynamicMatches.Count > 0 ? dynamicMatches : matches;
+
+                foundAny = true;
+                bool ambiguous = usefulMatches.Count > 1;
+                int  bestMatch = usefulMatches[0] + actualWindow;
+
+                result.Found       = true;
+                result.NewPhysAddr = bestMatch;
+                result.Method      = $"HexPattern-{actualWindow}" + (dynamicMatches.Count > 0 ? "-filtered" : "");
+                result.Confidence  = ambiguous ? Math.Max(20, 100 - (usefulMatches.Count - 1) * 25) : 100;
+                result.Ambiguous   = ambiguous;
+
+                if (ambiguous)
+                {
+                    result.CandidateAddrs = usefulMatches.Take(8).Select(m => m + actualWindow).ToList();
+                    logLines.Add($"    [S1] HexPattern-{actualWindow}: {usefulMatches.Count} candidates — best: 0x{bestMatch:X6}");
+                    foreach (var m in usefulMatches.Take(8))
+                        logLines.Add($"      candidate 0x{m + actualWindow:X6}");
+                }
+                else
+                {
+                    logLines.Add($"    [S1] HexPattern-{actualWindow}: unique match → 0x{bestMatch:X6}  ✓");
+                }
+
+                break;
+            }
+
+            // ── Strategy 2: MIPS code-reference fingerprint ──────────────────────
+            if (!foundAny || result.Confidence < 100)
+            {
+                logLines.Add($"    [S2] Trying MIPS code-reference fingerprint…");
+                var codeRefs = FindMipsCodeReferences(sourceData, physAddr, logLines);
+                if (codeRefs.Count > 0)
+                {
+                    logLines.Add($"    [S2] Found {codeRefs.Count} code reference(s) — building fingerprints");
+                    foreach (var cref in codeRefs)
+                    {
+                        int fpBefore = Math.Min(cref.LuiPos, 32);
+                        int fpAfter  = Math.Min(sourceData.Length - cref.RefPos, 16);
+                        int fpStart  = cref.LuiPos - fpBefore;
+                        int fpLen    = (cref.RefPos + fpAfter) - fpStart;
+                        if (fpLen <= 0 || fpStart + fpLen > sourceData.Length) continue;
+
+                        byte[] fp   = new byte[fpLen];
+                        byte[] mask = new byte[fpLen];
+                        Array.Copy(sourceData, fpStart, fp, 0, fpLen);
+                        Array.Fill(mask, (byte)0xFF);
+
+                        int refInFp = cref.RefPos - fpStart;
+                        if (refInFp + 1 < mask.Length)
+                        {
+                            mask[refInFp]     = 0;
+                            mask[refInFp + 1] = 0;
+                        }
+                        int luiInFp = cref.LuiPos - fpStart;
+                        if (luiInFp + 1 < mask.Length)
+                        {
+                            mask[luiInFp]     = 0;
+                            mask[luiInFp + 1] = 0;
+                        }
+
+                        var fpMatches = FindMaskedPattern(targetData, fp, mask, step: 4);
+                        if (fpMatches.Count == 0)
+                        {
+                            logLines.Add($"    [S2] Fingerprint-{fpLen}B: no match");
+                            continue;
+                        }
+
+                        var candidates = new List<int>();
+                        foreach (int fm in fpMatches)
+                        {
+                            int matchRefPos = fm + refInFp;
+                            if (matchRefPos + 2 > targetData.Length) continue;
+                            int newLow16 = targetData[matchRefPos] | (targetData[matchRefPos + 1] << 8);
+
+                            int matchLuiPos = fm + luiInFp;
+                            if (matchLuiPos + 4 > targetData.Length) continue;
+                            int newLuiImm = targetData[matchLuiPos] | (targetData[matchLuiPos + 1] << 8);
+
+                            int newAddr = (newLuiImm << 16) + (short)newLow16;
+                            if (newAddr > 0 && newAddr < targetData.Length)
+                                candidates.Add(newAddr);
+                        }
+
+                        if (candidates.Count == 0) continue;
+
+                        bool ambig = candidates.Count > 1;
+                        int  best  = candidates[0];
+                        int  conf  = ambig ? Math.Max(40, 100 - (candidates.Count - 1) * 30) : 100;
+
+                        if (!foundAny || conf > result.Confidence)
+                        {
+                            foundAny           = true;
+                            result.Found       = true;
+                            result.NewPhysAddr = best;
+                            result.Method      = $"CodeRef-{fpLen}B";
+                            result.Confidence  = conf;
+                            result.Ambiguous   = ambig;
+                            result.CandidateAddrs = ambig ? candidates.Take(8).ToList() : null;
+
+                            if (ambig)
+                                logLines.Add($"    [S2] Fingerprint-{fpLen}B: {candidates.Count} candidates — best 0x{best:X6}");
+                            else
+                                logLines.Add($"    [S2] Fingerprint-{fpLen}B: unique match → 0x{best:X6}  ✓");
+                        }
+
+                        if (result.Confidence == 100) break;
+                    }
+                }
+                else
+                {
+                    logLines.Add($"    [S2] No direct MIPS code references found");
+                }
+            }
+
+            // ── Strategy 3: extended anchor search ────────────────────────────────
+            if (!foundAny || result.Confidence < 100)
+            {
+                logLines.Add($"    [S3] Trying extended anchor search (up to 512B scan-back)…");
+                var anchorCandidates = FindAnchorCandidates(sourceData, targetData, physAddr, logLines);
+
+                if (anchorCandidates.Count > 0)
+                {
+                    int  best  = anchorCandidates[0].Address;
+                    bool ambig = anchorCandidates.Count > 1;
+                    int  conf  = anchorCandidates[0].Confidence;
+
+                    if (!foundAny || conf > result.Confidence)
+                    {
+                        foundAny           = true;
+                        result.Found       = true;
+                        result.NewPhysAddr = best;
+                        result.Method      = anchorCandidates[0].Method;
+                        result.Confidence  = conf;
+                        result.Ambiguous   = ambig;
+                        result.CandidateAddrs = ambig
+                            ? anchorCandidates.Take(8).Select(c => c.Address).ToList()
+                            : null;
+
+                        if (ambig)
+                            logLines.Add($"    [S3] {anchorCandidates.Count} candidates — best 0x{best:X6} (confidence {conf}%)");
+                        else
+                            logLines.Add($"    [S3] Unique anchor match → 0x{best:X6}  ✓");
+                    }
+                }
+                else
+                {
+                    logLines.Add($"    [S3] No anchor match found");
+                }
+            }
+
+            // ── Strategy 4: pointer scan ─────────────────────────────────────────
+            if (!foundAny || result.Confidence < 100)
+            {
+                logLines.Add($"    [S4] Trying pointer scan…");
+                var ptrCandidates = FindViaPointerScan(sourceData, targetData, physAddr, logLines);
+
+                if (ptrCandidates.Count > 0)
+                {
+                    int  best  = ptrCandidates[0].Address;
+                    bool ambig = ptrCandidates.Count > 1;
+                    int  conf  = ptrCandidates[0].Confidence;
+
+                    if (!foundAny || conf > result.Confidence)
+                    {
+                        foundAny           = true;
+                        result.Found       = true;
+                        result.NewPhysAddr = best;
+                        result.Method      = ptrCandidates[0].Method;
+                        result.Confidence  = conf;
+                        result.Ambiguous   = ambig;
+                        result.CandidateAddrs = ambig
+                            ? ptrCandidates.Take(8).Select(c => c.Address).ToList()
+                            : null;
+
+                        if (ambig)
+                            logLines.Add($"    [S4] {ptrCandidates.Count} pointer candidates — best 0x{best:X6} (confidence {conf}%)");
+                        else
+                            logLines.Add($"    [S4] Unique pointer match → 0x{best:X6}  ✓");
+                    }
+                }
+                else
+                {
+                    logLines.Add($"    [S4] No pointer match found");
+                }
+            }
+
+            if (!result.Found)
+                result.Method = "No match — all strategies exhausted";
+
+            return result;
+        }
 
         /// <summary>
         /// Scans <paramref name="sourceData"/> for MIPS LUI + load/store/addiu instruction
@@ -2661,28 +2699,27 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Searches <paramref name="haystack"/> for every occurrence of
-        /// <paramref name="needle"/> using a simple sliding-window scan and returns
-        /// the starting byte offset of each match.  Suitable for the dump sizes
-        /// encountered in practice (≤ 32 MB); performance is acceptable because the
-        /// inner comparison exits early on the first mismatch.
+        /// <paramref name="needle"/> and returns the starting byte offset of each match.
+        /// Uses <see cref="MemoryExtensions.IndexOf{T}(Span{T},ReadOnlySpan{T})"/> which is
+        /// SIMD-accelerated on .NET 8 and therefore significantly faster than a manual
+        /// byte-by-byte loop over the 32 MB dump files encountered in practice.
         /// </summary>
         private static List<int> FindPattern(byte[] haystack, byte[] needle)
         {
             var results = new List<int>();
             if (needle.Length == 0 || needle.Length > haystack.Length) return results;
 
-            int limit = haystack.Length - needle.Length;
-            byte first = needle[0];
+            var h = haystack.AsSpan();
+            var n = needle.AsSpan();
+            int offset = 0;
+            int limit  = haystack.Length - needle.Length;
 
-            for (int i = 0; i <= limit; i++)
+            while (offset <= limit)
             {
-                if (haystack[i] != first) continue;
-                bool match = true;
-                for (int j = 1; j < needle.Length; j++)
-                {
-                    if (haystack[i + j] != needle[j]) { match = false; break; }
-                }
-                if (match) results.Add(i);
+                int idx = h.Slice(offset).IndexOf(n);
+                if (idx < 0) break;
+                results.Add(offset + idx);
+                offset += idx + 1;
             }
             return results;
         }
