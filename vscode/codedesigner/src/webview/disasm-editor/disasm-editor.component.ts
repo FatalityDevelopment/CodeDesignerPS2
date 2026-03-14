@@ -1124,7 +1124,7 @@ export class DisasmEditorComponent implements AfterViewInit {
           const total = results.length;
           const allOk = found === total;
           setPorterStatus(
-            `Done — ${found} of ${total} code${total === 1 ? '' : 's'} ported. See Output panel for details.`,
+            `Done — ${found} of ${total} code${total === 1 ? '' : 's'} ported. See output panel for details.`,
             !allOk,
           );
         }

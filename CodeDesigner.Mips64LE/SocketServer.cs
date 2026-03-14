@@ -2104,14 +2104,12 @@ namespace CodeDesigner.Mips64LE
                     foreach (int windowSize in windowSizes)
                     {
                         int patternStart = physAddr - windowSize;
-                        if (patternStart < 0 || physAddr > sourceData.Length)
+                        if (patternStart < 0 || physAddr >= sourceData.Length)
                         {
                             logLines.Add($"    [{windowSize}-byte window] Address out of range in source dump — skipping");
                             continue;
                         }
 
-                        // Clamp if near the start of the dump.
-                        if (patternStart < 0) patternStart = 0;
                         int actualWindow = physAddr - patternStart;
                         if (actualWindow <= 0) continue;
 
