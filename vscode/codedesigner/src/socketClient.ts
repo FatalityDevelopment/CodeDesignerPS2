@@ -26,6 +26,9 @@ interface CommandMessage {
     // CONVERTCHEAT fields
     Format?: string;
     Direction?: string;
+    // PORTCHEATS fields
+    SourceDumpPath?: string;
+    TargetDumpPath?: string;
     // COMPILECDS — pre-resolved pointer-manager labels (e.g. { address:'0x80100000', label:'seal.health' })
     Labels?: LabelEntry[];
 }
@@ -216,6 +219,8 @@ interface CommandResponse {
     // RECOMPILE fields
     FunctionCount?: number;
     WrittenFiles?: string[];
+    // PORTCHEATS fields
+    PortCheatResults?: Array<Record<string, unknown>>;
 }
 
 /**
@@ -265,6 +270,28 @@ export interface DiscElfEntry {
     Size: number;
     /** True when this is the BOOT2 executable listed in SYSTEM.CNF. */
     IsBootElf: boolean;
+}
+
+/**
+ * Result for a single cheat code line produced by PORTCHEATS.
+ */
+export interface PortCheatResult {
+    /** The #Name label of the cheat block this line belongs to. */
+    blockName: string;
+    /** Original GameShark code line, e.g. "20123456 000003E8". */
+    originalCode: string;
+    /** Ported code line with the updated address, e.g. "20124ABC 000003E8". Null when not found. */
+    newCode: string | null;
+    /** Whether a match was found in the target dump. */
+    found: boolean;
+    /** Description of the method used, e.g. "HexPattern-48". */
+    method: string;
+    /** 0–100 confidence score. */
+    confidence: number;
+    /** True when more than one candidate address was found. */
+    ambiguous: boolean;
+    /** All candidate new code lines when ambiguous. */
+    candidates: string[] | null;
 }
 
 /**
@@ -1224,6 +1251,44 @@ export class SocketClient {
             throw new Error(response.Error || 'ConvertCheat failed');
         }
         return response.Data ?? '';
+    }
+
+    /**
+     * Port a list of raw GameShark cheat codes from a source EE-RAM dump to a target
+     * EE-RAM dump by scanning for hex patterns around each cheat address.
+     *
+     * @param cheatText  Raw GameShark codes (optional #Name headers).
+     * @param sourcePath Absolute path to the source (r0001) raw EE-RAM dump file.
+     * @param targetPath Absolute path to the target (r0002) raw EE-RAM dump file.
+     * @returns Tuple of structured per-code results and a detailed log string.
+     */
+    public async portCheats(
+        cheatText:  string,
+        sourcePath: string,
+        targetPath: string,
+    ): Promise<{ results: PortCheatResult[]; log: string }> {
+        const command: CommandMessage = {
+            Command:        'PORTCHEATS',
+            Data:           cheatText,
+            SourceDumpPath: sourcePath,
+            TargetDumpPath: targetPath,
+        };
+        const response = await this.sendCommand(command, 120_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'PortCheats failed');
+        }
+        const raw = response.PortCheatResults as Array<Record<string, unknown>> ?? [];
+        const results: PortCheatResult[] = raw.map(r => ({
+            blockName:    (r['BlockName']    as string)  ?? '',
+            originalCode: (r['OriginalCode'] as string)  ?? '',
+            newCode:      (r['NewCode']      as string | null) ?? null,
+            found:        (r['Found']        as boolean) ?? false,
+            method:       (r['Method']       as string)  ?? '',
+            confidence:   (r['Confidence']   as number)  ?? 0,
+            ambiguous:    (r['Ambiguous']    as boolean) ?? false,
+            candidates:   (r['Candidates']   as string[] | null) ?? null,
+        }));
+        return { results, log: response.Data ?? '' };
     }
 
     /**

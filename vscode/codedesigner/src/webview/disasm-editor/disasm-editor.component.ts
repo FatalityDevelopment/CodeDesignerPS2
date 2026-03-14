@@ -30,6 +30,7 @@ import './disasm-editor.css';
     <button class="header-tool-btn live-only" id="setpc-toggle-btn" title="Set PC to Address (Ctrl+Alt+P)">&#9655; Set PC</button>
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
     <button class="header-tool-btn" id="converter-btn" title="Cheat Code Converter">&#8645; Converter</button>
+    <button class="header-tool-btn" id="porter-btn" title="Cheat Code Porter">&#8651; Port</button>
 
 </div>
 <div id="goto-panel">
@@ -274,6 +275,44 @@ import './disasm-editor.css';
             <div class="converter-overlay-field">
                 <label class="converter-overlay-label" for="converter-output">Output Codes</label>
                 <textarea id="converter-output" class="converter-overlay-textarea" spellcheck="false" readonly placeholder="Converted codes will appear here…"></textarea>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="porter-overlay">
+    <div id="porter-overlay-box">
+        <div id="porter-overlay-header">
+            <span id="porter-overlay-title">&#8651; Cheat Code Porter</span>
+            <button id="porter-overlay-close" title="Close (Escape)">&#xD7;</button>
+        </div>
+        <div id="porter-overlay-body">
+            <div class="porter-overlay-field">
+                <label class="porter-overlay-label" for="porter-input">Cheat Codes (raw GameShark format)</label>
+                <textarea id="porter-input" class="porter-overlay-textarea" spellcheck="false" placeholder="#Code Name&#10;20XXXXXX YYYYYYYY"></textarea>
+            </div>
+            <div class="porter-dump-row">
+                <div class="porter-overlay-field porter-dump-field">
+                    <label class="porter-overlay-label">Source Dump (r0001)</label>
+                    <div class="porter-file-row">
+                        <input type="text" id="porter-source-path" class="porter-file-input" readonly placeholder="Select source EE RAM dump…" />
+                        <button id="porter-source-browse" class="porter-browse-btn" title="Browse for source RAM dump file">&#8230;</button>
+                    </div>
+                </div>
+                <div class="porter-overlay-field porter-dump-field">
+                    <label class="porter-overlay-label">Target Dump (r0002)</label>
+                    <div class="porter-file-row">
+                        <input type="text" id="porter-target-path" class="porter-file-input" readonly placeholder="Select target EE RAM dump…" />
+                        <button id="porter-target-browse" class="porter-browse-btn" title="Browse for target RAM dump file">&#8230;</button>
+                    </div>
+                </div>
+            </div>
+            <div id="porter-overlay-controls">
+                <button id="porter-port-btn">&#8651; Port Cheats</button>
+                <span id="porter-overlay-status" class="porter-overlay-status"></span>
+            </div>
+            <div id="porter-results"></div>
+            <div id="porter-copy-row" class="porter-copy-row" style="display:none">
+                <button id="porter-copy-btn">Copy Selected Codes</button>
             </div>
         </div>
     </div>
@@ -852,6 +891,242 @@ export class DisasmEditorComponent implements AfterViewInit {
         } else {
           converterOutput.value = (data['result'] as string) ?? '';
           setConverterStatus('Conversion complete.', false);
+        }
+      }
+    });
+
+    // ── Porter overlay ────────────────────────────────────────────────────────
+    interface PorterResult {
+      blockName:    string;
+      originalCode: string;
+      newCode:      string | null;
+      found:        boolean;
+      method:       string;
+      confidence:   number;
+      ambiguous:    boolean;
+      candidates:   string[] | null;
+    }
+
+    const porterOverlay      = document.getElementById('porter-overlay')!;
+    const porterInput        = document.getElementById('porter-input') as HTMLTextAreaElement;
+    const porterSourcePath   = document.getElementById('porter-source-path') as HTMLInputElement;
+    const porterTargetPath   = document.getElementById('porter-target-path') as HTMLInputElement;
+    const porterSourceBrowse = document.getElementById('porter-source-browse')!;
+    const porterTargetBrowse = document.getElementById('porter-target-browse')!;
+    const porterPortBtn      = document.getElementById('porter-port-btn')!;
+    const porterOverlayClose = document.getElementById('porter-overlay-close')!;
+    const porterStatus       = document.getElementById('porter-overlay-status')!;
+    const porterBtn          = document.getElementById('porter-btn')!;
+    const porterResults      = document.getElementById('porter-results')!;
+    const porterCopyRow      = document.getElementById('porter-copy-row')!;
+    const porterCopyBtn      = document.getElementById('porter-copy-btn')!;
+
+    let _porterResultData: PorterResult[] = [];
+
+    function openPorterOverlay() {
+      porterStatus.textContent = '';
+      porterStatus.className = 'porter-overlay-status';
+      porterOverlay.classList.add('visible');
+      porterInput.focus();
+    }
+
+    function closePorterOverlay() {
+      porterOverlay.classList.remove('visible');
+    }
+
+    function setPorterStatus(msg: string, isError: boolean) {
+      porterStatus.textContent = msg;
+      porterStatus.className = 'porter-overlay-status' + (isError ? ' porter-status-error' : ' porter-status-ok');
+    }
+
+    function renderPorterResults(results: PorterResult[]) {
+      _porterResultData = results;
+      porterResults.innerHTML = '';
+      if (results.length === 0) {
+        porterResults.innerHTML = '<div class="porter-no-results">No cheat codes found in input.</div>';
+        porterCopyRow.style.display = 'none';
+        return;
+      }
+
+      // Group entries by blockName to render one card per cheat block.
+      const groups = new Map<string, PorterResult[]>();
+      for (const r of results) {
+        const key = r.blockName;
+        if (!groups.has(key)) { groups.set(key, []); }
+        groups.get(key)!.push(r);
+      }
+
+      for (const [blockName, entries] of groups) {
+        const allFound  = entries.every(e => e.found);
+        const anyFound  = entries.some(e => e.found);
+
+        const card = document.createElement('div');
+        card.className = 'porter-result-card';
+
+        // ── Card header row ──────────────────────────────────────────────────
+        const headerRow = document.createElement('div');
+        headerRow.className = 'porter-result-header';
+
+        const cb = document.createElement('input');
+        cb.type      = 'checkbox';
+        cb.className = 'porter-result-cb';
+        cb.dataset['block'] = blockName;
+        cb.checked  = allFound;
+        cb.disabled = !anyFound;
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className   = 'porter-result-name';
+        nameSpan.textContent = blockName || '(unnamed)';
+
+        const badge = document.createElement('span');
+        badge.className   = allFound ? 'porter-badge porter-badge-ok'
+                          : anyFound ? 'porter-badge porter-badge-warn'
+                          :            'porter-badge porter-badge-err';
+        badge.textContent = allFound ? '✓ found' : anyFound ? '⚠ partial' : '✗ not found';
+
+        headerRow.appendChild(cb);
+        headerRow.appendChild(nameSpan);
+        headerRow.appendChild(badge);
+        card.appendChild(headerRow);
+
+        // ── Per-line results ─────────────────────────────────────────────────
+        for (const entry of entries) {
+          const line = document.createElement('div');
+          line.className = 'porter-result-line';
+
+          const origSpan = document.createElement('span');
+          origSpan.className   = 'porter-addr-old';
+          origSpan.textContent = entry.originalCode;
+          line.appendChild(origSpan);
+
+          const arrow = document.createElement('span');
+          arrow.className   = 'porter-arrow';
+          arrow.textContent = ' → ';
+          line.appendChild(arrow);
+
+          if (entry.found && entry.newCode) {
+            const newSpan = document.createElement('span');
+            newSpan.className   = 'porter-addr-new';
+            newSpan.textContent = entry.newCode;
+            line.appendChild(newSpan);
+
+            const methodSpan = document.createElement('span');
+            methodSpan.className   = 'porter-method';
+            methodSpan.textContent = `  ${entry.method}`;
+            if (entry.ambiguous) { methodSpan.textContent += ' ⚠'; }
+            methodSpan.title = entry.ambiguous
+              ? `${entry.candidates?.length ?? 0} candidates — pick manually`
+              : `Confidence: ${entry.confidence}%`;
+            line.appendChild(methodSpan);
+
+            if (entry.ambiguous && entry.candidates) {
+              const candDiv = document.createElement('div');
+              candDiv.className   = 'porter-candidates';
+              candDiv.textContent = 'Candidates: ' + entry.candidates.join('  ');
+              card.appendChild(line);
+              card.appendChild(candDiv);
+              continue;
+            }
+          } else {
+            const nfSpan = document.createElement('span');
+            nfSpan.className   = 'porter-not-found';
+            nfSpan.textContent = 'not found';
+            line.appendChild(nfSpan);
+
+            const methodSpan = document.createElement('span');
+            methodSpan.className   = 'porter-method';
+            methodSpan.textContent = `  ${entry.method}`;
+            line.appendChild(methodSpan);
+          }
+
+          card.appendChild(line);
+        }
+
+        porterResults.appendChild(card);
+      }
+
+      porterCopyRow.style.display = 'block';
+    }
+
+    function copySelectedPortedCodes() {
+      const checkedBoxes = Array.from(
+        porterResults.querySelectorAll<HTMLInputElement>('input.porter-result-cb:checked')
+      );
+      if (checkedBoxes.length === 0) {
+        setPorterStatus('No codes selected.', true);
+        return;
+      }
+      const lines: string[] = [];
+      for (const cb of checkedBoxes) {
+        const blockName = cb.dataset['block']!;
+        const entries = _porterResultData.filter(e => e.blockName === blockName && e.found && e.newCode);
+        if (entries.length === 0) { continue; }
+        if (blockName) { lines.push(blockName); }
+        for (const entry of entries) { lines.push(entry.newCode!); }
+        lines.push('');
+      }
+      const text = lines.join('\n').trimEnd();
+      navigator.clipboard.writeText(text).then(() => {
+        setPorterStatus('Copied to clipboard!', false);
+      }).catch(() => {
+        setPorterStatus('Copy failed — try again.', true);
+      });
+    }
+
+    porterBtn.addEventListener('click', openPorterOverlay);
+    porterOverlayClose.addEventListener('click', closePorterOverlay);
+    porterOverlay.addEventListener('click', (e: MouseEvent) => {
+      if (e.target === porterOverlay) { closePorterOverlay(); }
+    });
+    porterOverlay.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { closePorterOverlay(); }
+    });
+
+    porterSourceBrowse.addEventListener('click', () => {
+      vscode.postMessage({ type: 'browseSourceDump' });
+    });
+    porterTargetBrowse.addEventListener('click', () => {
+      vscode.postMessage({ type: 'browseTargetDump' });
+    });
+
+    porterPortBtn.addEventListener('click', () => {
+      const codes = porterInput.value.trim();
+      if (!codes) { setPorterStatus('Please enter cheat codes in the input box.', true); return; }
+      const src = porterSourcePath.value.trim();
+      if (!src)   { setPorterStatus('Please select a source EE RAM dump.', true); return; }
+      const tgt = porterTargetPath.value.trim();
+      if (!tgt)   { setPorterStatus('Please select a target EE RAM dump.', true); return; }
+
+      setPorterStatus('Porting…', false);
+      porterPortBtn.setAttribute('disabled', 'true');
+      porterResults.innerHTML = '';
+      porterCopyRow.style.display = 'none';
+
+      vscode.postMessage({ type: 'portCheats', codes, sourcePath: src, targetPath: tgt });
+    });
+
+    porterCopyBtn.addEventListener('click', copySelectedPortedCodes);
+
+    window.addEventListener('message', (e: MessageEvent) => {
+      const data = e.data as Record<string, unknown>;
+      if (data?.['type'] === 'browseSourceDumpResult') {
+        if (data['filePath']) { porterSourcePath.value = data['filePath'] as string; }
+      } else if (data?.['type'] === 'browseTargetDumpResult') {
+        if (data['filePath']) { porterTargetPath.value = data['filePath'] as string; }
+      } else if (data?.['type'] === 'portCheatsResult') {
+        porterPortBtn.removeAttribute('disabled');
+        if (data['error']) {
+          setPorterStatus('Error: ' + (data['error'] as string), true);
+        } else {
+          const results = (data['results'] as PorterResult[]) ?? [];
+          renderPorterResults(results);
+          const found = results.filter(r => r.found).length;
+          const total = results.length;
+          const allOk = found === total;
+          setPorterStatus(
+            `Done — ${found} of ${total} code${total === 1 ? '' : 's'} ported. See Output panel for details.`,
+            !allOk,
+          );
         }
       }
     });

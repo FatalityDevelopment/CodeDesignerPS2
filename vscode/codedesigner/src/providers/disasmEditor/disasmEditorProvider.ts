@@ -462,6 +462,42 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         } else {
           webviewPanel.webview.postMessage({ type: 'convertCheatResult', error: 'Not connected to emulator server' });
         }
+      } else if (message.type === 'browseSourceDump') {
+        const uris = await vscode.window.showOpenDialog({
+          canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+          filters: { 'EE RAM Dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
+          title: 'Select Source EE RAM Dump (r0001)',
+        });
+        if (uris?.[0]) {
+          webviewPanel.webview.postMessage({ type: 'browseSourceDumpResult', filePath: uris[0].fsPath });
+        }
+      } else if (message.type === 'browseTargetDump') {
+        const uris = await vscode.window.showOpenDialog({
+          canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+          filters: { 'EE RAM Dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
+          title: 'Select Target EE RAM Dump (r0002)',
+        });
+        if (uris?.[0]) {
+          webviewPanel.webview.postMessage({ type: 'browseTargetDumpResult', filePath: uris[0].fsPath });
+        }
+      } else if (message.type === 'portCheats') {
+        if (!this.socketClient?.isConnected()) {
+          webviewPanel.webview.postMessage({ type: 'portCheatsResult', error: 'Not connected to emulator server' });
+          return;
+        }
+        try {
+          const { results, log } = await this.socketClient.portCheats(
+            message.codes as string,
+            message.sourcePath as string,
+            message.targetPath as string,
+          );
+          getOutputChannel().info('[Port Cheats]\n' + log);
+          webviewPanel.webview.postMessage({ type: 'portCheatsResult', results });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          getOutputChannel().error('[Port Cheats] ' + errMsg);
+          webviewPanel.webview.postMessage({ type: 'portCheatsResult', error: errMsg });
+        }
       }
     });
 
@@ -913,6 +949,42 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 } catch (err: unknown) {
                     const errMsg = err instanceof Error ? err.message : String(err);
                     panel.webview.postMessage({ type: 'convertCheatResult', error: errMsg });
+                }
+            } else if (message.type === 'browseSourceDump') {
+                const uris = await vscode.window.showOpenDialog({
+                    canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+                    filters: { 'EE RAM Dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
+                    title: 'Select Source EE RAM Dump (r0001)',
+                });
+                if (uris?.[0]) {
+                    panel.webview.postMessage({ type: 'browseSourceDumpResult', filePath: uris[0].fsPath });
+                }
+            } else if (message.type === 'browseTargetDump') {
+                const uris = await vscode.window.showOpenDialog({
+                    canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+                    filters: { 'EE RAM Dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
+                    title: 'Select Target EE RAM Dump (r0002)',
+                });
+                if (uris?.[0]) {
+                    panel.webview.postMessage({ type: 'browseTargetDumpResult', filePath: uris[0].fsPath });
+                }
+            } else if (message.type === 'portCheats') {
+                if (!this.socketClient?.isConnected()) {
+                    panel.webview.postMessage({ type: 'portCheatsResult', error: 'Not connected to emulator server' });
+                    return;
+                }
+                try {
+                    const { results, log } = await this.socketClient.portCheats(
+                        message.codes as string,
+                        message.sourcePath as string,
+                        message.targetPath as string,
+                    );
+                    getOutputChannel().info('[Port Cheats]\n' + log);
+                    panel.webview.postMessage({ type: 'portCheatsResult', results });
+                } catch (err: unknown) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    getOutputChannel().error('[Port Cheats] ' + errMsg);
+                    panel.webview.postMessage({ type: 'portCheatsResult', error: errMsg });
                 }
             }
         });

@@ -384,6 +384,9 @@ namespace CodeDesigner.Mips64LE
                     case "CONVERTCHEAT":
                         return HandleConvertCheat(command.Data, command.Format, command.Direction);
 
+                    case "PORTCHEATS":
+                        return HandlePortCheats(command.Data, command.SourceDumpPath, command.TargetDumpPath);
+
                     case "PING":
                         return CreateSuccessResponse("PONG");
                     
@@ -2026,6 +2029,196 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
+        /// Handle PORTCHEATS command — scans two raw EE-RAM dump files and attempts to
+        /// relocate a list of raw GameShark cheat codes from the source revision to the
+        /// target revision using hex-pattern matching.
+        ///
+        /// Strategy: for each cheat address, extract a context window of bytes immediately
+        /// BEFORE the target address from the source dump, then search the target dump for
+        /// that same byte sequence.  The position where it matches, plus the window size,
+        /// gives the new cheat address.  Three window sizes are attempted in order (48, 32,
+        /// 16 bytes) so that a wider — and therefore more reliable — pattern is preferred.
+        /// </summary>
+        private string HandlePortCheats(string? cheatText, string? sourcePath, string? targetPath)
+        {
+            if (string.IsNullOrWhiteSpace(cheatText))
+                return CreateErrorResponse("No cheat data provided");
+            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+                return CreateErrorResponse($"Source dump not found: {sourcePath}");
+            if (string.IsNullOrWhiteSpace(targetPath) || !File.Exists(targetPath))
+                return CreateErrorResponse($"Target dump not found: {targetPath}");
+
+            byte[] sourceData;
+            byte[] targetData;
+            try
+            {
+                sourceData = File.ReadAllBytes(sourcePath);
+                targetData = File.ReadAllBytes(targetPath);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Failed to read dump files: {ex.Message}");
+            }
+
+            // Parse cheat blocks using the existing infrastructure.
+            var cheatList = new CheatList(cheatText);
+            List<CodeDesigner.Mips64LE.Common.CheatEngine.CheatBlock> blocks;
+            try { blocks = cheatList.Parse(); }
+            catch (Exception ex) { return CreateErrorResponse($"Failed to parse cheat codes: {ex.Message}"); }
+
+            var allResults = new List<PortCheatResult>();
+            var logLines   = new List<string>();
+            logLines.Add($"[PORTCHEATS] Source: {sourcePath}");
+            logLines.Add($"[PORTCHEATS] Target: {targetPath}");
+            logLines.Add(string.Empty);
+
+            // Window sizes to try, largest first (most reliable → least).
+            int[] windowSizes = { 48, 32, 16 };
+
+            foreach (var block in blocks)
+            {
+                string blockName = block.Label ?? string.Empty;
+                logLines.Add($"--- {(string.IsNullOrWhiteSpace(blockName) ? "(unnamed block)" : blockName)} ---");
+
+                foreach (var cheat in block.Cheats)
+                {
+                    // Physical address in the dump file: CheatBlock.Parse stores the lower
+                    // 24 bits of the GameShark address field (e.g. 0x123456 for "20123456").
+                    int physAddr   = cheat.Address;
+                    string typeHex = ((int)cheat.CheatType).ToString("X2");
+                    // Reconstruct the value hex (big-endian as written in the cheat file).
+                    byte[] valBytes = (byte[])cheat.Data.Clone();
+                    Array.Reverse(valBytes);
+                    string valueHex = BitConverter.ToString(valBytes).Replace("-", "");
+                    string origCode = $"{typeHex}{physAddr:X6} {valueHex}";
+
+                    logLines.Add($"  Code: {origCode}  (physical 0x{physAddr:X6})");
+
+                    var result = new PortCheatResult
+                    {
+                        BlockName    = blockName,
+                        OriginalCode = origCode,
+                    };
+
+                    bool foundAny = false;
+                    foreach (int windowSize in windowSizes)
+                    {
+                        int patternStart = physAddr - windowSize;
+                        if (patternStart < 0 || physAddr > sourceData.Length)
+                        {
+                            logLines.Add($"    [{windowSize}-byte window] Address out of range in source dump — skipping");
+                            continue;
+                        }
+
+                        // Clamp if near the start of the dump.
+                        if (patternStart < 0) patternStart = 0;
+                        int actualWindow = physAddr - patternStart;
+                        if (actualWindow <= 0) continue;
+
+                        byte[] pattern = new byte[actualWindow];
+                        Array.Copy(sourceData, patternStart, pattern, 0, actualWindow);
+
+                        logLines.Add($"    Trying HexPattern-{actualWindow}: scanning {targetData.Length / 1024 / 1024} MB…");
+
+                        var matches = FindPattern(targetData, pattern);
+
+                        if (matches.Count == 0)
+                        {
+                            logLines.Add($"    HexPattern-{actualWindow}: no match");
+                            continue;
+                        }
+
+                        // The new physical address = match start + actualWindow.
+                        foundAny = true;
+                        bool ambiguous = matches.Count > 1;
+                        int  bestMatch = matches[0] + actualWindow;
+
+                        string newAddrHex = $"{typeHex}{bestMatch:X6}";
+                        string newCode    = $"{newAddrHex} {valueHex}";
+
+                        result.Found      = true;
+                        result.NewCode    = newCode;
+                        result.Method     = $"HexPattern-{actualWindow}";
+                        result.Confidence = ambiguous ? Math.Max(10, 100 - (matches.Count - 1) * 20) : 100;
+                        result.Ambiguous  = ambiguous;
+
+                        if (ambiguous)
+                        {
+                            result.Candidates = matches
+                                .Take(8)
+                                .Select(m => $"{typeHex}{(m + actualWindow):X6} {valueHex}")
+                                .ToList();
+
+                            logLines.Add($"    HexPattern-{actualWindow}: {matches.Count} candidates (ambiguous) — best: 0x{bestMatch:X6}");
+                            foreach (var m in matches.Take(8))
+                                logLines.Add($"      candidate 0x{m + actualWindow:X6}");
+                        }
+                        else
+                        {
+                            logLines.Add($"    HexPattern-{actualWindow}: unique match → 0x{bestMatch:X6}  ✓");
+                        }
+
+                        break; // Stop at the first window size that gives a result.
+                    }
+
+                    if (!foundAny)
+                    {
+                        result.Method = "HexPattern — no match";
+                        logLines.Add($"    Result: NOT FOUND ✗");
+                    }
+                    else
+                    {
+                        logLines.Add($"    Result: {result.NewCode}  (confidence {result.Confidence}%)");
+                    }
+
+                    allResults.Add(result);
+                }
+
+                logLines.Add(string.Empty);
+            }
+
+            int foundCount = allResults.Count(r => r.Found);
+            logLines.Add($"[PORTCHEATS] Complete: {foundCount}/{allResults.Count} codes ported.");
+
+            var response = new CommandResponse
+            {
+                Success          = true,
+                Command          = "PORTCHEATS",
+                Data             = string.Join("\n", logLines),
+                PortCheatResults = allResults,
+            };
+            return JsonSerializer.Serialize(response);
+        }
+
+        /// <summary>
+        /// Searches <paramref name="haystack"/> for every occurrence of
+        /// <paramref name="needle"/> using a simple sliding-window scan and returns
+        /// the starting byte offset of each match.  Suitable for the dump sizes
+        /// encountered in practice (≤ 32 MB); performance is acceptable because the
+        /// inner comparison exits early on the first mismatch.
+        /// </summary>
+        private static List<int> FindPattern(byte[] haystack, byte[] needle)
+        {
+            var results = new List<int>();
+            if (needle.Length == 0 || needle.Length > haystack.Length) return results;
+
+            int limit = haystack.Length - needle.Length;
+            byte first = needle[0];
+
+            for (int i = 0; i <= limit; i++)
+            {
+                if (haystack[i] != first) continue;
+                bool match = true;
+                for (int j = 1; j < needle.Length; j++)
+                {
+                    if (haystack[i + j] != needle[j]) { match = false; break; }
+                }
+                if (match) results.Add(i);
+            }
+            return results;
+        }
+
+        /// <summary>
         /// Handle CONVERTCHEAT command — converts PS2 cheat codes between raw format
         /// and a device-specific encrypted format using the CheatConverter module.
         /// </summary>
@@ -3286,6 +3479,9 @@ namespace CodeDesigner.Mips64LE
         // CONVERTCHEAT fields
         public string? Format { get; set; }
         public string? Direction { get; set; }
+        // PORTCHEATS fields
+        public string? SourceDumpPath { get; set; }
+        public string? TargetDumpPath { get; set; }
         // COMPILECDS — pre-resolved pointer-manager labels (dotted names like "seal.health")
         public List<LabelEntry>? Labels { get; set; }
     }
@@ -3383,6 +3579,39 @@ namespace CodeDesigner.Mips64LE
         // RECOMPILE fields
         public int? FunctionCount { get; set; }
         public List<string>? WrittenFiles { get; set; }
+
+        // PORTCHEATS fields
+        public List<PortCheatResult>? PortCheatResults { get; set; }
+    }
+
+    /// <summary>
+    /// Result for a single cheat code line produced by PORTCHEATS.
+    /// </summary>
+    public class PortCheatResult
+    {
+        /// <summary>The #Name label of the cheat block this line belongs to.</summary>
+        public string BlockName { get; set; } = string.Empty;
+
+        /// <summary>Original GameShark code line, e.g. "20123456 000003E8".</summary>
+        public string OriginalCode { get; set; } = string.Empty;
+
+        /// <summary>Ported code line with the updated address, e.g. "20124ABC 000003E8". Null when not found.</summary>
+        public string? NewCode { get; set; }
+
+        /// <summary>Whether a match was found in the target dump.</summary>
+        public bool Found { get; set; }
+
+        /// <summary>Description of the method and window size used, e.g. "HexPattern-48".</summary>
+        public string Method { get; set; } = string.Empty;
+
+        /// <summary>0–100 confidence score. 100 = unique match; lower when multiple candidates were found.</summary>
+        public int Confidence { get; set; }
+
+        /// <summary>True when more than one candidate address was found in the target dump.</summary>
+        public bool Ambiguous { get; set; }
+
+        /// <summary>All candidate new code lines when Ambiguous is true.</summary>
+        public List<string>? Candidates { get; set; }
     }
 
     /// <summary>
