@@ -292,14 +292,14 @@ import './disasm-editor.css';
             </div>
             <div class="porter-dump-row">
                 <div class="porter-overlay-field porter-dump-field">
-                    <label class="porter-overlay-label">Source Dump (r0001)</label>
+                    <label class="porter-overlay-label">Source Dump</label>
                     <div class="porter-file-row">
                         <input type="text" id="porter-source-path" class="porter-file-input" readonly placeholder="Select source EE RAM dump…" />
                         <button id="porter-source-browse" class="porter-browse-btn" title="Browse for source RAM dump file">&#8230;</button>
                     </div>
                 </div>
                 <div class="porter-overlay-field porter-dump-field">
-                    <label class="porter-overlay-label">Target Dump (r0002)</label>
+                    <label class="porter-overlay-label">Target Dump</label>
                     <div class="porter-file-row">
                         <input type="text" id="porter-target-path" class="porter-file-input" readonly placeholder="Select target EE RAM dump…" />
                         <button id="porter-target-browse" class="porter-browse-btn" title="Browse for target RAM dump file">&#8230;</button>
