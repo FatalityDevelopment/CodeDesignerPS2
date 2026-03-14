@@ -103,14 +103,23 @@ Messages are sent as JSON-encoded strings with the following structure:
 ```typescript
 interface CommandMessage {
     Command: string;             // Command type (see Supported Commands)
-    Data?: string;               // Generic data payload (assembly text, hex bytes, base64 binary)
+    Data?: string;               // Generic data payload (assembly text, hex bytes, base64 binary, cheat text, CDS source)
     Address?: number;            // Virtual address (DISASSEMBLE, READMEM, WRITEMEM, SCANSTRINGS, …)
     Length?: number;             // Byte count (READMEM, SCANSTRINGS, SCANFUNCTIONS, SEARCH)
     Region?: string;             // Memory region: "ee" (default) or "iop"
     OutputPath?: string;         // Output directory path (SNAPSHOT)
+    InputPath?: string;          // Input file or directory path (LOADSNAPSHOT, LOADBIN)
+    IsoPath?: string;            // Path to ISO/BIN disc image (LISTDISCELFS, RECOMPILE)
+    ElfName?: string;            // ELF filename within the disc (RECOMPILE)
+    OutputDirectory?: string;    // Output directory for recompiled files (RECOMPILE)
+    Format?: string;             // Cheat format identifier: "gameshark" (CONVERTCHEAT)
+    Direction?: string;          // Conversion direction: "import" or "export" (CONVERTCHEAT)
+    SourceDumpPath?: string;     // Source-version snapshot directory (PORTCHEATS)
+    TargetDumpPath?: string;     // Target-version snapshot directory (PORTCHEATS)
     BreakpointAddress?: number;  // EE virtual address (SETBP / CLEARBP)
     Label?: string;              // Symbol label name (ADDLABEL)
     Comment?: string;            // Optional comment (ADDLABEL)
+    Labels?: LabelEntry[];       // Pre-resolved pointer-manager labels (COMPILECDS)
     Query?: string;              // Search pattern (SEARCH)
     SearchMode?: string;         // Search mode: "text", "regex", "bytes", "string" (SEARCH)
     RegisterName?: string;       // Register type (SETREG): GPR, PC, HI, LO, HI1, LO1, SA, COP0, FPR, FCR, VU0I, VU0F
@@ -600,6 +609,230 @@ Example response:
 
 Thread status values: `Running`, `Ready`, `Waiting`, `Suspended`, `Dormant`.  
 If no valid TCBs are found a single synthetic entry for the live CPU state is returned.
+
+---
+
+#### LOADBIN
+Loads a raw binary file from disk into live emulator memory at the given address.
+
+```json
+{
+    "Command": "LOADBIN",
+    "InputPath": "/path/to/file.bin",
+    "Address": 2147483648,
+    "Region": "ee"
+}
+```
+
+`Region` is `"ee"` (default) or `"iop"`.  
+Response: `{ "Success": true, "Message": "Loaded N bytes at 0x80000000" }`
+
+---
+
+#### APPLYCHEATS
+Applies a block of cheat codes in the CodeDesigner cheat format to live emulator memory.  
+See [CodeDesigner.Mips64LE.Common/CheatEngine/README.md](CodeDesigner.Mips64LE.Common/CheatEngine/README.md) for the cheat line format.
+
+```json
+{
+    "Command": "APPLYCHEATS",
+    "Data": "#Infinite Health\n20123456 000003E8"
+}
+```
+
+Response: `{ "Success": true, "Message": "Applied N cheat block(s)" }`
+
+---
+
+#### COMPILECDS
+Compiles a `.cds` (Code Designer Script) assembly source file to GameShark-style cheat codes.  
+The source file may contain MIPS assembly, label definitions, and inline directives.  
+Optionally accepts a `Labels` array of pre-resolved pointer-manager entries.
+
+```json
+{
+    "Command": "COMPILECDS",
+    "Data": "// set health to max\n@seal.health\nori $v0, $zero, 0x270F\nsw $v0, 0($a0)",
+    "Labels": [
+        { "address": "0x20123456", "label": "seal.health", "comment": null }
+    ]
+}
+```
+
+Response: `{ "Success": true, "Command": "COMPILECDS", "Results": [ { "Assembly": "...", "Hex": "20XXXXXX YYYYYYYY" } ] }`
+
+---
+
+#### SCANPOINTERS
+Scans a region of live emulator memory for 32-bit little-endian values that point into valid code-referenced EE addresses.
+
+```json
+{
+    "Command": "SCANPOINTERS",
+    "Address": 2147483648,
+    "Length": 65536,
+    "Region": "ee"
+}
+```
+
+Response: `{ "Success": true, "Command": "SCANPOINTERS", "Strings": [ { "address": "0x80001234", "value": "0x80010000" }, … ] }`
+
+---
+
+#### GETPOINTERS
+Scans caller-supplied base64-encoded binary data for pointer values.  
+Useful for offline analysis of a previously captured memory dump.
+
+```json
+{
+    "Command": "GETPOINTERS",
+    "Address": 2147483648,
+    "Data": "<base64-encoded binary>"
+}
+```
+
+`Address` is the base address for reported pointer locations.  
+Response format is identical to `SCANPOINTERS`.
+
+---
+
+#### SCANFLOATS
+Scans a region of live emulator memory for IEEE-754 single-precision float values that are finite and non-zero (rejects denormals, ±Inf, NaN).
+
+```json
+{
+    "Command": "SCANFLOATS",
+    "Address": 2147483648,
+    "Length": 65536,
+    "Region": "ee"
+}
+```
+
+Response: `{ "Success": true, "Command": "SCANFLOATS", "Strings": [ { "address": "0x80001234", "value": "1.0" }, … ] }`
+
+---
+
+#### GETFLOATS
+Scans caller-supplied base64-encoded binary data for IEEE-754 float values.
+
+```json
+{
+    "Command": "GETFLOATS",
+    "Address": 2147483648,
+    "Data": "<base64-encoded binary>"
+}
+```
+
+Response format is identical to `SCANFLOATS`.
+
+---
+
+#### SCANINTEGERS
+Scans a region of live emulator memory for 32-bit integer values within a reasonable non-trivial range (filters out all-zero and all-ones words).
+
+```json
+{
+    "Command": "SCANINTEGERS",
+    "Address": 2147483648,
+    "Length": 65536,
+    "Region": "ee"
+}
+```
+
+Response: `{ "Success": true, "Command": "SCANINTEGERS", "Strings": [ { "address": "0x80001234", "value": "1000" }, … ] }`
+
+---
+
+#### GETINTEGERS
+Scans caller-supplied base64-encoded binary data for integer values.
+
+```json
+{
+    "Command": "GETINTEGERS",
+    "Address": 2147483648,
+    "Data": "<base64-encoded binary>"
+}
+```
+
+Response format is identical to `SCANINTEGERS`.
+
+---
+
+#### LISTDISCELFS
+Lists all ELF executable files found in an ISO/BIN disc image.  
+The main game executable (`BOOT2` from `SYSTEM.CNF`) is marked with a `★` suffix in its name.
+
+```json
+{
+    "Command": "LISTDISCELFS",
+    "IsoPath": "/path/to/game.iso"
+}
+```
+
+Response: `{ "Success": true, "Command": "LISTDISCELFS", "Strings": [ { "address": "0", "value": "SLUS_123.45;1 ★" }, … ] }`
+
+---
+
+#### RECOMPILE
+Statically recompiles an ELF from a disc image to native code using the built-in recompiler.  
+`ElfName` is the name of the ELF as returned by `LISTDISCELFS` (without the `★` marker).
+
+```json
+{
+    "Command": "RECOMPILE",
+    "IsoPath": "/path/to/game.iso",
+    "ElfName": "SLUS_123.45;1",
+    "OutputDirectory": "/tmp/recompiled"
+}
+```
+
+Response: `{ "Success": true, "Command": "RECOMPILE", "Message": "Recompiled to /tmp/recompiled" }`
+
+---
+
+#### CONVERTCHEAT
+Converts a cheat code between GameShark/Action Replay raw format and the CodeDesigner cheat format.
+
+```json
+{
+    "Command": "CONVERTCHEAT",
+    "Data": "D0123456 00000064\n10123456 000000FF",
+    "Format": "gameshark",
+    "Direction": "import"
+}
+```
+
+| `Format` | Description |
+|---|---|
+| `gameshark` | GameShark / Action Replay Pro raw codes |
+| `codedesigner` | Native CodeDesigner cheat format |
+
+| `Direction` | Description |
+|---|---|
+| `import` | Convert from `Format` → CodeDesigner |
+| `export` | Convert from CodeDesigner → `Format` |
+
+Response: `{ "Success": true, "Command": "CONVERTCHEAT", "Data": "… converted cheat text …" }`
+
+---
+
+#### PORTCHEATS
+Attempts to automatically port cheat codes written for one game version to another version.  
+Uses four strategies in order: before-window scan, MIPS LUI+load code fingerprinting, extended anchor search, and pointer scan.
+
+```json
+{
+    "Command": "PORTCHEATS",
+    "Data": "#Infinite Health\n20123456 000003E8",
+    "SourceDumpPath": "/tmp/source-version-snapshot",
+    "TargetDumpPath": "/tmp/target-version-snapshot"
+}
+```
+
+`SourceDumpPath` and `TargetDumpPath` are snapshot directories as produced by `SNAPSHOT`.  
+Response: `{ "Success": true, "Command": "PORTCHEATS", "Data": "… ported cheat text …" }`
+
+---
 
 ### Protocol
 

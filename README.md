@@ -8,10 +8,13 @@ A C# library and toolset for working with the **Sony PlayStation 2 Emotion Engin
 
 ```
 Mips64LE/
-├── CodeDesigner.Mips64LE.Common/     # Core library (assembler, disassembler, instructions, emulator)
-├── CodeDesigner.Mips64LE/           # Console application + socket server
-├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite (960 tests)
-└── vscode/codedesigner/             # VSCode extension frontend
+├── CodeDesigner.Mips64LE.Common/        # Core library (assembler, disassembler, instructions, emulator)
+├── CodeDesigner.Mips64LE/               # Console application + socket server
+├── CodeDesigner.Mips64LE.McpServer/     # MCP stdio bridge for GitHub Copilot
+├── CodeDesigner.Mips64LE.Recompiler/    # Static recompiler (work in progress)
+├── CodeDesigner.Mips64LE.CheatConverter/# Cheat code format converter utility
+├── CodeDesigner.Mips64LE.TestProject/   # Unit-test suite (960 tests)
+└── vscode/codedesigner/                 # VS Code extension frontend
 ```
 
 ---
@@ -359,9 +362,12 @@ These documents live in [`CodeDesigner.Mips64LE.Common/Documentation/Architectur
 |----------|-------------|
 | [CodeDesigner.Mips64LE.Common/README.md](CodeDesigner.Mips64LE.Common/README.md) | Core library overview: EE CPU architecture, vector units, FPU, memory system |
 | [CodeDesigner.Mips64LE/README.md](CodeDesigner.Mips64LE/README.md) | Console application and socket server overview |
+| [CodeDesigner.Mips64LE.McpServer/README.md](CodeDesigner.Mips64LE.McpServer/README.md) | MCP stdio bridge: GitHub Copilot integration, available tools, registration |
 | [vscode/codedesigner/README.md](vscode/codedesigner/README.md) | VS Code extension user guide: setup, commands, supported instructions |
 | [vscode/codedesigner/CHANGELOG.md](vscode/codedesigner/CHANGELOG.md) | VS Code extension release history |
+| [vscode/codedesigner/ARCHITECTURE.md](vscode/codedesigner/ARCHITECTURE.md) | Extension architecture: webpack, Angular, provider pattern, communication |
 | [vscode/codedesigner/vsc-extension-quickstart.md](vscode/codedesigner/vsc-extension-quickstart.md) | Extension developer quick-start: project structure, build, debug, and extend |
+| [CodeDesigner.Mips64LE.Common/CheatEngine/README.md](CodeDesigner.Mips64LE.Common/CheatEngine/README.md) | Cheat code format reference: line types, address encoding, timer/condition cheats |
 
 ---
 
