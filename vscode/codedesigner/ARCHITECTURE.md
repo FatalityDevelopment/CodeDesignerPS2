@@ -11,24 +11,19 @@ vscode/codedesigner/
 │   ├── utils/
 │   │   └── nonce.ts                   # CSP nonce generator
 │   ├── providers/                     # Extension-host (Node.js) side — one folder per panel
-│   │   ├── asmPanel/
-│   │   │   ├── asmPanel.css           # CSS reference (canonical source in webview folder)
-│   │   │   └── asmPanelProvider.ts    # VS Code WebviewViewProvider — serves Angular bundle
 │   │   ├── disasmPanel/
 │   │   │   ├── disasmPanel.css        # CSS reference
 │   │   │   └── disasmPanelProvider.ts # VS Code WebviewViewProvider — serves Angular bundle
-│   │   └── disasmEditor/
-│   │       ├── disasmEditor.css       # CSS reference
-│   │       └── disasmEditorProvider.ts# VS Code CustomReadonlyEditorProvider — serves Angular bundle
+│   │   ├── disasmEditor/
+│   │   │   ├── disasmEditor.css       # CSS reference
+│   │   │   └── disasmEditorProvider.ts# VS Code CustomReadonlyEditorProvider — serves Angular bundle
+│   │   └── pointerManager/
+│   │       └── pointerManagerProvider.ts # VS Code TreeDataProvider — struct/label tree view
 │   └── webview/                       # Angular 19 webview apps (compiled by webviewConfig)
 │       ├── typings.d.ts               # CSS import declarations for webview TypeScript
 │       ├── shared/
 │       │   ├── vscode-api.ts          # Singleton wrapper for acquireVsCodeApi()
 │       │   └── vscode-bridge.service.ts  # Angular service: postMessage + messages$ RxJS stream
-│       ├── asm-panel/
-│       │   ├── main.ts                # bootstrapApplication(AsmPanelComponent)
-│       │   ├── asm-panel.component.ts # Standalone Angular 19 component
-│       │   └── asm-panel.css          # Styles (style-loader injects at runtime)
 │       ├── disasm-panel/
 │       │   ├── main.ts                # bootstrapApplication(DisasmPanelComponent)
 │       │   ├── disasm-panel.component.ts
@@ -48,11 +43,10 @@ vscode/codedesigner/
 Compiles the extension host code (`src/extension.ts`) to `dist/extension.js`.
 
 ### `webviewConfig` (target: `web`)
-Compiles three Angular 19 apps to `dist/webview/`:
+Compiles two Angular 19 apps to `dist/webview/`:
 
 | Entry point | Output |
 |-------------|--------|
-| `src/webview/asm-panel/main.ts` | `dist/webview/asm-panel.js` |
 | `src/webview/disasm-panel/main.ts` | `dist/webview/disasm-panel.js` |
 | `src/webview/disasm-editor/main.ts` | `dist/webview/disasm-editor.js` |
 
@@ -65,7 +59,7 @@ Each provider converts the compiled bundle path to a webview-accessible URI:
 ```typescript
 private getHtml(webview: vscode.Webview): string {
     const scriptUri = webview.asWebviewUri(
-        vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'asm-panel.js')
+        vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'disasm-panel.js')
     );
     return `<!DOCTYPE html>
 <html lang="en">
@@ -75,7 +69,7 @@ private getHtml(webview: vscode.Webview): string {
         content="default-src 'none'; style-src 'unsafe-inline'; script-src ${webview.cspSource};">
 </head>
 <body>
-  <app-asm-panel></app-asm-panel>
+  <app-disasm-panel></app-disasm-panel>
   <script src="${scriptUri}"></script>
 </body>
 </html>`;
@@ -109,13 +103,13 @@ so global CSS (VS Code theme variables) applies without scoping:
 
 ```typescript
 @Component({
-  selector: 'app-asm-panel',
+  selector: 'app-disasm-panel',
   standalone: true,
   imports: [CommonModule, FormsModule],
   encapsulation: ViewEncapsulation.None,
   template: `...`,
 })
-export class AsmPanelComponent implements OnInit, OnDestroy { ... }
+export class DisasmPanelComponent implements OnInit, OnDestroy { ... }
 ```
 
 `zone.js` is imported as the **first** import in every `main.ts`.
