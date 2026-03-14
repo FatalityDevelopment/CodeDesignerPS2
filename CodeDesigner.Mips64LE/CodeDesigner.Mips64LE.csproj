@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <Folder Include="Isos\" />
+    <Folder Include="Dumps\" />
   </ItemGroup>
 
   <ItemGroup>
