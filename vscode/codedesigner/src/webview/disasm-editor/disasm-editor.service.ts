@@ -281,7 +281,7 @@ export class DisasmEditorService implements OnDestroy {
     this.state.loadedPages.clear();
     this.state.disasmRows        = [];
     this.state.cursor            = 0;
-    this.state.isLive            = !!(msg['isLive'] || msg['isBinLive']);
+    this.state.isLive            = !!(msg['isLive']);
 
     if (this.state.totalInstructions > 0) {
       this.requestPage(this.getPageStart(0));
