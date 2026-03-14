@@ -8,6 +8,7 @@ vscode/codedesigner/
 │   ├── declarations.d.ts              # TypeScript module declarations for .html/.css imports
 │   ├── extension.ts                   # Extension entry point — registers providers & commands
 │   ├── socketClient.ts                # TCP socket client — communicates with the C# backend
+│   ├── language-configuration.json    # .cds language bracket/comment configuration
 │   ├── utils/
 │   │   └── nonce.ts                   # CSP nonce generator
 │   ├── providers/                     # Extension-host (Node.js) side — one folder per panel
@@ -30,8 +31,11 @@ vscode/codedesigner/
 │       │   └── disasm-panel.css
 │       └── disasm-editor/
 │           ├── main.ts                # bootstrapApplication(DisasmEditorComponent)
-│           ├── disasm-editor.component.ts  # Full editor: grid, hex, search, debug panels
-│           └── disasm-editor.css
+│           ├── disasm-editor.component.ts  # Full editor: grid, search, debug, bottom, symbols panels
+│           ├── disasm-editor.service.ts    # All editor state + VS Code message handling
+│           ├── disasm-editor.css
+│           └── components/
+│               └── hex-view.component.ts   # Standalone hex dump panel
 ├── tsconfig.json                      # Extension-host TypeScript config
 ├── tsconfig.webview.json              # Angular/webview TypeScript config
 └── webpack.config.js                  # Exports [extensionConfig, webviewConfig]
@@ -94,7 +98,9 @@ bridge.on<AssembleResultMsg>('assembleResult').subscribe(msg => {
 ```
 
 The extension host sends back via `webview.postMessage(...)` and receives via
-`webview.onDidReceiveMessage(...)` — unchanged from before the Angular migration.
+`webview.onDidReceiveMessage(...)`.
+
+`DisasmEditorService` holds all disassembler state and handles VS Code messages via `VsCodeBridgeService` with Subject observables. `HexViewComponent` is a standalone Angular component for the hex view.
 
 ## Angular 19 conventions
 
@@ -123,29 +129,18 @@ export class DisasmPanelComponent implements OnInit, OnDestroy { ... }
 3. Create provider in `src/providers/my-panel/myPanelProvider.ts`
 4. Register in `extension.ts`
 
-### Splitting the disasm-editor into sub-components
+### Adding sub-components to disasm-editor
 
-`disasm-editor.component.ts` (~1,357 lines) is the largest single component. A
-natural decomposition:
+`disasm-editor.component.ts` is the root component. New standalone sub-components
+follow the existing `components/hex-view.component.ts` pattern — create the file under
+`components/`, declare it `standalone: true`, import it in `DisasmEditorComponent.imports`,
+and use it in the template.
 
-```
-disasm-editor/
-  disasm-editor.component.ts        # Root — bootstraps, owns state
-  components/
-    disasm-grid.component.ts        # Virtual instruction rows
-    hex-view.component.ts           # Hex viewer
-    search-panel.component.ts       # Search bar
-    goto-panel.component.ts         # Goto address
-    symbols-panel.component.ts      # Labels / Strings / Functions tabs
-    debug-panel.component.ts        # GPR / COP0 / FPR / VU0 / GS / Stack tabs
-    edit-overlay.component.ts       # Inline label/comment editor modal
-```
-
-Pass state with `@Input()` / `@Output()` or inject a shared service.
+Pass state with `@Input()` / `@Output()` or inject the shared `DisasmEditorService`.
 
 ### Virtual scrolling
 
-For large binaries (BIOS = 1M instructions), Angular CDK virtual scroll improves
+For large binaries (BIOS = 1 M instructions), Angular CDK virtual scroll improves
 performance significantly:
 
 ```bash
