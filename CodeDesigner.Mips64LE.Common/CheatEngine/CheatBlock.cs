@@ -12,8 +12,11 @@ namespace CodeDesigner.Mips64LE.Common.CheatEngine
 
         public static CheatBlock Parse(string block)
         {
-            var labelMatch = Regex.Match(block, @"(#.+?)(\r\n|\n)", RegexOptions.IgnoreCase);
-            var cheatBlock = new CheatBlock { Label = labelMatch.Groups[1].Value };
+            // Match the first #label line; [^\r\n]+ means a newline is not required at
+            // end-of-block (handles single-line blocks and last-line labels correctly).
+            var labelMatch = Regex.Match(block, @"(#[^\r\n]+)");
+            string label   = labelMatch.Success ? labelMatch.Groups[1].Value.TrimEnd() : string.Empty;
+            var cheatBlock = new CheatBlock { Label = label };
 
             var cheatMatches = Regex.Matches(block, @"([a-f0-9]{8})\s+([a-f0-9]{8})", RegexOptions.IgnoreCase);
 
