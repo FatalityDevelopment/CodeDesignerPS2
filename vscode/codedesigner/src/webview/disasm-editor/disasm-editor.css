@@ -1829,6 +1829,17 @@ app-hex-view {
 .porter-badge-warn { background: #3a2e00; color: #cca700; border: 1px solid #5a4800; }
 .porter-badge-err  { background: #3a1a1a; color: #f44747; border: 1px solid #5a2a2a; }
 
+.porter-block-text {
+    color: #9cdcfe;
+    font-family: monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding-left: 18px;
+    padding-bottom: 2px;
+    opacity: 0.85;
+}
+
 .porter-result-line {
     display: flex;
     align-items: baseline;

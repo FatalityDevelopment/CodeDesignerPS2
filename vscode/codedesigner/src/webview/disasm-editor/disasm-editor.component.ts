@@ -917,6 +917,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     // ── Porter overlay ────────────────────────────────────────────────────────
     interface PorterResult {
       blockName:    string;
+      blockText:    string | null;
       originalCode: string;
       newCode:      string | null;
       found:        boolean;
@@ -1008,6 +1009,17 @@ export class DisasmEditorComponent implements AfterViewInit {
         headerRow.appendChild(badge);
         card.appendChild(headerRow);
 
+        // ── Block description text (if any) ──────────────────────────────────
+        // All entries in a block share the same blockText (it is per-block metadata),
+        // so reading it from the first entry is sufficient.
+        const blockText = entries[0]?.blockText;
+        if (blockText) {
+          const descDiv = document.createElement('div');
+          descDiv.className   = 'porter-block-text';
+          descDiv.textContent = blockText;
+          card.appendChild(descDiv);
+        }
+
         // ── Per-line results ─────────────────────────────────────────────────
         for (const entry of entries) {
           const line = document.createElement('div');
@@ -1081,6 +1093,8 @@ export class DisasmEditorComponent implements AfterViewInit {
         const entries = _porterResultData.filter(e => e.blockName === blockName && e.found && e.newCode);
         if (entries.length === 0) { continue; }
         if (blockName) { lines.push(blockName); }
+        const blockText = entries[0]?.blockText;
+        if (blockText) { lines.push(blockText); }
         for (const entry of entries) { lines.push(entry.newCode!); }
         lines.push('');
       }
