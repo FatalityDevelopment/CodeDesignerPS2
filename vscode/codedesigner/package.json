@@ -11,17 +11,6 @@
     "Debuggers"
   ],
   "contributes": {
-    "customEditors": [
-      {
-        "viewType": "disasm.disasmEditor",
-        "displayName": "Disassembler",
-        "selector": [
-          {
-            "filenamePattern": "*.bin"
-          }
-        ]
-      }
-    ],
     "viewsContainers": {
       "activitybar": [
         {
