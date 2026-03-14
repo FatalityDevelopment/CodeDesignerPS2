@@ -784,26 +784,25 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        // Read file and convert to hex string
-        let fileBytes: Buffer;
+        const label   = path.basename(filePath);
+        const addrStr = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
+
+        // Get file size for the log message without reading the entire file
+        let fileSizeStr = 'unknown size';
         try {
-            fileBytes = fs.readFileSync(filePath);
+            const stat = fs.statSync(filePath);
+            fileSizeStr = `${stat.size} bytes`;
         } catch (err: any) {
-            vscode.window.showErrorMessage(`Could not read file: ${err?.message ?? err}`);
-            return;
+            out.warn(`Could not stat file for size: ${err?.message ?? err}`);
         }
 
-        const hexData   = fileBytes.toString('hex');
-        const label     = path.basename(filePath);
-        const addrStr   = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
-
-        out.info(`Importing ${label} (${fileBytes.length} bytes) → ${addrStr} (${region.value})`);
+        out.info(`Importing ${label} (${fileSizeStr}) → ${addrStr} (${region.value})`);
 
         try {
-            await this.socketClient.writeMemory(address, hexData, region.value);
-            out.info(`Import complete — ${fileBytes.length} byte(s) written.`);
+            await this.socketClient.loadBinFromFile(filePath, address, region.value);
+            out.info(`Import complete — ${fileSizeStr} written.`);
             vscode.window.showInformationMessage(
-                `Imported ${label} (${fileBytes.length} bytes) at ${addrStr}.`
+                `Imported ${label} (${fileSizeStr}) at ${addrStr}.`
             );
         } catch (err: any) {
             out.error(`Import failed: ${err?.message ?? err}`);

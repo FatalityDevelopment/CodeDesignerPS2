@@ -319,6 +319,9 @@ namespace CodeDesigner.Mips64LE
                     case "WRITEMEM":
                         return HandleWriteMem(command.Address ?? 0, command.Data, command.Region);
 
+                    case "LOADBIN":
+                        return HandleLoadBin(command.InputPath, command.Address ?? 0, command.Region);
+
                     case "APPLYCHEATS":
                         return HandleApplyCheats(command.Data);
 
@@ -1895,6 +1898,94 @@ namespace CodeDesigner.Mips64LE
                 }
             }
             return CreateSuccessResponse($"Wrote {bytes.Length} byte(s) to 0x{address:X8}");
+        }
+
+        /// <summary>
+        /// Handle LOADBIN command — read a binary file from disk and copy it directly
+        /// into live emulator memory at the specified address.  This is more efficient
+        /// than WRITEMEM for large files because the file data is never transferred over
+        /// the socket; the server reads it locally from <paramref name="filePath"/>.
+        /// </summary>
+        private string HandleLoadBin(string? filePath, uint address, string? region)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (string.IsNullOrWhiteSpace(filePath))
+                return CreateErrorResponse("InputPath is required for LOADBIN");
+            if (!File.Exists(filePath))
+                return CreateErrorResponse($"File not found: {filePath}");
+
+            byte[] bytes;
+            try
+            {
+                bytes = File.ReadAllBytes(filePath);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Could not read file: {ex.Message}");
+            }
+
+            bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+            if (useIop)
+            {
+                // Translate the start address and bulk-copy when the entire range fits in IOP RAM.
+                uint startPhys = IopMemoryBus.TranslateAddress(address);
+                if (startPhys >= EeIopMirrorBase && startPhys < EeIopMirrorEnd)
+                    startPhys -= EeIopMirrorBase;
+
+                if (startPhys + (uint)bytes.Length <= (uint)IopMemoryBus.RamSize)
+                {
+                    Array.Copy(bytes, 0, Scheduler.IOP.Bus.Ram, (int)startPhys, bytes.Length);
+                }
+                else
+                {
+                    for (int i = 0; i < bytes.Length; i++)
+                    {
+                        uint vaddr    = address + (uint)i;
+                        uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
+                        if (physAddr >= EeIopMirrorBase && physAddr < EeIopMirrorEnd)
+                            physAddr -= EeIopMirrorBase;
+                        if (physAddr < (uint)IopMemoryBus.RamSize)
+                            Scheduler.IOP.Bus.Ram[physAddr] = bytes[i];
+                    }
+                }
+            }
+            else
+            {
+                // Translate the EE start address and bulk-copy when the entire range fits in Main RAM.
+                uint startPhys;
+                if (address >= 0x80000000u && address < 0xC0000000u)
+                    startPhys = address & 0x1FFFFFFFu;
+                else if (address >= EeUncachedRamBase && address < EeUncachedRamEnd)
+                    startPhys = address - EeUncachedRamBase;
+                else
+                    startPhys = address;
+
+                if (startPhys + (uint)bytes.Length <= (uint)PS2MemoryBus.MainRamSize)
+                {
+                    Array.Copy(bytes, 0, Scheduler.EE.Bus.Ram, (int)startPhys, bytes.Length);
+                }
+                else
+                {
+                    for (int i = 0; i < bytes.Length; i++)
+                    {
+                        uint vaddr = address + (uint)i;
+                        uint physAddr;
+                        if (vaddr >= 0x80000000u && vaddr < 0xC0000000u)
+                            physAddr = vaddr & 0x1FFFFFFFu;
+                        else if (vaddr >= EeUncachedRamBase && vaddr < EeUncachedRamEnd)
+                            physAddr = vaddr - EeUncachedRamBase;
+                        else
+                            physAddr = vaddr;
+
+                        if (physAddr < (uint)PS2MemoryBus.MainRamSize)
+                            Scheduler.EE.Bus.Ram[physAddr] = bytes[i];
+                        else if (vaddr >= 0x70000000u && vaddr < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                            Scheduler.EE.Bus.Scratchpad[vaddr - 0x70000000u] = bytes[i];
+                    }
+                }
+            }
+            return CreateSuccessResponse($"Loaded {bytes.Length} byte(s) from {Path.GetFileName(filePath)} to 0x{address:X8}");
         }
 
         /// <summary>

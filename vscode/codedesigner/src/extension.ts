@@ -53,33 +53,6 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerCustomEditorProvider('disasm.disasmEditor', editorProvider)
 	);
 
-	// Check for already-open .bin files and prompt to reopen with custom editor
-	const checkForOpenBinFiles = () => {
-		const openTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
-		const binTabs = openTabs.filter(tab => {
-			if (tab.input instanceof vscode.TabInputText) {
-				const uri = tab.input.uri;
-				return uri.scheme === 'file' && uri.path.toLowerCase().endsWith('.bin');
-			}
-			return false;
-		});
-
-		if (binTabs.length > 0) {
-			outputChannel.info(`Found ${binTabs.length} already-open .bin file(s)`);
-			binTabs.forEach(tab => {
-				if (tab.input instanceof vscode.TabInputText) {
-					const uri = tab.input.uri;
-					outputChannel.info(`Reopening ${uri.fsPath} with disassembler`);
-					// Close the text editor and reopen with custom editor
-					vscode.commands.executeCommand('vscode.openWith', uri, 'disasm.disasmEditor');
-				}
-			});
-		}
-	};
-
-	// Check for open .bin files after a short delay to ensure extension is fully activated
-	setTimeout(checkForOpenBinFiles, 500);
-
 	// Register webview panels — pass socketClient so the panel can auto-connect
 	const disasmPanelProvider = new DisasmPanelProvider(socketClient, editorProvider, context.extensionUri);
 	disasmPanelProvider.register(context);

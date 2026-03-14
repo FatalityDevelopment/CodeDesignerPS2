@@ -870,6 +870,30 @@ export class SocketClient {
     }
 
     /**
+     * Load a binary file from disk directly into live EE or IOP memory.
+     * The file is read server-side, avoiding the need to transfer its contents
+     * over the socket (which would time out for large dumps like 32 MB EE RAM).
+     * @param filePath Absolute path to the binary file on the server machine
+     * @param address  Target virtual address
+     * @param region   'ee' (default) or 'iop'
+     */
+    public async loadBinFromFile(filePath: string, address: number, region: string = 'ee'): Promise<void> {
+        const command: CommandMessage = {
+            Command:   'LOADBIN',
+            InputPath: filePath,
+            Address:   address,
+            Region:    region,
+        };
+        // Use a generous timeout — large files (e.g. 32 MB EE RAM) take time to
+        // read from disk and copy into emulator memory even though no file data
+        // is transferred over the socket.
+        const response = await this.sendCommand(command, 120000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'LoadBin failed');
+        }
+    }
+
+    /**
      * Update a single EE CPU register.
      * @param name   Register type: 'GPR', 'PC', 'HI', 'LO', 'HI1', 'LO1', 'SA', 'COP0', 'FPR'
      * @param index  Register index (0-31 for GPR/COP0/FPR; ignored for PC/HI/LO/…)
