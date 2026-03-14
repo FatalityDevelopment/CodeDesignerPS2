@@ -2210,13 +2210,19 @@ namespace CodeDesigner.Mips64LE
 
                                 // Mask the load/store offset bytes (bits [15:0] = bytes 0–1 in LE).
                                 int refInFp = cref.RefPos - fpStart;
-                                mask[refInFp]     = 0;
-                                mask[refInFp + 1] = 0;
+                                if (refInFp + 1 < mask.Length)
+                                {
+                                    mask[refInFp]     = 0;
+                                    mask[refInFp + 1] = 0;
+                                }
                                 // Also mask the LUI immediate (bytes 0–1) so it still matches
                                 // even when the high-word happens to differ.
                                 int luiInFp = cref.LuiPos - fpStart;
-                                mask[luiInFp]     = 0;
-                                mask[luiInFp + 1] = 0;
+                                if (luiInFp + 1 < mask.Length)
+                                {
+                                    mask[luiInFp]     = 0;
+                                    mask[luiInFp + 1] = 0;
+                                }
 
                                 var fpMatches = FindMaskedPattern(targetData, fp, mask, step: 4);
                                 if (fpMatches.Count == 0)
@@ -2712,6 +2718,175 @@ namespace CodeDesigner.Mips64LE
             return results;
         }
 
+        // ════════════════════════════════════════════════════════════════════════
+        // Pointer-scanner helpers (shared by HandleScanPointers + HandleGetPointers)
+        // ════════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Maximum byte distance between a LUI instruction and its paired
+        /// load/store/addiu in <see cref="BuildCodeReferencedAddresses"/>.
+        /// 128 bytes (32 instructions) covers essentially all real MIPS compiler output.
+        /// </summary>
+        private const int MaxLuiWindow = 128;
+
+        /// <summary>
+        /// Tests whether <paramref name="val"/> is a plausible EE virtual address:
+        /// user-mode or KSEG0/KSEG1 main RAM (physical 0–32 MB), or EE scratchpad
+        /// (0x70000000–0x70003FFF).  Zero is always rejected.
+        /// </summary>
+        private static bool IsValidEePointerValue(uint val)
+        {
+            if (val == 0) return false;
+            uint phys = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
+            return phys < (uint)PS2MemoryBus.MainRamSize ||
+                   (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
+        }
+
+        /// <summary>
+        /// Normalises <paramref name="vaddr"/> to its EE physical equivalent and adds it
+        /// to <paramref name="set"/>.  KSEG0/KSEG1 addresses (0x80000000–0xBFFFFFFF) are
+        /// stripped to physical via <c>&amp; 0x1FFFFFFF</c>; scratchpad virtual addresses
+        /// (0x70000000–0x70003FFF) are stored as-is; non-RAM addresses are silently ignored.
+        /// Zero is never added.
+        /// </summary>
+        private static void AddEePhysAddr(HashSet<uint> set, uint vaddr)
+        {
+            if (vaddr == 0) return;
+            uint phys = vaddr >= 0x80000000u && vaddr < 0xC0000000u ? vaddr & 0x1FFFFFFFu : vaddr;
+            if (phys < (uint)PS2MemoryBus.MainRamSize)
+                set.Add(phys);
+            else if (vaddr >= 0x70000000u && vaddr < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                set.Add(vaddr); // scratchpad: keep virtual address
+        }
+
+        /// <summary>
+        /// Scans <paramref name="codeBytes"/> (loaded at virtual base
+        /// <paramref name="baseVAddr"/>) for all EE addresses referenced by MIPS code,
+        /// and returns them as a set of normalised physical addresses.
+        ///
+        /// Three sources of references are collected in a single O(n) forward pass:
+        /// <list type="bullet">
+        ///   <item><description>
+        ///     <b>Function entry points</b> — every <c>ADDIU $sp,$sp,-N</c> prologue.
+        ///   </description></item>
+        ///   <item><description>
+        ///     <b>JAL targets</b> — the absolute target of every <c>JAL</c> instruction.
+        ///   </description></item>
+        ///   <item><description>
+        ///     <b>LUI + I-type pairs</b> — every <c>LUI $rt, high</c> followed within
+        ///     <see cref="MaxLuiWindow"/> bytes by a <c>LW/SW/ADDIU $rx, $rt, low</c>
+        ///     that uses <c>$rt</c> as its base; the combined address
+        ///     <c>(high &lt;&lt; 16) + sign_extend(low)</c> is recorded.
+        ///   </description></item>
+        /// </list>
+        ///
+        /// Per-register LUI state is invalidated whenever the register is overwritten,
+        /// preventing stale LUI values from producing false address matches.
+        /// </summary>
+        private static HashSet<uint> BuildCodeReferencedAddresses(byte[] codeBytes, uint baseVAddr)
+        {
+            var set     = new HashSet<uint>();
+            int len     = codeBytes.Length;
+
+            // Per-register LUI tracking: luiSlot[r] = byte offset of the most recent
+            // LUI that wrote $r (-1 means none); luiImm[r] = that LUI's imm16.
+            var luiSlot = new int[32];
+            var luiImm  = new uint[32];
+            Array.Fill(luiSlot, -1);
+
+            for (int i = 0; i + 3 < len; i += 4)
+            {
+                uint instr  = BitConverter.ToUInt32(codeBytes, i);
+                uint opcode = (instr >> 26) & 0x3Fu;
+                uint rs     = (instr >> 21) & 0x1Fu;
+                uint rt     = (instr >> 16) & 0x1Fu;
+
+                // ── LUI: rt ← imm << 16 ──────────────────────────────────────
+                if (opcode == 0x0Fu)
+                {
+                    if (rt != 0) { luiSlot[rt] = i; luiImm[rt] = instr & 0xFFFFu; }
+                    continue;
+                }
+
+                // ── JAL: call absolute target; clobbers $ra ───────────────────
+                if (opcode == 0x03u)
+                {
+                    uint pc     = baseVAddr + (uint)i;
+                    uint target = ((instr & 0x03FFFFFFu) << 2) | (pc & 0xF0000000u);
+                    AddEePhysAddr(set, target);
+                    luiSlot[31] = -1; // JAL writes $ra
+                    continue;
+                }
+
+                // ── ADDIU: rt ← rs + sign_ext(imm) ──────────────────────────
+                if (opcode == 0x09u)
+                {
+                    short addOff = (short)(instr & 0xFFFFu);
+                    if (rs == 29u && rt == 29u && addOff < 0)
+                    {
+                        // ADDIU $sp, $sp, -N  →  function prologue
+                        AddEePhysAddr(set, baseVAddr + (uint)i);
+                    }
+                    else if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        // LUI $rs, high  +  ADDIU $rt, $rs, low  →  address reference
+                        AddEePhysAddr(set, unchecked((luiImm[rs] << 16) + (uint)addOff));
+                    }
+                    if (rt != 0) luiSlot[rt] = -1; // ADDIU writes $rt
+                    continue;
+                }
+
+                // ── Loads (0x20–0x27): rt ← mem[rs + off] ────────────────────
+                if (opcode >= 0x20u && opcode <= 0x27u)
+                {
+                    if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        short loadOff = (short)(instr & 0xFFFFu);
+                        AddEePhysAddr(set, unchecked((luiImm[rs] << 16) + (uint)loadOff));
+                    }
+                    if (rt != 0) luiSlot[rt] = -1; // load writes $rt
+                    continue;
+                }
+
+                // ── Stores (0x28–0x2F): mem[rs + off] ← rt ───────────────────
+                if (opcode >= 0x28u && opcode <= 0x2Fu)
+                {
+                    if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        short storeOff = (short)(instr & 0xFFFFu);
+                        AddEePhysAddr(set, unchecked((luiImm[rs] << 16) + (uint)storeOff));
+                    }
+                    // Stores do not write to any register — no invalidation.
+                    continue;
+                }
+
+                // ── Register-write invalidation for everything else ───────────
+                // SPECIAL (0x00) R-type instructions write $rd.
+                if (opcode == 0x00u)
+                {
+                    uint rd = (instr >> 11) & 0x1Fu;
+                    if (rd != 0) luiSlot[rd] = -1;
+                    continue;
+                }
+
+                // Branch opcodes (REGIMM, BEQ/BNE/BLEZ/BGTZ, BEQL/BNEL/BLEZL/BGTZL),
+                // plain J, and the EE MMI group (0x1C, R-type) do not write $rt.
+                // Every other I-type opcode is assumed to write $rt — invalidate.
+                if (opcode != 0x01u             // REGIMM (branches)
+                 && opcode != 0x02u             // J
+                 && opcode != 0x04u && opcode != 0x05u  // BEQ / BNE
+                 && opcode != 0x06u && opcode != 0x07u  // BLEZ / BGTZ
+                 && opcode != 0x14u && opcode != 0x15u  // BEQL / BNEL
+                 && opcode != 0x16u && opcode != 0x17u  // BLEZL / BGTZL
+                 && opcode != 0x1Cu)            // MMI (handled as R-type above via rd)
+                {
+                    if (rt != 0) luiSlot[rt] = -1;
+                }
+            }
+
+            return set;
+        }
+
         /// <summary>
         /// Handle CONVERTCHEAT command — converts PS2 cheat codes between raw format
         /// and a device-specific encrypted format using the CheatConverter module.
@@ -2989,7 +3164,17 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle GETPOINTERS — scans base64-encoded binary data for 4-byte aligned
-        /// values that look like valid EE memory pointers.
+        /// values that are confirmed EE memory pointers.
+        ///
+        /// Two filters are applied in sequence:
+        ///   1. The candidate value must fall in a valid EE virtual address range
+        ///      (user-mode main RAM, KSEG0, KSEG1, or scratchpad).
+        ///   2. The candidate value must be referenced by MIPS code.  Code references
+        ///      are sourced from live EE main RAM when a scheduler is running (most
+        ///      accurate), or from the binary data itself when no emulator is attached.
+        ///      In the latter case the filter is only applied if the binary contains
+        ///      at least 10 <c>ADDIU $sp,$sp,-N</c> function prologues — fewer than
+        ///      that suggests the binary is a pure-data slice with no useful code.
         /// </summary>
         private string HandleGetPointers(uint startAddress, string? base64Data)
         {
@@ -2998,27 +3183,56 @@ namespace CodeDesigner.Mips64LE
 
             try
             {
-                var bytes   = Convert.FromBase64String(base64Data);
+                var bytes = Convert.FromBase64String(base64Data);
+
+                // Build the set of all EE addresses referenced by MIPS code.
+                //   • Live emulator running: scan the full physical EE main RAM for the
+                //     most reliable results (same source as HandleScanPointers).
+                //   • No emulator: scan the binary itself, but only trust the result
+                //     when it contains enough function prologues to confirm it is code.
+                //     A pure-data binary (< 10 prologues) would produce spurious entries
+                //     from accidental instruction bit-patterns, so we fall back to the
+                //     address-range check alone in that case.
+                HashSet<uint> codeRefs;
+                if (Scheduler != null)
+                {
+                    codeRefs = BuildCodeReferencedAddresses(Scheduler.EE.Bus.Ram, 0x00000000u);
+                }
+                else
+                {
+                    int prologueCount = 0;
+                    for (int k = 0; k + 3 < bytes.Length; k += 4)
+                    {
+                        uint w = BitConverter.ToUInt32(bytes, k);
+                        // ADDIU $sp, $sp, -N  (opcode=9, rs=rt=29, imm<0)
+                        if ((w >> 26) == 0x09u && ((w >> 21) & 0x1Fu) == 29u &&
+                            ((w >> 16) & 0x1Fu) == 29u && (short)(w & 0xFFFF) < 0)
+                            prologueCount++;
+                    }
+                    codeRefs = prologueCount >= 10
+                        ? BuildCodeReferencedAddresses(bytes, startAddress)
+                        : new HashSet<uint>();
+                }
+
                 var results = new List<PointerEntry>();
 
                 for (int i = 0; i + 3 < bytes.Length; i += 4)
                 {
                     uint val = BitConverter.ToUInt32(bytes, i);
-                    uint physEquiv = val;
-                    if (val >= 0x80000000u && val < 0xC0000000u)
-                        physEquiv = val & 0x1FFFFFFFu;
-                    bool isValid =
-                        physEquiv < (uint)PS2MemoryBus.MainRamSize ||
-                        (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
 
-                    if (isValid)
+                    // Filter 1: plausible EE address range.
+                    if (!IsValidEePointerValue(val)) continue;
+
+                    // Filter 2: must be referenced by MIPS code.
+                    // Skip this filter when no code was found (pure-data binary or early boot).
+                    uint physVal = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
+                    if (codeRefs.Count > 0 && !codeRefs.Contains(physVal)) continue;
+
+                    results.Add(new PointerEntry
                     {
-                        results.Add(new PointerEntry
-                        {
-                            Address  = $"0x{(startAddress + (uint)i):X8}",
-                            PointsTo = $"0x{val:X8}"
-                        });
-                    }
+                        Address  = $"0x{(startAddress + (uint)i):X8}",
+                        PointsTo = $"0x{val:X8}"
+                    });
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
@@ -3296,11 +3510,24 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle SCANPOINTERS — reads <paramref name="length"/> bytes of live emulator
-        /// memory and returns 4-byte aligned values that look like valid EE or IOP
-        /// memory pointers.  For EE scans the valid target ranges are:
-        /// main RAM (physical 0x00000000–0x01FFFFFF), KSEG0 (0x80000000–0x81FFFFFF),
-        /// KSEG1 (0xA0000000–0xA1FFFFFF), and scratchpad (0x70000000–0x70003FFF).
-        /// For IOP scans the valid range is IOP RAM (0x00000000–0x001FFFFF).
+        /// memory starting at <paramref name="address"/> and returns 4-byte aligned values
+        /// that are confirmed EE memory pointers.
+        ///
+        /// Two filters are applied in sequence:
+        ///   1. The candidate value must fall in a valid EE virtual address range
+        ///      (user-mode main RAM, KSEG0, KSEG1, or scratchpad).
+        ///   2. The candidate value must be referenced by MIPS code in EE main RAM —
+        ///      i.e. some function accesses that address via a LUI + load/store/addiu
+        ///      pair, JAL target, or ADDIU $sp,$sp,-N prologue.
+        ///
+        /// The scan area is unrestricted: <paramref name="address"/> may point to any
+        /// region (main RAM, BIOS, scratchpad, IOP, etc.).  The pointer VALUE check is
+        /// always performed against EE address ranges so the tool works correctly
+        /// regardless of which region is being scanned.
+        ///
+        /// If no code references are found in EE main RAM (e.g. early boot before any
+        /// game code has loaded), filter 2 is skipped and only the address-range check
+        /// applies, preserving the original behaviour.
         /// </summary>
         private string HandleScanPointers(uint address, int length, string? region)
         {
@@ -3313,36 +3540,31 @@ namespace CodeDesigner.Mips64LE
             {
                 bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
                 var bytes   = ReadLiveBytes(address, length, useIop);
+
+                // Build the set of all EE addresses referenced by MIPS code.
+                // We always use EE main RAM as the code source regardless of the scan
+                // region so that the filter works when scanning BIOS, scratchpad, IOP, etc.
+                var codeRefs = BuildCodeReferencedAddresses(Scheduler!.EE.Bus.Ram, 0x00000000u);
+
                 var results = new List<PointerEntry>();
 
                 for (int i = 0; i + 3 < bytes.Length; i += 4)
                 {
                     uint val = BitConverter.ToUInt32(bytes, i);
-                    bool isValid;
-                    if (useIop)
-                    {
-                        // IOP: plain RAM range
-                        isValid = val < (uint)IopMemoryBus.RamSize;
-                    }
-                    else
-                    {
-                        // EE: main RAM, KSEG0 mirror, KSEG1 mirror, or scratchpad
-                        uint physEquiv = val;
-                        if (val >= 0x80000000u && val < 0xC0000000u)
-                            physEquiv = val & 0x1FFFFFFFu;
-                        isValid =
-                            physEquiv < (uint)PS2MemoryBus.MainRamSize ||
-                            (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
-                    }
 
-                    if (isValid)
+                    // Filter 1: plausible EE address range.
+                    if (!IsValidEePointerValue(val)) continue;
+
+                    // Filter 2: must be referenced by MIPS code in EE main RAM.
+                    // Skip this filter when no code has been found yet (early boot).
+                    uint physVal = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
+                    if (codeRefs.Count > 0 && !codeRefs.Contains(physVal)) continue;
+
+                    results.Add(new PointerEntry
                     {
-                        results.Add(new PointerEntry
-                        {
-                            Address  = $"0x{(address + (uint)i):X8}",
-                            PointsTo = $"0x{val:X8}"
-                        });
-                    }
+                        Address  = $"0x{(address + (uint)i):X8}",
+                        PointsTo = $"0x{val:X8}"
+                    });
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
