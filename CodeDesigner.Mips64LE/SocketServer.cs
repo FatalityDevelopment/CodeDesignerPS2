@@ -2130,6 +2130,7 @@ namespace CodeDesigner.Mips64LE
                     var result = new PortCheatResult
                     {
                         BlockName    = blockName,
+                        BlockText    = block.BlockText,
                         OriginalCode = origCode,
                         Found        = cached.Found,
                         Method       = cached.Method,
@@ -4381,6 +4382,9 @@ namespace CodeDesigner.Mips64LE
     {
         /// <summary>The #Name label of the cheat block this line belongs to.</summary>
         public string BlockName { get; set; } = string.Empty;
+
+        /// <summary>Any non-label, non-code description text found in the cheat block above the codes. Null when absent.</summary>
+        public string? BlockText { get; set; }
 
         /// <summary>Original GameShark code line, e.g. "20123456 000003E8".</summary>
         public string OriginalCode { get; set; } = string.Empty;

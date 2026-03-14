@@ -278,6 +278,8 @@ export interface DiscElfEntry {
 export interface PortCheatResult {
     /** The #Name label of the cheat block this line belongs to. */
     blockName: string;
+    /** Any non-label, non-code description text found in the cheat block. Null when absent. */
+    blockText: string | null;
     /** Original GameShark code line, e.g. "20123456 000003E8". */
     originalCode: string;
     /** Ported code line with the updated address, e.g. "20124ABC 000003E8". Null when not found. */
@@ -1280,6 +1282,7 @@ export class SocketClient {
         const raw = response.PortCheatResults as Array<Record<string, unknown>> ?? [];
         const results: PortCheatResult[] = raw.map(r => ({
             blockName:    (r['BlockName']    as string)  ?? '',
+            blockText:    (r['BlockText']    as string | null) ?? null,
             originalCode: (r['OriginalCode'] as string)  ?? '',
             newCode:      (r['NewCode']      as string | null) ?? null,
             found:        (r['Found']        as boolean) ?? false,
