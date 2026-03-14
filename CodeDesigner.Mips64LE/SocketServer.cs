@@ -2730,14 +2730,47 @@ namespace CodeDesigner.Mips64LE
         private const int MaxLuiWindow = 128;
 
         /// <summary>
+        /// Minimum physical address a pointer must target to be considered valid.
+        /// The first 64 KB of EE physical RAM is the exception-vector / BIOS-stub area;
+        /// game data and heap allocations never live that low, so small constants such as
+        /// 0x00000001 that accidentally match the address range are rejected.
+        /// </summary>
+        private const uint MinValidPointerPhysAddr = 0x00010000u;
+
+        /// <summary>
         /// Tests whether <paramref name="val"/> is a plausible EE virtual address:
-        /// user-mode or KSEG0/KSEG1 main RAM (physical 0–32 MB), or EE scratchpad
-        /// (0x70000000–0x70003FFF).  Zero is always rejected.
+        /// user-mode or KSEG0/KSEG1 main RAM (physical 0x10000–32 MB), or EE scratchpad
+        /// (0x70000000–0x70003FFF).
+        ///
+        /// Three filters are applied in order:
+        /// <list type="bullet">
+        ///   <item><description>Zero is always rejected.</description></item>
+        ///   <item><description>
+        ///     The value must be 4-byte aligned — valid MIPS code and data pointers are
+        ///     always word-aligned; unaligned values are random constants, not pointers.
+        ///   </description></item>
+        ///   <item><description>
+        ///     The corresponding physical address must be at or above
+        ///     <see cref="MinValidPointerPhysAddr"/> (0x00010000).  The first 64 KB is
+        ///     the EE exception-vector / BIOS-stub area; genuine heap/data pointers never
+        ///     reside that low.  This eliminates the large class of false positives caused
+        ///     by small integer constants (e.g. 0x00000001) whose numeric value falls
+        ///     inside the 32 MB main-RAM range.
+        ///   </description></item>
+        /// </list>
         /// </summary>
         private static bool IsValidEePointerValue(uint val)
         {
             if (val == 0) return false;
+
+            // Pointers are always 4-byte aligned in MIPS — reject unaligned values.
+            if ((val & 3) != 0) return false;
+
             uint phys = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
+
+            // Reject the exception-vector / BIOS-stub area (physical < 0x00010000).
+            if (phys < MinValidPointerPhysAddr) return false;
+
             return phys < (uint)PS2MemoryBus.MainRamSize ||
                    (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
         }
@@ -3166,10 +3199,12 @@ namespace CodeDesigner.Mips64LE
         /// Handle GETPOINTERS — scans base64-encoded binary data for 4-byte aligned
         /// values that are confirmed EE memory pointers.
         ///
-        /// Two filters are applied in sequence:
-        ///   1. The candidate value must fall in a valid EE virtual address range
+        /// Three filters are applied in sequence:
+        ///   1. The candidate value must be non-zero, 4-byte aligned, and have a physical
+        ///      address at or above 0x00010000 (see <see cref="IsValidEePointerValue"/>).
+        ///   2. The candidate value must fall in a valid EE virtual address range
         ///      (user-mode main RAM, KSEG0, KSEG1, or scratchpad).
-        ///   2. The candidate value must be referenced by MIPS code.  Code references
+        ///   3. The candidate value must be referenced by MIPS code.  Code references
         ///      are sourced from live EE main RAM when a scheduler is running (most
         ///      accurate), or from the binary data itself when no emulator is attached.
         ///      In the latter case the filter is only applied if the binary contains
@@ -3513,10 +3548,12 @@ namespace CodeDesigner.Mips64LE
         /// memory starting at <paramref name="address"/> and returns 4-byte aligned values
         /// that are confirmed EE memory pointers.
         ///
-        /// Two filters are applied in sequence:
-        ///   1. The candidate value must fall in a valid EE virtual address range
+        /// Three filters are applied in sequence:
+        ///   1. The candidate value must be non-zero, 4-byte aligned, and have a physical
+        ///      address at or above 0x00010000 (see <see cref="IsValidEePointerValue"/>).
+        ///   2. The candidate value must fall in a valid EE virtual address range
         ///      (user-mode main RAM, KSEG0, KSEG1, or scratchpad).
-        ///   2. The candidate value must be referenced by MIPS code in EE main RAM —
+        ///   3. The candidate value must be referenced by MIPS code in EE main RAM —
         ///      i.e. some function accesses that address via a LUI + load/store/addiu
         ///      pair, JAL target, or ADDIU $sp,$sp,-N prologue.
         ///
@@ -3526,8 +3563,8 @@ namespace CodeDesigner.Mips64LE
         /// regardless of which region is being scanned.
         ///
         /// If no code references are found in EE main RAM (e.g. early boot before any
-        /// game code has loaded), filter 2 is skipped and only the address-range check
-        /// applies, preserving the original behaviour.
+        /// game code has loaded), filter 3 is skipped and only the address-range checks
+        /// apply, preserving the original behaviour.
         /// </summary>
         private string HandleScanPointers(uint address, int length, string? region)
         {
