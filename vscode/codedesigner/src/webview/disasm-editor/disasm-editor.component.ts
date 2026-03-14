@@ -356,8 +356,10 @@ export class DisasmEditorComponent implements AfterViewInit {
     const vscode = getVsCodeApi();
 
     const SCAN_TIMEOUT_MS   = 120_000;
-    /** Maximum number of scanner results shown in the symbols panel at once. */
+    /** Maximum number of scanner results shown in the symbols panel at once (per page). */
     const SYM_DISPLAY_LIMIT = 500;
+    /** Current page (0-indexed) for each symbol scanner list. Reset on new scan or filter change. */
+    const symPage = { strings: 0, functions: 0, pointers: 0, floats: 0, integers: 0 };
 
     // ── DOM refs ──────────────────────────────────────────────────────────────
     // Note: hex-header and hex-container are rendered by <app-hex-view> and
@@ -656,6 +658,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.stringsUpdated$.subscribe(() => {
+      symPage.strings = 0;
       renderSymStrings();
       if (symStringsStatus) {
         symStringsStatus.textContent = state.symStrings.length > 0 ? `${state.symStrings.length} found` : 'None found';
@@ -664,6 +667,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.functionsUpdated$.subscribe(() => {
+      symPage.functions = 0;
       renderSymFunctions();
       if (symFunctionsStatus) {
         symFunctionsStatus.textContent = state.symFunctions.length > 0 ? `${state.symFunctions.length} found` : 'None found';
@@ -672,6 +676,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.pointersUpdated$.subscribe(() => {
+      symPage.pointers = 0;
       renderSymPointers();
       if (symPointersStatus) {
         symPointersStatus.textContent = state.symPointers.length > 0 ? `${state.symPointers.length} found` : 'None found';
@@ -680,6 +685,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.floatsUpdated$.subscribe(() => {
+      symPage.floats = 0;
       renderSymFloats();
       if (symFloatsStatus) {
         symFloatsStatus.textContent = state.symFloats.length > 0 ? `${state.symFloats.length} found` : 'None found';
@@ -688,6 +694,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.integersUpdated$.subscribe(() => {
+      symPage.integers = 0;
       renderSymIntegers();
       if (symIntegersStatus) {
         symIntegersStatus.textContent = state.symIntegers.length > 0 ? `${state.symIntegers.length} found` : 'None found';
@@ -1995,19 +2002,29 @@ export class DisasmEditorComponent implements AfterViewInit {
         symStringsList.innerHTML = '<div class="sym-empty">No strings found. Click "Scan for strings".</div>';
         return;
       }
-      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
-      const overflow  = items.length > SYM_DISPLAY_LIMIT
-        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.strings = Math.max(0, Math.min(symPage.strings, totalPages - 1));
+      const page = symPage.strings;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-strings-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-strings-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
         : '';
       symStringsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.value)}">${escHtml(item.value)}</span>
         </div>`
-      ).join('') + overflow;
+      ).join('') + pager;
       symStringsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-strings-prev')?.addEventListener('click', () => { symPage.strings = Math.max(0, symPage.strings - 1); renderSymStrings(); symStringsList.scrollTop = 0; });
+      document.getElementById('sym-strings-next')?.addEventListener('click', () => { symPage.strings++; renderSymStrings(); symStringsList.scrollTop = 0; });
     }
 
     function renderSymFunctions() {
@@ -2021,19 +2038,29 @@ export class DisasmEditorComponent implements AfterViewInit {
         symFunctionsList.innerHTML = '<div class="sym-empty">No functions found. Click "Scan for functions".</div>';
         return;
       }
-      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
-      const overflow  = items.length > SYM_DISPLAY_LIMIT
-        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.functions = Math.max(0, Math.min(symPage.functions, totalPages - 1));
+      const page = symPage.functions;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-functions-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-functions-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
         : '';
       symFunctionsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-name" title="${escHtml(item.label)}">${escHtml(item.label)}</span>
         </div>`
-      ).join('') + overflow;
+      ).join('') + pager;
       symFunctionsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-functions-prev')?.addEventListener('click', () => { symPage.functions = Math.max(0, symPage.functions - 1); renderSymFunctions(); symFunctionsList.scrollTop = 0; });
+      document.getElementById('sym-functions-next')?.addEventListener('click', () => { symPage.functions++; renderSymFunctions(); symFunctionsList.scrollTop = 0; });
     }
 
     function renderSymPointers() {
@@ -2047,19 +2074,29 @@ export class DisasmEditorComponent implements AfterViewInit {
         symPointersList.innerHTML = '<div class="sym-empty">No pointers found. Click "Scan for pointers".</div>';
         return;
       }
-      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
-      const overflow  = items.length > SYM_DISPLAY_LIMIT
-        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.pointers = Math.max(0, Math.min(symPage.pointers, totalPages - 1));
+      const page = symPage.pointers;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-pointers-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-pointers-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
         : '';
       symPointersList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="→ ${escHtml(item.pointsTo)}">→ ${escHtml(item.pointsTo)}</span>
         </div>`
-      ).join('') + overflow;
+      ).join('') + pager;
       symPointersList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-pointers-prev')?.addEventListener('click', () => { symPage.pointers = Math.max(0, symPage.pointers - 1); renderSymPointers(); symPointersList.scrollTop = 0; });
+      document.getElementById('sym-pointers-next')?.addEventListener('click', () => { symPage.pointers++; renderSymPointers(); symPointersList.scrollTop = 0; });
     }
 
     function renderSymFloats() {
@@ -2073,19 +2110,29 @@ export class DisasmEditorComponent implements AfterViewInit {
         symFloatsList.innerHTML = '<div class="sym-empty">No floats found. Click "Scan for floats".</div>';
         return;
       }
-      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
-      const overflow  = items.length > SYM_DISPLAY_LIMIT
-        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.floats = Math.max(0, Math.min(symPage.floats, totalPages - 1));
+      const page = symPage.floats;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-floats-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-floats-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
         : '';
       symFloatsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.raw)}">${rawBitsToFloat(parseInt(item.raw, 16) >>> 0)} (${escHtml(item.raw)})</span>
         </div>`
-      ).join('') + overflow;
+      ).join('') + pager;
       symFloatsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-floats-prev')?.addEventListener('click', () => { symPage.floats = Math.max(0, symPage.floats - 1); renderSymFloats(); symFloatsList.scrollTop = 0; });
+      document.getElementById('sym-floats-next')?.addEventListener('click', () => { symPage.floats++; renderSymFloats(); symFloatsList.scrollTop = 0; });
     }
 
     function renderSymIntegers() {
@@ -2099,19 +2146,29 @@ export class DisasmEditorComponent implements AfterViewInit {
         symIntegersList.innerHTML = '<div class="sym-empty">No integers found. Click "Scan for integers".</div>';
         return;
       }
-      const displayed = items.slice(0, SYM_DISPLAY_LIMIT);
-      const overflow  = items.length > SYM_DISPLAY_LIMIT
-        ? `<div class="sym-overflow">Showing ${SYM_DISPLAY_LIMIT} of ${items.length} — use filter to narrow results</div>`
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.integers = Math.max(0, Math.min(symPage.integers, totalPages - 1));
+      const page = symPage.integers;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-integers-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-integers-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
         : '';
       symIntegersList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.hex)}">${item.value} (${escHtml(item.hex)})</span>
         </div>`
-      ).join('') + overflow;
+      ).join('') + pager;
       symIntegersList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-integers-prev')?.addEventListener('click', () => { symPage.integers = Math.max(0, symPage.integers - 1); renderSymIntegers(); symIntegersList.scrollTop = 0; });
+      document.getElementById('sym-integers-next')?.addEventListener('click', () => { symPage.integers++; renderSymIntegers(); symIntegersList.scrollTop = 0; });
     }
 
     symbolsToggleBtn.addEventListener('click', () => toggleSymbolsPanel());
@@ -2206,12 +2263,12 @@ export class DisasmEditorComponent implements AfterViewInit {
       }, SCAN_TIMEOUT_MS);
     });
 
-    // Filter inputs — re-render the corresponding list on each keystroke.
-    symStringsFilter?.addEventListener('input',   () => renderSymStrings());
-    symFunctionsFilter?.addEventListener('input', () => renderSymFunctions());
-    symPointersFilter?.addEventListener('input',  () => renderSymPointers());
-    symFloatsFilter?.addEventListener('input',    () => renderSymFloats());
-    symIntegersFilter?.addEventListener('input',  () => renderSymIntegers());
+    // Filter inputs — re-render the corresponding list on each keystroke (reset to page 0).
+    symStringsFilter?.addEventListener('input',   () => { symPage.strings   = 0; renderSymStrings();   });
+    symFunctionsFilter?.addEventListener('input', () => { symPage.functions = 0; renderSymFunctions(); });
+    symPointersFilter?.addEventListener('input',  () => { symPage.pointers  = 0; renderSymPointers();  });
+    symFloatsFilter?.addEventListener('input',    () => { symPage.floats    = 0; renderSymFloats();    });
+    symIntegersFilter?.addEventListener('input',  () => { symPage.integers  = 0; renderSymIntegers();  });
 
     // ── Debug panel ───────────────────────────────────────────────────────────
     const MIPS_REG_NAMES = [
