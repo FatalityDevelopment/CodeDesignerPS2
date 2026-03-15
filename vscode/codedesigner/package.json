@@ -7,9 +7,14 @@
     "vscode": "^1.108.1"
   },
   "main": "./dist/extension.js",
+  "activationEvents": [],
   "categories": [
     "Debuggers"
   ],
+    "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TylerDev888/Mips64LE.git"
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [

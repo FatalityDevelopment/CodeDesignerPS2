@@ -1461,7 +1461,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /** Sync the tracked active CDS file when the editor focus changes. */
-    private _syncActiveCdsEditor(editor: vscode.TextEditor | undefined): void {        if (!editor) { return; }
+    private _syncActiveCdsEditor(editor: vscode.TextEditor | undefined): void {        
+        if (!editor) { return; }
         if (!editor.document.uri.fsPath.toLowerCase().endsWith('.cds')) { return; }
         this._activeCdsFilePath = editor.document.uri.fsPath;
         this._activeCdsContent  = editor.document.getText();

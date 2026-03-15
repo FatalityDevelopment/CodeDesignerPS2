@@ -980,7 +980,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 const uris = await vscode.window.showOpenDialog({
                     canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
                     filters: { 'EE RAM Dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
-                    title: 'Select Target EE RAM Dump (r0002)',
+                    title: 'Select Target EE RAM Dump',
                 });
                 if (uris?.[0]) {
                     panel.webview.postMessage({ type: 'browseTargetDumpResult', filePath: uris[0].fsPath });
