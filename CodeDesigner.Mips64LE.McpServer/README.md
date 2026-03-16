@@ -2,7 +2,7 @@
 
 `CodeDesigner.Mips64LE.McpServer` is a **stdio-based Model Context Protocol (MCP) server** that bridges GitHub Copilot (and any MCP-compatible client) to the CodeDesigner MIPS64 Emotion Engine socket server.
 
-Once registered, Copilot can query your live disassembler views, read emulator memory, inspect registers, and run assembly/disassembly operations directly from the chat panel.
+Once registered, Copilot can query your live disassembler views, read and write emulator memory, inspect and modify registers, compile CDS scripts, apply cheat codes, port cheats between game revisions, scan for data patterns, list disc ELFs, recompile PS2 executables, and much more — directly from the chat panel.
 
 ---
 
@@ -15,17 +15,17 @@ GitHub Copilot Chat
 CodeDesigner.Mips64LE.McpServer  ← this project
        │  JSON over TCP :8765
        ▼
-CodeDesigner.Mips64LE (--run mode, embedded socket server)
+CodeDesigner.Mips64LE (--run or --pcsx2 mode)
        │
        ▼
-PS2 Emulator / Disassembler engine
+PS2 Emulator / PCSX2 via PINE IPC / Disassembler engine
 ```
 
 ### Port assignment
 
 | Port | Purpose |
 |------|---------|
-| **8765** | Embedded socket server started by `--run`. Used by the **VS Code extension** *and* the **MCP bridge** simultaneously. Each client gets its own connection; there is no conflict. |
+| **8765** | Embedded socket server started by `--run` or `--pcsx2`. Used by the **VS Code extension** *and* the **MCP bridge** simultaneously. Each client gets its own connection; there is no conflict. |
 | **8766** | Standalone socket server started by `--server`. Provides assembler/disassembler without a live emulator. **Not used by the MCP bridge or the VS Code extension.** |
 
 > **Important — do not run `--server` when using the VS Code extension or the MCP server.**
@@ -37,11 +37,15 @@ PS2 Emulator / Disassembler engine
 
 ## Prerequisites
 
-1. **.NET 8 SDK** – `dotnet --version` should print `8.x.x` or later.
+1. **.NET 8 SDK** — `dotnet --version` should print `8.x.x` or later.
 2. The **emulator** must be running with `--run` (which starts the embedded socket server on port 8765):
    ```bash
    cd CodeDesigner.Mips64LE
    dotnet run -- --run
+   ```
+   Or in PCSX2 bridge mode:
+   ```bash
+   dotnet run -- --pcsx2
    ```
    The VS Code extension can also start the emulator for you via the **Connect** button in the Disasm panel.
 
@@ -101,32 +105,100 @@ Then reference the binary in settings:
 
 ## Available MCP Tools
 
+### Connectivity
 | Tool | Description |
 |---|---|
 | `ping` | Test connectivity to the emulator backend |
-| `disassemble` | Disassemble hex opcodes to MIPS EE assembly |
+
+### Disassembly & Assembly
+| Tool | Description |
+|---|---|
+| `disassemble` | Disassemble hex opcodes to MIPS EE assembly (with label/branch resolution) |
 | `assemble` | Assemble MIPS EE instructions to hex opcodes |
-| `read_memory` | Read raw bytes from live emulator memory |
+| `compile_cds` | Compile a Code Designer Script (.cds) to PS2 GameShark/AR cheat codes |
+| `disassemble_memory` | Read + disassemble a range of live emulator memory |
+
+### Live Memory
+| Tool | Description |
+|---|---|
+| `read_memory` | Read raw bytes from live emulator memory (returns hex dump) |
 | `write_memory` | Write arbitrary bytes to live emulator memory |
-| `disassemble_memory` | Read + disassemble a range of emulator memory |
-| `get_pc` | Get current program counter and pause state |
-| `get_registers` | Dump all GPRs, COP0, COP1 FPU, and VU0 registers |
-| `set_register` | Write a new value to any EE CPU register |
-| `get_labels` | List all symbols from the PS2 symbol database |
-| `add_label` | Insert or update a symbol label |
-| `delete_label` | Remove a symbol label |
-| `get_threads` | Enumerate EE OS threads (status, PC, SP, priority) |
-| `scan_strings` | Scan live memory for null-terminated ASCII strings |
-| `scan_functions` | Detect function entry points in live memory |
-| `search` | Search live memory or disassembly for text/regex/bytes |
+| `load_bin` | Load a binary file from disk directly into live emulator memory |
+
+### Cheat Codes
+| Tool | Description |
+|---|---|
+| `apply_cheats` | Apply GameShark/Action Replay cheat codes to live emulator memory |
+| `port_cheats` | Port cheat codes between game revisions using multi-strategy pattern matching |
+| `detect_cheat_format` | Auto-detect the encryption format of a block of cheat codes |
+| `convert_cheat` | Convert codes between raw and device-specific encrypted formats |
+
+### CPU State
+| Tool | Description |
+|---|---|
+| `get_pc` | Get current EE program counter and pause state |
+| `get_registers` | Dump all GPRs, COP0, COP1 FPU, VU0 float/integer registers, and GS privileged regs |
+| `set_register` | Write a new value to any EE CPU register (GPR, PC, HI/LO, COP0, FPR, VU0I/F, FCR) |
+
+### Execution Control
+| Tool | Description |
+|---|---|
 | `pause_emulator` | Pause CPU execution |
-| `resume_emulator` | Resume CPU execution |
-| `step` | Execute one EE instruction while paused |
-| `restart_emulator` | Full hardware reset without dropping the connection |
-| `set_breakpoint` | Set a breakpoint at a virtual address |
+| `resume_emulator` | Resume CPU execution (auto-steps past active breakpoint) |
+| `step` | Execute one EE instruction while paused; returns new PC + analysis comment |
+| `restart_emulator` | Full hardware reset without dropping the connection; preserves breakpoints |
+| `set_breakpoint` | Set a PC execution breakpoint |
 | `clear_breakpoint` | Remove a breakpoint |
 | `clear_all_breakpoints` | Remove all breakpoints |
-| `snapshot` | Save a full memory snapshot (EE RAM, BIOS, IOP RAM) to disk |
+
+### Symbol Labels
+| Tool | Description |
+|---|---|
+| `get_labels` | List all symbols from the PS2 symbol database |
+| `add_label` | Insert or update a symbol label (persisted to disk) |
+| `delete_label` | Remove a symbol label (persisted to disk) |
+
+### Thread Inspection
+| Tool | Description |
+|---|---|
+| `get_threads` | Enumerate EE OS threads (status, PC, SP, priority, entry point) |
+
+### Memory Scanning — Live
+| Tool | Description |
+|---|---|
+| `scan_strings` | Scan live memory for null-terminated ASCII strings |
+| `scan_functions` | Detect MIPS function entry points in live memory |
+| `scan_pointers` | Find confirmed EE memory pointers in live memory |
+| `scan_floats` | Find plausible IEEE-754 single-precision floats in live memory |
+| `scan_integers` | Find non-zero 32-bit integers in live memory |
+| `search` | Search live memory for text, regex, byte pattern, or raw string |
+
+### Memory Scanning — File / Base64
+| Tool | Description |
+|---|---|
+| `get_strings` | Scan base64-encoded binary data for ASCII strings |
+| `get_functions` | Detect function entry points in base64-encoded binary data |
+| `get_pointers` | Find EE memory pointers in base64-encoded binary data |
+| `get_floats` | Find plausible floats in base64-encoded binary data |
+| `get_integers` | Find non-zero integers in base64-encoded binary data |
+
+### Snapshots
+| Tool | Description |
+|---|---|
+| `snapshot` | Save a full memory snapshot (EE RAM, BIOS, Scratchpad, IOP RAM) to disk |
+| `load_snapshot` | Restore a previously saved snapshot into live emulator memory |
+
+### Disc Image Tools
+| Tool | Description |
+|---|---|
+| `list_disc_elfs` | List all ELF/IRX files on a PS2 disc image; identifies the BOOT2 executable |
+| `recompile_elf` | Extract an ELF from a disc image and recompile it to C++ via the static recompiler |
+
+### PCSX2 / PINE Bridge
+| Tool | Description |
+|---|---|
+| `pcsx2_status` | Query PCSX2 emulator status (Running/Paused/Shutdown) via PINE |
+| `pcsx2_game_info` | Query game title, serial ID, UUID, and version from PCSX2 via PINE |
 
 ---
 
@@ -134,18 +206,45 @@ Then reference the binary in settings:
 
 Once registered you can ask Copilot things like:
 
+**Disassembly & assembly:**
 - *"Disassemble the bytes at 0x80010000 in the running emulator"*
-- *"What function is at 0x8001A234? Check the label database."*
-- *"Show me the current register state"*
 - *"Assemble: `addiu $sp,$sp,-0x30 / sw $ra,0x28($sp)`"*
-- *"Scan memory from 0x80000000 for 0x10000 bytes and find all strings"*
+- *"Compile this CDS script and give me the GameShark codes"*
+
+**Memory inspection:**
+- *"Read 256 bytes from 0x80020000 and show me the hex dump"*
+- *"Scan memory from 0x80100000 for 0x20000 bytes and list all strings"*
+- *"Find all EE pointers in the region 0x80200000–0x80210000"*
+- *"Scan 0x80300000 for floats that might be player speed values"*
+
+**Debugging:**
+- *"Pause the emulator and show me the current register state"*
 - *"Step through the next 5 instructions and show me the PC after each one"*
+- *"Set a breakpoint at 0x80010000 and resume execution"*
+- *"What function is at 0x8001A234? Check the label database."*
 - *"Set register $a0 to 0x80010000"*
-- *"Write the bytes `27 BD FF D0 AF BF 00 1C` to address 0x80010000"*
-- *"Add a label 'scePadRead' at 0x800112F4"*
-- *"Show me all currently running threads"*
+- *"Show me all currently running EE threads"*
+
+**Cheats:**
+- *"Apply these GameShark codes to the live emulator"*
+- *"Convert these Action Replay codes to raw format"*
+- *"Port these cheat codes from EEmem_v1.bin to EEmem_v2.bin"*
+
+**Snapshots:**
 - *"Take a memory snapshot and save it to /tmp/ps2-snapshot"*
-- *"Restart the emulator and set a breakpoint at 0x80010000"*
+- *"Restore the snapshot from /tmp/ps2-snapshot"*
+
+**Disc tools:**
+- *"List all ELF files on this ISO: /games/game.iso"*
+- *"Recompile the BOOT2 ELF from /games/game.iso to recomp_out/"*
+
+**Labels:**
+- *"Add a label 'scePadRead' at 0x800112F4"*
+- *"Show all labels in the database"*
+
+**PCSX2 mode:**
+- *"What game is currently running in PCSX2?"*
+- *"Check the PCSX2 emulator status"*
 
 ---
 
@@ -154,6 +253,9 @@ Once registered you can ask Copilot things like:
 | Symptom | Fix |
 |---|---|
 | `Cannot connect to emulator socket server` | Start the emulator: `dotnet run -- --run` in `CodeDesigner.Mips64LE/`. The VS Code extension can also start it via the **Connect** button. |
-| `Emulator not running — no scheduler attached` | The socket server is up but no emulator session is active; start a session with `--run` |
-| MCP server not listed in Copilot | Reload VS Code after editing `settings.json`; check **Output → MCP** log |
+| `Emulator not running — no scheduler attached` | The socket server is up but no emulator session is active; start a session with `--run`. |
+| `PCSX2STATUS requires --pcsx2 mode` | PCSX2-specific tools only work when the server is started with `--pcsx2`. |
+| `GETTHREADS is not available in PINE mode` | Thread introspection requires the internal emulator. Use `--run` instead of `--pcsx2`. |
+| MCP server not listed in Copilot | Reload VS Code after editing `settings.json`; check **Output → MCP** log. |
 | Extension connects but memory/register reads fail | Do **not** run `--server` while the extension is active. Use `--run` instead; both the extension and the MCP bridge share the embedded server on port 8765. |
+| Debugger commands fail (PAUSE/RESUME/STEP/SETBP/GETPC/GETREGS) in PCSX2 mode | These require the PINE debugger extension PR. See `PINE_EXTENSION_PROPOSAL.md` for the C++ implementation. Basic memory commands (READMEM/WRITEMEM/APPLYCHEATS) work with standard upstream PINE. |
