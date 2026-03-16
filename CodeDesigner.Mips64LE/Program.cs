@@ -37,6 +37,12 @@ namespace CodeDesigner.Mips64LE
                 return;
             }
 
+            if (HasFlag(args, "--pcsx2"))
+            {
+                await StartPcsx2BridgeServer(args);
+                return;
+            }
+
             // --server (or default legacy path): start the socket server for the VSCode extension
             await StartSocketServer();
         }
@@ -1298,6 +1304,86 @@ namespace CodeDesigner.Mips64LE
             }
         }
 
+        // ── PCSX2 PINE bridge mode ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Connects to a running PCSX2 instance via the PINE IPC socket and starts
+        /// the socket server with the <see cref="PineClient"/> attached so that the
+        /// VS Code extension can use READMEM, WRITEMEM, DISASSEMBLE, APPLYCHEATS,
+        /// and (once the PINE extension PR is merged) PAUSE/RESUME/STEP/SETBP/GETPC/
+        /// GETREGS against the live PCSX2 process.
+        ///
+        /// <para>Usage:
+        /// <code>
+        ///   dotnet run -- --pcsx2 [--pcsx2-slot 28011] [--pcsx2-host 127.0.0.1] [--port 8765]
+        /// </code>
+        /// </para>
+        /// </summary>
+        private static async Task StartPcsx2BridgeServer(string[] args)
+        {
+            string host = GetArg(args, "--pcsx2-host") ?? "127.0.0.1";
+            int slot    = PineClient.DefaultSlot;
+            if (GetArg(args, "--pcsx2-slot") is string slotStr && int.TryParse(slotStr, out int parsed))
+                slot = parsed;
+            int serverPort = 8765;
+            if (GetArg(args, "--port") is string portStr && int.TryParse(portStr, out int pp))
+                serverPort = pp;
+
+            Console.WriteLine($"PCSX2 PINE bridge mode — connecting to {host}:{slot}…");
+            var pine = new PineClient(host, slot);
+
+            // Test the connection immediately so the user gets a clear error message
+            // before the server starts accepting VS Code extension connections.
+            try
+            {
+                var status = pine.GetStatus();
+                Console.WriteLine($"PCSX2 PINE connected — emulator status: {status}");
+                if (status != PineClient.EmuStatus.Shutdown)
+                {
+                    string gameTitle = pine.GetGameTitle();
+                    string gameId    = pine.GetGameID();
+                    if (!string.IsNullOrEmpty(gameId))
+                        Console.WriteLine($"Running game: {gameTitle} ({gameId})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Cannot connect to PCSX2 PINE on {host}:{slot}: {ex.Message}");
+                Console.Error.WriteLine("Make sure PCSX2 is running and PINE is enabled under Settings → Advanced.");
+                return;
+            }
+
+            Console.WriteLine($"Starting bridge server on port {serverPort}…");
+            var server = new SocketServer(serverPort) { PineClient = pine };
+
+            server.ClientConnected    += (_, ep) => Console.WriteLine($"[Bridge] VS Code connected: {ep}");
+            server.ClientDisconnected += (_, _)  => Console.WriteLine("[Bridge] VS Code disconnected");
+
+            var serverTask = server.StartAsync();
+
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                cts.Cancel();
+                Console.WriteLine("\nShutting down bridge…");
+                server.Stop();
+                pine.Dispose();
+            };
+
+            Console.WriteLine("Bridge is running. Press Ctrl+C to stop.");
+            Console.WriteLine("Commands available in this mode:");
+            Console.WriteLine("  READMEM, WRITEMEM, APPLYCHEATS, DISASSEMBLE, ASSEMBLE,");
+            Console.WriteLine("  SCAN*, GETLABELS, ADDLABEL, DELETELABEL, GETSTRINGS, GETFUNCTIONS,");
+            Console.WriteLine("  PCSX2STATUS, PCSX2GAMEINFO");
+            Console.WriteLine("  PAUSE, RESUME, STEP, SETBP, CLEARBP, CLEARBP_ALL, GETPC, GETREGS");
+            Console.WriteLine("  Note: debugger commands (PAUSE/RESUME/STEP/SETBP/GETPC/GETREGS) require the PCSX2 PINE extension PR to be merged.");
+
+            try { await Task.Delay(-1, cts.Token); }
+            catch (TaskCanceledException) { /* Ctrl+C */ }
+            await serverTask;
+        }
+
         // ── Static recompiler mode ────────────────────────────────────────────
 
         /// <summary>
@@ -1435,6 +1521,13 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine("  dotnet run -- --recompile --elf <game.elf> [--out <dir>] [options]");
             Console.WriteLine("      Statically recompile a PS2 ELF to C++ source files.");
             Console.WriteLine();
+            Console.WriteLine("  dotnet run -- --pcsx2 [--pcsx2-slot 28011] [--pcsx2-host 127.0.0.1] [--port 8765]");
+            Console.WriteLine("      Start the PCSX2 PINE bridge server.");
+            Console.WriteLine("      Connects to a running PCSX2 instance via the PINE IPC socket and");
+            Console.WriteLine("      exposes READMEM/WRITEMEM/APPLYCHEATS/DISASSEMBLE and (once the PINE");
+            Console.WriteLine("      extension PR is merged) full debugger commands to the VS Code extension.");
+            Console.WriteLine("      Requires PCSX2 running with PINE enabled (Settings → Advanced).");
+            Console.WriteLine();
             Console.WriteLine("  dotnet run -- --server");
             Console.WriteLine("      Start the standalone TCP socket server (port 8766).");
             Console.WriteLine("      Use this for assembler/disassembler access without a live emulator.");
@@ -1461,6 +1554,11 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine("  --stub name[@addr]   Mark a function as an external stub.");
             Console.WriteLine("  --skip name          Skip a function (emit TODO wrapper).");
             Console.WriteLine("  --patch-cop0         Replace COP0 instructions with no-ops.");
+            Console.WriteLine();
+            Console.WriteLine("Options for --pcsx2:");
+            Console.WriteLine("  --pcsx2-slot N  PINE slot/port number (default: 28011).");
+            Console.WriteLine("  --pcsx2-host H  PCSX2 host address (default: 127.0.0.1).");
+            Console.WriteLine("  --port N        Port for the bridge socket server (default: 8765).");
         }
 
         /// <summary>
