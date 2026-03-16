@@ -1459,7 +1459,8 @@ namespace CodeDesigner.Mips64LE
             }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
-            uint normalized = NormalizeBreakpointToPhysical(address.Value);
+            
+            normalized = NormalizeBreakpointToPhysical(address.Value);
             Scheduler.Breakpoints.Add(normalized);
             return CreateSuccessResponse($"Breakpoint set at 0x{normalized:X8}");
         }
@@ -1480,7 +1481,7 @@ namespace CodeDesigner.Mips64LE
             }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
-            uint normalized = NormalizeBreakpointToPhysical(address.Value);
+            normalized = NormalizeBreakpointToPhysical(address.Value);
             Scheduler.Breakpoints.Remove(normalized);
             return CreateSuccessResponse($"Breakpoint cleared at 0x{normalized:X8}");
         }

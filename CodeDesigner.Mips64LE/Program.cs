@@ -1383,7 +1383,6 @@ namespace CodeDesigner.Mips64LE
             catch (TaskCanceledException) { /* Ctrl+C */ }
             await serverTask;
         }
-        }
 
         // ── Static recompiler mode ────────────────────────────────────────────
 
