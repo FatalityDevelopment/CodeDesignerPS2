@@ -27,7 +27,10 @@ import './disasm-editor.css';
     <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)">&#8693; Stack</button>
     <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
     <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
+    <button class="header-tool-btn live-only" id="setpc-toggle-btn" title="Set PC to Address (Ctrl+Alt+P)">&#9655; Set PC</button>
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
+    <button class="header-tool-btn" id="converter-btn" title="Cheat Code Converter">&#8645; Converter</button>
+    <button class="header-tool-btn" id="porter-btn" title="Cheat Code Porter">&#8651; Port</button>
 
 </div>
 <div id="goto-panel">
@@ -41,6 +44,19 @@ import './disasm-editor.css';
         </div>
         <span class="search-info" id="goto-info"></span>
         <button class="close-search" id="close-goto" title="Close (Escape)">&#xD7;</button>
+    </div>
+</div>
+<div id="setpc-panel">
+    <div class="search-row">
+        <div class="search-input-wrapper">
+            <input type="text" id="setpc-input" class="search-input" placeholder="New PC address (hex)" />
+            <button class="search-clear" id="setpc-clear">&#xD7;</button>
+        </div>
+        <div class="search-nav">
+            <button class="nav-btn" id="setpc-btn" title="Set PC (Enter)">Set PC</button>
+        </div>
+        <span class="search-info" id="setpc-info"></span>
+        <button class="close-search" id="close-setpc" title="Close (Escape)">&#xD7;</button>
     </div>
 </div>
 <div id="search-panel">
@@ -101,6 +117,7 @@ import './disasm-editor.css';
             <button id="sym-scan-strings-btn" class="sym-scan-btn">Scan for strings</button>
             <span id="sym-strings-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-strings-filter" class="sym-filter-input" placeholder="Filter strings…" />
         <div id="sym-strings-list" class="sym-list"></div>
     </div>
     <div id="sym-functions-content" class="sym-tab-content">
@@ -108,6 +125,7 @@ import './disasm-editor.css';
             <button id="sym-scan-functions-btn" class="sym-scan-btn">Scan for functions</button>
             <span id="sym-functions-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-functions-filter" class="sym-filter-input" placeholder="Filter functions…" />
         <div id="sym-functions-list" class="sym-list"></div>
     </div>
     <div id="sym-pointers-content" class="sym-tab-content">
@@ -115,6 +133,7 @@ import './disasm-editor.css';
             <button id="sym-scan-pointers-btn" class="sym-scan-btn">Scan for pointers</button>
             <span id="sym-pointers-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-pointers-filter" class="sym-filter-input" placeholder="Filter pointers…" />
         <div id="sym-pointers-list" class="sym-list"></div>
     </div>
     <div id="sym-floats-content" class="sym-tab-content">
@@ -122,6 +141,7 @@ import './disasm-editor.css';
             <button id="sym-scan-floats-btn" class="sym-scan-btn">Scan for floats</button>
             <span id="sym-floats-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-floats-filter" class="sym-filter-input" placeholder="Filter floats…" />
         <div id="sym-floats-list" class="sym-list"></div>
     </div>
     <div id="sym-integers-content" class="sym-tab-content">
@@ -129,6 +149,7 @@ import './disasm-editor.css';
             <button id="sym-scan-integers-btn" class="sym-scan-btn">Scan for integers</button>
             <span id="sym-integers-status" class="sym-status"></span>
         </div>
+        <input type="text" id="sym-integers-filter" class="sym-filter-input" placeholder="Filter integers…" />
         <div id="sym-integers-list" class="sym-list"></div>
     </div>
 </div>
@@ -192,12 +213,15 @@ import './disasm-editor.css';
             <span id="edit-overlay-title">Edit Address</span>
             <button id="edit-overlay-close" title="Close (Escape)">&#xD7;</button>
         </div>
-        <div id="edit-overlay-info"></div>
         <div id="edit-overlay-tabs">
             <button class="edit-overlay-tab active" data-tab="edit">Edit</button>
             <button class="edit-overlay-tab" data-tab="history">History</button>
         </div>
         <div id="edit-overlay-tab-edit" class="edit-overlay-tab-content active">
+            <div class="edit-overlay-field">
+                <label class="edit-overlay-label" for="edit-overlay-instr-in">Instruction</label>
+                <input type="text" id="edit-overlay-instr-in" class="edit-overlay-input" placeholder="e.g. ADDIU $v0, $zero, 5" spellcheck="false" />
+            </div>
             <div class="edit-overlay-field">
                 <label class="edit-overlay-label" for="edit-overlay-bytes-in">Bytes (hex)</label>
                 <input type="text" id="edit-overlay-bytes-in" class="edit-overlay-input" placeholder="e.g. 24020005" spellcheck="false" />
@@ -219,6 +243,81 @@ import './disasm-editor.css';
         <div id="edit-overlay-tab-history" class="edit-overlay-tab-content">
             <div id="edit-overlay-history-list" class="edit-overlay-history-list">
                 <div class="edit-overlay-history-empty">Loading history...</div>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="converter-overlay">
+    <div id="converter-overlay-box">
+        <div id="converter-overlay-header">
+            <span id="converter-overlay-title">&#8645; Cheat Code Converter</span>
+            <button id="converter-overlay-close" title="Close (Escape)">&#xD7;</button>
+        </div>
+        <div id="converter-overlay-body">
+            <div class="converter-overlay-field">
+                <label class="converter-overlay-label" for="converter-input">Input Codes</label>
+                <textarea id="converter-input" class="converter-overlay-textarea" spellcheck="false" placeholder="Paste cheat codes here…"></textarea>
+            </div>
+            <div id="converter-overlay-controls">
+                <div class="converter-overlay-field converter-format-field">
+                    <label class="converter-overlay-label" for="converter-format-select">Cheat Engine &amp; Version</label>
+                    <select id="converter-format-select" class="converter-overlay-select">
+                        <option value="Raw">Raw (unencrypted GameShark / Action Replay)</option>
+                        <option value="ActionReplay1">Action Replay 1 (fixed-seed XOR)</option>
+                        <option value="ActionReplay2">Action Replay 2 / GameShark 2 (DEADFACE XOR)</option>
+                        <option value="ActionReplayMax">Action Replay MAX (DES-like, alphanumeric)</option>
+                        <option value="GameSharkV3">GameShark V3 / Xploder 4 / Xterminator (Mersenne Twister)</option>
+                        <option value="CodeBreakerV1">CodeBreaker V1–6 (seed-table XOR)</option>
+                        <option value="CodeBreakerV7">CodeBreaker V7+ (ARCFOUR + modular-inverse)</option>
+                    </select>
+                </div>
+                <div id="converter-overlay-buttons">
+                    <button id="converter-to-raw-btn" title="Decrypt the input codes to the unencrypted raw format">&#8595; Convert to Raw</button>
+                    <button id="converter-to-engine-btn" title="Encrypt the raw input codes to the selected engine format">&#8593; Convert to Engine</button>
+                </div>
+            </div>
+            <div id="converter-overlay-status" class="converter-overlay-status"></div>
+            <div class="converter-overlay-field">
+                <label class="converter-overlay-label" for="converter-output">Output Codes</label>
+                <textarea id="converter-output" class="converter-overlay-textarea" spellcheck="false" readonly placeholder="Converted codes will appear here…"></textarea>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="porter-overlay">
+    <div id="porter-overlay-box">
+        <div id="porter-overlay-header">
+            <span id="porter-overlay-title">&#8651; Cheat Code Porter</span>
+            <button id="porter-overlay-close" title="Close (Escape)">&#xD7;</button>
+        </div>
+        <div id="porter-overlay-body">
+            <div class="porter-overlay-field">
+                <label class="porter-overlay-label" for="porter-input">Cheat Codes (raw GameShark format)</label>
+                <textarea id="porter-input" class="porter-overlay-textarea" spellcheck="false" placeholder="#Code Name&#10;20XXXXXX YYYYYYYY"></textarea>
+            </div>
+            <div class="porter-dump-row">
+                <div class="porter-overlay-field porter-dump-field">
+                    <label class="porter-overlay-label">Source Dump</label>
+                    <div class="porter-file-row">
+                        <input type="text" id="porter-source-path" class="porter-file-input" readonly placeholder="Select source EE RAM dump…" />
+                        <button id="porter-source-browse" class="porter-browse-btn" title="Browse for source RAM dump file">&#8230;</button>
+                    </div>
+                </div>
+                <div class="porter-overlay-field porter-dump-field">
+                    <label class="porter-overlay-label">Target Dump</label>
+                    <div class="porter-file-row">
+                        <input type="text" id="porter-target-path" class="porter-file-input" readonly placeholder="Select target EE RAM dump…" />
+                        <button id="porter-target-browse" class="porter-browse-btn" title="Browse for target RAM dump file">&#8230;</button>
+                    </div>
+                </div>
+            </div>
+            <div id="porter-overlay-controls">
+                <button id="porter-port-btn">&#8651; Port Cheats</button>
+                <span id="porter-overlay-status" class="porter-overlay-status"></span>
+            </div>
+            <div id="porter-results"></div>
+            <div id="porter-copy-row" class="porter-copy-row" style="display:none">
+                <button id="porter-copy-btn">Copy Selected Codes</button>
             </div>
         </div>
     </div>
@@ -256,7 +355,11 @@ export class DisasmEditorComponent implements AfterViewInit {
     const svc    = this.svc;
     const vscode = getVsCodeApi();
 
-    const SCAN_TIMEOUT_MS = 120_000;
+    const SCAN_TIMEOUT_MS   = 120_000;
+    /** Maximum number of scanner results shown in the symbols panel at once (per page). */
+    const SYM_DISPLAY_LIMIT = 500;
+    /** Current page (0-indexed) for each symbol scanner list. Reset on new scan or filter change. */
+    const symPage = { strings: 0, functions: 0, pointers: 0, floats: 0, integers: 0 };
 
     // ── DOM refs ──────────────────────────────────────────────────────────────
     // Note: hex-header and hex-container are rendered by <app-hex-view> and
@@ -275,6 +378,13 @@ export class DisasmEditorComponent implements AfterViewInit {
     const gotoBtn        = document.getElementById('goto-btn')!;
     const gotoInfo       = document.getElementById('goto-info')!;
     const closeGoto      = document.getElementById('close-goto')!;
+    const setpcPanel     = document.getElementById('setpc-panel')!;
+    const setpcInput     = document.getElementById('setpc-input') as HTMLInputElement;
+    const setpcClear     = document.getElementById('setpc-clear')!;
+    const setpcBtn       = document.getElementById('setpc-btn')!;
+    const setpcInfo      = document.getElementById('setpc-info')!;
+    const closeSetpc     = document.getElementById('close-setpc')!;
+    const setpcToggleBtn = document.getElementById('setpc-toggle-btn')!;
     const headerToolbar  = document.getElementById('header-toolbar')!;
 
     const registersToggleBtn   = document.getElementById('registers-toggle-btn')!;
@@ -313,11 +423,16 @@ export class DisasmEditorComponent implements AfterViewInit {
     const symScanPointersBtn  = document.getElementById('sym-scan-pointers-btn') as HTMLButtonElement;
     const symScanFloatsBtn    = document.getElementById('sym-scan-floats-btn') as HTMLButtonElement;
     const symScanIntegersBtn  = document.getElementById('sym-scan-integers-btn') as HTMLButtonElement;
+    const symStringsFilter    = document.getElementById('sym-strings-filter')   as HTMLInputElement;
+    const symFunctionsFilter  = document.getElementById('sym-functions-filter') as HTMLInputElement;
+    const symPointersFilter   = document.getElementById('sym-pointers-filter')  as HTMLInputElement;
+    const symFloatsFilter     = document.getElementById('sym-floats-filter')    as HTMLInputElement;
+    const symIntegersFilter   = document.getElementById('sym-integers-filter')  as HTMLInputElement;
 
     // Edit overlay
     const editOverlay          = document.getElementById('edit-overlay')!;
     const editOverlayTitle     = document.getElementById('edit-overlay-title')!;
-    const editOverlayInfo      = document.getElementById('edit-overlay-info')!;
+    const editOverlayInstrIn   = document.getElementById('edit-overlay-instr-in')! as HTMLInputElement;
     const editOverlayBytesIn   = document.getElementById('edit-overlay-bytes-in')! as HTMLInputElement;
     const editOverlayDisasmPreview = document.getElementById('edit-overlay-disasm-preview')!;
     const editOverlayLabelIn   = document.getElementById('edit-overlay-label-input') as HTMLInputElement;
@@ -358,6 +473,19 @@ export class DisasmEditorComponent implements AfterViewInit {
     const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
     const getPageStart = (index: number) => Math.floor(index / state.pageSize) * state.pageSize;
     const getLocalIndex = (index: number) => index - getPageStart(index);
+
+    // ── Pointer-label map ─────────────────────────────────────────────────────
+    // Kept in sync with state.pointerLabels; keyed by 8-digit upper-case hex
+    // address without the "0x" prefix so it can be directly compared with
+    // r.addr values in buildDisasmRowHtml.
+    let pointerLabelMap = new Map<string, string>();
+    function rebuildPointerLabelMap(): void {
+      pointerLabelMap = new Map<string, string>();
+      for (const entry of state.pointerLabels) {
+        const key = entry.address.replace(/^0x/i, '').toUpperCase().padStart(8, '0');
+        pointerLabelMap.set(key, entry.label);
+      }
+    }
     // Returns the 0-based index of the current PC within the page that starts at
     // `pageStart`, or -1 if the PC is not on that page (or not set).
     const getPcLocalIndex = (pageStart: number): number => {
@@ -530,6 +658,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.stringsUpdated$.subscribe(() => {
+      symPage.strings = 0;
       renderSymStrings();
       if (symStringsStatus) {
         symStringsStatus.textContent = state.symStrings.length > 0 ? `${state.symStrings.length} found` : 'None found';
@@ -538,6 +667,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.functionsUpdated$.subscribe(() => {
+      symPage.functions = 0;
       renderSymFunctions();
       if (symFunctionsStatus) {
         symFunctionsStatus.textContent = state.symFunctions.length > 0 ? `${state.symFunctions.length} found` : 'None found';
@@ -546,6 +676,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.pointersUpdated$.subscribe(() => {
+      symPage.pointers = 0;
       renderSymPointers();
       if (symPointersStatus) {
         symPointersStatus.textContent = state.symPointers.length > 0 ? `${state.symPointers.length} found` : 'None found';
@@ -554,6 +685,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.floatsUpdated$.subscribe(() => {
+      symPage.floats = 0;
       renderSymFloats();
       if (symFloatsStatus) {
         symFloatsStatus.textContent = state.symFloats.length > 0 ? `${state.symFloats.length} found` : 'None found';
@@ -562,6 +694,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
 
     svc.integersUpdated$.subscribe(() => {
+      symPage.integers = 0;
       renderSymIntegers();
       if (symIntegersStatus) {
         symIntegersStatus.textContent = state.symIntegers.length > 0 ? `${state.symIntegers.length} found` : 'None found';
@@ -571,6 +704,11 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     svc.analysisUpdated$.subscribe(() => {
       // Re-render so the updated analysis comments are visible immediately.
+      renderDisassembly();
+    });
+
+    svc.pointerLabelsUpdated$.subscribe(() => {
+      rebuildPointerLabelMap();
       renderDisassembly();
     });
 
@@ -584,7 +722,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       _editOverlayAddrHex = addressHex;
       editOverlayTitle.textContent = 'Edit Address — 0x' + addressHex.toUpperCase();
       const instrStr = (op || '') + (args ? '  ' + args : '');
-      editOverlayInfo.textContent = instrStr;
+      editOverlayInstrIn.value = instrStr;
       // Populate the bytes field (strip spaces so it's a clean hex string)
       const rawBytes = (bytes || '').replace(/\s+/g, '');
       _editOverlayOrigBytes = rawBytes;
@@ -601,8 +739,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       editOverlayHistoryList.innerHTML = '<div class="edit-overlay-history-empty">Loading history...</div>';
       vscode.postMessage({ type: 'getAddressHistory', address });
       editOverlay.classList.add('visible');
-      editOverlayBytesIn.focus();
-      editOverlayBytesIn.select();
+      editOverlayInstrIn.focus();
+      editOverlayInstrIn.select();
     }
 
     function closeEditOverlay() {
@@ -626,6 +764,18 @@ export class DisasmEditorComponent implements AfterViewInit {
     editOverlayCancel.addEventListener('click', closeEditOverlay);
     editOverlayClose.addEventListener('click', closeEditOverlay);
 
+    editOverlayInstrIn.addEventListener('input', () => {
+      const instr = editOverlayInstrIn.value.trim();
+      if (instr) {
+        vscode.postMessage({ type: 'assembleInstr', instruction: instr, address: _editOverlayAddr });
+      } else {
+        editOverlayDisasmPreview.textContent = '';
+      }
+    });
+    editOverlayInstrIn.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { editOverlayBytesIn.focus(); editOverlayBytesIn.select(); }
+      if (e.key === 'Escape') { closeEditOverlay(); }
+    });
     editOverlayBytesIn.addEventListener('input', () => {
       const hex = editOverlayBytesIn.value.replace(/\s+/g, '');
       if (hex.length === 8 && /^[0-9a-fA-F]{8}$/.test(hex)) {
@@ -649,9 +799,25 @@ export class DisasmEditorComponent implements AfterViewInit {
     window.addEventListener('message', (e: MessageEvent) => {
       const data = e.data as Record<string, unknown>;
       if (data?.['type'] === 'disasmBytesResult') {
-        editOverlayDisasmPreview.textContent = (data['preview'] as string) ?? '';
+        const preview = (data['preview'] as string) ?? '';
+        editOverlayDisasmPreview.textContent = preview;
+        // Update instruction field when bytes are edited (avoid feedback loop)
+        if (document.activeElement !== editOverlayInstrIn && preview && preview !== '(invalid)') {
+          editOverlayInstrIn.value = preview;
+        }
+      } else if (data?.['type'] === 'assembleInstrResult') {
+        const hexBytes = data['hexBytes'] as string | undefined;
+        if (hexBytes) {
+          // Update bytes field when instruction is edited (avoid feedback loop)
+          if (document.activeElement !== editOverlayBytesIn) {
+            editOverlayBytesIn.value = hexBytes;
+          }
+          editOverlayDisasmPreview.textContent = '';
+        } else {
+          editOverlayDisasmPreview.textContent = '(assembly error)';
+        }
       } else if (data?.['type'] === 'addressHistoryResult') {
-        const history = data['history'] as Array<{ name: string; date: string; value: string }> | undefined;
+        const history = data['history'] as Array<{ name: string; date: string; value: string; disasm?: string }> | undefined;
         if (!history || history.length === 0) {
           editOverlayHistoryList.innerHTML = '<div class="edit-overlay-history-empty">No snapshot history for this address.</div>';
         } else {
@@ -659,6 +825,9 @@ export class DisasmEditorComponent implements AfterViewInit {
           for (const h of history) {
             html += `<div class="edit-overlay-history-row">`;
             html += `<span class="edit-overlay-history-value">${h.value}</span>`;
+            if (h.disasm) {
+              html += `<span class="edit-overlay-history-disasm">${h.disasm}</span>`;
+            }
             html += `<span class="edit-overlay-history-name">${h.name}</span>`;
             html += `<span class="edit-overlay-history-date">${h.date}</span>`;
             html += `</div>`;
@@ -671,6 +840,330 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (e.target === editOverlay) { closeEditOverlay(); }
     });
 
+    // ── Converter overlay ─────────────────────────────────────────────────────
+    const converterOverlay      = document.getElementById('converter-overlay')!;
+    const converterInput        = document.getElementById('converter-input') as HTMLTextAreaElement;
+    const converterOutput       = document.getElementById('converter-output') as HTMLTextAreaElement;
+    const converterFormatSelect = document.getElementById('converter-format-select') as HTMLSelectElement;
+    const converterToRawBtn     = document.getElementById('converter-to-raw-btn')!;
+    const converterToEngineBtn  = document.getElementById('converter-to-engine-btn')!;
+    const converterOverlayClose = document.getElementById('converter-overlay-close')!;
+    const converterStatus       = document.getElementById('converter-overlay-status')!;
+    const converterBtn          = document.getElementById('converter-btn')!;
+
+    function openConverterOverlay() {
+      converterStatus.textContent = '';
+      converterStatus.className = 'converter-overlay-status';
+      converterOverlay.classList.add('visible');
+      converterInput.focus();
+    }
+
+    function closeConverterOverlay() {
+      converterOverlay.classList.remove('visible');
+    }
+
+    function setConverterStatus(msg: string, isError: boolean) {
+      converterStatus.textContent = msg;
+      converterStatus.className = 'converter-overlay-status' + (isError ? ' converter-status-error' : ' converter-status-ok');
+    }
+
+    async function runConvert(direction: 'toRaw' | 'toEngine') {
+      const codes = converterInput.value.trim();
+      if (!codes) {
+        setConverterStatus('Please enter cheat codes in the input box.', true);
+        return;
+      }
+      const format = converterFormatSelect.value;
+      converterOutput.value = '';
+      setConverterStatus('Converting…', false);
+      converterToRawBtn.setAttribute('disabled', 'true');
+      converterToEngineBtn.setAttribute('disabled', 'true');
+      try {
+        vscode.postMessage({ type: 'convertCheat', codes, direction, format });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setConverterStatus('Error: ' + msg, true);
+        converterToRawBtn.removeAttribute('disabled');
+        converterToEngineBtn.removeAttribute('disabled');
+      }
+    }
+
+    converterBtn.addEventListener('click', openConverterOverlay);
+    converterOverlayClose.addEventListener('click', closeConverterOverlay);
+    converterOverlay.addEventListener('click', (e: MouseEvent) => {
+      if (e.target === converterOverlay) { closeConverterOverlay(); }
+    });
+    converterOverlay.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { closeConverterOverlay(); }
+    });
+    converterToRawBtn.addEventListener('click', () => runConvert('toRaw'));
+    converterToEngineBtn.addEventListener('click', () => runConvert('toEngine'));
+
+    // Handle convertCheatResult message from the provider
+    window.addEventListener('message', (e: MessageEvent) => {
+      const data = e.data as Record<string, unknown>;
+      if (data?.['type'] === 'convertCheatResult') {
+        converterToRawBtn.removeAttribute('disabled');
+        converterToEngineBtn.removeAttribute('disabled');
+        if (data['error']) {
+          setConverterStatus('Error: ' + data['error'], true);
+        } else {
+          converterOutput.value = (data['result'] as string) ?? '';
+          setConverterStatus('Conversion complete.', false);
+        }
+      }
+    });
+
+    // ── Porter overlay ────────────────────────────────────────────────────────
+    interface PorterResult {
+      blockName:    string;
+      blockText:    string | null;
+      originalCode: string;
+      newCode:      string | null;
+      found:        boolean;
+      method:       string;
+      confidence:   number;
+      ambiguous:    boolean;
+      candidates:   string[] | null;
+    }
+
+    const porterOverlay      = document.getElementById('porter-overlay')!;
+    const porterInput        = document.getElementById('porter-input') as HTMLTextAreaElement;
+    const porterSourcePath   = document.getElementById('porter-source-path') as HTMLInputElement;
+    const porterTargetPath   = document.getElementById('porter-target-path') as HTMLInputElement;
+    const porterSourceBrowse = document.getElementById('porter-source-browse')!;
+    const porterTargetBrowse = document.getElementById('porter-target-browse')!;
+    const porterPortBtn      = document.getElementById('porter-port-btn')!;
+    const porterOverlayClose = document.getElementById('porter-overlay-close')!;
+    const porterStatus       = document.getElementById('porter-overlay-status')!;
+    const porterBtn          = document.getElementById('porter-btn')!;
+    const porterResults      = document.getElementById('porter-results')!;
+    const porterCopyRow      = document.getElementById('porter-copy-row')!;
+    const porterCopyBtn      = document.getElementById('porter-copy-btn')!;
+
+    let _porterResultData: PorterResult[] = [];
+
+    function openPorterOverlay() {
+      porterStatus.textContent = '';
+      porterStatus.className = 'porter-overlay-status';
+      porterOverlay.classList.add('visible');
+      porterInput.focus();
+    }
+
+    function closePorterOverlay() {
+      porterOverlay.classList.remove('visible');
+    }
+
+    function setPorterStatus(msg: string, isError: boolean) {
+      porterStatus.textContent = msg;
+      porterStatus.className = 'porter-overlay-status' + (isError ? ' porter-status-error' : ' porter-status-ok');
+    }
+
+    function renderPorterResults(results: PorterResult[]) {
+      _porterResultData = results;
+      porterResults.innerHTML = '';
+      if (results.length === 0) {
+        porterResults.innerHTML = '<div class="porter-no-results">No cheat codes found in input.</div>';
+        porterCopyRow.style.display = 'none';
+        return;
+      }
+
+      // Group entries by blockName to render one card per cheat block.
+      const groups = new Map<string, PorterResult[]>();
+      for (const r of results) {
+        const key = r.blockName;
+        if (!groups.has(key)) { groups.set(key, []); }
+        groups.get(key)!.push(r);
+      }
+
+      for (const [blockName, entries] of groups) {
+        const allFound  = entries.every(e => e.found);
+        const anyFound  = entries.some(e => e.found);
+
+        const card = document.createElement('div');
+        card.className = 'porter-result-card';
+
+        // ── Card header row ──────────────────────────────────────────────────
+        const headerRow = document.createElement('div');
+        headerRow.className = 'porter-result-header';
+
+        const cb = document.createElement('input');
+        cb.type      = 'checkbox';
+        cb.className = 'porter-result-cb';
+        cb.dataset['block'] = blockName;
+        cb.checked  = allFound;
+        cb.disabled = !anyFound;
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className   = 'porter-result-name';
+        nameSpan.textContent = blockName || '(unnamed)';
+
+        const badge = document.createElement('span');
+        badge.className   = allFound ? 'porter-badge porter-badge-ok'
+                          : anyFound ? 'porter-badge porter-badge-warn'
+                          :            'porter-badge porter-badge-err';
+        badge.textContent = allFound ? '✓ found' : anyFound ? '⚠ partial' : '✗ not found';
+
+        headerRow.appendChild(cb);
+        headerRow.appendChild(nameSpan);
+        headerRow.appendChild(badge);
+        card.appendChild(headerRow);
+
+        // ── Block description text (if any) ──────────────────────────────────
+        // All entries in a block share the same blockText (it is per-block metadata),
+        // so reading it from the first entry is sufficient.
+        const blockText = entries[0]?.blockText;
+        if (blockText) {
+          const descDiv = document.createElement('div');
+          descDiv.className   = 'porter-block-text';
+          descDiv.textContent = blockText;
+          card.appendChild(descDiv);
+        }
+
+        // ── Per-line results ─────────────────────────────────────────────────
+        for (const entry of entries) {
+          const line = document.createElement('div');
+          line.className = 'porter-result-line';
+
+          const origSpan = document.createElement('span');
+          origSpan.className   = 'porter-addr-old';
+          origSpan.textContent = entry.originalCode;
+          line.appendChild(origSpan);
+
+          const arrow = document.createElement('span');
+          arrow.className   = 'porter-arrow';
+          arrow.textContent = ' → ';
+          line.appendChild(arrow);
+
+          if (entry.found && entry.newCode) {
+            const newSpan = document.createElement('span');
+            newSpan.className   = 'porter-addr-new';
+            newSpan.textContent = entry.newCode;
+            line.appendChild(newSpan);
+
+            const methodSpan = document.createElement('span');
+            methodSpan.className   = 'porter-method';
+            methodSpan.textContent = `  ${entry.method}`;
+            if (entry.ambiguous) { methodSpan.textContent += ' ⚠'; }
+            methodSpan.title = entry.ambiguous
+              ? `${entry.candidates?.length ?? 0} candidates — pick manually`
+              : `Confidence: ${entry.confidence}%`;
+            line.appendChild(methodSpan);
+
+            if (entry.ambiguous && entry.candidates) {
+              const candDiv = document.createElement('div');
+              candDiv.className   = 'porter-candidates';
+              candDiv.textContent = 'Candidates: ' + entry.candidates.join('  ');
+              card.appendChild(line);
+              card.appendChild(candDiv);
+              continue;
+            }
+          } else {
+            const nfSpan = document.createElement('span');
+            nfSpan.className   = 'porter-not-found';
+            nfSpan.textContent = 'not found';
+            line.appendChild(nfSpan);
+
+            const methodSpan = document.createElement('span');
+            methodSpan.className   = 'porter-method';
+            methodSpan.textContent = `  ${entry.method}`;
+            line.appendChild(methodSpan);
+          }
+
+          card.appendChild(line);
+        }
+
+        porterResults.appendChild(card);
+      }
+
+      porterCopyRow.style.display = 'block';
+    }
+
+    function copySelectedPortedCodes() {
+      const checkedBoxes = Array.from(
+        porterResults.querySelectorAll<HTMLInputElement>('input.porter-result-cb:checked')
+      );
+      if (checkedBoxes.length === 0) {
+        setPorterStatus('No codes selected.', true);
+        return;
+      }
+      const lines: string[] = [];
+      for (const cb of checkedBoxes) {
+        const blockName = cb.dataset['block']!;
+        const entries = _porterResultData.filter(e => e.blockName === blockName && e.found && e.newCode);
+        if (entries.length === 0) { continue; }
+        if (blockName) { lines.push(blockName); }
+        const blockText = entries[0]?.blockText;
+        if (blockText) { lines.push(blockText); }
+        for (const entry of entries) { lines.push(entry.newCode!); }
+        lines.push('');
+      }
+      const text = lines.join('\n').trimEnd();
+      navigator.clipboard.writeText(text).then(() => {
+        setPorterStatus('Copied to clipboard!', false);
+      }).catch(() => {
+        setPorterStatus('Copy failed — try again.', true);
+      });
+    }
+
+    porterBtn.addEventListener('click', openPorterOverlay);
+    porterOverlayClose.addEventListener('click', closePorterOverlay);
+    porterOverlay.addEventListener('click', (e: MouseEvent) => {
+      if (e.target === porterOverlay) { closePorterOverlay(); }
+    });
+    porterOverlay.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { closePorterOverlay(); }
+    });
+
+    porterSourceBrowse.addEventListener('click', () => {
+      vscode.postMessage({ type: 'browseSourceDump' });
+    });
+    porterTargetBrowse.addEventListener('click', () => {
+      vscode.postMessage({ type: 'browseTargetDump' });
+    });
+
+    porterPortBtn.addEventListener('click', () => {
+      const codes = porterInput.value.trim();
+      if (!codes) { setPorterStatus('Please enter cheat codes in the input box.', true); return; }
+      const src = porterSourcePath.value.trim();
+      if (!src)   { setPorterStatus('Please select a source EE RAM dump.', true); return; }
+      const tgt = porterTargetPath.value.trim();
+      if (!tgt)   { setPorterStatus('Please select a target EE RAM dump.', true); return; }
+
+      setPorterStatus('Porting…', false);
+      porterPortBtn.setAttribute('disabled', 'true');
+      porterResults.innerHTML = '';
+      porterCopyRow.style.display = 'none';
+
+      vscode.postMessage({ type: 'portCheats', codes, sourcePath: src, targetPath: tgt });
+    });
+
+    porterCopyBtn.addEventListener('click', copySelectedPortedCodes);
+
+    window.addEventListener('message', (e: MessageEvent) => {
+      const data = e.data as Record<string, unknown>;
+      if (data?.['type'] === 'browseSourceDumpResult') {
+        if (data['filePath']) { porterSourcePath.value = data['filePath'] as string; }
+      } else if (data?.['type'] === 'browseTargetDumpResult') {
+        if (data['filePath']) { porterTargetPath.value = data['filePath'] as string; }
+      } else if (data?.['type'] === 'portCheatsResult') {
+        porterPortBtn.removeAttribute('disabled');
+        if (data['error']) {
+          setPorterStatus('Error: ' + (data['error'] as string), true);
+        } else {
+          const results = (data['results'] as PorterResult[]) ?? [];
+          renderPorterResults(results);
+          const found = results.filter(r => r.found).length;
+          const total = results.length;
+          const allOk = found === total;
+          setPorterStatus(
+            `Done — ${found} of ${total} code${total === 1 ? '' : 's'} ported. See output panel for details.`,
+            !allOk,
+          );
+        }
+      }
+    });
+
     // ── Address helpers ───────────────────────────────────────────────────────
     function parseAddress(input: string): number | null {
       const cleaned = input.trim().toLowerCase().replace(/^0x/, '');
@@ -678,8 +1171,17 @@ export class DisasmEditorComponent implements AfterViewInit {
       return parseInt(cleaned, 16);
     }
 
+    /** Translate any virtual/logical EE address to its physical equivalent.
+     *  KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip the top 3 bits.
+     *  EE RAM uncached mirror (0x20100000–0x21FFFFFF): subtract 0x20000000.
+     *  EE RAM uncached+accelerated (0x30100000–0x31FFFFFF): subtract 0x30000000.
+     *  All other addresses (physical or special like scratchpad) pass through. */
     function toPhysAddr(va: number): number {
-      return (va >= 0x80000000 && va <= 0xBFFFFFFF) ? ((va & 0x1FFFFFFF) >>> 0) : (va >>> 0);
+      const v = va >>> 0;
+      if (v >= 0x80000000 && v <= 0xBFFFFFFF) return ((v & 0x1FFFFFFF) >>> 0);
+      if (v >= 0x20100000 && v <= 0x21FFFFFF) return ((v - 0x20000000) >>> 0);
+      if (v >= 0x30100000 && v <= 0x31FFFFFF) return ((v - 0x30000000) >>> 0);
+      return v;
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -951,6 +1453,41 @@ export class DisasmEditorComponent implements AfterViewInit {
       gotoInfo.textContent = 'Address out of range';
     });
 
+    // ── Set PC ────────────────────────────────────────────────────────────────
+    function toggleSetPc() {
+      const active = setpcPanel.classList.toggle('visible');
+      setpcToggleBtn.classList.toggle('active', active);
+      if (active) {
+        setpcInput.focus();
+        setpcInput.select();
+      } else {
+        setpcInput.value = '';
+        setpcInfo.textContent = '';
+      }
+    }
+
+    function doSetPC() {
+      const addr = parseAddress(setpcInput.value);
+      if (addr === null) {
+        setpcInput.classList.add('error');
+        setpcInfo.textContent = 'Invalid hex address';
+        return;
+      }
+      setpcInput.classList.remove('error');
+      setpcInfo.textContent = `Setting PC to 0x${addr.toString(16).toUpperCase()}...`;
+      // Ask the provider to pause, update PC, broadcast status, and navigate.
+      vscode.postMessage({ type: 'setPC', address: addr });
+    }
+
+    setpcBtn.addEventListener('click', doSetPC);
+    setpcInput.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { e.preventDefault(); doSetPC(); }
+      else if (e.key === 'Escape') { toggleSetPc(); grid.focus(); }
+    });
+    setpcClear.addEventListener('click', () => { setpcInput.value = ''; setpcInfo.textContent = ''; setpcInput.focus(); });
+    closeSetpc.addEventListener('click', () => { toggleSetPc(); grid.focus(); });
+    setpcToggleBtn.addEventListener('click', toggleSetPc);
+
     // ── Disassembly grid ──────────────────────────────────────────────────────
     // scrollBlock controls where the cursor row appears in the viewport after
     // a scrollIntoView call:
@@ -1012,12 +1549,62 @@ export class DisasmEditorComponent implements AfterViewInit {
       return `${before}<span class="${highlightClass}">${highlighted}</span>${after}`;
     }
 
+    // Maps a GPR index (0-31) to the CSS category class used both in the debug
+    // panel (.dbg-name spans) and in the disassembler args column (inline spans).
+    function gprCatClass(i: number): string {
+      if (i === 0)                                      return 'dbg-reg-zero';    // $zero
+      if (i === 1)                                      return 'dbg-reg-at';      // $at
+      if (i >= 2  && i <= 3)                            return 'dbg-reg-v';       // $v0-$v1
+      if (i >= 4  && i <= 7)                            return 'dbg-reg-a';       // $a0-$a3
+      if ((i >= 8 && i <= 15) || i === 24 || i === 25) return 'dbg-reg-t';       // $t0-$t9
+      if (i >= 16 && i <= 23)                           return 'dbg-reg-s';       // $s0-$s7
+      if (i === 26 || i === 27)                         return 'dbg-reg-k';       // $k0-$k1
+      return 'dbg-reg-special';                                                    // $gp $sp $fp $ra
+    }
+
+    // Maps a bare GPR name (as produced by the disassembler) to its category
+    // CSS class.  Returns undefined for names that are not GPRs.
+    const GPR_NAME_TO_CAT: Readonly<Record<string, string>> = (() => {
+      const map: Record<string, string> = {};
+      const names = [
+        'zero','at','v0','v1','a0','a1','a2','a3',
+        't0','t1','t2','t3','t4','t5','t6','t7',
+        's0','s1','s2','s3','s4','s5','s6','s7',
+        't8','t9','k0','k1','gp','sp','fp','ra',
+      ];
+      names.forEach((n, i) => { map[n] = gprCatClass(i); });
+      return map;
+    })();
+
+    // Regex that matches a GPR register name optionally preceded by a '$' sign,
+    // at a word boundary, handling both forms emitted by the disassembler and
+    // written in CDS source ('zero' / '$zero', 't0' / '$t0', etc.).
+    // Longer/more-specific names are listed first to avoid partial matches.
+    const GPR_REGEX = /\$?(zero|at|v[01]|a[0-3]|t[0-9]|s[0-7]|k[01]|gp|sp|fp|ra)(?![A-Za-z0-9_])/g;
+
+    // Wraps each GPR register token in `text` with a <span> carrying the
+    // appropriate category colour class.  Safe to call on plain disassembler
+    // text that does not yet contain any HTML.
+    function colorizeRegisters(text: string): string {
+      if (!text) { return text; }
+      return text.replace(GPR_REGEX, (match, name) => {
+        const cls = GPR_NAME_TO_CAT[name];
+        if (!cls) { return match; }
+        const dollar = match.startsWith('$') ? '$' : '';
+        return `<span class="${cls}">${dollar}${name}</span>`;
+      });
+    }
+
     function buildDisasmRowHtml(r: DisasmRow, globalIndex: number): string {
       const branchMatch = r.args.match(/^(.*\$[0-9A-F]{8})\s*(\([+-]\d+[▼▲]\))(.*)$/);
       let args = branchMatch ? `${branchMatch[1]} <span style="color:#6a9955">${branchMatch[2]}</span>${branchMatch[3]}` : r.args;
+      args = colorizeRegisters(args);
       const addr    = highlightSearchInText(r.addr, globalIndex, 'addr');
       const bytes   = highlightSearchInText(r.bytes, globalIndex, 'bytes');
-      const label   = highlightSearchInText(r.label || '', globalIndex, 'label');
+      // Label precedence: server/user labels (r.label) take priority over
+      // pointer-manager labels so explicit annotations always win.
+      const rawLabel = r.label || pointerLabelMap.get(r.addr) || '';
+      const label   = highlightSearchInText(rawLabel, globalIndex, 'label');
       const op      = highlightSearchInText(r.op, globalIndex, 'op');
       args          = highlightSearchInText(args, globalIndex, 'args');
       const comment = highlightSearchInText(r.comment || '', globalIndex, 'comment');
@@ -1120,6 +1707,10 @@ export class DisasmEditorComponent implements AfterViewInit {
       }
       if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyT') {
         e.preventDefault(); e.stopPropagation(); toggleBottomPanel();
+      }
+      if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyP') {
+        e.preventDefault(); e.stopPropagation();
+        if (state.isLive) { toggleSetPc(); }
       }
       if (e.altKey && !e.ctrlKey && !e.shiftKey && e.code === 'ArrowLeft') {
         // Only fire when no editable element is focused, so the shortcut
@@ -1246,6 +1837,10 @@ export class DisasmEditorComponent implements AfterViewInit {
         // indicator stays visible even after the user navigates elsewhere.
         if (pc !== undefined && pc !== null) {
           state.pcAddress = pc;
+          // If the Set PC panel is open, confirm the new PC value.
+          if (setpcPanel.classList.contains('visible')) {
+            setpcInfo.textContent = `PC set to 0x${pc.toString(16).toUpperCase()}`;
+          }
         }
       } else {
         state.breakpointHitAddress = undefined;
@@ -1412,92 +2007,182 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     function renderSymStrings() {
       if (!symStringsList) { return; }
-      const items = (state.symStrings || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symStringsFilter ? symStringsFilter.value.toLowerCase() : '';
+      const regionItems = (state.symStrings || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.value.toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symStringsList.innerHTML = '<div class="sym-empty">No strings found. Click "Scan for strings".</div>';
         return;
       }
-      symStringsList.innerHTML = items.map(item =>
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.strings = Math.max(0, Math.min(symPage.strings, totalPages - 1));
+      const page = symPage.strings;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-strings-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-strings-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
+        : '';
+      symStringsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.value)}">${escHtml(item.value)}</span>
         </div>`
-      ).join('');
+      ).join('') + pager;
       symStringsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-strings-prev')?.addEventListener('click', () => { symPage.strings = Math.max(0, symPage.strings - 1); renderSymStrings(); symStringsList.scrollTop = 0; });
+      document.getElementById('sym-strings-next')?.addEventListener('click', () => { symPage.strings++; renderSymStrings(); symStringsList.scrollTop = 0; });
     }
 
     function renderSymFunctions() {
       if (!symFunctionsList) { return; }
-      const items = (state.symFunctions || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symFunctionsFilter ? symFunctionsFilter.value.toLowerCase() : '';
+      const regionItems = (state.symFunctions || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.label.toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symFunctionsList.innerHTML = '<div class="sym-empty">No functions found. Click "Scan for functions".</div>';
         return;
       }
-      symFunctionsList.innerHTML = items.map(item =>
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.functions = Math.max(0, Math.min(symPage.functions, totalPages - 1));
+      const page = symPage.functions;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-functions-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-functions-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
+        : '';
+      symFunctionsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-name" title="${escHtml(item.label)}">${escHtml(item.label)}</span>
         </div>`
-      ).join('');
+      ).join('') + pager;
       symFunctionsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-functions-prev')?.addEventListener('click', () => { symPage.functions = Math.max(0, symPage.functions - 1); renderSymFunctions(); symFunctionsList.scrollTop = 0; });
+      document.getElementById('sym-functions-next')?.addEventListener('click', () => { symPage.functions++; renderSymFunctions(); symFunctionsList.scrollTop = 0; });
     }
 
     function renderSymPointers() {
       if (!symPointersList) { return; }
-      const items = (state.symPointers || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symPointersFilter ? symPointersFilter.value.toLowerCase() : '';
+      const regionItems = (state.symPointers || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.pointsTo.toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symPointersList.innerHTML = '<div class="sym-empty">No pointers found. Click "Scan for pointers".</div>';
         return;
       }
-      symPointersList.innerHTML = items.map(item =>
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.pointers = Math.max(0, Math.min(symPage.pointers, totalPages - 1));
+      const page = symPage.pointers;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-pointers-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-pointers-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
+        : '';
+      symPointersList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="→ ${escHtml(item.pointsTo)}">→ ${escHtml(item.pointsTo)}</span>
         </div>`
-      ).join('');
+      ).join('') + pager;
       symPointersList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-pointers-prev')?.addEventListener('click', () => { symPage.pointers = Math.max(0, symPage.pointers - 1); renderSymPointers(); symPointersList.scrollTop = 0; });
+      document.getElementById('sym-pointers-next')?.addEventListener('click', () => { symPage.pointers++; renderSymPointers(); symPointersList.scrollTop = 0; });
     }
 
     function renderSymFloats() {
       if (!symFloatsList) { return; }
-      const items = (state.symFloats || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symFloatsFilter ? symFloatsFilter.value.toLowerCase() : '';
+      const regionItems = (state.symFloats || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.raw.toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symFloatsList.innerHTML = '<div class="sym-empty">No floats found. Click "Scan for floats".</div>';
         return;
       }
-      symFloatsList.innerHTML = items.map(item =>
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.floats = Math.max(0, Math.min(symPage.floats, totalPages - 1));
+      const page = symPage.floats;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-floats-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-floats-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
+        : '';
+      symFloatsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.raw)}">${rawBitsToFloat(parseInt(item.raw, 16) >>> 0)} (${escHtml(item.raw)})</span>
         </div>`
-      ).join('');
+      ).join('') + pager;
       symFloatsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-floats-prev')?.addEventListener('click', () => { symPage.floats = Math.max(0, symPage.floats - 1); renderSymFloats(); symFloatsList.scrollTop = 0; });
+      document.getElementById('sym-floats-next')?.addEventListener('click', () => { symPage.floats++; renderSymFloats(); symFloatsList.scrollTop = 0; });
     }
 
     function renderSymIntegers() {
       if (!symIntegersList) { return; }
-      const items = (state.symIntegers || []).filter(item => isAddrInCurrentRegion(item.address));
+      const filterText = symIntegersFilter ? symIntegersFilter.value.toLowerCase() : '';
+      const regionItems = (state.symIntegers || []).filter(item => isAddrInCurrentRegion(item.address));
+      const items = filterText
+        ? regionItems.filter(item => item.address.toLowerCase().includes(filterText) || item.hex.toLowerCase().includes(filterText) || String(item.value).toLowerCase().includes(filterText))
+        : regionItems;
       if (items.length === 0) {
         symIntegersList.innerHTML = '<div class="sym-empty">No integers found. Click "Scan for integers".</div>';
         return;
       }
-      symIntegersList.innerHTML = items.map(item =>
+      const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
+      symPage.integers = Math.max(0, Math.min(symPage.integers, totalPages - 1));
+      const page = symPage.integers;
+      const start = page * SYM_DISPLAY_LIMIT;
+      const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pager = totalPages > 1
+        ? `<div class="sym-pager">
+            <button class="sym-pager-btn" id="sym-integers-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
+            <button class="sym-pager-btn" id="sym-integers-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
+          </div>`
+        : '';
+      symIntegersList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.hex)}">${item.value} (${escHtml(item.hex)})</span>
         </div>`
-      ).join('');
+      ).join('') + pager;
       symIntegersList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
+      document.getElementById('sym-integers-prev')?.addEventListener('click', () => { symPage.integers = Math.max(0, symPage.integers - 1); renderSymIntegers(); symIntegersList.scrollTop = 0; });
+      document.getElementById('sym-integers-next')?.addEventListener('click', () => { symPage.integers++; renderSymIntegers(); symIntegersList.scrollTop = 0; });
     }
 
     symbolsToggleBtn.addEventListener('click', () => toggleSymbolsPanel());
@@ -1591,6 +2276,13 @@ export class DisasmEditorComponent implements AfterViewInit {
         if (symIntegersStatus.textContent === 'Scanning…') { symIntegersStatus.textContent = ''; }
       }, SCAN_TIMEOUT_MS);
     });
+
+    // Filter inputs — re-render the corresponding list on each keystroke (reset to page 0).
+    symStringsFilter?.addEventListener('input',   () => { symPage.strings   = 0; renderSymStrings();   });
+    symFunctionsFilter?.addEventListener('input', () => { symPage.functions = 0; renderSymFunctions(); });
+    symPointersFilter?.addEventListener('input',  () => { symPage.pointers  = 0; renderSymPointers();  });
+    symFloatsFilter?.addEventListener('input',    () => { symPage.floats    = 0; renderSymFloats();    });
+    symIntegersFilter?.addEventListener('input',  () => { symPage.integers  = 0; renderSymIntegers();  });
 
     // ── Debug panel ───────────────────────────────────────────────────────────
     const MIPS_REG_NAMES = [
@@ -1765,8 +2457,9 @@ export class DisasmEditorComponent implements AfterViewInit {
         const val  = gpr128(i);
         const nz   = gprNz(i);
         const ro   = i === 0;  // $zero is read-only
+        const cat  = gprCatClass(i);
         const editAttr = ro ? '' : ` data-reg-type="GPR" data-reg-idx="${i}"`;
-        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name">${name}</span><span class="dbg-val dbg-qw-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val}</span></div>`;
+        html += `<div class="dbg-row${nz ? ' dbg-nonzero' : ''}"${editAttr}><span class="dbg-name ${cat}">${name}</span><span class="dbg-val dbg-qw-val${ro ? '' : ' dbg-editable'}" title="${ro ? '' : 'Double-click to edit'}">${val}</span></div>`;
       }
 
       // ── Inline call-stack trace from stack memory ────────────────────────

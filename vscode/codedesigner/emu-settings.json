@@ -17,6 +17,10 @@
     {
       "name": "Gameshark 2 v4 PS2",
       "path": "../../CodeDesigner.Mips64LE/Isos/Gameshark 2 v4 PS2.zip"
+    },
+    {
+      "name": "SOCOM II - U.S. Navy SEALs",
+      "path": "c:\\Users\\tholu\\Desktop\\SOCOM II - U.S. Navy SEALs.iso"
     }
   ],
   "emulators": [

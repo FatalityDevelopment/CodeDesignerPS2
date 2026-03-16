@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using CodeDesigner.Mips64LE.CheatConverter;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Mips64LE.McpServer.Tools;
@@ -502,6 +503,89 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
     }
 
     // -------------------------------------------------------------------------
+    // Cheat code conversion (no emulator required — pure offline processing)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "detect_cheat_format")]
+    [Description("Heuristically detect the encryption format of a block of PS2 cheat codes. " +
+                 "Returns the detected format name (Raw, ActionReplay1, ActionReplay2, " +
+                 "ActionReplayMax, GameSharkV3, CodeBreakerV1, or CodeBreakerV7). " +
+                 "Does not require the emulator to be running.")]
+    public Task<string> DetectCheatFormat(
+        [Description("Multi-line block of PS2 cheat codes whose format should be identified.")] string codes)
+    {
+        if (string.IsNullOrWhiteSpace(codes))
+            return Task.FromResult("Error: no codes provided");
+
+        try
+        {
+            var format = CheatFormatDetector.Detect(codes);
+            return Task.FromResult(format.ToString());
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult($"Error: {ex.Message}");
+        }
+    }
+
+    [McpServerTool(Name = "convert_cheat")]
+    [Description("Convert PS2 cheat codes between the unencrypted raw format and a " +
+                 "device-specific encrypted format. Does not require the emulator to be running.\n\n" +
+                 "Supported formats: Raw, ActionReplay1, ActionReplay2, ActionReplayMax, " +
+                 "GameSharkV3, CodeBreakerV1, CodeBreakerV7.\n\n" +
+                 "direction='toRaw'    — decrypt device codes → unencrypted hex pairs (TTAAAAAA VVVVVVVV). " +
+                 "The source format is auto-detected when targetFormat is omitted.\n" +
+                 "direction='toEngine' — encrypt raw hex pairs → the chosen device format. " +
+                 "targetFormat is required when direction is 'toEngine'.")]
+    public Task<string> ConvertCheat(
+        [Description("Multi-line block of PS2 cheat codes to convert.")] string codes,
+        [Description("Conversion direction: 'toRaw' (decrypt to raw hex) or 'toEngine' (encrypt to device format).")] string direction,
+        [Description("Target/source cheat engine format. Required for 'toEngine'. " +
+                     "Omit or pass empty string for 'toRaw' to auto-detect. " +
+                     "Valid values: Raw, ActionReplay1, ActionReplay2, ActionReplayMax, GameSharkV3, CodeBreakerV1, CodeBreakerV7.")] string? targetFormat = null)
+    {
+        if (string.IsNullOrWhiteSpace(codes))
+            return Task.FromResult("Error: no codes provided");
+        if (string.IsNullOrWhiteSpace(direction))
+            return Task.FromResult("Error: direction must be 'toRaw' or 'toEngine'");
+
+        try
+        {
+            string result;
+
+            if (string.Equals(direction, "toRaw", StringComparison.OrdinalIgnoreCase))
+            {
+                // Auto-detect format when not supplied, then decode → raw
+                ICheatCodeConverter sourceConverter = string.IsNullOrWhiteSpace(targetFormat)
+                    ? CheatFormatDetector.CreateConverter(CheatFormatDetector.Detect(codes))
+                    : CheatFormatDetector.CreateConverter(ParseFormat(targetFormat));
+
+                var rawCodes = sourceConverter.Decode(codes);
+                result = new RawConverter().Encode(rawCodes);
+            }
+            else if (string.Equals(direction, "toEngine", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(targetFormat))
+                    return Task.FromResult("Error: targetFormat is required when direction is 'toEngine'");
+
+                var format = ParseFormat(targetFormat);
+                var rawCodes = new RawConverter().Decode(codes);
+                result = CheatFormatDetector.CreateConverter(format).Encode(rawCodes);
+            }
+            else
+            {
+                return Task.FromResult("Error: direction must be 'toRaw' or 'toEngine'");
+            }
+
+            return Task.FromResult(string.IsNullOrWhiteSpace(result) ? "(no output — check that the input codes are in the expected format)" : result);
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult($"Error: {ex.Message}");
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Snapshot
     // -------------------------------------------------------------------------
 
@@ -519,6 +603,22 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
             cancellationToken);
 
         return FormatSnapshot(json);
+    }
+
+    [McpServerTool(Name = "load_snapshot")]
+    [Description("Reload a previously saved memory snapshot as a save state into the running PS2 emulator. " +
+                 "Reads EEmem.bin, BIOSrom.bin, Scratchpad.bin, and IOPmem.bin from the given directory " +
+                 "and restores them into the live emulator memory. " +
+                 "The emulator is paused automatically before the restore and remains paused afterwards.")]
+    public async Task<string> LoadSnapshot(
+        [Description("Absolute path to the snapshot directory containing the .bin files to restore.")] string inputPath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "LOADSNAPSHOT", InputPath = inputPath },
+            cancellationToken);
+
+        return FormatLoadSnapshot(json);
     }
 
     // -------------------------------------------------------------------------
@@ -542,6 +642,14 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
             return decVal;
 
         return null;
+    }
+
+    private static CheatFormat ParseFormat(string name)
+    {
+        if (!Enum.TryParse<CheatFormat>(name, ignoreCase: true, out var fmt))
+            throw new ArgumentException(
+                $"Unknown cheat format '{name}'. Valid values: Raw, ActionReplay1, ActionReplay2, ActionReplayMax, GameSharkV3, CodeBreakerV1, CodeBreakerV7.");
+        return fmt;
     }
 
     private static string FormatDisasmResults(string json)
@@ -899,6 +1007,37 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
                 uint baseA = item.TryGetProperty("baseAddress", out var bProp) ? bProp.GetUInt32() : 0u;
                 int size = item.TryGetProperty("size", out var sProp) ? sProp.GetInt32() : 0;
                 sb.AppendLine($"  [{label}]  base=0x{baseA:X8}  size={size / 1024} KB  → {file}");
+            }
+
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private static string FormatLoadSnapshot(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var errProp))
+                return $"Error: {errProp.GetString()}";
+
+            if (!root.TryGetProperty("Regions", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Snapshot restored (emulator paused):");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string label = item.TryGetProperty("Label", out var lProp) ? (lProp.GetString() ?? "?") : "?";
+                string file  = item.TryGetProperty("File",  out var fProp) ? (fProp.GetString() ?? "?") : "?";
+                int    size  = item.TryGetProperty("Size",  out var sProp) ? sProp.GetInt32() : 0;
+                sb.AppendLine($"  [{label}]  size={size / 1024} KB  ← {file}");
             }
 
             return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);

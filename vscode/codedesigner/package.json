@@ -7,32 +7,21 @@
     "vscode": "^1.108.1"
   },
   "main": "./dist/extension.js",
+  "activationEvents": [],
   "categories": [
     "Debuggers"
   ],
+    "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TylerDev888/Mips64LE.git"
+  },
   "contributes": {
-    "customEditors": [
-      {
-        "viewType": "disasm.disasmEditor",
-        "displayName": "Disassembler",
-        "selector": [
-          {
-            "filenamePattern": "*.bin"
-          }
-        ]
-      }
-    ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "disasmSidebar",
-          "title": "disasm",
+          "title": "CodeDesigner",
           "icon": "dist/resources/disasm-icon.svg"
-        },
-        {
-          "id": "asmSidebar",
-          "title": "asm",
-          "icon": "dist/resources/asm-icon.svg"
         }
       ]
     },
@@ -42,25 +31,15 @@
           "type": "webview",
           "id": "disasm.disasmPanel",
           "name": "Emulator"
-        }
-      ],
-      "asmSidebar": [
+        },
         {
-          "type": "webview",
-          "id": "asm.asmPanel",
-          "name": "Asm Panel"
+          "type": "tree",
+          "id": "disasm.pointerManager",
+          "name": "Structs"
         }
       ]
     },
     "commands": [
-      {
-        "command": "disasm.showPanel",
-        "title": "Show Disasm Panel"
-      },
-      {
-        "command": "asm.showPanel",
-        "title": "Show Asm Panel"
-      },
       {
         "command": "codedesigner.connectServer",
         "title": "CodeDesigner: Connect to Server"
@@ -72,8 +51,78 @@
       {
         "command": "codedesigner.sendMessage",
         "title": "CodeDesigner: Send Message to Server"
+      },
+      {
+        "command": "codedesigner.recompile",
+        "title": "CodeDesigner: Recompile Game ELF from Disc"
+      },
+      {
+        "command": "codedesigner.pointerManager.addPointer",
+        "title": "Add Struct",
+        "icon": "$(add)"
+      },
+      {
+        "command": "codedesigner.pointerManager.addChildLabel",
+        "title": "Add Child Label",
+        "icon": "$(add)"
+      },
+      {
+        "command": "codedesigner.pointerManager.editNode",
+        "title": "Edit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "codedesigner.pointerManager.deleteNode",
+        "title": "Delete",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "codedesigner.pointerManager.goToAddress",
+        "title": "Go to Address",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "codedesigner.pointerManager.refresh",
+        "title": "Refresh Structs",
+        "icon": "$(refresh)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "codedesigner.pointerManager.addPointer",
+          "when": "view == disasm.pointerManager",
+          "group": "navigation"
+        },
+        {
+          "command": "codedesigner.pointerManager.refresh",
+          "when": "view == disasm.pointerManager",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codedesigner.pointerManager.addChildLabel",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childPointerNode || viewItem == childLabelNode)",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "codedesigner.pointerManager.editNode",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode || viewItem == childPointerNode)",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "codedesigner.pointerManager.deleteNode",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode || viewItem == childPointerNode)",
+          "group": "1_modify@3"
+        },
+        {
+          "command": "codedesigner.pointerManager.goToAddress",
+          "when": "view == disasm.pointerManager && (viewItem == pointerNode || viewItem == childLabelNode || viewItem == childPointerNode)",
+          "group": "2_navigate@1"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "cds",
@@ -93,7 +142,53 @@
         "scopeName": "source.cds",
         "path": "./syntaxes/cds.tmLanguage.json"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "variable.register.zero.cds",
+            "settings": { "foreground": "#858585" }
+          },
+          {
+            "scope": "variable.register.at.cds",
+            "settings": { "foreground": "#cca700" }
+          },
+          {
+            "scope": "variable.register.value.cds",
+            "settings": { "foreground": "#b5cea8" }
+          },
+          {
+            "scope": "variable.register.arg.cds",
+            "settings": { "foreground": "#ce9178" }
+          },
+          {
+            "scope": "variable.register.temp.cds",
+            "settings": { "foreground": "#dcdcaa" }
+          },
+          {
+            "scope": "variable.register.saved.cds",
+            "settings": { "foreground": "#9cdcfe" }
+          },
+          {
+            "scope": "variable.register.kernel.cds",
+            "settings": { "foreground": "#f48771" }
+          },
+          {
+            "scope": "variable.register.special.cds",
+            "settings": { "foreground": "#4ec9b0" }
+          },
+          {
+            "scope": "variable.register.fpu.cds",
+            "settings": { "foreground": "#b5cea8" }
+          },
+          {
+            "scope": "variable.register.numeric.cds",
+            "settings": { "foreground": "#9cdcfe" }
+          }
+        ]
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

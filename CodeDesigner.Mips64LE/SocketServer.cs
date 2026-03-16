@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -9,6 +10,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using CodeDesigner.Mips64LE.CheatConverter;
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.CheatEngine;
 using CodeDesigner.Mips64LE.Common.Emulator;
@@ -26,6 +28,30 @@ namespace CodeDesigner.Mips64LE
         private bool _isRunning;
         private readonly int _port;
         private CancellationTokenSource? _cancellationTokenSource;
+
+        // ── Compiled regexes for CDS compilation (avoid per-line recompilation) ──
+        /// <summary>Matches a bare label definition line: "Name:"  (identifier + colon, optional trailing whitespace).</summary>
+        private static readonly System.Text.RegularExpressions.Regex CdsLabelDefRegex =
+            new(@"^([A-Za-z_][A-Za-z0-9_]*):\s*$",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>
+        /// Matches a label reference inside an instruction operand: ":Name" or ":scope.name".
+        /// Dots are allowed to support pointer-manager scoped labels (e.g. <c>:seal.health</c>).
+        /// </summary>
+        private static readonly System.Text.RegularExpressions.Regex CdsLabelRefRegex =
+            new(@":([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>
+        /// Matches an absolute-address label reference: "@Name" or "@scope.name".
+        /// Dots are allowed to support pointer-manager scoped labels (e.g. <c>@seal.health</c>).
+        /// Replaced with the raw hex address of the label (e.g. 0x80010018),
+        /// suitable for use with jump instructions or absolute address operands.
+        /// </summary>
+        private static readonly System.Text.RegularExpressions.Regex CdsAbsLabelRefRegex =
+            new(@"@([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
 
         /// <summary>
         /// Symbol/label database loaded from ps2MemMap.json at construction time.
@@ -270,6 +296,9 @@ namespace CodeDesigner.Mips64LE
                 {
                     case "ASSEMBLE":
                         return HandleAssemble(command.Data);
+
+                    case "COMPILECDS":
+                        return HandleCompileCds(command.Data, command.Labels);
                     
                     case "DISASSEMBLE":
                         return HandleDisassemble(command.Data, command.Address);
@@ -279,6 +308,9 @@ namespace CodeDesigner.Mips64LE
 
                     case "SNAPSHOT":
                         return HandleSnapshot(command.OutputPath);
+
+                    case "LOADSNAPSHOT":
+                        return HandleLoadSnapshot(command.InputPath);
                     
                     case "PAUSE":
                         return HandlePause();
@@ -309,6 +341,9 @@ namespace CodeDesigner.Mips64LE
 
                     case "WRITEMEM":
                         return HandleWriteMem(command.Address ?? 0, command.Data, command.Region);
+
+                    case "LOADBIN":
+                        return HandleLoadBin(command.InputPath, command.Address ?? 0, command.Region);
 
                     case "APPLYCHEATS":
                         return HandleApplyCheats(command.Data);
@@ -363,6 +398,18 @@ namespace CodeDesigner.Mips64LE
                     case "GETTHREADS":
                         return HandleGetThreads();
 
+                    case "LISTDISCELFS":
+                        return HandleListDiscElfs(command.IsoPath);
+
+                    case "RECOMPILE":
+                        return HandleRecompile(command.IsoPath, command.ElfName, command.OutputDirectory);
+
+                    case "CONVERTCHEAT":
+                        return HandleConvertCheat(command.Data, command.Format, command.Direction);
+
+                    case "PORTCHEATS":
+                        return HandlePortCheats(command.Data, command.SourceDumpPath, command.TargetDumpPath);
+
                     case "PING":
                         return CreateSuccessResponse("PONG");
 
@@ -386,6 +433,453 @@ namespace CodeDesigner.Mips64LE
             {
                 return CreateErrorResponse($"Error processing command: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Handle COMPILECDS command — compiles a .cds (Code Designer Script) assembly file
+        /// into PS2 GameShark / Action Replay cheat codes.
+        ///
+        /// Supported directives:
+        ///   address 0xXXXXXXXX  or  address $XXXXXXXX  — set the current target address.
+        ///   hexcode 0xXXXXXXXX  or  hexcode $XXXXXXXX  — emit a raw 32-bit word.
+        ///   print   "string"                            — ignored (no instruction output).
+        ///
+        /// Supported pseudo-instruction:
+        ///   setreg  reg, value   — expands to lui reg, upper16 + ori reg, reg, lower16.
+        ///
+        /// Label definitions (Name:) and branch label references (:Name) are supported
+        /// via a two-pass approach.
+        ///
+        /// Registers may be written with or without the $ prefix ($v0 or v0).
+        /// Numeric immediates may be decimal (1), 0x-hex (0x0001), or $-hex ($0001).
+        ///
+        /// Each instruction is emitted as a GameShark type-2 code: 2AAAAAAA VVVVVVVV
+        /// </summary>
+        private string HandleCompileCds(string? sourceCode, List<LabelEntry>? externalLabels = null)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(sourceCode))
+                {
+                    return CreateErrorResponse("No source code provided");
+                }
+
+                // Split preserving original line numbers (1-based).
+                var rawLines = sourceCode.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+
+                // ── Pass 1: collect label → address mapping ───────────────────────
+                // Pre-populate with all emulator/server labels so CDS source can use them
+                // directly. CDS-defined labels (Name:) take precedence if names collide.
+                var labelAddresses = new Dictionary<string, uint>(StringComparer.Ordinal);
+                foreach (var kv in _labels)
+                    labelAddresses[kv.Value.Label] = kv.Key;
+
+                // Merge pointer-manager labels (pre-resolved by the frontend).
+                // These carry dotted scope names (e.g. "seal.health") and are injected
+                // here so that CDS source can reference them as :seal.health or @seal.health.
+                // Server labels take precedence on name conflicts.
+                if (externalLabels != null)
+                {
+                    foreach (var entry in externalLabels)
+                    {
+                        if (string.IsNullOrWhiteSpace(entry.Label) || string.IsNullOrWhiteSpace(entry.Address))
+                            continue;
+                        var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                            ? entry.Address[2..]
+                            : entry.Address;
+                        if (uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber,
+                                null, out uint addr) && !labelAddresses.ContainsKey(entry.Label))
+                            labelAddresses[entry.Label] = addr;
+                    }
+                }
+
+                uint scanAddress   = 0;
+                bool scanInBlock   = false;
+
+                foreach (var rawLine in rawLines)
+                {
+                    var raw = rawLine.Trim();
+
+                    // Block comment tracking (/* ... */)
+                    if (scanInBlock)
+                    {
+                        if (raw.Contains("*/")) scanInBlock = false;
+                        continue;
+                    }
+                    if (raw.StartsWith("/*", StringComparison.Ordinal))
+                    {
+                        if (!raw.Contains("*/")) scanInBlock = true;
+                        continue;
+                    }
+
+                    var scan = StripCdsComments(raw);
+                    if (string.IsNullOrWhiteSpace(scan)) { continue; }
+
+                    if (scan.StartsWith("address", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var p = scan.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (p.Length >= 2)
+                        {
+                            if (TryParseCdsUInt32(p[1], out uint addr))
+                                scanAddress = addr;
+                            else if (labelAddresses.TryGetValue(StripLabelPrefix(p[1]), out addr))
+                                scanAddress = addr;
+                        }
+                        continue;
+                    }
+                    if (scan.StartsWith("hexcode", StringComparison.OrdinalIgnoreCase)) { scanAddress += 4; continue; }
+                    if (scan.StartsWith("print",   StringComparison.OrdinalIgnoreCase)) { continue; }
+                    if (scan.StartsWith("setreg",  StringComparison.OrdinalIgnoreCase)) { scanAddress += 8; continue; }
+
+                    // Label definition: "Name:" at start of line (identifier + colon, optional trailing ws)
+                    var labelMatch = CdsLabelDefRegex.Match(scan);
+                    if (labelMatch.Success)
+                    {
+                        labelAddresses[labelMatch.Groups[1].Value] = scanAddress;
+                        continue;
+                    }
+
+                    // Everything else is a regular instruction (4 bytes)
+                    scanAddress += 4;
+                }
+
+                // ── Pass 2: assemble ──────────────────────────────────────────────
+                var results        = new List<InstructionResult>();
+                uint currentAddress = 0;
+                bool inBlockComment = false;
+
+                for (int i = 0; i < rawLines.Length; i++)
+                {
+                    int lineNumber = i + 1;
+                    var raw2 = rawLines[i].Trim();
+
+                    // Block comment tracking (/* ... */)
+                    if (inBlockComment)
+                    {
+                        if (raw2.Contains("*/")) inBlockComment = false;
+                        continue;
+                    }
+                    if (raw2.StartsWith("/*", StringComparison.Ordinal))
+                    {
+                        if (!raw2.Contains("*/")) inBlockComment = true;
+                        continue;
+                    }
+
+                    var trimmed    = StripCdsComments(raw2);
+                    if (string.IsNullOrWhiteSpace(trimmed)) { continue; }
+
+                    // ── address directive ────────────────────────────────────────────
+                    if (trimmed.StartsWith("address", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 2)
+                        {
+                            var addrToken = StripLabelPrefix(parts[1]);
+                            if (TryParseCdsUInt32(parts[1], out uint addr))
+                            {
+                                currentAddress = addr;
+                            }
+                            else if (labelAddresses.TryGetValue(addrToken, out addr))
+                            {
+                                currentAddress = addr;
+                            }
+                            else
+                            {
+                                results.Add(new InstructionResult
+                                {
+                                    Assembly   = trimmed,
+                                    Error      = $"Invalid address value '{parts[1]}'",
+                                    Success    = false,
+                                    LineNumber = lineNumber
+                                });
+                            }
+                        }
+                        else
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = "address directive requires a value (e.g. address 0x20123456 or address EE_BIOS_PUTS)",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                        }
+                        continue;
+                    }
+
+                    // ── hexcode directive (raw 32-bit word) ──────────────────────────
+                    if (trimmed.StartsWith("hexcode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 2)
+                        {
+                            if (TryParseCdsUInt32(parts[1], out uint raw))
+                            {
+                                results.Add(new InstructionResult
+                                {
+                                    Assembly   = trimmed,
+                                    Hex        = FormatGameSharkCode(currentAddress, raw),
+                                    Success    = true,
+                                    LineNumber = lineNumber
+                                });
+                                currentAddress += 4;
+                            }
+                            else
+                            {
+                                results.Add(new InstructionResult
+                                {
+                                    Assembly   = trimmed,
+                                    Error      = $"Invalid hex value '{parts[1]}'",
+                                    Success    = false,
+                                    LineNumber = lineNumber
+                                });
+                            }
+                        }
+                        else
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = "hexcode directive requires a value (e.g. hexcode 0xABCD1234 or hexcode $ABCD1234)",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                        }
+                        continue;
+                    }
+
+                    // ── print directive — no instruction output ──────────────────────
+                    if (trimmed.StartsWith("print", StringComparison.OrdinalIgnoreCase)) { continue; }
+
+                    // ── label definition — no instruction output ─────────────────────
+                    if (CdsLabelDefRegex.IsMatch(trimmed)) { continue; }
+
+                    // ── setreg pseudo-instruction ────────────────────────────────────
+                    // setreg reg, value  →  lui reg, upper16 ; ori reg, reg, lower16
+                    if (trimmed.StartsWith("setreg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts = trimmed.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length < 3)
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = "setreg requires two operands: setreg reg, value",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                            continue;
+                        }
+
+                        string regName = parts[1];
+                        string valStr  = parts[2];
+
+                        if (!TryParseCdsUInt32(valStr, out uint setVal) &&
+                            !labelAddresses.TryGetValue(StripLabelPrefix(valStr), out setVal))
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = $"Invalid setreg value '{valStr}' — expected a number or a known label",
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                            continue;
+                        }
+
+                        uint upper16 = (setVal >> 16) & 0xFFFF;
+                        uint lower16 = setVal & 0xFFFF;
+
+                        try
+                        {
+                            // lui reg, upper16
+                            uint luiEncoded = MipsAssembler.Assemble($"lui {regName}, 0x{upper16:X4}");
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = $"lui {regName}, 0x{upper16:X4}",
+                                Hex        = FormatGameSharkCode(currentAddress, luiEncoded),
+                                Success    = true,
+                                LineNumber = lineNumber
+                            });
+                            currentAddress += 4;
+
+                            // ori reg, reg, lower16
+                            uint oriEncoded = MipsAssembler.Assemble($"ori {regName}, {regName}, 0x{lower16:X4}");
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = $"ori {regName}, {regName}, 0x{lower16:X4}",
+                                Hex        = FormatGameSharkCode(currentAddress, oriEncoded),
+                                Success    = true,
+                                LineNumber = lineNumber
+                            });
+                            currentAddress += 4;
+                        }
+                        catch (Exception ex)
+                        {
+                            results.Add(new InstructionResult
+                            {
+                                Assembly   = trimmed,
+                                Error      = ex.Message,
+                                Success    = false,
+                                LineNumber = lineNumber
+                            });
+                        }
+                        continue;
+                    }
+
+                    // ── MIPS instruction (resolve label references first) ─────────────
+                    try
+                    {
+                        // Determine if this is a J-type jump instruction (j/jal) vs a branch.
+                        // Jumps encode an absolute 26-bit word address; branches use a
+                        // PC-relative 16-bit word offset.
+                        string instMnemonic = trimmed
+                            .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)[0]
+                            .ToLowerInvariant();
+                        bool isJumpInstr = instMnemonic == "j" || instMnemonic == "jal";
+
+                        // Replace :LabelName with the computed target value.
+                        // • Jumps (j/jal)   → absolute byte address (0xXXXXXXXX)
+                        // • Branches (beq…) → PC-relative word offset (signed integer)
+                        string resolved = CdsLabelRefRegex.Replace(
+                            trimmed,
+                            m =>
+                            {
+                                var name = m.Groups[1].Value;
+                                if (!labelAddresses.TryGetValue(name, out uint labelAddr))
+                                    throw new ArgumentException(
+                                        $"Undefined label '{name}' in '{trimmed}' (line {lineNumber})");
+                                if (isJumpInstr)
+                                    return $"0x{labelAddr:X8}";
+                                // Branch offset = (label_addr - (current_addr + 4)) / 4
+                                // Use long arithmetic to avoid overflow when addresses exceed 0x7FFFFFFF
+                                long branchOff = ((long)labelAddr - (long)(currentAddress + 4)) / 4;
+                                return ((int)branchOff).ToString();
+                            });
+
+                        // Replace @LabelName with the raw absolute hex address.
+                        // Use this for jump/call targets and any operand that requires an
+                        // absolute address (e.g. j @EE_BIOS_PUTS, jal @InitHeap,
+                        // setreg $a0, @EE_SCRATCHPAD).
+                        resolved = CdsAbsLabelRefRegex.Replace(
+                            resolved,
+                            m =>
+                            {
+                                var name = m.Groups[1].Value;
+                                if (!labelAddresses.TryGetValue(name, out uint labelAddr))
+                                    throw new ArgumentException(
+                                        $"Undefined label '@{name}' in '{trimmed}' (line {lineNumber})");
+                                return $"0x{labelAddr:X8}";
+                            });
+
+                        uint encoded  = MipsAssembler.Assemble(resolved);
+                        results.Add(new InstructionResult
+                        {
+                            Assembly   = trimmed,
+                            Hex        = FormatGameSharkCode(currentAddress, encoded),
+                            Success    = true,
+                            LineNumber = lineNumber
+                        });
+                        currentAddress += 4;
+                    }
+                    catch (Exception ex)
+                    {
+                        results.Add(new InstructionResult
+                        {
+                            Assembly   = trimmed,
+                            Error      = ex.Message,
+                            Success    = false,
+                            LineNumber = lineNumber
+                        });
+                    }
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "COMPILECDS",
+                    Results = results
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Compile error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Strip inline comments from a CDS source line, finding the earliest
+        /// occurrence of //, ;, or # and cutting from there.
+        /// Lines that are entirely a comment (start with the marker) are left empty.
+        /// </summary>
+        private static string StripCdsComments(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) { return line; }
+
+            // Skip entirely-comment lines fast
+            if (line.StartsWith("//", StringComparison.Ordinal)
+                || line.StartsWith(";",  StringComparison.Ordinal)
+                || line.StartsWith("#",  StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+
+            int cutAt = int.MaxValue;
+            foreach (var marker in new[] { "//", ";", "#" })
+            {
+                int ci = line.IndexOf(marker, StringComparison.Ordinal);
+                if (ci > 0 && ci < cutAt) { cutAt = ci; }
+            }
+
+            return cutAt != int.MaxValue ? line[..cutAt].TrimEnd() : line;
+        }
+
+        /// <summary>
+        /// Strip an optional leading '@' from a CDS label token, so both
+        /// "EE_BIOS_PUTS" and "@EE_BIOS_PUTS" resolve to the same label name.
+        /// </summary>
+        private static string StripLabelPrefix(string token) =>
+            token.Length > 0 && token[0] == '@' ? token[1..] : token;
+
+        /// <summary>
+        /// Parse a CDS numeric literal that may be prefixed with $, 0x, or neither.
+        ///   $XXXX  → hexadecimal (CDS / PS2 assembler style)
+        ///   0xXXXX → hexadecimal
+        ///   DDDDD  → decimal
+        /// Returns false if the string cannot be parsed.
+        /// </summary>
+        private static bool TryParseCdsUInt32(string s, out uint value)
+        {
+            value = 0;
+            if (string.IsNullOrWhiteSpace(s)) { return false; }
+            s = s.Trim();
+            try
+            {
+                if (s.StartsWith("$", StringComparison.Ordinal))
+                {
+                    value = Convert.ToUInt32(s[1..], 16);
+                    return true;
+                }
+                if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = Convert.ToUInt32(s, 16);
+                    return true;
+                }
+                value = uint.Parse(s);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Format a 32-bit address/value pair as a PS2 GameShark type-2 (32-bit write) code.
+        /// Format: 2AAAAAAA VVVVVVVV  (address low 28 bits, value 32 bits).
+        /// </summary>
+        private static string FormatGameSharkCode(uint address, uint value)
+        {
+            // Type-2 prefix (0x20000000) ORed with the low 28 bits of the target address.
+            uint codeAddr = 0x20000000u | (address & 0x0FFFFFFFu);
+            return $"{codeAddr:X8} {value:X8}";
         }
 
         /// <summary>
@@ -491,11 +985,23 @@ namespace CodeDesigner.Mips64LE
                         // Pass PC to disassembler for proper branch target calculation
                         string disasm = MipsDisassembler.Disassemble(instruction, currentPc);
 
+                        // For unknown instructions the disassembler returns ".word 0xXXXXXXXX  # Unknown ..."
+                        // Per the problem statement, the instruction column should just say "unknown"
+                        // and the details should be placed in the comment column instead.
+                        string assembly = disasm;
+                        string? unknownComment = null;
+                        if (disasm.StartsWith(".word ", StringComparison.Ordinal))
+                        {
+                            assembly = "unknown";
+                            unknownComment = disasm.Substring(".word ".Length);
+                        }
+
                         results.Add(new InstructionResult
                         {
                             Hex = $"0x{instruction:X8}",
-                            Assembly = disasm,
-                            Success = true
+                            Assembly = assembly,
+                            Success = true,
+                            Comment = unknownComment
                         });
                         
                         // Store instruction for analysis
@@ -688,7 +1194,7 @@ namespace CodeDesigner.Mips64LE
                     (Label: "EE Main RAM",  File: "EEmem.bin",    Bytes: Scheduler.EE.Bus.Ram,        Base: 0x00000000u),
                     (Label: "BIOS ROM",     File: "BIOSrom.bin",   Bytes: Scheduler.EE.Bus.Bios,       Base: PS2MemoryBus.BiosRomPhysBase),
                     (Label: "Scratchpad",   File: "Scratchpad.bin",Bytes: Scheduler.EE.Bus.Scratchpad, Base: 0x70000000u),
-                    (Label: "IOP RAM",      File: "IOPmem.bin",    Bytes: Scheduler.IOP.Bus.Ram,       Base: 0x00000000u),
+                    (Label: "IOP RAM",      File: "IOPmem.bin",    Bytes: Scheduler.IOP.Bus.Ram,       Base: EeIopMirrorBase),
                 };
 
                 var written = new List<SnapshotRegion>();
@@ -716,6 +1222,74 @@ namespace CodeDesigner.Mips64LE
             catch (Exception ex)
             {
                 return CreateErrorResponse($"Snapshot error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle LOADSNAPSHOT command — restores all memory regions from .bin files
+        /// previously written by a SNAPSHOT command.  The emulator must be paused
+        /// before calling this; if it is not paused it will be paused automatically
+        /// and left paused after the restore completes.
+        /// </summary>
+        private string HandleLoadSnapshot(string? inputPath)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            if (string.IsNullOrWhiteSpace(inputPath))
+                return CreateErrorResponse("InputPath is required for LOADSNAPSHOT");
+
+            if (!Directory.Exists(inputPath))
+                return CreateErrorResponse($"Snapshot directory not found: {inputPath}");
+
+            // Pause the emulator while we swap memory so it does not race with
+            // the run-loop reading/writing the same arrays.
+            bool wasPaused = Scheduler.Paused;
+            Scheduler.Paused = true;
+            try
+            {
+                var regions = new[]
+                {
+                    (File: "EEmem.bin",     Label: "EE Main RAM",  Bytes: Scheduler.EE.Bus.Ram,        MaxSize: PS2MemoryBus.MainRamSize,        Base: 0x00000000u),
+                    (File: "BIOSrom.bin",   Label: "BIOS ROM",     Bytes: Scheduler.EE.Bus.Bios,       MaxSize: Scheduler.EE.Bus.Bios.Length,   Base: PS2MemoryBus.BiosRomPhysBase),
+                    (File: "Scratchpad.bin",Label: "Scratchpad",   Bytes: Scheduler.EE.Bus.Scratchpad, MaxSize: PS2MemoryBus.ScratchpadSize,     Base: 0x70000000u),
+                    (File: "IOPmem.bin",    Label: "IOP RAM",      Bytes: Scheduler.IOP.Bus.Ram,       MaxSize: Scheduler.IOP.Bus.Ram.Length,   Base: EeIopMirrorBase),
+                };
+
+                var loaded = new List<SnapshotRegion>();
+                foreach (var (file, label, dest, maxSize, baseAddr) in regions)
+                {
+                    string filePath = Path.Combine(inputPath, file);
+                    if (!File.Exists(filePath))
+                        continue;
+
+                    byte[] src = File.ReadAllBytes(filePath);
+                    int count = Math.Min(src.Length, maxSize);
+                    Array.Copy(src, dest, count);
+
+                    loaded.Add(new SnapshotRegion
+                    {
+                        Label       = label,
+                        File        = filePath,
+                        BaseAddress = baseAddr,
+                        Size        = count,
+                    });
+                }
+
+                // Leave emulator paused so the caller can inspect state or resume
+                // explicitly.
+                var response = new CommandResponse
+                {
+                    Success = true,
+                    Command = "LOADSNAPSHOT",
+                    Regions = loaded,
+                };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                if (!wasPaused) Scheduler.Paused = false;
+                return CreateErrorResponse($"LoadSnapshot error: {ex.Message}");
             }
         }
 
@@ -839,15 +1413,33 @@ namespace CodeDesigner.Mips64LE
         /// Normalize a virtual EE address to its KSEG0 representation.
         /// KSEG1 (0xA0000000–0xBFFFFFFF, uncached) is remapped to the equivalent
         /// KSEG0 address (0x80000000–0x9FFFFFFF, cached) so that all PC values
-        /// and breakpoint addresses presented to the client are consistent and use
-        /// the 0x8xxxxxxx / 0x9xxxxxxx form regardless of which segment the CPU
-        /// is physically executing from.
+        /// presented to the client are consistent and use the 0x8xxxxxxx /
+        /// 0x9xxxxxxx form regardless of which segment the CPU is executing from.
         /// </summary>
         private static uint NormalizePcToKseg0(uint vaddr)
         {
             // KSEG1: bits[31:29] == 101 (0xA0000000–0xBFFFFFFF)
             if ((vaddr & 0xE0000000u) == 0xA0000000u)
                 return (vaddr & 0x1FFFFFFFu) | 0x80000000u;
+            return vaddr;
+        }
+
+        /// <summary>
+        /// Normalize a virtual EE address to its physical representation for
+        /// breakpoint storage.  KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1
+        /// (0xA0000000–0xBFFFFFFF) both strip the top 3 bits to yield the
+        /// physical address.  Physical addresses (from the live disassembly panels
+        /// which display EE Main RAM at 0x00000000 and BIOS ROM at 0x1FC00000) and
+        /// KUSEG user-mode addresses pass through unchanged.
+        /// Using physical addresses as the canonical form ensures that a breakpoint
+        /// set from the disassembly panel fires correctly regardless of which
+        /// virtual alias the CPU uses at runtime.
+        /// </summary>
+        private static uint NormalizeBreakpointToPhysical(uint vaddr)
+        {
+            // KSEG0 (0x80000000–0x9FFFFFFF) or KSEG1 (0xA0000000–0xBFFFFFFF)
+            if (vaddr >= 0x80000000u && vaddr <= 0xBFFFFFFFu)
+                return vaddr & 0x1FFFFFFFu;
             return vaddr;
         }
 
@@ -867,6 +1459,7 @@ namespace CodeDesigner.Mips64LE
             }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
+            uint normalized = NormalizeBreakpointToPhysical(address.Value);
             Scheduler.Breakpoints.Add(normalized);
             return CreateSuccessResponse($"Breakpoint set at 0x{normalized:X8}");
         }
@@ -887,6 +1480,7 @@ namespace CodeDesigner.Mips64LE
             }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
+            uint normalized = NormalizeBreakpointToPhysical(address.Value);
             Scheduler.Breakpoints.Remove(normalized);
             return CreateSuccessResponse($"Breakpoint cleared at 0x{normalized:X8}");
         }
@@ -1478,7 +2072,15 @@ namespace CodeDesigner.Mips64LE
                 uint vaddr = address + (uint)i;
                 if (useIop)
                 {
+                    // Supported address windows for IOP writes:
+                    //   0x00000000–0x003FFFFF  physical IOP RAM (direct)
+                    //   0x80000000–0xBFFFFFFF  KSEG0/KSEG1 — strip top 3 bits
+                    //   0x1C000000–0x1DFFFFFF  EE VTLB mirror of IOP RAM
+                    // The IOP RAM panel uses region='iop' and sends addresses starting
+                    // at 0x1C000000, so the EeIopMirrorBase subtraction is essential.
                     uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
+                    if (physAddr >= EeIopMirrorBase && physAddr < EeIopMirrorEnd)
+                        physAddr -= EeIopMirrorBase;
                     if (physAddr < (uint)IopMemoryBus.RamSize)
                         Scheduler!.IOP.Bus.Ram[physAddr] = bytes[i];
                 }
@@ -1499,6 +2101,94 @@ namespace CodeDesigner.Mips64LE
                 }
             }
             return CreateSuccessResponse($"Wrote {bytes.Length} byte(s) to 0x{address:X8}");
+        }
+
+        /// <summary>
+        /// Handle LOADBIN command — read a binary file from disk and copy it directly
+        /// into live emulator memory at the specified address.  This is more efficient
+        /// than WRITEMEM for large files because the file data is never transferred over
+        /// the socket; the server reads it locally from <paramref name="filePath"/>.
+        /// </summary>
+        private string HandleLoadBin(string? filePath, uint address, string? region)
+        {
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            if (string.IsNullOrWhiteSpace(filePath))
+                return CreateErrorResponse("InputPath is required for LOADBIN");
+            if (!File.Exists(filePath))
+                return CreateErrorResponse($"File not found: {filePath}");
+
+            byte[] bytes;
+            try
+            {
+                bytes = File.ReadAllBytes(filePath);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Could not read file: {ex.Message}");
+            }
+
+            bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+            if (useIop)
+            {
+                // Translate the start address and bulk-copy when the entire range fits in IOP RAM.
+                uint startPhys = IopMemoryBus.TranslateAddress(address);
+                if (startPhys >= EeIopMirrorBase && startPhys < EeIopMirrorEnd)
+                    startPhys -= EeIopMirrorBase;
+
+                if (startPhys + (uint)bytes.Length <= (uint)IopMemoryBus.RamSize)
+                {
+                    Array.Copy(bytes, 0, Scheduler.IOP.Bus.Ram, (int)startPhys, bytes.Length);
+                }
+                else
+                {
+                    for (int i = 0; i < bytes.Length; i++)
+                    {
+                        uint vaddr    = address + (uint)i;
+                        uint physAddr = IopMemoryBus.TranslateAddress(vaddr);
+                        if (physAddr >= EeIopMirrorBase && physAddr < EeIopMirrorEnd)
+                            physAddr -= EeIopMirrorBase;
+                        if (physAddr < (uint)IopMemoryBus.RamSize)
+                            Scheduler.IOP.Bus.Ram[physAddr] = bytes[i];
+                    }
+                }
+            }
+            else
+            {
+                // Translate the EE start address and bulk-copy when the entire range fits in Main RAM.
+                uint startPhys;
+                if (address >= 0x80000000u && address < 0xC0000000u)
+                    startPhys = address & 0x1FFFFFFFu;
+                else if (address >= EeUncachedRamBase && address < EeUncachedRamEnd)
+                    startPhys = address - EeUncachedRamBase;
+                else
+                    startPhys = address;
+
+                if (startPhys + (uint)bytes.Length <= (uint)PS2MemoryBus.MainRamSize)
+                {
+                    Array.Copy(bytes, 0, Scheduler.EE.Bus.Ram, (int)startPhys, bytes.Length);
+                }
+                else
+                {
+                    for (int i = 0; i < bytes.Length; i++)
+                    {
+                        uint vaddr = address + (uint)i;
+                        uint physAddr;
+                        if (vaddr >= 0x80000000u && vaddr < 0xC0000000u)
+                            physAddr = vaddr & 0x1FFFFFFFu;
+                        else if (vaddr >= EeUncachedRamBase && vaddr < EeUncachedRamEnd)
+                            physAddr = vaddr - EeUncachedRamBase;
+                        else
+                            physAddr = vaddr;
+
+                        if (physAddr < (uint)PS2MemoryBus.MainRamSize)
+                            Scheduler.EE.Bus.Ram[physAddr] = bytes[i];
+                        else if (vaddr >= 0x70000000u && vaddr < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                            Scheduler.EE.Bus.Scratchpad[vaddr - 0x70000000u] = bytes[i];
+                    }
+                }
+            }
+            return CreateSuccessResponse($"Loaded {bytes.Length} byte(s) from {Path.GetFileName(filePath)} to 0x{address:X8}");
         }
 
         /// <summary>
@@ -1526,6 +2216,994 @@ namespace CodeDesigner.Mips64LE
             catch (Exception ex)
             {
                 return CreateErrorResponse($"ApplyCheats error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle PORTCHEATS command — scans two raw EE-RAM dump files and attempts to
+        /// relocate a list of raw GameShark cheat codes from the source revision to the
+        /// target revision using hex-pattern matching.
+        ///
+        /// Strategy: for each cheat address, extract a context window of bytes immediately
+        /// BEFORE the target address from the source dump, then search the target dump for
+        /// that same byte sequence.  The position where it matches, plus the window size,
+        /// gives the new cheat address.  Three window sizes are attempted in order (48, 32,
+        /// 16 bytes) so that a wider — and therefore more reliable — pattern is preferred.
+        ///
+        /// When the simple window approach fails or yields too many matches, three additional
+        /// strategies are tried in order:
+        ///   2. MIPS code-reference fingerprint: find LUI+load/store instruction sequences
+        ///      that reference the cheat address, mask out the address-specific immediate
+        ///      bytes, and search the target for the masked function fingerprint.
+        ///   3. Extended anchor search: scan backwards up to 512 bytes for the nearest
+        ///      non-trivial (non-zero) byte sequence, use it as an anchor, filter out
+        ///      "static" matches (same position in both dumps), and pick from the remaining
+        ///      dynamic candidates.
+        ///   4. Pointer scan: search the source dump for 32-bit pointers that point to the
+        ///      cheat address or its structural header, then follow those same pointer
+        ///      locations in the target dump to derive the new address.
+        /// </summary>
+        private string HandlePortCheats(string? cheatText, string? sourcePath, string? targetPath)
+        {
+            if (string.IsNullOrWhiteSpace(cheatText))
+                return CreateErrorResponse("No cheat data provided");
+            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+                return CreateErrorResponse($"Source dump not found: {sourcePath}");
+            if (string.IsNullOrWhiteSpace(targetPath) || !File.Exists(targetPath))
+                return CreateErrorResponse($"Target dump not found: {targetPath}");
+
+            byte[] sourceData;
+            byte[] targetData;
+            try
+            {
+                sourceData = File.ReadAllBytes(sourcePath);
+                targetData = File.ReadAllBytes(targetPath);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"Failed to read dump files: {ex.Message}");
+            }
+
+            // Parse cheat blocks using the existing infrastructure.
+            var cheatList = new CheatList(cheatText);
+            List<CodeDesigner.Mips64LE.Common.CheatEngine.CheatBlock> blocks;
+            try { blocks = cheatList.Parse(); }
+            catch (Exception ex) { return CreateErrorResponse($"Failed to parse cheat codes: {ex.Message}"); }
+
+            var allResults = new List<PortCheatResult>();
+            var logLines   = new List<string>();
+            logLines.Add($"[PORTCHEATS] Source: {sourcePath}");
+            logLines.Add($"[PORTCHEATS] Target: {targetPath}");
+            logLines.Add(string.Empty);
+
+            // Window sizes to try, largest first (most reliable → least).
+            int[] windowSizes = { 48, 32, 16 };
+
+            // ── Phase 0: collect all unique physical addresses across every block ──
+            // Many cheat lists include both an ON and an OFF code for the same address.
+            // Consolidating duplicates here means each address is searched only once.
+            var uniqueAddrs = new HashSet<int>();
+            foreach (var b in blocks)
+                foreach (var c in b.Cheats)
+                    uniqueAddrs.Add(c.Address);
+
+            int totalCheats = blocks.Sum(b => b.Cheats.Count);
+            logLines.Add($"[PORTCHEATS] {totalCheats} cheat entr{(totalCheats == 1 ? "y" : "ies")} across {blocks.Count} block{(blocks.Count == 1 ? "" : "s")}, {uniqueAddrs.Count} unique address{(uniqueAddrs.Count == 1 ? "" : "es")} to resolve.");
+            logLines.Add(string.Empty);
+
+            // ── Phase 1: resolve each unique address exactly once ─────────────────
+            var addressCache = new Dictionary<int, AddressSearchResult>(uniqueAddrs.Count);
+            foreach (int addr in uniqueAddrs)
+            {
+                logLines.Add($"Resolving 0x{addr:X6}…");
+                addressCache[addr] = ResolvePhysAddress(sourceData, targetData, addr, logLines, windowSizes);
+                logLines.Add(string.Empty);
+            }
+
+            // ── Phase 2: emit per-block / per-cheat results using the cache ───────
+            foreach (var block in blocks)
+            {
+                string blockName = block.Label ?? string.Empty;
+                logLines.Add($"--- {(string.IsNullOrWhiteSpace(blockName) ? "(unnamed block)" : blockName)} ---");
+
+                foreach (var cheat in block.Cheats)
+                {
+                    int    physAddr = cheat.Address;
+                    string typeHex  = ((int)cheat.CheatType).ToString("X2");
+                    // Reconstruct the value hex (big-endian as written in the cheat file).
+                    byte[] valBytes = (byte[])cheat.Data.Clone();
+                    Array.Reverse(valBytes);
+                    string valueHex = BitConverter.ToString(valBytes).Replace("-", "");
+                    string origCode = $"{typeHex}{physAddr:X6} {valueHex}";
+
+                    var cached = addressCache[physAddr];
+
+                    var result = new PortCheatResult
+                    {
+                        BlockName    = blockName,
+                        BlockText    = block.BlockText,
+                        OriginalCode = origCode,
+                        Found        = cached.Found,
+                        Method       = cached.Method,
+                        Confidence   = cached.Confidence,
+                        Ambiguous    = cached.Ambiguous,
+                    };
+
+                    if (cached.Found)
+                    {
+                        result.NewCode = $"{typeHex}{cached.NewPhysAddr:X6} {valueHex}";
+                        if (cached.Ambiguous && cached.CandidateAddrs != null)
+                            result.Candidates = cached.CandidateAddrs
+                                .Take(8)
+                                .Select(a => $"{typeHex}{a:X6} {valueHex}")
+                                .ToList();
+                        logLines.Add($"  {origCode} → {result.NewCode}  (confidence {cached.Confidence}%, method: {cached.Method})");
+                    }
+                    else
+                    {
+                        logLines.Add($"  {origCode} → NOT FOUND");
+                    }
+
+                    allResults.Add(result);
+                }
+
+                logLines.Add(string.Empty);
+            }
+
+            int foundCount = allResults.Count(r => r.Found);
+            logLines.Add($"[PORTCHEATS] Complete: {foundCount}/{allResults.Count} codes ported.");
+
+            var response = new CommandResponse
+            {
+                Success          = true,
+                Command          = "PORTCHEATS",
+                Data             = string.Join("\n", logLines),
+                PortCheatResults = allResults,
+            };
+            return JsonSerializer.Serialize(response);
+        }
+
+        // ════════════════════════════════════════════════════════════════════════
+        // PORTCHEATS helper types
+        // ════════════════════════════════════════════════════════════════════════
+
+        private sealed class PortCheatCandidate
+        {
+            public int    Address    { get; set; }
+            public int    Confidence { get; set; }
+            public string Method     { get; set; } = string.Empty;
+        }
+
+        /// <summary>Cached resolution result for a single unique physical address.</summary>
+        private sealed class AddressSearchResult
+        {
+            public bool       Found          { get; set; }
+            public int        NewPhysAddr    { get; set; }
+            public string     Method         { get; set; } = string.Empty;
+            public int        Confidence     { get; set; }
+            public bool       Ambiguous      { get; set; }
+            /// <summary>Raw target physical addresses for ambiguous results (no code formatting).</summary>
+            public List<int>? CandidateAddrs { get; set; }
+        }
+
+        private sealed class MipsCodeRef
+        {
+            /// <summary>Byte position of the LUI instruction in the source dump.</summary>
+            public int LuiPos { get; set; }
+            /// <summary>Byte position of the load/store/addiu that uses the address offset.</summary>
+            public int RefPos { get; set; }
+        }
+
+        // ════════════════════════════════════════════════════════════════════════
+        // Unified address resolver (runs all four strategies for one physAddr)
+        // ════════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Runs the four PORTCHEATS strategies in order for a single physical address
+        /// and returns the best result found.  Called once per unique address; results
+        /// are cached so each address is searched only once even when multiple cheat
+        /// entries share the same address.
+        /// </summary>
+        private static AddressSearchResult ResolvePhysAddress(
+            byte[] sourceData, byte[] targetData, int physAddr,
+            IList<string> logLines, int[] windowSizes)
+        {
+            var result   = new AddressSearchResult();
+            bool foundAny = false;
+
+            // ── Strategy 1: simple before-window ────────────────────────────────
+            foreach (int windowSize in windowSizes)
+            {
+                int patternStart = physAddr - windowSize;
+                if (patternStart < 0 || physAddr >= sourceData.Length)
+                {
+                    logLines.Add($"    [S1 {windowSize}B window] Address out of range — skipping");
+                    continue;
+                }
+
+                int actualWindow = physAddr - patternStart;
+                if (actualWindow <= 0) continue;
+
+                byte[] pattern = new byte[actualWindow];
+                Array.Copy(sourceData, patternStart, pattern, 0, actualWindow);
+
+                bool allZero = pattern.All(b => b == 0);
+                if (allZero)
+                {
+                    logLines.Add($"    [S1 {windowSize}B window] All-zero pattern — skipping");
+                    continue;
+                }
+
+                logLines.Add($"    [S1] Trying HexPattern-{actualWindow}: scanning {targetData.Length / 1024 / 1024} MB…");
+                var matches = FindPattern(targetData, pattern);
+
+                if (matches.Count == 0)
+                {
+                    logLines.Add($"    [S1] HexPattern-{actualWindow}: no match");
+                    continue;
+                }
+
+                var dynamicMatches = matches
+                    .Where(m => m + actualWindow <= sourceData.Length &&
+                                !sourceData.AsSpan(m, actualWindow).SequenceEqual(pattern))
+                    .ToList();
+
+                var usefulMatches = dynamicMatches.Count > 0 ? dynamicMatches : matches;
+
+                foundAny = true;
+                bool ambiguous = usefulMatches.Count > 1;
+                int  bestMatch = usefulMatches[0] + actualWindow;
+
+                result.Found       = true;
+                result.NewPhysAddr = bestMatch;
+                result.Method      = $"HexPattern-{actualWindow}" + (dynamicMatches.Count > 0 ? "-filtered" : "");
+                result.Confidence  = ambiguous ? Math.Max(20, 100 - (usefulMatches.Count - 1) * 25) : 100;
+                result.Ambiguous   = ambiguous;
+
+                if (ambiguous)
+                {
+                    result.CandidateAddrs = usefulMatches.Take(8).Select(m => m + actualWindow).ToList();
+                    logLines.Add($"    [S1] HexPattern-{actualWindow}: {usefulMatches.Count} candidates — best: 0x{bestMatch:X6}");
+                    foreach (var m in usefulMatches.Take(8))
+                        logLines.Add($"      candidate 0x{m + actualWindow:X6}");
+                }
+                else
+                {
+                    logLines.Add($"    [S1] HexPattern-{actualWindow}: unique match → 0x{bestMatch:X6}  ✓");
+                }
+
+                break;
+            }
+
+            // ── Strategy 2: MIPS code-reference fingerprint ──────────────────────
+            if (!foundAny || result.Confidence < 100)
+            {
+                logLines.Add($"    [S2] Trying MIPS code-reference fingerprint…");
+                var codeRefs = FindMipsCodeReferences(sourceData, physAddr, logLines);
+                if (codeRefs.Count > 0)
+                {
+                    logLines.Add($"    [S2] Found {codeRefs.Count} code reference(s) — building fingerprints");
+                    foreach (var cref in codeRefs)
+                    {
+                        int fpBefore = Math.Min(cref.LuiPos, 32);
+                        int fpAfter  = Math.Min(sourceData.Length - cref.RefPos, 16);
+                        int fpStart  = cref.LuiPos - fpBefore;
+                        int fpLen    = (cref.RefPos + fpAfter) - fpStart;
+                        if (fpLen <= 0 || fpStart + fpLen > sourceData.Length) continue;
+
+                        byte[] fp   = new byte[fpLen];
+                        byte[] mask = new byte[fpLen];
+                        Array.Copy(sourceData, fpStart, fp, 0, fpLen);
+                        Array.Fill(mask, (byte)0xFF);
+
+                        int refInFp = cref.RefPos - fpStart;
+                        if (refInFp + 1 < mask.Length)
+                        {
+                            mask[refInFp]     = 0;
+                            mask[refInFp + 1] = 0;
+                        }
+                        int luiInFp = cref.LuiPos - fpStart;
+                        if (luiInFp + 1 < mask.Length)
+                        {
+                            mask[luiInFp]     = 0;
+                            mask[luiInFp + 1] = 0;
+                        }
+
+                        var fpMatches = FindMaskedPattern(targetData, fp, mask, step: 4);
+                        if (fpMatches.Count == 0)
+                        {
+                            logLines.Add($"    [S2] Fingerprint-{fpLen}B: no match");
+                            continue;
+                        }
+
+                        var candidates = new List<int>();
+                        foreach (int fm in fpMatches)
+                        {
+                            int matchRefPos = fm + refInFp;
+                            if (matchRefPos + 2 > targetData.Length) continue;
+                            int newLow16 = targetData[matchRefPos] | (targetData[matchRefPos + 1] << 8);
+
+                            int matchLuiPos = fm + luiInFp;
+                            if (matchLuiPos + 4 > targetData.Length) continue;
+                            int newLuiImm = targetData[matchLuiPos] | (targetData[matchLuiPos + 1] << 8);
+
+                            int newAddr = (newLuiImm << 16) + (short)newLow16;
+                            if (newAddr > 0 && newAddr < targetData.Length)
+                                candidates.Add(newAddr);
+                        }
+
+                        if (candidates.Count == 0) continue;
+
+                        bool ambig = candidates.Count > 1;
+                        int  best  = candidates[0];
+                        int  conf  = ambig ? Math.Max(40, 100 - (candidates.Count - 1) * 30) : 100;
+
+                        if (!foundAny || conf > result.Confidence)
+                        {
+                            foundAny           = true;
+                            result.Found       = true;
+                            result.NewPhysAddr = best;
+                            result.Method      = $"CodeRef-{fpLen}B";
+                            result.Confidence  = conf;
+                            result.Ambiguous   = ambig;
+                            result.CandidateAddrs = ambig ? candidates.Take(8).ToList() : null;
+
+                            if (ambig)
+                                logLines.Add($"    [S2] Fingerprint-{fpLen}B: {candidates.Count} candidates — best 0x{best:X6}");
+                            else
+                                logLines.Add($"    [S2] Fingerprint-{fpLen}B: unique match → 0x{best:X6}  ✓");
+                        }
+
+                        if (result.Confidence == 100) break;
+                    }
+                }
+                else
+                {
+                    logLines.Add($"    [S2] No direct MIPS code references found");
+                }
+            }
+
+            // ── Strategy 3: extended anchor search ────────────────────────────────
+            if (!foundAny || result.Confidence < 100)
+            {
+                logLines.Add($"    [S3] Trying extended anchor search (up to 512B scan-back)…");
+                var anchorCandidates = FindAnchorCandidates(sourceData, targetData, physAddr, logLines);
+
+                if (anchorCandidates.Count > 0)
+                {
+                    int  best  = anchorCandidates[0].Address;
+                    bool ambig = anchorCandidates.Count > 1;
+                    int  conf  = anchorCandidates[0].Confidence;
+
+                    if (!foundAny || conf > result.Confidence)
+                    {
+                        foundAny           = true;
+                        result.Found       = true;
+                        result.NewPhysAddr = best;
+                        result.Method      = anchorCandidates[0].Method;
+                        result.Confidence  = conf;
+                        result.Ambiguous   = ambig;
+                        result.CandidateAddrs = ambig
+                            ? anchorCandidates.Take(8).Select(c => c.Address).ToList()
+                            : null;
+
+                        if (ambig)
+                            logLines.Add($"    [S3] {anchorCandidates.Count} candidates — best 0x{best:X6} (confidence {conf}%)");
+                        else
+                            logLines.Add($"    [S3] Unique anchor match → 0x{best:X6}  ✓");
+                    }
+                }
+                else
+                {
+                    logLines.Add($"    [S3] No anchor match found");
+                }
+            }
+
+            // ── Strategy 4: pointer scan ─────────────────────────────────────────
+            if (!foundAny || result.Confidence < 100)
+            {
+                logLines.Add($"    [S4] Trying pointer scan…");
+                var ptrCandidates = FindViaPointerScan(sourceData, targetData, physAddr, logLines);
+
+                if (ptrCandidates.Count > 0)
+                {
+                    int  best  = ptrCandidates[0].Address;
+                    bool ambig = ptrCandidates.Count > 1;
+                    int  conf  = ptrCandidates[0].Confidence;
+
+                    if (!foundAny || conf > result.Confidence)
+                    {
+                        foundAny           = true;
+                        result.Found       = true;
+                        result.NewPhysAddr = best;
+                        result.Method      = ptrCandidates[0].Method;
+                        result.Confidence  = conf;
+                        result.Ambiguous   = ambig;
+                        result.CandidateAddrs = ambig
+                            ? ptrCandidates.Take(8).Select(c => c.Address).ToList()
+                            : null;
+
+                        if (ambig)
+                            logLines.Add($"    [S4] {ptrCandidates.Count} pointer candidates — best 0x{best:X6} (confidence {conf}%)");
+                        else
+                            logLines.Add($"    [S4] Unique pointer match → 0x{best:X6}  ✓");
+                    }
+                }
+                else
+                {
+                    logLines.Add($"    [S4] No pointer match found");
+                }
+            }
+
+            if (!result.Found)
+                result.Method = "No match — all strategies exhausted";
+
+            return result;
+        }
+
+        /// <summary>
+        /// Scans <paramref name="sourceData"/> for MIPS LUI + load/store/addiu instruction
+        /// pairs that together reference <paramref name="physAddr"/>.  All standard PS2 EE
+        /// virtual address spaces are tried (user, KSEG0, KSEG1).
+        /// </summary>
+        private static List<MipsCodeRef> FindMipsCodeReferences(
+            byte[] sourceData, int physAddr, IList<string> logLines)
+        {
+            var refs = new List<MipsCodeRef>();
+
+            // Three PS2 EE virtual address spaces:
+            //   0x00000000 – user mode (application code, mapped 1:1 to physical)
+            //   0x80000000 – KSEG0 (kernel cached, physical = vaddr & 0x1FFFFFFF)
+            //   0xA0000000 – KSEG1 (kernel uncached, physical = vaddr & 0x1FFFFFFF)
+            // Many games reference EE RAM through KSEG0; device drivers use KSEG1.
+            int[] vbases = { 0x00000000, unchecked((int)0x80000000), unchecked((int)0xA0000000) };
+
+            foreach (int vbase in vbases)
+            {
+                uint vaddr  = unchecked((uint)(vbase + physAddr));
+                int  low16  = (int)(vaddr & 0xFFFF);
+                int  high16 = (int)((vaddr >> 16) & 0xFFFF);
+                // MIPS assemblers correct for the sign-extension applied by load/store
+                // immediates: if the low 16 bits would be interpreted as negative (≥ 0x8000),
+                // the assembler increments the LUI immediate by 1 so that the runtime sum
+                // (LUI_result + sign_extend(imm)) still equals the intended address.
+                int luiImm = (high16 + (low16 >= 0x8000 ? 1 : 0)) & 0xFFFF;
+
+                byte luiLo = (byte)(luiImm & 0xFF);
+                byte luiHi = (byte)((luiImm >> 8) & 0xFF);
+                byte offLo = (byte)(low16 & 0xFF);
+                byte offHi = (byte)((low16 >> 8) & 0xFF);
+
+                // Scan 4-byte-aligned positions for LUI instructions.
+                for (int i = 0; i <= sourceData.Length - 4; i += 4)
+                {
+                    // LUI in little-endian: [imm_lo][imm_hi][reg][0x3C]
+                    if (sourceData[i] != luiLo || sourceData[i + 1] != luiHi || sourceData[i + 3] != 0x3C)
+                        continue;
+
+                    // Look forward up to 256 bytes for a load/store/addiu using the offset.
+                    int limit = Math.Min(sourceData.Length - 4, i + 256);
+                    for (int j = i + 4; j <= limit; j += 4)
+                    {
+                        if (sourceData[j] != offLo || sourceData[j + 1] != offHi) continue;
+
+                        // In little-endian MIPS encoding byte[3] is the most-significant byte
+                        // of the 32-bit instruction word; the opcode occupies its top 6 bits
+                        // (bits [31:26] of the word), so opcode = byte[3] >> 2.
+                        // We accept I-type immediate instructions: ALU immediates (0x08–0x0F),
+                        // loads (0x20–0x27), and stores (0x28–0x2F).
+                        int op = sourceData[j + 3] >> 2;
+                        if ((op >= 0x08 && op <= 0x0F) || (op >= 0x20 && op <= 0x2F))
+                        {
+                            refs.Add(new MipsCodeRef { LuiPos = i, RefPos = j });
+                            logLines.Add($"    [S2]   Found: LUI@0x{i:X} + ref@0x{j:X} (vbase=0x{(uint)vbase:X8})");
+                        }
+                        break;
+                    }
+
+                    if (refs.Count >= 8) break; // Enough candidates.
+                }
+
+                if (refs.Count >= 8) break;
+            }
+
+            return refs;
+        }
+
+        // ════════════════════════════════════════════════════════════════════════
+        // Strategy 3: extended anchor search
+        // ════════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Scans backwards from <paramref name="physAddr"/> up to 512 bytes to find the
+        /// nearest meaningful (non-trivially-zero) byte run, then uses that run as an anchor
+        /// pattern to locate the address in the target dump.  "Static" matches — those that
+        /// appear at the same position in both dumps — are filtered out, leaving only the
+        /// candidates that reflect the actual code-relocation between versions.
+        /// When multiple dynamic candidates remain they are ranked by proximity to the
+        /// source address.
+        /// </summary>
+        private static List<PortCheatCandidate> FindAnchorCandidates(
+            byte[] sourceData, byte[] targetData, int physAddr, IList<string> logLines)
+        {
+            if (physAddr <= 0 || physAddr >= sourceData.Length)
+                return new List<PortCheatCandidate>();
+
+            const int MaxScanBack    = 512;
+            const int MinPatternLen  = 8;    // Anchor must have at least this many bytes.
+            const int MinNonZeroBytes = 4;   // Pattern must contain at least this many non-zero bytes.
+
+            // Try progressively larger scan-back distances.
+            for (int scanBack = MinPatternLen; scanBack <= MaxScanBack; scanBack += 4)
+            {
+                int anchorStart = physAddr - scanBack;
+                if (anchorStart < 0) break;
+
+                byte[] pattern = new byte[scanBack];
+                Array.Copy(sourceData, anchorStart, pattern, 0, scanBack);
+
+                // Count non-zero bytes — skip trivial all-zero windows.
+                int nonZeroCount = pattern.Count(b => b != 0);
+                if (nonZeroCount < MinNonZeroBytes) continue;
+
+                var rawMatches = FindPattern(targetData, pattern);
+                if (rawMatches.Count == 0) continue;
+
+                // Filter static matches: positions where the source also has the same bytes.
+                var dynamicMatches = rawMatches
+                    .Where(m => m + scanBack <= sourceData.Length &&
+                                !sourceData.AsSpan(m, scanBack).SequenceEqual(pattern.AsSpan()))
+                    .ToList();
+
+                // If all matches are static skip this window; the non-zero bytes are shared
+                // verbatim between versions (e.g. static library data) and not useful for
+                // locating the relocated address.
+                if (dynamicMatches.Count == 0) continue;
+
+                // Sort dynamic candidates by distance from the source address so that
+                // the closest relocation is ranked first.  Use CompareTo on the absolute
+                // distances to avoid integer-overflow when the dump is large.
+                dynamicMatches.Sort((a, b) =>
+                    Math.Abs((a + scanBack) - physAddr).CompareTo(Math.Abs((b + scanBack) - physAddr)));
+
+                int conf = dynamicMatches.Count == 1
+                    ? 100
+                    : Math.Max(20, 100 - (dynamicMatches.Count - 1) * 25);
+
+                logLines.Add($"    [S3] AnchorSearch-{scanBack}B: {dynamicMatches.Count} dynamic candidate(s)");
+
+                return dynamicMatches
+                    .Take(8)
+                    .Select(m => new PortCheatCandidate
+                    {
+                        Address    = m + scanBack,
+                        Confidence = conf,
+                        Method     = $"AnchorSearch-{scanBack}B",
+                    })
+                    .ToList();
+            }
+
+            return new List<PortCheatCandidate>();
+        }
+
+        // ════════════════════════════════════════════════════════════════════════
+        // Strategy 4: pointer scan
+        // ════════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Searches the source dump for 32-bit little-endian pointers that reference
+        /// <paramref name="physAddr"/> directly or its structural header (physAddr minus a
+        /// small fixed offset found by scanning backwards).  For each such pointer location
+        /// the same 4-byte slot is read from the target dump; the resulting pointer value
+        /// plus the same header-relative offset gives the candidate target address.
+        ///
+        /// This strategy is highly reliable when the two dumps share a table or array of
+        /// per-version pointers at a stable location (e.g. a module's pad-port table).
+        /// </summary>
+        private static List<PortCheatCandidate> FindViaPointerScan(
+            byte[] sourceData, byte[] targetData, int physAddr, IList<string> logLines)
+        {
+            var candidates = new List<PortCheatCandidate>();
+
+            // Build a set of candidate "reference values" to look for as pointers:
+            // the address itself plus several header offsets found by scanning backwards
+            // for the nearest non-zero 4-byte-aligned value.
+            var refValues = new List<(int refVal, int headerOffset)>();
+            refValues.Add((physAddr, 0)); // direct pointer to the address
+
+            // Scan backwards for non-zero 4-byte values within 64 bytes.
+            for (int back = 4; back <= 64; back += 4)
+            {
+                int scanPos = physAddr - back;
+                if (scanPos < 0 || scanPos + 4 > sourceData.Length) break;
+                int word = sourceData[scanPos]
+                         | (sourceData[scanPos + 1] << 8)
+                         | (sourceData[scanPos + 2] << 16)
+                         | (sourceData[scanPos + 3] << 24);
+                if (word != 0)
+                {
+                    // The non-zero word at physAddr-back could be the structure header.
+                    // Record a pointer to that header position.
+                    refValues.Add((scanPos, back));
+                    if (refValues.Count >= 4) break; // enough anchors
+                }
+            }
+
+            var seen = new HashSet<int>();
+
+            foreach (var (refVal, headerOffset) in refValues)
+            {
+                // Build the 4-byte LE representation of the pointer value.
+                byte[] needle = new byte[4];
+                needle[0] = (byte)( refVal        & 0xFF);
+                needle[1] = (byte)((refVal >>  8) & 0xFF);
+                needle[2] = (byte)((refVal >> 16) & 0xFF);
+                needle[3] = (byte)((refVal >> 24) & 0xFF);
+
+                // Search source dump for this pointer (not necessarily 4-byte aligned).
+                var ptrLocs = FindPattern(sourceData, needle);
+                if (ptrLocs.Count == 0) continue;
+                if (ptrLocs.Count > 32) continue; // too common — unreliable
+
+                logLines.Add($"    [S4] Found {ptrLocs.Count} pointer(s) to 0x{refVal:X} (hdrOffset={headerOffset})");
+
+                foreach (int loc in ptrLocs)
+                {
+                    if (loc + 4 > targetData.Length) continue;
+
+                    // Read the pointer value at the same location in the target dump.
+                    int tgtPtr = targetData[loc]
+                               | (targetData[loc + 1] << 8)
+                               | (targetData[loc + 2] << 16)
+                               | (targetData[loc + 3] << 24);
+
+                    if (tgtPtr == 0) continue;
+
+                    // Derive candidate target address.
+                    int candidateAddr = tgtPtr + headerOffset;
+                    if (candidateAddr <= 0 || candidateAddr >= targetData.Length) continue;
+                    if (!seen.Add(candidateAddr)) continue;
+
+                    logLines.Add($"    [S4]   ptr@0x{loc:X}: src=0x{refVal:X} → tgt=0x{tgtPtr:X} → addr=0x{candidateAddr:X}");
+                    candidates.Add(new PortCheatCandidate
+                    {
+                        Address    = candidateAddr,
+                        Confidence = ptrLocs.Count == 1 ? 100 : Math.Max(30, 100 - (ptrLocs.Count - 1) * 10),
+                        Method     = $"PtrScan-hdr{headerOffset}",
+                    });
+                }
+            }
+
+            // Sort by confidence descending, then by proximity to source address.
+            candidates.Sort((a, b) =>
+            {
+                int cmpConf = b.Confidence.CompareTo(a.Confidence);
+                if (cmpConf != 0) return cmpConf;
+                return Math.Abs(a.Address - physAddr).CompareTo(Math.Abs(b.Address - physAddr));
+            });
+
+            return candidates;
+        }
+
+        // ════════════════════════════════════════════════════════════════════════
+        // Low-level pattern search helpers
+        // ════════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Searches <paramref name="haystack"/> for every occurrence of
+        /// <paramref name="needle"/> and returns the starting byte offset of each match.
+        /// Uses <see cref="MemoryExtensions.IndexOf{T}(Span{T},ReadOnlySpan{T})"/> which is
+        /// SIMD-accelerated on .NET 8 and therefore significantly faster than a manual
+        /// byte-by-byte loop over the 32 MB dump files encountered in practice.
+        /// </summary>
+        private static List<int> FindPattern(byte[] haystack, byte[] needle)
+        {
+            var results = new List<int>();
+            if (needle.Length == 0 || needle.Length > haystack.Length) return results;
+
+            var h = haystack.AsSpan();
+            var n = needle.AsSpan();
+            int offset = 0;
+            int limit  = haystack.Length - needle.Length;
+
+            while (offset <= limit)
+            {
+                int idx = h.Slice(offset).IndexOf(n);
+                if (idx < 0) break;
+                results.Add(offset + idx);
+                offset += idx + 1;
+            }
+            return results;
+        }
+
+        /// <summary>
+        /// Searches <paramref name="haystack"/> for every occurrence of
+        /// <paramref name="pattern"/> where the corresponding <paramref name="mask"/>
+        /// byte is 0xFF (must match exactly) or 0x00 (wildcard — any byte accepted).
+        /// </summary>
+        /// <param name="step">Alignment step for the outer loop (4 for 4-byte-aligned code).</param>
+        private static List<int> FindMaskedPattern(byte[] haystack, byte[] pattern, byte[] mask, int step = 1)
+        {
+            var results = new List<int>();
+            if (pattern.Length == 0 || pattern.Length > haystack.Length) return results;
+
+            // Find the first non-zero mask byte for a fast pre-filter.
+            int firstMaskIdx = Array.FindIndex(mask, m => m != 0);
+            if (firstMaskIdx < 0) return results; // All wildcards — useless.
+
+            byte firstMaskVal = pattern[firstMaskIdx];
+            int  limit        = haystack.Length - pattern.Length;
+
+            for (int i = 0; i <= limit; i += step)
+            {
+                if (haystack[i + firstMaskIdx] != firstMaskVal) continue;
+                bool match = true;
+                for (int j = 0; j < pattern.Length; j++)
+                {
+                    if (mask[j] != 0 && haystack[i + j] != pattern[j]) { match = false; break; }
+                }
+                if (match) results.Add(i);
+            }
+            return results;
+        }
+
+        // ════════════════════════════════════════════════════════════════════════
+        // Pointer-scanner helpers (shared by HandleScanPointers + HandleGetPointers)
+        // ════════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Maximum byte distance between a LUI instruction and its paired
+        /// load/store/addiu in <see cref="BuildCodeReferencedAddresses"/>.
+        /// 128 bytes (32 instructions) covers essentially all real MIPS compiler output.
+        /// </summary>
+        private const int MaxLuiWindow = 128;
+
+        /// <summary>
+        /// Minimum physical address a pointer must target to be considered valid.
+        /// The first 64 KB of EE physical RAM is the exception-vector / BIOS-stub area;
+        /// game data and heap allocations never live that low, so small constants such as
+        /// 0x00000001 that accidentally match the address range are rejected.
+        /// </summary>
+        private const uint MinValidPointerPhysAddr = 0x00010000u;
+
+        /// <summary>
+        /// Tests whether <paramref name="val"/> is a plausible EE virtual address:
+        /// user-mode or KSEG0/KSEG1 main RAM (physical 0x10000–32 MB), or EE scratchpad
+        /// (0x70000000–0x70003FFF).
+        ///
+        /// Three filters are applied in order:
+        /// <list type="bullet">
+        ///   <item><description>Zero is always rejected.</description></item>
+        ///   <item><description>
+        ///     The value must be 4-byte aligned — valid MIPS code and data pointers are
+        ///     always word-aligned; unaligned values are random constants, not pointers.
+        ///   </description></item>
+        ///   <item><description>
+        ///     The corresponding physical address must be at or above
+        ///     <see cref="MinValidPointerPhysAddr"/> (0x00010000).  The first 64 KB is
+        ///     the EE exception-vector / BIOS-stub area; genuine heap/data pointers never
+        ///     reside that low.  This eliminates the large class of false positives caused
+        ///     by small integer constants (e.g. 0x00000001) whose numeric value falls
+        ///     inside the 32 MB main-RAM range.
+        ///   </description></item>
+        /// </list>
+        /// </summary>
+        private static bool IsValidEePointerValue(uint val)
+        {
+            if (val == 0) return false;
+
+            // Pointers are always 4-byte aligned in MIPS — reject unaligned values.
+            if ((val & 3) != 0) return false;
+
+            uint phys = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
+
+            // Reject the exception-vector / BIOS-stub area (physical < 0x00010000).
+            if (phys < MinValidPointerPhysAddr) return false;
+
+            return phys < (uint)PS2MemoryBus.MainRamSize ||
+                   (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
+        }
+
+        /// <summary>
+        /// Normalises <paramref name="vaddr"/> to its EE physical equivalent and adds it
+        /// to <paramref name="set"/>.  KSEG0/KSEG1 addresses (0x80000000–0xBFFFFFFF) are
+        /// stripped to physical via <c>&amp; 0x1FFFFFFF</c>; scratchpad virtual addresses
+        /// (0x70000000–0x70003FFF) are stored as-is; non-RAM addresses are silently ignored.
+        /// Zero is never added.
+        /// </summary>
+        private static void AddEePhysAddr(HashSet<uint> set, uint vaddr)
+        {
+            if (vaddr == 0) return;
+            uint phys = vaddr >= 0x80000000u && vaddr < 0xC0000000u ? vaddr & 0x1FFFFFFFu : vaddr;
+            if (phys < (uint)PS2MemoryBus.MainRamSize)
+                set.Add(phys);
+            else if (vaddr >= 0x70000000u && vaddr < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                set.Add(vaddr); // scratchpad: keep virtual address
+        }
+
+        /// <summary>
+        /// Scans <paramref name="codeBytes"/> (loaded at virtual base
+        /// <paramref name="baseVAddr"/>) for all EE addresses referenced by MIPS code,
+        /// and returns them as a set of normalised physical addresses.
+        ///
+        /// Three sources of references are collected in a single O(n) forward pass:
+        /// <list type="bullet">
+        ///   <item><description>
+        ///     <b>Function entry points</b> — every <c>ADDIU $sp,$sp,-N</c> prologue.
+        ///   </description></item>
+        ///   <item><description>
+        ///     <b>JAL targets</b> — the absolute target of every <c>JAL</c> instruction.
+        ///   </description></item>
+        ///   <item><description>
+        ///     <b>LUI + I-type pairs</b> — every <c>LUI $rt, high</c> followed within
+        ///     <see cref="MaxLuiWindow"/> bytes by a <c>LW/SW/ADDIU $rx, $rt, low</c>
+        ///     that uses <c>$rt</c> as its base; the combined address
+        ///     <c>(high &lt;&lt; 16) + sign_extend(low)</c> is recorded.
+        ///   </description></item>
+        /// </list>
+        ///
+        /// Per-register LUI state is invalidated whenever the register is overwritten,
+        /// preventing stale LUI values from producing false address matches.
+        /// </summary>
+        private static HashSet<uint> BuildCodeReferencedAddresses(byte[] codeBytes, uint baseVAddr)
+        {
+            var set     = new HashSet<uint>();
+            int len     = codeBytes.Length;
+
+            // Per-register LUI tracking: luiSlot[r] = byte offset of the most recent
+            // LUI that wrote $r (-1 means none); luiImm[r] = that LUI's imm16.
+            var luiSlot = new int[32];
+            var luiImm  = new uint[32];
+            Array.Fill(luiSlot, -1);
+
+            for (int i = 0; i + 3 < len; i += 4)
+            {
+                uint instr  = BitConverter.ToUInt32(codeBytes, i);
+                uint opcode = (instr >> 26) & 0x3Fu;
+                uint rs     = (instr >> 21) & 0x1Fu;
+                uint rt     = (instr >> 16) & 0x1Fu;
+
+                // ── LUI: rt ← imm << 16 ──────────────────────────────────────
+                if (opcode == 0x0Fu)
+                {
+                    if (rt != 0) { luiSlot[rt] = i; luiImm[rt] = instr & 0xFFFFu; }
+                    continue;
+                }
+
+                // ── JAL: call absolute target; clobbers $ra ───────────────────
+                if (opcode == 0x03u)
+                {
+                    uint pc     = baseVAddr + (uint)i;
+                    uint target = ((instr & 0x03FFFFFFu) << 2) | (pc & 0xF0000000u);
+                    AddEePhysAddr(set, target);
+                    luiSlot[31] = -1; // JAL writes $ra
+                    continue;
+                }
+
+                // ── ADDIU: rt ← rs + sign_ext(imm) ──────────────────────────
+                if (opcode == 0x09u)
+                {
+                    short addOff = (short)(instr & 0xFFFFu);
+                    if (rs == 29u && rt == 29u && addOff < 0)
+                    {
+                        // ADDIU $sp, $sp, -N  →  function prologue
+                        AddEePhysAddr(set, baseVAddr + (uint)i);
+                    }
+                    else if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        // LUI $rs, high  +  ADDIU $rt, $rs, low  →  address reference
+                        AddEePhysAddr(set, unchecked((luiImm[rs] << 16) + (uint)addOff));
+                    }
+                    if (rt != 0) luiSlot[rt] = -1; // ADDIU writes $rt
+                    continue;
+                }
+
+                // ── Loads (0x20–0x27): rt ← mem[rs + off] ────────────────────
+                if (opcode >= 0x20u && opcode <= 0x27u)
+                {
+                    if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        short loadOff = (short)(instr & 0xFFFFu);
+                        AddEePhysAddr(set, unchecked((luiImm[rs] << 16) + (uint)loadOff));
+                    }
+                    if (rt != 0) luiSlot[rt] = -1; // load writes $rt
+                    continue;
+                }
+
+                // ── Stores (0x28–0x2F): mem[rs + off] ← rt ───────────────────
+                if (opcode >= 0x28u && opcode <= 0x2Fu)
+                {
+                    if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        short storeOff = (short)(instr & 0xFFFFu);
+                        AddEePhysAddr(set, unchecked((luiImm[rs] << 16) + (uint)storeOff));
+                    }
+                    // Stores do not write to any register — no invalidation.
+                    continue;
+                }
+
+                // ── Register-write invalidation for everything else ───────────
+                // SPECIAL (0x00) R-type instructions write $rd.
+                if (opcode == 0x00u)
+                {
+                    uint rd = (instr >> 11) & 0x1Fu;
+                    if (rd != 0) luiSlot[rd] = -1;
+                    continue;
+                }
+
+                // Branch opcodes (REGIMM, BEQ/BNE/BLEZ/BGTZ, BEQL/BNEL/BLEZL/BGTZL),
+                // plain J, and the EE MMI group (0x1C, R-type) do not write $rt.
+                // Every other I-type opcode is assumed to write $rt — invalidate.
+                if (opcode != 0x01u             // REGIMM (branches)
+                 && opcode != 0x02u             // J
+                 && opcode != 0x04u && opcode != 0x05u  // BEQ / BNE
+                 && opcode != 0x06u && opcode != 0x07u  // BLEZ / BGTZ
+                 && opcode != 0x14u && opcode != 0x15u  // BEQL / BNEL
+                 && opcode != 0x16u && opcode != 0x17u  // BLEZL / BGTZL
+                 && opcode != 0x1Cu)            // MMI (handled as R-type above via rd)
+                {
+                    if (rt != 0) luiSlot[rt] = -1;
+                }
+            }
+
+            return set;
+        }
+
+        /// <summary>
+        /// Handle CONVERTCHEAT command — converts PS2 cheat codes between raw format
+        /// and a device-specific encrypted format using the CheatConverter module.
+        /// </summary>
+        /// <param name="data">Multi-line cheat code text to convert.</param>
+        /// <param name="format">
+        /// Target cheat engine format name. Recognised values (case-insensitive):
+        /// Raw, ActionReplay1, ActionReplay2, ActionReplayMax, GameSharkV3, CodeBreakerV1, CodeBreakerV7.
+        /// </param>
+        /// <param name="direction">
+        /// Conversion direction: "toRaw" decrypts device codes → raw hex pairs;
+        /// "toEngine" encrypts raw hex pairs → device format.
+        /// </param>
+        private string HandleConvertCheat(string? data, string? format, string? direction)
+        {
+            if (string.IsNullOrWhiteSpace(data))
+                return CreateErrorResponse("No cheat data provided");
+
+            try
+            {
+                // Parse the target format (default to auto-detect when not specified)
+                CheatFormat targetFormat = CheatFormat.Raw;
+                if (!string.IsNullOrWhiteSpace(format))
+                {
+                    if (!Enum.TryParse<CheatFormat>(format, ignoreCase: true, out targetFormat))
+                        return CreateErrorResponse($"Unknown cheat format '{format}'. Valid values: Raw, ActionReplay1, ActionReplay2, ActionReplayMax, GameSharkV3, CodeBreakerV1, CodeBreakerV7");
+                }
+
+                string result;
+                if (string.Equals(direction, "toRaw", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Auto-detect source format and decode to raw, or use specified format
+                    ICheatCodeConverter converter = string.IsNullOrWhiteSpace(format)
+                        ? CheatFormatDetector.CreateConverter(CheatFormatDetector.Detect(data))
+                        : CheatFormatDetector.CreateConverter(targetFormat);
+
+                    var rawCodes = converter.Decode(data);
+                    var rawConverter = new RawConverter();
+                    result = rawConverter.Encode(rawCodes);
+                }
+                else
+                {
+                    // "toEngine": decode from raw then encode to target format
+                    var rawConverter = new RawConverter();
+                    var rawCodes = rawConverter.Decode(data);
+                    var targetConverter = CheatFormatDetector.CreateConverter(targetFormat);
+                    result = targetConverter.Encode(rawCodes);
+                }
+
+                var response = new CommandResponse { Success = true, Command = "CONVERTCHEAT", Data = result };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ConvertCheat error: {ex.Message}");
             }
         }
 
@@ -1748,7 +3426,19 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle GETPOINTERS — scans base64-encoded binary data for 4-byte aligned
-        /// values that look like valid EE memory pointers.
+        /// values that are confirmed EE memory pointers.
+        ///
+        /// Three filters are applied in sequence:
+        ///   1. The candidate value must be non-zero, 4-byte aligned, and have a physical
+        ///      address at or above 0x00010000 (see <see cref="IsValidEePointerValue"/>).
+        ///   2. The candidate value must fall in a valid EE virtual address range
+        ///      (user-mode main RAM, KSEG0, KSEG1, or scratchpad).
+        ///   3. The candidate value must be referenced by MIPS code.  Code references
+        ///      are sourced from live EE main RAM when a scheduler is running (most
+        ///      accurate), or from the binary data itself when no emulator is attached.
+        ///      In the latter case the filter is only applied if the binary contains
+        ///      at least 10 <c>ADDIU $sp,$sp,-N</c> function prologues — fewer than
+        ///      that suggests the binary is a pure-data slice with no useful code.
         /// </summary>
         private string HandleGetPointers(uint startAddress, string? base64Data)
         {
@@ -1757,27 +3447,56 @@ namespace CodeDesigner.Mips64LE
 
             try
             {
-                var bytes   = Convert.FromBase64String(base64Data);
+                var bytes = Convert.FromBase64String(base64Data);
+
+                // Build the set of all EE addresses referenced by MIPS code.
+                //   • Live emulator running: scan the full physical EE main RAM for the
+                //     most reliable results (same source as HandleScanPointers).
+                //   • No emulator: scan the binary itself, but only trust the result
+                //     when it contains enough function prologues to confirm it is code.
+                //     A pure-data binary (< 10 prologues) would produce spurious entries
+                //     from accidental instruction bit-patterns, so we fall back to the
+                //     address-range check alone in that case.
+                HashSet<uint> codeRefs;
+                if (Scheduler != null)
+                {
+                    codeRefs = BuildCodeReferencedAddresses(Scheduler.EE.Bus.Ram, 0x00000000u);
+                }
+                else
+                {
+                    int prologueCount = 0;
+                    for (int k = 0; k + 3 < bytes.Length; k += 4)
+                    {
+                        uint w = BitConverter.ToUInt32(bytes, k);
+                        // ADDIU $sp, $sp, -N  (opcode=9, rs=rt=29, imm<0)
+                        if ((w >> 26) == 0x09u && ((w >> 21) & 0x1Fu) == 29u &&
+                            ((w >> 16) & 0x1Fu) == 29u && (short)(w & 0xFFFF) < 0)
+                            prologueCount++;
+                    }
+                    codeRefs = prologueCount >= 10
+                        ? BuildCodeReferencedAddresses(bytes, startAddress)
+                        : new HashSet<uint>();
+                }
+
                 var results = new List<PointerEntry>();
 
                 for (int i = 0; i + 3 < bytes.Length; i += 4)
                 {
                     uint val = BitConverter.ToUInt32(bytes, i);
-                    uint physEquiv = val;
-                    if (val >= 0x80000000u && val < 0xC0000000u)
-                        physEquiv = val & 0x1FFFFFFFu;
-                    bool isValid =
-                        physEquiv < (uint)PS2MemoryBus.MainRamSize ||
-                        (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
 
-                    if (isValid)
+                    // Filter 1: plausible EE address range.
+                    if (!IsValidEePointerValue(val)) continue;
+
+                    // Filter 2: must be referenced by MIPS code.
+                    // Skip this filter when no code was found (pure-data binary or early boot).
+                    uint physVal = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
+                    if (codeRefs.Count > 0 && !codeRefs.Contains(physVal)) continue;
+
+                    results.Add(new PointerEntry
                     {
-                        results.Add(new PointerEntry
-                        {
-                            Address  = $"0x{(startAddress + (uint)i):X8}",
-                            PointsTo = $"0x{val:X8}"
-                        });
-                    }
+                        Address  = $"0x{(startAddress + (uint)i):X8}",
+                        PointsTo = $"0x{val:X8}"
+                    });
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
@@ -2059,11 +3778,26 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>
         /// Handle SCANPOINTERS — reads <paramref name="length"/> bytes of live emulator
-        /// memory and returns 4-byte aligned values that look like valid EE or IOP
-        /// memory pointers.  For EE scans the valid target ranges are:
-        /// main RAM (physical 0x00000000–0x01FFFFFF), KSEG0 (0x80000000–0x81FFFFFF),
-        /// KSEG1 (0xA0000000–0xA1FFFFFF), and scratchpad (0x70000000–0x70003FFF).
-        /// For IOP scans the valid range is IOP RAM (0x00000000–0x001FFFFF).
+        /// memory starting at <paramref name="address"/> and returns 4-byte aligned values
+        /// that are confirmed EE memory pointers.
+        ///
+        /// Three filters are applied in sequence:
+        ///   1. The candidate value must be non-zero, 4-byte aligned, and have a physical
+        ///      address at or above 0x00010000 (see <see cref="IsValidEePointerValue"/>).
+        ///   2. The candidate value must fall in a valid EE virtual address range
+        ///      (user-mode main RAM, KSEG0, KSEG1, or scratchpad).
+        ///   3. The candidate value must be referenced by MIPS code in EE main RAM —
+        ///      i.e. some function accesses that address via a LUI + load/store/addiu
+        ///      pair, JAL target, or ADDIU $sp,$sp,-N prologue.
+        ///
+        /// The scan area is unrestricted: <paramref name="address"/> may point to any
+        /// region (main RAM, BIOS, scratchpad, IOP, etc.).  The pointer VALUE check is
+        /// always performed against EE address ranges so the tool works correctly
+        /// regardless of which region is being scanned.
+        ///
+        /// If no code references are found in EE main RAM (e.g. early boot before any
+        /// game code has loaded), filter 3 is skipped and only the address-range checks
+        /// apply, preserving the original behaviour.
         /// </summary>
         private string HandleScanPointers(uint address, int length, string? region)
         {
@@ -2076,36 +3810,31 @@ namespace CodeDesigner.Mips64LE
             {
                 bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
                 var bytes   = ReadLiveBytes(address, length, useIop);
+
+                // Build the set of all EE addresses referenced by MIPS code.
+                // We always use EE main RAM as the code source regardless of the scan
+                // region so that the filter works when scanning BIOS, scratchpad, IOP, etc.
+                var codeRefs = BuildCodeReferencedAddresses(Scheduler!.EE.Bus.Ram, 0x00000000u);
+
                 var results = new List<PointerEntry>();
 
                 for (int i = 0; i + 3 < bytes.Length; i += 4)
                 {
                     uint val = BitConverter.ToUInt32(bytes, i);
-                    bool isValid;
-                    if (useIop)
-                    {
-                        // IOP: plain RAM range
-                        isValid = val < (uint)IopMemoryBus.RamSize;
-                    }
-                    else
-                    {
-                        // EE: main RAM, KSEG0 mirror, KSEG1 mirror, or scratchpad
-                        uint physEquiv = val;
-                        if (val >= 0x80000000u && val < 0xC0000000u)
-                            physEquiv = val & 0x1FFFFFFFu;
-                        isValid =
-                            physEquiv < (uint)PS2MemoryBus.MainRamSize ||
-                            (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
-                    }
 
-                    if (isValid)
+                    // Filter 1: plausible EE address range.
+                    if (!IsValidEePointerValue(val)) continue;
+
+                    // Filter 2: must be referenced by MIPS code in EE main RAM.
+                    // Skip this filter when no code has been found yet (early boot).
+                    uint physVal = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
+                    if (codeRefs.Count > 0 && !codeRefs.Contains(physVal)) continue;
+
+                    results.Add(new PointerEntry
                     {
-                        results.Add(new PointerEntry
-                        {
-                            Address  = $"0x{(address + (uint)i):X8}",
-                            PointsTo = $"0x{val:X8}"
-                        });
-                    }
+                        Address  = $"0x{(address + (uint)i):X8}",
+                        PointsTo = $"0x{val:X8}"
+                    });
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
@@ -2438,6 +4167,232 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine($"[Labels] Saved {_labels.Count} symbol(s) to {savePath}");
         }
 
+        // ── LISTDISCELFS ─────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Open a disc image stream from either a plain ISO/BIN path or a ZIP archive
+        /// that contains an ISO or BIN entry.  The caller owns the returned stream and
+        /// must dispose it.  Throws <see cref="InvalidOperationException"/> when the
+        /// file cannot be opened as a disc image.
+        /// </summary>
+        private static Stream OpenDiscStream(string path)
+        {
+            if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                using var archive = ZipFile.OpenRead(path);
+                var entry = archive.Entries.FirstOrDefault(e =>
+                    e.Name.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) ||
+                    e.Name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase));
+
+                if (entry == null)
+                    throw new InvalidOperationException("No ISO or BIN disc image found inside the ZIP archive.");
+
+                if (entry.Length > (long)int.MaxValue)
+                    throw new InvalidOperationException(
+                        $"Disc image inside ZIP is too large ({entry.Length / 1_048_576.0:F0} MB). " +
+                        "Extract the ISO to disk and select it directly.");
+
+                // Read the compressed entry into a MemoryStream so the archive can be
+                // closed while the caller continues to use the stream.
+                var ms = new MemoryStream((int)entry.Length);
+                using (var entryStream = entry.Open())
+                    entryStream.CopyTo(ms);
+                ms.Position = 0;
+                return ms;
+            }
+
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+
+        /// <summary>
+        /// Open an ISO-9660 disc image, walk all files, and return a list of every
+        /// ELF or IRX file found.  Also reads SYSTEM.CNF to mark the BOOT2
+        /// executable with <see cref="DiscElfEntry.IsBootElf"/> = true.
+        /// The <paramref name="isoPath"/> may be a plain ISO/BIN file or a ZIP
+        /// archive containing an ISO/BIN entry.
+        /// </summary>
+        private string HandleListDiscElfs(string? isoPath)
+        {
+            if (string.IsNullOrWhiteSpace(isoPath))
+                return CreateErrorResponse("IsoPath is required.");
+
+            if (!File.Exists(isoPath))
+                return CreateErrorResponse($"ISO file not found: {isoPath}");
+
+            try
+            {
+                using var stream = OpenDiscStream(isoPath);
+                var cdvd = new CodeDesigner.Mips64LE.Common.Emulator.IOP.Cdvd();
+                cdvd.LoadFromStream(stream);
+
+                // ── Read SYSTEM.CNF to discover the BOOT2 executable ──────────
+                string? bootElfName = null;
+                var cnfEntry = cdvd.FindFile("SYSTEM.CNF");
+                if (cnfEntry != null)
+                {
+                    byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
+                    string cnfText  = System.Text.Encoding.Latin1.GetString(cnfBytes);
+                    string? rawBoot = CodeDesigner.Mips64LE.Common.Emulator.GameLoader.ParseSystemCnf(cnfText);
+                    if (rawBoot != null)
+                    {
+                        // Normalise to bare filename (strip path and version suffix).
+                        int slash = rawBoot.LastIndexOfAny(new[] { '/', '\\' });
+                        bootElfName = slash >= 0 ? rawBoot[(slash + 1)..] : rawBoot;
+                        int semi = bootElfName.IndexOf(';');
+                        if (semi >= 0) bootElfName = bootElfName[..semi];
+                    }
+                }
+
+                // ── Walk all files looking for ELF / IRX ─────────────────────
+                // Helper: strip the ISO-9660 version suffix (";1", ";2", …).
+                static string StripVersion(string n)
+                {
+                    int s = n.IndexOf(';');
+                    return s >= 0 ? n[..s] : n;
+                }
+
+                // PS2 disc-ID pattern: 4 uppercase letters + '_' + 3 digits + '.' + 2 digits
+                // e.g. SCUS_971.98, SLUS_210.40, SLES_123.45
+                var discIdPattern = new System.Text.RegularExpressions.Regex(
+                    @"^[A-Z]{4}_\d{3}\.\d{2}$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+                var elfFiles = new List<DiscElfEntry>();
+                foreach (var (discPath, entry) in cdvd.EnumerateFiles())
+                {
+                    string cleanName = StripVersion(entry.Name);
+                    string ext       = System.IO.Path.GetExtension(cleanName).ToUpperInvariant();
+
+                    // Include: explicit .ELF / .IRX files, or PS2 disc-ID executables
+                    // (e.g. SCUS_971.98 has no .ELF extension but is a valid EE ELF).
+                    bool isElf   = ext == ".ELF" || ext == ".IRX";
+                    bool isDiscId = discIdPattern.IsMatch(cleanName);
+                    if (!isElf && !isDiscId)
+                        continue;
+
+                    bool isBootElf = bootElfName != null &&
+                        cleanName.Equals(bootElfName, StringComparison.OrdinalIgnoreCase);
+
+                    elfFiles.Add(new DiscElfEntry
+                    {
+                        Path      = discPath,
+                        Name      = cleanName,
+                        Size      = entry.Size,
+                        IsBootElf = isBootElf,
+                    });
+                }
+
+                // Sort: BOOT2 first, then by path.
+                elfFiles.Sort((a, b) =>
+                {
+                    if (a.IsBootElf != b.IsBootElf) return a.IsBootElf ? -1 : 1;
+                    return string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase);
+                });
+
+                var response = new CommandResponse
+                {
+                    Success  = true,
+                    Message  = $"Found {elfFiles.Count} ELF/IRX file(s).",
+                    ElfFiles = elfFiles,
+                    BootElf  = bootElfName,
+                };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"LISTDISCELFS failed: {ex.Message}");
+            }
+        }
+
+        // ── RECOMPILE ─────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Extract a named ELF from a disc image and run the static recompiler on it.
+        /// </summary>
+        /// <param name="isoPath">
+        /// Path to the ISO-9660 disc image (plain ISO/BIN or a ZIP archive containing one).
+        /// </param>
+        /// <param name="elfName">
+        /// Name of the ELF file on the disc (e.g. "SCUS_971.98" or "/SCUS_971.98;1").
+        /// When <c>null</c> or empty, the BOOT2 executable from SYSTEM.CNF is used.
+        /// </param>
+        /// <param name="outputDirectory">
+        /// Directory where the generated C++ files will be written.
+        /// Defaults to <c>recomp_out</c> in the current directory when <c>null</c>.
+        /// </param>
+        private string HandleRecompile(string? isoPath, string? elfName, string? outputDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(isoPath))
+                return CreateErrorResponse("IsoPath is required.");
+
+            if (!File.Exists(isoPath))
+                return CreateErrorResponse($"ISO file not found: {isoPath}");
+
+            try
+            {
+                using var stream = OpenDiscStream(isoPath);
+                var cdvd = new CodeDesigner.Mips64LE.Common.Emulator.IOP.Cdvd();
+                cdvd.LoadFromStream(stream);
+
+                // ── Resolve the ELF path ──────────────────────────────────────
+                string resolvedElfName = elfName?.Trim() ?? string.Empty;
+
+                if (string.IsNullOrEmpty(resolvedElfName))
+                {
+                    // Fall back to BOOT2 from SYSTEM.CNF.
+                    var cnfEntry = cdvd.FindFile("SYSTEM.CNF");
+                    if (cnfEntry == null)
+                        return CreateErrorResponse("SYSTEM.CNF not found on disc.");
+
+                    byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
+                    string cnfText  = System.Text.Encoding.Latin1.GetString(cnfBytes);
+                    resolvedElfName = CodeDesigner.Mips64LE.Common.Emulator.GameLoader.ParseSystemCnf(cnfText)
+                        ?? string.Empty;
+
+                    if (string.IsNullOrEmpty(resolvedElfName))
+                        return CreateErrorResponse("BOOT2 entry not found in SYSTEM.CNF.");
+                }
+
+                // ── Find and read the ELF ─────────────────────────────────────
+                var entry = cdvd.FindFile(resolvedElfName);
+                if (entry == null)
+                    return CreateErrorResponse($"ELF not found on disc: {resolvedElfName}");
+
+                byte[] elfData = cdvd.ReadFile(entry.Value);
+                if (elfData.Length == 0)
+                    return CreateErrorResponse($"ELF is empty: {resolvedElfName}");
+
+                // ── Run the recompiler ────────────────────────────────────────
+                string outDir = string.IsNullOrWhiteSpace(outputDirectory) ? "recomp_out" : outputDirectory;
+
+                var cfg = new CodeDesigner.Mips64LE.Recompiler.RecompilerConfig
+                {
+                    OutputDirectory  = outDir,
+                    SingleFileOutput = true,
+                    PatchSyscalls    = true,
+                    PatchCache       = true,
+                };
+
+                var recompiler = new CodeDesigner.Mips64LE.Recompiler.Ps2StaticRecompiler(cfg);
+                var progressLog = new List<string>();
+                var result = recompiler.Recompile(elfData.AsSpan(), msg => progressLog.Add(msg));
+
+                var response = new CommandResponse
+                {
+                    Success       = true,
+                    Message       = $"Recompiled {result.Functions.Count} function(s) into {outDir}.",
+                    FunctionCount = result.Functions.Count,
+                    WrittenFiles  = result.WrittenFiles,
+                    BootElf       = resolvedElfName,
+                };
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"RECOMPILE failed: {ex.Message}");
+            }
+        }
+
         private string CreateSuccessResponse(string message)
         {
             var response = new CommandResponse
@@ -2493,6 +4448,7 @@ namespace CodeDesigner.Mips64LE
         public int? Length { get; set; }
         public string? Region { get; set; }
         public string? OutputPath { get; set; }
+        public string? InputPath { get; set; }
         public uint? BreakpointAddress { get; set; }
         public string? Label { get; set; }
         public string? Comment { get; set; }
@@ -2502,6 +4458,18 @@ namespace CodeDesigner.Mips64LE
         public string? RegisterName { get; set; }
         public int? RegisterIndex { get; set; }
         public string? RegisterValue { get; set; }
+        // LISTDISCELFS / RECOMPILE fields
+        public string? IsoPath { get; set; }
+        public string? ElfName { get; set; }
+        public string? OutputDirectory { get; set; }
+        // CONVERTCHEAT fields
+        public string? Format { get; set; }
+        public string? Direction { get; set; }
+        // PORTCHEATS fields
+        public string? SourceDumpPath { get; set; }
+        public string? TargetDumpPath { get; set; }
+        // COMPILECDS — pre-resolved pointer-manager labels (dotted names like "seal.health")
+        public List<LabelEntry>? Labels { get; set; }
     }
 
     /// <summary>
@@ -2589,6 +4557,50 @@ namespace CodeDesigner.Mips64LE
         /// without reloading the full disassembly page.
         /// </summary>
         public Dictionary<string, string>? InstructionAnalysis { get; set; }
+
+        // LISTDISCELFS fields
+        public List<DiscElfEntry>? ElfFiles { get; set; }
+        public string? BootElf { get; set; }
+
+        // RECOMPILE fields
+        public int? FunctionCount { get; set; }
+        public List<string>? WrittenFiles { get; set; }
+
+        // PORTCHEATS fields
+        public List<PortCheatResult>? PortCheatResults { get; set; }
+    }
+
+    /// <summary>
+    /// Result for a single cheat code line produced by PORTCHEATS.
+    /// </summary>
+    public class PortCheatResult
+    {
+        /// <summary>The #Name label of the cheat block this line belongs to.</summary>
+        public string BlockName { get; set; } = string.Empty;
+
+        /// <summary>Any non-label, non-code description text found in the cheat block above the codes. Null when absent.</summary>
+        public string? BlockText { get; set; }
+
+        /// <summary>Original GameShark code line, e.g. "20123456 000003E8".</summary>
+        public string OriginalCode { get; set; } = string.Empty;
+
+        /// <summary>Ported code line with the updated address, e.g. "20124ABC 000003E8". Null when not found.</summary>
+        public string? NewCode { get; set; }
+
+        /// <summary>Whether a match was found in the target dump.</summary>
+        public bool Found { get; set; }
+
+        /// <summary>Description of the method and window size used, e.g. "HexPattern-48".</summary>
+        public string Method { get; set; } = string.Empty;
+
+        /// <summary>0–100 confidence score. 100 = unique match; lower when multiple candidates were found.</summary>
+        public int Confidence { get; set; }
+
+        /// <summary>True when more than one candidate address was found in the target dump.</summary>
+        public bool Ambiguous { get; set; }
+
+        /// <summary>All candidate new code lines when Ambiguous is true.</summary>
+        public List<string>? Candidates { get; set; }
     }
 
     /// <summary>
@@ -2603,6 +4615,24 @@ namespace CodeDesigner.Mips64LE
     }
 
     /// <summary>
+    /// Describes one ELF (or IRX) file found on a disc image, returned by LISTDISCELFS.
+    /// </summary>
+    public class DiscElfEntry
+    {
+        /// <summary>Absolute disc path, e.g. "/SCUS_971.98;1" or "/MODULES/CDVD.IRX;1".</summary>
+        public string Path { get; set; } = string.Empty;
+
+        /// <summary>Filename without the path prefix or version suffix, e.g. "SCUS_971.98".</summary>
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>File size in bytes.</summary>
+        public uint Size { get; set; }
+
+        /// <summary>True when this is the BOOT2 executable listed in SYSTEM.CNF.</summary>
+        public bool IsBootElf { get; set; }
+    }
+
+    /// <summary>
     /// Result for individual instruction assembly/disassembly
     /// </summary>
     public class InstructionResult
@@ -2613,6 +4643,7 @@ namespace CodeDesigner.Mips64LE
         public string? Error { get; set; }
         public string? Comment { get; set; }  // Added for analyzer-generated comments
         public string? Label { get; set; }    // Symbol label from ps2MemMap.json
+        public int? LineNumber { get; set; }  // 1-based source line number
     }
 
     /// <summary>One entry in the label/symbol database.</summary>

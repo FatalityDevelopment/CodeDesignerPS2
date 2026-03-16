@@ -10,6 +10,7 @@ interface CommandMessage {
     Length?: number;
     Region?: string;
     OutputPath?: string;
+    InputPath?: string;
     BreakpointAddress?: number;
     Label?: string;
     Comment?: string;
@@ -18,6 +19,18 @@ interface CommandMessage {
     RegisterName?: string;
     RegisterIndex?: number;
     RegisterValue?: string;
+    // LISTDISCELFS / RECOMPILE fields
+    IsoPath?: string;
+    ElfName?: string;
+    OutputDirectory?: string;
+    // CONVERTCHEAT fields
+    Format?: string;
+    Direction?: string;
+    // PORTCHEATS fields
+    SourceDumpPath?: string;
+    TargetDumpPath?: string;
+    // COMPILECDS — pre-resolved pointer-manager labels (e.g. { address:'0x80100000', label:'seal.health' })
+    Labels?: LabelEntry[];
 }
 
 /**
@@ -200,6 +213,14 @@ interface CommandResponse {
     // Per-address analysis comments produced when an instruction executes.
     // Keyed by hex address string (e.g. "80001234"), value is the analysis comment.
     InstructionAnalysis?: Record<string, string>;
+    // LISTDISCELFS fields
+    ElfFiles?: DiscElfEntry[];
+    BootElf?: string;
+    // RECOMPILE fields
+    FunctionCount?: number;
+    WrittenFiles?: string[];
+    // PORTCHEATS fields
+    PortCheatResults?: Array<Record<string, unknown>>;
 }
 
 /**
@@ -212,6 +233,7 @@ interface InstructionResult {
     Error?: string;
     Comment?: string;
     Label?: string;
+    LineNumber?: number;
 }
 
 /**
@@ -234,6 +256,56 @@ export interface ThreadEntry {
     sp: number;
     priority: number;
     entryPc: number;
+}
+
+/**
+ * One ELF or IRX file found on a PS2 disc image.
+ */
+export interface DiscElfEntry {
+    /** Absolute disc path, e.g. "/SCUS_971.98;1" or "/MODULES/CDVD.IRX;1". */
+    Path: string;
+    /** Filename without path or version suffix, e.g. "SCUS_971.98". */
+    Name: string;
+    /** File size in bytes. */
+    Size: number;
+    /** True when this is the BOOT2 executable listed in SYSTEM.CNF. */
+    IsBootElf: boolean;
+}
+
+/**
+ * Result for a single cheat code line produced by PORTCHEATS.
+ */
+export interface PortCheatResult {
+    /** The #Name label of the cheat block this line belongs to. */
+    blockName: string;
+    /** Any non-label, non-code description text found in the cheat block. Null when absent. */
+    blockText: string | null;
+    /** Original GameShark code line, e.g. "20123456 000003E8". */
+    originalCode: string;
+    /** Ported code line with the updated address, e.g. "20124ABC 000003E8". Null when not found. */
+    newCode: string | null;
+    /** Whether a match was found in the target dump. */
+    found: boolean;
+    /** Description of the method used, e.g. "HexPattern-48". */
+    method: string;
+    /** 0–100 confidence score. */
+    confidence: number;
+    /** True when more than one candidate address was found. */
+    ambiguous: boolean;
+    /** All candidate new code lines when ambiguous. */
+    candidates: string[] | null;
+}
+
+/**
+ * Result returned by the RECOMPILE socket command.
+ */
+export interface RecompileResult {
+    /** Number of functions that were recompiled. */
+    functionCount: number;
+    /** Absolute paths of all files written by the recompiler. */
+    writtenFiles: string[];
+    /** The ELF path (or name) that was recompiled. */
+    bootElf: string;
 }
 
 /**
@@ -527,6 +599,30 @@ export class SocketClient {
     }
 
     /**
+     * Compile a .cds (Code Designer Script) assembly file.
+     * Forwards the raw source text to the backend COMPILECDS command.
+     * @param labels Optional pre-resolved pointer-manager labels (e.g. from PointerManagerProvider.getResolvedLabels()).
+     *               These are injected into the compiler so CDS source can reference them as `:seal.health` or `@seal.health`.
+     */
+    public async compileCds(sourceCode: string, labels?: LabelEntry[]): Promise<InstructionResult[]> {
+        const command: CommandMessage = {
+            Command: 'COMPILECDS',
+            Data: sourceCode
+        };
+        if (labels && labels.length > 0) {
+            command.Labels = labels;
+        }
+
+        const response = await this.sendCommand(command);
+
+        if (!response.Success) {
+            throw new Error(response.Error || 'Compilation failed');
+        }
+
+        return response.Results || [];
+    }
+
+    /**
      * Assemble MIPS assembly code to hex
      */
     public async assemble(asmCode: string): Promise<InstructionResult[]> {
@@ -606,6 +702,27 @@ export class SocketClient {
 
         if (!response.Success) {
             throw new Error(response.Error || 'Snapshot failed');
+        }
+
+        return response.Regions || [];
+    }
+
+    /**
+     * Reload a snapshot as a save state: read .bin files from inputPath and
+     * restore them into the live emulator memory.  The emulator is paused
+     * automatically and remains paused after the restore completes.
+     * Returns the list of restored region descriptors.
+     */
+    public async loadSnapshot(inputPath: string): Promise<SnapshotRegion[]> {
+        const command: CommandMessage = {
+            Command: 'LOADSNAPSHOT',
+            InputPath: inputPath,
+        };
+
+        const response = await this.sendCommand(command);
+
+        if (!response.Success) {
+            throw new Error(response.Error || 'Load snapshot failed');
         }
 
         return response.Regions || [];
@@ -778,6 +895,30 @@ export class SocketClient {
         const response = await this.sendCommand(command);
         if (!response.Success) {
             throw new Error(response.Error || 'WriteMemory failed');
+        }
+    }
+
+    /**
+     * Load a binary file from disk directly into live EE or IOP memory.
+     * The file is read server-side, avoiding the need to transfer its contents
+     * over the socket (which would time out for large dumps like 32 MB EE RAM).
+     * @param filePath Absolute path to the binary file on the server machine
+     * @param address  Target virtual address
+     * @param region   'ee' (default) or 'iop'
+     */
+    public async loadBinFromFile(filePath: string, address: number, region: string = 'ee'): Promise<void> {
+        const command: CommandMessage = {
+            Command:   'LOADBIN',
+            InputPath: filePath,
+            Address:   address,
+            Region:    region,
+        };
+        // Use a generous timeout — large files (e.g. 32 MB EE RAM) take time to
+        // read from disk and copy into emulator memory even though no file data
+        // is transferred over the socket.
+        const response = await this.sendCommand(command, 120000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'LoadBin failed');
         }
     }
 
@@ -1088,5 +1229,121 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'ApplyCheats failed');
         }
+    }
+
+    /**
+     * Convert PS2 cheat codes between raw and a device-specific encrypted format.
+     * @param codes      Multi-line cheat code text to convert.
+     * @param direction  'toRaw' — decrypt device codes → raw hex pairs;
+     *                   'toEngine' — encrypt raw hex pairs → device format.
+     * @param format     Cheat engine format name (Raw, ActionReplay1, ActionReplay2,
+     *                   ActionReplayMax, GameSharkV3, CodeBreakerV1, CodeBreakerV7).
+     *                   Required for 'toEngine'; omit for auto-detect on 'toRaw'.
+     * @returns The converted cheat codes as a multi-line string.
+     */
+    public async convertCheat(codes: string, direction: 'toRaw' | 'toEngine', format?: string): Promise<string> {
+        const command: CommandMessage = {
+            Command:   'CONVERTCHEAT',
+            Data:      codes,
+            Direction: direction,
+            Format:    format,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ConvertCheat failed');
+        }
+        return response.Data ?? '';
+    }
+
+    /**
+     * Port a list of raw GameShark cheat codes from a source EE-RAM dump to a target
+     * EE-RAM dump by scanning for hex patterns around each cheat address.
+     *
+     * @param cheatText  Raw GameShark codes (optional #Name headers).
+     * @param sourcePath Absolute path to the source (r0001) raw EE-RAM dump file.
+     * @param targetPath Absolute path to the target (r0002) raw EE-RAM dump file.
+     * @returns Tuple of structured per-code results and a detailed log string.
+     */
+    public async portCheats(
+        cheatText:  string,
+        sourcePath: string,
+        targetPath: string,
+    ): Promise<{ results: PortCheatResult[]; log: string }> {
+        const command: CommandMessage = {
+            Command:        'PORTCHEATS',
+            Data:           cheatText,
+            SourceDumpPath: sourcePath,
+            TargetDumpPath: targetPath,
+        };
+        const response = await this.sendCommand(command, 600_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'PortCheats failed');
+        }
+        const raw = response.PortCheatResults as Array<Record<string, unknown>> ?? [];
+        const results: PortCheatResult[] = raw.map(r => ({
+            blockName:    (r['BlockName']    as string)  ?? '',
+            blockText:    (r['BlockText']    as string | null) ?? null,
+            originalCode: (r['OriginalCode'] as string)  ?? '',
+            newCode:      (r['NewCode']      as string | null) ?? null,
+            found:        (r['Found']        as boolean) ?? false,
+            method:       (r['Method']       as string)  ?? '',
+            confidence:   (r['Confidence']   as number)  ?? 0,
+            ambiguous:    (r['Ambiguous']    as boolean) ?? false,
+            candidates:   (r['Candidates']   as string[] | null) ?? null,
+        }));
+        return { results, log: response.Data ?? '' };
+    }
+
+    /**
+     * List all ELF and IRX files found on a PS2 disc image.
+     * Also identifies which file is the BOOT2 main executable from SYSTEM.CNF.
+     *
+     * @param isoPath Absolute path to the ISO-9660 disc image.
+     */
+    public async listDiscElfs(isoPath: string): Promise<{ elfFiles: DiscElfEntry[]; bootElf: string }> {
+        const command: CommandMessage = {
+            Command: 'LISTDISCELFS',
+            IsoPath: isoPath,
+        };
+        const response = await this.sendCommand(command, 30_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'LISTDISCELFS failed');
+        }
+        return {
+            elfFiles: response.ElfFiles ?? [],
+            bootElf:  response.BootElf  ?? '',
+        };
+    }
+
+    /**
+     * Extract a named ELF from a PS2 disc image and run the static recompiler on it,
+     * generating C++ source files in the specified output directory.
+     *
+     * @param isoPath         Absolute path to the ISO-9660 disc image.
+     * @param elfName         Name of the ELF on the disc (e.g. "SCUS_971.98").
+     *                        Pass an empty string to use the BOOT2 executable from SYSTEM.CNF.
+     * @param outputDirectory Directory where the generated C++ files will be written.
+     */
+    public async recompile(
+        isoPath: string,
+        elfName: string,
+        outputDirectory: string,
+    ): Promise<RecompileResult> {
+        const command: CommandMessage = {
+            Command:         'RECOMPILE',
+            IsoPath:         isoPath,
+            ElfName:         elfName,
+            OutputDirectory: outputDirectory,
+        };
+        // Recompilation can take a while for large game ELFs — allow up to 5 minutes.
+        const response = await this.sendCommand(command, 300_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'RECOMPILE failed');
+        }
+        return {
+            functionCount: response.FunctionCount ?? 0,
+            writtenFiles:  response.WrittenFiles  ?? [],
+            bootElf:       response.BootElf       ?? elfName,
+        };
     }
 }

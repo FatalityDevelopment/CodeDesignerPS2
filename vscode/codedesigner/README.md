@@ -1,19 +1,79 @@
 # CodeDesigner — PS2 Emotion Engine MIPS Toolkit for VS Code
 
-A VS Code extension that provides **MIPS64 assembly and disassembly** for the
-PlayStation 2 Emotion Engine (EE) via a connection to the CodeDesigner C# backend.
+A VS Code extension that provides **MIPS64 assembly, disassembly, and live PS2 emulator debugging** for the PlayStation 2 Emotion Engine (EE) via a connection to the CodeDesigner C# backend.
 
 ---
 
 ## Features
 
+### Assembler & Disassembler
 - **Assembler Panel** — type EE MIPS assembly and convert it to hex machine code
 - **Disassembler Panel** — paste hex instruction words and get annotated MIPS assembly
-- **Live Disassembler** — view live EE memory disassembly while the emulator is running
-- **Breakpoints** — press **F9** on any instruction row to toggle a breakpoint; the panel auto-scrolls to the hit address when the emulator pauses
-- **Pause / Resume** — pause and resume EE execution from within the disassembler panel
-- **Server connection** — communicates with the C# backend over a local TCP socket (port 8765)
-- Supports the full PS2 EE instruction set: core MIPS64, COP0, COP1 FPU, COP2/VU0 macro-mode, and MMI multimedia extensions
+
+### Live Disassembler (Emulator Memory View)
+- **Live Disassembler** — scrollable disassembly view over live EE memory while the emulator is running; auto-updates when paused
+- **PC indicator** — `▷` marker on the current program counter row; always visible while paused
+- **Go-to address** — press `Ctrl+G` to jump to any virtual address; cross-region navigation supported
+- **Navigate Back** — `Alt+Left` to return to the previous address
+- **Search** — `Ctrl+F` to open the search panel; supports text, byte pattern (`0x12 34 AB`), and ASCII string modes
+- **Hex view** — resizable hex dump panel aligned with the disassembly grid
+
+### Debug Execution Controls
+- **Pause / Resume** — pause and resume EE execution (`F5`)
+- **Single Step** — execute exactly one EE instruction while paused; live register analysis shown inline on the stepped instruction
+- **Breakpoints** — press `F9` on any instruction row to toggle a breakpoint; panel auto-scrolls to the hit address and shows a **PAUSED** indicator
+- **Set PC** — move the program counter to any address without executing code
+
+### Register & State Inspection (Debug Panel)
+The collapsible Debug Panel (`Ctrl+Alt+R`) shows all CPU and co-processor state with tabs:
+
+| Tab | Contents |
+|-----|---------|
+| **GPR** | 32 × 128-bit general-purpose registers ($zero–$ra) |
+| **CP0** | All 32 COP0 registers (Status, Cause, EPC, PCCR, Count, …) |
+| **FPR** | 32 COP1 floating-point registers + accumulator (FACC) |
+| **FCR** | FPU control registers FCR0 and FCR31 (FCSR) |
+| **VU0f** | 32 × (x/y/z/w) VU0 vector float registers |
+| **VU0i** | 16 VU0 integer registers (VI0–VI15) |
+| **GS** | All GS privileged register values |
+| **Stack** | 32-word stack frame dump at current $sp |
+
+### Symbols Panel (Ctrl+Alt+S)
+Collapsible side panel with tabs for all scanned symbol categories:
+
+| Tab | Description |
+|-----|-------------|
+| **Labels** | User-defined and auto-imported symbol labels |
+| **Strings** | Null-terminated ASCII strings found in memory |
+| **Functions** | Detected MIPS function entry points |
+| **Pointers** | 32-bit code-referenced pointer values |
+| **Floats** | IEEE-754 single-precision float values |
+| **Integers** | 32-bit integer values |
+
+Click any entry to navigate the disassembler to that address. Labels can be added, edited, and deleted inline.
+
+### Bottom Panel (Ctrl+Alt+T)
+Collapsible bottom panel with three tabs:
+
+| Tab | Description |
+|-----|-------------|
+| **Call Stack** | Reconstructed call stack from saved return addresses on the stack |
+| **Threads** | Live EE OS thread list (id, status, PC, SP, priority) |
+| **Breakpoints** | List of all active breakpoints with one-click remove |
+
+### Emulator Sidebar Panel
+The **Emulator** activity-bar panel provides:
+
+- **Emulator Settings tab** — configure emulator path, BIOS ROM, game disc; connect/disconnect; run/restart; import binary; take and restore memory snapshots
+- **Cheats tab** — paste CodeDesigner cheat codes and click **Update** to apply them to live memory
+- **CDS tab** — enter Code Designer Script (`.cds`) source; compile to GameShark cheat codes; patch the emulator or export as a cheat block
+- **Recompile tab** — list ELF executables from a game ISO; select one and run the static recompiler to produce a native-code output
+
+### Structs / Pointer Manager
+A **Structs** tree view in the activity bar lets you define named pointer chains (struct root + child offsets), navigate to any resolved address with one click, and export the resolved labels to the CDS compiler.
+
+### `.cds` Language Support
+Files with the `.cds` extension get syntax configuration (comment delimiters, bracket pairs) for Code Designer Script source files.
 
 ---
 
@@ -28,7 +88,7 @@ PlayStation 2 Emotion Engine (EE) via a connection to the CodeDesigner C# backen
 
 ### 1. Start the C# backend
 
-The recommended way is to use the **Connect** button in the Disasm panel — the extension will start the emulator automatically.
+The recommended way is to use the **Connect** button in the Emulator panel — the extension will start the emulator automatically.
 
 Alternatively, start it manually:
 
@@ -55,10 +115,13 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run:
 CodeDesigner: Connect to Server
 ```
 
+Or click the **Connect** button in the Emulator sidebar panel.
+
 ### 3. Use the panels
 
-- Open the **Assembler** panel from the sidebar, enter MIPS assembly, and click **Assemble**.
-- Open the **Disassembler** panel, enter hex words, and click **Disassemble**.
+- Open the **Emulator** panel from the activity bar (CodeDesigner icon).
+- Use the **Settings** tab to select a BIOS and game, then click **Run**.
+- A **Live Memory** disassembler tab opens automatically when a live session is started.
 
 ---
 
@@ -76,6 +139,21 @@ release; modify `socketClient.ts` to change it if needed.
 | `CodeDesigner: Connect to Server` | Connect to the C# backend on port 8765 |
 | `CodeDesigner: Disconnect from Server` | Close the TCP connection |
 | `CodeDesigner: Send Message to Server` | Send a raw JSON message (for debugging) |
+| `CodeDesigner: Recompile Game ELF from Disc` | Open the recompiler workflow |
+
+### Disassembler Editor Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `F5` | Pause / Resume EE execution |
+| `F9` | Toggle breakpoint on highlighted row |
+| `F10` | Single step (while paused) |
+| `Ctrl+G` | Open go-to address bar |
+| `Ctrl+F` | Open search panel |
+| `Ctrl+Alt+S` | Toggle Symbols panel |
+| `Ctrl+Alt+R` | Toggle Registers (Debug) panel |
+| `Ctrl+Alt+T` | Toggle bottom panel (Call Stack / Threads / Breakpoints) |
+| `Alt+Left` | Navigate back |
 
 ---
 
@@ -110,7 +188,7 @@ The Live Disassembler panel has a built-in breakpoint system that lets you pause
 
 ### Clearing All Breakpoints
 
-Open the Command Palette (`Ctrl+Shift+P`) and run **CodeDesigner: Clear All Breakpoints**, or call the `CLEARBP_ALL` socket command directly.
+Open the **Breakpoints** tab in the bottom panel and click **Clear All**, or call the `CLEARBP_ALL` socket command directly.
 
 > **Tip:** Breakpoints are address-based and work even if the program was loaded from an ELF file.  
 > The `break` MIPS instruction (opcode `0x0D`) is a *separate*, software-only mechanism that triggers a CPU exception — it does not use the breakpoint system described here.
@@ -132,16 +210,13 @@ The assembler and disassembler cover the full PS2 EE instruction set:
 ## Known Issues
 
 - No syntax highlighting or code completion in assembly input panels yet.
-- The extension requires the C# server to be started manually before connecting.
+- The extension requires the C# server to be started manually (or via Connect) before connecting.
 
 ---
 
 ## Release Notes
 
-### 1.0.0
-
-Initial release with assembler and disassembler panels, TCP socket communication, and
-full PS2 EE instruction set support via the C# backend.
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ---
 

@@ -16,6 +16,15 @@ interface DisassembledRow {
   comment: string;
 }
 
+/** Cached scanner results stored per panel. */
+interface PanelScanCache {
+  strings?:   StringEntry[];
+  functions?: FunctionEntry[];
+  pointers?:  PointerEntry[];
+  floats?:    FloatEntry[];
+  integers?:  IntegerEntry[];
+}
+
 export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private static readonly HEX_VIEW_SIZE = 0x30;
   private static readonly INSTRUCTION_SIZE = 4;
@@ -36,6 +45,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }> = [];
 
   /**
+   * Per-panel cache of the most recent scanner results (strings, functions, pointers,
+   * floats, integers).  Populated when a scan completes; re-sent to the webview when
+   * the symbols panel is opened after a page reload without requiring a re-scan.
+   */
+  private _panelScanCache: Map<vscode.WebviewPanel, PanelScanCache> = new Map();
+
+  /**
    * All breakpoints the user has toggled across all live panels.  Persisted here
    * in the extension process so they can be reliably re-sent to the C# server on
    * every connect/reconnect/restart — without depending on the Angular webview
@@ -44,6 +60,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _knownBreakpoints: Set<number> = new Set();
   /** Game-specific labels loaded from snapshots/<isoName>/labels.json. Merged with server labels. */
   private _gameLabels: LabelEntry[] = [];
+  /** Labels derived from live-resolved Pointer Manager entries. Shown as an overlay in the instruction display. */
+  private _pointerLabels: LabelEntry[] = [];
 
   /**
    * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
@@ -55,7 +73,40 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * Optional callback for retrieving address history from snapshots.
    * Wired to DisasmPanelProvider.getAddressHistory() in extension.ts.
    */
-  public onGetAddressHistory?: (address: number) => Array<{ name: string; date: string; value: string }>;
+  public onGetAddressHistory?: (address: number) => Array<{ name: string; date: string; value: string; disasm?: string }>;
+
+  // ── Public helpers ──────────────────────────────────────────────────────────
+
+  /**
+   * Reveal the live panel whose label matches `label`.
+   * Called by DisasmPanelProvider when the user selects a region from the dropdown.
+   */
+  public focusLivePanelByLabel(label: string): void {
+    const info = this._livePanelInfo.find(i => i.label === label);
+    if (info) {
+      info.panel.reveal(undefined, false);
+    }
+  }
+
+  /**
+   * Navigate the appropriate live panel to `address`.
+   * Reveals the panel whose address range contains the address and sends a
+   * `gotoAddress` message so the disassembler cursor jumps there.
+   * The webview handles `gotoAddress` in `disasm-editor.service.ts` via the
+   * `gotoAddressReceived$` subject, which the component uses to move the cursor.
+   * Called by external providers (e.g. the Pointer Manager tree view).
+   */
+  public navigateToAddress(address: number): void {
+    const physAddr = DisasmEditorProvider._toPhysAddr(address);
+    const target = this._livePanelInfo.find(info =>
+        physAddr >= info.physBaseAddress &&
+        physAddr < info.physBaseAddress + info.totalBytes
+    );
+    if (target) {
+        target.panel.reveal(undefined, false);
+        target.panel.webview.postMessage({ type: 'gotoAddress', address });
+    }
+  }
 
   constructor(socketClient: SocketClient | null, private readonly _extensionUri: vscode.Uri) {
     this.socketClient = socketClient;
@@ -86,6 +137,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           p.webview.postMessage({ type: 'labelsUpdated', labels: this._gameLabels });
         }
       }
+    }
+  }
+
+  /**
+   * Set the live-resolved labels from the Pointer Manager.
+   * Broadcasts a `pointerLabelsUpdated` message to all open live panels so the
+   * instruction display can overlay the label names for matching addresses.
+   */
+  public setPointerLabels(labels: LabelEntry[]): void {
+    this._pointerLabels = labels;
+    for (const p of this._livePanels) {
+      p.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
     }
   }
 
@@ -376,7 +439,81 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const history = this.onGetAddressHistory
             ? this.onGetAddressHistory(message.address as number)
             : [];
+        if (this.socketClient?.isConnected()) {
+          await Promise.allSettled(history.map(async entry => {
+            if (!entry.disasm && entry.value) {
+              const results = await this.socketClient!.disassemble(entry.value, message.address as number);
+              if (results?.[0]?.Assembly) { entry.disasm = results[0].Assembly; }
+            }
+          }));
+        }
         webviewPanel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
+      } else if (message.type === "assembleInstr") {
+        if (this.socketClient?.isConnected()) {
+          try {
+            const results = await this.socketClient.assemble(message.instruction as string);
+            const first = results?.[0];
+            if (first?.Success && first.Hex) {
+              const hexBytes = first.Hex.replace(/^0x/i, '').toUpperCase();
+              webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes });
+            } else {
+              webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
+            }
+          } catch {
+            webviewPanel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
+          }
+        }
+      } else if (message.type === "convertCheat") {
+        if (this.socketClient?.isConnected()) {
+          try {
+            const result = await this.socketClient.convertCheat(
+              message.codes as string,
+              message.direction as 'toRaw' | 'toEngine',
+              message.format as string | undefined);
+            webviewPanel.webview.postMessage({ type: 'convertCheatResult', result });
+          } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            webviewPanel.webview.postMessage({ type: 'convertCheatResult', error: errMsg });
+          }
+        } else {
+          webviewPanel.webview.postMessage({ type: 'convertCheatResult', error: 'Not connected to emulator server' });
+        }
+      } else if (message.type === 'browseSourceDump') {
+        const uris = await vscode.window.showOpenDialog({
+          canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+          filters: { 'EE RAM Dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
+          title: 'Select Source EE RAM Dump (r0001)',
+        });
+        if (uris?.[0]) {
+          webviewPanel.webview.postMessage({ type: 'browseSourceDumpResult', filePath: uris[0].fsPath });
+        }
+      } else if (message.type === 'browseTargetDump') {
+        const uris = await vscode.window.showOpenDialog({
+          canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+          filters: { 'EE RAM Dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
+          title: 'Select Target EE RAM Dump (r0002)',
+        });
+        if (uris?.[0]) {
+          webviewPanel.webview.postMessage({ type: 'browseTargetDumpResult', filePath: uris[0].fsPath });
+        }
+      } else if (message.type === 'portCheats') {
+        if (!this.socketClient?.isConnected()) {
+          webviewPanel.webview.postMessage({ type: 'portCheatsResult', error: 'Not connected to emulator server' });
+          return;
+        }
+        try {
+          const { results, log } = await this.socketClient.portCheats(
+            message.codes as string,
+            message.sourcePath as string,
+            message.targetPath as string,
+          );
+          getOutputChannel().info('[Port Cheats]\n' + log);
+          webviewPanel.webview.postMessage({ type: 'portCheatsResult', results });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          getOutputChannel().error('[Port Cheats] ' + errMsg);
+          webviewPanel.webview.postMessage({ type: 'portCheatsResult', error: errMsg });
+        }
       }
     });
 
@@ -418,9 +555,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             // _revealPanelForAddress uses the correct range after an address change
             // (e.g. BIOS ROM shown at KSEG0 0x9FC00000 instead of physical 0x1FC00000).
             existingInfo.baseAddress = baseAddress;
-            existingInfo.physBaseAddress = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
-                ? (baseAddress & 0x1FFFFFFF) >>> 0
-                : baseAddress >>> 0;
+            existingInfo.physBaseAddress = DisasmEditorProvider._toPhysAddr(baseAddress);
             // Re-initialize with live data now that we have a connection
             if (connected) {
                 const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -436,6 +571,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.sendLiveDisasmPage(existingInfo.panel, region, baseAddress, totalBytes, 0);
                 await this.sendLiveHexView(existingInfo.panel, region, baseAddress, baseAddress,
                     DisasmEditorProvider.INSTRUCTION_SIZE);
+                if (this._pointerLabels.length > 0) {
+                    existingInfo.panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
+                }
             }
             return;
         }
@@ -452,15 +590,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         );
 
         // Track this panel for pause/resume broadcast and address lookup.
-        const physBase = (baseAddress >= 0x80000000 && baseAddress <= 0xBFFFFFFF)
-            ? (baseAddress & 0x1FFFFFFF) >>> 0
-            : baseAddress >>> 0;
+        const physBase = DisasmEditorProvider._toPhysAddr(baseAddress);
         const info = { panel, label, region, baseAddress, totalBytes, physBaseAddress: physBase };
         this._livePanels.push(panel);
         this._livePanelInfo.push(info);
         panel.onDidDispose(() => {
             this._livePanels = this._livePanels.filter(p => p !== panel);
             this._livePanelInfo = this._livePanelInfo.filter(info => info.panel !== panel);
+            this._panelScanCache.delete(panel);
         });
 
         const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
@@ -485,6 +622,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 if (this.socketClient?.isConnected()) {
                     await this.sendLiveHexView(panel, region, baseAddress, baseAddress,
                         DisasmEditorProvider.INSTRUCTION_SIZE);
+                }
+                // Send any already-resolved struct labels so they appear immediately.
+                if (this._pointerLabels.length > 0) {
+                    panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
                 }
                 return;
             }
@@ -636,13 +777,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 // The webview could not find the address in its own region.
                 // Find which live panel owns the address and instruct it to navigate.
                 const addr = message.address as number;
-                const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
-                    ? (addr & 0x1FFFFFFF) >>> 0
-                    : addr >>> 0;
-                // Prefer a panel in the same region first.  This disambiguates the
-                // overlap between EE Main RAM and IOP RAM, which both start at
-                // physical address 0x0: a native IOP address like 0x0000ae94 sent
-                // from the IOP panel should land in the IOP panel, not EE Main RAM.
+                const physAddr = DisasmEditorProvider._toPhysAddr(addr as number);
+                // Prefer a panel in the same region first.  EE Main RAM sits at
+                // physical 0x00000000 and IOP RAM at 0x1C000000, so there is no
+                // address overlap; the region preference is kept as a tiebreaker
+                // for any future regions that might share a physical range.
                 const target =
                     this._livePanelInfo.find(info =>
                         info.region === region &&
@@ -665,9 +804,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'patchBytes') {
                 if (this.socketClient?.isConnected()) {
                     try {
+                        // The bytes field (populated by formatBytesForDisplay) shows bytes in
+                        // big-endian (word) order.  Reverse the byte pairs to get the correct
+                        // little-endian layout expected by EE memory before writing.
+                        const hexStr = message.hexBytes as string;
+                        const leHex = (hexStr.match(/.{2}/g) ?? [hexStr]).reverse().join('');
                         await this.socketClient.writeMemory(
                             message.address as number,
-                            message.hexBytes as string,
+                            leHex,
                             'ee'
                         );
                         // Recompute the page that contains this address and refresh it.
@@ -709,6 +853,53 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         console.error(`[LIVE] SetRegister failed: ${err?.message ?? err}`);
                     }
                 }
+            } else if (message.type === 'setPC') {
+                // Set the CPU program counter to the requested address, pause the
+                // emulator, broadcast the new state to every live panel (so all PC
+                // arrows update), reveal the panel that owns the address, and
+                // navigate the cursor there.
+                if (!this.socketClient?.isConnected()) { return; }
+                const addr: number = message.address as number;
+                const addrHex = `0x${addr.toString(16).toUpperCase()}`;
+                try {
+                    // Ensure the emulator is paused before we change the PC.
+                    await this.socketClient.pause();
+                    // Write the new PC value via the existing SETREG mechanism.
+                    await this.socketClient.setRegister('PC', 0, addrHex);
+                    // Fetch the fresh status + full register state.
+                    const status = await this.socketClient.getPC();
+                    const statusMsg: any = { type: 'status', ...status };
+                    statusMsg.paused = true;
+                    try {
+                        const regs = await this.socketClient.getRegisters();
+                        statusMsg.registers = regs;
+                        const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29] ?? 0;
+                        if (sp) {
+                            try {
+                                const buf = await this.socketClient.readMemory(sp, 128, 'ee');
+                                statusMsg.stackBytes = Array.from(buf);
+                                statusMsg.stackBase  = sp;
+                            } catch { /* ignore stack read errors */ }
+                        }
+                    } catch { /* ignore register fetch errors */ }
+                    // Broadcast the new PC state to ALL live panels so every panel's
+                    // PC arrow indicator and register panel update simultaneously.
+                    this._broadcastFullStatus(statusMsg);
+                    // Reveal and navigate the panel that owns this address.
+                    this._revealPanelForAddress(addr);
+                    const physAddr = DisasmEditorProvider._toPhysAddr(addr);
+                    const target = this._livePanelInfo.find(info =>
+                        physAddr >= info.physBaseAddress &&
+                        physAddr < info.physBaseAddress + info.totalBytes
+                    );
+                    if (target) {
+                        target.panel.webview.postMessage({ type: 'gotoAddress', address: addr });
+                    }
+                    // Notify the sidebar so it stays in PAUSED state.
+                    this.onPauseStateChange?.(true);
+                } catch (err: any) {
+                    getOutputChannel().appendLine(`[SETPC] Error: ${err?.message ?? err}`);
+                }
             } else if (message.type === 'disasmBytes') {
                 // Quick disassembly preview for the bytes editor in the edit overlay.
                 if (this.socketClient?.isConnected()) {
@@ -723,6 +914,23 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                             preview: first?.Success && first.Assembly ? first.Assembly.trim() : '(invalid)',
                         });
                     } catch { /* ignore */ }
+                }
+            } else if (message.type === 'assembleInstr') {
+                // Quick assembly for the instruction editor in the edit overlay.
+                if (this.socketClient?.isConnected()) {
+                    try {
+                        const results = await this.socketClient.assemble(message.instruction as string);
+                        const first = results?.[0];
+                        if (first?.Success && first.Hex) {
+                            // Strip the "0x" prefix so patchBytes/saveEditOverlay receive a raw hex string.
+                            const hexBytes = first.Hex.replace(/^0x/i, '').toUpperCase();
+                            panel.webview.postMessage({ type: 'assembleInstrResult', hexBytes });
+                        } else {
+                            panel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
+                        }
+                    } catch {
+                        panel.webview.postMessage({ type: 'assembleInstrResult', hexBytes: null });
+                    }
                 }
             } else if (message.type === 'saveLabel') {
                 await this.handleSaveLabel(panel, message.address, message.newLabel ?? '', message.newComment ?? '');
@@ -739,7 +947,62 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 const history = this.onGetAddressHistory
                     ? this.onGetAddressHistory(message.address as number)
                     : [];
+                if (this.socketClient?.isConnected()) {
+                    await Promise.allSettled(history.map(async entry => {
+                        if (!entry.disasm && entry.value) {
+                            const results = await this.socketClient!.disassemble(entry.value, message.address as number);
+                            if (results?.[0]?.Assembly) { entry.disasm = results[0].Assembly; }
+                        }
+                    }));
+                }
                 panel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
+            } else if (message.type === 'convertCheat') {
+                try {
+                    const result = await this.socketClient!.convertCheat(
+                        message.codes as string,
+                        message.direction as 'toRaw' | 'toEngine',
+                        message.format as string | undefined);
+                    panel.webview.postMessage({ type: 'convertCheatResult', result });
+                } catch (err: unknown) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    panel.webview.postMessage({ type: 'convertCheatResult', error: errMsg });
+                }
+            } else if (message.type === 'browseSourceDump') {
+                const uris = await vscode.window.showOpenDialog({
+                    canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+                    filters: { 'EE RAM Dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
+                    title: 'Select Source EE RAM Dump (r0001)',
+                });
+                if (uris?.[0]) {
+                    panel.webview.postMessage({ type: 'browseSourceDumpResult', filePath: uris[0].fsPath });
+                }
+            } else if (message.type === 'browseTargetDump') {
+                const uris = await vscode.window.showOpenDialog({
+                    canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+                    filters: { 'EE RAM Dumps': ['bin', 'raw', 'dump'], 'All Files': ['*'] },
+                    title: 'Select Target EE RAM Dump',
+                });
+                if (uris?.[0]) {
+                    panel.webview.postMessage({ type: 'browseTargetDumpResult', filePath: uris[0].fsPath });
+                }
+            } else if (message.type === 'portCheats') {
+                if (!this.socketClient?.isConnected()) {
+                    panel.webview.postMessage({ type: 'portCheatsResult', error: 'Not connected to emulator server' });
+                    return;
+                }
+                try {
+                    const { results, log } = await this.socketClient.portCheats(
+                        message.codes as string,
+                        message.sourcePath as string,
+                        message.targetPath as string,
+                    );
+                    getOutputChannel().info('[Port Cheats]\n' + log);
+                    panel.webview.postMessage({ type: 'portCheatsResult', results });
+                } catch (err: unknown) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    getOutputChannel().error('[Port Cheats] ' + errMsg);
+                    panel.webview.postMessage({ type: 'portCheatsResult', error: errMsg });
+                }
             }
         });
 
@@ -784,13 +1047,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     /**
      * Find the live panel whose address range contains `addr` and reveal it so
      * the user immediately sees the paused location.  Strips KSEG0/KSEG1 bits
-     * before comparing, matching the MIPS physical-address mapping.
+     * and the uncached-user EE mirror prefix before comparing.
      * Panel base addresses are pre-computed as physBaseAddress at creation time.
      */
     private _revealPanelForAddress(addr: number): void {
-        const physAddr = (addr >= 0x80000000 && addr <= 0xBFFFFFFF)
-            ? (addr & 0x1FFFFFFF) >>> 0
-            : addr >>> 0;
+        const physAddr = DisasmEditorProvider._toPhysAddr(addr);
 
         for (const info of this._livePanelInfo) {
             if (physAddr >= info.physBaseAddress && physAddr < info.physBaseAddress + info.totalBytes) {
@@ -798,6 +1059,21 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 return;
             }
         }
+    }
+
+    /**
+     * Convert a virtual/logical EE address to its physical equivalent.
+     *   KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip top 3 bits.
+     *   EE RAM uncached mirror (0x20100000–0x21FFFFFF): subtract 0x20000000.
+     *   EE RAM uncached+accelerated (0x30100000–0x31FFFFFF): subtract 0x30000000.
+     *   All other addresses (physical or special like scratchpad) pass through.
+     */
+    private static _toPhysAddr(addr: number): number {
+        const v = addr >>> 0;
+        if (v >= 0x80000000 && v <= 0xBFFFFFFF) return (v & 0x1FFFFFFF) >>> 0;
+        if (v >= 0x20100000 && v <= 0x21FFFFFF) return (v - 0x20000000) >>> 0;
+        if (v >= 0x30100000 && v <= 0x31FFFFFF) return (v - 0x30000000) >>> 0;
+        return v;
     }
 
     private async sendLiveDisasmPage(
@@ -852,7 +1128,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     ): Promise<void> {
         if (!this.socketClient || !this.socketClient.isConnected()) { return; }
 
-        const alignedAddr = Math.max(baseAddress, (highlightAddr & ~0xf) - 0x10);
+        const alignedAddr = Math.max(baseAddress, ((highlightAddr & ~0xf) >>> 0) - 0x10);
         try {
             const buffer = await this.socketClient.readMemory(
                 alignedAddr, DisasmEditorProvider.HEX_VIEW_SIZE, region);
@@ -901,6 +1177,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /**
    * Scan a live memory region for strings, functions, pointers, floats, or
    * integers using the C# backend.
+   * Results are cached per panel; subsequent scans always re-fetch fresh data
+   * and update the cache so the webview can restore them after a page reload.
    * Posts the corresponding `*Updated` message to the webview.
    */
   private async handleLiveScan(
@@ -912,20 +1190,31 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   ): Promise<void> {
     if (!this.socketClient?.isConnected()) { return; }
     try {
+      const cache = this._panelScanCache.get(panel) ?? {};
       if (kind === 'strings') {
         const strings = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
+        cache.strings = strings;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
       } else if (kind === 'functions') {
         const functions = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
+        cache.functions = functions;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'functionsUpdated', functions });
       } else if (kind === 'pointers') {
         const pointers = await this.socketClient.scanLivePointers(baseAddress, totalBytes, region);
+        cache.pointers = pointers;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'pointersUpdated', pointers });
       } else if (kind === 'floats') {
         const floats = await this.socketClient.scanLiveFloats(baseAddress, totalBytes, region);
+        cache.floats = floats;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'floatsUpdated', floats });
       } else {
         const integers = await this.socketClient.scanLiveIntegers(baseAddress, totalBytes, region);
+        cache.integers = integers;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'integersUpdated', integers });
       }
     } catch (err: any) {
@@ -948,6 +1237,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /**
    * Scan file binary data for strings, functions, pointers, floats, or integers
    * using the C# backend.
+   * Results are cached per panel; subsequent scans always re-fetch fresh data
+   * and update the cache.
    * Posts the corresponding `*Updated` message to the webview.
    */
   private async handleFileScan(
@@ -958,20 +1249,31 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   ): Promise<void> {
     if (!this.socketClient?.isConnected()) { return; }
     try {
+      const cache = this._panelScanCache.get(panel) ?? {};
       if (kind === 'strings') {
         const strings = await this.socketClient.getStrings(fileData, baseAddress);
+        cache.strings = strings;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'stringsUpdated', strings });
       } else if (kind === 'functions') {
         const functions = await this.socketClient.getFunctions(fileData, baseAddress);
+        cache.functions = functions;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'functionsUpdated', functions });
       } else if (kind === 'pointers') {
         const pointers = await this.socketClient.getPointers(fileData, baseAddress);
+        cache.pointers = pointers;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'pointersUpdated', pointers });
       } else if (kind === 'floats') {
         const floats = await this.socketClient.getFloats(fileData, baseAddress);
+        cache.floats = floats;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'floatsUpdated', floats });
       } else {
         const integers = await this.socketClient.getIntegers(fileData, baseAddress);
+        cache.integers = integers;
+        this._panelScanCache.set(panel, cache);
         panel.webview.postMessage({ type: 'integersUpdated', integers });
       }
     } catch (err: any) {
@@ -995,6 +1297,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * back to the webview as a single `symbols` message.
    * For live panels that have no backing fileData, pass `undefined`; in that
    * case strings and functions are returned empty.
+   * Any previously cached scan results (pointers, floats, integers) are replayed
+   * so the webview restores its state without requiring a re-scan.
    */
   private async handleGetSymbols(
     panel: vscode.WebviewPanel,
@@ -1020,6 +1324,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     panel.webview.postMessage({ type: 'symbols', labels, strings, functions });
+
+    // Replay any cached scanner results (pointers, floats, integers) so the
+    // webview restores its previous scan state without requiring a re-scan.
+    const cache = this._panelScanCache.get(panel);
+    if (cache) {
+      if (cache.strings   !== undefined) { panel.webview.postMessage({ type: 'stringsUpdated',   strings:   cache.strings   }); }
+      if (cache.functions !== undefined) { panel.webview.postMessage({ type: 'functionsUpdated', functions: cache.functions }); }
+      if (cache.pointers  !== undefined) { panel.webview.postMessage({ type: 'pointersUpdated',  pointers:  cache.pointers  }); }
+      if (cache.floats    !== undefined) { panel.webview.postMessage({ type: 'floatsUpdated',    floats:    cache.floats    }); }
+      if (cache.integers  !== undefined) { panel.webview.postMessage({ type: 'integersUpdated',  integers:  cache.integers  }); }
+    }
   }
 
   /**
@@ -1170,7 +1485,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     highlightAddr: number,
     highlightLength: number
   ): void {
-    const alignedAddr = Math.max(baseAddr, (highlightAddr & ~0xf) - 0x10);
+    const alignedAddr = Math.max(baseAddr, ((highlightAddr & ~0xf) >>> 0) - 0x10);
     const fileOffset = alignedAddr - baseAddr;
     const endOffset = Math.min(
       fileData.length,

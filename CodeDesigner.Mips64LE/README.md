@@ -1,176 +1,77 @@
-﻿# MIPS64 – PlayStation 2 Emotion Engine
+# CodeDesigner.Mips64LE — Console Application & Socket Server
 
 ## Overview
 
-The **Emotion Engine (EE)** is the primary CPU of the **Sony PlayStation 2**, designed jointly by **Sony** and **Toshiba**.  
-It is a **custom 64-bit MIPS-based processor** engineered to deliver extremely high throughput through **parallelism**, **vector processing**, and **DMA-driven data flow**.
+`CodeDesigner.Mips64LE` is the **executable entry point** for the toolkit. It hosts:
 
-Rather than relying on a single powerful scalar core, the EE combines:
-- A **superscalar MIPS64 CPU**
-- Two **high-performance Vector Units (VU0 and VU1)**
-- A **bandwidth-focused memory and DMA architecture**
-
-This repository/project focuses on **understanding, documenting, and working with the MIPS64 architecture as implemented by the PlayStation 2 Emotion Engine**, including its many non-standard extensions.
+- A **dual-CPU PS2 emulator** (EE + IOP) that boots a real PS2 BIOS and loads game discs
+- An **embedded TCP socket server** (port 8765, `--run` mode) used by the VS Code extension and the MCP bridge
+- A **standalone assembler/disassembler server** (port 8766, `--server` mode) with no live emulator
 
 ---
 
-## Emotion Engine Architecture
+## Command-Line Modes
 
-### Core CPU
+| Mode | Command | Port | Description |
+|------|---------|------|-------------|
+| Interactive menu | `dotnet run` | — | Text-based menu for quick assembly/disassembly |
+| Emulator + server | `dotnet run -- --run` | **8765** | Full PS2 emulator with embedded socket server |
+| Assembler server | `dotnet run -- --server` | **8766** | Assembler/disassembler only, no live emulator |
 
-- **Architecture:** MIPS III / MIPS64 (custom Sony extensions)
-- **Word Size:** 64-bit
-- **Clock Speed:** ~294.912 MHz
-- **Endianness:** Little-endian
-- **Pipeline:** Superscalar, dual-issue
-- **Execution:** In-order with instruction pairing rules
+### Emulator flags (used with `--run`)
 
-#### Registers
-- **32 × 128-bit General Purpose Registers (GPRs)** — integer operations use the lower 64-bit lane; the upper 64 bits are sign-extended from bit 63
-- **HI / LO registers** for multiply/divide results
-- **Program Counter (PC)**
-- **Special-purpose system registers** accessed via COP0
+| Flag | Description |
+|------|-------------|
+| `--bios <path>` | Path to a PS2 BIOS ROM image (required for emulation) |
+| `--game <path>` | Path to an ISO/BIN/ZIP disc image to boot |
+| `--steps <N>` | Run exactly N EE steps then exit (useful for CI / benchmarks) |
 
-The EE core supports both **32-bit and 64-bit integer operations**, allowing legacy MIPS code and new 64-bit code to coexist.
-
----
-
-## Vector Units (Key Feature)
-
-The Emotion Engine’s defining feature is its **two programmable vector coprocessors**, which offload most math-heavy workloads.
-
-### VU0 (Vector Unit 0)
-
-- Dual-mode operation:
-  - **Macro Mode** – Acts as a COP2-style coprocessor controlled by the EE CPU
-  - **Micro Mode** – Executes its own microprograms independently
-- Typically used for:
-  - Physics calculations
-  - Animation blending
-  - Collision detection
-  - Assisting the CPU with SIMD math
-
-### VU1 (Vector Unit 1)
-
-- Fully independent processor
-- Executes **microcode only** (no macro mode)
-- Optimized for:
-  - Geometry transformations
-  - Lighting calculations
-  - Vertex skinning
-  - Feeding data to the Graphics Synthesizer (GS)
-- Closely coupled to the **graphics pipeline**
-
-### Vector Capabilities
-
-- **32 × 128-bit vector registers per VU**
-- Each register contains **4 × 32-bit floating-point components**
-- SIMD-style execution with per-component masking
-- Dedicated accumulator register (`ACC`)
+**Example — boot BIOS for 200 M steps:**
+```bash
+dotnet run -- --run --bios SCPH-70012_BIOS_V12_USA_200.bin --steps 200000000
+```
 
 ---
 
-## Floating Point & Coprocessors
+## Socket Server
 
-### COP1 – Floating Point Unit (FPU)
-- **Single-precision only** (PS2 EE does not have double-precision FPU)
-- **Denormals flushed to zero** (not IEEE 754 compliant for denormal inputs/outputs)
-- Mostly used for:
-  - Game logic
-  - Non-vectorized math
-  - Compiler-generated floating-point code
+The socket server at port 8765 (`--run`) accepts multiple simultaneous TCP clients — the VS Code extension and the MCP bridge both connect at the same time without conflict.
 
-### COP0 – System Control
-- Handles:
-  - Exceptions and interrupts
-  - Privilege levels
-  - Timers and counters
-  - Cache and TLB management
+The standalone server at port 8766 (`--server`) is for assembler/disassembler use only; it does not start the emulator and emulator commands will return an error.
+
+See [SOCKET_COMMUNICATION.md](../SOCKET_COMMUNICATION.md) for the full JSON protocol reference.
 
 ---
 
-## Memory System
+## Key Source Files
 
-- **Main Memory:** 32 MB RDRAM
-- **Memory Bandwidth:** Extremely high for its time
-- **Scratchpad RAM:** 16 KB on-chip, low latency
-- **Cache:**
-  - Instruction Cache
-  - Data Cache
-- **DMA Controllers:**
-  - Multiple DMA channels
-  - Core to EE ↔ VUs ↔ GS data flow
-  - Essential for performance
-
-The PS2 relies heavily on **DMA-driven parallelism**, allowing the CPU, VUs, and GS to operate concurrently.
+| File | Description |
+|------|-------------|
+| `Program.cs` | Entry point — parses command-line args and launches the chosen mode |
+| `SocketServer.cs` | TCP socket server — all ~40 command handlers live here |
+| `Menu.cs` | Interactive text menu for manual assembly/disassembly |
 
 ---
 
-## Instruction Set Notes
+## Building & Running
 
-The Emotion Engine extends standard MIPS with:
+```bash
+# Build
+cd CodeDesigner.Mips64LE
+dotnet build
 
-- Full **64-bit integer arithmetic**
-- **128-bit quadword load/store instructions** (`LQ`, `SQ`)
-- Multimedia-style operations
-- Tight integration with vector and DMA subsystems
-- Non-standard behavior in certain corner cases
+# Run with emulator and socket server
+dotnet run -- --run --bios /path/to/bios.bin --game /path/to/game.iso
 
-These extensions make the EE **not fully compatible with desktop MIPS64 CPUs**, requiring **custom handling in emulators, assemblers, and compilers**.
-
----
-
-## Execution Model
-
-- Scalar CPU, VU0, VU1, and GS run **in parallel**
-- Explicit synchronization via:
-  - DMA completion
-  - Pipeline waits
-  - Cache control instructions
-- Performance depends heavily on:
-  - Instruction scheduling
-  - Memory alignment
-  - Data locality
-
----
-
-## Common Use Cases
-
-This project or documentation is useful for:
-
-- 🎮 **PlayStation 2 emulation**
-- 🧪 **Low-level PS2 homebrew development**
-- 🛠 **Writing assemblers or compilers targeting the EE**
-- 🔍 **Reverse engineering PS2 executables**
-- 📐 **Studying SIMD, parallelism, and heterogeneous CPU design**
-
----
-
-## Challenges
-
-- Non-standard MIPS extensions
-- Complex instruction pairing rules
-- Heavy reliance on DMA timing
-- Tight synchronization between:
-  - EE Core
-  - VU0
-  - VU1
-  - Graphics Synthesizer
-- Performance-sensitive code paths with minimal margin for error
+# Run standalone assembler/disassembler server
+dotnet run -- --server
+```
 
 ---
 
 ## References
 
-- Sony PlayStation 2 Technical Documentation  
-- MIPS64 Architecture Manuals  
-- PS2 Linux and Homebrew Documentation  
-- PS2 Reverse Engineering & Emulation Communities  
-
----
-
-## Disclaimer
-
-This project is for **educational and research purposes only**.  
-PlayStation, Emotion Engine, and related trademarks are the property of  
-**Sony Interactive Entertainment**.
+- [SOCKET_COMMUNICATION.md](../SOCKET_COMMUNICATION.md) — full command/response protocol
+- [ASSEMBLER_DISASSEMBLER_INTEGRATION.md](../ASSEMBLER_DISASSEMBLER_INTEGRATION.md) — assemble/disassemble JSON protocol detail
+- [CodeDesigner.Mips64LE.Common/README.md](../CodeDesigner.Mips64LE.Common/README.md) — core library architecture
+- [CodeDesigner.Mips64LE.McpServer/README.md](../CodeDesigner.Mips64LE.McpServer/README.md) — MCP bridge for GitHub Copilot

@@ -1,8 +1,26 @@
+/* Make the entire webview fill available sidebar height */
+html {
+    height: 100%;
+}
+
 body {
     padding: 10px;
     font-family: var(--vscode-editor-font-family);
     color: var(--vscode-editor-foreground);
     background: var(--vscode-editor-background);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-sizing: border-box;
+    margin: 0;
+}
+
+app-disasm-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 /* ── Panel tabs ──────────────────────────────────────────────────────────── */
@@ -13,6 +31,7 @@ body {
     margin: 0 -10px 10px;
     border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
     background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d30);
+    flex-shrink: 0;
 }
 
 .panel-tab {
@@ -43,20 +62,30 @@ body {
 
 .tab-content {
     padding: 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 /* ── Cheats tab ──────────────────────────────────────────────────────────── */
+
+#tab-cheats {
+    flex-direction: column;
+    overflow: hidden;
+}
 
 .cheats-container {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    flex: 1;
+    min-height: 0;
 }
 
 #cheats-input {
-    width: 100%;
-    min-height: 200px;
-    resize: vertical;
+    flex: 1;
+    min-height: 0;
+    resize: none;
     background: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border);
@@ -92,6 +121,7 @@ body {
     font-size: 12px;
     font-weight: bold;
     letter-spacing: 0.04em;
+    flex-shrink: 0;
 }
 
 #emu-status-bar.status-connected {
@@ -198,6 +228,12 @@ body {
     flex: 1;
 }
 
+/* Browse icon button — sits beside a select, stays compact */
+.row .browse-btn {
+    flex: 0 0 auto;
+    padding: 4px 8px;
+}
+
 select, button {
     font-family: var(--vscode-editor-font-family);
     font-size: var(--vscode-editor-font-size);
@@ -300,8 +336,135 @@ button:disabled {
     white-space: nowrap;
 }
 
+.reload-snapshot-btn {
+    padding: 2px 8px;
+    font-size: 11px;
+    flex-shrink: 0;
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #cccccc);
+}
+
+.reload-snapshot-btn:hover:not(:disabled) {
+    background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
 .open-snapshot-btn {
     padding: 2px 8px;
     font-size: 11px;
     flex-shrink: 0;
+}
+
+.section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--vscode-descriptionForeground);
+    margin: 12px 0 4px;
+}
+
+/* ── CDS tab ─────────────────────────────────────────────────────────────── */
+
+/* When active the tab-content div uses display:flex (set via Angular binding) */
+#tab-cds {
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.cds-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+}
+
+#cds-output {
+    flex: 1;
+    min-height: 0;
+    resize: none;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 6px;
+    font-family: monospace;
+    font-size: 12px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+#cds-output::placeholder {
+    color: var(--vscode-input-placeholderForeground, #888);
+}
+
+/* ── Recompile tab ─────────────────────────────────────────────────────────── */
+
+.recompile-help {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    margin: 0 0 8px;
+    line-height: 1.5;
+}
+
+#recompileElfSelect {
+    width: 100%;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 4px 6px;
+    box-sizing: border-box;
+}
+
+#recompileOutputDir {
+    flex: 1;
+    min-width: 0;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 4px 6px;
+    box-sizing: border-box;
+    font-size: 12px;
+}
+
+#recompileBrowseBtn {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: 1px solid var(--vscode-button-border, transparent);
+}
+
+.recompile-status {
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: var(--vscode-notifications-background, #252526);
+    color: var(--vscode-notifications-foreground);
+    margin-top: 4px;
+    word-break: break-all;
+}
+
+.recompile-status.recompile-error {
+    color: var(--vscode-errorForeground, #f48771);
+    background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+    border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+.recompile-files {
+    margin-top: 8px;
+}
+
+.recompile-files ul {
+    padding-left: 16px;
+    margin: 4px 0 0;
+}
+
+.recompile-file-item {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--vscode-foreground);
+    word-break: break-all;
+    margin-bottom: 2px;
 }

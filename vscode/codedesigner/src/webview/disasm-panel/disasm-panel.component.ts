@@ -45,6 +45,75 @@ interface CheatsAppliedMsg {
   error?: string;
 }
 
+/** Message sent by the provider after a CDS compile. */
+interface CdsCompileResultMsg {
+  command: 'cdsCompileResult';
+  success: boolean;
+  codes?: string;
+  errors?: Array<{ lineNumber: number; message: string }>;
+}
+
+/** Message sent by the provider after Add Patch. */
+interface CdsPatchAppliedMsg {
+  command: 'cdsPatchApplied';
+  success: boolean;
+  error?: string;
+}
+
+/** One ELF or IRX file listed on the disc. */
+interface DiscElfEntry {
+  Path: string;
+  Name: string;
+  Size: number;
+  IsBootElf: boolean;
+}
+
+/** Message sent by the provider after a LISTDISCELFS call. */
+interface ListDiscElfsResultMsg {
+  command: 'listDiscElfsResult';
+  success: boolean;
+  elfFiles?: DiscElfEntry[];
+  bootElf?: string;
+  error?: string;
+}
+
+/** Message sent by the provider after a RECOMPILE call. */
+interface RecompileResultMsg {
+  command: 'recompileResult';
+  success: boolean;
+  functionCount?: number;
+  writtenFiles?: string[];
+  bootElf?: string;
+  error?: string;
+}
+
+/** Message sent by the provider after a folder-picker dialog for the output directory. */
+interface BrowseOutputDirectoryResultMsg {
+  command: 'browseOutputDirectoryResult';
+  directory: string;
+}
+
+/** Message sent by the provider after an ISO file-picker dialog. */
+interface BrowseGameResultMsg {
+  command: 'browseGameResult';
+  filePath: string;
+  gameOptions?: EmuOption[];
+}
+
+/** Message sent by the provider after a BIOS file-picker dialog. */
+interface BrowseBiosResultMsg {
+  command: 'browseBiosResult';
+  filePath: string;
+  biosOptions?: EmuOption[];
+}
+
+/** Message sent by the provider after an emulator file-picker dialog. */
+interface BrowseEmulatorResultMsg {
+  command: 'browseEmulatorResult';
+  filePath: string;
+  emulators?: EmuOption[];
+}
+
 /** Message sent by the provider with initial panel data (options, existing snapshots). */
 interface InitMsg {
   type: 'init';
@@ -54,6 +123,11 @@ interface InitMsg {
   snapshots: SnapshotEntry[];
   connectedEmulatorPath?: string;
   selectedGameName?: string;
+  isConnected?: boolean;
+  isPaused?: boolean;
+  selectedEmulator?: string;
+  selectedBios?: string;
+  selectedGame?: string;
 }
 
 @Component({
@@ -79,6 +153,8 @@ interface InitMsg {
 <div id="panel-tabs">
   <button class="panel-tab" [class.active]="activeTab === 'settings'" (click)="setTab('settings')">Emulator Settings</button>
   <button class="panel-tab" [class.active]="activeTab === 'cheats'" (click)="setTab('cheats')">Cheats</button>
+  <button class="panel-tab" [class.active]="activeTab === 'cds'" (click)="setTab('cds')">CDS</button>
+  <button class="panel-tab" [class.active]="activeTab === 'recompile'" (click)="setTab('recompile')">Recompile</button>
 </div>
 
 <div id="tab-settings" class="tab-content" [style.display]="activeTab === 'settings' ? 'block' : 'none'">
@@ -89,6 +165,7 @@ interface InitMsg {
         <option value="">Select Emulator...</option>
         <option *ngFor="let e of emulators" [value]="e.value">{{e.label}}</option>
       </select>
+      <button class="browse-btn" (click)="browseEmulator()" title="Browse for emulator executable">…</button>
     </div>
 
     <div class="row">
@@ -96,6 +173,7 @@ interface InitMsg {
         <option value="">Select BIOS...</option>
         <option *ngFor="let b of biosOptions" [value]="b.value">{{b.label}}</option>
       </select>
+      <button class="browse-btn" (click)="browseBios()" title="Browse for PS2 BIOS file">…</button>
     </div>
 
     <div class="row">
@@ -103,12 +181,17 @@ interface InitMsg {
         <option value="">Select Game...</option>
         <option *ngFor="let g of gameOptions" [value]="g.value">{{g.label}}</option>
       </select>
+      <button class="browse-btn" (click)="browseGame()" title="Browse for ISO, BIN, or ZIP disc image">…</button>
     </div>
 
     <div class="row">
       <button id="connectBtn" (click)="connect()">
         {{isConnected ? 'Disconnect' : 'Connect'}}
       </button>
+    </div>
+
+    <div class="row">
+      <button id="runBtn" (click)="run()">▶ Run</button>
     </div>
 
     <div class="row">
@@ -133,6 +216,7 @@ interface InitMsg {
             <span class="snapshot-date-time">{{snap.date}} {{snap.timestamp}}</span>
           </div>
           <button class="open-snapshot-btn" (click)="openSnapshot(snap)">Open</button>
+          <button class="reload-snapshot-btn" (click)="reloadSnapshot(snap)" [disabled]="!isConnected" title="Restore this snapshot into the live emulator">Reload</button>
         </div>
       </div>
     </div>
@@ -140,7 +224,7 @@ interface InitMsg {
   </div>
 </div>
 
-<div id="tab-cheats" class="tab-content" [style.display]="activeTab === 'cheats' ? 'block' : 'none'">
+<div id="tab-cheats" class="tab-content" [style.display]="activeTab === 'cheats' ? 'flex' : 'none'">
   <div class="cheats-container">
     <textarea id="cheats-input" [(ngModel)]="cheatText"
       placeholder="Paste cheat codes here (GameShark/Action Replay format)&#10;&#10;Example:&#10;#Infinite Health&#10;20123456 000003E8"></textarea>
@@ -148,6 +232,72 @@ interface InitMsg {
       <button id="cheatsUpdateBtn" (click)="applyCheats()" [disabled]="!isConnected">Update</button>
     </div>
     <div *ngIf="cheatMessage" class="cheat-message" [class.cheat-error]="cheatError">{{cheatMessage}}</div>
+  </div>
+</div>
+
+<div id="tab-cds" class="tab-content" [style.display]="activeTab === 'cds' ? 'flex' : 'none'">
+  <div class="cds-container">
+    <div class="section-label">Compiled GameShark Codes</div>
+    <textarea id="cds-output" [(ngModel)]="cdsOutput" readonly
+      placeholder="Compiled GameShark codes will appear here after pressing Compile.&#10;&#10;Add an address directive in your .cds file:&#10;  address 0x20123456&#10;  nop&#10;  add $t0, $s0, $s1"></textarea>
+    <div class="row">
+      <button id="cdsCompileBtn" (click)="compileCds()" [disabled]="!isConnected">Compile</button>
+      <button id="cdsAddPatchBtn" (click)="addPatch()" [disabled]="!isConnected || !cdsOutput">Add Patch</button>
+    </div>
+    <div class="row">
+      <button id="cdsAddCheatBtn" (click)="addCheat()" [disabled]="!cdsOutput">Add Cheat</button>
+    </div>
+  </div>
+</div>
+
+<div id="tab-recompile" class="tab-content" [style.display]="activeTab === 'recompile' ? 'block' : 'none'">
+  <div class="container">
+    <div class="section-label">Static Recompiler</div>
+    <p class="recompile-help">
+      Extracts an ELF from the loaded disc image and generates C++ source files.
+      Each game has one main executable (BOOT2, shown with ★); other files are
+      IOP modules (IRX) or game overlays.
+    </p>
+
+    <div class="row">
+      <button id="recompileListBtn" (click)="listDiscElfs()" [disabled]="!selectedGame">
+        Load ELF list from disc
+      </button>
+    </div>
+
+    <div class="row" *ngIf="recompileElfList.length > 0">
+      <select id="recompileElfSelect" [(ngModel)]="recompileSelectedElf">
+        <option value="">Select ELF to recompile…</option>
+        <option *ngFor="let e of recompileElfList" [value]="e.Name">
+          {{e.IsBootElf ? '★ ' : ''}}{{e.Name}} ({{formatBytes(e.Size)}})
+        </option>
+      </select>
+    </div>
+
+    <div class="row">
+      <input id="recompileOutputDir" type="text" [(ngModel)]="recompileOutputDir"
+        placeholder="Output directory (default: recomp_out)" />
+      <button id="recompileBrowseBtn" (click)="browseOutputDirectory()" title="Browse for output directory" aria-label="Browse for output directory">…</button>
+    </div>
+
+    <div class="row">
+      <button id="recompileRunBtn" (click)="runRecompile()"
+        [disabled]="!selectedGame || recompileRunning">
+        {{recompileRunning ? 'Recompiling…' : 'Recompile'}}
+      </button>
+    </div>
+
+    <div *ngIf="recompileStatus" class="recompile-status"
+         [class.recompile-error]="recompileIsError">
+      {{recompileStatus}}
+    </div>
+
+    <div *ngIf="recompileWrittenFiles.length > 0" class="recompile-files">
+      <div class="section-label">Generated files</div>
+      <ul>
+        <li *ngFor="let f of recompileWrittenFiles" class="recompile-file-item">{{f}}</li>
+      </ul>
+    </div>
   </div>
 </div>
   `
@@ -162,11 +312,21 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   selectedEmulator = '';
   selectedBios = '';
   selectedGame = '';
-  activeTab: 'settings' | 'cheats' = 'settings';
+  activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' = 'settings';
   cheatText = '';
   cheatMessage = '';
   cheatError = false;
   currentGameName = '';
+  // CDS tab state
+  cdsOutput = '';
+  // Recompile tab state
+  recompileElfList: DiscElfEntry[] = [];
+  recompileSelectedElf = '';
+  recompileOutputDir = '';
+  recompileRunning = false;
+  recompileStatus = '';
+  recompileIsError = false;
+  recompileWrittenFiles: string[] = [];
   private subs: Subscription[] = [];
 
   get statusText(): string {
@@ -196,16 +356,83 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         // Always sync snapshot list (may be empty array to clear old entries)
         if (msg.snapshots !== undefined) { this.snapshots = msg.snapshots; }
         if (msg.connectedEmulatorPath) { this.selectedEmulator = msg.connectedEmulatorPath; }
+        // Restore saved dropdown selections from settings.json
+        if (msg.selectedEmulator !== undefined) { this.selectedEmulator = msg.selectedEmulator; }
+        if (msg.selectedBios     !== undefined) { this.selectedBios     = msg.selectedBios;     }
+        if (msg.selectedGame     !== undefined) { this.selectedGame     = msg.selectedGame;     }
         if (msg.selectedGameName !== undefined) { this.currentGameName = msg.selectedGameName; }
+        // Restore connection/pause state so the UI is correct if the sidebar
+        // opens after auto-connect has already succeeded.
+        if (msg.isConnected !== undefined) { this.isConnected = msg.isConnected; }
+        if (msg.isPaused    !== undefined) { this.isPaused    = msg.isPaused;    }
       }),
       this.bridge.on<CheatsAppliedMsg>('cheatsApplied').subscribe(msg => {
         this.cheatError   = !msg.success;
         this.cheatMessage = msg.success ? 'Cheats applied!' : (msg.error ?? 'Failed to apply cheats.');
         setTimeout(() => { this.cheatMessage = ''; }, 4000);
+      }),
+      this.bridge.on<CdsCompileResultMsg>('cdsCompileResult').subscribe(msg => {
+        if (msg.success && msg.codes) {
+          this.cdsOutput = msg.codes;
+        } else {
+          this.cdsOutput = '';
+        }
+      }),
+      this.bridge.on<CdsPatchAppliedMsg>('cdsPatchApplied').subscribe(_msg => {
+        // Patch results are logged to the Debug output channel server-side
+      }),
+      this.bridge.on<ListDiscElfsResultMsg>('listDiscElfsResult').subscribe(msg => {
+        if (msg.success && msg.elfFiles) {
+          this.recompileElfList = msg.elfFiles;
+          // Default to the BOOT2 executable if available
+          const boot = msg.elfFiles.find(e => e.IsBootElf);
+          if (boot) { this.recompileSelectedElf = boot.Name; }
+          this.recompileStatus  = '';
+          this.recompileIsError = false;
+        } else {
+          this.recompileStatus  = msg.error ?? 'Failed to load ELF list.';
+          this.recompileIsError = true;
+        }
+      }),
+      this.bridge.on<RecompileResultMsg>('recompileResult').subscribe(msg => {
+        this.recompileRunning = false;
+        if (msg.success) {
+          this.recompileStatus      = `Done — ${msg.functionCount ?? 0} function(s) recompiled.`;
+          this.recompileIsError     = false;
+          this.recompileWrittenFiles = msg.writtenFiles ?? [];
+        } else {
+          this.recompileStatus      = msg.error ?? 'Recompilation failed.';
+          this.recompileIsError     = true;
+          this.recompileWrittenFiles = [];
+        }
+      }),
+      this.bridge.on<BrowseOutputDirectoryResultMsg>('browseOutputDirectoryResult').subscribe(msg => {
+        if (msg.directory) {
+          this.recompileOutputDir = msg.directory;
+        }
+      }),
+      this.bridge.on<BrowseGameResultMsg>('browseGameResult').subscribe(msg => {
+        if (msg.filePath) {
+          if (msg.gameOptions) { this.gameOptions = msg.gameOptions; }
+          this.selectedGame = msg.filePath;
+          this.onGameChange();
+        }
+      }),
+      this.bridge.on<BrowseBiosResultMsg>('browseBiosResult').subscribe(msg => {
+        if (msg.filePath) {
+          if (msg.biosOptions) { this.biosOptions = msg.biosOptions; }
+          this.selectedBios = msg.filePath;
+          this.onBiosChange();
+        }
+      }),
+      this.bridge.on<BrowseEmulatorResultMsg>('browseEmulatorResult').subscribe(msg => {
+        if (msg.filePath) {
+          if (msg.emulators) { this.emulators = msg.emulators; }
+          this.selectedEmulator = msg.filePath;
+          this.onEmulatorChange();
+        }
       })
     );
-    // Signal to the provider that subscriptions are set up and we are ready
-    // to receive messages (especially the initial 'init' payload).
     this.bridge.postMessage({ command: 'ready' });
   }
 
@@ -216,6 +443,15 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   connect(): void {
     this.bridge.postMessage({
       command: 'connect',
+      emulatorPath: this.selectedEmulator,
+      biosPath: this.selectedBios,
+      gamePath: this.selectedGame,
+    });
+  }
+
+  run(): void {
+    this.bridge.postMessage({
+      command: 'run',
       emulatorPath: this.selectedEmulator,
       biosPath: this.selectedBios,
       gamePath: this.selectedGame,
@@ -246,6 +482,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
     this.bridge.postMessage({ command: 'openSnapshot', path: snap.path });
   }
 
+  reloadSnapshot(snap: SnapshotEntry): void {
+    this.bridge.postMessage({ command: 'reloadSnapshot', path: snap.path });
+  }
+
   onEmulatorChange(): void {
     this.bridge.postMessage({ command: 'emulatorChanged', emulatorPath: this.selectedEmulator });
   }
@@ -258,11 +498,73 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
     this.bridge.postMessage({ command: 'gameChanged', gamePath: this.selectedGame });
   }
 
-  setTab(tab: 'settings' | 'cheats'): void {
+  setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile'): void {
     this.activeTab = tab;
   }
 
   applyCheats(): void {
     this.bridge.postMessage({ command: 'applyCheats', cheatText: this.cheatText });
+  }
+
+  compileCds(): void {
+    this.bridge.postMessage({ command: 'compileCds' });
+  }
+
+  addPatch(): void {
+    if (!this.cdsOutput) { return; }
+    this.bridge.postMessage({ command: 'addPatch', codes: this.cdsOutput });
+  }
+
+  addCheat(): void {
+    if (!this.cdsOutput) { return; }
+    // Append compiled codes to the cheats tab list and switch to it
+    this.cheatText = this.cheatText
+      ? this.cheatText.trimEnd() + '\n' + this.cdsOutput
+      : this.cdsOutput;
+    this.activeTab = 'cheats';
+  }
+
+  listDiscElfs(): void {
+    this.recompileElfList    = [];
+    this.recompileStatus     = 'Loading ELF list…';
+    this.recompileIsError    = false;
+    this.recompileWrittenFiles = [];
+    this.bridge.postMessage({ command: 'listDiscElfs', gamePath: this.selectedGame });
+  }
+
+  browseOutputDirectory(): void {
+    this.bridge.postMessage({ command: 'browseOutputDirectory' });
+  }
+
+  browseGame(): void {
+    this.bridge.postMessage({ command: 'browseGame' });
+  }
+
+  browseBios(): void {
+    this.bridge.postMessage({ command: 'browseBios' });
+  }
+
+  browseEmulator(): void {
+    this.bridge.postMessage({ command: 'browseEmulator' });
+  }
+
+  runRecompile(): void {
+    if (!this.selectedGame || this.recompileRunning) { return; }
+    this.recompileRunning    = true;
+    this.recompileStatus     = 'Recompiling…';
+    this.recompileIsError    = false;
+    this.recompileWrittenFiles = [];
+    this.bridge.postMessage({
+      command:         'recompile',
+      gamePath:        this.selectedGame,
+      elfName:         this.recompileSelectedElf,
+      outputDirectory: this.recompileOutputDir,
+    });
+  }
+
+  formatBytes(bytes: number): string {
+    if (bytes < 1024) { return `${bytes} B`; }
+    if (bytes < 1024 * 1024) { return `${(bytes / 1024).toFixed(1)} KB`; }
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 }

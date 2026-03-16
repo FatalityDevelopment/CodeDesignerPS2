@@ -2,6 +2,7 @@
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
+using CodeDesigner.Mips64LE.Recompiler;
 
 namespace CodeDesigner.Mips64LE
 {
@@ -21,6 +22,12 @@ namespace CodeDesigner.Mips64LE
             if (HasFlag(args, "--graphics-info"))
             {
                 PrintGraphicsInfo();
+                return;
+            }
+
+            if (HasFlag(args, "--recompile"))
+            {
+                await RunRecompiler(args);
                 return;
             }
 
@@ -1376,8 +1383,92 @@ namespace CodeDesigner.Mips64LE
             catch (TaskCanceledException) { /* Ctrl+C */ }
             await serverTask;
         }
+        }
 
+        // ── Static recompiler mode ────────────────────────────────────────────
 
+        /// <summary>
+        /// Statically recompile a PS2 ELF binary to C++ source files.
+        ///
+        /// Usage:
+        ///   dotnet run -- --recompile --elf game.elf [--out recomp_out] [--single-file] [--stub name[@0xADDR]] [--skip name] [--ghidra map.csv]
+        /// </summary>
+        private static Task RunRecompiler(string[] args)
+        {
+            string? elfPath   = GetArg(args, "--elf");
+            string  outDir    = GetArg(args, "--out") ?? "recomp_out";
+            bool    single    = HasFlag(args, "--single-file");
+            string? ghidra    = GetArg(args, "--ghidra");
+            bool    patchCop0 = HasFlag(args, "--patch-cop0");
+
+            if (elfPath == null)
+            {
+                Console.Error.WriteLine("Error: --elf <path> is required for --recompile mode.");
+                Console.Error.WriteLine("  Usage: dotnet run -- --recompile --elf game.elf [--out recomp_out]");
+                return Task.CompletedTask;
+            }
+
+            if (!File.Exists(elfPath))
+            {
+                Console.Error.WriteLine($"Error: ELF file not found: {elfPath}");
+                return Task.CompletedTask;
+            }
+
+            // Collect --stub and --skip lists (may appear multiple times)
+            var stubs = new List<string>();
+            var skips = new List<string>();
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--stub" && i + 1 < args.Length) stubs.Add(args[++i]);
+                if (args[i] == "--skip" && i + 1 < args.Length) skips.Add(args[++i]);
+            }
+
+            var config = new RecompilerConfig
+            {
+                InputElf         = elfPath,
+                OutputDirectory  = outDir,
+                SingleFileOutput = single,
+                GhidraFunctionMap = ghidra,
+                PatchCop0        = patchCop0,
+                Stubs            = stubs,
+                Skips            = skips,
+            };
+
+            Console.WriteLine($"Recompiling: {elfPath}");
+            Console.WriteLine($"Output:      {outDir}");
+
+            byte[] elfData;
+            try
+            {
+                elfData = File.ReadAllBytes(elfPath);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error reading ELF: {ex.Message}");
+                return Task.CompletedTask;
+            }
+
+            try
+            {
+                var recompiler = new Ps2StaticRecompiler(config);
+                var result = recompiler.Recompile(elfData, msg => Console.WriteLine($"  {msg}"));
+
+                Console.WriteLine();
+                Console.WriteLine($"Recompilation complete.");
+                Console.WriteLine($"  Functions : {result.Functions.Count}");
+                Console.WriteLine($"  Files     : {result.WrittenFiles.Count}");
+                foreach (var f in result.WrittenFiles)
+                    Console.WriteLine($"    {f}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Recompilation failed: {ex.Message}");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        // ── Socket server mode ────────────────────────────────────────────────
 
         private static async Task StartSocketServer()
         {
@@ -1428,6 +1519,9 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine("  dotnet run -- --run [--bios <bios.bin>] [--disc <game.iso>] [--steps N]");
             Console.WriteLine("      Run the PS2 emulator with a real BIOS (and optionally a game disc).");
             Console.WriteLine();
+            Console.WriteLine("  dotnet run -- --recompile --elf <game.elf> [--out <dir>] [options]");
+            Console.WriteLine("      Statically recompile a PS2 ELF to C++ source files.");
+            Console.WriteLine();
             Console.WriteLine("  dotnet run -- --pcsx2 [--pcsx2-slot 28011] [--pcsx2-host 127.0.0.1] [--port 8765]");
             Console.WriteLine("      Start the PCSX2 PINE bridge server.");
             Console.WriteLine("      Connects to a running PCSX2 instance via the PINE IPC socket and");
@@ -1452,6 +1546,15 @@ namespace CodeDesigner.Mips64LE
             Console.WriteLine("                  defaults to SCPH-70012_BIOS_V12_USA_200.bin in the repo.");
             Console.WriteLine("  --disc <path>   Path to a PS2 ISO-9660 game disc image. Optional.");
             Console.WriteLine("  --steps N       Stop after N EE instruction steps (default: unlimited).");
+            Console.WriteLine();
+            Console.WriteLine("Options for --recompile:");
+            Console.WriteLine("  --elf <path>         Path to the PS2 ELF binary to recompile (required).");
+            Console.WriteLine("  --out <dir>          Output directory for C++ files (default: recomp_out).");
+            Console.WriteLine("  --single-file        Write all functions into one recomp_output.cpp.");
+            Console.WriteLine("  --ghidra <csv>       Ghidra function map CSV (address,name per line).");
+            Console.WriteLine("  --stub name[@addr]   Mark a function as an external stub.");
+            Console.WriteLine("  --skip name          Skip a function (emit TODO wrapper).");
+            Console.WriteLine("  --patch-cop0         Replace COP0 instructions with no-ops.");
             Console.WriteLine();
             Console.WriteLine("Options for --pcsx2:");
             Console.WriteLine("  --pcsx2-slot N  PINE slot/port number (default: 28011).");

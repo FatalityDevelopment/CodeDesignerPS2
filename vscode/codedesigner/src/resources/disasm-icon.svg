@@ -1,4 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-  <path fill="#C5C5C5" d="M3 3h18v2H3V3zm0 4h12v2H3V7zm0 4h18v2H3v-2zm0 4h12v2H3v-2zm0 4h18v2H3v-2z"/>
-  <path fill="#007ACC" d="M17 7l4 2.5L17 12V7z"/>
+  <!-- CPU chip body -->
+  <rect x="7" y="7" width="10" height="10" rx="1" fill="#007ACC"/>
+  <!-- Pin connectors - top -->
+  <line x1="9" y1="7" x2="9" y2="4" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="12" y1="7" x2="12" y2="4" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="15" y1="7" x2="15" y2="4" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Pin connectors - bottom -->
+  <line x1="9" y1="17" x2="9" y2="20" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="12" y1="17" x2="12" y2="20" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="15" y1="17" x2="15" y2="20" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Pin connectors - left -->
+  <line x1="7" y1="9" x2="4" y2="9" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="7" y1="12" x2="4" y2="12" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="7" y1="15" x2="4" y2="15" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Pin connectors - right -->
+  <line x1="17" y1="9" x2="20" y2="9" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="17" y1="12" x2="20" y2="12" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="17" y1="15" x2="20" y2="15" stroke="#C5C5C5" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Inner chip detail -->
+  <rect x="9.5" y="9.5" width="5" height="5" rx="0.5" fill="none" stroke="#FFFFFF" stroke-width="0.8" opacity="0.6"/>
 </svg>

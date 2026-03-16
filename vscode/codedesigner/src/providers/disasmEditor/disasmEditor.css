@@ -483,11 +483,31 @@ body {
 }
 
 .dbg-name {
-    color: #9cdcfe;
+    color: var(--vscode-debugTokenExpression-name, #9cdcfe);
     width: 7ch;
     flex-shrink: 0;
     white-space: pre;
 }
+
+/* ── GPR register category colours ── */
+/* Applied to .dbg-name spans in the debug panel and inline <span> elements   */
+/* injected by colorizeRegisters() in the disassembler args column.            */
+/* $zero — always-zero, muted */
+.dbg-reg-zero   { color: var(--vscode-disabledForeground, #858585); }
+/* $at — assembler temporary, amber caution */
+.dbg-reg-at     { color: var(--vscode-editorWarning-foreground, #cca700); }
+/* $v0/$v1 — function return values, number/value green */
+.dbg-reg-v      { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
+/* $a0-$a3 — call arguments, string/parameter orange */
+.dbg-reg-a      { color: var(--vscode-debugTokenExpression-string, #ce9178); }
+/* $t0-$t9 — temporaries, function-name yellow */
+.dbg-reg-t      { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
+/* $s0-$s7 — saved (callee-saved), variable blue */
+.dbg-reg-s      { color: var(--vscode-debugTokenExpression-name, #9cdcfe); }
+/* $k0/$k1 — kernel-reserved, error red */
+.dbg-reg-k      { color: var(--vscode-debugTokenExpression-error, #f48771); }
+/* $gp/$sp/$fp/$ra — architectural specials, type-param teal */
+.dbg-reg-special { color: var(--vscode-symbolIcon-typeParameterForeground, #4ec9b0); }
 
 .dbg-addr {
     color: #c586c0;
@@ -868,6 +888,75 @@ body {
     text-align: center;
 }
 
+.sym-filter-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: #1e1e1e;
+    border: none;
+    border-bottom: 1px solid #3e3e42;
+    color: #cccccc;
+    font-family: monospace;
+    font-size: 11px;
+    padding: 4px 8px;
+    outline: none;
+    flex-shrink: 0;
+}
+
+.sym-filter-input::placeholder {
+    color: #555;
+}
+
+.sym-filter-input:focus {
+    border-bottom-color: #007acc;
+}
+
+.sym-overflow {
+    color: #858585;
+    font-size: 10px;
+    padding: 6px 8px;
+    text-align: center;
+    border-top: 1px solid #3e3e42;
+}
+
+.sym-pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 8px;
+    border-top: 1px solid #3e3e42;
+    flex-shrink: 0;
+    background: #252526;
+}
+
+.sym-pager-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    flex-shrink: 0;
+}
+
+.sym-pager-btn:hover:not(:disabled) {
+    background: #505050;
+}
+
+.sym-pager-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.sym-pager-info {
+    color: #858585;
+    font-size: 10px;
+    text-align: center;
+    flex: 1;
+}
+
 /* ── Inline address edit overlay ─────────────────────────────────────── */
 
 #edit-overlay {
@@ -999,5 +1088,100 @@ body {
 
 #edit-overlay-cancel:hover {
     background: #505050;
+}
+
+/* ── Edit overlay tabs ── */
+
+#edit-overlay-tabs {
+    display: flex;
+    border-bottom: 1px solid #3e3e42;
+}
+
+.edit-overlay-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #858585;
+    cursor: pointer;
+    padding: 6px 14px;
+    font-size: 11px;
+    font-family: monospace;
+    margin-bottom: -1px;
+}
+
+.edit-overlay-tab:hover {
+    color: #d4d4d4;
+}
+
+.edit-overlay-tab.active {
+    color: #d4d4d4;
+    border-bottom-color: #007acc;
+}
+
+.edit-overlay-tab-content {
+    display: none;
+}
+
+.edit-overlay-tab-content.active {
+    display: block;
+}
+
+/* ── History tab ── */
+
+.edit-overlay-history-list {
+    padding: 6px 12px 10px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.edit-overlay-history-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 0;
+    border-bottom: 1px solid #2d2d30;
+}
+
+.edit-overlay-history-row:last-child {
+    border-bottom: none;
+}
+
+.edit-overlay-history-value {
+    color: #9cdcfe;
+    font-family: monospace;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.edit-overlay-history-disasm {
+    color: #ce9178;
+    font-family: monospace;
+    font-size: 11px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.edit-overlay-history-name {
+    color: #d4d4d4;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+}
+
+.edit-overlay-history-date {
+    color: #858585;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.edit-overlay-history-empty {
+    color: #858585;
+    font-size: 11px;
+    text-align: center;
+    padding: 16px 0;
 }
 

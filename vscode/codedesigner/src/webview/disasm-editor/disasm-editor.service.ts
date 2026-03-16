@@ -118,6 +118,8 @@ export interface DisasmEditorState {
   symPointers: SymPointer[];
   symFloats: SymFloat[];
   symIntegers: SymInteger[];
+  /** Live-resolved labels from the Pointer Manager, keyed by normalised address. */
+  pointerLabels: SymLabel[];
 }
 
 // ── Event payloads ────────────────────────────────────────────────────────────
@@ -185,6 +187,7 @@ export class DisasmEditorService implements OnDestroy {
     symPointers: [],
     symFloats: [],
     symIntegers: [],
+    pointerLabels: [],
   };
 
   // ── Events the component (and future sub-components) subscribe to ─────────
@@ -203,6 +206,8 @@ export class DisasmEditorService implements OnDestroy {
   readonly integersUpdated$         = new Subject<void>();
   /** Fired when live analysis comments arrive for one or more addresses. */
   readonly analysisUpdated$         = new Subject<Record<string, string>>();
+  /** Fired when live-resolved Pointer Manager labels arrive. */
+  readonly pointerLabelsUpdated$    = new Subject<void>();
   /** Fired when the extension host instructs this panel to navigate to an address. */
   readonly gotoAddressReceived$     = new Subject<{ address: number }>();
   /** Fired when another panel syncs its goto-input value to this panel. */
@@ -229,6 +234,7 @@ export class DisasmEditorService implements OnDestroy {
       this._bridge.on<Record<string, unknown>>('pointersUpdated').subscribe(msg => this._onPointersUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('floatsUpdated').subscribe(msg => this._onFloatsUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('integersUpdated').subscribe(msg => this._onIntegersUpdated(msg)),
+      this._bridge.on<Record<string, unknown>>('pointerLabelsUpdated').subscribe(msg => this._onPointerLabelsUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('gotoAddress').subscribe(msg => this.gotoAddressReceived$.next({ address: msg['address'] as number })),
       this._bridge.on<Record<string, unknown>>('syncGotoInput').subscribe(msg => this.syncGotoInputReceived$.next({ value: msg['value'] as string })),
       this._bridge.on<Record<string, unknown>>('gotoRegionNotFound').subscribe(msg => this.gotoRegionNotFoundReceived$.next({ address: msg['address'] as number })),
@@ -375,9 +381,17 @@ export class DisasmEditorService implements OnDestroy {
     }
   }
 
-  /** Strip KSEG0/KSEG1 virtual-address bits to get the physical address. */
+  /** Translate any virtual/logical EE address to its physical equivalent.
+   *  KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip the top 3 bits.
+   *  EE RAM uncached mirror (0x20100000–0x21FFFFFF): subtract 0x20000000.
+   *  EE RAM uncached+accelerated (0x30100000–0x31FFFFFF): subtract 0x30000000.
+   *  All other addresses (physical or special like scratchpad) pass through. */
   private _toPhysAddr(addr: number): number {
-    return (addr >= 0x80000000 && addr <= 0xBFFFFFFF) ? (addr & 0x1FFFFFFF) : addr;
+    const v = addr >>> 0;
+    if (v >= 0x80000000 && v <= 0xBFFFFFFF) return (v & 0x1FFFFFFF) >>> 0;
+    if (v >= 0x20100000 && v <= 0x21FFFFFF) return (v - 0x20000000) >>> 0;
+    if (v >= 0x30100000 && v <= 0x31FFFFFF) return (v - 0x30000000) >>> 0;
+    return v;
   }
 
   private _onReset(): void {
@@ -420,5 +434,10 @@ export class DisasmEditorService implements OnDestroy {
   private _onIntegersUpdated(msg: Record<string, unknown>): void {
     this.state.symIntegers = (msg['integers'] as SymInteger[] | undefined) ?? [];
     this.integersUpdated$.next();
+  }
+
+  private _onPointerLabelsUpdated(msg: Record<string, unknown>): void {
+    this.state.pointerLabels = (msg['labels'] as SymLabel[] | undefined) ?? [];
+    this.pointerLabelsUpdated$.next();
   }
 }
