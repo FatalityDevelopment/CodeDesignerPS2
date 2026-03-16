@@ -88,6 +88,23 @@ import './disasm-editor.css';
 </div>
 <div id="content-wrapper">
 <div id="grid" tabindex="0"></div>
+<div id="grid-context-menu">
+    <div id="ctx-addr" class="ctx-menu-addr">0x00000000</div>
+    <div class="ctx-menu-item" id="ctx-set-bp">
+        <span class="ctx-menu-icon">●</span>Set Breakpoint
+    </div>
+    <div class="ctx-menu-item" id="ctx-remove-bp">
+        <span class="ctx-menu-icon">○</span>Remove Breakpoint
+    </div>
+    <div class="ctx-menu-separator"></div>
+    <div class="ctx-menu-item" id="ctx-goto-target">
+        <span class="ctx-menu-icon">→</span>Go to Target Address
+    </div>
+    <div class="ctx-menu-separator"></div>
+    <div class="ctx-menu-item" id="ctx-edit">
+        <span class="ctx-menu-icon">✎</span>Edit / Add Label…
+    </div>
+</div>
 <div id="symbols-panel">
     <div id="symbols-panel-header">
         <span class="symbols-title">Symbols</span>
@@ -461,6 +478,14 @@ export class DisasmEditorComponent implements AfterViewInit {
     const editOverlayCancel    = document.getElementById('edit-overlay-cancel')!;
     const editOverlayClose     = document.getElementById('edit-overlay-close')!;
     const editOverlayHistoryList = document.getElementById('edit-overlay-history-list')!;
+
+    // Context menu
+    const ctxMenu        = document.getElementById('grid-context-menu')!;
+    const ctxAddr        = document.getElementById('ctx-addr')!;
+    const ctxSetBp       = document.getElementById('ctx-set-bp')!;
+    const ctxRemoveBp    = document.getElementById('ctx-remove-bp')!;
+    const ctxGotoTarget  = document.getElementById('ctx-goto-target')!;
+    const ctxEdit        = document.getElementById('ctx-edit')!;
 
     // Tab switching in the edit overlay
     editOverlay.querySelectorAll('.edit-overlay-tab').forEach(btn => {
@@ -2949,6 +2974,125 @@ export class DisasmEditorComponent implements AfterViewInit {
     // ── Cleanup ───────────────────────────────────────────────────────────────
     window.addEventListener('unload', () => {
       stopLiveRefresh();
+    });
+
+    // ──Context Menu ──
+    document.addEventListener('wheel', e => e.preventDefault(), { passive: false });
+    /** The instruction-row index the context menu was opened for. */
+    let ctxRowGlobalIndex = -1;
+
+    function openContextMenu(x: number, y: number, globalIndex: number): void {
+        ctxRowGlobalIndex = globalIndex;
+        const localIndex = getLocalIndex(globalIndex);
+        const row = state.disasmRows[localIndex];
+
+        // Header: show the address
+        const addrStr = row ? `0x${row.addr.toUpperCase()}` : '—';
+        ctxAddr.textContent = addrStr;
+
+        // Show/disable breakpoint items based on current state
+        if (row) {
+            const addr = parseInt(row.addr, 16);
+            const hasBp = state.breakpoints.has(addr);
+            ctxSetBp.classList.toggle('disabled', hasBp);
+            ctxRemoveBp.classList.toggle('disabled', !hasBp);
+            // Go to target: only show if the instruction has a branch/jump target
+            const hasTarget = !!(row.args.match(/\$([0-9A-F]{8})/i) ||
+                                row.args.match(/0x([0-9A-F]{8})/i));
+            ctxGotoTarget.classList.toggle('disabled', !hasTarget);
+        }
+
+        // Position — keep the menu inside the viewport
+        ctxMenu.classList.add('visible');
+        const menuW = ctxMenu.offsetWidth;
+        const menuH = ctxMenu.offsetHeight;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        ctxMenu.style.left = `${Math.min(x, vw - menuW - 4)}px`;
+        ctxMenu.style.top  = `${Math.min(y, vh - menuH - 4)}px`;
+    }
+
+    function closeContextMenu(): void {
+        ctxMenu.classList.remove('visible');
+        ctxRowGlobalIndex = -1;
+    }
+
+    grid.addEventListener('contextmenu', (e: MouseEvent) => {
+        e.preventDefault();
+        // Move the cursor to the right-clicked row
+        const target = (e.target as HTMLElement).closest('.row') as HTMLElement | null;
+        if (target) {
+            const idx = target.dataset['globalIndex'];
+            if (idx !== undefined) {
+                const globalIndex = parseInt(idx, 10);
+                state.cursor = globalIndex;
+                updateCursor();
+                openContextMenu(e.clientX, e.clientY, globalIndex);
+            }
+        }
+    });
+
+    // Dismiss on any outside click or Escape
+    document.addEventListener('click', (e: MouseEvent) => {
+        if (!ctxMenu.contains(e.target as Node)) {
+            closeContextMenu();
+        }
+    });
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && ctxMenu.classList.contains('visible')) {
+            closeContextMenu();
+        }
+    }, true);
+
+    ctxSetBp.addEventListener('click', () => {
+        if (ctxRowGlobalIndex < 0) { return; }
+        const localIndex = getLocalIndex(ctxRowGlobalIndex);
+        const row = state.disasmRows[localIndex];
+        if (!row) { return; }
+        const addr = parseInt(row.addr, 16);
+        if (!state.breakpoints.has(addr)) {
+            state.breakpoints.add(addr);
+            vscode.postMessage({ type: 'setBreakpoint', address: addr });
+            renderDisassembly();
+        }
+        closeContextMenu();
+        grid.focus();
+    });
+
+    ctxRemoveBp.addEventListener('click', () => {
+        if (ctxRowGlobalIndex < 0) { return; }
+        const localIndex = getLocalIndex(ctxRowGlobalIndex);
+        const row = state.disasmRows[localIndex];
+        if (!row) { return; }
+        const addr = parseInt(row.addr, 16);
+        if (state.breakpoints.has(addr)) {
+            state.breakpoints.delete(addr);
+            vscode.postMessage({ type: 'clearBreakpoint', address: addr });
+            renderDisassembly();
+        }
+        closeContextMenu();
+        grid.focus();
+    });
+
+    ctxGotoTarget.addEventListener('click', () => {
+        if (ctxRowGlobalIndex < 0) { return; }
+        state.cursor = ctxRowGlobalIndex;
+        navigateToCurrentRowTarget();
+        closeContextMenu();
+        grid.focus();
+    });
+
+    ctxEdit.addEventListener('click', () => {
+        if (ctxRowGlobalIndex < 0) { return; }
+        const localIndex = getLocalIndex(ctxRowGlobalIndex);
+        const row = state.disasmRows[localIndex];
+        if (!row) { return; }
+        closeContextMenu();
+        openEditOverlay(
+            parseInt(row.addr, 16), row.addr,
+            row.op || '', row.args || '',
+            row.bytes || '', row.label || '', row.comment || ''
+        );
     });
   }
 }
