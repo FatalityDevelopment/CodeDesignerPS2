@@ -1,5 +1,6 @@
 using System;
 using CodeDesigner.Mips64LE.Common.CheatEngine;
+using CodeDesigner.Mips64LE.Common.Emulator;
 
 namespace CodeDesigner.Mips64LE
 {
@@ -51,16 +52,32 @@ namespace CodeDesigner.Mips64LE
         // ── Address translation ────────────────────────────────────────────────
 
         /// <summary>
-        /// Translates a virtual EE address for PINE.
-        /// PINE addresses the same virtual address space as the EE CPU (KSEG0/KSEG1
-        /// are resolved server-side by PCSX2).  We only flatten the PS2 uncached
-        /// user-mirror (0x20000000–0x21FFFFFF → physical 0x00000000–0x01FFFFFF) since
-        /// PCSX2's PINE server may not map that window.
+        /// Translates an EE address into a PINE-friendly virtual address.
+        /// The UI and cheat engine often use physical bases (0x00000000 for EE RAM),
+        /// while PCSX2 PINE expects EE virtual addresses. Map physical/uncached
+        /// mirrors into KSEG0, and leave already-virtual ranges intact.
         /// </summary>
         private static uint TranslateEeAddress(uint vaddr)
         {
+            // Preserve IOP mirror and scratchpad (valid EE virtual ranges).
+            if (vaddr >= 0x1C000000u && vaddr < 0x1E000000u)
+                return vaddr;
+            if (vaddr >= 0x70000000u &&
+                vaddr < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                return vaddr;
+
+            // Keep KSEG0/KSEG1 as-is.
+            if (vaddr >= 0x80000000u && vaddr <= 0xBFFFFFFFu)
+                return vaddr;
+
+            // Uncached user mirror → physical.
             if (vaddr >= 0x20000000u && vaddr < 0x22000000u)
-                return vaddr - 0x20000000u;
+                vaddr -= 0x20000000u;
+
+            // Physical RAM/BIOS → KSEG0 cached alias for PINE.
+            if (vaddr < 0x20000000u)
+                return vaddr | 0x80000000u;
+
             return vaddr;
         }
     }

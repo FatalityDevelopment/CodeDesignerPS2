@@ -188,6 +188,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     try {
       const status = await this.socketClient!.getPC();
       const statusMsg: any = { type: 'status', ...status };
+      this._applyBreakpointHitFallback(statusMsg);
       // Attach any live analysis comments produced for the stepped instruction.
       if (stepResult?.instructionAnalysis) {
         statusMsg.instructionAnalysis = stepResult.instructionAnalysis;
@@ -196,16 +197,16 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         try {
           const regs = await this.socketClient!.getRegisters();
           statusMsg.registers = regs;
-          const sp = regs.gpr[29];
+          const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29];
           if (sp !== undefined) {
             try {
-              const stackBuf = await this.socketClient!.readMemory(sp, 128, 'ee');
+              const stackBuf = await this.socketClient!.readMemory(sp, 512, 'ee');
               statusMsg.stackBytes = Array.from(stackBuf);
               statusMsg.stackBase  = sp;
             } catch { /* ignore stack read errors */ }
           }
         } catch { /* ignore register fetch errors */ }
-        const hitAddr = status.breakpointHitAddress ?? status.pc;
+        const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
         this._revealPanelForAddress(hitAddr);
       }
       this._broadcastFullStatus(statusMsg);
@@ -641,17 +642,38 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.sendLiveHexView(panel, region, baseAddress, message.address,
                     message.length || DisasmEditorProvider.INSTRUCTION_SIZE);
             } else if (message.type === 'pause') {
+                if (!this.socketClient?.isConnected()) { return; }
                 try {
                     await this.socketClient!.pause();
-                    // Immediately reflect the paused state in every live window so all
-                    // panels show "PAUSED" without waiting for their next status poll.
-                    this._broadcastStatus(true);
+                    const status = await this.socketClient!.getPC();
+                    const statusMsg: any = { type: 'status', ...status };
+                    this._applyBreakpointHitFallback(statusMsg);
+                    if (status.paused) {
+                        try {
+                            const regs = await this.socketClient!.getRegisters();
+                            statusMsg.registers = regs;
+                            // Fetch stack memory (128 bytes from $sp = gpr[29])
+                            const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29];
+                            if (sp !== undefined) {
+                                try {
+                                    const stackBuf = await this.socketClient!.readMemory(sp, 512, 'ee');
+                                    statusMsg.stackBytes = Array.from(stackBuf);
+                                    statusMsg.stackBase = sp;
+                                } catch { /* ignore stack read errors */ }
+                            }
+                        } catch { /* ignore register fetch errors */ }
+                        const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
+                        this._revealPanelForAddress(hitAddr);
+                    }
+                    this._broadcastFullStatus(statusMsg);
+                    this.onPauseStateChange?.(status.paused);
                 } catch (err: any) {
                     const msg = err?.message ?? String(err);
                     console.error(`[LIVE] Failed to pause emulator: ${msg}`);
                     vscode.window.showWarningMessage(`Could not pause emulator: ${msg}`);
                 }
             } else if (message.type === 'resume') {
+                if (!this.socketClient?.isConnected()) { return; }
                 try {
                     await this.socketClient!.resume();
                     // Immediately reflect the resumed state in every live window.
@@ -684,41 +706,22 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 }
             } else if (message.type === 'step') {
                 await this.stepAndBroadcast();
-            } else if (message.type === 'pause') {
-                if (this.socketClient?.isConnected()) {
-                    try {
-                        await this.socketClient!.pause();
-                        this._broadcastStatus(true);
-                        this.onPauseStateChange?.(true);
-                    } catch (err: any) {
-                        console.error(`[LIVE] Pause failed: ${err?.message ?? err}`);
-                    }
-                }
-            } else if (message.type === 'resume') {
-                if (this.socketClient?.isConnected()) {
-                    try {
-                        await this.socketClient!.resume();
-                        this._broadcastStatus(false);
-                        this.onPauseStateChange?.(false);
-                    } catch (err: any) {
-                        console.error(`[LIVE] Resume failed: ${err?.message ?? err}`);
-                    }
-                }
             } else if (message.type === 'getStatus') {
                 if (!this.socketClient?.isConnected()) { return; }
                 try {
                     const status = await this.socketClient!.getPC();
                     const statusMsg: any = { type: 'status', ...status };
+                    this._applyBreakpointHitFallback(statusMsg);
                     // When paused, also fetch registers for the debug panel
                     if (status.paused) {
                         try {
                             const regs = await this.socketClient!.getRegisters();
                             statusMsg.registers = regs;
                             // Fetch stack memory (128 bytes from $sp = gpr[29])
-                            const sp = regs.gpr[29];
+                            const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29];
                             if (sp !== undefined) {
                                 try {
-                                    const stackBuf = await this.socketClient!.readMemory(sp, 128, 'ee');
+                                    const stackBuf = await this.socketClient!.readMemory(sp, 512, 'ee');
                                     statusMsg.stackBytes = Array.from(stackBuf);
                                     statusMsg.stackBase = sp;
                                 } catch { /* ignore stack read errors */ }
@@ -727,7 +730,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
                         // When a breakpoint was hit, bring the correct panel to front
                         // and broadcast the full status to every live window.
-                        const hitAddr = status.breakpointHitAddress ?? status.pc;
+                        const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
                         this._revealPanelForAddress(hitAddr);
                         this._broadcastFullStatus(statusMsg);
                         // Notify the sidebar so it flips to PAUSED immediately.
@@ -840,7 +843,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         let stackBase  = 0;
                         if (sp) {
                             try {
-                                const buf = await this.socketClient.readMemory(sp, 128, 'ee');
+                                const buf = await this.socketClient.readMemory(sp, 512, 'ee');
                                 stackBytes = Array.from(buf);
                                 stackBase  = sp;
                             } catch { /* ignore */ }
@@ -876,7 +879,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29] ?? 0;
                         if (sp) {
                             try {
-                                const buf = await this.socketClient.readMemory(sp, 128, 'ee');
+                                const buf = await this.socketClient.readMemory(sp, 512, 'ee');
                                 statusMsg.stackBytes = Array.from(buf);
                                 statusMsg.stackBase  = sp;
                             } catch { /* ignore stack read errors */ }
@@ -1041,6 +1044,33 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     private _broadcastFullStatus(statusMsg: object): void {
         for (const p of this._livePanels) {
             p.webview.postMessage(statusMsg);
+        }
+    }
+
+    /**
+     * If the backend did not report a breakpoint hit, infer it when the
+     * current PC matches a known breakpoint (compare in physical space).
+     */
+    private _applyBreakpointHitFallback(statusMsg: { paused?: boolean; pc?: number; breakpointHitAddress?: number }): void {
+        const existing = (statusMsg as any).breakpointHitAddress;
+        if (existing !== undefined && existing !== null) { return; }
+        if (existing === null) { delete (statusMsg as any).breakpointHitAddress; }
+        if (!statusMsg.paused) { return; }
+        const pc = statusMsg.pc;
+        if (pc === undefined || pc === null) { return; }
+        const candidates = [
+            pc >>> 0,
+            (pc - 4) >>> 0,
+            (pc - 8) >>> 0,
+        ];
+        for (const cand of candidates) {
+            const candPhys = DisasmEditorProvider._toPhysAddr(cand);
+            for (const bp of this._knownBreakpoints) {
+                if (DisasmEditorProvider._toPhysAddr(bp) === candPhys) {
+                    statusMsg.breakpointHitAddress = cand;
+                    return;
+                }
+            }
         }
     }
 

@@ -117,7 +117,10 @@ import './disasm-editor.css';
             <button id="sym-scan-strings-btn" class="sym-scan-btn">Scan for strings</button>
             <span id="sym-strings-status" class="sym-status"></span>
         </div>
-        <input type="text" id="sym-strings-filter" class="sym-filter-input" placeholder="Filter strings…" />
+        <div class="sym-filter-row">
+            <input type="text" id="sym-strings-filter" class="sym-filter-input" placeholder="Filter strings..." />
+            <div id="sym-strings-pager" class="sym-pager"></div>
+        </div>
         <div id="sym-strings-list" class="sym-list"></div>
     </div>
     <div id="sym-functions-content" class="sym-tab-content">
@@ -125,7 +128,10 @@ import './disasm-editor.css';
             <button id="sym-scan-functions-btn" class="sym-scan-btn">Scan for functions</button>
             <span id="sym-functions-status" class="sym-status"></span>
         </div>
-        <input type="text" id="sym-functions-filter" class="sym-filter-input" placeholder="Filter functions…" />
+        <div class="sym-filter-row">
+            <input type="text" id="sym-functions-filter" class="sym-filter-input" placeholder="Filter functions..." />
+            <div id="sym-functions-pager" class="sym-pager"></div>
+        </div>
         <div id="sym-functions-list" class="sym-list"></div>
     </div>
     <div id="sym-pointers-content" class="sym-tab-content">
@@ -133,7 +139,10 @@ import './disasm-editor.css';
             <button id="sym-scan-pointers-btn" class="sym-scan-btn">Scan for pointers</button>
             <span id="sym-pointers-status" class="sym-status"></span>
         </div>
-        <input type="text" id="sym-pointers-filter" class="sym-filter-input" placeholder="Filter pointers…" />
+        <div class="sym-filter-row">
+            <input type="text" id="sym-pointers-filter" class="sym-filter-input" placeholder="Filter pointers..." />
+            <div id="sym-pointers-pager" class="sym-pager"></div>
+        </div>
         <div id="sym-pointers-list" class="sym-list"></div>
     </div>
     <div id="sym-floats-content" class="sym-tab-content">
@@ -141,7 +150,10 @@ import './disasm-editor.css';
             <button id="sym-scan-floats-btn" class="sym-scan-btn">Scan for floats</button>
             <span id="sym-floats-status" class="sym-status"></span>
         </div>
-        <input type="text" id="sym-floats-filter" class="sym-filter-input" placeholder="Filter floats…" />
+        <div class="sym-filter-row">
+            <input type="text" id="sym-floats-filter" class="sym-filter-input" placeholder="Filter floats..." />
+            <div id="sym-floats-pager" class="sym-pager"></div>
+        </div>
         <div id="sym-floats-list" class="sym-list"></div>
     </div>
     <div id="sym-integers-content" class="sym-tab-content">
@@ -149,7 +161,10 @@ import './disasm-editor.css';
             <button id="sym-scan-integers-btn" class="sym-scan-btn">Scan for integers</button>
             <span id="sym-integers-status" class="sym-status"></span>
         </div>
-        <input type="text" id="sym-integers-filter" class="sym-filter-input" placeholder="Filter integers…" />
+        <div class="sym-filter-row">
+            <input type="text" id="sym-integers-filter" class="sym-filter-input" placeholder="Filter integers..." />
+            <div id="sym-integers-pager" class="sym-pager"></div>
+        </div>
         <div id="sym-integers-list" class="sym-list"></div>
     </div>
 </div>
@@ -428,6 +443,11 @@ export class DisasmEditorComponent implements AfterViewInit {
     const symPointersFilter   = document.getElementById('sym-pointers-filter')  as HTMLInputElement;
     const symFloatsFilter     = document.getElementById('sym-floats-filter')    as HTMLInputElement;
     const symIntegersFilter   = document.getElementById('sym-integers-filter')  as HTMLInputElement;
+    const symStringsPager     = document.getElementById('sym-strings-pager')    as HTMLDivElement;
+    const symFunctionsPager   = document.getElementById('sym-functions-pager')  as HTMLDivElement;
+    const symPointersPager    = document.getElementById('sym-pointers-pager')   as HTMLDivElement;
+    const symFloatsPager      = document.getElementById('sym-floats-pager')     as HTMLDivElement;
+    const symIntegersPager    = document.getElementById('sym-integers-pager')   as HTMLDivElement;
 
     // Edit overlay
     const editOverlay          = document.getElementById('edit-overlay')!;
@@ -1182,6 +1202,15 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (v >= 0x20100000 && v <= 0x21FFFFFF) return ((v - 0x20000000) >>> 0);
       if (v >= 0x30100000 && v <= 0x31FFFFFF) return ((v - 0x30000000) >>> 0);
       return v;
+    }
+
+    /** Heuristic: does this value look like a valid EE code pointer? */
+    function isCodePointer(addr: number): boolean {
+      const v = addr >>> 0;
+      if (v === 0 || (v & 3) !== 0) { return false; }
+      const phys = toPhysAddr(v);
+      // EE main RAM (0x00000000–0x01FFFFFF) or BIOS (0x1FC00000–0x1FFFFFFF).
+      return (phys < 0x02000000) || (phys >= 0x1FC00000 && phys < 0x20000000);
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -2006,7 +2035,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
 
     function renderSymStrings() {
-      if (!symStringsList) { return; }
+      if (!symStringsList || !symStringsPager) { return; }
       const filterText = symStringsFilter ? symStringsFilter.value.toLowerCase() : '';
       const regionItems = (state.symStrings || []).filter(item => isAddrInCurrentRegion(item.address));
       const items = filterText
@@ -2014,6 +2043,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         : regionItems;
       if (items.length === 0) {
         symStringsList.innerHTML = '<div class="sym-empty">No strings found. Click "Scan for strings".</div>';
+        symStringsPager.innerHTML = '';
         return;
       }
       const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
@@ -2021,19 +2051,19 @@ export class DisasmEditorComponent implements AfterViewInit {
       const page = symPage.strings;
       const start = page * SYM_DISPLAY_LIMIT;
       const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pagerInfo = `Page ${page + 1} of ${totalPages} (${start + 1}-${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})`;
       const pager = totalPages > 1
-        ? `<div class="sym-pager">
-            <button class="sym-pager-btn" id="sym-strings-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
-            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
-            <button class="sym-pager-btn" id="sym-strings-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
-          </div>`
+        ? `<button class="sym-pager-btn" id="sym-strings-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+           <span class="sym-pager-info" title="${pagerInfo}">${pagerInfo}</span>
+           <button class="sym-pager-btn" id="sym-strings-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>`
         : '';
+      symStringsPager.innerHTML = pager;
       symStringsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.value)}">${escHtml(item.value)}</span>
         </div>`
-      ).join('') + pager;
+      ).join('');
       symStringsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -2042,7 +2072,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
 
     function renderSymFunctions() {
-      if (!symFunctionsList) { return; }
+      if (!symFunctionsList || !symFunctionsPager) { return; }
       const filterText = symFunctionsFilter ? symFunctionsFilter.value.toLowerCase() : '';
       const regionItems = (state.symFunctions || []).filter(item => isAddrInCurrentRegion(item.address));
       const items = filterText
@@ -2050,6 +2080,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         : regionItems;
       if (items.length === 0) {
         symFunctionsList.innerHTML = '<div class="sym-empty">No functions found. Click "Scan for functions".</div>';
+        symFunctionsPager.innerHTML = '';
         return;
       }
       const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
@@ -2057,19 +2088,19 @@ export class DisasmEditorComponent implements AfterViewInit {
       const page = symPage.functions;
       const start = page * SYM_DISPLAY_LIMIT;
       const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pagerInfo = `Page ${page + 1} of ${totalPages} (${start + 1}-${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})`;
       const pager = totalPages > 1
-        ? `<div class="sym-pager">
-            <button class="sym-pager-btn" id="sym-functions-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
-            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
-            <button class="sym-pager-btn" id="sym-functions-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
-          </div>`
+        ? `<button class="sym-pager-btn" id="sym-functions-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+           <span class="sym-pager-info" title="${pagerInfo}">${pagerInfo}</span>
+           <button class="sym-pager-btn" id="sym-functions-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>`
         : '';
+      symFunctionsPager.innerHTML = pager;
       symFunctionsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-name" title="${escHtml(item.label)}">${escHtml(item.label)}</span>
         </div>`
-      ).join('') + pager;
+      ).join('');
       symFunctionsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -2078,7 +2109,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
 
     function renderSymPointers() {
-      if (!symPointersList) { return; }
+      if (!symPointersList || !symPointersPager) { return; }
       const filterText = symPointersFilter ? symPointersFilter.value.toLowerCase() : '';
       const regionItems = (state.symPointers || []).filter(item => isAddrInCurrentRegion(item.address));
       const items = filterText
@@ -2086,6 +2117,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         : regionItems;
       if (items.length === 0) {
         symPointersList.innerHTML = '<div class="sym-empty">No pointers found. Click "Scan for pointers".</div>';
+        symPointersPager.innerHTML = '';
         return;
       }
       const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
@@ -2093,19 +2125,19 @@ export class DisasmEditorComponent implements AfterViewInit {
       const page = symPage.pointers;
       const start = page * SYM_DISPLAY_LIMIT;
       const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pagerInfo = `Page ${page + 1} of ${totalPages} (${start + 1}-${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})`;
       const pager = totalPages > 1
-        ? `<div class="sym-pager">
-            <button class="sym-pager-btn" id="sym-pointers-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
-            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
-            <button class="sym-pager-btn" id="sym-pointers-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
-          </div>`
+        ? `<button class="sym-pager-btn" id="sym-pointers-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+           <span class="sym-pager-info" title="${pagerInfo}">${pagerInfo}</span>
+           <button class="sym-pager-btn" id="sym-pointers-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>`
         : '';
+      symPointersPager.innerHTML = pager;
       symPointersList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
-          <span class="sym-item-value" title="→ ${escHtml(item.pointsTo)}">→ ${escHtml(item.pointsTo)}</span>
+          <span class="sym-item-value" title="-> ${escHtml(item.pointsTo)}">-> ${escHtml(item.pointsTo)}</span>
         </div>`
-      ).join('') + pager;
+      ).join('');
       symPointersList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -2114,7 +2146,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
 
     function renderSymFloats() {
-      if (!symFloatsList) { return; }
+      if (!symFloatsList || !symFloatsPager) { return; }
       const filterText = symFloatsFilter ? symFloatsFilter.value.toLowerCase() : '';
       const regionItems = (state.symFloats || []).filter(item => isAddrInCurrentRegion(item.address));
       const items = filterText
@@ -2122,6 +2154,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         : regionItems;
       if (items.length === 0) {
         symFloatsList.innerHTML = '<div class="sym-empty">No floats found. Click "Scan for floats".</div>';
+        symFloatsPager.innerHTML = '';
         return;
       }
       const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
@@ -2129,19 +2162,19 @@ export class DisasmEditorComponent implements AfterViewInit {
       const page = symPage.floats;
       const start = page * SYM_DISPLAY_LIMIT;
       const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pagerInfo = `Page ${page + 1} of ${totalPages} (${start + 1}-${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})`;
       const pager = totalPages > 1
-        ? `<div class="sym-pager">
-            <button class="sym-pager-btn" id="sym-floats-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
-            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
-            <button class="sym-pager-btn" id="sym-floats-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
-          </div>`
+        ? `<button class="sym-pager-btn" id="sym-floats-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+           <span class="sym-pager-info" title="${pagerInfo}">${pagerInfo}</span>
+           <button class="sym-pager-btn" id="sym-floats-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>`
         : '';
+      symFloatsPager.innerHTML = pager;
       symFloatsList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.raw)}">${rawBitsToFloat(parseInt(item.raw, 16) >>> 0)} (${escHtml(item.raw)})</span>
         </div>`
-      ).join('') + pager;
+      ).join('');
       symFloatsList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -2150,7 +2183,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
 
     function renderSymIntegers() {
-      if (!symIntegersList) { return; }
+      if (!symIntegersList || !symIntegersPager) { return; }
       const filterText = symIntegersFilter ? symIntegersFilter.value.toLowerCase() : '';
       const regionItems = (state.symIntegers || []).filter(item => isAddrInCurrentRegion(item.address));
       const items = filterText
@@ -2158,6 +2191,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         : regionItems;
       if (items.length === 0) {
         symIntegersList.innerHTML = '<div class="sym-empty">No integers found. Click "Scan for integers".</div>';
+        symIntegersPager.innerHTML = '';
         return;
       }
       const totalPages = Math.ceil(items.length / SYM_DISPLAY_LIMIT);
@@ -2165,19 +2199,19 @@ export class DisasmEditorComponent implements AfterViewInit {
       const page = symPage.integers;
       const start = page * SYM_DISPLAY_LIMIT;
       const displayed = items.slice(start, start + SYM_DISPLAY_LIMIT);
+      const pagerInfo = `Page ${page + 1} of ${totalPages} (${start + 1}-${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})`;
       const pager = totalPages > 1
-        ? `<div class="sym-pager">
-            <button class="sym-pager-btn" id="sym-integers-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
-            <span class="sym-pager-info">Page ${page + 1} of ${totalPages} (${start + 1}–${Math.min(start + SYM_DISPLAY_LIMIT, items.length)} of ${items.length})</span>
-            <button class="sym-pager-btn" id="sym-integers-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>
-          </div>`
+        ? `<button class="sym-pager-btn" id="sym-integers-prev"${page === 0 ? ' disabled' : ''}>&#8249; Prev</button>
+           <span class="sym-pager-info" title="${pagerInfo}">${pagerInfo}</span>
+           <button class="sym-pager-btn" id="sym-integers-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &#8250;</button>`
         : '';
+      symIntegersPager.innerHTML = pager;
       symIntegersList.innerHTML = displayed.map(item =>
         `<div class="sym-item" data-addr="${escHtml(item.address)}">
           <span class="sym-item-addr">${escHtml(item.address)}</span>
           <span class="sym-item-value" title="${escHtml(item.hex)}">${item.value} (${escHtml(item.hex)})</span>
         </div>`
-      ).join('') + pager;
+      ).join('');
       symIntegersList.querySelectorAll('.sym-item').forEach(el => {
         el.addEventListener('click', () => symNavigate((el as HTMLElement).dataset['addr'] ?? ''));
       });
@@ -2472,7 +2506,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         const codeAddrs: { addr: number; val: number }[] = [];
         for (let i = 0; i + 4 <= Math.min(stackBytes.length, 128); i += 4) {
           const word = readUInt32LE(stackBytes, i);
-          if (word >= 0x80000000 && word < 0xC0000000) {
+          if (isCodePointer(word)) {
             codeAddrs.push({ addr: (stackBase! + i) >>> 0, val: word });
           }
         }
@@ -2685,7 +2719,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       for (let i = 0; i < Math.min(stackBytes.length, 128); i += 4) {
         const addr = (stackBase + i) >>> 0;
         const word = ((stackBytes[i+3] << 24) | (stackBytes[i+2] << 16) | (stackBytes[i+1] << 8) | stackBytes[i]) >>> 0;
-        const isCodeAddr = word >= 0x80000000 && word < 0xC0000000;
+        const isCodeAddr = isCodePointer(word);
         const cls = isCodeAddr ? ' dbg-retaddr' : '';
         const annotation = isCodeAddr ? ' <span class="dbg-dim">← code ptr</span>' : '';
         html += `<div class="dbg-row${cls}"><span class="dbg-addr">${hex32(addr)}</span><span class="dbg-val">${hex32(word)}</span>${annotation}</div>`;
@@ -2765,8 +2799,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (stackBytes && stackBytes.length > 0) {
         for (let i = 0; i < Math.min(stackBytes.length, 512); i += 4) {
           const word = ((stackBytes[i+3] << 24) | (stackBytes[i+2] << 16) | (stackBytes[i+1] << 8) | stackBytes[i]) >>> 0;
-          // PS2 code addresses: KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1 (0xA0000000–0xBFFFFFFF)
-          if (word >= 0x80000000 && word < 0xC0000000) {
+          // PS2 code addresses: KSEG0/KSEG1 or physical main RAM/BIOS.
+          if (isCodePointer(word)) {
             frames.push({ pc: word });
           }
         }
@@ -2918,3 +2952,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
   }
 }
+
+
+

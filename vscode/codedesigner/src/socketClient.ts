@@ -795,7 +795,7 @@ export class SocketClient {
         return {
             paused: response.Paused ?? false,
             pc: response.PC ?? 0,
-            breakpointHitAddress: response.BreakpointHitAddress,
+            breakpointHitAddress: response.BreakpointHitAddress ?? undefined,
         };
     }
 
@@ -814,7 +814,7 @@ export class SocketClient {
         return {
             paused: response.Paused ?? true,
             pc: response.PC ?? 0,
-            breakpointHitAddress: response.BreakpointHitAddress,
+            breakpointHitAddress: response.BreakpointHitAddress ?? undefined,
             instructionAnalysis: response.InstructionAnalysis,
         };
     }

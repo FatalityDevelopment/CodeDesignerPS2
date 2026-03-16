@@ -167,6 +167,9 @@ interface InitMsg {
       </select>
       <button class="browse-btn" (click)="browseEmulator()" title="Browse for emulator executable">…</button>
     </div>
+    <div class="pcsx2-note" *ngIf="isPcsx2Selected">
+      PCSX2 selected. Run starts the CodeDesigner PINE bridge; PCSX2 must already be running with PINE enabled.
+    </div>
 
     <div class="row">
       <select id="biosSelect" [(ngModel)]="selectedBios" (change)="onBiosChange()">
@@ -332,6 +335,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   get statusText(): string {
     if (this.isPaused) { return '⏸ PAUSED'; }
     return this.isConnected ? 'LIVE' : 'STOPPED';
+  }
+
+  get isPcsx2Selected(): boolean {
+    return (this.selectedEmulator ?? '').toLowerCase().includes('pcsx2');
   }
 
   constructor(private bridge: VsCodeBridgeService) {}

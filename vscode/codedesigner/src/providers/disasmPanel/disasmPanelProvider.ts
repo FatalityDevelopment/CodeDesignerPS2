@@ -10,6 +10,7 @@ interface EmuSettings {
     bios?: Array<{ name: string; path: string }>;
     games?: Array<{ name: string; path: string }>;
     emulators?: Array<{ type: string; path: string }>;
+    pcsx2?: { host?: string; slot?: number };
 }
 
 interface UserPreferences {
@@ -72,6 +73,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _paused: boolean = false;
     /** Set to true by handleRun() so that onSocketConnected() resumes the emulator. */
     private _resumeOnConnect: boolean = false;
+    /** True when the current connection is through the PCSX2 PINE bridge. */
+    private _bridgeMode: boolean = false;
     private _activeCdsFilePath: string = '';
     private _activeCdsContent: string = '';
     /** Diagnostic collection for CDS compilation errors — shows red squiggles in the editor. */
@@ -432,6 +435,29 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     // ── Emulator launch ───────────────────────────────────────────────────────
 
+    private isPcsx2Entry(entry: { type?: string; path: string }): boolean {
+        const type = entry.type?.toLowerCase() ?? '';
+        const p = entry.path.toLowerCase();
+        return p.includes('pcsx2') || type.includes('pcsx2');
+    }
+
+    private isPcsx2Selection(emulatorPath: string): boolean {
+        if (!emulatorPath) { return false; }
+        const lower = emulatorPath.toLowerCase();
+        if (lower.includes('pcsx2')) { return true; }
+        const resolved = this.resolvePath(emulatorPath).toLowerCase();
+        const entry = (this.settings.emulators ?? []).find(e =>
+            this.resolvePath(e.path).toLowerCase() === resolved
+        );
+        return entry ? this.isPcsx2Entry(entry) : false;
+    }
+
+    private getBridgeExecutablePath(): string | null {
+        const entry = (this.settings.emulators ?? []).find(e => !this.isPcsx2Entry(e));
+        if (!entry) { return null; }
+        return this.resolvePath(entry.path);
+    }
+
     private handleConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
 
@@ -460,6 +486,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         out.show(true);
 
+        // Track whether this session is a PCSX2 PINE bridge.
+        this._bridgeMode = this.isPcsx2Selection(emulatorPath);
+
         // Spawn the emulator and connect when ready (same as Run).
         this.spawnAndConnect(emulatorPath, biosPath, gamePath);
     }
@@ -481,12 +510,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         // If already connected, just register breakpoints and resume immediately.
         if (this.socketClient.isConnected()) {
-            this._registerBreakpointsAndResume(true);
+            this._bridgeMode = this.isPcsx2Selection(emulatorPath);
+            this._registerBreakpointsAndResume(!this._bridgeMode);
             return;
         }
 
         // Not yet connected — spawn the emulator and resume once the socket connects.
-        this._resumeOnConnect = true;
+        this._bridgeMode = this.isPcsx2Selection(emulatorPath);
+        this._resumeOnConnect = !this._bridgeMode;
         this.spawnAndConnect(emulatorPath, biosPath, gamePath);
     }
 
@@ -494,9 +525,51 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private spawnAndConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
 
+        const isPcsx2 = this.isPcsx2Selection(emulatorPath);
         const resolvedExe  = this.resolvePath(emulatorPath);
         const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
         const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
+
+        if (isPcsx2) {
+            const bridgeExe = this.getBridgeExecutablePath();
+            if (!bridgeExe) {
+                out.error('PCSX2 bridge requires the CodeDesigner executable in emu-settings.json.');
+                vscode.window.showErrorMessage(
+                    'PCSX2 bridge requires CodeDesigner.Mips64LE.exe. Add it to emu-settings.json and try again.'
+                );
+                this.cleanupProcess();
+                return;
+            }
+
+            if (!fs.existsSync(bridgeExe)) {
+                out.error(`PCSX2 bridge executable not found: ${bridgeExe}`);
+                vscode.window.showErrorMessage(
+                    `Bridge not found: ${bridgeExe}\n` +
+                    'Build the project first: cd CodeDesigner.Mips64LE && dotnet build'
+                );
+                this.cleanupProcess();
+                return;
+            }
+
+            const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
+            const slot = this.settings.pcsx2?.slot ?? 28011;
+
+            const cliArgs: string[] = ['--pcsx2', '--pcsx2-host', host, '--pcsx2-slot', String(slot), '--port', '8765'];
+
+            out.info(`Starting PCSX2 PINE bridge: ${bridgeExe} ${cliArgs.join(' ')}`);
+            out.info('PCSX2 must already be running with PINE enabled (Settings -> Advanced -> Enable PINE).');
+
+            const terminal = vscode.window.createTerminal({
+                name:      'PCSX2 Bridge',
+                shellPath: bridgeExe,
+                shellArgs: cliArgs,
+            });
+            terminal.show(true);
+
+            this.emulatorTerminal = terminal;
+            this.connectSocketAndOpenViews();
+            return;
+        }
 
         // Verify the executable actually exists before trying to launch it.
         // Using shellPath: resolvedExe directly fails silently on some VS Code
@@ -578,6 +651,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private cleanupProcess(): void {
         this.emulatorTerminal = undefined;
         this._paused = false;
+        this._bridgeMode = false;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
     }
 

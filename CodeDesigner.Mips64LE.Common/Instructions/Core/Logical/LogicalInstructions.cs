@@ -58,7 +58,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 ulong rsVal = cpu.RegsLo[args.Rs];
                 ulong rtVal = cpu.RegsLo[args.Rt];
-                return $"{eq} => 0x{rsVal:X16} & 0x{rtVal:X16} = 0x{rsVal & rtVal:X16}";
+                return $"{eq} => 0x{rsVal:X8} & 0x{rtVal:X8} = 0x{rsVal & rtVal:X8}";
             }
             return eq;
         }
@@ -107,7 +107,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 ulong rsVal = cpu.RegsLo[args.Rs];
                 ulong rtVal = cpu.RegsLo[args.Rt];
-                return $"{eq} => 0x{rsVal:X16} | 0x{rtVal:X16} = 0x{rsVal | rtVal:X16}";
+                return $"{eq} => 0x{rsVal:X8} | 0x{rtVal:X8} = 0x{rsVal | rtVal:X8}";
             }
             return eq;
         }
@@ -156,7 +156,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 ulong rsVal = cpu.RegsLo[args.Rs];
                 ulong rtVal = cpu.RegsLo[args.Rt];
-                return $"{eq} => 0x{rsVal:X16} ^ 0x{rtVal:X16} = 0x{rsVal ^ rtVal:X16}";
+                return $"{eq} => 0x{rsVal:X8} ^ 0x{rtVal:X8} = 0x{rsVal ^ rtVal:X8}";
             }
             return eq;
         }
@@ -205,7 +205,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             {
                 ulong rsVal = cpu.RegsLo[args.Rs];
                 ulong rtVal = cpu.RegsLo[args.Rt];
-                return $"{eq} => ~(0x{rsVal:X16} | 0x{rtVal:X16}) = 0x{~(rsVal | rtVal):X16}";
+                return $"{eq} => ~(0x{rsVal:X8} | 0x{rtVal:X8}) = 0x{~(rsVal | rtVal):X8}";
             }
             return eq;
         }
@@ -254,7 +254,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 ulong rsVal = cpu.RegsLo[args.Rs];
-                return $"{eq} => 0x{rsVal:X16} & 0x{imm:X4} = 0x{rsVal & imm:X16}";
+                return $"{eq} => 0x{rsVal:X8} & 0x{imm:X4} = 0x{rsVal & imm:X8}";
             }
             return eq;
         }
@@ -304,7 +304,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 ulong rsVal = cpu.RegsLo[args.Rs];
-                return $"{eq} => 0x{rsVal:X16} | 0x{imm:X4} = 0x{rsVal | imm:X16}";
+                return $"{eq} => 0x{rsVal:X8} | 0x{imm:X4} = 0x{rsVal | imm:X8}";
             }
             return eq;
         }
@@ -353,7 +353,7 @@ namespace CodeDesigner.Mips64LE.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 ulong rsVal = cpu.RegsLo[args.Rs];
-                return $"{eq} => 0x{rsVal:X16} ^ 0x{imm:X4} = 0x{rsVal ^ imm:X16}";
+                return $"{eq} => 0x{rsVal:X8} ^ 0x{imm:X4} = 0x{rsVal ^ imm:X8}";
             }
             return eq;
         }

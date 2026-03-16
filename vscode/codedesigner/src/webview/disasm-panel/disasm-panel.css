@@ -223,6 +223,12 @@ app-disasm-panel {
     margin-bottom: 4px;
 }
 
+.pcsx2-note {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground, #9da5b4);
+    margin: -2px 0 6px;
+}
+
 .row select,
 .row button {
     flex: 1;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -1089,6 +1089,39 @@ namespace CodeDesigner.Mips64LE
         private const uint EeIopMirrorEnd  = 0x1E000000u;     // exclusive
 
         /// <summary>
+        /// Translate EE addresses from the UI/bridge into a PINE-friendly virtual address.
+        /// The VSCode UI uses physical bases for EE RAM/BIOS, while PCSX2 PINE expects
+        /// EE virtual addresses. We map physical and uncached mirrors into KSEG0,
+        /// while leaving already-virtual ranges (KSEG0/KSEG1, scratchpad, IOP mirror) intact.
+        /// </summary>
+        private static uint TranslatePineAddress(uint address, bool useIop)
+        {
+            if (useIop)
+                return address; // IOP mirror is already a valid EE virtual window.
+
+            // Preserve IOP mirror and scratchpad addresses (already valid EE virtual ranges).
+            if (address >= EeIopMirrorBase && address < EeIopMirrorEnd)
+                return address;
+            if (address >= 0x70000000u &&
+                address < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+                return address;
+
+            // If already KSEG0/KSEG1, keep it.
+            if (address >= 0x80000000u && address <= 0xBFFFFFFFu)
+                return address;
+
+            // Uncached user mirror → physical.
+            if (address >= EeUncachedRamBase && address < EeUncachedRamEnd)
+                address -= EeUncachedRamBase;
+
+            // Physical RAM/BIOS → KSEG0 cached alias for PINE.
+            if (address < 0x20000000u)
+                return address | 0x80000000u;
+
+            return address;
+        }
+
+        /// <summary>
         /// Handle READMEM command — reads raw bytes from the live emulator memory.
         /// In PINE mode the bytes are read from PCSX2 via the PINE IPC socket.
         /// </summary>
@@ -1115,7 +1148,8 @@ namespace CodeDesigner.Mips64LE
                     // PINE addresses the EE virtual memory map directly.
                     // IOP region is not separately accessible; callers should use
                     // EE physical addresses in that case.
-                    bytes = PineClient!.ReadBytes(address, length);
+                    uint pineAddr = TranslatePineAddress(address, useIop);
+                    bytes = PineClient!.ReadBytes(pineAddr, length);
                 }
                 else
                 {
@@ -1179,16 +1213,53 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         private string HandleSnapshot(string? outputPath)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-
             if (string.IsNullOrWhiteSpace(outputPath))
                 return CreateErrorResponse("OutputPath is required for SNAPSHOT");
-
+            if (IsPineMode)
+            {
+                try
+                {
+                    Directory.CreateDirectory(outputPath);
+                    var regions = new[]
+                    {
+                        (Label: "EE Main RAM",  File: "EEmem.bin",     Base: 0x00000000u,                 Size: (int)PS2MemoryBus.MainRamSize,    UseIop: false),
+                        (Label: "BIOS ROM",     File: "BIOSrom.bin",   Base: PS2MemoryBus.BiosRomPhysBase, Size: (int)PS2MemoryBus.BiosRomSize,    UseIop: false),
+                        (Label: "Scratchpad",   File: "Scratchpad.bin",Base: 0x70000000u,                 Size: (int)PS2MemoryBus.ScratchpadSize, UseIop: false),
+                        (Label: "IOP RAM",      File: "IOPmem.bin",    Base: EeIopMirrorBase,             Size: (int)IopMemoryBus.RamSize,        UseIop: true),
+                    };
+                    var written = new List<SnapshotRegion>();
+                    foreach (var (label, file, baseAddr, size, useIop) in regions)
+                    {
+                        uint pineAddr = TranslatePineAddress(baseAddr, useIop);
+                        byte[] bytes  = PineClient!.ReadBytes(pineAddr, size);
+                        string filePath = Path.Combine(outputPath, file);
+                        File.WriteAllBytes(filePath, bytes);
+                        written.Add(new SnapshotRegion
+                        {
+                            Label       = label,
+                            File        = filePath,
+                            BaseAddress = baseAddr,
+                            Size        = bytes.Length,
+                        });
+                    }
+                    var pineResp = new CommandResponse
+                    {
+                        Success = true,
+                        Command = "SNAPSHOT",
+                        Regions = written,
+                    };
+                    return JsonSerializer.Serialize(pineResp);
+                }
+                catch (Exception ex)
+                {
+                    return CreateErrorResponse("PINE Snapshot error: " + ex.Message);
+                }
+            }
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running - no scheduler attached");
             try
             {
                 Directory.CreateDirectory(outputPath);
-
                 var regions = new[]
                 {
                     (Label: "EE Main RAM",  File: "EEmem.bin",    Bytes: Scheduler.EE.Bus.Ram,        Base: 0x00000000u),
@@ -1196,7 +1267,6 @@ namespace CodeDesigner.Mips64LE
                     (Label: "Scratchpad",   File: "Scratchpad.bin",Bytes: Scheduler.EE.Bus.Scratchpad, Base: 0x70000000u),
                     (Label: "IOP RAM",      File: "IOPmem.bin",    Bytes: Scheduler.IOP.Bus.Ram,       Base: EeIopMirrorBase),
                 };
-
                 var written = new List<SnapshotRegion>();
                 foreach (var (label, file, bytes, baseAddr) in regions)
                 {
@@ -1210,7 +1280,6 @@ namespace CodeDesigner.Mips64LE
                         Size        = bytes.Length,
                     });
                 }
-
                 var response = new CommandResponse
                 {
                     Success = true,
@@ -1221,7 +1290,7 @@ namespace CodeDesigner.Mips64LE
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"Snapshot error: {ex.Message}");
+                return CreateErrorResponse("Snapshot error: " + ex.Message);
             }
         }
 
@@ -1233,15 +1302,60 @@ namespace CodeDesigner.Mips64LE
         /// </summary>
         private string HandleLoadSnapshot(string? inputPath)
         {
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-
             if (string.IsNullOrWhiteSpace(inputPath))
                 return CreateErrorResponse("InputPath is required for LOADSNAPSHOT");
-
             if (!Directory.Exists(inputPath))
-                return CreateErrorResponse($"Snapshot directory not found: {inputPath}");
-
+                return CreateErrorResponse("Snapshot directory not found: " + inputPath);
+            if (IsPineMode)
+            {
+                try
+                {
+                    // Pause the emulator while we swap memory so it does not race with execution.
+                    try { PineClient!.Pause(); } catch { /* ignore pause errors */ }
+                    var regions = new[]
+                    {
+                        (File: "EEmem.bin",     Label: "EE Main RAM",  MaxSize: (int)PS2MemoryBus.MainRamSize,    Base: 0x00000000u,                 UseIop: false),
+                        (File: "BIOSrom.bin",   Label: "BIOS ROM",     MaxSize: (int)PS2MemoryBus.BiosRomSize,    Base: PS2MemoryBus.BiosRomPhysBase, UseIop: false),
+                        (File: "Scratchpad.bin",Label: "Scratchpad",   MaxSize: (int)PS2MemoryBus.ScratchpadSize, Base: 0x70000000u,                 UseIop: false),
+                        (File: "IOPmem.bin",    Label: "IOP RAM",      MaxSize: (int)IopMemoryBus.RamSize,        Base: EeIopMirrorBase,             UseIop: true),
+                    };
+                    var loaded = new List<SnapshotRegion>();
+                    foreach (var (file, label, maxSize, baseAddr, useIop) in regions)
+                    {
+                        string filePath = Path.Combine(inputPath, file);
+                        if (!File.Exists(filePath))
+                            continue;
+                        byte[] src = File.ReadAllBytes(filePath);
+                        int count  = Math.Min(src.Length, maxSize);
+                        if (count <= 0)
+                            continue;
+                        if (count != src.Length)
+                            Array.Resize(ref src, count);
+                        uint pineAddr = TranslatePineAddress(baseAddr, useIop);
+                        PineClient!.WriteBytes(pineAddr, src);
+                        loaded.Add(new SnapshotRegion
+                        {
+                            Label       = label,
+                            File        = filePath,
+                            BaseAddress = baseAddr,
+                            Size        = count,
+                        });
+                    }
+                    var pineResp = new CommandResponse
+                    {
+                        Success = true,
+                        Command = "LOADSNAPSHOT",
+                        Regions = loaded,
+                    };
+                    return JsonSerializer.Serialize(pineResp);
+                }
+                catch (Exception ex)
+                {
+                    return CreateErrorResponse("PINE LoadSnapshot error: " + ex.Message);
+                }
+            }
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running - no scheduler attached");
             // Pause the emulator while we swap memory so it does not race with
             // the run-loop reading/writing the same arrays.
             bool wasPaused = Scheduler.Paused;
@@ -1255,18 +1369,15 @@ namespace CodeDesigner.Mips64LE
                     (File: "Scratchpad.bin",Label: "Scratchpad",   Bytes: Scheduler.EE.Bus.Scratchpad, MaxSize: PS2MemoryBus.ScratchpadSize,     Base: 0x70000000u),
                     (File: "IOPmem.bin",    Label: "IOP RAM",      Bytes: Scheduler.IOP.Bus.Ram,       MaxSize: Scheduler.IOP.Bus.Ram.Length,   Base: EeIopMirrorBase),
                 };
-
                 var loaded = new List<SnapshotRegion>();
                 foreach (var (file, label, dest, maxSize, baseAddr) in regions)
                 {
                     string filePath = Path.Combine(inputPath, file);
                     if (!File.Exists(filePath))
                         continue;
-
                     byte[] src = File.ReadAllBytes(filePath);
                     int count = Math.Min(src.Length, maxSize);
                     Array.Copy(src, dest, count);
-
                     loaded.Add(new SnapshotRegion
                     {
                         Label       = label,
@@ -1275,7 +1386,6 @@ namespace CodeDesigner.Mips64LE
                         Size        = count,
                     });
                 }
-
                 // Leave emulator paused so the caller can inspect state or resume
                 // explicitly.
                 var response = new CommandResponse
@@ -1289,15 +1399,9 @@ namespace CodeDesigner.Mips64LE
             catch (Exception ex)
             {
                 if (!wasPaused) Scheduler.Paused = false;
-                return CreateErrorResponse($"LoadSnapshot error: {ex.Message}");
+                return CreateErrorResponse("LoadSnapshot error: " + ex.Message);
             }
-        }
-
-        /// <summary>
-        /// Handle PAUSE command — halts emulator execution.
-        /// In PINE mode, pauses PCSX2 via the extended PINE protocol (MsgPause).
-        /// </summary>
-        private string HandlePause()
+        }private string HandlePause()
         {
             if (IsPineMode)
             {
@@ -2047,6 +2151,8 @@ namespace CodeDesigner.Mips64LE
             if (string.IsNullOrWhiteSpace(hexData))
                 return CreateErrorResponse("No data provided");
 
+            bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+
             byte[] bytes;
             try
             {
@@ -2063,11 +2169,15 @@ namespace CodeDesigner.Mips64LE
 
             if (IsPineMode)
             {
-                try   { PineClient!.WriteBytes(address, bytes); return CreateSuccessResponse($"Wrote {bytes.Length} byte(s) to 0x{address:X8}"); }
+                try
+                {
+                    uint pineAddr = TranslatePineAddress(address, useIop);
+                    PineClient!.WriteBytes(pineAddr, bytes);
+                    return CreateSuccessResponse($"Wrote {bytes.Length} byte(s) to 0x{address:X8}");
+                }
                 catch (Exception ex) { return CreateErrorResponse($"PINE WriteMem error: {ex.Message}"); }
             }
 
-            bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
             for (int i = 0; i < bytes.Length; i++)
             {
                 uint vaddr = address + (uint)i;
@@ -3618,7 +3728,10 @@ namespace CodeDesigner.Mips64LE
         private byte[] ReadLiveBytes(uint startAddress, int length, bool useIop)
         {
             if (IsPineMode)
-                return PineClient!.ReadBytes(startAddress, length);
+            {
+                uint pineAddr = TranslatePineAddress(startAddress, useIop);
+                return PineClient!.ReadBytes(pineAddr, length);
+            }
 
             var bytes = new byte[length];
             for (int i = 0; i < length; i++)
@@ -3815,7 +3928,11 @@ namespace CodeDesigner.Mips64LE
                 // Build the set of all EE addresses referenced by MIPS code.
                 // We always use EE main RAM as the code source regardless of the scan
                 // region so that the filter works when scanning BIOS, scratchpad, IOP, etc.
-                var codeRefs = BuildCodeReferencedAddresses(Scheduler!.EE.Bus.Ram, 0x00000000u);
+                // In PINE mode we don't have direct access to the full EE RAM array;
+                // skip the code-reference filter to avoid a huge IPC read.
+                HashSet<uint> codeRefs = Scheduler != null
+                    ? BuildCodeReferencedAddresses(Scheduler.EE.Bus.Ram, 0x00000000u)
+                    : new HashSet<uint>();
 
                 var results = new List<PointerEntry>();
 
@@ -4748,3 +4865,8 @@ namespace CodeDesigner.Mips64LE
         public uint EntryPc { get; set; }
     }
 }
+
+
+
+
+

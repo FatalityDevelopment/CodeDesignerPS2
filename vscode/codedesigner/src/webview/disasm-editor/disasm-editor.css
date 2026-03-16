@@ -826,6 +826,74 @@ app-hex-view {
     text-overflow: ellipsis;
 }
 
+/* -- Filter + pager row (Strings / Functions / Pointers / Floats / Integers) -- */
+
+.sym-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+    background: #252526;
+}
+
+.sym-filter-input {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 3px 6px;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    flex: 1;
+    min-width: 0;
+}
+
+.sym-filter-input:focus {
+    border-color: #007acc;
+}
+
+.sym-pager {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.sym-pager:empty {
+    display: none;
+}
+
+.sym-pager-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 3px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+}
+
+.sym-pager-btn:hover:not(:disabled) {
+    background: #505050;
+}
+
+.sym-pager-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sym-pager-info {
+    color: #858585;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+}
+
 /* ── Shared list styles ── */
 
 .sym-list {
