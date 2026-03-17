@@ -108,6 +108,11 @@ namespace CodeDesigner.Mips64LE
         public event EventHandler<string>? MessageReceived;
         public event EventHandler<string>? ClientConnected;
         public event EventHandler? ClientDisconnected;
+        /// <summary>
+        /// Optional callback for runtime-mode commands handled by Program.cs.
+        /// Used for STARTPCSX2/STARTEMULATOR style commands that need process-level control.
+        /// </summary>
+        public Func<CommandMessage, string>? RuntimeCommandHandler { get; set; }
 
         /// <summary>
         /// Called by the emulator run-loop after a restart is fully complete (new
@@ -294,6 +299,20 @@ namespace CodeDesigner.Mips64LE
 
                 switch (command.Command.ToUpperInvariant())
                 {
+                    case "STARTPCSX2":
+                    case "START_PCSX2":
+                    case "STARTPCSX2MODE":
+                    case "START_PCSX2_MODE":
+                    case "STARTEMULATOR":
+                    case "START_EMULATOR":
+                    case "STARTBUILTINEMULATOR":
+                    case "START_BUILTIN_EMULATOR":
+                    case "STARTEMULATORMODE":
+                    case "START_EMULATOR_MODE":
+                        if (RuntimeCommandHandler == null)
+                            return CreateErrorResponse("Runtime mode switching is not enabled in this server instance");
+                        return RuntimeCommandHandler(command);
+
                     case "ASSEMBLE":
                         return HandleAssemble(command.Data);
 
@@ -4586,6 +4605,12 @@ namespace CodeDesigner.Mips64LE
         // PORTCHEATS fields
         public string? SourceDumpPath { get; set; }
         public string? TargetDumpPath { get; set; }
+        // Runtime mode control fields
+        public string? Pcsx2Host { get; set; }
+        public int? Pcsx2Slot { get; set; }
+        public string? BiosPath { get; set; }
+        public string? DiscPath { get; set; }
+        public long? Steps { get; set; }
         // COMPILECDS — pre-resolved pointer-manager labels (dotted names like "seal.health")
         public List<LabelEntry>? Labels { get; set; }
     }

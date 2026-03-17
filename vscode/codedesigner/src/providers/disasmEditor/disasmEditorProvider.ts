@@ -31,6 +31,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private static readonly BASE_ADDRESS = 0x00000000;
   private static readonly PAGE_SIZE = 1000;
   private static readonly BUFFER_PAGES = 2;
+  private static readonly LIVE_READ_BACKOFF_MS = 5000;
   private socketClient: SocketClient | null;
   /** All currently-open live memory panels. Used to broadcast pause/resume state. */
   private _livePanels: vscode.WebviewPanel[] = [];
@@ -62,6 +63,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _gameLabels: LabelEntry[] = [];
   /** Labels derived from live-resolved Pointer Manager entries. Shown as an overlay in the instruction display. */
   private _pointerLabels: LabelEntry[] = [];
+  /** Suppress repeated live read retries after emulator-side connection failures. */
+  private _liveReadBackoffUntil = 0;
+  private _liveReadFailureActive = false;
+  private _liveReadFailureMessage = '';
 
   /**
    * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
@@ -707,9 +712,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'step') {
                 await this.stepAndBroadcast();
             } else if (message.type === 'getStatus') {
-                if (!this.socketClient?.isConnected()) { return; }
+              if (!this._canIssueLiveBackendRequest()) { return; }
                 try {
                     const status = await this.socketClient!.getPC();
+                this._handleLiveReadSuccess();
                     const statusMsg: any = { type: 'status', ...status };
                     this._applyBreakpointHitFallback(statusMsg);
                     // When paused, also fetch registers for the debug panel
@@ -739,7 +745,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         panel.webview.postMessage(statusMsg);
                     }
                 } catch (err: any) {
-                    console.error(`[LIVE] Failed to get status: ${err?.message ?? err}`);
+                    this._handleLiveReadFailure('getStatus', err);
                 }
             } else if (message.type === 'search') {
                 await this.handleSearch(panel, message.query, message.mode,
@@ -1106,6 +1112,87 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         return v;
     }
 
+    private _isLiveReadBackoffActive(): boolean {
+      return Date.now() < this._liveReadBackoffUntil;
+    }
+
+    private _canIssueLiveBackendRequest(): boolean {
+      return !!this.socketClient && this.socketClient.isConnected() && !this._isLiveReadBackoffActive();
+    }
+
+    private _buildPlaceholderRows(baseAddress: number, startOffset: number, readLength: number): DisassembledRow[] {
+      const count = Math.floor(readLength / DisasmEditorProvider.INSTRUCTION_SIZE);
+      const rows: DisassembledRow[] = [];
+      for (let i = 0; i < count; i++) {
+        const addr = baseAddress + startOffset + i * DisasmEditorProvider.INSTRUCTION_SIZE;
+        rows.push({
+          addr: addr.toString(16).toUpperCase().padStart(8, '0'),
+          bytes: '00000000',
+          label: '',
+          op: 'nop',
+          args: '',
+          comment: '',
+        });
+      }
+      return rows;
+    }
+
+    private _postUnavailableHexView(
+      panel: vscode.WebviewPanel,
+      baseAddress: number,
+      highlightAddr: number,
+      highlightLength: number
+    ): void {
+      const alignedAddr = Math.max(baseAddress, ((highlightAddr & ~0xf) >>> 0) - 0x10);
+      panel.webview.postMessage({
+        type: 'hexview',
+        data: new Array<number>(DisasmEditorProvider.HEX_VIEW_SIZE).fill(0),
+        offset: alignedAddr,
+        highlight_addr: highlightAddr,
+        highlight_length: highlightLength,
+      });
+    }
+
+    private _isLiveReadConnectionFailure(err: unknown): boolean {
+      const msg = String((err as any)?.message ?? err ?? '').toLowerCase();
+      return msg.includes('actively refused')
+        || msg.includes('client not ready')
+        || msg.includes('readmem error')
+        || msg.includes('connection refused')
+        || msg.includes('command timeout')
+        || msg.includes('getpc error')
+        || msg.includes('pine getpc error')
+        || msg.includes('not connected to server')
+        || msg.includes('disconnected');
+    }
+
+    private _handleLiveReadSuccess(): void {
+      if (!this._liveReadFailureActive) { return; }
+      this._liveReadFailureActive = false;
+      this._liveReadFailureMessage = '';
+      this._liveReadBackoffUntil = 0;
+      getOutputChannel().appendLine('[LIVE] Emulator memory reads recovered; resuming normal refresh.');
+    }
+
+    private _handleLiveReadFailure(context: string, err: unknown): void {
+      const msg = String((err as any)?.message ?? err ?? 'Unknown live read failure');
+      if (!this._isLiveReadConnectionFailure(err)) {
+        console.error(`[LIVE] ${context} failed: ${msg}`);
+        return;
+      }
+
+      const now = Date.now();
+      this._liveReadBackoffUntil = now + DisasmEditorProvider.LIVE_READ_BACKOFF_MS;
+      if (!this._liveReadFailureActive || this._liveReadFailureMessage !== msg) {
+        this._liveReadFailureActive = true;
+        this._liveReadFailureMessage = msg;
+        getOutputChannel().appendLine(
+          `[LIVE] Emulator memory reads unavailable; backing off for ${DisasmEditorProvider.LIVE_READ_BACKOFF_MS}ms. ${msg}`
+        );
+        console.warn(`[LIVE] ${context} unavailable: ${msg}`);
+      }
+    }
+
     private async sendLiveDisasmPage(
         panel: vscode.WebviewPanel,
         region: string,
@@ -1118,34 +1205,29 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const readLength  = Math.min(totalBytes - startOffset, maxBytes);
         if (readLength <= 0) { return; }
 
-        if (!this.socketClient || !this.socketClient.isConnected()) {
-            // When not connected, send placeholder rows with default zero data so the
-            // grid is navigable and shows 00000000 / nop before the server connects.
-            const count = Math.floor(readLength / DisasmEditorProvider.INSTRUCTION_SIZE);
-            const rows: DisassembledRow[] = [];
-            for (let i = 0; i < count; i++) {
-                const addr = baseAddress + startOffset + i * DisasmEditorProvider.INSTRUCTION_SIZE;
-                rows.push({
-                    addr: addr.toString(16).toUpperCase().padStart(8, '0'),
-                    bytes: '00000000',
-                    label: '',
-                    op: 'nop',
-                    args: '',
-                    comment: '',
-                });
-            }
-            panel.webview.postMessage({ type: 'disasmPage', rows, startIndex });
+        if (!this._canIssueLiveBackendRequest()) {
+          panel.webview.postMessage({
+            type: 'disasmPage',
+            rows: this._buildPlaceholderRows(baseAddress, startOffset, readLength),
+            startIndex,
+          });
             return;
         }
 
+        const socketClient = this.socketClient!;
         const startAddr = baseAddress + startOffset;
         try {
-            const buffer = await this.socketClient.readMemory(startAddr, readLength, region);
+            const buffer = await socketClient.readMemory(startAddr, readLength, region);
             const rows   = await this.disassembleWithBackend(startAddr, buffer);
+          this._handleLiveReadSuccess();
             panel.webview.postMessage({ type: 'disasmPage', rows, startIndex });
         } catch (err: any) {
-            const msg = err?.message ?? String(err);
-            console.error(`[LIVE] sendLiveDisasmPage failed at 0x${startAddr.toString(16)}: ${msg}`);
+          this._handleLiveReadFailure(`sendLiveDisasmPage at 0x${startAddr.toString(16)}`, err);
+          panel.webview.postMessage({
+            type: 'disasmPage',
+            rows: this._buildPlaceholderRows(baseAddress, startOffset, readLength),
+            startIndex,
+          });
         }
     }
 
@@ -1156,12 +1238,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         highlightAddr: number,
         highlightLength: number
     ): Promise<void> {
-        if (!this.socketClient || !this.socketClient.isConnected()) { return; }
+      if (!this._canIssueLiveBackendRequest()) {
+        this._postUnavailableHexView(panel, baseAddress, highlightAddr, highlightLength);
+        return;
+      }
 
+        const socketClient = this.socketClient!;
         const alignedAddr = Math.max(baseAddress, ((highlightAddr & ~0xf) >>> 0) - 0x10);
         try {
-            const buffer = await this.socketClient.readMemory(
+            const buffer = await socketClient.readMemory(
                 alignedAddr, DisasmEditorProvider.HEX_VIEW_SIZE, region);
+        this._handleLiveReadSuccess();
             panel.webview.postMessage({
                 type: 'hexview',
                 data: Array.from(buffer),
@@ -1170,8 +1257,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 highlight_length: highlightLength,
             });
         } catch (err: any) {
-            const msg = err?.message ?? String(err);
-            console.error(`[LIVE] sendLiveHexView failed at 0x${alignedAddr.toString(16)}: ${msg}`);
+        this._handleLiveReadFailure(`sendLiveHexView at 0x${alignedAddr.toString(16)}`, err);
+        this._postUnavailableHexView(panel, baseAddress, highlightAddr, highlightLength);
         }
     }
 

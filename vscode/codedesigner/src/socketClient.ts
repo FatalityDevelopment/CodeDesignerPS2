@@ -23,6 +23,12 @@ interface CommandMessage {
     IsoPath?: string;
     ElfName?: string;
     OutputDirectory?: string;
+    // Runtime mode switch fields (control-server mode)
+    BiosPath?: string;
+    DiscPath?: string;
+    Steps?: number;
+    Pcsx2Host?: string;
+    Pcsx2Slot?: number;
     // CONVERTCHEAT fields
     Format?: string;
     Direction?: string;
@@ -827,6 +833,35 @@ export class SocketClient {
         const response = await this.sendCommand(command);
         if (!response.Success) {
             throw new Error(response.Error || 'Restart failed');
+        }
+    }
+
+    /**
+     * Runtime mode switch: start (or keep) the built-in emulator in control-server mode.
+     */
+    public async startEmulator(biosPath?: string, discPath?: string, steps?: number): Promise<void> {
+        const command: CommandMessage = { Command: 'STARTEMULATOR' };
+        if (biosPath) { command.BiosPath = biosPath; }
+        if (discPath) { command.DiscPath = discPath; }
+        if (steps !== undefined) { command.Steps = steps; }
+
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'STARTEMULATOR failed');
+        }
+    }
+
+    /**
+     * Runtime mode switch: start PCSX2 bridge mode in control-server mode.
+     */
+    public async startPcsx2(host?: string, slot?: number): Promise<void> {
+        const command: CommandMessage = { Command: 'STARTPCSX2' };
+        if (host) { command.Pcsx2Host = host; }
+        if (slot !== undefined) { command.Pcsx2Slot = slot; }
+
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'STARTPCSX2 failed');
         }
     }
 

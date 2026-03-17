@@ -1,0 +1,137 @@
+<div id="header">
+<div id="header-toolbar">
+    <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">&#8862; Symbols</button>
+    <button class="header-tool-btn" id="registers-toggle-btn" title="Toggle Registers Panel (Ctrl+Alt+R)">&#8863; Regs</button>
+    <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)">&#8693; Stack</button>
+    <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
+    <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
+    <button class="header-tool-btn live-only" id="setpc-toggle-btn" title="Set PC to Address (Ctrl+Alt+P)">&#9655; Set PC</button>
+    <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
+    <button class="header-tool-btn" id="converter-btn" title="Cheat Code Converter">&#8645; Converter</button>
+    <button class="header-tool-btn" id="porter-btn" title="Cheat Code Porter">&#8651; Port</button>
+
+</div>
+<!-- New Angular component-based panels -->
+<app-address-input-panel
+    [visible]="signals.panels.goto()"
+    [panelId]="'goto-panel'"
+    [placeholder]="'Go to address (hex)'"
+    [buttonLabel]="'Go'"
+    [buttonTitle]="'Go to address (Enter)'"
+    [externalStatus]="gotoStatus()"
+    [externalValue]="gotoValue()"
+    (submit$)="onGotoAddress($event)"
+  (valueChange)="onGotoValueChange($event)"
+    (close)="onGotoClose()">
+</app-address-input-panel>
+<app-address-input-panel
+    [visible]="signals.panels.setpc()"
+    [panelId]="'setpc-panel'"
+    [placeholder]="'New PC address (hex)'"
+    [buttonLabel]="'Set PC'"
+    [buttonTitle]="'Set PC (Enter)'"
+    [externalStatus]="setpcStatus()"
+    (submit$)="onSetPc($event)"
+    (close)="onSetPcClose()">
+</app-address-input-panel>
+<app-search-panel
+    (search)="onSearch($event)"
+    (clear)="onSearchClear()"
+    (close)="onSearchClose()"
+    (prevMatch)="onPrevMatch()"
+    (nextMatch)="onNextMatch()">
+</app-search-panel>
+<app-hex-view
+    [data]="hexViewData"
+    [offset]="hexViewOffset"
+    [highlightAddr]="hexViewHighlightAddr"
+    [highlightLength]="hexViewHighlightLength">
+</app-hex-view>
+</div>
+<div id="content-wrapper">
+<app-virtual-grid
+    #virtualGrid
+    [rows]="gridRows()"
+    [pageStart]="gridPageStart()"
+    [pointerLabelMap]="gridPointerLabelMap()"
+    (selectRow)="onGridSelectRow($event)"
+    (editRow)="onGridEditRow($event)"
+    (contextMenu)="onGridContextMenu($event)"
+    (navigateTarget)="onGridNavigateTarget()"
+    (navigateBack)="onGridNavigateBack()"
+    (toggleBreakpoint)="onGridToggleBreakpoint()"
+    (cursorMove)="onGridCursorMove($event)"
+  />
+<app-context-menu
+    #contextMenu
+    (setBreakpoint)="onCtxSetBreakpoint()"
+    (removeBreakpoint)="onCtxRemoveBreakpoint()"
+    (gotoTarget)="onCtxGotoTarget()"
+    (editRow)="onCtxEdit()"
+    (closed)="onCtxClosed()"
+  />
+<!-- Angular SymbolsPanel (Phase 9) -->
+<app-symbols-panel
+    [visible]="symbolsPanelVisible()"
+    [regionLabel]="symbolsPanelRegionLabel()"
+    [labels]="symbolsPanelLabels()"
+    [strings]="symbolsPanelStrings()"
+    [functions]="symbolsPanelFunctions()"
+    [pointers]="symbolsPanelPointers()"
+    [floats]="symbolsPanelFloats()"
+    [integers]="symbolsPanelIntegers()"
+    [stringsStatus]="symbolsPanelStringsStatus()"
+    [functionsStatus]="symbolsPanelFunctionsStatus()"
+    [pointersStatus]="symbolsPanelPointersStatus()"
+    [floatsStatus]="symbolsPanelFloatsStatus()"
+    [integersStatus]="symbolsPanelIntegersStatus()"
+    (close)="onSymbolsPanelClose()"
+    (refresh)="onSymbolsPanelRefresh()"
+    (navigateToAddress)="onSymbolsPanelNavigate($event)"
+    (addLabel)="onSymbolsPanelAddLabel($event)"
+    (deleteLabel)="onSymbolsPanelDeleteLabel($event)"
+    (scanStrings)="onSymbolsPanelScanStrings()"
+    (scanFunctions)="onSymbolsPanelScanFunctions()"
+    (scanPointers)="onSymbolsPanelScanPointers()"
+    (scanFloats)="onSymbolsPanelScanFloats()"
+    (scanIntegers)="onSymbolsPanelScanIntegers()"
+  />
+<!-- Angular DebugPanel (Phase 7) -->
+<app-debug-panel
+    [visible]="debugPanelVisible()"
+    [registers]="debugPanelRegisters()"
+    [stackBytes]="debugPanelStackBytes()"
+    [stackBase]="debugPanelStackBase()"
+    (editRegister)="onDebugEditRegister($event)"
+  />
+</div>
+<!-- Angular BottomPanel (Phase 8) -->
+<app-bottom-panel
+    [visible]="bottomPanelVisible()"
+    [callStack]="bottomPanelCallStack()"
+    [threads]="bottomPanelThreads()"
+    [breakpoints]="bottomPanelBreakpoints()"
+    (navigateToAddress)="onBottomPanelNavigate($event)"
+    (removeBreakpoint)="onBottomPanelRemoveBreakpoint($event)"
+    (clearAllBreakpoints)="onBottomPanelClearAllBreakpoints()"
+    (tabSelected)="onBottomPanelTabSelected($event)"
+    (refreshTab)="onBottomPanelRefresh($event)"
+  />
+<!-- Angular Overlay Components (Phase 10) -->
+<app-edit-overlay #editOverlayComp
+    [externalDisasmPreview]="editOverlayDisasmPreview()"
+    [externalHexBytes]="editOverlayExternalHexBytes()"
+    [externalInstrPreview]="editOverlayExternalInstrPreview()"
+    (save$)="onEditOverlaySave($event)"
+    (close$)="onEditOverlayClose()"
+    (assembleInstr)="onAssembleInstr($event)"
+    (disasmBytes)="onDisasmBytes($event)"
+    (requestHistory)="onRequestHistory($event)" />
+<app-converter-overlay #converterOverlayComp
+    (close$)="onConverterOverlayClose()"
+    (convert$)="onConvertCheat($event)" />
+<app-porter-overlay #porterOverlayComp
+    (close$)="onPorterOverlayClose()"
+    (port$)="onPortCheats($event)"
+    (browseSource)="onBrowseSourceDump()"
+    (browseTarget)="onBrowseTargetDump()" />

@@ -71,8 +71,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private selectedGamePath: string = '';
     private selectedGameName: string = '';
     private _paused: boolean = false;
-    /** Set to true by handleRun() so that onSocketConnected() resumes the emulator. */
-    private _resumeOnConnect: boolean = false;
+    /** If Run was clicked before socket connect, execute this mode once connected. */
+    private _pendingRunMode: 'emulator' | 'pcsx2' | null = null;
     /** True when the current connection is through the PCSX2 PINE bridge. */
     private _bridgeMode: boolean = false;
     private _activeCdsFilePath: string = '';
@@ -208,8 +208,18 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         msg.gamePath ?? this.selectedGamePath
                     );
                     break;
+                case 'startPcsx2':
+                    this.handleStartPcsx2(
+                        msg.emulatorPath ?? this.selectedEmulatorPath,
+                        msg.biosPath ?? this.selectedBiosPath,
+                        msg.gamePath ?? this.selectedGamePath
+                    );
+                    break;
                 case 'snapshot':
                     await this.handleSnapshot();
+                    break;
+                case 'snapshotPcsx2':
+                    this.handlePcsx2SnapshotStub();
                     break;
                 case 'importBin':
                     await this.handleImportBin();
@@ -452,10 +462,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         return entry ? this.isPcsx2Entry(entry) : false;
     }
 
-    private getBridgeExecutablePath(): string | null {
-        const entry = (this.settings.emulators ?? []).find(e => !this.isPcsx2Entry(e));
-        if (!entry) { return null; }
-        return this.resolvePath(entry.path);
+    private getControlServerExecutablePath(selectedEmulatorPath?: string): string | null {
+        if (selectedEmulatorPath) {
+            const selectedEntry = (this.settings.emulators ?? []).find(e =>
+                this.resolvePath(e.path).toLowerCase() === this.resolvePath(selectedEmulatorPath).toLowerCase()
+            );
+            if (selectedEntry && !this.isPcsx2Entry(selectedEntry)) {
+                return this.resolvePath(selectedEntry.path);
+            }
+        }
+
+        const fallback = (this.settings.emulators ?? []).find(e => !this.isPcsx2Entry(e));
+        if (!fallback) { return null; }
+        return this.resolvePath(fallback.path);
     }
 
     private handleConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
@@ -466,14 +485,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
 
-        // Toggle: if already running or already socket-connected, stop/disconnect
-        if (this.emulatorTerminal || this.socketClient.isConnected()) {
+        // Toggle: if connected and/or launched from this panel, disconnect and close process.
+        if (this.socketClient.isConnected() || this.emulatorTerminal) {
             if (this.emulatorTerminal) {
+                out.info('Stopping emulator process...');
                 this.emulatorTerminal.dispose();
-                out.info('Emulator stopped by user.');
-            } else {
-                out.info('Disconnected from server.');
             }
+            out.info('Disconnected from server.');
             this.socketClient.disconnect();
             this.cleanupProcess();
             return;
@@ -485,15 +503,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         out.show(true);
-
-        // Track whether this session is a PCSX2 PINE bridge.
-        this._bridgeMode = this.isPcsx2Selection(emulatorPath);
-
-        // Spawn the emulator and connect when ready (same as Run).
-        this.spawnAndConnect(emulatorPath, biosPath, gamePath);
+        this._pendingRunMode = null;
+        this.launchControlServerAndConnect(emulatorPath);
     }
 
-    /** Launch the emulator in a VS Code terminal tab and, once the server is up, connect and resume. */
+    /** Start the selected runtime mode via socket after Connect has established control-server link. */
     private handleRun(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
 
@@ -507,106 +521,59 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         out.show(true);
+        const runMode: 'emulator' | 'pcsx2' = this.isPcsx2Selection(emulatorPath) ? 'pcsx2' : 'emulator';
 
-        // If already connected, just register breakpoints and resume immediately.
+        // If already connected, switch runtime mode immediately over socket.
         if (this.socketClient.isConnected()) {
-            this._bridgeMode = this.isPcsx2Selection(emulatorPath);
-            this._registerBreakpointsAndResume(!this._bridgeMode);
+            this.startRuntimeMode(runMode, biosPath, gamePath);
             return;
         }
 
-        // Not yet connected — spawn the emulator and resume once the socket connects.
-        this._bridgeMode = this.isPcsx2Selection(emulatorPath);
-        this._resumeOnConnect = !this._bridgeMode;
-        this.spawnAndConnect(emulatorPath, biosPath, gamePath);
+        // Not connected yet: launch control server, then run mode once connected.
+        this._pendingRunMode = runMode;
+        this.launchControlServerAndConnect(emulatorPath);
     }
 
-    /** Launch the emulator in a VS Code terminal tab and, once the server is up, connect. */
-    private spawnAndConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
+    /** Launch CodeDesigner control server with no mode args, then connect socket/views. */
+    private launchControlServerAndConnect(selectedEmulatorPath: string): void {
         const out = getOutputChannel();
+        const resolvedExe = this.getControlServerExecutablePath(selectedEmulatorPath);
+        if (!resolvedExe) {
+            out.error('Connect requires CodeDesigner.Mips64LE.exe in emu-settings.json.');
+            vscode.window.showErrorMessage(
+                'Connect requires CodeDesigner.Mips64LE.exe in emu-settings.json. Add it and try again.'
+            );
+            this.cleanupProcess();
+            return;
+        }
 
-        const isPcsx2 = this.isPcsx2Selection(emulatorPath);
-        const resolvedExe  = this.resolvePath(emulatorPath);
-        const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
-        const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
-
-        if (isPcsx2) {
-            const bridgeExe = this.getBridgeExecutablePath();
-            if (!bridgeExe) {
-                out.error('PCSX2 bridge requires the CodeDesigner executable in emu-settings.json.');
-                vscode.window.showErrorMessage(
-                    'PCSX2 bridge requires CodeDesigner.Mips64LE.exe. Add it to emu-settings.json and try again.'
-                );
-                this.cleanupProcess();
-                return;
-            }
-
-            if (!fs.existsSync(bridgeExe)) {
-                out.error(`PCSX2 bridge executable not found: ${bridgeExe}`);
-                vscode.window.showErrorMessage(
-                    `Bridge not found: ${bridgeExe}\n` +
-                    'Build the project first: cd CodeDesigner.Mips64LE && dotnet build'
-                );
-                this.cleanupProcess();
-                return;
-            }
-
-            const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
-            const slot = this.settings.pcsx2?.slot ?? 28011;
-
-            const cliArgs: string[] = ['--pcsx2', '--pcsx2-host', host, '--pcsx2-slot', String(slot), '--port', '8765'];
-
-            out.info(`Starting PCSX2 PINE bridge: ${bridgeExe} ${cliArgs.join(' ')}`);
-            out.info('PCSX2 must already be running with PINE enabled (Settings -> Advanced -> Enable PINE).');
-
-            const terminal = vscode.window.createTerminal({
-                name:      'PCSX2 Bridge',
-                shellPath: bridgeExe,
-                shellArgs: cliArgs,
-            });
-            terminal.show(true);
-
-            this.emulatorTerminal = terminal;
+        // If we already launched a terminal process, just retry socket connect.
+        if (this.emulatorTerminal) {
             this.connectSocketAndOpenViews();
             return;
         }
 
-        // Verify the executable actually exists before trying to launch it.
-        // Using shellPath: resolvedExe directly fails silently on some VS Code
-        // versions when the file is missing; this gives the user a clear message.
+        // Verify the executable exists before trying to launch it.
         if (!fs.existsSync(resolvedExe)) {
-            out.error(`Emulator executable not found: ${resolvedExe}`);
+            out.error(`CodeDesigner executable not found: ${resolvedExe}`);
             vscode.window.showErrorMessage(
-                `Emulator not found: ${resolvedExe}\n` +
+                `CodeDesigner not found: ${resolvedExe}\n` +
                 'Build the project first: cd CodeDesigner.Mips64LE && dotnet build'
             );
             this.cleanupProcess();
             return;
         }
 
-        const cliArgs: string[] = ['--run'];
-        if (resolvedBios) { cliArgs.push('--bios', resolvedBios); }
-        if (resolvedDisc) { cliArgs.push('--disc', resolvedDisc); }
+        out.info(`Starting control server: ${resolvedExe}`);
 
-        out.info(`Starting emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
-
-        // Use shellPath/shellArgs to pass the exe and its arguments directly to
-        // the OS without any shell quoting — this avoids shell-injection concerns
-        // and works cross-platform regardless of the user's default shell.
         const terminal = vscode.window.createTerminal({
-            name:      'PS2 Emulator',
+            name: 'CodeDesigner',
             shellPath: resolvedExe,
-            shellArgs: cliArgs,
+            shellArgs: [],
         });
-        terminal.show(true);          // reveal but keep editor focus
+        terminal.show(true);
 
         this.emulatorTerminal = terminal;
-
-        // After the emulator starts the embedded socket server, connect the
-        // socket client and open a live memory view for every region.
-        // Do NOT send connectionStatus:true here — send it only once the socket
-        // actually connects (via onSocketConnected / onConnected event) so the
-        // sidebar shows the real connection state and not a premature "LIVE".
         this.connectSocketAndOpenViews();
     }
 
@@ -652,7 +619,89 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.emulatorTerminal = undefined;
         this._paused = false;
         this._bridgeMode = false;
+        this._pendingRunMode = null;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
+    }
+
+    private startRuntimeMode(mode: 'emulator' | 'pcsx2', biosPath: string, gamePath: string): void {
+        const out = getOutputChannel();
+        if (!this.socketClient.isConnected()) {
+            out.warn('Run requested before socket connection is ready.');
+            return;
+        }
+
+        void (async () => {
+            try {
+                if (mode === 'emulator') {
+                    const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
+                    const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
+                    out.info('Sending STARTEMULATOR command to control server...');
+                    await this.socketClient.startEmulator(resolvedBios, resolvedDisc);
+                    this._bridgeMode = false;
+                    await this._registerBreakpointsAndResume(true);
+                } else {
+                    const host = (this.settings.pcsx2?.host ?? '127.0.0.1').trim() || '127.0.0.1';
+                    const slot = this.settings.pcsx2?.slot ?? 28011;
+                    out.info(`Sending STARTPCSX2 command to control server (${host}:${slot})...`);
+                    await this.socketClient.startPcsx2(host, slot);
+                    this._bridgeMode = true;
+                    this._setPauseState(false);
+                }
+            } catch (err: any) {
+                out.error(`Run failed: ${err?.message ?? err}`);
+                vscode.window.showErrorMessage(`Run failed: ${err?.message ?? err}`);
+            }
+        })();
+    }
+
+    /**
+     * Launch the external PCSX2 application using CLI arguments from panel selections.
+     * This does not connect sockets by itself; Connect/Run still control CodeDesigner.
+     */
+    private handleStartPcsx2(emulatorPath: string, biosPath: string, gamePath: string): void {
+        const out = getOutputChannel();
+
+        this.selectedEmulatorPath = emulatorPath;
+        this.selectedBiosPath = biosPath;
+        this.selectedGamePath = gamePath;
+
+        if (!emulatorPath || !this.isPcsx2Selection(emulatorPath)) {
+            vscode.window.showWarningMessage('Please select a PCSX2 emulator entry first.');
+            return;
+        }
+
+        const pcsx2Exe = this.resolvePath(emulatorPath);
+        if (!fs.existsSync(pcsx2Exe)) {
+            out.error(`PCSX2 executable not found: ${pcsx2Exe}`);
+            vscode.window.showErrorMessage(`PCSX2 executable not found: ${pcsx2Exe}`);
+            return;
+        }
+
+        const args: string[] = ['-batch'];
+        const resolvedDisc = gamePath ? this.resolvePath(gamePath) : '';
+        const resolvedBios = biosPath ? this.resolvePath(biosPath) : '';
+
+        // Match known-good command shape:
+        // pcsx2.exe -batch "path\\game.iso" -earlyconsolelog
+        if (resolvedDisc && fs.existsSync(resolvedDisc)) {
+            args.push(resolvedDisc);
+        } else {
+            out.warn('No valid game selected for PCSX2 launch; starting without a boot image.');
+        }
+        args.push('-earlyconsolelog');
+
+        if (resolvedBios) {
+            out.info(`PCSX2 BIOS selection: ${resolvedBios}`);
+        }
+
+        out.info(`Starting PCSX2: ${pcsx2Exe} ${args.join(' ')}`);
+
+        const quotePs = (v: string): string => `"${v.replace(/"/g, '""')}"`;
+        const command = `& ${quotePs(pcsx2Exe)} ${args.map(a => a.includes(' ') ? quotePs(a) : a).join(' ')}`;
+
+        const terminal = vscode.window.createTerminal({ name: 'PCSX2' });
+        terminal.show(true);
+        terminal.sendText(command, true);
     }
 
     /**
@@ -882,6 +931,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             out.error(`Import failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Import failed: ${err?.message ?? err}`);
         }
+    }
+
+    /** Temporary placeholder until native PCSX2 snapshot plumbing is implemented. */
+    private handlePcsx2SnapshotStub(): void {
+        const out = getOutputChannel();
+        out.info('[PCSX2] Snapshot requested, but PCSX2 snapshot handler is not implemented yet.');
+        out.info('[PCSX2] TODO: wire to PCSX2 save-state/snapshot API once available.');
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────
@@ -1548,16 +1604,20 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * The emulator is left paused — call Resume or click ▶ Run to start execution.
      */
     public async onSocketConnected(): Promise<void> {
-        this._setPauseState(true);
+        this._setPauseState(false);
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
         for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
-        // Register any existing breakpoints on the server.
-        // Only resume if handleRun() set the flag (i.e. the user explicitly clicked Run).
-        const shouldResume = this._resumeOnConnect;
-        this._resumeOnConnect = false;
-        await this._registerBreakpointsAndResume(shouldResume);
+        const pendingMode = this._pendingRunMode;
+        this._pendingRunMode = null;
+        if (pendingMode) {
+            this.startRuntimeMode(
+                pendingMode,
+                this.selectedBiosPath,
+                this.selectedGamePath
+            );
+        }
     }
 
     /**
@@ -1572,7 +1632,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Auto-start the CodeDesigner console app with --server in a VS Code terminal.
+    * Auto-start the CodeDesigner console app in default control-server mode.
      * Called at extension activation when auto-connect fails.
      * Looks for the first non-PCSX2 emulator configured in emu-settings.json.
      * Returns true if a terminal was spawned (or was already running), false otherwise.
@@ -1612,22 +1672,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return true;
         }
 
-        // Build --run arguments; pass the first configured BIOS path if available.
-        // --run starts the embedded socket server on port 8765 (used by this extension).
-        // --server starts a standalone server on port 8766 and must NOT be used here.
-        const cliArgs: string[] = ['--run'];
-        const bios = this.settings.bios?.[0];
-        if (bios) {
-            const resolvedBios = this.resolvePath(bios.path);
-            if (fs.existsSync(resolvedBios)) {
-                cliArgs.push('--bios', resolvedBios);
-            }
-        }
+        const cliArgs: string[] = [];
 
-        getOutputChannel().info(`Auto-starting CodeDesigner emulator: ${resolvedExe} ${cliArgs.join(' ')}`);
+        getOutputChannel().info(`Auto-starting CodeDesigner control server: ${resolvedExe}`);
 
         const terminal = vscode.window.createTerminal({
-            name: 'PS2 Emulator',
+            name: 'CodeDesigner',
             shellPath: resolvedExe,
             shellArgs: cliArgs,
         });
