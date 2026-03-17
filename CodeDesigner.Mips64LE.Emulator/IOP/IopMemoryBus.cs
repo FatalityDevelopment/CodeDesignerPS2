@@ -1,4 +1,5 @@
 using System;
+using CodeDesigner.Mips64LE.Common.Core;
 using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 
 namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
@@ -30,7 +31,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.IOP
     ///
     /// Reference: PCSX2 pcsx2/IopDma.h, pcsx2/IopMem.cpp.
     /// </summary>
-    public sealed class IopMemoryBus
+    public sealed class IopMemoryBus : IIopMemoryBus
     {
         // ── Region sizes ──────────────────────────────────────────────────────
         // PCSX2 allocates 4 MB for IOP RAM (psxM, IopMem.cpp) even though the

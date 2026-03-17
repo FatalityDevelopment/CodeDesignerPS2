@@ -1,7 +1,7 @@
 using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
+using CodeDesigner.Mips64LE.Common.Core;
 
 namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU1
 {
@@ -30,7 +30,7 @@ namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU1
         /// </summary>
         /// <param name="state">VU1 state (must already have IsRunning=true and PC set).</param>
         /// <param name="gif">GIF instance to receive XGKICK data (may be null).</param>
-        public static void RunProgram(VU1State state, GIF? gif)
+        public static void RunProgram(VU1State state, IGifDataSink? gif)
         {
             int guard = MaxSteps;
             while (state.IsRunning && guard-- > 0)
@@ -38,7 +38,7 @@ namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU1
         }
 
         /// <summary>Execute a single VU1 instruction pair (8 bytes).</summary>
-        public static void Step(VU1State state, GIF? gif)
+        public static void Step(VU1State state, IGifDataSink? gif)
         {
             int pc = state.PC;
             if (pc + 8 > state.MicroMem.Length)
@@ -216,7 +216,7 @@ namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU1
         // ── Lower instruction (memory / integer / branch) ─────────────────────
 
         /// <summary>Returns true if a branch was taken (PC was modified).</summary>
-        private static bool ExecuteLower(VU1State s, uint lower, GIF? gif)
+        private static bool ExecuteLower(VU1State s, uint lower, IGifDataSink? gif)
         {
             // LOI: bit 31 set → store entire lower word as float immediate in I register.
             if ((lower & 0x80000000u) != 0)
@@ -397,7 +397,7 @@ namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU1
         }
 
         private static bool ExecuteLowerSpecial(VU1State s, uint lower,
-            int fs, int ft, int fd, int funct, byte mask, GIF? gif)
+            int fs, int ft, int fd, int funct, byte mask, IGifDataSink? gif)
         {
             switch (funct)
             {
@@ -538,7 +538,7 @@ namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU1
 
         // ── XGKICK ────────────────────────────────────────────────────────────
 
-        private static void DoXGKick(VU1State s, int isReg, GIF? gif)
+        private static void DoXGKick(VU1State s, int isReg, IGifDataSink? gif)
         {
             if (gif == null) return;
             int startByte = s.VI[isReg] * 16;

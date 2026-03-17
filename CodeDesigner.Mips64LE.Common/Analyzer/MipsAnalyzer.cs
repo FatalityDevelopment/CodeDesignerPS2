@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using CodeDesigner.Mips64LE.Common.Core;
 using CodeDesigner.Mips64LE.Common.CPU;
-using CodeDesigner.Mips64LE.Common.Emulator;
 
 namespace CodeDesigner.Mips64LE.Common
 {
@@ -25,7 +25,7 @@ namespace CodeDesigner.Mips64LE.Common
             IEnumerable<(uint instruction, uint address)> instructions, 
             uint startPc = 0,
             bool executeInstructions = true,
-            PS2MemoryBus? bus = null,
+            IPs2MemoryBus? bus = null,
             Func<uint, string?>? lookupLabel = null)
         {
             var comments = new Dictionary<uint, string>();
@@ -102,7 +102,7 @@ namespace CodeDesigner.Mips64LE.Common
         /// <param name="bus">Optional memory bus used to peek at the branch/jump target for a string hint.</param>
         /// <param name="lookupLabel">Optional callback that returns a label name for a given address, or null if none.</param>
         public static string AnalyzeSingleInstruction(uint instruction, uint pc, CpuState cpu,
-            PS2MemoryBus? bus = null,
+            IPs2MemoryBus? bus = null,
             Func<uint, string?>? lookupLabel = null)
         {
             try
@@ -207,7 +207,7 @@ namespace CodeDesigner.Mips64LE.Common
         /// <paramref name="address"/> in <paramref name="bus"/>.
         /// Returns <c>null</c> when the content is not a recognizable string.
         /// </summary>
-        private static string? TryPeekStringAtAddress(PS2MemoryBus bus, uint address)
+        private static string? TryPeekStringAtAddress(IPs2MemoryBus bus, uint address)
         {
             const int MaxLen = 64; // reasonable upper bound for typical in-game string literals
             const int MinLen = 2;  // exclude trivial single-character matches
@@ -235,7 +235,7 @@ namespace CodeDesigner.Mips64LE.Common
         /// by checking the label database first, then peeking at memory for a string.
         /// Returns <c>null</c> when no useful hint can be produced.
         /// </summary>
-        private static string? BuildTargetHint(uint target, PS2MemoryBus? bus, Func<uint, string?>? lookupLabel)
+        private static string? BuildTargetHint(uint target, IPs2MemoryBus? bus, Func<uint, string?>? lookupLabel)
         {
             // Prefer a symbolic label over a raw memory peek
             if (lookupLabel != null)

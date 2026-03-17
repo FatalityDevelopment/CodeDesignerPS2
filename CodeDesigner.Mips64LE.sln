@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE.Recom
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE.CheatConverter", "CodeDesigner.Mips64LE.CheatConverter\CodeDesigner.Mips64LE.CheatConverter.csproj", "{C2D3E4F5-A6B7-8901-CDEF-012345678912}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE.Emulator", "CodeDesigner.Mips64LE.Emulator\CodeDesigner.Mips64LE.Emulator.csproj", "{D3E4F5A6-B7C8-9012-DEF0-123456789013}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -107,6 +109,18 @@ Global
 		{C2D3E4F5-A6B7-8901-CDEF-012345678912}.Release|x64.Build.0 = Release|Any CPU
 		{C2D3E4F5-A6B7-8901-CDEF-012345678912}.Release|x86.ActiveCfg = Release|Any CPU
 		{C2D3E4F5-A6B7-8901-CDEF-012345678912}.Release|x86.Build.0 = Release|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Debug|x64.Build.0 = Debug|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Debug|x86.Build.0 = Debug|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Release|x64.ActiveCfg = Release|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Release|x64.Build.0 = Release|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Release|x86.ActiveCfg = Release|Any CPU
+		{D3E4F5A6-B7C8-9012-DEF0-123456789013}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
