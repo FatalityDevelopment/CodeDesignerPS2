@@ -26,6 +26,7 @@
     <ProjectReference Include="..\CodeDesigner.Mips64LE.CheatConverter\CodeDesigner.Mips64LE.CheatConverter.csproj" />
     <ProjectReference Include="..\CodeDesigner.Mips64LE.Common\CodeDesigner.Mips64LE.Common.csproj" />
     <ProjectReference Include="..\CodeDesigner.Mips64LE.Emulator\CodeDesigner.Mips64LE.Emulator.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Mips64LE.PortCheats\CodeDesigner.Mips64LE.PortCheats.csproj" />
     <ProjectReference Include="..\CodeDesigner.Mips64LE.Recompiler\CodeDesigner.Mips64LE.Recompiler.csproj" />
   </ItemGroup>
 
