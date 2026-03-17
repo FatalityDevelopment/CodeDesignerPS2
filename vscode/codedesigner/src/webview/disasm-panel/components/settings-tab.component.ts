@@ -24,11 +24,11 @@ import { EmuOption, SnapshotEntry } from '../types';
     <div class="container">
 
       <div class="row">
-        <select id="emulatorSelect" [value]="selectedEmulator()"
+        <select id="emulatorSelect"
                 (change)="emulatorChange.emit($any($event.target).value)">
-          <option value="">Select Emulator...</option>
+          <option value="" [selected]="!selectedEmulator()">Select Emulator...</option>
           @for (e of emulators(); track e.value) {
-            <option [value]="e.value">{{e.label}}</option>
+            <option [value]="e.value" [selected]="e.value === selectedEmulator()">{{e.label}}</option>
           }
         </select>
         <button class="browse-btn" (click)="browseEmulatorClick.emit()"
@@ -43,11 +43,11 @@ import { EmuOption, SnapshotEntry } from '../types';
       }
 
       <div class="row">
-        <select id="biosSelect" [value]="selectedBios()"
+        <select id="biosSelect"
                 (change)="biosChange.emit($any($event.target).value)">
-          <option value="">Select BIOS...</option>
+          <option value="" [selected]="!selectedBios()">Select BIOS...</option>
           @for (b of biosOptions(); track b.value) {
-            <option [value]="b.value">{{b.label}}</option>
+            <option [value]="b.value" [selected]="b.value === selectedBios()">{{b.label}}</option>
           }
         </select>
         <button class="browse-btn" (click)="browseBiosClick.emit()"
@@ -55,11 +55,11 @@ import { EmuOption, SnapshotEntry } from '../types';
       </div>
 
       <div class="row">
-        <select id="gameSelect" [value]="selectedGame()"
+        <select id="gameSelect"
                 (change)="gameChange.emit($any($event.target).value)">
-          <option value="">Select Game...</option>
+          <option value="" [selected]="!selectedGame()">Select Game...</option>
           @for (g of gameOptions(); track g.value) {
-            <option [value]="g.value">{{g.label}}</option>
+            <option [value]="g.value" [selected]="g.value === selectedGame()">{{g.label}}</option>
           }
         </select>
         <button class="browse-btn" (click)="browseGameClick.emit()"
