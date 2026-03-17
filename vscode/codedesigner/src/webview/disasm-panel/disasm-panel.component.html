@@ -1,16 +1,9 @@
-<div id="emu-status-bar"
-     [class.status-connected]="isConnected && !isPaused"
-     [class.status-disconnected]="!isConnected && !isPaused"
-     [class.status-paused]="isPaused">
-  <span id="emu-status-dot">●</span>
-  <span id="emu-status-text">{{statusText}}</span>
-  <button id="emu-play-pause-btn" (click)="togglePause()" title="Pause/Resume emulator">
-    {{isPaused ? '▶ Resume' : '⏸ Pause'}}
-  </button>
-  <button id="emu-step-btn" (click)="step()" [disabled]="!isConnected || !isPaused" title="Single step one EE instruction (only while paused)">
-    ▷| Step
-  </button>
-</div>
+<app-panel-status-bar
+  [isConnected]="isConnected"
+  [isPaused]="isPaused"
+  (togglePause)="togglePause()"
+  (step)="step()"
+/>
 
 <div id="panel-tabs">
   <button class="panel-tab" [class.active]="activeTab === 'settings'" (click)="setTab('settings')">Emulator Settings</button>
@@ -20,157 +13,51 @@
 </div>
 
 <div id="tab-settings" class="tab-content" [style.display]="activeTab === 'settings' ? 'block' : 'none'">
-  <div class="container">
-
-    <div class="row">
-      <select id="emulatorSelect" [(ngModel)]="selectedEmulator" (change)="onEmulatorChange()">
-        <option value="">Select Emulator...</option>
-        <option *ngFor="let e of emulators" [value]="e.value">{{e.label}}</option>
-      </select>
-      <button class="browse-btn" (click)="browseEmulator()" title="Browse for emulator executable">…</button>
-    </div>
-    <div class="pcsx2-note" *ngIf="isPcsx2Selected">
-      PCSX2 selected. Start PCSX2 launches the external app with CLI args from selected game/BIOS.
-      Connect starts CodeDesigner control server; Run sends STARTPCSX2 over socket.
-    </div>
-
-    <div class="row">
-      <select id="biosSelect" [(ngModel)]="selectedBios" (change)="onBiosChange()">
-        <option value="">Select BIOS...</option>
-        <option *ngFor="let b of biosOptions" [value]="b.value">{{b.label}}</option>
-      </select>
-      <button class="browse-btn" (click)="browseBios()" title="Browse for PS2 BIOS file">…</button>
-    </div>
-
-    <div class="row">
-      <select id="gameSelect" [(ngModel)]="selectedGame" (change)="onGameChange()">
-        <option value="">Select Game...</option>
-        <option *ngFor="let g of gameOptions" [value]="g.value">{{g.label}}</option>
-      </select>
-      <button class="browse-btn" (click)="browseGame()" title="Browse for ISO, BIN, or ZIP disc image">…</button>
-    </div>
-
-    <div class="row">
-      <button id="connectBtn" (click)="connect()">
-        {{isConnected ? 'Disconnect' : 'Connect'}}
-      </button>
-    </div>
-
-    <div class="row">
-      <button id="runBtn" (click)="run()">▶ Run</button>
-    </div>
-
-    <div class="row" *ngIf="isCodeDesignerSelected">
-      <button id="restartBtn" (click)="restart()" [disabled]="!isConnected">⟳ Restart</button>
-    </div>
-
-    <div class="row" *ngIf="isPcsx2Selected">
-      <button id="startPcsx2Btn" (click)="startPcsx2()">▶ Start PCSX2</button>
-    </div>
-
-    <div class="row">
-      <button id="importBinBtn" (click)="importBin()" [disabled]="!isConnected">⬆ Import Binary</button>
-    </div>
-
-    <div class="row" *ngIf="isCodeDesignerSelected">
-      <button id="snapshotBtn" (click)="snapshot()" [disabled]="!isConnected">Take Snapshot</button>
-    </div>
-
-    <div class="row" *ngIf="isPcsx2Selected">
-      <button id="snapshotBtn" class="pseudo-disabled-btn" (click)="snapshotPcsx2()" title="PCSX2 snapshot handler not wired yet">Take Snapshot (PCSX2 - TODO)</button>
-    </div>
-
-    <div class="snapshot-list">
-      <h4>Snapshots<span *ngIf="currentGameName" class="snapshot-game-name"> — {{currentGameName}}</span></h4>
-      <div *ngIf="snapshots.length === 0" class="snapshot-empty">No snapshots yet</div>
-      <div class="snapshot-scroll">
-        <div *ngFor="let snap of snapshots" class="snapshot-item">
-          <div class="snapshot-item-info">
-            <span class="snapshot-label">{{snap.name || snap.label}}</span>
-            <span class="snapshot-date-time">{{snap.date}} {{snap.timestamp}}</span>
-          </div>
-          <button class="open-snapshot-btn" (click)="openSnapshot(snap)">Open</button>
-          <button class="reload-snapshot-btn" (click)="reloadSnapshot(snap)" [disabled]="!isConnected" title="Restore this snapshot into the live emulator">Reload</button>
-        </div>
-      </div>
-    </div>
-
-  </div>
+  <app-settings-tab
+    [emulators]="emulators"
+    [biosOptions]="biosOptions"
+    [gameOptions]="gameOptions"
+    [selectedEmulator]="selectedEmulator"
+    [selectedBios]="selectedBios"
+    [selectedGame]="selectedGame"
+    [isConnected]="isConnected"
+    [snapshots]="snapshots"
+    [currentGameName]="currentGameName"
+    (connectClick)="connect()"
+    (runClick)="run()"
+    (startPcsx2Click)="startPcsx2()"
+    (restartClick)="restart()"
+    (snapshotClick)="snapshot()"
+    (snapshotPcsx2Click)="snapshotPcsx2()"
+    (importBinClick)="importBin()"
+    (emulatorChange)="onSelectedEmulatorChange($event)"
+    (biosChange)="onSelectedBiosChange($event)"
+    (gameChange)="onSelectedGameChange($event)"
+    (browseEmulatorClick)="browseEmulator()"
+    (browseBiosClick)="browseBios()"
+    (browseGameClick)="browseGame()"
+    (openSnapshotClick)="openSnapshot($event)"
+    (reloadSnapshotClick)="reloadSnapshot($event)"
+  />
 </div>
 
 <div id="tab-cheats" class="tab-content" [style.display]="activeTab === 'cheats' ? 'flex' : 'none'">
-  <div class="cheats-container">
-    <textarea id="cheats-input" [(ngModel)]="cheatText"
-      placeholder="Paste cheat codes here (GameShark/Action Replay format)&#10;&#10;Example:&#10;#Infinite Health&#10;20123456 000003E8"></textarea>
-    <div class="row">
-      <button id="cheatsUpdateBtn" (click)="applyCheats()" [disabled]="!isConnected">Update</button>
-    </div>
-    <div *ngIf="cheatMessage" class="cheat-message" [class.cheat-error]="cheatError">{{cheatMessage}}</div>
-  </div>
+  <app-cheats-tab
+    [isConnected]="isConnected"
+    [(cheatText)]="cheatText"
+  />
 </div>
 
 <div id="tab-cds" class="tab-content" [style.display]="activeTab === 'cds' ? 'flex' : 'none'">
-  <div class="cds-container">
-    <div class="section-label">Compiled GameShark Codes</div>
-    <textarea id="cds-output" [(ngModel)]="cdsOutput" readonly
-      placeholder="Compiled GameShark codes will appear here after pressing Compile.&#10;&#10;Add an address directive in your .cds file:&#10;  address 0x20123456&#10;  nop&#10;  add $t0, $s0, $s1"></textarea>
-    <div class="row">
-      <button id="cdsCompileBtn" (click)="compileCds()" [disabled]="!isConnected">Compile</button>
-      <button id="cdsAddPatchBtn" (click)="addPatch()" [disabled]="!isConnected || !cdsOutput">Add Patch</button>
-    </div>
-    <div class="row">
-      <button id="cdsAddCheatBtn" (click)="addCheat()" [disabled]="!cdsOutput">Add Cheat</button>
-    </div>
-  </div>
+  <app-cds-tab
+    [isConnected]="isConnected"
+    (addCheatClick)="onAddCheat($event)"
+  />
 </div>
 
 <div id="tab-recompile" class="tab-content" [style.display]="activeTab === 'recompile' ? 'block' : 'none'">
-  <div class="container">
-    <div class="section-label">Static Recompiler</div>
-    <p class="recompile-help">
-      Extracts an ELF from the loaded disc image and generates C++ source files.
-      Each game has one main executable (BOOT2, shown with ★); other files are
-      IOP modules (IRX) or game overlays.
-    </p>
-
-    <div class="row">
-      <button id="recompileListBtn" (click)="listDiscElfs()" [disabled]="!selectedGame">
-        Load ELF list from disc
-      </button>
-    </div>
-
-    <div class="row" *ngIf="recompileElfList.length > 0">
-      <select id="recompileElfSelect" [(ngModel)]="recompileSelectedElf">
-        <option value="">Select ELF to recompile…</option>
-        <option *ngFor="let e of recompileElfList" [value]="e.Name">
-          {{e.IsBootElf ? '★ ' : ''}}{{e.Name}} ({{formatBytes(e.Size)}})
-        </option>
-      </select>
-    </div>
-
-    <div class="row">
-      <input id="recompileOutputDir" type="text" [(ngModel)]="recompileOutputDir"
-        placeholder="Output directory (default: recomp_out)" />
-      <button id="recompileBrowseBtn" (click)="browseOutputDirectory()" title="Browse for output directory" aria-label="Browse for output directory">…</button>
-    </div>
-
-    <div class="row">
-      <button id="recompileRunBtn" (click)="runRecompile()"
-        [disabled]="!selectedGame || recompileRunning">
-        {{recompileRunning ? 'Recompiling…' : 'Recompile'}}
-      </button>
-    </div>
-
-    <div *ngIf="recompileStatus" class="recompile-status"
-         [class.recompile-error]="recompileIsError">
-      {{recompileStatus}}
-    </div>
-
-    <div *ngIf="recompileWrittenFiles.length > 0" class="recompile-files">
-      <div class="section-label">Generated files</div>
-      <ul>
-        <li *ngFor="let f of recompileWrittenFiles" class="recompile-file-item">{{f}}</li>
-      </ul>
-    </div>
-  </div>
+  <app-recompile-tab
+    [isConnected]="isConnected"
+    [selectedGame]="selectedGame"
+  />
 </div>
