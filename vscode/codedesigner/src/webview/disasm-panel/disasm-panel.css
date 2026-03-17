@@ -271,6 +271,17 @@ button:disabled {
     cursor: not-allowed;
 }
 
+/* Looks disabled but remains clickable to emit TODO/log messages. */
+.pseudo-disabled-btn {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(0.2);
+}
+
+.pseudo-disabled-btn:hover {
+    background: var(--vscode-button-background);
+}
+
 .snapshot-list {
     margin-top: 12px;
     border-top: 1px solid var(--vscode-input-border);

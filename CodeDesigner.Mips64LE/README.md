@@ -2,26 +2,62 @@
 
 ## Overview
 
-`CodeDesigner.Mips64LE` is the **executable entry point** for the toolkit. It hosts:
+`CodeDesigner.Mips64LE` is the **executable entry point** for the toolkit. It provides:
 
 - A **dual-CPU PS2 emulator** (EE + IOP) that boots a real PS2 BIOS and loads game discs
-- An **embedded TCP socket server** (port 8765, `--run` mode) used by the VS Code extension and the MCP bridge
-- A **PCSX2 PINE bridge server** (port 8765, `--pcsx2` mode) that connects the extension to a live PCSX2 process
-- A **standalone assembler/disassembler server** (port 8766, `--server` mode) with no live emulator
-- A **static recompiler** (`--recompile` mode) that converts PS2 ELF binaries to C++ source files
+- An **embedded TCP socket server** (port 8765) used by the VS Code extension and the MCP bridge
+- A **PCSX2 PINE bridge** that connects to a live PCSX2 process for remote debugging
+- A **runtime mode switcher** — start the server first, then select emulator or PCSX2 mode via socket commands
+- A **static recompiler** that converts PS2 ELF binaries to C++ source files
+
+---
+
+## Quick Start
+
+### Default: Control Server (Recommended)
+
+```bash
+dotnet run
+```
+
+Starts the socket server on port **8765** and waits for runtime mode commands from the VS Code extension or MCP bridge. This is the **recommended startup mode** — you can then switch between built-in emulator and PCSX2 modes without restarting.
+
+### Built-In Emulator Mode
+
+```bash
+dotnet run -- --run --disc "path\to\game.iso"
+```
+
+Boots the PS2 BIOS with an optional disc image, starts **paused** at the reset vector, and hosts the socket server on port 8765.
+
+### PCSX2 Bridge Mode
+
+```bash
+dotnet run -- --pcsx2
+```
+
+Connects to a running PCSX2 instance (via PINE) and forwards all debugger/memory commands from the socket server to PCSX2.
+
+### Static Recompiler
+
+```bash
+dotnet run -- --recompile --elf game.elf --out recomp_out
+```
+
+Statically recompiles a PS2 ELF to C++ source files.
 
 ---
 
 ## Command-Line Modes
 
-| Mode | Command | Port | Description |
-|------|---------|------|-------------|
-| Emulator + server | `dotnet run -- --run` | **8765** | Full PS2 emulator with embedded socket server |
-| PCSX2 bridge | `dotnet run -- --pcsx2` | **8765** | Forwards all commands to PCSX2 via PINE IPC |
-| Static recompiler | `dotnet run -- --recompile` | — | Recompile a PS2 ELF to C++ source files |
-| Assembler server | `dotnet run -- --server` | **8766** | Assembler/disassembler only, no live emulator |
-| Graphics info | `dotnet run -- --graphics-info` | — | Print instructions for adding a display window |
-| Help | `dotnet run -- --help` | — | Show all flags and usage |
+| Mode | Command | Description |
+|------|---------|-------------|
+| **Control server (default)** | `dotnet run` | Starts socket server on port 8765; runtime mode selected later via socket commands (`STARTEMULATOR` / `STARTPCSX2`) |
+| **Emulator + server** | `dotnet run -- --run` | Boots PS2 emulator immediately with embedded socket server on port 8765 |
+| **PCSX2 bridge** | `dotnet run -- --pcsx2` | Connects to live PCSX2 via PINE and forwards all socket commands to PCSX2 |
+| **Static recompiler** | `dotnet run -- --recompile` | Recompile a PS2 ELF to C++ source files (no server, no emulation) |
+| **Graphics info** | `dotnet run -- --graphics-info` | Print instructions for adding a display window |
+| **Help** | `dotnet run -- --help` | Show all flags and usage |
 
 ---
 
@@ -30,7 +66,8 @@
 Loads a real PS2 BIOS ROM and optionally a game disc image, then runs the dual-CPU scheduler (EE + IOP) with an embedded socket server on port 8765.
 
 ```bash
-dotnet run -- --run --bios SCPH-70012_BIOS_V12_USA_200.bin --disc game.iso
+dotnet run -- --run --disc game.iso
+dotnet run -- --run --bios custom-bios.bin --disc "SOCOM II.iso" --steps 10000000
 ```
 
 The emulator starts **paused** at the reset vector so the VS Code extension or MCP bridge can register breakpoints before execution begins.
@@ -39,35 +76,102 @@ The emulator starts **paused** at the reset vector so the VS Code extension or M
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--bios <path>` | `SCPH-70012_BIOS_V12_USA_200.bin` | Path to a 4 MB PS2 BIOS ROM |
-| `--disc <path>` | *(none)* | Path to a PS2 disc image (ISO, BIN, or ZIP containing one) |
-| `--steps <N>` | unlimited | Stop after exactly N EE instruction steps (useful for CI) |
+| `--bios <path>` | `SCPH-70012_BIOS_V12_USA_200.bin` | Path to a 4 MB PS2 BIOS ROM (automatically uses bundled USA BIOS if omitted) |
+| `--disc <path>` | *(none)* | Path to a PS2 disc image (ISO, BIN, or **ZIP** containing one) |
+| `--steps <N>` | unlimited | Stop after exactly N EE instruction steps (useful for CI testing and benchmarking) |
 
-The BIOS path defaults to `CodeDesigner.Mips64LE.Common/Bios/SCPH-70012_BIOS_V12_USA_200.bin` relative to the repository root. ZIP archives are automatically extracted to the system temp directory and cached for subsequent runs.
+**Notes:**
+- The BIOS path defaults to `CodeDesigner.Mips64LE.Common/Bios/SCPH-70012_BIOS_V12_USA_200.bin` relative to the repository root.
+- **ZIP support:** Pass a `.zip` file to `--disc` and the emulator will automatically extract the first ISO/BIN found inside to the system temp directory. Subsequent runs reuse the cached extraction if the ZIP hasn't changed.
+- The emulator includes a **built-in debug session** that automatically tracks PC frequency, execution hotspots, and performance metrics — no extra configuration needed.
 
 ---
 
 ## PCSX2 Bridge Mode (`--pcsx2`)
 
-Connects to a running PCSX2 instance via the **PINE IPC socket** and starts the socket server so the VS Code extension and MCP bridge can interact with the live PCSX2 process — without running the internal emulator at all.
+Connects to a running PCSX2 instance via the **PINE IPC socket** and starts the socket server on port 8765 so the VS Code extension and MCP bridge can interact with the live PCSX2 process — without running the internal emulator at all.
 
 ```bash
-dotnet run -- --pcsx2 --pcsx2-host 127.0.0.1 --pcsx2-slot 28011
+dotnet run -- --pcsx2
+dotnet run -- --pcsx2 --pcsx2-host 192.168.1.100 --pcsx2-slot 28012 --port 9000
 ```
 
 ### Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--pcsx2-host <host>` | `127.0.0.1` | PCSX2 host address |
-| `--pcsx2-slot <N>` | `28011` | PINE slot/port number |
-| `--port <N>` | `8765` | Port for the bridge socket server |
+| `--pcsx2-host <host>` | `127.0.0.1` | PCSX2 host address (IP or hostname) |
+| `--pcsx2-slot <N>` | `28011` | PINE slot/port number (default PINE port) |
+| `--port <N>` | `8765` | Port for the bridge socket server (change if 8765 is in use) |
 
 ### PINE protocol notes
 
-All basic memory and disassembly commands work with the **standard upstream PINE** protocol (opcodes 0x00–0x0F). Full debugger commands (PAUSE, RESUME, STEP, SETBP, GETPC, GETREGS) require the **PINE debugger extension** — see `PINE_EXTENSION_PROPOSAL.md` for the C++ implementation to submit as a PCSX2 pull request.
+All basic memory and disassembly commands work with the **standard upstream PINE** protocol (opcodes 0x00–0x0F). Full debugger commands (`PAUSE`, `RESUME`, `STEP`, `SETBP`, `GETPC`, `GETREGS`) require the **PINE debugger extension** — see `PINE_EXTENSION_PROPOSAL.md` for the C++ implementation to submit as a PCSX2 pull request.
 
-Enable PINE in PCSX2 under **Settings → Advanced → Enable PINE**.
+**Enable PINE:** In PCSX2, go to **Settings → Advanced** and check **Enable PINE**.
+
+---
+
+## Runtime Mode Switching (Control Server)
+
+When you start the application **without any mode flag** (or with `--server`), it launches the socket server in **control mode** and waits for runtime commands from the VS Code extension or MCP bridge.
+
+```bash
+dotnet run
+```
+
+This is the **recommended startup method** because it lets you:
+- Start the server once
+- Switch between built-in emulator and PCSX2 modes via socket commands
+- Never restart the server process
+
+### Runtime Commands
+
+Send these commands via the socket protocol (the VS Code extension and MCP server do this automatically):
+
+#### `STARTEMULATOR` — Start Built-In Emulator
+
+Boots the internal PS2 emulator and attaches it to the active socket server. The emulator starts **paused** at the reset vector.
+
+**Optional parameters:**
+- `biosPath` (string): Path to a custom BIOS ROM
+- `discPath` (string): Path to a disc image (ISO, BIN, or ZIP)
+- `steps` (int): Maximum EE instruction steps to run before stopping
+
+**Example JSON:**
+```json
+{
+  "command": "STARTEMULATOR",
+  "biosPath": "C:\\PS2\\SCPH-70012.bin",
+  "discPath": "C:\\PS2\\Games\\SOCOM II.zip",
+  "steps": 50000000
+}
+```
+
+**Notes:**
+- If the built-in emulator is already running, this command succeeds immediately without restarting.
+- If PCSX2 mode is active, it will be shut down first.
+
+#### `STARTPCSX2` — Switch to PCSX2 Bridge Mode
+
+Connects to a live PCSX2 instance via PINE and forwards all subsequent debugger/memory commands to PCSX2.
+
+**Optional parameters:**
+- `pcsx2Host` (string): PCSX2 host address (default: `127.0.0.1`)
+- `pcsx2Slot` (int): PINE slot/port number (default: `28011`)
+
+**Example JSON:**
+```json
+{
+  "command": "STARTPCSX2",
+  "pcsx2Host": "192.168.1.100",
+  "pcsx2Slot": 28012
+}
+```
+
+**Notes:**
+- If the built-in emulator is running, this command will fail. Stop the emulator first (Ctrl+C in the console, or send a `STOP` command if implemented).
+- If PCSX2 is not running or PINE is disabled, the command will return an error with connection details.
 
 ---
 
@@ -95,13 +199,28 @@ dotnet run -- --recompile --elf game.elf --out recomp_out
 
 ## Socket Server
 
-The socket server at port 8765 (`--run` or `--pcsx2`) accepts **multiple simultaneous TCP clients**. The VS Code extension and the MCP bridge both connect at the same time without conflict.
+The socket server at port **8765** accepts **multiple simultaneous TCP clients**. The VS Code extension and the MCP bridge can both connect at the same time without conflict.
 
-The standalone server at port 8766 (`--server`) provides assembler/disassembler and label-database access only — it does not start the emulator and emulator-specific commands return an error.
+### Server Startup Behavior
 
-> **Important:** Do not run `--server` while the VS Code extension is active. The extension auto-connects to port 8765. Use `--run` or `--pcsx2` instead; both share the embedded server on 8765 with the extension.
+| Command | Behavior |
+|---------|----------|
+| `dotnet run` | Starts control server; waits for `STARTEMULATOR` / `STARTPCSX2` runtime commands |
+| `dotnet run -- --run` | Starts control server **and** immediately boots built-in emulator mode |
+| `dotnet run -- --pcsx2` | Starts control server **and** immediately connects to PCSX2 bridge mode |
 
-See [SOCKET_COMMUNICATION.md](../SOCKET_COMMUNICATION.md) for the full JSON protocol reference.
+**Recommendation:** Use `dotnet run` (default control server) so you can switch modes via VS Code commands without restarting the process.
+
+### Runtime Mode Commands (Control Server)
+
+When the server is in control mode, send these JSON commands to select a runtime:
+
+- **`STARTEMULATOR`** (`biosPath`, `discPath`, `steps` optional): start the built-in emulator and attach live scheduler memory to the server.
+- **`STARTPCSX2`** (`pcsx2Host`, `pcsx2Slot` optional): attach server commands to a live PCSX2 PINE connection.
+
+The VS Code extension UI provides buttons/commands to send these — you don't need to manually craft JSON.
+
+See **[SOCKET_COMMUNICATION.md](../SOCKET_COMMUNICATION.md)** for the full JSON protocol reference.
 
 ### Supported socket commands
 
@@ -133,13 +252,13 @@ See [SOCKET_COMMUNICATION.md](../SOCKET_COMMUNICATION.md) for the full JSON prot
 | `GETREGS` | Dump all GPRs, COP0, COP1 FPU, VU0 float/integer registers, and GS regs |
 | `SETREG` | Write a new value to any EE register (GPR, PC, HI/LO, COP0, FPR, VU0I/F, FCR) |
 | `PAUSE` | Pause EE execution |
-| `RESUME` | Resume EE execution (auto-steps past active breakpoint) |
+| `RESUME` | Resume EE execution (auto-steps past active breakpoint if needed) |
 | `STEP` | Execute one EE instruction while paused; returns new PC + instruction analysis |
 | `SETBP` | Set a PC execution breakpoint |
 | `CLEARBP` | Remove a breakpoint |
 | `CLEARBP_ALL` | Remove all breakpoints |
-| `RESTART` | Full hardware reset without dropping the connection; preserves breakpoints |
-| `GETTHREADS` | Enumerate EE OS threads (internal emulator only) |
+| `RESTART` | Full hardware reset without dropping the connection; preserves all breakpoints |
+| `GETTHREADS` | Enumerate EE OS threads (internal emulator only; not available in PCSX2 mode) |
 
 #### Symbol Labels
 | Command | Description |
@@ -196,8 +315,7 @@ See [SOCKET_COMMUNICATION.md](../SOCKET_COMMUNICATION.md) for the full JSON prot
 
 | Port | Mode | Used by |
 |------|------|---------|
-| **8765** | `--run` / `--pcsx2` | VS Code extension, MCP bridge (both connect simultaneously) |
-| **8766** | `--server` | Standalone assembler/disassembler access only |
+| **8765** | default / `--server` / `--run` / `--pcsx2` | VS Code extension, MCP bridge (both connect simultaneously) |
 
 ---
 
@@ -231,7 +349,10 @@ dotnet run -- --run --bios /path/to/bios.bin --disc /path/to/game.iso
 # Run PCSX2 bridge (requires PCSX2 running with PINE enabled)
 dotnet run -- --pcsx2
 
-# Run standalone assembler/disassembler server (port 8766)
+# Run default control server (port 8765)
+dotnet run
+
+# Run control server explicitly (same as default startup)
 dotnet run -- --server
 
 # Recompile a PS2 ELF to C++

@@ -1,5 +1,6 @@
-import 'zone.js';
+// Zoneless Angular 19 - no zone.js import needed
 import { bootstrapApplication } from '@angular/platform-browser';
+import { provideExperimentalZonelessChangeDetection } from '@angular/core';
 import { DisasmEditorComponent } from './disasm-editor.component';
 
 function showBootstrapError(err: unknown): void {
@@ -16,4 +17,8 @@ function showBootstrapError(err: unknown): void {
     } catch { /* ignore */ }
 }
 
-bootstrapApplication(DisasmEditorComponent).catch(showBootstrapError);
+bootstrapApplication(DisasmEditorComponent, {
+    providers: [
+        provideExperimentalZonelessChangeDetection()
+    ]
+}).catch(showBootstrapError);

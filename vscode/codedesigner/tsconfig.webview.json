@@ -14,5 +14,17 @@
   "angularCompilerOptions": {
     "compilationMode": "full"
   },
-  "include": ["src/webview/**/*"]
+  "files": [
+    "src/webview/disasm-editor/main.ts",
+    "src/webview/disasm-panel/main.ts",
+    "src/webview/typings.d.ts"
+  ],
+  "exclude": [
+    "src/webview/disasm-editor/components/index.ts",
+    "src/webview/disasm-editor/state/editor.actions.ts",
+    "src/webview/disasm-editor/state/index.ts",
+    "src/webview/disasm-editor/utils/address.utils.ts",
+    "src/webview/disasm-editor/utils/index.ts",
+    "src/webview/disasm-editor/utils/registers.utils.ts"
+  ]
 }

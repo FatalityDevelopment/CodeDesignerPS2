@@ -11,7 +11,7 @@
   "categories": [
     "Debuggers"
   ],
-    "repository": {
+  "repository": {
     "type": "git",
     "url": "git+https://github.com/TylerDev888/Mips64LE.git"
   },
@@ -148,43 +148,63 @@
         "textMateRules": [
           {
             "scope": "variable.register.zero.cds",
-            "settings": { "foreground": "#858585" }
+            "settings": {
+              "foreground": "#858585"
+            }
           },
           {
             "scope": "variable.register.at.cds",
-            "settings": { "foreground": "#cca700" }
+            "settings": {
+              "foreground": "#cca700"
+            }
           },
           {
             "scope": "variable.register.value.cds",
-            "settings": { "foreground": "#b5cea8" }
+            "settings": {
+              "foreground": "#b5cea8"
+            }
           },
           {
             "scope": "variable.register.arg.cds",
-            "settings": { "foreground": "#ce9178" }
+            "settings": {
+              "foreground": "#ce9178"
+            }
           },
           {
             "scope": "variable.register.temp.cds",
-            "settings": { "foreground": "#dcdcaa" }
+            "settings": {
+              "foreground": "#dcdcaa"
+            }
           },
           {
             "scope": "variable.register.saved.cds",
-            "settings": { "foreground": "#9cdcfe" }
+            "settings": {
+              "foreground": "#9cdcfe"
+            }
           },
           {
             "scope": "variable.register.kernel.cds",
-            "settings": { "foreground": "#f48771" }
+            "settings": {
+              "foreground": "#f48771"
+            }
           },
           {
             "scope": "variable.register.special.cds",
-            "settings": { "foreground": "#4ec9b0" }
+            "settings": {
+              "foreground": "#4ec9b0"
+            }
           },
           {
             "scope": "variable.register.fpu.cds",
-            "settings": { "foreground": "#b5cea8" }
+            "settings": {
+              "foreground": "#b5cea8"
+            }
           },
           {
             "scope": "variable.register.numeric.cds",
-            "settings": { "foreground": "#9cdcfe" }
+            "settings": {
+              "foreground": "#9cdcfe"
+            }
           }
         ]
       }
@@ -223,6 +243,7 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
+    "@angular/cdk": "^19.2.19",
     "@angular/common": "^19.2.19",
     "@angular/compiler": "^19.2.19",
     "@angular/core": "^19.2.19",

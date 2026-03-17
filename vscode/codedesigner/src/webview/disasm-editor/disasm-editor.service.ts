@@ -1,89 +1,33 @@
-import { Injectable, OnDestroy } from '@angular/core';
+import { Injectable, OnDestroy, inject } from '@angular/core';
 import { Subject, Subscription } from 'rxjs';
 import { VsCodeBridgeService } from '../shared/vscode-bridge.service';
+import { EditorState } from './state/editor.state';
+import {
+  DisasmRow,
+  SearchMatch,
+  SymLabel,
+  SymString,
+  SymFunction,
+  SymPointer,
+  SymFloat,
+  SymInteger,
+  ThreadEntry,
+  RegisterData,
+} from './state/types';
 
-// ── Shared data types ─────────────────────────────────────────────────────────
-
-export interface DisasmRow {
-  addr: string;
-  bytes: string;
-  label: string;
-  op: string;
-  args: string;
-  comment: string;
-}
-
-export interface SearchMatch {
-  instructionIndex: number;
-  field: string;
-  start: number;
-  length: number;
-}
-
-export interface SymLabel {
-  address: string;
-  label: string;
-  comment?: string;
-}
-
-export interface SymString {
-  address: string;
-  value: string;
-}
-
-export interface SymFunction {
-  address: string;
-  label: string;
-}
-
-export interface SymPointer {
-  address:  string;
-  pointsTo: string;
-}
-
-export interface SymFloat {
-  address: string;
-  value:   number;
-  raw:     string;
-}
-
-export interface SymInteger {
-  address: string;
-  value:   number;
-  hex:     string;
-}
-
-export interface ThreadEntry {
-  id: number;
-  status: string;
-  pc: number;
-  sp: number;
-  priority: number;
-  entryPc: number;
-}
-
-export interface RegisterData {
-  pc?: number;
-  hi?: number; lo?: number;
-  hi1?: number; lo1?: number;
-  sa?: number;
-  gpr?: number[];
-  // Precise 32-bit halves of each 128-bit GPR (see RegisterDump for field semantics)
-  gprLo32?: number[];
-  gprHi32?: number[];
-  gprUpLo32?: number[];
-  gprUpHi32?: number[];
-  cop0Regs?: number[];
-  fpr?: number[];
-  fprAcc?: number;
-  fcr0?: number; fcr31?: number;
-  vu0fX?: number[]; vu0fY?: number[]; vu0fZ?: number[]; vu0fW?: number[];
-  vu0AccX?: number; vu0AccY?: number; vu0AccZ?: number; vu0AccW?: number;
-  vu0Q?: number; vu0P?: number; vu0I?: number;
-  vu0Status?: number; vu0Mac?: number; vu0Clip?: number;
-  vu0i?: number[];
-  gsPriv?: number[];
-}
+// Re-export types for backward compatibility
+export type {
+  DisasmRow,
+  SearchMatch,
+  SymLabel,
+  SymString,
+  SymFunction,
+  SymPointer,
+  SymFloat,
+  SymInteger,
+  ThreadEntry,
+  RegisterData,
+} from './state/types';
 
 // ── Editor state ──────────────────────────────────────────────────────────────
 
@@ -192,7 +136,7 @@ export class DisasmEditorService implements OnDestroy {
 
   // ── Events the component (and future sub-components) subscribe to ─────────
   readonly initReceived$            = new Subject<InitReceivedEvent>();
-  readonly pageLoaded$              = new Subject<{ startIndex: number }>();
+  readonly pageLoaded$              = new Subject<{ startIndex: number; changed: boolean }>();
   readonly hexUpdated$              = new Subject<HexUpdatedEvent>();
   readonly searchResultsReceived$   = new Subject<SearchMatch[]>();
   readonly statusReceived$          = new Subject<StatusUpdatePayload>();
@@ -218,6 +162,10 @@ export class DisasmEditorService implements OnDestroy {
   readonly threadsReceived$ = new Subject<ThreadEntry[]>();
 
   private readonly _subs: Subscription[] = [];
+
+  // ── Signal-based state (new architecture) ─────────────────────────────────
+  /** Inject EditorState for signal-based reactive updates. */
+  readonly signals = inject(EditorState);
 
   constructor(private readonly _bridge: VsCodeBridgeService) {
     this._subs.push(
@@ -271,19 +219,36 @@ export class DisasmEditorService implements OnDestroy {
   // ── Message handlers ───────────────────────────────────────────────────────
 
   private _onInit(msg: Record<string, unknown>): void {
-    this.state.totalInstructions = msg['totalInstructions'] as number;
-    this.state.pageSize          = msg['pageSize']          as number;
-    this.state.baseAddress       = msg['baseAddress']       as number;
-    this.state.totalBytes        = (msg['totalBytes'] as number | undefined)
-      // Fallback: PS2 EE MIPS instructions are always 4 bytes (fixed-width ISA).
-      ?? ((msg['totalInstructions'] as number) * 4);
-    this.state.regionLabel       = (msg['regionLabel'] as string | undefined) ?? '';
+    const totalInstructions = msg['totalInstructions'] as number;
+    const pageSize = msg['pageSize'] as number;
+    const baseAddress = msg['baseAddress'] as number;
+    const totalBytes = (msg['totalBytes'] as number | undefined) ?? (totalInstructions * 4);
+    const regionLabel = (msg['regionLabel'] as string | undefined) ?? '';
+    const isLive = !!(msg['isLive']);
+
+    // Update mutable state (legacy)
+    this.state.totalInstructions = totalInstructions;
+    this.state.pageSize          = pageSize;
+    this.state.baseAddress       = baseAddress;
+    this.state.totalBytes        = totalBytes;
+    this.state.regionLabel       = regionLabel;
     this.state.loadedPages.clear();
     this.state.disasmRows        = [];
     this.state.cursor            = 0;
-    this.state.isLive            = !!(msg['isLive']);
+    this.state.isLive            = isLive;
 
-    if (this.state.totalInstructions > 0) {
+    // Update signals (new architecture)
+    this.signals.totalInstructions.set(totalInstructions);
+    this.signals.pageSize.set(pageSize);
+    this.signals.baseAddress.set(baseAddress);
+    this.signals.totalBytes.set(totalBytes);
+    this.signals.regionLabel.set(regionLabel);
+    this.signals.loadedPages.set(new Map());
+    this.signals.cursor.set(0);
+    this.signals.isLive.set(isLive);
+    this.signals.navHistory.set([]);
+
+    if (totalInstructions > 0) {
       this.requestPage(this.getPageStart(0));
     }
 
@@ -291,45 +256,127 @@ export class DisasmEditorService implements OnDestroy {
     // emulator server.  After a restart or reconnect, the server-side
     // breakpoint set is empty; re-sending here keeps the webview and the
     // server in sync without requiring the user to re-add every breakpoint.
-    if (this.state.isLive && this.state.breakpoints.size > 0) {
+    if (isLive && this.state.breakpoints.size > 0) {
       for (const addr of this.state.breakpoints) {
         this._bridge.postMessage({ type: 'setBreakpoint', address: addr });
       }
     }
 
-    this.initReceived$.next({ isLive: this.state.isLive, regionLabel: this.state.regionLabel });
+    this.initReceived$.next({ isLive, regionLabel });
   }
 
   private _onDisasmPage(msg: Record<string, unknown>): void {
     const startIndex = msg['startIndex'] as number;
     const rows       = msg['rows']       as DisasmRow[];
-    this.state.loadedPages.set(startIndex, rows);
-    if (startIndex === this.getPageStart(this.state.cursor)) {
-      this.state.disasmRows = rows;
+
+    // Stabilize row-object references: reuse existing objects where content is
+    // identical so that Angular CDK virtual scroll does not push new `data`
+    // signal values into DisasmRowComponent instances on every live-refresh
+    // tick.  When every row is unchanged, `stableRows` is the exact same array
+    // reference as `existing`, which lets lastGridState's p1/p2 cache hit and
+    // skip gridRows.set() entirely — zero DOM re-renders on a quiet tick.
+    const existing  = this.state.loadedPages.get(startIndex);
+    let stableRows: DisasmRow[];
+    if (existing && existing.length === rows.length) {
+      let allSame = true;
+      const mapped = rows.map((r, i) => {
+        const e = existing[i];
+        if (e
+          && e.addr    === r.addr
+          && e.op      === r.op
+          && e.args    === r.args
+          && e.bytes   === r.bytes
+          && e.label   === r.label) {
+          return e;
+        }
+        allSame = false;
+        return r;
+      });
+      stableRows = allSame ? existing : mapped;
+    } else {
+      stableRows = rows;
     }
-    this.pageLoaded$.next({ startIndex });
+
+    // Update mutable state (legacy)
+    this.state.loadedPages.set(startIndex, stableRows);
+    if (startIndex === this.getPageStart(this.state.cursor)) {
+      this.state.disasmRows = stableRows;
+    }
+
+    // Update signals (new architecture) — skip when content is unchanged to
+    // avoid creating a new Map reference that could cascade unnecessary work.
+    if (stableRows !== existing) {
+      this.signals.loadedPages.update(pages => {
+        const newPages = new Map(pages);
+        newPages.set(startIndex, stableRows);
+        return newPages;
+      });
+    }
+
+    this.pageLoaded$.next({ startIndex, changed: stableRows !== existing });
   }
 
   private _onHexView(msg: Record<string, unknown>): void {
     const data   = msg['data']   as number[];
     const offset = (msg['offset'] as number | undefined) ?? 0;
+    const highlightAddr = msg['highlight_addr'] as number | undefined;
+    const highlightLength = msg['highlight_length'] as number | undefined;
+
+    // Update mutable state (legacy)
     this.state.hexData   = data;
     this.state.hexOffset = offset;
-    this.hexUpdated$.next({
-      data,
-      offset,
-      highlightAddr:   msg['highlight_addr']   as number | undefined,
-      highlightLength: msg['highlight_length'] as number | undefined,
-    });
+
+    // Update signals (new architecture)
+    this.signals.hexData.set(data);
+    this.signals.hexOffset.set(offset);
+    if (highlightAddr !== undefined) {
+      this.signals.hexHighlightAddr.set(highlightAddr);
+    }
+    if (highlightLength !== undefined) {
+      this.signals.hexHighlightLength.set(highlightLength);
+    }
+
+    this.hexUpdated$.next({ data, offset, highlightAddr, highlightLength });
   }
 
   private _onSearchResults(msg: Record<string, unknown>): void {
-    this.state.searchMatches = (msg['matches'] as SearchMatch[] | undefined) ?? [];
-    this.searchResultsReceived$.next(this.state.searchMatches);
+    const matches = (msg['matches'] as SearchMatch[] | undefined) ?? [];
+
+    // Update mutable state (legacy)
+    this.state.searchMatches = matches;
+
+    // Update signals (new architecture)
+    this.signals.searchMatches.set(matches);
+    if (matches.length > 0) {
+      this.signals.currentMatchIndex.set(0);
+    } else {
+      this.signals.currentMatchIndex.set(-1);
+    }
+
+    this.searchResultsReceived$.next(matches);
   }
 
   private _onStatus(msg: Record<string, unknown>): void {
     const instructionAnalysis = msg['instructionAnalysis'] as Record<string, string> | undefined;
+    const paused = msg['paused'] as boolean;
+    const pc = msg['pc'] as number;
+    const breakpointHitAddress = msg['breakpointHitAddress'] as number | undefined;
+    const registers = msg['registers'] as RegisterData;
+    const stackBytes = msg['stackBytes'] as number[];
+    const stackBase = msg['stackBase'] as number;
+
+    // Update signals (new architecture)
+    this.signals.isPaused.set(paused);
+    if (paused) {
+      this.signals.pcAddress.set(pc);
+      this.signals.breakpointHitAddress.set(breakpointHitAddress);
+      this.signals.registers.set(registers);
+      this.signals.stackBytes.set(stackBytes);
+      this.signals.stackBase.set(stackBase);
+    } else {
+      this.signals.pcAddress.set(undefined);
+      this.signals.breakpointHitAddress.set(undefined);
+    }
 
     // If the status carries live analysis comments, patch the affected rows in
     // every loaded page so the analysis column reflects real register values.
@@ -338,12 +385,12 @@ export class DisasmEditorService implements OnDestroy {
     }
 
     this.statusReceived$.next({
-      paused:               msg['paused']               as boolean,
-      pc:                   msg['pc']                   as number,
-      breakpointHitAddress: msg['breakpointHitAddress'] as number | undefined,
-      registers:            msg['registers']            as RegisterData,
-      stackBytes:           msg['stackBytes']           as number[],
-      stackBase:            msg['stackBase']            as number,
+      paused,
+      pc,
+      breakpointHitAddress,
+      registers,
+      stackBytes,
+      stackBase,
       instructionAnalysis,
     });
   }
@@ -368,10 +415,11 @@ export class DisasmEditorService implements OnDestroy {
       if (!page) { continue; }
       const local = instrIdx - pageStart;
       if (local >= 0 && local < page.length) {
-        page[local] = { ...page[local], comment };
+        if ((page[local].comment ?? '') === (comment ?? '')) { continue; }
+        page[local].comment = comment;
         // Keep the active disasmRows array in sync when this is the current page.
         if (pageStart === activePageStart) {
-          this.state.disasmRows[local] = page[local];
+          this.state.disasmRows[local].comment = comment;
         }
         anyUpdated = true;
       }
@@ -395,49 +443,83 @@ export class DisasmEditorService implements OnDestroy {
   }
 
   private _onReset(): void {
+    // Update mutable state (legacy)
     this.state.breakpointHitAddress = undefined;
+
+    // Update signals (new architecture)
+    this.signals.breakpointHitAddress.set(undefined);
+    this.signals.pcAddress.set(undefined);
+    this.signals.isPaused.set(false);
+    this.signals.loadedPages.set(new Map());
+    this.signals.navHistory.set([]);
+
     this.resetReceived$.next();
   }
 
   private _onSymbols(msg: Record<string, unknown>): void {
-    this.state.symLabels    = (msg['labels']    as SymLabel[]    | undefined) ?? [];
-    this.state.symStrings   = (msg['strings']   as SymString[]   | undefined) ?? [];
-    this.state.symFunctions = (msg['functions'] as SymFunction[] | undefined) ?? [];
+    const labels = (msg['labels'] as SymLabel[] | undefined) ?? [];
+    const strings = (msg['strings'] as SymString[] | undefined) ?? [];
+    const functions = (msg['functions'] as SymFunction[] | undefined) ?? [];
+
+    // Update mutable state (legacy)
+    this.state.symLabels    = labels;
+    this.state.symStrings   = strings;
+    this.state.symFunctions = functions;
+
+    // Update signals (new architecture)
+    this.signals.symLabels.set(labels);
+    this.signals.symStrings.set(strings);
+    this.signals.symFunctions.set(functions);
+
     this.symbolsReceived$.next();
   }
 
   private _onLabelsUpdated(msg: Record<string, unknown>): void {
-    this.state.symLabels = (msg['labels'] as SymLabel[] | undefined) ?? [];
+    const labels = (msg['labels'] as SymLabel[] | undefined) ?? [];
+    this.state.symLabels = labels;
+    this.signals.symLabels.set(labels);
     this.labelsUpdated$.next();
   }
 
   private _onStringsUpdated(msg: Record<string, unknown>): void {
-    this.state.symStrings = (msg['strings'] as SymString[] | undefined) ?? [];
+    const strings = (msg['strings'] as SymString[] | undefined) ?? [];
+    this.state.symStrings = strings;
+    this.signals.symStrings.set(strings);
     this.stringsUpdated$.next();
   }
 
   private _onFunctionsUpdated(msg: Record<string, unknown>): void {
-    this.state.symFunctions = (msg['functions'] as SymFunction[] | undefined) ?? [];
+    const functions = (msg['functions'] as SymFunction[] | undefined) ?? [];
+    this.state.symFunctions = functions;
+    this.signals.symFunctions.set(functions);
     this.functionsUpdated$.next();
   }
 
   private _onPointersUpdated(msg: Record<string, unknown>): void {
-    this.state.symPointers = (msg['pointers'] as SymPointer[] | undefined) ?? [];
+    const pointers = (msg['pointers'] as SymPointer[] | undefined) ?? [];
+    this.state.symPointers = pointers;
+    this.signals.symPointers.set(pointers);
     this.pointersUpdated$.next();
   }
 
   private _onFloatsUpdated(msg: Record<string, unknown>): void {
-    this.state.symFloats = (msg['floats'] as SymFloat[] | undefined) ?? [];
+    const floats = (msg['floats'] as SymFloat[] | undefined) ?? [];
+    this.state.symFloats = floats;
+    this.signals.symFloats.set(floats);
     this.floatsUpdated$.next();
   }
 
   private _onIntegersUpdated(msg: Record<string, unknown>): void {
-    this.state.symIntegers = (msg['integers'] as SymInteger[] | undefined) ?? [];
+    const integers = (msg['integers'] as SymInteger[] | undefined) ?? [];
+    this.state.symIntegers = integers;
+    this.signals.symIntegers.set(integers);
     this.integersUpdated$.next();
   }
 
   private _onPointerLabelsUpdated(msg: Record<string, unknown>): void {
-    this.state.pointerLabels = (msg['labels'] as SymLabel[] | undefined) ?? [];
+    const labels = (msg['labels'] as SymLabel[] | undefined) ?? [];
+    this.state.pointerLabels = labels;
+    this.signals.pointerLabels.set(labels);
     this.pointerLabelsUpdated$.next();
   }
 }

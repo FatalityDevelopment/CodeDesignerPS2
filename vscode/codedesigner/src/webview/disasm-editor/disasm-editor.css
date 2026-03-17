@@ -27,6 +27,25 @@ app-hex-view {
     display: block;
 }
 
+app-virtual-grid {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+app-symbols-panel,
+app-debug-panel {
+    display: flex;
+    flex: 0 0 auto;
+    min-height: 0;
+}
+
+app-bottom-panel {
+    display: contents;
+}
+
 #header {
     flex-shrink: 0;
 }
@@ -54,12 +73,14 @@ app-hex-view {
 
 .search-input-wrapper {
     position: relative;
-    flex: 1;
+    flex: 0 1 400px;
+    min-width: 0;
     max-width: 400px;
 }
 
 .search-input {
     width: 100%;
+    box-sizing: border-box;
     background: #3c3c3c;
     border: 1px solid #3e3e42;
     color: #cccccc;
@@ -79,7 +100,7 @@ app-hex-view {
 
 .search-clear {
     position: absolute;
-    right: 4px;
+    right: 6px;
     top: 50%;
     transform: translateY(-50%);
     background: none;
@@ -258,7 +279,12 @@ app-hex-view {
 .row {
     display: grid;
     grid-template-columns: 10ch 12ch 26ch 8ch 34ch 66ch;
-    padding: 2px 6px;
+    height: 20px;
+    box-sizing: border-box;
+    align-items: center;
+    padding: 0 6px;
+    line-height: 20px;
+    overflow: hidden;
     cursor: default;
 }
  
@@ -346,6 +372,10 @@ app-hex-view {
 .args { color: #ce9178; } 
 .comment { color: #6a9955; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } 
 
+.branch-offset-annotation {
+    color: #6a9955;
+}
+
 .search-match-highlight {
     background: #f9826c;
     color: #000;
@@ -388,7 +418,7 @@ app-hex-view {
 
 /* ── Debug Panel (Registers + Stack) ─────────────────────────────────── */
 
-#debug-panel {
+.debug-panel {
     width: 320px;
     min-width: 320px;
     display: none;
@@ -400,11 +430,12 @@ app-hex-view {
     font-size: 12px;
 }
 
-#debug-panel.visible {
+.debug-panel.visible {
     display: flex;
 }
 
-#debug-tabs {
+#debug-tabs,
+.debug-tabs {
     display: flex;
     background: #252526;
     border-bottom: 1px solid #3e3e42;
@@ -831,6 +862,7 @@ app-hex-view {
 .sym-filter-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
     padding: 6px 8px;
     border-bottom: 1px solid #3e3e42;
@@ -847,7 +879,7 @@ app-hex-view {
     font-size: 11px;
     outline: none;
     flex: 1;
-    min-width: 0;
+    min-width: 220px;
 }
 
 .sym-filter-input:focus {
@@ -859,6 +891,7 @@ app-hex-view {
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
+    margin-left: auto;
 }
 
 .sym-pager:empty {
@@ -891,7 +924,7 @@ app-hex-view {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 140px;
+    max-width: 90px;
 }
 
 /* ── Shared list styles ── */
@@ -991,7 +1024,7 @@ app-hex-view {
     flex-shrink: 0;
     height: 200px;
     min-height: 120px;
-    display: flex;
+    display: none;
     flex-direction: column;
     background: #1e1e1e;
     border-top: 1px solid #3e3e42;
@@ -1000,8 +1033,8 @@ app-hex-view {
     font-size: 12px;
 }
 
-#bottom-panel.hidden {
-    display: none;
+#bottom-panel.visible {
+    display: flex;
 }
 
 #bottom-panel-header {
@@ -1012,9 +1045,12 @@ app-hex-view {
     flex-shrink: 0;
 }
 
-#bottom-tabs {
+.bottom-tabs {
     display: flex;
-    flex: 1;
+    flex: 0 0 auto;
+    align-items: center;
+    background: #252526;
+    border-bottom: 1px solid #3e3e42;
 }
 
 .bottom-tab {
@@ -1036,6 +1072,25 @@ app-hex-view {
 .bottom-tab.active {
     color: #d4d4d4;
     border-bottom-color: #007acc;
+}
+
+.bottom-refresh-btn {
+    margin-left: auto;
+    margin-right: 6px;
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.bottom-refresh-btn:hover {
+    background: #505050;
+    color: #fff;
 }
 
 #bottom-panel-actions {
@@ -1083,7 +1138,7 @@ app-hex-view {
 
 /* ── Breakpoints toolbar ── */
 
-#breakpoints-toolbar {
+.breakpoints-header {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1091,6 +1146,23 @@ app-hex-view {
     border-bottom: 1px solid #3e3e42;
     flex-shrink: 0;
     background: #252526;
+}
+
+.bp-clear-all-btn {
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #cccccc;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.bp-clear-all-btn:hover {
+    background: #505050;
+    color: #fff;
 }
 
 /* ── Shared table styles ── */
@@ -1120,9 +1192,28 @@ app-hex-view {
     white-space: nowrap;
 }
 
+.dbg-table th {
+    color: #858585;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 3px 8px;
+    text-align: left;
+    border-bottom: 1px solid #3e3e42;
+    white-space: nowrap;
+}
+
 .dbg-table tbody tr {
     cursor: pointer;
     border-bottom: 1px solid #2a2a2a;
+}
+
+.dbg-table .dbg-table-row {
+    display: table-row;
+}
+
+.dbg-table .dbg-table-row td {
+    vertical-align: middle;
 }
 
 .dbg-table tbody tr:hover {
@@ -1979,7 +2070,7 @@ app-hex-view {
 }
 /* ── Grid context menu ───────────────────────────────────────────────────── */
 
-#grid-context-menu {
+.context-menu {
     display: none;
     position: fixed;
     z-index: 2000;
@@ -1994,7 +2085,7 @@ app-hex-view {
     user-select: none;
 }
 
-#grid-context-menu.visible {
+.context-menu.visible {
     display: block;
 }
 

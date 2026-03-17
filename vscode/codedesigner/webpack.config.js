@@ -129,7 +129,7 @@ const webviewConfig = {
       jitMode: false,
     }),
   ],
-  devtool: 'nosources-source-map',
+  devtool: false,
 };
 
 module.exports = [ extensionConfig, webviewConfig ];
