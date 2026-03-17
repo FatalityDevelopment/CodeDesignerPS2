@@ -74,6 +74,13 @@ app-disasm-panel {
     overflow: hidden;
 }
 
+app-cheats-tab {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+}
+
 .cheats-container {
     display: flex;
     flex-direction: column;
@@ -386,6 +393,13 @@ button:disabled {
 #tab-cds {
     flex-direction: column;
     overflow: hidden;
+}
+
+app-cds-tab {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
 }
 
 .cds-container {
