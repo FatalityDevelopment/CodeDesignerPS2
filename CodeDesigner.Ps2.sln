@@ -25,6 +25,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.CheatPorte
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.CdsLanguage", "CodeDesigner.Ps2.CdsLanguage\CodeDesigner.Ps2.CdsLanguage.csproj", "{B7C8D9E0-F1A2-3456-1234-567890123457}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.MemoryCardManager", "CodeDesigner.Ps2.MemoryCardManager\CodeDesigner.Ps2.MemoryCardManager.csproj", "{C8D9E0F1-A2B3-4567-2345-678901234568}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -163,6 +165,18 @@ Global
 		{B7C8D9E0-F1A2-3456-1234-567890123457}.Release|x64.Build.0 = Release|Any CPU
 		{B7C8D9E0-F1A2-3456-1234-567890123457}.Release|x86.ActiveCfg = Release|Any CPU
 		{B7C8D9E0-F1A2-3456-1234-567890123457}.Release|x86.Build.0 = Release|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Debug|x64.Build.0 = Debug|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Debug|x86.Build.0 = Debug|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Release|x64.ActiveCfg = Release|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Release|x64.Build.0 = Release|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Release|x86.ActiveCfg = Release|Any CPU
+		{C8D9E0F1-A2B3-4567-2345-678901234568}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
