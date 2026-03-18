@@ -37,6 +37,12 @@ interface CommandMessage {
     TargetDumpPath?: string;
     // COMPILECDS — pre-resolved pointer-manager labels (e.g. { address:'0x80100000', label:'seal.health' })
     Labels?: LabelEntry[];
+    // MC_* fields
+    McPath?: string;
+    SaveName?: string;
+    ExportDir?: string;
+    ImportDir?: string;
+    McOverwrite?: boolean;
 }
 
 /**
@@ -227,6 +233,28 @@ interface CommandResponse {
     WrittenFiles?: string[];
     // PORTCHEATS fields
     PortCheatResults?: Array<Record<string, unknown>>;
+    // MC_LIST fields
+    McSaves?: McSaveInfo[];
+}
+
+/**
+ * One save-game directory entry returned by MC_LIST.
+ */
+export interface McSaveInfo {
+    Name:       string;
+    FileCount:  number;
+    Created:    string;
+    Modified:   string;
+    TotalBytes: number;
+    Files:      McFileInfo[];
+}
+
+/**
+ * One file within a PS2 save-game directory.
+ */
+export interface McFileInfo {
+    Name: string;
+    Size: number;
 }
 
 /**
@@ -1380,5 +1408,77 @@ export class SocketClient {
             writtenFiles:  response.WrittenFiles  ?? [],
             bootElf:       response.BootElf       ?? elfName,
         };
+    }
+
+    // ── Memory Card Manager ──────────────────────────────────────────────────
+
+    /**
+     * List all save-game directories on a PS2 memory card image.
+     * @param mcPath Absolute path to the .ps2 memory card file.
+     */
+    public async mcList(mcPath: string): Promise<McSaveInfo[]> {
+        const response = await this.sendCommand({ Command: 'MC_LIST', McPath: mcPath });
+        if (!response.Success) {
+            throw new Error(response.Error || 'MC_LIST failed');
+        }
+        return response.McSaves ?? [];
+    }
+
+    /**
+     * Export a save-game directory from a PS2 memory card image to a host directory.
+     * @param mcPath    Absolute path to the .ps2 memory card file.
+     * @param saveName  Name of the save directory (e.g. "BASLUS-20386SPEOPS").
+     * @param exportDir Absolute host directory where the save folder will be written.
+     */
+    public async mcExport(mcPath: string, saveName: string, exportDir: string): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'MC_EXPORT', McPath: mcPath, SaveName: saveName, ExportDir: exportDir }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'MC_EXPORT failed');
+        }
+        return response.Data ?? exportDir;
+    }
+
+    /**
+     * Import a save-game directory from the host into a PS2 memory card image.
+     * @param mcPath    Absolute path to the .ps2 memory card file.
+     * @param importDir Absolute path to the save-game folder on the host.
+     * @param overwrite Whether to overwrite an existing save with the same name.
+     */
+    public async mcImport(mcPath: string, importDir: string, overwrite: boolean): Promise<void> {
+        const response = await this.sendCommand(
+            { Command: 'MC_IMPORT', McPath: mcPath, ImportDir: importDir, McOverwrite: overwrite }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'MC_IMPORT failed');
+        }
+    }
+
+    /**
+     * Delete a save-game directory from a PS2 memory card image.
+     * @param mcPath   Absolute path to the .ps2 memory card file.
+     * @param saveName Name of the save directory to delete.
+     */
+    public async mcDelete(mcPath: string, saveName: string): Promise<void> {
+        const response = await this.sendCommand(
+            { Command: 'MC_DELETE', McPath: mcPath, SaveName: saveName }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'MC_DELETE failed');
+        }
+    }
+
+    /**
+     * Create a new blank 8 MB PS2 memory card image at the given path.
+     * @param mcPath Absolute path for the new .ps2 file.
+     */
+    public async mcFormat(mcPath: string): Promise<void> {
+        const response = await this.sendCommand(
+            { Command: 'MC_FORMAT', McPath: mcPath }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'MC_FORMAT failed');
+        }
     }
 }
