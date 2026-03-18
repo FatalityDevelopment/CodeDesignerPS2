@@ -102,11 +102,6 @@ import { EmuOption, SnapshotEntry } from '../types';
             Take Snapshot
           </button>
         </div>
-        <div class="row">
-          <button id="memoryCardBtn" (click)="memoryCardClick.emit()">
-            &#x1F4BE; Memory Card Manager
-          </button>
-        </div>
       }
 
       @if (isPcsx2Selected()) {
@@ -168,7 +163,6 @@ export class SettingsTabComponent {
   readonly browseGameClick = output<void>();
   readonly openSnapshotClick = output<SnapshotEntry>();
   readonly reloadSnapshotClick = output<SnapshotEntry>();
-  readonly memoryCardClick = output<void>();
 
   readonly isPcsx2Selected = computed(() =>
     (this.selectedEmulator() ?? '').toLowerCase().includes('pcsx2')

@@ -23,12 +23,13 @@ import { SymbolsPanelComponent, SymbolTab } from './components/symbols-panel.com
 import { EditOverlayComponent, EditOverlayOpenData, EditOverlaySaveEvent } from './components/edit-overlay.component';
 import { ConverterOverlayComponent, ConvertRequest, ConvertResult } from './components/converter-overlay.component';
 import { PorterOverlayComponent, PortRequest, PortResultPayload } from './components/porter-overlay.component';
+import { MemoryCardOverlayComponent, McListResult, McActionResult } from './components/memory-card-overlay.component';
 import './disasm-editor.css';
 
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -226,6 +227,13 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Reference to porter overlay component */
   private readonly porterOverlayRef = viewChild<PorterOverlayComponent>('porterOverlayComp');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Memory Card Overlay State
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Reference to memory card overlay component */
+  private readonly mcOverlayRef = viewChild<MemoryCardOverlayComponent>('mcOverlayComp');
 
   /** Signal-based state (new architecture) */
   protected readonly signals = inject(EditorState);
@@ -537,6 +545,34 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onBrowseTargetDump(): void {
     this.vscode.postMessage({ type: 'browseTargetDump' });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Memory Card Overlay Event Handlers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  protected onMcBrowse(): void {
+    this.vscode.postMessage({ type: 'browseMc' });
+  }
+
+  protected onMcNew(): void {
+    this.vscode.postMessage({ type: 'newMc' });
+  }
+
+  protected onMcList(mcPath: string): void {
+    this.vscode.postMessage({ type: 'mcList', mcPath });
+  }
+
+  protected onMcExport(event: { mcPath: string; saveName: string }): void {
+    this.vscode.postMessage({ type: 'mcExport', mcPath: event.mcPath, saveName: event.saveName });
+  }
+
+  protected onMcImport(mcPath: string): void {
+    this.vscode.postMessage({ type: 'mcImport', mcPath });
+  }
+
+  protected onMcDelete(event: { mcPath: string; saveName: string }): void {
+    this.vscode.postMessage({ type: 'mcDelete', mcPath: event.mcPath, saveName: event.saveName });
   }
 
   private focusVirtualGrid(): void {
@@ -1381,10 +1417,52 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
   }
 
+  private openMemoryCardOverlay(): void {
+    this.zone.run(() => {
+      this.mcOverlayRef()?.open();
+    });
+  }
+
+  private handleMemoryCardMessage(data: Record<string, unknown>): void {
+    if (data['type'] === 'browseMcResult') {
+      if (data['filePath']) {
+        this.zone.run(() => this.mcOverlayRef()?.setMcPath(data['filePath'] as string));
+      }
+      return;
+    }
+
+    if (data['type'] === 'newMcResult') {
+      if (data['filePath']) {
+        this.zone.run(() => this.mcOverlayRef()?.setMcPath(data['filePath'] as string));
+      }
+      return;
+    }
+
+    if (data['type'] === 'mcListResult') {
+      this.zone.run(() => {
+        this.mcOverlayRef()?.setListResult({
+          saves: data['saves'] as McListResult['saves'],
+          error: data['error'] as string | undefined,
+        });
+      });
+      return;
+    }
+
+    if (data['type'] === 'mcActionResult') {
+      this.zone.run(() => {
+        this.mcOverlayRef()?.setActionResult({
+          message: data['message'] as string | undefined,
+          error: data['error'] as string | undefined,
+        });
+      });
+    }
+  }
+
   private handleWindowMessage(data: Record<string, unknown>): void {
     this.handleEditOverlayMessage(data);
     this.handleConverterOverlayMessage(data);
     this.handlePorterOverlayMessage(data);
+    this.handleMemoryCardMessage(data);
   }
 
   private registerServiceSubscriptions(params: {
@@ -2081,6 +2159,11 @@ export class DisasmEditorComponent implements AfterViewInit {
     const porterBtn = document.getElementById('porter-btn')!;
 
     porterBtn.addEventListener('click', () => this.openPorterOverlay());
+
+    // ── Memory Card overlay (Angular-only) ───────────────────────────────────
+    const mcBtn = document.getElementById('mc-btn')!;
+
+    mcBtn.addEventListener('click', () => this.openMemoryCardOverlay());
 
     // ── Search ────────────────────────────────────────────────────────────────
     const clearSearchMatches = () => this.clearSearchMatches({
