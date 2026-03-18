@@ -20,7 +20,7 @@ using CodeDesigner.Ps2.Emulator.IOP;
 using CodeDesigner.Ps2.CheatPorter;
 using CheatPorterLib = CodeDesigner.Ps2.CheatPorter.CheatPorter;
 
-namespace CodeDesigner.Ps2
+namespace CodeDesigner.Ps2.Bridge
 {
     /// <summary>
     /// Socket server for communication with VSCode extension
