@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ViewEncapsulation } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewEncapsulation, viewChild } from '@angular/core';
 import { VsCodeBridgeService } from '../shared/vscode-bridge.service';
 import { Subscription } from 'rxjs';
 import {
@@ -7,7 +7,9 @@ import {
   CheatsTabComponent,
   CdsTabComponent,
   RecompileTabComponent,
+  MemoryCardOverlayComponent,
 } from './components';
+import type { McListResult, McActionResult } from './components';
 import { EmuOption, SnapshotEntry } from './types';
 import './disasm-panel.css';
 
@@ -76,6 +78,7 @@ interface InitMsg {
     CheatsTabComponent,
     CdsTabComponent,
     RecompileTabComponent,
+    MemoryCardOverlayComponent,
   ],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-panel.component.html',
@@ -95,6 +98,9 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   cheatText = '';
   currentGameName = '';
   private subs: Subscription[] = [];
+
+  /** Reference to the memory card overlay. */
+  private readonly mcOverlayRef = viewChild<MemoryCardOverlayComponent>('mcOverlayComp');
 
   constructor(private bridge: VsCodeBridgeService) {}
 
@@ -145,7 +151,20 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
           if (msg.emulators) { this.emulators = msg.emulators; }
           this.onSelectedEmulatorChange(msg.filePath);
         }
-      })
+      }),
+      // ── Memory Card Manager responses ─────────────────────────────────────
+      this.bridge.on<{ command: 'browseMcResult'; filePath: string }>('browseMcResult').subscribe(msg => {
+        if (msg.filePath) { this.mcOverlayRef()?.setMcPath(msg.filePath); }
+      }),
+      this.bridge.on<{ command: 'newMcResult'; filePath: string }>('newMcResult').subscribe(msg => {
+        if (msg.filePath) { this.mcOverlayRef()?.setMcPath(msg.filePath); }
+      }),
+      this.bridge.on<{ command: 'mcListResult' } & McListResult>('mcListResult').subscribe(msg => {
+        this.mcOverlayRef()?.setListResult({ saves: msg.saves, error: msg.error });
+      }),
+      this.bridge.on<{ command: 'mcActionResult' } & McActionResult>('mcActionResult').subscribe(msg => {
+        this.mcOverlayRef()?.setActionResult({ message: msg.message, error: msg.error });
+      }),
     );
     this.bridge.postMessage({ command: 'ready' });
   }
@@ -258,5 +277,35 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       ? this.cheatText.trimEnd() + '\n' + codes
       : codes;
     this.activeTab = 'cheats';
+  }
+
+  // ── Memory Card Manager handlers ─────────────────────────────────────────
+
+  openMemoryCard(): void {
+    this.mcOverlayRef()?.open();
+  }
+
+  onMcBrowse(): void {
+    this.bridge.postMessage({ command: 'browseMc' });
+  }
+
+  onMcNew(): void {
+    this.bridge.postMessage({ command: 'newMc' });
+  }
+
+  onMcList(mcPath: string): void {
+    this.bridge.postMessage({ command: 'mcList', mcPath });
+  }
+
+  onMcExport(event: { mcPath: string; saveName: string }): void {
+    this.bridge.postMessage({ command: 'mcExport', mcPath: event.mcPath, saveName: event.saveName });
+  }
+
+  onMcImport(mcPath: string): void {
+    this.bridge.postMessage({ command: 'mcImport', mcPath });
+  }
+
+  onMcDelete(event: { mcPath: string; saveName: string }): void {
+    this.bridge.postMessage({ command: 'mcDelete', mcPath: event.mcPath, saveName: event.saveName });
   }
 }

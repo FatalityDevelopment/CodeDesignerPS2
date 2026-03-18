@@ -1163,7 +1163,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         || msg.includes('getpc error')
         || msg.includes('pine getpc error')
         || msg.includes('not connected to server')
-        || msg.includes('disconnected');
+        || msg.includes('disconnected')
+        || msg.includes('no live memory backend')
+        || msg.includes('no scheduler attached');
     }
 
     private _handleLiveReadSuccess(): void {

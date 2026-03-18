@@ -286,6 +286,25 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'browseEmulator':
                     await this.handleBrowseEmulator();
                     break;
+                // ── Memory Card Manager ───────────────────────────────────
+                case 'browseMc':
+                    await this.handleBrowseMc();
+                    break;
+                case 'newMc':
+                    await this.handleNewMc();
+                    break;
+                case 'mcList':
+                    await this.handleMcList(msg.mcPath ?? '');
+                    break;
+                case 'mcExport':
+                    await this.handleMcExport(msg.mcPath ?? '', msg.saveName ?? '');
+                    break;
+                case 'mcImport':
+                    await this.handleMcImport(msg.mcPath ?? '');
+                    break;
+                case 'mcDelete':
+                    await this.handleMcDelete(msg.mcPath ?? '', msg.saveName ?? '');
+                    break;
             }
         });
     }
@@ -1591,6 +1610,149 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 filePath,
                 emulators,
             });
+        }
+    }
+
+    // ── Memory Card Manager ───────────────────────────────────────────────────
+
+    /**
+     * Open a file-picker so the user can select an existing .ps2 memory card image.
+     * Posts 'browseMcResult' with the chosen path back to the webview.
+     */
+    private async handleBrowseMc(): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:   true,
+            canSelectFolders: false,
+            canSelectMany:    false,
+            filters: {
+                'PS2 Memory Cards': ['ps2'],
+                'All Files':        ['*'],
+            },
+            title: 'Open PS2 Memory Card',
+        });
+        if (uris && uris.length > 0) {
+            this.webview?.postMessage({ command: 'browseMcResult', filePath: uris[0].fsPath });
+        }
+    }
+
+    /**
+     * Open a save-file dialog so the user can create a new blank 8 MB memory card.
+     * Calls MC_FORMAT on the socket server, then posts 'newMcResult' back.
+     */
+    private async handleNewMc(): Promise<void> {
+        const uri = await vscode.window.showSaveDialog({
+            filters: {
+                'PS2 Memory Cards': ['ps2'],
+                'All Files':        ['*'],
+            },
+            title: 'Create New PS2 Memory Card',
+        });
+        if (!uri) { return; }
+        const mcPath = uri.fsPath;
+        try {
+            if (!this.socketClient.isConnected()) {
+                vscode.window.showErrorMessage('Not connected to the emulator. Cannot create memory card via socket.');
+                return;
+            }
+            await this.socketClient.mcFormat(mcPath);
+            this.webview?.postMessage({ command: 'newMcResult', filePath: mcPath });
+        } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            vscode.window.showErrorMessage(`Failed to create memory card: ${msg}`);
+            this.webview?.postMessage({ command: 'mcActionResult', error: msg });
+        }
+    }
+
+    /**
+     * List the saves on a PS2 memory card and post the result back to the webview.
+     */
+    private async handleMcList(mcPath: string): Promise<void> {
+        if (!mcPath) { return; }
+        try {
+            if (!this.socketClient.isConnected()) {
+                this.webview?.postMessage({ command: 'mcListResult', error: 'Not connected to emulator.' });
+                return;
+            }
+            const saves = await this.socketClient.mcList(mcPath);
+            this.webview?.postMessage({ command: 'mcListResult', saves });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'mcListResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    /**
+     * Export a named save from a memory card. Prompts the user to pick an output
+     * directory, then calls MC_EXPORT and posts the result back.
+     */
+    private async handleMcExport(mcPath: string, saveName: string): Promise<void> {
+        if (!mcPath || !saveName) { return; }
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:   false,
+            canSelectFolders: true,
+            canSelectMany:    false,
+            title: `Export "${saveName}" — Choose Destination Folder`,
+        });
+        if (!uris || uris.length === 0) { return; }
+        const exportDir = uris[0].fsPath;
+        try {
+            if (!this.socketClient.isConnected()) {
+                this.webview?.postMessage({ command: 'mcActionResult', error: 'Not connected to emulator.' });
+                return;
+            }
+            const outPath = await this.socketClient.mcExport(mcPath, saveName, exportDir);
+            const msg = `Exported "${saveName}" → ${outPath}`;
+            getOutputChannel().info(msg);
+            this.webview?.postMessage({ command: 'mcActionResult', message: `Exported "${saveName}" successfully.` });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'mcActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    /**
+     * Import a save into a memory card. Prompts the user to pick a save folder,
+     * then calls MC_IMPORT and posts the result back.
+     */
+    private async handleMcImport(mcPath: string): Promise<void> {
+        if (!mcPath) { return; }
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:   false,
+            canSelectFolders: true,
+            canSelectMany:    false,
+            title: 'Select Save Folder to Import',
+        });
+        if (!uris || uris.length === 0) { return; }
+        const importDir = uris[0].fsPath;
+        try {
+            if (!this.socketClient.isConnected()) {
+                this.webview?.postMessage({ command: 'mcActionResult', error: 'Not connected to emulator.' });
+                return;
+            }
+            await this.socketClient.mcImport(mcPath, importDir, true);
+            const saveName = path.basename(importDir);
+            const msg = `Imported "${saveName}" into memory card.`;
+            getOutputChannel().info(msg);
+            this.webview?.postMessage({ command: 'mcActionResult', message: msg });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'mcActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    /**
+     * Delete a named save from a memory card and post the result back.
+     */
+    private async handleMcDelete(mcPath: string, saveName: string): Promise<void> {
+        if (!mcPath || !saveName) { return; }
+        try {
+            if (!this.socketClient.isConnected()) {
+                this.webview?.postMessage({ command: 'mcActionResult', error: 'Not connected to emulator.' });
+                return;
+            }
+            await this.socketClient.mcDelete(mcPath, saveName);
+            const msg = `Deleted "${saveName}" from memory card.`;
+            getOutputChannel().info(msg);
+            this.webview?.postMessage({ command: 'mcActionResult', message: msg });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'mcActionResult', error: err?.message ?? String(err) });
         }
     }
 
