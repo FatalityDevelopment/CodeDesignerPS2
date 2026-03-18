@@ -2,7 +2,7 @@ using System;
 using CodeDesigner.Ps2.CheatEngine;
 using CodeDesigner.Ps2.Emulator;
 
-namespace CodeDesigner.Ps2
+namespace CodeDesigner.Ps2.Bridge
 {
     /// <summary>
     /// Implements <see cref="IByteEditor"/> backed by a live PCSX2 instance

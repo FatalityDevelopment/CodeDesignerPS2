@@ -4,7 +4,7 @@ using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Emulator;
 using CodeDesigner.Ps2.Recompiler;
 
-namespace CodeDesigner.Ps2
+namespace CodeDesigner.Ps2.Bridge
 {
     class Program
     {

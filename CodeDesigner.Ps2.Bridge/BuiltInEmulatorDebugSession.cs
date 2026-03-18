@@ -6,7 +6,7 @@ using CodeDesigner.Ps2.Emulator;
 using CodeDesigner.Ps2.Emulator.Hardware;
 using CodeDesigner.Ps2.Emulator.IOP;
 
-namespace CodeDesigner.Ps2
+namespace CodeDesigner.Ps2.Bridge
 {
     internal sealed class BuiltInEmulatorDebugSession
     {

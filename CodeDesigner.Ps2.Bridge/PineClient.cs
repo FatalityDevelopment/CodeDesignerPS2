@@ -5,7 +5,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace CodeDesigner.Ps2
+namespace CodeDesigner.Ps2.Bridge
 {
     /// <summary>
     /// PCSX2 PINE (Protocol for Instrumentation of Emulators) IPC client.

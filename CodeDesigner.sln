@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.36511.14
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2", "CodeDesigner.Ps2\CodeDesigner.Ps2.csproj", "{F853B404-EBF3-47DA-B9DE-E634DF32BC6F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Bridge", "CodeDesigner.Ps2.Bridge\CodeDesigner.Ps2.Bridge.csproj", "{F853B404-EBF3-47DA-B9DE-E634DF32BC6F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.TestProject", "CodeDesigner.Ps2.TestProject\CodeDesigner.Ps2.TestProject.csproj", "{E039FFEF-26C5-40C9-9E5B-18970D64259D}"
 EndProject
