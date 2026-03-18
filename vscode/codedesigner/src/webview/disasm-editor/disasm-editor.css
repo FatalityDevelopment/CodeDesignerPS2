@@ -2089,7 +2089,7 @@ app-bottom-panel {
     background: #252526;
     border: 1px solid #3e3e42;
     border-radius: 6px;
-    width: min(600px, 95vw);
+    width: min(720px, 95vw);
     max-height: calc(100vh - 40px);
     margin: 20px auto;
     display: flex;
@@ -2279,6 +2279,20 @@ app-bottom-panel {
     background: rgba(255, 255, 255, 0.04);
 }
 
+.mc-row:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.mc-row:nth-child(even):hover td {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.mc-row-empty td {
+    color: transparent;
+    border-bottom: 1px solid #2e2e2e;
+    user-select: none;
+}
+
 .mc-col-name     { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mc-col-files    { width: 44px;  text-align: center; }
 .mc-col-size     { width: 70px;  text-align: right;  white-space: nowrap; }
@@ -2315,6 +2329,41 @@ app-bottom-panel {
     font-family: monospace;
     color: #d4d4d4;
     white-space: nowrap;
+}
+
+.mc-paging-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 6px 0 2px;
+    font-family: monospace;
+}
+
+.mc-page-btn {
+    padding: 3px 10px;
+    font-size: 12px;
+    font-family: monospace;
+    background: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #555;
+    cursor: pointer;
+    border-radius: 2px;
+}
+
+.mc-page-btn:hover:not(:disabled) {
+    background: #505050;
+}
+
+.mc-page-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.mc-page-info {
+    font-size: 12px;
+    font-family: monospace;
+    color: #858585;
 }
 
 /* ── Grid context menu ───────────────────────────────────────────────────── */
