@@ -9,6 +9,7 @@
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
     <button class="header-tool-btn" id="converter-btn" title="Cheat Code Converter">&#8645; Converter</button>
     <button class="header-tool-btn" id="porter-btn" title="Cheat Code Porter">&#8651; Port</button>
+    <button class="header-tool-btn" id="mc-btn" title="Memory Card Manager">&#x1F4BE; Memory Card</button>
 
 </div>
 <!-- New Angular component-based panels -->
@@ -135,3 +136,10 @@
     (port$)="onPortCheats($event)"
     (browseSource)="onBrowseSourceDump()"
     (browseTarget)="onBrowseTargetDump()" />
+<app-memory-card-overlay #mcOverlayComp
+    (browseMc)="onMcBrowse()"
+    (newMc)="onMcNew()"
+    (listSaves)="onMcList($event)"
+    (exportSave)="onMcExport($event)"
+    (importSave)="onMcImport($event)"
+    (deleteSave)="onMcDelete($event)" />

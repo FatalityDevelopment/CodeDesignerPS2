@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
+import * as path from "path";
 import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
@@ -520,6 +521,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           getOutputChannel().error('[Port Cheats] ' + errMsg);
           webviewPanel.webview.postMessage({ type: 'portCheatsResult', error: errMsg });
         }
+      } else if (message.type === 'browseMc') {
+        await this._handleBrowseMc(webviewPanel.webview);
+      } else if (message.type === 'newMc') {
+        await this._handleNewMc(webviewPanel.webview);
+      } else if (message.type === 'mcList') {
+        await this._handleMcList(webviewPanel.webview, message.mcPath as string ?? '');
+      } else if (message.type === 'mcExport') {
+        await this._handleMcExport(webviewPanel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
+      } else if (message.type === 'mcImport') {
+        await this._handleMcImport(webviewPanel.webview, message.mcPath as string ?? '');
+      } else if (message.type === 'mcDelete') {
+        await this._handleMcDelete(webviewPanel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
       }
     });
 
@@ -1012,6 +1025,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     getOutputChannel().error('[Port Cheats] ' + errMsg);
                     panel.webview.postMessage({ type: 'portCheatsResult', error: errMsg });
                 }
+            } else if (message.type === 'browseMc') {
+                await this._handleBrowseMc(panel.webview);
+            } else if (message.type === 'newMc') {
+                await this._handleNewMc(panel.webview);
+            } else if (message.type === 'mcList') {
+                await this._handleMcList(panel.webview, message.mcPath as string ?? '');
+            } else if (message.type === 'mcExport') {
+                await this._handleMcExport(panel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
+            } else if (message.type === 'mcImport') {
+                await this._handleMcImport(panel.webview, message.mcPath as string ?? '');
+            } else if (message.type === 'mcDelete') {
+                await this._handleMcDelete(panel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
             }
         });
 
@@ -1621,5 +1646,147 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       highlight_addr: highlightAddr,
       highlight_length: highlightLength,
     });
+  }
+
+  // ── Memory Card Manager ───────────────────────────────────────────────────
+
+  /**
+   * Open a file-picker so the user can select an existing .ps2 memory card image.
+   * Posts 'browseMcResult' with the chosen path back to the webview.
+   */
+  private async _handleBrowseMc(webview: vscode.Webview): Promise<void> {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      filters: {
+        'PS2 Memory Cards': ['ps2'],
+        'All Files': ['*'],
+      },
+      title: 'Open PS2 Memory Card',
+    });
+    if (uris && uris.length > 0) {
+      webview.postMessage({ type: 'browseMcResult', filePath: uris[0].fsPath });
+    }
+  }
+
+  /**
+   * Open a save-file dialog so the user can create a new blank 8 MB memory card.
+   * Calls MC_FORMAT on the socket server, then posts 'newMcResult' back.
+   */
+  private async _handleNewMc(webview: vscode.Webview): Promise<void> {
+    const uri = await vscode.window.showSaveDialog({
+      filters: {
+        'PS2 Memory Cards': ['ps2'],
+        'All Files': ['*'],
+      },
+      title: 'Create New PS2 Memory Card',
+    });
+    if (!uri) { return; }
+    const mcPath = uri.fsPath;
+    try {
+      if (!this.socketClient?.isConnected()) {
+        vscode.window.showErrorMessage('Not connected to the emulator. Cannot create memory card via socket.');
+        return;
+      }
+      await this.socketClient.mcFormat(mcPath);
+      webview.postMessage({ type: 'newMcResult', filePath: mcPath });
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      vscode.window.showErrorMessage(`Failed to create memory card: ${msg}`);
+      webview.postMessage({ type: 'mcActionResult', error: msg });
+    }
+  }
+
+  /**
+   * List the saves on a PS2 memory card and post the result back to the webview.
+   */
+  private async _handleMcList(webview: vscode.Webview, mcPath: string): Promise<void> {
+    if (!mcPath) { return; }
+    try {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'mcListResult', error: 'Not connected to emulator.' });
+        return;
+      }
+      const saves = await this.socketClient.mcList(mcPath);
+      webview.postMessage({ type: 'mcListResult', saves });
+    } catch (err: any) {
+      webview.postMessage({ type: 'mcListResult', error: err?.message ?? String(err) });
+    }
+  }
+
+  /**
+   * Export a named save from a memory card. Prompts the user to pick an output
+   * directory, then calls MC_EXPORT and posts the result back.
+   */
+  private async _handleMcExport(webview: vscode.Webview, mcPath: string, saveName: string): Promise<void> {
+    if (!mcPath || !saveName) { return; }
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      title: `Export "${saveName}" — Choose Destination Folder`,
+    });
+    if (!uris || uris.length === 0) { return; }
+    const exportDir = uris[0].fsPath;
+    try {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'mcActionResult', error: 'Not connected to emulator.' });
+        return;
+      }
+      const outPath = await this.socketClient.mcExport(mcPath, saveName, exportDir);
+      getOutputChannel().info(`[MC] Exported "${saveName}" → ${outPath}`);
+      webview.postMessage({ type: 'mcActionResult', message: `Exported "${saveName}" successfully.` });
+    } catch (err: any) {
+      webview.postMessage({ type: 'mcActionResult', error: err?.message ?? String(err) });
+    }
+  }
+
+  /**
+   * Import a save into a memory card. Prompts the user to pick a save folder,
+   * then calls MC_IMPORT and posts the result back.
+   */
+  private async _handleMcImport(webview: vscode.Webview, mcPath: string): Promise<void> {
+    if (!mcPath) { return; }
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      title: 'Select Save Folder to Import',
+    });
+    if (!uris || uris.length === 0) { return; }
+    const importDir = uris[0].fsPath;
+    try {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'mcActionResult', error: 'Not connected to emulator.' });
+        return;
+      }
+      await this.socketClient.mcImport(mcPath, importDir, true);
+      const saveName = path.basename(importDir);
+      const msg = `Imported "${saveName}" into memory card.`;
+      getOutputChannel().info(`[MC] ${msg}`);
+      webview.postMessage({ type: 'mcActionResult', message: msg });
+    } catch (err: any) {
+      webview.postMessage({ type: 'mcActionResult', error: err?.message ?? String(err) });
+    }
+  }
+
+  /**
+   * Delete a named save from a memory card and post the result back.
+   */
+  private async _handleMcDelete(webview: vscode.Webview, mcPath: string, saveName: string): Promise<void> {
+    if (!mcPath || !saveName) { return; }
+    try {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'mcActionResult', error: 'Not connected to emulator.' });
+        return;
+      }
+      await this.socketClient.mcDelete(mcPath, saveName);
+      const msg = `Deleted "${saveName}" from memory card.`;
+      getOutputChannel().info(`[MC] ${msg}`);
+      webview.postMessage({ type: 'mcActionResult', message: msg });
+    } catch (err: any) {
+      webview.postMessage({ type: 'mcActionResult', error: err?.message ?? String(err) });
+    }
   }
 }
