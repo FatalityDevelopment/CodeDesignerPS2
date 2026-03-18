@@ -12,8 +12,15 @@ public sealed class Ps2MemoryCard : IDisposable
     // ── Format constants ────────────────────────────────────────────────────
     private const string Magic         = "Sony PS2 Memory Card Format ";
     private const int    SpareSize     = 16;             // ECC spare bytes per page
-    private const uint   FatFree       = 0xFFFF_FFFF;
-    private const uint   FatEndOfChain = 0x7FFF_FFFF;
+
+    // FAT values — matching the real PS2 / PCSX2 memory card format.
+    //   Bit 31 (FatAllocBit) is SET on every in-use (allocated) FAT entry.
+    //   Free clusters have bit 31 clear.
+    //   End-of-chain is 0xFFFFFFFF (= FatAllocBit | FatClusterMask).
+    private const uint FatAllocBit   = 0x8000_0000;  // allocated flag
+    private const uint FatClusterMask = 0x7FFF_FFFF;  // lower-31-bit cluster index
+    private const uint FatFree       = 0x7FFF_FFFF;  // free / unallocated end-of-chain
+    private const uint FatEndOfChain = 0xFFFF_FFFF;  // last cluster in chain
 
     // Directory entry mode flags
     private const ushort DfRead    = 0x0001;
@@ -507,8 +514,7 @@ public sealed class Ps2MemoryCard : IDisposable
                 entries.Add(ParseDirEntry(raw));
             }
 
-            uint next = current < _allocEnd ? _fat[current] : FatEndOfChain;
-            if (next == FatEndOfChain || next == FatFree || next >= _allocEnd) break;
+            if (!TryNextCluster(current, out uint next)) break;
             current = next;
         }
 
@@ -529,9 +535,7 @@ public sealed class Ps2MemoryCard : IDisposable
         uint current = clusterRel;
         while (true)
         {
-            if (current >= _allocEnd) break;
-            uint next = _fat[current];
-            if (next == FatEndOfChain || next == FatFree || next >= _allocEnd) break;
+            if (!TryNextCluster(current, out uint next)) break;
             chain.Add(next);
             current = next;
         }
@@ -539,7 +543,7 @@ public sealed class Ps2MemoryCard : IDisposable
         while (chain.Count < clustersNeeded)
         {
             uint newCluster = AllocateSingleCluster();
-            _fat[chain[^1]] = newCluster;
+            _fat[chain[^1]] = FatAllocBit | newCluster;
             chain.Add(newCluster);
         }
         _fat[chain[^1]] = FatEndOfChain;
@@ -573,8 +577,7 @@ public sealed class Ps2MemoryCard : IDisposable
         while (true)
         {
             allData.AddRange(ReadCluster(_allocOffset + current));
-            uint next = current < _allocEnd ? _fat[current] : FatEndOfChain;
-            if (next == FatEndOfChain || next == FatFree || next >= _allocEnd) break;
+            if (!TryNextCluster(current, out uint next)) break;
             current = next;
         }
 
@@ -602,11 +605,33 @@ public sealed class Ps2MemoryCard : IDisposable
 
     // ── Cluster allocation ───────────────────────────────────────────────────
 
+    /// <summary>
+    /// Follows one step in a FAT chain.  Returns <see langword="false"/> and leaves
+    /// <paramref name="next"/> undefined when <paramref name="current"/> is the last
+    /// cluster in its chain (end-of-chain) or a free/unallocated cluster.
+    /// Handles both the real PS2/PCSX2 format (chain links have bit 31 set) and
+    /// the legacy internal format (plain cluster indices, bit 31 clear).
+    /// </summary>
+    private bool TryNextCluster(uint current, out uint next)
+    {
+        next = 0; // only meaningful when returning true; satisfies the compiler for early-exit paths
+        if (current >= _allocEnd) return false;
+        uint raw = _fat[current];
+        // End-of-chain: 0xFFFFFFFF (real PS2 format)
+        if (raw == FatEndOfChain) return false;
+        // Free / unallocated: bit 31 clear (also covers legacy FatFree = 0x7FFFFFFF)
+        if ((raw & FatAllocBit) == 0) return false;
+        // Allocated chain link: strip bit 31 to get next cluster index
+        next = raw & FatClusterMask;
+        return next < _allocEnd;
+    }
+
     private uint AllocateSingleCluster()
     {
+        // A free cluster has bit 31 (FatAllocBit) clear.
         for (uint i = 0; i < _allocEnd; i++)
         {
-            if (_fat[i] == FatFree)
+            if ((_fat[i] & FatAllocBit) == 0)
             {
                 _fat[i] = FatEndOfChain;
                 return i;
@@ -622,7 +647,7 @@ public sealed class Ps2MemoryCard : IDisposable
         for (uint i = 0; i < count; i++)
             chain[i] = AllocateSingleCluster();
         for (int i = 0; i < chain.Length - 1; i++)
-            _fat[chain[i]] = chain[i + 1];
+            _fat[chain[i]] = FatAllocBit | chain[i + 1];
         _fat[chain[^1]] = FatEndOfChain;
         return chain;
     }
@@ -641,9 +666,11 @@ public sealed class Ps2MemoryCard : IDisposable
         while (true)
         {
             if (current >= _allocEnd) break;
-            uint next = _fat[current];
+            uint raw = _fat[current];
             _fat[current] = FatFree;
-            if (next == FatEndOfChain || next == FatFree || next >= _allocEnd) break;
+            if (raw == FatEndOfChain || (raw & FatAllocBit) == 0) break;
+            uint next = raw & FatClusterMask;
+            if (next >= _allocEnd) break;
             current = next;
         }
     }
