@@ -677,31 +677,35 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        const args: string[] = ['-batch'];
+        const args: string[] = [];
         const resolvedDisc = gamePath ? this.resolvePath(gamePath) : '';
         const resolvedBios = biosPath ? this.resolvePath(biosPath) : '';
 
-        // Match known-good command shape:
-        // pcsx2.exe -batch "path\\game.iso" -earlyconsolelog
+        /* if (resolvedBios && fs.existsSync(resolvedBios)) {
+            out.info(`PCSX2 BIOS selection: ${resolvedBios}`);
+            args.push('-bios', resolvedBios);
+        } */
+
         if (resolvedDisc && fs.existsSync(resolvedDisc)) {
-            args.push(resolvedDisc);
+            out.info(`PCSX2 game selection: ${resolvedDisc}`);
+            args.push('-batch', resolvedDisc);
         } else {
             out.warn('No valid game selected for PCSX2 launch; starting without a boot image.');
         }
+
         args.push('-earlyconsolelog');
 
-        if (resolvedBios) {
-            out.info(`PCSX2 BIOS selection: ${resolvedBios}`);
-        }
+        const preview = [pcsx2Exe, ...args]
+            .map(v => v.includes(' ') ? `"${v}"` : v)
+            .join(' ');
+        out.info(`Starting PCSX2: ${preview}`);
 
-        out.info(`Starting PCSX2: ${pcsx2Exe} ${args.join(' ')}`);
-
-        const quotePs = (v: string): string => `"${v.replace(/"/g, '""')}"`;
-        const command = `& ${quotePs(pcsx2Exe)} ${args.map(a => a.includes(' ') ? quotePs(a) : a).join(' ')}`;
-
-        const terminal = vscode.window.createTerminal({ name: 'PCSX2' });
+        const terminal = vscode.window.createTerminal({
+            name: 'PCSX2',
+            shellPath: pcsx2Exe,
+            shellArgs: args,
+        });
         terminal.show(true);
-        terminal.sendText(command, true);
     }
 
     /**
