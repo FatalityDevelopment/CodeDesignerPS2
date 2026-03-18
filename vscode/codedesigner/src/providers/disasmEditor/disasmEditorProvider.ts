@@ -224,6 +224,87 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Step into the next EE instruction (PINE mode only).
+   * Sends STEPINTO (non-blocking), then polls until the emulator pauses and
+   * broadcasts the new state to all live panels.
+   */
+  public async stepIntoAndBroadcast(): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      await this.socketClient.stepInto();
+    } catch (err: any) {
+      getOutputChannel().appendLine(`[STEPINTO] Error: ${err?.message ?? err}`);
+      return;
+    }
+    await this._pollForPauseAndBroadcast('[STEPINTO]');
+  }
+
+  /**
+   * Step over the next EE instruction (PINE mode only).
+   * Sends STEPOVER (non-blocking), then polls until the emulator pauses and
+   * broadcasts the new state to all live panels.
+   */
+  public async stepOverAndBroadcast(): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      await this.socketClient.stepOver();
+    } catch (err: any) {
+      getOutputChannel().appendLine(`[STEPOVER] Error: ${err?.message ?? err}`);
+      return;
+    }
+    await this._pollForPauseAndBroadcast('[STEPOVER]');
+  }
+
+  /**
+   * After a non-blocking step command (StepInto / StepOver), poll GETPC every
+   * 100 ms until the emulator reports paused, then fetch registers and broadcast.
+   * Gives up after 30 s or if the socket disconnects mid-poll.
+   */
+  private async _pollForPauseAndBroadcast(tag: string): Promise<void> {
+    // Mark as running so the sidebar status bar updates immediately.
+    this.onPauseStateChange?.(false);
+
+    const maxRetries = 300; // 300 × 100 ms = 30 s
+    const delayMs    = 100;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      await new Promise<void>(r => setTimeout(r, delayMs));
+      // Bail out early if the socket disconnected during the poll.
+      if (!this.socketClient?.isConnected()) {
+        getOutputChannel().appendLine(`${tag} Aborted — socket disconnected`);
+        return;
+      }
+      try {
+        const status = await this.socketClient!.getPC();
+        if (status.paused) {
+          const statusMsg: any = { type: 'status', ...status };
+          this._applyBreakpointHitFallback(statusMsg);
+          try {
+            const regs = await this.socketClient!.getRegisters();
+            statusMsg.registers = regs;
+            const sp = regs.gprLo32?.[29] ?? regs.gpr?.[29];
+            if (sp !== undefined) {
+              try {
+                const stackBuf = await this.socketClient!.readMemory(sp, 512, 'ee');
+                statusMsg.stackBytes = Array.from(stackBuf);
+                statusMsg.stackBase  = sp;
+              } catch { /* ignore */ }
+            }
+          } catch { /* ignore register fetch errors */ }
+          this._broadcastFullStatus(statusMsg);
+          this.onPauseStateChange?.(true);
+          const hitAddr = statusMsg.breakpointHitAddress ?? status.pc;
+          this._revealPanelForAddress(hitAddr);
+          return;
+        }
+      } catch (err: any) {
+        getOutputChannel().appendLine(`${tag} Poll error: ${err?.message ?? err}`);
+        return;
+      }
+    }
+    getOutputChannel().appendLine(`${tag} Timed out waiting for emulator to pause`);
+  }
+
+  /**
    * Returns a snapshot of all breakpoints the user has set across all live
    * panels.  Used by DisasmPanelProvider to re-register BPs with the C# server
    * on every connect/restart — before sending RESUME — so no timing dependency

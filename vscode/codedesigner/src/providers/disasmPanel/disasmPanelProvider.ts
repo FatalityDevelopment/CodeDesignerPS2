@@ -219,7 +219,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.handleSnapshot();
                     break;
                 case 'snapshotPcsx2':
-                    this.handlePcsx2SnapshotStub();
+                    await this.handleSnapshot();
                     break;
                 case 'importBin':
                     await this.handleImportBin();
@@ -235,6 +235,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'step':
                     await this.handleStep();
+                    break;
+                case 'stepInto':
+                    await this.handleStepInto();
+                    break;
+                case 'stepOver':
+                    await this.handleStepOver();
                     break;
                 case 'togglePause':
                     await this.handleTogglePause();
@@ -777,6 +783,32 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         await this.editorProvider.stepAndBroadcast();
     }
 
+    /**
+     * Step into the next EE instruction (PINE mode).
+     * Delegates to DisasmEditorProvider.stepIntoAndBroadcast() which sends
+     * STEPINTO, polls for pause, fetches registers, and broadcasts to all panels.
+     */
+    private async handleStepInto(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        await this.editorProvider.stepIntoAndBroadcast();
+    }
+
+    /**
+     * Step over the next EE instruction (PINE mode).
+     * Delegates to DisasmEditorProvider.stepOverAndBroadcast() which sends
+     * STEPOVER, polls for pause, fetches registers, and broadcasts to all panels.
+     */
+    private async handleStepOver(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        await this.editorProvider.stepOverAndBroadcast();
+    }
+
     /** Restart the emulator: send RESTART command via socket, keeping the connection alive. */
     private async handleRestart(): Promise<void> {
         const out = getOutputChannel();
@@ -935,13 +967,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             out.error(`Import failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Import failed: ${err?.message ?? err}`);
         }
-    }
-
-    /** Temporary placeholder until native PCSX2 snapshot plumbing is implemented. */
-    private handlePcsx2SnapshotStub(): void {
-        const out = getOutputChannel();
-        out.info('[PCSX2] Snapshot requested, but PCSX2 snapshot handler is not implemented yet.');
-        out.info('[PCSX2] TODO: wire to PCSX2 save-state/snapshot API once available.');
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────

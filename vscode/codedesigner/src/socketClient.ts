@@ -854,6 +854,30 @@ export class SocketClient {
     }
 
     /**
+     * Step into the next EE instruction, following branches and function calls.
+     * Non-blocking (PINE mode only): resumes the CPU with a one-shot breakpoint.
+     */
+    public async stepInto(): Promise<void> {
+        const command: CommandMessage = { Command: 'STEPINTO' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'StepInto failed');
+        }
+    }
+
+    /**
+     * Step over the next EE instruction, treating function calls as atomic.
+     * Non-blocking (PINE mode only): resumes the CPU with a one-shot breakpoint.
+     */
+    public async stepOver(): Promise<void> {
+        const command: CommandMessage = { Command: 'STEPOVER' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'StepOver failed');
+        }
+    }
+
+    /**
      * Restart the emulator (reset both CPUs to power-on state, then pause)
      */
     public async restart(): Promise<void> {

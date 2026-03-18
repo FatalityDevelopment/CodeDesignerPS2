@@ -9,10 +9,10 @@ import {
 
 /**
  * PanelStatusBarComponent - Displays emulator connection/pause status and
- * provides Pause/Resume and Step buttons.
+ * provides Pause/Resume, Step, Step Into, and Step Over buttons.
  *
- * Accepts `isConnected` and `isPaused` signal inputs and emits `togglePause`
- * and `step` outputs when the corresponding buttons are clicked.
+ * Accepts `isConnected` and `isPaused` signal inputs and emits the
+ * corresponding outputs when buttons are clicked.
  */
 @Component({
   selector: 'app-panel-status-bar',
@@ -33,6 +33,14 @@ import {
               title="Single step one EE instruction (only while paused)">
         ▷| Step
       </button>
+      <button id="emu-step-into-btn" (click)="stepInto.emit()" [disabled]="!isConnected() || !isPaused()"
+              title="Step into: follow branches and calls (PINE mode, only while paused)">
+        ↳ Into
+      </button>
+      <button id="emu-step-over-btn" (click)="stepOver.emit()" [disabled]="!isConnected() || !isPaused()"
+              title="Step over: treat function calls as atomic (PINE mode, only while paused)">
+        ↷ Over
+      </button>
     </div>
   `,
 })
@@ -42,6 +50,8 @@ export class PanelStatusBarComponent {
 
   readonly togglePause = output<void>();
   readonly step = output<void>();
+  readonly stepInto = output<void>();
+  readonly stepOver = output<void>();
 
   readonly statusText = computed(() => {
     if (this.isPaused()) { return '⏸ PAUSED'; }

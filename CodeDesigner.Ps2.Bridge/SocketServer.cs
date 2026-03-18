@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -1332,6 +1333,8 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>
         /// Handle SNAPSHOT command — dumps all memory regions to .bin files in the
         /// given output directory and returns the list of written files.
+        /// In PINE mode, uses PCSX2's native save-state format for a complete
+        /// snapshot (memory + registers + hardware state).
         /// </summary>
         private string HandleSnapshot(string? outputPath)
         {
@@ -1342,28 +1345,21 @@ namespace CodeDesigner.Ps2.Bridge
                 try
                 {
                     Directory.CreateDirectory(outputPath);
-                    var regions = new[]
+                    // Use PCSX2 native save-state file — captures complete emulator
+                    // state (memory, registers, hardware) in a single .p2s file.
+                    string saveStatePath = Path.Combine(outputPath, "pcsx2_state.p2s");
+                    PineClient!.SaveStateFile(saveStatePath);
+                    var savedInfo  = new FileInfo(saveStatePath);
+                    var written = new List<SnapshotRegion>
                     {
-                        (Label: "EE Main RAM",  File: "EEmem.bin",     Base: 0x00000000u,                 Size: (int)PS2MemoryBus.MainRamSize,    UseIop: false),
-                        (Label: "BIOS ROM",     File: "BIOSrom.bin",   Base: PS2MemoryBus.BiosRomPhysBase, Size: (int)PS2MemoryBus.BiosRomSize,    UseIop: false),
-                        (Label: "Scratchpad",   File: "Scratchpad.bin",Base: 0x70000000u,                 Size: (int)PS2MemoryBus.ScratchpadSize, UseIop: false),
-                        (Label: "IOP RAM",      File: "IOPmem.bin",    Base: EeIopMirrorBase,             Size: (int)IopMemoryBus.RamSize,        UseIop: true),
-                    };
-                    var written = new List<SnapshotRegion>();
-                    foreach (var (label, file, baseAddr, size, useIop) in regions)
-                    {
-                        uint pineAddr = TranslatePineAddress(baseAddr, useIop);
-                        byte[] bytes  = PineClient!.ReadBytes(pineAddr, size);
-                        string filePath = Path.Combine(outputPath, file);
-                        File.WriteAllBytes(filePath, bytes);
-                        written.Add(new SnapshotRegion
+                        new SnapshotRegion
                         {
-                            Label       = label,
-                            File        = filePath,
-                            BaseAddress = baseAddr,
-                            Size        = bytes.Length,
-                        });
-                    }
+                            Label       = "PCSX2 Save State",
+                            File        = saveStatePath,
+                            BaseAddress = 0,
+                            Size        = savedInfo.Exists ? (int)savedInfo.Length : 0,
+                        }
+                    };
                     var pineResp = new CommandResponse
                     {
                         Success = true,
@@ -1432,7 +1428,31 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 try
                 {
-                    // Pause the emulator while we swap memory so it does not race with execution.
+                    // Prefer native PCSX2 save-state file (set by the new PINE snapshot).
+                    string saveStatePath = Path.Combine(inputPath, "pcsx2_state.p2s");
+                    if (File.Exists(saveStatePath))
+                    {
+                        bool ok = PineClient!.LoadStateFile(saveStatePath);
+                        if (!ok)
+                            return CreateErrorResponse("PINE LoadStateFile failed — invalid or incompatible save state");
+                        var pineStateResp = new CommandResponse
+                        {
+                            Success = true,
+                            Command = "LOADSNAPSHOT",
+                            Regions = new List<SnapshotRegion>
+                            {
+                                new SnapshotRegion
+                                {
+                                    Label       = "PCSX2 Save State",
+                                    File        = saveStatePath,
+                                    BaseAddress = 0,
+                                    Size        = (int)new FileInfo(saveStatePath).Length,
+                                }
+                            },
+                        };
+                        return JsonSerializer.Serialize(pineStateResp);
+                    }
+                    // Fallback: old-style raw memory dump (EEmem.bin etc.)
                     try { PineClient!.Pause(); } catch { /* ignore pause errors */ }
                     var regions = new[]
                     {
@@ -1783,24 +1803,96 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 try
                 {
+                    // ── GPR (cat 0) — full 128-bit via GetRegister ──────────────────────
+                    var pineGpr      = new List<ulong>(32);
+                    var pineGprLo32  = new List<uint>(32);
+                    var pineGprHi32  = new List<uint>(32);
+                    var pineGprUpLo32 = new List<uint>(32);
+                    var pineGprUpHi32 = new List<uint>(32);
+                    for (int i = 0; i < 32; i++)
+                    {
+                        byte[] reg = PineGetRegisterSafe(0, 0, (byte)i);
+                        uint lo0 = BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(0));
+                        uint lo1 = BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(4));
+                        uint up0 = BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(8));
+                        uint up1 = BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(12));
+                        pineGprLo32.Add(lo0);
+                        pineGprHi32.Add(lo1);
+                        pineGprUpLo32.Add(up0);
+                        pineGprUpHi32.Add(up1);
+                        pineGpr.Add((ulong)lo0 | ((ulong)lo1 << 32));
+                    }
+                    // Get PC / HI / LO from the bulk snapshot (faster than individual calls)
                     var snap = PineClient!.GetRegisters();
-                    var pineGpr     = snap.GPR.Select(v => (ulong)v).ToList();
-                    var pineGprLo32 = snap.GPR.ToList();
-                    // PINE MsgGetRegisters only returns lower 32-bit halves of each GPR.
-                    // Hi32 / UpLo32 / UpHi32 are unavailable and filled with zeros.
-                    var pineZeros   = Enumerable.Repeat(0u, 32).ToList();
+
+                    // ── COP0 (cat 1) — 32 × 32-bit ─────────────────────────────────────
+                    var pCop0Regs = new List<ulong>(32);
+                    for (int i = 0; i < 32; i++)
+                    {
+                        byte[] reg = PineGetRegisterSafe(0, 1, (byte)i);
+                        pCop0Regs.Add(BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(0)));
+                    }
+
+                    // ── FPR (cat 2) — 32 × 32-bit float raw bits ────────────────────────
+                    var pFpr = new List<uint>(32);
+                    for (int i = 0; i < 32; i++)
+                    {
+                        byte[] reg = PineGetRegisterSafe(0, 2, (byte)i);
+                        pFpr.Add(BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(0)));
+                    }
+
+                    // ── VU0F (cat 3) — 32 × 128-bit (x,y,z,w each 32-bit float) ────────
+                    var pVu0fX = new List<uint>(32);
+                    var pVu0fY = new List<uint>(32);
+                    var pVu0fZ = new List<uint>(32);
+                    var pVu0fW = new List<uint>(32);
+                    for (int i = 0; i < 32; i++)
+                    {
+                        byte[] reg = PineGetRegisterSafe(0, 3, (byte)i);
+                        pVu0fX.Add(BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(0)));
+                        pVu0fY.Add(BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(4)));
+                        pVu0fZ.Add(BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(8)));
+                        pVu0fW.Add(BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(12)));
+                    }
+
+                    // ── VU0I (cat 4) — 16 integer registers (vi00–vi15), 16-bit each ───
+                    var pVu0i = new List<uint>(32);
+                    for (int i = 0; i < 16; i++)
+                    {
+                        byte[] reg = PineGetRegisterSafe(0, 4, (byte)i);
+                        pVu0i.Add(BinaryPrimitives.ReadUInt32LittleEndian(reg.AsSpan(0)) & 0xFFFFu);
+                    }
+                    // Pad remaining control-register slots with zeros (not available via PINE cat 4)
+                    for (int i = 16; i < 32; i++) pVu0i.Add(0);
+
+                    uint pCop0Status = pCop0Regs.Count > 12 ? (uint)pCop0Regs[12] : 0;
+                    uint pCop0Cause  = pCop0Regs.Count > 13 ? (uint)pCop0Regs[13] : 0;
+                    ulong pCop0Epc   = pCop0Regs.Count > 14 ? pCop0Regs[14] : 0;
+                    uint pCop0Count  = pCop0Regs.Count > 9  ? (uint)pCop0Regs[9]  : 0;
+
                     return JsonSerializer.Serialize(new CommandResponse
                     {
-                        Success   = true,
-                        Command   = "GETREGS",
-                        GPR       = pineGpr,
-                        GPR_Lo32  = pineGprLo32,
-                        GPR_Hi32  = pineZeros,
-                        GPR_UpLo32 = pineZeros,
-                        GPR_UpHi32 = pineZeros,
-                        GPR_PC    = snap.PC,
-                        GPR_HI    = snap.HI,
-                        GPR_LO    = snap.LO,
+                        Success     = true,
+                        Command     = "GETREGS",
+                        GPR         = pineGpr,
+                        GPR_Lo32    = pineGprLo32,
+                        GPR_Hi32    = pineGprHi32,
+                        GPR_UpLo32  = pineGprUpLo32,
+                        GPR_UpHi32  = pineGprUpHi32,
+                        GPR_PC      = snap.PC,
+                        GPR_HI      = snap.HI,
+                        GPR_LO      = snap.LO,
+                        COP0_Status = pCop0Status,
+                        COP0_Cause  = pCop0Cause,
+                        COP0_EPC    = pCop0Epc,
+                        COP0_Count  = pCop0Count,
+                        COP0_Regs   = pCop0Regs,
+                        FPR         = pFpr,
+                        VU0F_X      = pVu0fX,
+                        VU0F_Y      = pVu0fY,
+                        VU0F_Z      = pVu0fZ,
+                        VU0F_W      = pVu0fW,
+                        VU0I        = pVu0i,
                     });
                 }
                 catch (Exception ex) { return CreateErrorResponse($"PINE GetRegisters error: {ex.Message}"); }
@@ -2051,6 +2143,16 @@ namespace CodeDesigner.Ps2.Bridge
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
             Scheduler.Reset();
             return CreateSuccessResponse("Reset");
+        }
+
+        /// <summary>
+        /// Calls <see cref="PineClient.GetRegister"/> and returns the 16-byte result.
+        /// Returns a zeroed 16-byte array on failure so callers can gracefully degrade.
+        /// </summary>
+        private byte[] PineGetRegisterSafe(byte cpuSel, byte cat, byte num)
+        {
+            try   { return PineClient!.GetRegister(cpuSel, cat, num); }
+            catch { return new byte[16]; }
         }
 
         private string HandleStepInto()
