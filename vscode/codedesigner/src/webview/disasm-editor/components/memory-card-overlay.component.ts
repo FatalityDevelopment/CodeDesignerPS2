@@ -129,15 +129,17 @@ export interface McActionResult {
             }
           </tbody>
         </table>
-        <div class="mc-paging-row">
-          <button class="mc-page-btn"
-                  [disabled]="currentPage() === 0"
-                  (click)="prevPage()">&#x276E; Back</button>
-          <span class="mc-page-info">Page {{ currentPage() + 1 }} of {{ totalPages() }}</span>
-          <button class="mc-page-btn"
-                  [disabled]="currentPage() >= totalPages() - 1"
-                  (click)="nextPage()">Next &#x276F;</button>
-        </div>
+        @if (saves().length > pageSize) {
+          <div class="mc-paging-row">
+            <button class="mc-page-btn"
+                    [disabled]="currentPage() === 0"
+                    (click)="prevPage()">&#x276E; Back</button>
+            <span class="mc-page-info">Page {{ currentPage() + 1 }} of {{ totalPages() }}</span>
+            <button class="mc-page-btn"
+                    [disabled]="currentPage() >= totalPages() - 1"
+                    (click)="nextPage()">Next &#x276F;</button>
+          </div>
+        }
       </div>
 
     </div>
