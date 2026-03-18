@@ -38,6 +38,7 @@
     (browseGameClick)="browseGame()"
     (openSnapshotClick)="openSnapshot($event)"
     (reloadSnapshotClick)="reloadSnapshot($event)"
+    (memoryCardClick)="openMemoryCard()"
   />
 </div>
 
@@ -61,3 +62,14 @@
     [selectedGame]="selectedGame"
   />
 </div>
+
+<!-- Memory Card Manager overlay (covers the full sidebar) -->
+<app-memory-card-overlay
+  #mcOverlayComp
+  (browseMc)="onMcBrowse()"
+  (newMc)="onMcNew()"
+  (listSaves)="onMcList($event)"
+  (exportSave)="onMcExport($event)"
+  (importSave)="onMcImport($event)"
+  (deleteSave)="onMcDelete($event)"
+/>
