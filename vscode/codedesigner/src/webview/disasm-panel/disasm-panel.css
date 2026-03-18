@@ -521,7 +521,7 @@ app-cds-tab {
     background: var(--vscode-editor-background, #1e1e1e);
     border: 1px solid var(--vscode-panel-border, #454545);
     border-radius: 6px;
-    width: min(600px, 95vw);
+    width: min(720px, 95vw);
     max-height: calc(100vh - 40px);
     margin: 20px auto;
     display: flex;
@@ -682,6 +682,20 @@ app-cds-tab {
     background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.04));
 }
 
+.mc-row:nth-child(even) td {
+    background: var(--vscode-list-inactiveSelectionBackground, rgba(255,255,255,0.03));
+}
+
+.mc-row:nth-child(even):hover td {
+    background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.06));
+}
+
+.mc-row-empty td {
+    color: transparent;
+    border-bottom: 1px solid var(--vscode-panel-border, #3a3a3a);
+    user-select: none;
+}
+
 .mc-col-name     { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mc-col-files    { width: 44px;  text-align: center; }
 .mc-col-size     { width: 70px;  text-align: right;  white-space: nowrap; }
@@ -715,4 +729,35 @@ app-cds-tab {
     font-size: 11px;
     color: var(--vscode-foreground);
     white-space: nowrap;
+}
+
+.mc-paging-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 6px 0 2px;
+}
+
+.mc-page-btn {
+    padding: 3px 10px;
+    font-size: 12px;
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #cccccc);
+    border: none;
+    cursor: pointer;
+}
+
+.mc-page-btn:hover:not(:disabled) {
+    background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+.mc-page-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.mc-page-info {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
 }

@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   ViewEncapsulation,
   signal,
+  computed,
   output,
 } from '@angular/core';
 
@@ -76,54 +77,67 @@ export interface McActionResult {
 
       <!-- Saves table -->
       <div id="mc-saves-area">
-        @if (saves().length === 0 && hasLoaded()) {
-          <div class="mc-empty">No saves found on this memory card.</div>
-        }
-        @if (saves().length > 0) {
-          <table class="mc-table">
-            <thead>
-              <tr>
-                <th class="mc-col-name">Save</th>
-                <th class="mc-col-files">Files</th>
-                <th class="mc-col-size">Size</th>
-                <th class="mc-col-modified">Modified</th>
-                <th class="mc-col-actions"></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (save of saves(); track save.Name) {
-                <tr class="mc-row">
-                  <td class="mc-col-name" [title]="save.Name">{{ save.Name }}</td>
-                  <td class="mc-col-files">{{ save.FileCount }}</td>
-                  <td class="mc-col-size">{{ formatBytes(save.TotalBytes) }}</td>
-                  <td class="mc-col-modified">{{ save.Modified }}</td>
-                   <td class="mc-col-actions">
-                    @if (pendingDelete() === save.Name) {
-                      <span class="mc-confirm-delete">
-                        Delete?
-                        <button class="mc-action-btn mc-delete-btn"
-                                (click)="doDelete(save.Name)">Yes</button>
-                        <button class="mc-action-btn"
-                                (click)="pendingDelete.set(null)">No</button>
-                      </span>
-                    } @else {
-                      <button class="mc-action-btn"
-                              title="Export this save to a folder on the host"
-                              (click)="exportSave.emit({ mcPath: mcPath(), saveName: save.Name })">
-                        &#x2B07; Export
-                      </button>
+        <table class="mc-table">
+          <thead>
+            <tr>
+              <th class="mc-col-name">Save</th>
+              <th class="mc-col-files">Files</th>
+              <th class="mc-col-size">Size</th>
+              <th class="mc-col-modified">Modified</th>
+              <th class="mc-col-actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (save of pagedSaves(); track save.Name) {
+              <tr class="mc-row">
+                <td class="mc-col-name" [title]="save.Name">{{ save.Name }}</td>
+                <td class="mc-col-files">{{ save.FileCount }}</td>
+                <td class="mc-col-size">{{ formatBytes(save.TotalBytes) }}</td>
+                <td class="mc-col-modified">{{ save.Modified }}</td>
+                <td class="mc-col-actions">
+                  @if (pendingDelete() === save.Name) {
+                    <span class="mc-confirm-delete">
+                      Delete?
                       <button class="mc-action-btn mc-delete-btn"
-                              title="Delete this save from the memory card"
-                              (click)="pendingDelete.set(save.Name)">
-                        &#x2715; Delete
-                      </button>
-                    }
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        }
+                              (click)="doDelete(save.Name)">Yes</button>
+                      <button class="mc-action-btn"
+                              (click)="pendingDelete.set(null)">No</button>
+                    </span>
+                  } @else {
+                    <button class="mc-action-btn"
+                            title="Export this save to a folder on the host"
+                            (click)="exportSave.emit({ mcPath: mcPath(), saveName: save.Name })">
+                      &#x2B07; Export
+                    </button>
+                    <button class="mc-action-btn mc-delete-btn"
+                            title="Delete this save from the memory card"
+                            (click)="pendingDelete.set(save.Name)">
+                      &#x2715; Delete
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+            @for (_ of emptyRows(); track $index) {
+              <tr class="mc-row mc-row-empty">
+                <td class="mc-col-name">&nbsp;</td>
+                <td class="mc-col-files">&nbsp;</td>
+                <td class="mc-col-size">&nbsp;</td>
+                <td class="mc-col-modified">&nbsp;</td>
+                <td class="mc-col-actions">&nbsp;</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+        <div class="mc-paging-row">
+          <button class="mc-page-btn"
+                  [disabled]="currentPage() === 0"
+                  (click)="prevPage()">&#x276E; Back</button>
+          <span class="mc-page-info">Page {{ currentPage() + 1 }} of {{ totalPages() }}</span>
+          <button class="mc-page-btn"
+                  [disabled]="currentPage() >= totalPages() - 1"
+                  (click)="nextPage()">Next &#x276F;</button>
+        </div>
       </div>
 
     </div>
@@ -169,6 +183,19 @@ export class MemoryCardOverlayComponent {
   /** Name of the save awaiting delete confirmation, or null. */
   readonly pendingDelete = signal<string | null>(null);
 
+  // ── Pagination ──────────────────────────────────────────────────────────────
+
+  readonly pageSize = 10;
+  readonly currentPage = signal(0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.saves().length / this.pageSize)));
+  readonly pagedSaves = computed(() => {
+    const start = this.currentPage() * this.pageSize;
+    return this.saves().slice(start, start + this.pageSize);
+  });
+  readonly emptyRows = computed(() =>
+    Array(Math.max(0, this.pageSize - this.pagedSaves().length)).fill(0));
+
   // ── Public API ──────────────────────────────────────────────────────────────
 
   open(): void {
@@ -192,6 +219,7 @@ export class MemoryCardOverlayComponent {
     this.loading.set(false);
     this.hasLoaded.set(true);
     this.pendingDelete.set(null);
+    this.currentPage.set(0);
     if (result.error) {
       this.setStatus('Error: ' + result.error, true);
       this.saves.set([]);
@@ -238,6 +266,18 @@ export class MemoryCardOverlayComponent {
   onBackdropClick(event: MouseEvent): void {
     if ((event.target as HTMLElement).id === 'mc-overlay') {
       this.close();
+    }
+  }
+
+  prevPage(): void {
+    if (this.currentPage() > 0) {
+      this.currentPage.update(p => p - 1);
+    }
+  }
+
+  nextPage(): void {
+    if (this.currentPage() < this.totalPages() - 1) {
+      this.currentPage.update(p => p + 1);
     }
   }
 
