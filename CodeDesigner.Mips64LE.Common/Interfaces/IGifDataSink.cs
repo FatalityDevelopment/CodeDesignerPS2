@@ -1,6 +1,6 @@
 using System;
 
-namespace CodeDesigner.Mips64LE.Common.Core
+namespace CodeDesigner.Mips64LE.Common.Interfaces
 {
     /// <summary>
     /// Abstraction for a GIF data consumer that accepts packed GIF packets.

@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\CodeDesigner.Mips64LE.CheatEngine\CodeDesigner.Mips64LE.CheatEngine.csproj" />
     <ProjectReference Include="..\CodeDesigner.Mips64LE.Common\CodeDesigner.Mips64LE.Common.csproj" />
   </ItemGroup>
 

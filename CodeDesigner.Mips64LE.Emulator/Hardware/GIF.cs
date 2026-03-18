@@ -1,5 +1,5 @@
 using System;
-using CodeDesigner.Mips64LE.Common.Core;
+using CodeDesigner.Mips64LE.Common.Interfaces;
 
 namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
 {

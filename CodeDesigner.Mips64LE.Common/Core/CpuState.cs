@@ -1,4 +1,4 @@
-﻿using CodeDesigner.Mips64LE.Common.Core;
+﻿using CodeDesigner.Mips64LE.Common.Interfaces;
 using CodeDesigner.Mips64LE.Common.CPU.COP0;
 using CodeDesigner.Mips64LE.Common.CPU.COP1;
 using CodeDesigner.Mips64LE.Common.VectorUnits.VU0;

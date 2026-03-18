@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using CodeDesigner.Mips64LE.Common.Core;
+using CodeDesigner.Mips64LE.Common.Interfaces;
 using CodeDesigner.Mips64LE.Common.CPU;
 
 namespace CodeDesigner.Mips64LE.Common

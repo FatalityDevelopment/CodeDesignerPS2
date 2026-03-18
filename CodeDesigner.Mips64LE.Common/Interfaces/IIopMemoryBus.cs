@@ -1,4 +1,4 @@
-namespace CodeDesigner.Mips64LE.Common.Core
+namespace CodeDesigner.Mips64LE.Common.Interfaces
 {
     /// <summary>
     /// Abstraction for the PS2 I/O Processor memory bus.

@@ -1,7 +1,7 @@
 using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using CodeDesigner.Mips64LE.Common.Core;
+using CodeDesigner.Mips64LE.Common.Interfaces;
 
 namespace CodeDesigner.Mips64LE.Common.VectorUnits.VU1
 {

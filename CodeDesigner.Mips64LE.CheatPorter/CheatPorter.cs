@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CodeDesigner.Mips64LE.Common.CheatEngine;
 
-namespace CodeDesigner.Mips64LE.PortCheats
+namespace CodeDesigner.Mips64LE.CheatPorter
 {
     /// <summary>
     /// Ports PS2 GameShark cheat codes from one game revision to another by scanning two

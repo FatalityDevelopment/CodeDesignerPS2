@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace CodeDesigner.Mips64LE.PortCheats
+namespace CodeDesigner.Mips64LE.CheatPorter
 {
     /// <summary>
     /// Result for a single cheat code line produced by <see cref="CheatPorter.Port"/>.

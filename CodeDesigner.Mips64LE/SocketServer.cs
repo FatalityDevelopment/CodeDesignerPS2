@@ -16,7 +16,8 @@ using CodeDesigner.Mips64LE.Common.CheatEngine;
 using CodeDesigner.Mips64LE.Common.Emulator;
 using CodeDesigner.Mips64LE.Common.Emulator.Hardware;
 using CodeDesigner.Mips64LE.Common.Emulator.IOP;
-using CodeDesigner.Mips64LE.PortCheats;
+using CodeDesigner.Mips64LE.CheatPorter;
+using CheatPorterLib = CodeDesigner.Mips64LE.CheatPorter.CheatPorter;
 
 namespace CodeDesigner.Mips64LE
 {
@@ -2351,7 +2352,7 @@ namespace CodeDesigner.Mips64LE
         }
 
         /// <summary>
-        /// Handle PORTCHEATS command — delegates to <see cref="CodeDesigner.Mips64LE.PortCheats.CheatPorter"/>
+        /// Handle PORTCHEATS command — delegates to <see cref="CodeDesigner.Mips64LE.CheatPorter.CheatPorter"/>
         /// to port GameShark cheat codes from one EE-RAM dump to another.
         /// </summary>
         private string HandlePortCheats(string? cheatText, string? sourcePath, string? targetPath)
@@ -2386,7 +2387,7 @@ namespace CodeDesigner.Mips64LE
             logLines.Add($"[PORTCHEATS] Target: {targetPath}");
             logLines.Add(string.Empty);
 
-            var allResults = CheatPorter.Port(sourceData, targetData, blocks, logLines);
+            var allResults = CheatPorterLib.Port(sourceData, targetData, blocks, logLines);
             int foundCount = allResults.Count(r => r.Found);
 
             var response = new CommandResponse
