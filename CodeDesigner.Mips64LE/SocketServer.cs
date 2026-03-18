@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CodeDesigner.Mips64LE.CheatConverter;
+using CodeDesigner.Mips64LE.MemoryCardManager;
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.CheatEngine;
 using CodeDesigner.Mips64LE.Common.Emulator;
@@ -428,6 +429,21 @@ namespace CodeDesigner.Mips64LE
 
                     case "PORTCHEATS":
                         return HandlePortCheats(command.Data, command.SourceDumpPath, command.TargetDumpPath);
+
+                    case "MC_LIST":
+                        return HandleMcList(command.McPath);
+
+                    case "MC_EXPORT":
+                        return HandleMcExport(command.McPath, command.SaveName, command.ExportDir);
+
+                    case "MC_IMPORT":
+                        return HandleMcImport(command.McPath, command.ImportDir, command.McOverwrite ?? false);
+
+                    case "MC_DELETE":
+                        return HandleMcDelete(command.McPath, command.SaveName);
+
+                    case "MC_FORMAT":
+                        return HandleMcFormat(command.McPath);
 
                     case "PING":
                         return CreateSuccessResponse("PONG");
@@ -3337,6 +3353,108 @@ namespace CodeDesigner.Mips64LE
             }
         }
 
+        // ── Memory Card handlers ────────────────────────────────────────────────
+
+        private string HandleMcList(string? mcPath)
+        {
+            if (string.IsNullOrWhiteSpace(mcPath))
+                return CreateErrorResponse("McPath is required for MC_LIST");
+            if (!File.Exists(mcPath))
+                return CreateErrorResponse($"Memory card file not found: {mcPath}");
+            try
+            {
+                using var mc = Ps2MemoryCard.Open(mcPath);
+                var saves = mc.ListSaves();
+                var infos = saves.Select(s => new McSaveInfo
+                {
+                    Name       = s.Name,
+                    FileCount  = s.FileCount,
+                    Created    = s.Created.ToString("yyyy-MM-dd HH:mm:ss"),
+                    Modified   = s.Modified.ToString("yyyy-MM-dd HH:mm:ss"),
+                    TotalBytes = s.TotalBytes,
+                    Files      = s.Files.Select(f => new McFileInfo { Name = f.Name, Size = f.Size }).ToList(),
+                }).ToList();
+                var resp = new CommandResponse { Success = true, Command = "MC_LIST", McSaves = infos };
+                return JsonSerializer.Serialize(resp);
+            }
+            catch (Exception ex) { return CreateErrorResponse($"MC_LIST error: {ex.Message}"); }
+        }
+
+        private string HandleMcExport(string? mcPath, string? saveName, string? exportDir)
+        {
+            if (string.IsNullOrWhiteSpace(mcPath))   return CreateErrorResponse("McPath is required");
+            if (string.IsNullOrWhiteSpace(saveName))  return CreateErrorResponse("SaveName is required");
+            if (string.IsNullOrWhiteSpace(exportDir)) return CreateErrorResponse("ExportDir is required");
+            if (!File.Exists(mcPath)) return CreateErrorResponse($"Memory card file not found: {mcPath}");
+            try
+            {
+                string outPath = Path.Combine(exportDir, saveName);
+                using var mc = Ps2MemoryCard.Open(mcPath);
+                mc.ExportSave(saveName, outPath);
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true, Command = "MC_EXPORT",
+                    Message = $"Exported '{saveName}' to {outPath}",
+                    Data    = outPath,
+                });
+            }
+            catch (Exception ex) { return CreateErrorResponse($"MC_EXPORT error: {ex.Message}"); }
+        }
+
+        private string HandleMcImport(string? mcPath, string? importDir, bool overwrite)
+        {
+            if (string.IsNullOrWhiteSpace(mcPath))   return CreateErrorResponse("McPath is required");
+            if (string.IsNullOrWhiteSpace(importDir)) return CreateErrorResponse("ImportDir is required");
+            if (!File.Exists(mcPath)) return CreateErrorResponse($"Memory card file not found: {mcPath}");
+            if (!Directory.Exists(importDir)) return CreateErrorResponse($"Import directory not found: {importDir}");
+            try
+            {
+                using var mc = Ps2MemoryCard.Open(mcPath);
+                mc.ImportSave(importDir, overwrite);
+                string saveName = Path.GetFileName(importDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true, Command = "MC_IMPORT",
+                    Message = $"Imported '{saveName}' from {importDir}",
+                });
+            }
+            catch (Exception ex) { return CreateErrorResponse($"MC_IMPORT error: {ex.Message}"); }
+        }
+
+        private string HandleMcDelete(string? mcPath, string? saveName)
+        {
+            if (string.IsNullOrWhiteSpace(mcPath))  return CreateErrorResponse("McPath is required");
+            if (string.IsNullOrWhiteSpace(saveName)) return CreateErrorResponse("SaveName is required");
+            if (!File.Exists(mcPath)) return CreateErrorResponse($"Memory card file not found: {mcPath}");
+            try
+            {
+                using var mc = Ps2MemoryCard.Open(mcPath);
+                mc.DeleteSave(saveName);
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true, Command = "MC_DELETE",
+                    Message = $"Deleted save '{saveName}'",
+                });
+            }
+            catch (Exception ex) { return CreateErrorResponse($"MC_DELETE error: {ex.Message}"); }
+        }
+
+        private string HandleMcFormat(string? mcPath)
+        {
+            if (string.IsNullOrWhiteSpace(mcPath)) return CreateErrorResponse("McPath is required");
+            try
+            {
+                Ps2MemoryCard.Create(mcPath);
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true, Command = "MC_FORMAT",
+                    Message = $"Created new 8 MB memory card at {mcPath}",
+                    Data    = mcPath,
+                });
+            }
+            catch (Exception ex) { return CreateErrorResponse($"MC_FORMAT error: {ex.Message}"); }
+        }
+
 
         /// full hardware reset (equivalent to killing and restarting the process)
         /// without dropping the socket connection.  The run-loop will re-create
@@ -4605,6 +4723,12 @@ namespace CodeDesigner.Mips64LE
         // PORTCHEATS fields
         public string? SourceDumpPath { get; set; }
         public string? TargetDumpPath { get; set; }
+        // MC_LIST / MC_EXPORT / MC_IMPORT / MC_DELETE / MC_FORMAT fields
+        public string? McPath { get; set; }
+        public string? SaveName { get; set; }
+        public string? ExportDir { get; set; }
+        public string? ImportDir { get; set; }
+        public bool?   McOverwrite { get; set; }
         // Runtime mode control fields
         public string? Pcsx2Host { get; set; }
         public int? Pcsx2Slot { get; set; }
@@ -4711,6 +4835,8 @@ namespace CodeDesigner.Mips64LE
 
         // PORTCHEATS fields
         public List<PortCheatResult>? PortCheatResults { get; set; }
+        // MC_LIST field
+        public List<McSaveInfo>? McSaves { get; set; }
     }
 
     /// <summary>
@@ -4744,6 +4870,24 @@ namespace CodeDesigner.Mips64LE
 
         /// <summary>All candidate new code lines when Ambiguous is true.</summary>
         public List<string>? Candidates { get; set; }
+    }
+
+    /// <summary>Metadata for a single PS2 save-game directory returned by MC_LIST.</summary>
+    public class McSaveInfo
+    {
+        public string Name       { get; set; } = string.Empty;
+        public uint   FileCount  { get; set; }
+        public string Created    { get; set; } = string.Empty;
+        public string Modified   { get; set; } = string.Empty;
+        public long   TotalBytes { get; set; }
+        public List<McFileInfo> Files { get; set; } = [];
+    }
+
+    /// <summary>A single file entry within a PS2 save directory.</summary>
+    public class McFileInfo
+    {
+        public string Name { get; set; } = string.Empty;
+        public long   Size { get; set; }
     }
 
     /// <summary>
