@@ -11,14 +11,12 @@ namespace CodeDesigner.Ps2.Bridge
     /// PCSX2 PINE (Protocol for Instrumentation of Emulators) IPC client.
     /// <para>
     /// Implements the binary PINE protocol to read/write PCSX2 guest memory,
-    /// query emulator status, and — once the PINE debugger extension PR is
-    /// merged — control EE execution (pause, resume, step, breakpoints, registers).
+    /// query emulator status, and control EE execution (pause, resume, step,
+    /// breakpoints, registers, threads, modules, symbols, and more).
     /// </para>
     /// <para>
     /// <b>Existing opcodes (upstream PINE):</b> 0x00–0x0F<br/>
-    /// <b>Extended opcodes (our PCSX2 PR):</b> 0x10–0x17<br/>
-    /// See <c>PINE_EXTENSION_PROPOSAL.md</c> for the full protocol spec and the
-    /// reference C++ implementation to submit to PCSX2.
+    /// <b>Extended opcodes (debugger extension):</b> 0x10–0x2D<br/>
     /// </para>
     /// <para>
     /// <b>Packet format:</b><br/>
@@ -55,7 +53,7 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgGameVersion = 0x0E;
         private const byte MsgStatus      = 0x0F;
 
-        // ── Extended PINE opcodes (PINE_EXTENSION_PROPOSAL.md) ────────────────
+        // ── Extended PINE opcodes (debugger extension) ────────────────────────
         private const byte MsgGetProgramCounter   = 0x10;
         private const byte MsgPause               = 0x11;
         private const byte MsgResume              = 0x12;
@@ -64,6 +62,28 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgClearBreakpoint     = 0x15;
         private const byte MsgClearAllBreakpoints = 0x16;
         private const byte MsgGetRegisters        = 0x17;
+        private const byte MsgGetRegister         = 0x18;
+        private const byte MsgSetRegister         = 0x19;
+        private const byte MsgGetEEThreads        = 0x1A;
+        private const byte MsgGetIOPThreads       = 0x1B;
+        private const byte MsgGetModules          = 0x1C;
+        private const byte MsgGetStack            = 0x1D;
+        private const byte MsgStepInto            = 0x1E;
+        private const byte MsgStepOver            = 0x1F;
+        private const byte MsgStepOut             = 0x20;
+        private const byte MsgGetSymbol           = 0x21;
+        private const byte MsgSaveStateFile       = 0x22;
+        private const byte MsgLoadStateFile       = 0x23;
+        private const byte MsgReset               = 0x24;
+        private const byte MsgFrameAdvance        = 0x25;
+        private const byte MsgGetFPS              = 0x26;
+        private const byte MsgSetLimiterMode      = 0x27;
+        private const byte MsgListBreakpoints     = 0x28;
+        private const byte MsgDisassemble         = 0x29;
+        private const byte MsgListFunctions       = 0x2A;
+        private const byte MsgGetSymbolByName     = 0x2B;
+        private const byte MsgListGlobals         = 0x2C;
+        private const byte MsgGetLocals           = 0x2D;
 
         // ── PINE result codes ─────────────────────────────────────────────────
         private const byte IPC_OK   = 0x00;
@@ -105,6 +125,139 @@ namespace CodeDesigner.Ps2.Bridge
             internal RegisterSnapshot(uint[] gpr, uint pc, uint hi, uint lo)
             {
                 GPR = gpr; PC = pc; HI = hi; LO = lo;
+            }
+        }
+
+        /// <summary>An EE or IOP OS thread returned by <see cref="GetEEThreads"/> / <see cref="GetIOPThreads"/>.</summary>
+        public sealed class PineThread
+        {
+            /// <summary>Thread ID.</summary>
+            public uint TID        { get; }
+            /// <summary>Current program counter.</summary>
+            public uint PC         { get; }
+            /// <summary>Raw thread status byte.</summary>
+            public byte Status     { get; }
+            /// <summary>Wait type byte.</summary>
+            public byte Wait       { get; }
+            /// <summary>Thread priority.</summary>
+            public uint Priority   { get; }
+            /// <summary>Thread entry-point address.</summary>
+            public uint EntryPoint { get; }
+            /// <summary>Stack-top address.</summary>
+            public uint StackTop   { get; }
+
+            internal PineThread(uint tid, uint pc, byte status, byte wait, uint priority, uint entry, uint stackTop)
+            {
+                TID = tid; PC = pc; Status = status; Wait = wait;
+                Priority = priority; EntryPoint = entry; StackTop = stackTop;
+            }
+        }
+
+        /// <summary>An IOP module entry returned by <see cref="GetModules"/>.</summary>
+        public sealed class IopModule
+        {
+            /// <summary>Module name (up to 31 characters).</summary>
+            public string Name      { get; }
+            /// <summary>Module version (BCD-encoded).</summary>
+            public ushort Version   { get; }
+            /// <summary>Address of the module's text (code) segment.</summary>
+            public uint   TextAddr  { get; }
+            /// <summary>Module entry point.</summary>
+            public uint   Entry     { get; }
+            /// <summary>Module global-pointer register value.</summary>
+            public uint   GP        { get; }
+            /// <summary>Size of the text segment.</summary>
+            public uint   TextSize  { get; }
+            /// <summary>Size of the data segment.</summary>
+            public uint   DataSize  { get; }
+            /// <summary>Size of the BSS (zero-initialised) segment.</summary>
+            public uint   BssSize   { get; }
+
+            internal IopModule(string name, ushort version, uint textAddr, uint entry, uint gp,
+                               uint textSize, uint dataSize, uint bssSize)
+            {
+                Name = name; Version = version; TextAddr = textAddr; Entry = entry;
+                GP = gp; TextSize = textSize; DataSize = dataSize; BssSize = bssSize;
+            }
+        }
+
+        /// <summary>One EE call-stack frame returned by <see cref="GetStack"/>.</summary>
+        public sealed class PineStackFrame
+        {
+            /// <summary>Function entry point.</summary>
+            public uint Entry     { get; }
+            /// <summary>Return address / saved PC for this frame.</summary>
+            public uint PC        { get; }
+            /// <summary>Stack pointer value for this frame.</summary>
+            public uint SP        { get; }
+            /// <summary>Size of this stack frame in bytes.</summary>
+            public uint StackSize { get; }
+
+            internal PineStackFrame(uint entry, uint pc, uint sp, uint stackSize)
+            {
+                Entry = entry; PC = pc; SP = sp; StackSize = stackSize;
+            }
+        }
+
+        /// <summary>A breakpoint entry returned by <see cref="ListBreakpoints"/>.</summary>
+        public sealed class PineBreakpointEntry
+        {
+            /// <summary>Breakpoint address.</summary>
+            public uint Address { get; }
+            /// <summary>Whether the breakpoint is currently enabled.</summary>
+            public bool Enabled { get; }
+            /// <summary>CPU selector: 0 = EE, 1 = IOP.</summary>
+            public byte Cpu     { get; }
+
+            internal PineBreakpointEntry(uint address, bool enabled, byte cpu)
+            {
+                Address = address; Enabled = enabled; Cpu = cpu;
+            }
+        }
+
+        /// <summary>One disassembled instruction line returned by <see cref="Disassemble"/>.</summary>
+        public sealed class PineDisassemblyLine
+        {
+            /// <summary>Instruction address.</summary>
+            public uint   Address { get; }
+            /// <summary>Disassembly text.</summary>
+            public string Text    { get; }
+
+            internal PineDisassemblyLine(uint address, string text)
+            {
+                Address = address; Text = text;
+            }
+        }
+
+        /// <summary>An EE symbol (function or global variable) returned by <see cref="ListFunctions"/> / <see cref="ListGlobals"/>.</summary>
+        public sealed class PineSymbolEntry
+        {
+            /// <summary>Symbol address.</summary>
+            public uint   Address { get; }
+            /// <summary>Symbol size in bytes.</summary>
+            public uint   Size    { get; }
+            /// <summary>Symbol name.</summary>
+            public string Name    { get; }
+
+            internal PineSymbolEntry(uint address, uint size, string name)
+            {
+                Address = address; Size = size; Name = name;
+            }
+        }
+
+        /// <summary>A local variable or parameter returned by <see cref="GetLocals"/>.</summary>
+        public sealed class PineLocalEntry
+        {
+            /// <summary>Storage class: 0 = global/static, 1 = register, 2 = stack.</summary>
+            public byte  StorageType { get; }
+            /// <summary>Register number (StorageType=1) or stack-pointer offset (StorageType=2).</summary>
+            public int   Value       { get; }
+            /// <summary>Variable or parameter name.</summary>
+            public string Name       { get; }
+
+            internal PineLocalEntry(byte storageType, int value, string name)
+            {
+                StorageType = storageType; Value = value; Name = name;
             }
         }
 
@@ -316,8 +469,459 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // Internal helpers
+        // Extended PINE API — opcodes 0x18–0x2D
         // ═════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// [Extended PINE] Reads one register as a 128-bit little-endian value (16 bytes).
+        /// <para>Request: <c>[8][opcode][cpuSel][cat][num]</c></para>
+        /// <para>Reply:   <c>[21][IPC_OK][u128 (16 bytes)]</c></para>
+        /// </summary>
+        /// <param name="cpuSel">CPU selector: 0 = EE, 1 = IOP.</param>
+        /// <param name="cat">Register category (architecture-defined).</param>
+        /// <param name="num">Register index within the category.</param>
+        /// <returns>16-byte little-endian u128 register value.</returns>
+        public byte[] GetRegister(byte cpuSel, byte cat, byte num)
+        {
+            var req = new byte[8];
+            WriteU32LE(req, 0, 8u);
+            req[4] = MsgGetRegister;
+            req[5] = cpuSel;
+            req[6] = cat;
+            req[7] = num;
+            byte[] rep = SendReceive(req, expectedReplySize: 21); // 5 header + 16 u128
+            if (rep[4] != IPC_OK) throw PineFail("MsgGetRegister");
+            var val = new byte[16];
+            Buffer.BlockCopy(rep, 5, val, 0, 16);
+            return val;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Writes one register from a 128-bit little-endian value (16 bytes).
+        /// <para>Request: <c>[24][opcode][cpuSel][cat][num][val(16)]</c></para>
+        /// </summary>
+        /// <param name="cpuSel">CPU selector: 0 = EE, 1 = IOP.</param>
+        /// <param name="cat">Register category (architecture-defined).</param>
+        /// <param name="num">Register index within the category.</param>
+        /// <param name="val128">16-byte little-endian u128 value to write.</param>
+        public void SetRegister(byte cpuSel, byte cat, byte num, byte[] val128)
+        {
+            if (val128 == null || val128.Length != 16)
+                throw new ArgumentException("val128 must be exactly 16 bytes", nameof(val128));
+            var req = new byte[24];
+            WriteU32LE(req, 0, 24u);
+            req[4] = MsgSetRegister;
+            req[5] = cpuSel;
+            req[6] = cat;
+            req[7] = num;
+            Buffer.BlockCopy(val128, 0, req, 8, 16);
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgSetRegister");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Returns a list of all EE (R5900) OS threads.
+        /// </summary>
+        public List<PineThread> GetEEThreads()
+            => GetThreadList(MsgGetEEThreads, "MsgGetEEThreads");
+
+        /// <summary>
+        /// [Extended PINE] Returns a list of all IOP (R3000) OS threads.
+        /// </summary>
+        public List<PineThread> GetIOPThreads()
+            => GetThreadList(MsgGetIOPThreads, "MsgGetIOPThreads");
+
+        private List<PineThread> GetThreadList(byte opcode, string opName)
+        {
+            byte[] rep = SendReceiveVariable(BuildSingleRequest(opcode));
+            if (rep[4] != IPC_OK) throw PineFail(opName);
+            if (rep.Length < 9) return new List<PineThread>();
+
+            uint count = ReadU32LE(rep, 5);
+            var threads = new List<PineThread>((int)count);
+            int pos = 9;
+            const int ThreadEntrySize = 22; // TID(4)+PC(4)+Status(1)+Wait(1)+Priority(4)+EntryPoint(4)+StackTop(4)
+            for (uint i = 0; i < count && pos + ThreadEntrySize <= rep.Length; i++)
+            {
+                uint tid      = ReadU32LE(rep, pos);
+                uint pc       = ReadU32LE(rep, pos + 4);
+                byte status   = rep[pos + 8];
+                byte wait     = rep[pos + 9];
+                uint priority = ReadU32LE(rep, pos + 10);
+                uint entry    = ReadU32LE(rep, pos + 14);
+                uint stackTop = ReadU32LE(rep, pos + 18);
+                threads.Add(new PineThread(tid, pc, status, wait, priority, entry, stackTop));
+                pos += ThreadEntrySize;
+            }
+            return threads;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Returns a list of all loaded IOP modules.
+        /// </summary>
+        public List<IopModule> GetModules()
+        {
+            byte[] rep = SendReceiveVariable(BuildSingleRequest(MsgGetModules));
+            if (rep[4] != IPC_OK) throw PineFail("MsgGetModules");
+            if (rep.Length < 9) return new List<IopModule>();
+
+            uint count = ReadU32LE(rep, 5);
+            var modules = new List<IopModule>((int)count);
+            int pos = 9;
+            const int ModuleEntrySize = 58; // Name[32]+Version(2)+TextAddr(4)+Entry(4)+GP(4)+TextSize(4)+DataSize(4)+BssSize(4)
+            for (uint i = 0; i < count && pos + ModuleEntrySize <= rep.Length; i++)
+            {
+                // name: 32 bytes, NUL-padded
+                int nameEnd = pos;
+                while (nameEnd < pos + 32 && rep[nameEnd] != 0) nameEnd++;
+                string name      = Encoding.ASCII.GetString(rep, pos, nameEnd - pos);
+                ushort version   = (ushort)(rep[pos + 32] | (rep[pos + 33] << 8));
+                uint   textAddr  = ReadU32LE(rep, pos + 34);
+                uint   entry     = ReadU32LE(rep, pos + 38);
+                uint   gp        = ReadU32LE(rep, pos + 42);
+                uint   textSize  = ReadU32LE(rep, pos + 46);
+                uint   dataSize  = ReadU32LE(rep, pos + 50);
+                uint   bssSize   = ReadU32LE(rep, pos + 54);
+                modules.Add(new IopModule(name, version, textAddr, entry, gp, textSize, dataSize, bssSize));
+                pos += ModuleEntrySize;
+            }
+            return modules;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Walks the EE call stack for the currently running thread and
+        /// returns the list of stack frames.
+        /// </summary>
+        public List<PineStackFrame> GetStack()
+        {
+            byte[] rep = SendReceiveVariable(BuildSingleRequest(MsgGetStack));
+            if (rep[4] != IPC_OK) throw PineFail("MsgGetStack");
+            if (rep.Length < 9) return new List<PineStackFrame>();
+
+            uint count = ReadU32LE(rep, 5);
+            var frames = new List<PineStackFrame>((int)count);
+            int pos = 9;
+            const int FrameEntrySize = 16; // entry(4)+pc(4)+sp(4)+stackSize(4)
+            for (uint i = 0; i < count && pos + FrameEntrySize <= rep.Length; i++)
+            {
+                uint entry     = ReadU32LE(rep, pos);
+                uint pc        = ReadU32LE(rep, pos + 4);
+                uint sp        = ReadU32LE(rep, pos + 8);
+                uint stackSize = ReadU32LE(rep, pos + 12);
+                frames.Add(new PineStackFrame(entry, pc, sp, stackSize));
+                pos += FrameEntrySize;
+            }
+            return frames;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Steps into the next EE instruction, following branches and syscalls.
+        /// Non-blocking: resumes the CPU with a temporary one-shot breakpoint.
+        /// </summary>
+        public void StepInto()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgStepInto), expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgStepInto (emulator must be paused)");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Steps over the next EE instruction, treating function calls as atomic.
+        /// Non-blocking: resumes the CPU with a temporary one-shot breakpoint.
+        /// </summary>
+        public void StepOver()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgStepOver), expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgStepOver (emulator must be paused)");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Steps out of the current EE function, stopping at the return address.
+        /// Non-blocking: resumes the CPU with a temporary one-shot breakpoint.
+        /// </summary>
+        public void StepOut()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgStepOut), expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgStepOut (emulator must be paused, call stack depth ≥ 2)");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Looks up the EE function symbol overlapping <paramref name="address"/>.
+        /// </summary>
+        /// <returns>
+        /// A tuple of (symbol start address, symbol name), or <c>null</c> if no symbol
+        /// is defined at that address.
+        /// </returns>
+        public (uint StartAddress, string Name)? GetSymbol(uint address)
+        {
+            byte[] rep = SendReceiveVariable(BuildAddressRequest(MsgGetSymbol, address));
+            if (rep[4] != IPC_OK) return null;
+            if (rep.Length < 9) return null;
+            uint symStart = ReadU32LE(rep, 5);
+            // name follows as NUL-terminated UTF-8
+            int nameStart = 9;
+            int nameEnd = nameStart;
+            while (nameEnd < rep.Length && rep[nameEnd] != 0) nameEnd++;
+            string name = Encoding.UTF8.GetString(rep, nameStart, nameEnd - nameStart);
+            return (symStart, name);
+        }
+
+        /// <summary>
+        /// [Extended PINE] Saves the current emulator state to <paramref name="filePath"/>.
+        /// </summary>
+        public void SaveStateFile(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath))
+                throw new ArgumentException("filePath must not be empty", nameof(filePath));
+            byte[] pathBytes = Encoding.UTF8.GetBytes(filePath);
+            if (pathBytes.Length > 512)
+                throw new ArgumentException("filePath must be ≤ 512 bytes when UTF-8 encoded", nameof(filePath));
+            ushort pathLen = (ushort)pathBytes.Length;
+            var req = new byte[4 + 1 + 2 + pathLen];
+            WriteU32LE(req, 0, (uint)req.Length);
+            req[4] = MsgSaveStateFile;
+            req[5] = (byte)(pathLen & 0xFF);
+            req[6] = (byte)(pathLen >> 8);
+            Buffer.BlockCopy(pathBytes, 0, req, 7, pathLen);
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail($"MsgSaveStateFile \"{filePath}\"");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Loads emulator state from <paramref name="filePath"/>.
+        /// </summary>
+        /// <returns><c>true</c> on success, <c>false</c> if the load failed (file not found, etc.).</returns>
+        public bool LoadStateFile(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath))
+                throw new ArgumentException("filePath must not be empty", nameof(filePath));
+            byte[] pathBytes = Encoding.UTF8.GetBytes(filePath);
+            if (pathBytes.Length > 512)
+                throw new ArgumentException("filePath must be ≤ 512 bytes when UTF-8 encoded", nameof(filePath));
+            ushort pathLen = (ushort)pathBytes.Length;
+            var req = new byte[4 + 1 + 2 + pathLen];
+            WriteU32LE(req, 0, (uint)req.Length);
+            req[4] = MsgLoadStateFile;
+            req[5] = (byte)(pathLen & 0xFF);
+            req[6] = (byte)(pathLen >> 8);
+            Buffer.BlockCopy(pathBytes, 0, req, 7, pathLen);
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            return rep[4] == IPC_OK;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Performs a cold-boot reset of the emulator.
+        /// </summary>
+        public void Reset()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgReset), expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgReset");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Advances emulation by <paramref name="numFrames"/> video frames,
+        /// then pauses. Must be called with the emulator running.
+        /// </summary>
+        public void FrameAdvance(byte numFrames)
+        {
+            if (numFrames == 0) throw new ArgumentOutOfRangeException(nameof(numFrames), "numFrames must be ≥ 1");
+            var req = new byte[6];
+            WriteU32LE(req, 0, 6u);
+            req[4] = MsgFrameAdvance;
+            req[5] = numFrames;
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgFrameAdvance");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Returns the current emulated frames-per-second.
+        /// </summary>
+        public float GetFPS()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgGetFPS), expectedReplySize: 9);
+            if (rep[4] != IPC_OK) throw PineFail("MsgGetFPS");
+            return BitConverter.ToSingle(rep, 5);
+        }
+
+        /// <summary>
+        /// [Extended PINE] Sets the emulator speed-limiter mode.
+        /// </summary>
+        /// <param name="mode">0 = Nominal, 1 = Turbo, 2 = Slomo, 3 = Unlimited.</param>
+        public void SetLimiterMode(byte mode)
+        {
+            if (mode > 3) throw new ArgumentOutOfRangeException(nameof(mode), "mode must be 0–3");
+            var req = new byte[6];
+            WriteU32LE(req, 0, 6u);
+            req[4] = MsgSetLimiterMode;
+            req[5] = mode;
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgSetLimiterMode");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Lists all active breakpoints.
+        /// </summary>
+        /// <param name="cpuSel">CPU filter: 0 = EE only, 1 = IOP only, 0xFF = both.</param>
+        public List<PineBreakpointEntry> ListBreakpoints(byte cpuSel = 0xFF)
+        {
+            var req = new byte[6];
+            WriteU32LE(req, 0, 6u);
+            req[4] = MsgListBreakpoints;
+            req[5] = cpuSel;
+            byte[] rep = SendReceiveVariable(req);
+            if (rep[4] != IPC_OK) throw PineFail("MsgListBreakpoints");
+            if (rep.Length < 9) return new List<PineBreakpointEntry>();
+
+            uint count = ReadU32LE(rep, 5);
+            var bps = new List<PineBreakpointEntry>((int)count);
+            int pos = 9;
+            const int BpEntrySize = 6; // addr(4)+enabled(1)+cpu(1)
+            for (uint i = 0; i < count && pos + BpEntrySize <= rep.Length; i++)
+            {
+                uint addr    = ReadU32LE(rep, pos);
+                bool enabled = rep[pos + 4] != 0;
+                byte cpu     = rep[pos + 5];
+                bps.Add(new PineBreakpointEntry(addr, enabled, cpu));
+                pos += BpEntrySize;
+            }
+            return bps;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Disassembles <paramref name="count"/> instructions at <paramref name="address"/>.
+        /// </summary>
+        /// <param name="cpuSel">CPU selector: 0 = EE, 1 = IOP.</param>
+        /// <param name="address">Starting address.</param>
+        /// <param name="count">Number of instructions to disassemble (max 1000).</param>
+        public List<PineDisassemblyLine> Disassemble(byte cpuSel, uint address, ushort count)
+        {
+            var req = new byte[12]; // size(4)+opcode(1)+cpu(1)+addr(4)+count(2)
+            WriteU32LE(req, 0, 12u);
+            req[4] = MsgDisassemble;
+            req[5] = cpuSel;
+            WriteU32LE(req, 6, address);
+            req[10] = (byte)(count & 0xFF);
+            req[11] = (byte)(count >> 8);
+            byte[] rep = SendReceiveVariable(req);
+            if (rep[4] != IPC_OK) throw PineFail("MsgDisassemble");
+            if (rep.Length < 7) return new List<PineDisassemblyLine>();
+
+            ushort returned = (ushort)(rep[5] | (rep[6] << 8));
+            var lines = new List<PineDisassemblyLine>(returned);
+            int pos = 7;
+            for (int i = 0; i < returned; i++)
+            {
+                if (pos + 5 > rep.Length) break;
+                uint lineAddr = ReadU32LE(rep, pos);
+                byte textLen  = rep[pos + 4];
+                pos += 5;
+                if (pos + textLen > rep.Length) break;
+                string text = Encoding.UTF8.GetString(rep, pos, textLen);
+                pos += textLen;
+                lines.Add(new PineDisassemblyLine(lineAddr, text));
+            }
+            return lines;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Returns a paginated list of EE function symbols.
+        /// </summary>
+        /// <param name="offset">Zero-based start index into the full symbol list.</param>
+        /// <param name="maxCount">Maximum number of symbols to return (up to 3000).</param>
+        /// <returns>A tuple of (total symbol count, symbols in this page).</returns>
+        public (uint Total, List<PineSymbolEntry> Symbols) ListFunctions(uint offset = 0, ushort maxCount = 256)
+            => ListSymbols(MsgListFunctions, offset, maxCount, "MsgListFunctions");
+
+        /// <summary>
+        /// [Extended PINE] Returns a paginated list of EE global variable symbols.
+        /// </summary>
+        /// <param name="offset">Zero-based start index into the full symbol list.</param>
+        /// <param name="maxCount">Maximum number of symbols to return (up to 3000).</param>
+        /// <returns>A tuple of (total symbol count, symbols in this page).</returns>
+        public (uint Total, List<PineSymbolEntry> Symbols) ListGlobals(uint offset = 0, ushort maxCount = 256)
+            => ListSymbols(MsgListGlobals, offset, maxCount, "MsgListGlobals");
+
+        private (uint Total, List<PineSymbolEntry> Symbols) ListSymbols(byte opcode, uint offset, ushort maxCount, string opName)
+        {
+            var req = new byte[11]; // size(4)+opcode(1)+offset(4)+maxCount(2)
+            WriteU32LE(req, 0, 11u);
+            req[4] = opcode;
+            WriteU32LE(req, 5, offset);
+            req[9]  = (byte)(maxCount & 0xFF);
+            req[10] = (byte)(maxCount >> 8);
+            byte[] rep = SendReceiveVariable(req);
+            if (rep[4] != IPC_OK) throw PineFail(opName);
+            if (rep.Length < 11) return (0, new List<PineSymbolEntry>());
+
+            uint   total    = ReadU32LE(rep, 5);
+            ushort returned = (ushort)(rep[9] | (rep[10] << 8));
+            var symbols = new List<PineSymbolEntry>(returned);
+            int pos = 11;
+            for (int i = 0; i < returned; i++)
+            {
+                if (pos + 9 > rep.Length) break; // addr(4)+size(4)+nameLen(1)
+                uint symAddr = ReadU32LE(rep, pos);
+                uint symSize = ReadU32LE(rep, pos + 4);
+                byte nameLen = rep[pos + 8];
+                pos += 9;
+                if (pos + nameLen > rep.Length) break;
+                string name = Encoding.UTF8.GetString(rep, pos, nameLen);
+                pos += nameLen;
+                symbols.Add(new PineSymbolEntry(symAddr, symSize, name));
+            }
+            return (total, symbols);
+        }
+
+        /// <summary>
+        /// [Extended PINE] Looks up an EE symbol by name.
+        /// </summary>
+        /// <returns>A tuple of (address, size) or <c>null</c> if the symbol is not found.</returns>
+        public (uint Address, uint Size)? GetSymbolByName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentException("name must not be empty", nameof(name));
+            byte[] nameBytes = Encoding.UTF8.GetBytes(name);
+            if (nameBytes.Length > 255)
+                throw new ArgumentException("name must be ≤ 255 bytes when UTF-8 encoded", nameof(name));
+            byte nameLen = (byte)nameBytes.Length;
+            var req = new byte[4 + 1 + 1 + nameLen];
+            WriteU32LE(req, 0, (uint)req.Length);
+            req[4] = MsgGetSymbolByName;
+            req[5] = nameLen;
+            Buffer.BlockCopy(nameBytes, 0, req, 6, nameLen);
+            byte[] rep = SendReceive(req, expectedReplySize: 13); // 5 header + addr(4) + size(4)
+            if (rep[4] != IPC_OK) return null;
+            uint addr = ReadU32LE(rep, 5);
+            uint size = ReadU32LE(rep, 9);
+            return (addr, size);
+        }
+
+        /// <summary>
+        /// [Extended PINE] Lists local variables and parameters for the function containing
+        /// <paramref name="address"/>.
+        /// </summary>
+        public List<PineLocalEntry> GetLocals(uint address)
+        {
+            byte[] rep = SendReceiveVariable(BuildAddressRequest(MsgGetLocals, address));
+            if (rep[4] != IPC_OK) return new List<PineLocalEntry>();
+            if (rep.Length < 9) return new List<PineLocalEntry>();
+
+            uint count = ReadU32LE(rep, 5);
+            var locals = new List<PineLocalEntry>((int)count);
+            int pos = 9;
+            for (uint i = 0; i < count; i++)
+            {
+                if (pos + 6 > rep.Length) break; // storageType(1)+value(4)+nameLen(1)
+                byte storageType = rep[pos];
+                int  value       = (int)ReadU32LE(rep, pos + 1);
+                byte nameLen     = rep[pos + 5];
+                pos += 6;
+                if (pos + nameLen > rep.Length) break;
+                string localName = Encoding.UTF8.GetString(rep, pos, nameLen);
+                pos += nameLen;
+                locals.Add(new PineLocalEntry(storageType, value, localName));
+            }
+            return locals;
+        }
 
         // ── Bulk memory helpers ───────────────────────────────────────────────
 
@@ -489,8 +1093,19 @@ namespace CodeDesigner.Ps2.Bridge
             }
             else
             {
-                // Linux / macOS: PINE uses a Unix-domain socket named /tmp/pcsx2.<slot>
-                string socketPath = $"/tmp/pcsx2.{_slot}";
+                // Linux / macOS: PINE uses a Unix-domain socket.
+                // Path: $XDG_RUNTIME_DIR/pcsx2.sock  (Linux)
+                //       $TMPDIR/pcsx2.sock            (macOS)
+                //       /tmp/pcsx2.sock               (fallback)
+                // Append .<slot> for non-default slots.
+                string? runtimeDir = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                    ? Environment.GetEnvironmentVariable("TMPDIR")
+                    : Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
+                string socketPath = runtimeDir != null
+                    ? Path.Combine(runtimeDir, "pcsx2.sock")
+                    : "/tmp/pcsx2.sock";
+                if (_slot != DefaultSlot)
+                    socketPath += $".{_slot}";
                 var ep = new UnixDomainSocketEndPoint(socketPath);
                 _socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
                 _socket.Connect(ep);

@@ -455,6 +455,91 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "PCSX2GAMEINFO":
                         return HandlePcsx2GameInfo();
+
+                    case "RESET":
+                        return HandleReset();
+
+                    case "STEPINTO":
+                    case "STEP_INTO":
+                        return HandleStepInto();
+
+                    case "STEPOVER":
+                    case "STEP_OVER":
+                        return HandleStepOver();
+
+                    case "STEPOUT":
+                    case "STEP_OUT":
+                        return HandleStepOut();
+
+                    case "GETFPS":
+                    case "GET_FPS":
+                        return HandleGetFps();
+
+                    case "SETLIMITER":
+                    case "SET_LIMITER":
+                    case "SETLIMITERMODE":
+                        return HandleSetLimiterMode(command.LimiterMode);
+
+                    case "FRAMEADVANCE":
+                    case "FRAME_ADVANCE":
+                        return HandleFrameAdvance(command.FrameCount);
+
+                    case "LISTBP":
+                    case "LIST_BP":
+                    case "LISTBREAKPOINTS":
+                        return HandleListBreakpoints(command.CpuSel);
+
+                    case "GETSYMBOL":
+                    case "GET_SYMBOL":
+                        return HandleGetSymbol(command.Address);
+
+                    case "GETSYMBOLBYNAME":
+                    case "GET_SYMBOL_BY_NAME":
+                        return HandleGetSymbolByName(command.SymbolName);
+
+                    case "GETSTACK":
+                    case "GET_STACK":
+                    case "CALLSTACK":
+                        return HandleGetStack();
+
+                    case "GETMODULES":
+                    case "GET_MODULES":
+                    case "IOPMODULES":
+                        return HandleGetModules();
+
+                    case "GETREGISTER":
+                    case "GET_REGISTER":
+                    case "PINEGETREGISTER":
+                        return HandleGetRegister(command.CpuSel, command.RegisterCategory, command.RegisterIndex);
+
+                    case "PINESETREG":
+                    case "PINE_SETREG":
+                    case "PINESETREGISTER":
+                        return HandlePineSetRegister(command.CpuSel, command.RegisterCategory, command.RegisterIndex, command.RegisterValue);
+
+                    case "LISTFUNCTIONS":
+                    case "LIST_FUNCTIONS":
+                    case "PINEFUNCTIONS":
+                        return HandleListFunctions(command.Offset, command.MaxCount);
+
+                    case "LISTGLOBALS":
+                    case "LIST_GLOBALS":
+                    case "PINEGLOBALS":
+                        return HandleListGlobals(command.Offset, command.MaxCount);
+
+                    case "GETLOCALS":
+                    case "GET_LOCALS":
+                        return HandleGetLocals(command.Address);
+
+                    case "SAVESTATETOFILE":
+                    case "SAVE_STATE_FILE":
+                    case "SAVESTATEFILE":
+                        return HandleSaveStateFile(command.FilePath);
+
+                    case "LOADSTATEFROMFILE":
+                    case "LOAD_STATE_FILE":
+                    case "LOADSTATEFILE":
+                        return HandleLoadStateFile(command.FilePath);
                     
                     default:
                         // Echo for unknown commands
@@ -1955,10 +2040,408 @@ namespace CodeDesigner.Ps2.Bridge
         /// 0x08=suspend, 0x10=dormant.  The thread table is located by reading
         /// the kernel's internal data starting at physical 0x00000000.
         /// </summary>
+        private string HandleReset()
+        {
+            if (IsPineMode)
+            {
+                try   { PineClient!.Reset(); return CreateSuccessResponse("Reset"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE Reset failed: {ex.Message}"); }
+            }
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+            Scheduler.Reset();
+            return CreateSuccessResponse("Reset");
+        }
+
+        private string HandleStepInto()
+        {
+            if (IsPineMode)
+            {
+                try   { PineClient!.StepInto(); return CreateSuccessResponse("StepInto initiated"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE StepInto failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("STEPINTO requires PINE mode");
+        }
+
+        private string HandleStepOver()
+        {
+            if (IsPineMode)
+            {
+                try   { PineClient!.StepOver(); return CreateSuccessResponse("StepOver initiated"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE StepOver failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("STEPOVER requires PINE mode");
+        }
+
+        private string HandleStepOut()
+        {
+            if (IsPineMode)
+            {
+                try   { PineClient!.StepOut(); return CreateSuccessResponse("StepOut initiated"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE StepOut failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("STEPOUT requires PINE mode");
+        }
+
+        private string HandleGetFps()
+        {
+            if (IsPineMode)
+            {
+                try
+                {
+                    float fps = PineClient!.GetFPS();
+                    return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "GETFPS", FPS = fps });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE GetFPS failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("GETFPS requires PINE mode");
+        }
+
+        private string HandleSetLimiterMode(byte? mode)
+        {
+            if (mode == null) return CreateErrorResponse("LimiterMode is required (0=Nominal, 1=Turbo, 2=Slomo, 3=Unlimited)");
+            if (IsPineMode)
+            {
+                try   { PineClient!.SetLimiterMode(mode.Value); return CreateSuccessResponse($"Limiter mode set to {mode}"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE SetLimiterMode failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("SETLIMITER requires PINE mode");
+        }
+
+        private string HandleFrameAdvance(byte? numFrames)
+        {
+            if (numFrames == null || numFrames == 0) return CreateErrorResponse("FrameCount is required and must be ≥ 1");
+            if (IsPineMode)
+            {
+                try   { PineClient!.FrameAdvance(numFrames.Value); return CreateSuccessResponse($"Frame advance by {numFrames} initiated"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE FrameAdvance failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("FRAMEADVANCE requires PINE mode");
+        }
+
+        private string HandleListBreakpoints(byte? cpuSel)
+        {
+            if (IsPineMode)
+            {
+                try
+                {
+                    var bps = PineClient!.ListBreakpoints(cpuSel ?? 0xFF);
+                    var entries = bps.Select(b => new PineBreakpointInfo
+                    {
+                        Address = $"0x{b.Address:X8}",
+                        Enabled = b.Enabled,
+                        Cpu     = b.Cpu == 0 ? "EE" : "IOP",
+                    }).ToList();
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success     = true,
+                        Command     = "LISTBP",
+                        Breakpoints = entries,
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE ListBreakpoints failed: {ex.Message}"); }
+            }
+            // Internal emulator — just use the existing breakpoint set
+            return CreateErrorResponse("LISTBP requires PINE mode (use SETBP / CLEARBP for the internal emulator)");
+        }
+
+        private string HandleGetSymbol(uint? address)
+        {
+            if (address == null) return CreateErrorResponse("Address is required for GETSYMBOL");
+            if (IsPineMode)
+            {
+                try
+                {
+                    var sym = PineClient!.GetSymbol(address.Value);
+                    if (sym == null) return CreateErrorResponse($"No symbol at 0x{address.Value:X8}");
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success       = true,
+                        Command       = "GETSYMBOL",
+                        SymbolAddress = $"0x{sym.Value.StartAddress:X8}",
+                        SymbolName    = sym.Value.Name,
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE GetSymbol failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("GETSYMBOL requires PINE mode");
+        }
+
+        private string HandleGetSymbolByName(string? name)
+        {
+            if (string.IsNullOrEmpty(name)) return CreateErrorResponse("SymbolName is required for GETSYMBOLBYNAME");
+            if (IsPineMode)
+            {
+                try
+                {
+                    var sym = PineClient!.GetSymbolByName(name);
+                    if (sym == null) return CreateErrorResponse($"Symbol '{name}' not found");
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success       = true,
+                        Command       = "GETSYMBOLBYNAME",
+                        SymbolAddress = $"0x{sym.Value.Address:X8}",
+                        SymbolName    = name,
+                        SymbolSize    = sym.Value.Size,
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE GetSymbolByName failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("GETSYMBOLBYNAME requires PINE mode");
+        }
+
+        private string HandleGetStack()
+        {
+            if (IsPineMode)
+            {
+                try
+                {
+                    var frames = PineClient!.GetStack();
+                    var entries = frames.Select(f => new PineStackFrameInfo
+                    {
+                        Entry     = $"0x{f.Entry:X8}",
+                        PC        = $"0x{f.PC:X8}",
+                        SP        = $"0x{f.SP:X8}",
+                        StackSize = f.StackSize,
+                    }).ToList();
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success     = true,
+                        Command     = "GETSTACK",
+                        StackFrames = entries,
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE GetStack failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("GETSTACK requires PINE mode");
+        }
+
+        private string HandleGetModules()
+        {
+            if (IsPineMode)
+            {
+                try
+                {
+                    var modules = PineClient!.GetModules();
+                    var entries = modules.Select(m => new IopModuleInfo
+                    {
+                        Name      = m.Name,
+                        Version   = m.Version,
+                        TextAddr  = $"0x{m.TextAddr:X8}",
+                        Entry     = $"0x{m.Entry:X8}",
+                        GP        = $"0x{m.GP:X8}",
+                        TextSize  = m.TextSize,
+                        DataSize  = m.DataSize,
+                        BssSize   = m.BssSize,
+                    }).ToList();
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = true,
+                        Command = "GETMODULES",
+                        Modules = entries,
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE GetModules failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("GETMODULES requires PINE mode");
+        }
+
+        private string HandleGetRegister(byte? cpuSel, byte? cat, int? regIndex)
+        {
+            if (cpuSel == null) return CreateErrorResponse("CpuSel is required for GETREGISTER (0=EE, 1=IOP)");
+            if (cat == null)    return CreateErrorResponse("RegisterCategory is required for GETREGISTER");
+            if (regIndex == null) return CreateErrorResponse("RegisterIndex is required for GETREGISTER");
+            if (IsPineMode)
+            {
+                try
+                {
+                    byte[] val = PineClient!.GetRegister(cpuSel.Value, cat.Value, (byte)regIndex.Value);
+                    string hex = BitConverter.ToString(val).Replace("-", "");
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success       = true,
+                        Command       = "GETREGISTER",
+                        RegisterValue = hex,
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE GetRegister failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("GETREGISTER requires PINE mode");
+        }
+
+        private string HandlePineSetRegister(byte? cpuSel, byte? cat, int? regIndex, string? regValue)
+        {
+            if (cpuSel == null) return CreateErrorResponse("CpuSel is required for PINESETREG (0=EE, 1=IOP)");
+            if (cat == null)    return CreateErrorResponse("RegisterCategory is required for PINESETREG");
+            if (regIndex == null) return CreateErrorResponse("RegisterIndex is required for PINESETREG");
+            if (string.IsNullOrEmpty(regValue)) return CreateErrorResponse("RegisterValue (32 hex chars = 128-bit LE) is required for PINESETREG");
+            if (!IsPineMode) return CreateErrorResponse("PINESETREG requires PINE mode; use SETREG for the internal emulator");
+
+            // Accept 32 hex chars (128-bit) or up to 16 hex chars (64-bit, zero-extended)
+            string hex = regValue.Replace("0x", "").Replace("0X", "").Trim();
+            if (hex.Length > 32 || hex.Length == 0 || hex.Length % 2 != 0)
+                return CreateErrorResponse("RegisterValue must be an even-length hex string of up to 32 characters (128 bits)");
+            byte[] val128 = new byte[16];
+            byte[] parsed = new byte[hex.Length / 2];
+            for (int i = 0; i < parsed.Length; i++)
+                parsed[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+            // Copy little-endian (pad high bytes with zero)
+            Buffer.BlockCopy(parsed, 0, val128, 0, parsed.Length);
+
+            try
+            {
+                PineClient!.SetRegister(cpuSel.Value, cat.Value, (byte)regIndex.Value, val128);
+                return CreateSuccessResponse($"Register set");
+            }
+            catch (Exception ex) { return CreateErrorResponse($"PINE SetRegister failed: {ex.Message}"); }
+        }
+
+        private string HandleListFunctions(uint? offset, ushort? maxCount)
+        {
+            if (IsPineMode)
+            {
+                try
+                {
+                    var (total, symbols) = PineClient!.ListFunctions(offset ?? 0, maxCount ?? 256);
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success       = true,
+                        Command       = "LISTFUNCTIONS",
+                        TotalSymbols  = total,
+                        PineSymbols   = symbols.Select(s => new PineSymbolInfo
+                        {
+                            Address = $"0x{s.Address:X8}",
+                            Size    = s.Size,
+                            Name    = s.Name,
+                        }).ToList(),
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE ListFunctions failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("LISTFUNCTIONS requires PINE mode");
+        }
+
+        private string HandleListGlobals(uint? offset, ushort? maxCount)
+        {
+            if (IsPineMode)
+            {
+                try
+                {
+                    var (total, symbols) = PineClient!.ListGlobals(offset ?? 0, maxCount ?? 256);
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success       = true,
+                        Command       = "LISTGLOBALS",
+                        TotalSymbols  = total,
+                        PineSymbols   = symbols.Select(s => new PineSymbolInfo
+                        {
+                            Address = $"0x{s.Address:X8}",
+                            Size    = s.Size,
+                            Name    = s.Name,
+                        }).ToList(),
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE ListGlobals failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("LISTGLOBALS requires PINE mode");
+        }
+
+        private string HandleGetLocals(uint? address)
+        {
+            if (address == null) return CreateErrorResponse("Address is required for GETLOCALS");
+            if (IsPineMode)
+            {
+                try
+                {
+                    var locals = PineClient!.GetLocals(address.Value);
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success    = true,
+                        Command    = "GETLOCALS",
+                        LocalVars  = locals.Select(l => new PineLocalInfo
+                        {
+                            StorageType = l.StorageType switch { 0 => "global", 1 => "register", 2 => "stack", _ => $"0x{l.StorageType:X2}" },
+                            Value       = l.Value,
+                            Name        = l.Name,
+                        }).ToList(),
+                    });
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE GetLocals failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("GETLOCALS requires PINE mode");
+        }
+
+        private string HandleSaveStateFile(string? filePath)
+        {
+            if (string.IsNullOrEmpty(filePath)) return CreateErrorResponse("FilePath is required for SAVESTATETOFILE");
+            if (IsPineMode)
+            {
+                try   { PineClient!.SaveStateFile(filePath); return CreateSuccessResponse($"State saved to '{filePath}'"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE SaveStateFile failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("SAVESTATETOFILE requires PINE mode; use SNAPSHOT for the internal emulator");
+        }
+
+        private string HandleLoadStateFile(string? filePath)
+        {
+            if (string.IsNullOrEmpty(filePath)) return CreateErrorResponse("FilePath is required for LOADSTATEFROMFILE");
+            if (IsPineMode)
+            {
+                try
+                {
+                    bool ok = PineClient!.LoadStateFile(filePath);
+                    return ok
+                        ? CreateSuccessResponse($"State loaded from '{filePath}'")
+                        : CreateErrorResponse($"PINE LoadStateFile failed for '{filePath}'");
+                }
+                catch (Exception ex) { return CreateErrorResponse($"PINE LoadStateFile failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("LOADSTATEFROMFILE requires PINE mode; use LOADSNAPSHOT for the internal emulator");
+        }
+
+        /// <summary>
+        /// Reads the current running thread from CPU state and attempts to walk
+        /// the PS2 EE OS thread control block list in EE RAM.  Each TCB is 128
+        /// bytes; status byte at offset 0: 0x01=running, 0x02=ready, 0x04=wait,
+        /// 0x08=suspend, 0x10=dormant.  The thread table is located by reading
+        /// the kernel's internal data starting at physical 0x00000000.
+        /// </summary>
         private string HandleGetThreads()
         {
             if (IsPineMode)
-                return CreateErrorResponse("GETTHREADS is not available in PINE mode (thread introspection requires the internal emulator).");
+            {
+                try
+                {
+                    var pineThreads = PineClient!.GetEEThreads();
+                    var pineThreadEntries = pineThreads.Select(t => new ThreadEntry
+                    {
+                        Id       = (int)t.TID,
+                        Status   = t.Status switch
+                        {
+                            1 => "Running",
+                            2 => "Ready",
+                            4 => "Waiting",
+                            8 => "Suspended",
+                            16 => "Dormant",
+                            _ => $"0x{t.Status:X2}",
+                        },
+                        Pc       = t.PC,
+                        Sp       = t.StackTop,
+                        Priority = (int)t.Priority,
+                        EntryPc  = t.EntryPoint,
+                    }).ToList();
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = true,
+                        Command = "GETTHREADS",
+                        Threads = pineThreadEntries,
+                    });
+                }
+                catch (Exception ex)
+                {
+                    return CreateErrorResponse($"PINE GETTHREADS failed: {ex.Message}");
+                }
+            }
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
@@ -4061,6 +4544,23 @@ namespace CodeDesigner.Ps2.Bridge
         public long? Steps { get; set; }
         // COMPILECDS — pre-resolved pointer-manager labels (dotted names like "seal.health")
         public List<LabelEntry>? Labels { get; set; }
+        // New PINE extended command fields
+        /// <summary>CPU selector for GETREGISTER/PINESETREG/LISTBP: 0=EE, 1=IOP, 0xFF=both.</summary>
+        public byte? CpuSel { get; set; }
+        /// <summary>Register category for GETREGISTER/PINESETREG.</summary>
+        public byte? RegisterCategory { get; set; }
+        /// <summary>Speed limiter mode for SETLIMITER: 0=Nominal, 1=Turbo, 2=Slomo, 3=Unlimited.</summary>
+        public byte? LimiterMode { get; set; }
+        /// <summary>Number of frames for FRAMEADVANCE.</summary>
+        public byte? FrameCount { get; set; }
+        /// <summary>Symbol name for GETSYMBOLBYNAME.</summary>
+        public string? SymbolName { get; set; }
+        /// <summary>File path for SAVESTATETOFILE / LOADSTATEFROMFILE.</summary>
+        public string? FilePath { get; set; }
+        /// <summary>Pagination offset for LISTFUNCTIONS / LISTGLOBALS.</summary>
+        public uint? Offset { get; set; }
+        /// <summary>Maximum result count for LISTFUNCTIONS / LISTGLOBALS.</summary>
+        public ushort? MaxCount { get; set; }
     }
 
     /// <summary>
@@ -4161,6 +4661,18 @@ namespace CodeDesigner.Ps2.Bridge
         public List<PortCheatResult>? PortCheatResults { get; set; }
         // MC_LIST field
         public List<McSaveInfo>? McSaves { get; set; }
+        // New PINE extended command response fields
+        public float? FPS { get; set; }
+        public string? SymbolAddress { get; set; }
+        public string? SymbolName { get; set; }
+        public uint? SymbolSize { get; set; }
+        public string? RegisterValue { get; set; }
+        public uint? TotalSymbols { get; set; }
+        public List<PineBreakpointInfo>?  Breakpoints  { get; set; }
+        public List<PineStackFrameInfo>?  StackFrames  { get; set; }
+        public List<IopModuleInfo>?       Modules      { get; set; }
+        public List<PineSymbolInfo>?      PineSymbols  { get; set; }
+        public List<PineLocalInfo>?       LocalVars    { get; set; }
     }
 
     /// <summary>Metadata for a single PS2 save-game directory returned by MC_LIST.</summary>
@@ -4323,6 +4835,89 @@ namespace CodeDesigner.Ps2.Bridge
 
         [System.Text.Json.Serialization.JsonPropertyName("entryPc")]
         public uint EntryPc { get; set; }
+    }
+
+    /// <summary>One breakpoint entry returned by LISTBP.</summary>
+    public class PineBreakpointInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
+        public string Address { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("enabled")]
+        public bool Enabled { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("cpu")]
+        public string Cpu { get; set; } = string.Empty;
+    }
+
+    /// <summary>One call-stack frame returned by GETSTACK.</summary>
+    public class PineStackFrameInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("entry")]
+        public string Entry { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("pc")]
+        public string PC { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("sp")]
+        public string SP { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("stackSize")]
+        public uint StackSize { get; set; }
+    }
+
+    /// <summary>One IOP module entry returned by GETMODULES.</summary>
+    public class IopModuleInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("version")]
+        public ushort Version { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("textAddr")]
+        public string TextAddr { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("entry")]
+        public string Entry { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("gp")]
+        public string GP { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("textSize")]
+        public uint TextSize { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("dataSize")]
+        public uint DataSize { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("bssSize")]
+        public uint BssSize { get; set; }
+    }
+
+    /// <summary>One EE symbol entry returned by LISTFUNCTIONS / LISTGLOBALS.</summary>
+    public class PineSymbolInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
+        public string Address { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("size")]
+        public uint Size { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+    }
+
+    /// <summary>One local variable or parameter entry returned by GETLOCALS.</summary>
+    public class PineLocalInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("storageType")]
+        public string StorageType { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public int Value { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
     }
 }
 
