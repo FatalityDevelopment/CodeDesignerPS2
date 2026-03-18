@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CodeDesigner.Mips64LE.Common.CheatEngine</RootNamespace>
+    <AssemblyName>CodeDesigner.Mips64LE.CheatEngine</AssemblyName>
+  </PropertyGroup>
+
+</Project>

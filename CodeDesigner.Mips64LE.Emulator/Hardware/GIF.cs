@@ -1,4 +1,5 @@
 using System;
+using CodeDesigner.Mips64LE.Common.Interfaces;
 
 namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
 {
@@ -44,7 +45,7 @@ namespace CodeDesigner.Mips64LE.Common.Emulator.Hardware
     ///
     /// Reference: PS2 EE User's Manual §4.2 (GIF); PCSX2 pcsx2/Gif.h, pcsx2/Gif.cpp.
     /// </summary>
-    public sealed class GIF
+    public sealed class GIF : IGifDataSink
     {
         // ── Register offsets (byte offset from GIF physical base 0x10003000) ───
         public const uint REG_CTRL  = 0x00u;
