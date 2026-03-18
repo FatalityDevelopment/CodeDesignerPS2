@@ -1,4 +1,4 @@
-# Copilot Instructions for Mips64LE
+# Copilot Instructions for CodeDesigner
 
 ## Project Overview
 
@@ -7,34 +7,42 @@ This is a C# library and toolset for the **Sony PlayStation 2 Emotion Engine (EE
 ## Repository Structure
 
 ```
-Mips64LE/
-├── CodeDesigner.Mips64LE.Common/     # Core library (assembler, disassembler, instructions, emulator)
-├── CodeDesigner.Mips64LE/            # Console application + socket server
-├── CodeDesigner.Mips64LE.TestProject/ # Unit-test suite
-└── vscode/codedesigner/              # VSCode extension frontend (TypeScript/Node.js)
+CodeDesigner/
+├── CodeDesigner.Ps2.Common/     # Core library (assembler, disassembler, instructions, encoder/decoder)
+├── CodeDesigner.Ps2.Emulator/   # PS2 emulator: EE + IOP CPUs, hardware peripherals, ELF loader
+├── CodeDesigner.Ps2/            # Console application + socket server
+├── CodeDesigner.Ps2.McpServer/  # MCP stdio bridge for GitHub Copilot
+├── CodeDesigner.Ps2.CdsLanguage/ # CDS compiler and parser
+├── CodeDesigner.Ps2.CheatEngine/ # Cheat code engine
+├── CodeDesigner.Ps2.CheatPorter/ # Port cheat codes between game revisions
+├── CodeDesigner.Ps2.CheatConverter/ # Cheat format converter
+├── CodeDesigner.Ps2.MemoryCardManager/ # PS2 memory card emulation
+├── CodeDesigner.Ps2.Recompiler/ # Static recompiler: PS2 ELF → C++
+├── CodeDesigner.Ps2.TestProject/ # Unit-test suite (1097 tests)
+└── vscode/codedesigner/         # VSCode extension frontend (TypeScript/Node.js)
 ```
 
 ## Build & Test
 
 ```bash
 # Build the solution
-dotnet build CodeDesigner.Mips64LE.sln
+dotnet build CodeDesigner.Ps2.sln
 
 # Run all tests
-dotnet test CodeDesigner.Mips64LE.TestProject/
+dotnet test CodeDesigner.Ps2.TestProject/
 
 # Run the console app
-cd CodeDesigner.Mips64LE && dotnet run
+cd CodeDesigner.Ps2 && dotnet run
 
 # Start the socket server (for the VSCode extension)
-cd CodeDesigner.Mips64LE && dotnet run -- --server
+cd CodeDesigner.Ps2 && dotnet run -- --server
 ```
 
 ## Key Conventions
 
 ### Instruction Implementation
 
-- Every instruction lives in `CodeDesigner.Mips64LE.Common/Instructions/` under the appropriate sub-folder (e.g., `Core/`, `Coprocessor/`, `MMI/`, `VectorUnit/`).
+- Every instruction lives in `CodeDesigner.Ps2.Common/Instructions/` under the appropriate sub-folder (e.g., `Core/`, `Coprocessor/`, `MMI/`, `VectorUnit/`).
 - Each instruction class implements an interface with `Disassemble`, `Assemble`, and `Exec` methods.
 - Instruction arguments are decoded via `MipsInstructionArgs` (fields: `Rs`, `Rt`, `Rd`, `Shamt`, `Funct`, `Immediate`, `Target`).
 - For **COP1 FPU** instructions, `args.Rs` is the format field (value `0x10`), **not** a register. Use `args.Rd` = fs, `args.Rt` = ft, `args.Shamt` = fd.
@@ -95,7 +103,7 @@ cd CodeDesigner.Mips64LE && dotnet run -- --server
 
 ### IOP Subsystem
 
-All IOP classes live in `CodeDesigner.Mips64LE.Common/Emulator/IOP/`.
+All IOP classes live in `CodeDesigner.Ps2.Emulator/IOP/`.
 
 - **IopState / IopMemoryBus / IopEmulator**: IOP RAM = 2 MB. INTC at `0x1F801070`/`0x1F801074`, timers at `0x1F801100`, SIF mirror at `0x1D000000`. `IopEmulator` bridges into `CpuState` for instruction execution. Reset vector `0xBFC00000`.
 - **IOP DMAC**: 13 channels (0–6 at `0x1F801080+`, 7–12 at `0x1F801500+`). Registers per channel: MADR+0, BCR+4, CHCR+8 (STR=bit24). DPCR/DICR at `0x1F8010F0`/`0xF4`, DPCR2/DICR2 at `0x1F801570`/`0x74`. INTC bit 3.
@@ -111,7 +119,7 @@ All IOP classes live in `CodeDesigner.Mips64LE.Common/Emulator/IOP/`.
 
 ### Testing
 
-- All tests live in `CodeDesigner.Mips64LE.TestProject/`.
+- All tests live in `CodeDesigner.Ps2.TestProject/`.
 - Tests verify both disassembly output and execution correctness.
 - When adding a new instruction, add both a disassembly test and an execution test following existing patterns in `TestFullInstructionCoverage.cs` and `TestPS2Instructions.cs`.
 - `SYSCALL` tests expect a `SystemCallException` from direct `Exec()` calls.

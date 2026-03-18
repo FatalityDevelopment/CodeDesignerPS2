@@ -148,7 +148,7 @@ Disassemble hex instructions into MIPS assembly.
 ### Starting the C# Server
 
 ```bash
-cd CodeDesigner.Mips64LE
+cd CodeDesigner.Ps2
 dotnet run -- --run
 ```
 
@@ -262,7 +262,7 @@ Error: Not connected to C# server. Use "Connect to Server" command first.
 
 **C# Backend:**
 ```bash
-dotnet build CodeDesigner.Mips64LE.sln
+dotnet build CodeDesigner.Ps2.sln
 ```
 
 **TypeScript Extension:**
@@ -277,7 +277,7 @@ npm run compile
 **C# Server Test:**
 ```bash
 # Start emulator (embedded server on port 8765)
-dotnet run --project CodeDesigner.Mips64LE/CodeDesigner.Mips64LE.csproj -- --run
+dotnet run --project CodeDesigner.Ps2/CodeDesigner.Ps2.csproj -- --run
 
 # In another terminal, connect with any TCP client and send a JSON PING command:
 # {"command":"PING"}

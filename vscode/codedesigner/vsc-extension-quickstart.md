@@ -38,7 +38,7 @@ npm run compile
 
 1. Start the C# emulator (embedded server on port 8765):
    ```bash
-   cd CodeDesigner.Mips64LE
+   cd CodeDesigner.Ps2
    dotnet run -- --run
    ```
 2. In VS Code, press **F5** to launch the Extension Development Host.

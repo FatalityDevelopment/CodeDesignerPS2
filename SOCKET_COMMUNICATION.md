@@ -8,7 +8,7 @@ The project now includes a TCP socket-based communication channel that allows th
 
 ## Components
 
-### 1. C# Socket Server (`CodeDesigner.Mips64LE/SocketServer.cs`)
+### 1. C# Socket Server (`CodeDesigner.Ps2/SocketServer.cs`)
 
 The socket server runs on port `8765` (embedded in `--run` mode) or `8766` (standalone `--server` mode) and provides:
 - TCP connection handling
@@ -43,7 +43,7 @@ The extension now includes three new commands:
 To use the VS Code extension or MCP bridge with a live emulator, start in `--run` mode (embedded server on port 8765):
 
 ```bash
-cd CodeDesigner.Mips64LE
+cd CodeDesigner.Ps2
 dotnet run -- --run
 ```
 
@@ -52,7 +52,7 @@ The server will start listening on `localhost:8765`. The VS Code extension can a
 For assembler/disassembler use only (no live emulator), start the standalone server on port 8766:
 
 ```bash
-cd CodeDesigner.Mips64LE
+cd CodeDesigner.Ps2
 dotnet run -- --server
 ```
 
@@ -75,7 +75,7 @@ A simple test can be performed:
 
 1. Start the emulator:
    ```bash
-   dotnet run --project CodeDesigner.Mips64LE/CodeDesigner.Mips64LE.csproj -- --run
+   dotnet run --project CodeDesigner.Ps2/CodeDesigner.Ps2.csproj -- --run
    ```
 
 2. In the VSCode extension, run the "Connect to Server" command
@@ -631,7 +631,7 @@ Response: `{ "Success": true, "Message": "Loaded N bytes at 0x80000000" }`
 
 #### APPLYCHEATS
 Applies a block of cheat codes in the CodeDesigner cheat format to live emulator memory.  
-See [CodeDesigner.Mips64LE.Common/CheatEngine/README.md](CodeDesigner.Mips64LE.Common/CheatEngine/README.md) for the cheat line format.
+See [CodeDesigner.Ps2.CheatEngine/README.md](CodeDesigner.Ps2.CheatEngine/README.md) for the cheat line format.
 
 ```json
 {
@@ -877,7 +877,7 @@ socketClient.onMessage((message: string) => {
 ### Build C# Project
 
 ```bash
-dotnet build CodeDesigner.Mips64LE.sln
+dotnet build CodeDesigner.Ps2.sln
 ```
 
 ### Build VSCode Extension

@@ -1,6 +1,6 @@
-# MIPS64 EE MCP Server
+# CodeDesigner.Ps2.McpServer — MCP Bridge for GitHub Copilot
 
-`CodeDesigner.Mips64LE.McpServer` is a **stdio-based Model Context Protocol (MCP) server** that bridges GitHub Copilot (and any MCP-compatible client) to the CodeDesigner MIPS64 Emotion Engine socket server.
+`CodeDesigner.Ps2.McpServer` is a **stdio-based Model Context Protocol (MCP) server** that bridges GitHub Copilot (and any MCP-compatible client) to the CodeDesigner PS2 socket server.
 
 Once registered, Copilot can query your live disassembler views, read and write emulator memory, inspect and modify registers, compile CDS scripts, apply cheat codes, port cheats between game revisions, scan for data patterns, list disc ELFs, recompile PS2 executables, and much more — directly from the chat panel.
 
@@ -12,10 +12,10 @@ Once registered, Copilot can query your live disassembler views, read and write 
 GitHub Copilot Chat
        │  MCP (stdio)
        ▼
-CodeDesigner.Mips64LE.McpServer  ← this project
+CodeDesigner.Ps2.McpServer  ← this project
        │  JSON over TCP :8765
        ▼
-CodeDesigner.Mips64LE (--run or --pcsx2 mode)
+CodeDesigner.Ps2 (--run or --pcsx2 mode)
        │
        ▼
 PS2 Emulator / PCSX2 via PINE IPC / Disassembler engine
@@ -40,7 +40,7 @@ PS2 Emulator / PCSX2 via PINE IPC / Disassembler engine
 1. **.NET 8 SDK** — `dotnet --version` should print `8.x.x` or later.
 2. The **emulator** must be running with `--run` (which starts the embedded socket server on port 8765):
    ```bash
-   cd CodeDesigner.Mips64LE
+   cd CodeDesigner.Ps2
    dotnet run -- --run
    ```
    Or in PCSX2 bridge mode:
@@ -61,13 +61,13 @@ Add the following to your VS Code **User Settings** (`Ctrl+Shift+P` → *Prefere
 {
   "mcp": {
     "servers": {
-      "mips64le": {
+      "codedesigner": {
         "type": "stdio",
         "command": "dotnet",
         "args": [
           "run",
           "--project",
-          "/absolute/path/to/CodeDesigner.Mips64LE.McpServer"
+          "/absolute/path/to/CodeDesigner.Ps2.McpServer"
         ]
       }
     }
@@ -75,14 +75,14 @@ Add the following to your VS Code **User Settings** (`Ctrl+Shift+P` → *Prefere
 }
 ```
 
-Replace `/absolute/path/to/CodeDesigner.Mips64LE.McpServer` with the actual path on your machine.
+Replace `/absolute/path/to/CodeDesigner.Ps2.McpServer` with the actual path on your machine.
 
 ### Option B — run from a published executable
 
 Publish a self-contained binary first:
 
 ```bash
-cd CodeDesigner.Mips64LE.McpServer
+cd CodeDesigner.Ps2.McpServer
 dotnet publish -c Release -r win-x64 --self-contained true -o publish/
 ```
 
@@ -92,9 +92,9 @@ Then reference the binary in settings:
 {
   "mcp": {
     "servers": {
-      "mips64le": {
+      "codedesigner": {
         "type": "stdio",
-        "command": "C:/path/to/CodeDesigner.Mips64LE.McpServer/publish/CodeDesigner.Mips64LE.McpServer.exe"
+        "command": "C:/path/to/CodeDesigner.Ps2.McpServer/publish/CodeDesigner.Ps2.McpServer.exe"
       }
     }
   }
@@ -252,7 +252,7 @@ Once registered you can ask Copilot things like:
 
 | Symptom | Fix |
 |---|---|
-| `Cannot connect to emulator socket server` | Start the emulator: `dotnet run -- --run` in `CodeDesigner.Mips64LE/`. The VS Code extension can also start it via the **Connect** button. |
+| `Cannot connect to emulator socket server` | Start the emulator: `dotnet run -- --run` in `CodeDesigner.Ps2/`. The VS Code extension can also start it via the **Connect** button. |
 | `Emulator not running — no scheduler attached` | The socket server is up but no emulator session is active; start a session with `--run`. |
 | `PCSX2STATUS requires --pcsx2 mode` | PCSX2-specific tools only work when the server is started with `--pcsx2`. |
 | `GETTHREADS is not available in PINE mode` | Thread introspection requires the internal emulator. Use `--run` instead of `--pcsx2`. |

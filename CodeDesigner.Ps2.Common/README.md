@@ -1,16 +1,16 @@
-﻿# MIPS64 – PlayStation 2 Emotion Engine
+# CodeDesigner.Ps2.Common — Core Library
 
 ## Overview
 
-The **Emotion Engine (EE)** is the primary CPU of the **Sony PlayStation 2**, designed jointly by **Sony** and **Toshiba**.  
+`CodeDesigner.Ps2.Common` is the **core library** of the CodeDesigner PS2 toolkit. It contains the assembler, disassembler, instruction encoder/decoder, and all MIPS EE instruction implementations.
+
+The **Emotion Engine (EE)** is the primary CPU of the **Sony PlayStation 2**, designed jointly by **Sony** and **Toshiba**.
 It is a **custom 64-bit MIPS-based processor** engineered to deliver extremely high throughput through **parallelism**, **vector processing**, and **DMA-driven data flow**.
 
 Rather than relying on a single powerful scalar core, the EE combines:
 - A **superscalar MIPS64 CPU**
 - Two **high-performance Vector Units (VU0 and VU1)**
 - A **bandwidth-focused memory and DMA architecture**
-
-This repository/project focuses on **understanding, documenting, and working with the MIPS64 architecture as implemented by the PlayStation 2 Emotion Engine**, including its many non-standard extensions.
 
 ---
 
