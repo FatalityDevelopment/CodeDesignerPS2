@@ -17,7 +17,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE.Recom
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE.CheatConverter", "CodeDesigner.Mips64LE.CheatConverter\CodeDesigner.Mips64LE.CheatConverter.csproj", "{C2D3E4F5-A6B7-8901-CDEF-012345678912}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Mips64LE.MemoryCardManager", "CodeDesigner.Mips64LE.MemoryCardManager\CodeDesigner.Mips64LE.MemoryCardManager.csproj", "{D3E4F5A6-B7C8-9012-DEF0-123456789013}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.MemoryCardManager", "CodeDesigner.Ps2.MemoryCardManager\CodeDesigner.Ps2.MemoryCardManager.csproj", "{D3E4F5A6-B7C8-9012-DEF0-123456789013}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

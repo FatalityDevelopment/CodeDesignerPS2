@@ -1,4 +1,4 @@
-namespace CodeDesigner.Mips64LE.MemoryCardManager;
+namespace CodeDesigner.Ps2.MemoryCardManager;
 
 /// <summary>Represents a single file within a PS2 save-game directory.</summary>
 public sealed class MemoryCardFile

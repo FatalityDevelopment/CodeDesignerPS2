@@ -11,7 +11,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CodeDesigner.Mips64LE.CheatConverter;
-using CodeDesigner.Mips64LE.MemoryCardManager;
+using CodeDesigner.Ps2.MemoryCardManager;
 using CodeDesigner.Mips64LE.Common;
 using CodeDesigner.Mips64LE.Common.CheatEngine;
 using CodeDesigner.Mips64LE.Common.Emulator;
