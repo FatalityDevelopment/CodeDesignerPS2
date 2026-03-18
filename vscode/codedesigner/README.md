@@ -80,7 +80,7 @@ Files with the `.cds` extension get syntax configuration (comment delimiters, br
 ## Requirements
 
 - [.NET 8.0 SDK](https://dotnet.microsoft.com/download)
-- The **CodeDesigner.Mips64LE** C# console application (included in this repository)
+- The **CodeDesigner.Ps2** C# console application (included in this repository)
 
 ---
 
@@ -93,7 +93,7 @@ The recommended way is to use the **Connect** button in the Emulator panel — t
 Alternatively, start it manually:
 
 ```bash
-cd CodeDesigner.Mips64LE
+cd CodeDesigner.Ps2
 dotnet run -- --run
 ```
 

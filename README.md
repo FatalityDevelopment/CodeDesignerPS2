@@ -1,20 +1,25 @@
-# Mips64LE — PlayStation 2 Emotion Engine MIPS Toolkit
+# CodeDesigner — PlayStation 2 Toolkit
 
-A C# library and toolset for working with the **Sony PlayStation 2 Emotion Engine (EE)** MIPS64 architecture. Provides a complete **assembler**, **disassembler**, **instruction decoder/encoder**, and **execution engine** for the PS2 EE, verified against [PCSX2](https://pcsx2.net/) reference behaviour.
+**CodeDesigner** is a C# library and toolset for the **Sony PlayStation 2 Emotion Engine (EE)**. It provides a complete **assembler**, **disassembler**, **instruction decoder/encoder**, **PS2 emulator**, **cheat engine**, **static recompiler**, and a **VS Code extension** — all verified against [PCSX2](https://pcsx2.net/) reference behaviour.
 
 ---
 
 ## Project Structure
 
 ```
-Mips64LE/
-├── CodeDesigner.Mips64LE.Common/        # Core library (assembler, disassembler, instructions, emulator)
-├── CodeDesigner.Mips64LE/               # Console application + socket server
-├── CodeDesigner.Mips64LE.McpServer/     # MCP stdio bridge for GitHub Copilot
-├── CodeDesigner.Mips64LE.Recompiler/    # Static recompiler (work in progress)
-├── CodeDesigner.Mips64LE.CheatConverter/# Cheat code format converter utility
-├── CodeDesigner.Mips64LE.TestProject/   # Unit-test suite (960 tests)
-└── vscode/codedesigner/                 # VS Code extension frontend
+CodeDesigner/
+├── CodeDesigner.Ps2.Common/        # Core library: assembler, disassembler, instructions, encoder/decoder
+├── CodeDesigner.Ps2.Emulator/      # PS2 emulator: EE + IOP CPUs, hardware peripherals, ELF loader
+├── CodeDesigner.Ps2/               # Console application + embedded socket server
+├── CodeDesigner.Ps2.McpServer/     # MCP stdio bridge for GitHub Copilot
+├── CodeDesigner.Ps2.CdsLanguage/   # Code Designer Script (CDS) compiler and parser
+├── CodeDesigner.Ps2.CheatEngine/   # Cheat code engine: apply, timer, condition cheats
+├── CodeDesigner.Ps2.CheatPorter/   # Port cheat codes between game revisions
+├── CodeDesigner.Ps2.CheatConverter/# Convert cheat codes between formats (AR2, CB, GS, raw)
+├── CodeDesigner.Ps2.MemoryCardManager/ # PS2 memory card emulation and management
+├── CodeDesigner.Ps2.Recompiler/    # Static recompiler: PS2 ELF → C++ source
+├── CodeDesigner.Ps2.TestProject/   # Unit-test suite (1097 tests)
+└── vscode/codedesigner/            # VS Code extension frontend (Angular 19 + TypeScript)
 ```
 
 ---
@@ -23,30 +28,30 @@ Mips64LE/
 
 ### Requirements
 - [.NET 8.0 SDK](https://dotnet.microsoft.com/download)
-- Node.js + npm (for the optional VSCode extension)
+- Node.js + npm (for the optional VS Code extension)
 
 ### Build
 
 ```bash
-dotnet build CodeDesigner.Mips64LE.sln
+dotnet build CodeDesigner.Ps2.sln
 ```
 
 ### Run Tests
 
 ```bash
-dotnet test CodeDesigner.Mips64LE.TestProject/
+dotnet test CodeDesigner.Ps2.TestProject/
 ```
 
-All 960 tests should pass.
+All 1097 tests should pass.
 
 ### Console Application
 
 ```bash
-cd CodeDesigner.Mips64LE
+cd CodeDesigner.Ps2
 dotnet run
 ```
 
-To start the emulator with the embedded socket server (port 8765) for the VS Code extension and MCP bridge:
+To start the PS2 emulator with the embedded socket server (port 8765) for the VS Code extension and MCP bridge:
 
 ```bash
 dotnet run -- --run
@@ -346,28 +351,34 @@ All instruction semantics have been cross-referenced with [PCSX2](https://pcsx2.
 
 ### Architecture Deep-Dives
 
-These documents live in [`CodeDesigner.Mips64LE.Common/Documentation/Architecture/`](CodeDesigner.Mips64LE.Common/Documentation/Architecture/).
+These documents live in [`CodeDesigner.Ps2.Common/Documentation/Architecture/`](CodeDesigner.Ps2.Common/Documentation/Architecture/).
 
 | Document | Description |
 |----------|-------------|
-| [EmotionEngine.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/EmotionEngine.md) | PS2 Emotion Engine CPU overview: registers, memory system, DMA, EE-specific instruction set extensions |
-| [COP0.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/COP0.md) | System Control Coprocessor: full register table (including PCCR at reg 25 sel, ErrorEPC at reg 30), exception flow, TLB, interrupts |
-| [COP1.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/COP1.md) | Floating-Point Unit: PS2 EE single-precision-only FPU, denormal flush, FCSR sticky flags, compare encoding differences vs standard MIPS |
-| [VU0.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/VU0.md) | Vector Unit 0: macro-mode (COP2) and micro-mode instruction sets, broadcast variants, LFSR RNG, VCALLMS/VCALLMSR |
-| [VU1.md](CodeDesigner.Mips64LE.Common/Documentation/Architecture/VU1.md) | Vector Unit 1: full micro-mode instruction reference — upper/lower word ops, EFU (P register), XGKICK → GIF PATH1 |
+| [EmotionEngine.md](CodeDesigner.Ps2.Common/Documentation/Architecture/EmotionEngine.md) | PS2 Emotion Engine CPU overview: registers, memory system, DMA, EE-specific instruction set extensions |
+| [COP0.md](CodeDesigner.Ps2.Common/Documentation/Architecture/COP0.md) | System Control Coprocessor: full register table (including PCCR at reg 25 sel, ErrorEPC at reg 30), exception flow, TLB, interrupts |
+| [COP1.md](CodeDesigner.Ps2.Common/Documentation/Architecture/COP1.md) | Floating-Point Unit: PS2 EE single-precision-only FPU, denormal flush, FCSR sticky flags, compare encoding differences vs standard MIPS |
+| [VU0.md](CodeDesigner.Ps2.Common/Documentation/Architecture/VU0.md) | Vector Unit 0: macro-mode (COP2) and micro-mode instruction sets, broadcast variants, LFSR RNG, VCALLMS/VCALLMSR |
+| [VU1.md](CodeDesigner.Ps2.Common/Documentation/Architecture/VU1.md) | Vector Unit 1: full micro-mode instruction reference — upper/lower word ops, EFU (P register), XGKICK → GIF PATH1 |
 
 ### Component README Files
 
 | Document | Description |
 |----------|-------------|
-| [CodeDesigner.Mips64LE.Common/README.md](CodeDesigner.Mips64LE.Common/README.md) | Core library overview: EE CPU architecture, vector units, FPU, memory system |
-| [CodeDesigner.Mips64LE/README.md](CodeDesigner.Mips64LE/README.md) | Console application and socket server overview |
-| [CodeDesigner.Mips64LE.McpServer/README.md](CodeDesigner.Mips64LE.McpServer/README.md) | MCP stdio bridge: GitHub Copilot integration, available tools, registration |
+| [CodeDesigner.Ps2.Common/README.md](CodeDesigner.Ps2.Common/README.md) | Core library overview: EE CPU architecture, vector units, FPU, memory system |
+| [CodeDesigner.Ps2/README.md](CodeDesigner.Ps2/README.md) | Console application and socket server overview |
+| [CodeDesigner.Ps2.McpServer/README.md](CodeDesigner.Ps2.McpServer/README.md) | MCP stdio bridge: GitHub Copilot integration, available tools, registration |
+| [CodeDesigner.Ps2.CdsLanguage/README.md](CodeDesigner.Ps2.CdsLanguage/README.md) | CDS compiler: language syntax, compilation pipeline, cheat code output |
+| [CodeDesigner.Ps2.CheatEngine/README.md](CodeDesigner.Ps2.CheatEngine/README.md) | Cheat engine: line types, address encoding, timer/condition cheats |
+| [CodeDesigner.Ps2.CheatPorter/README.md](CodeDesigner.Ps2.CheatPorter/README.md) | Cheat porter: multi-strategy pattern matching to port codes between game versions |
+| [CodeDesigner.Ps2.CheatConverter/README.md](CodeDesigner.Ps2.CheatConverter/README.md) | Cheat converter: format detection and conversion (AR2, CB, GS, raw) |
+| [CodeDesigner.Ps2.MemoryCardManager/README.md](CodeDesigner.Ps2.MemoryCardManager/README.md) | Memory card manager: PS2 8 MB memory card emulation and file access |
+| [CodeDesigner.Ps2.Recompiler/README.md](CodeDesigner.Ps2.Recompiler/README.md) | Static recompiler: translate PS2 ELF to native C++ source |
+| [CodeDesigner.Ps2.TestProject/README.md](CodeDesigner.Ps2.TestProject/README.md) | Test project: running the 1097-test suite |
 | [vscode/codedesigner/README.md](vscode/codedesigner/README.md) | VS Code extension user guide: setup, commands, supported instructions |
 | [vscode/codedesigner/CHANGELOG.md](vscode/codedesigner/CHANGELOG.md) | VS Code extension release history |
 | [vscode/codedesigner/ARCHITECTURE.md](vscode/codedesigner/ARCHITECTURE.md) | Extension architecture: webpack, Angular, provider pattern, communication |
 | [vscode/codedesigner/vsc-extension-quickstart.md](vscode/codedesigner/vsc-extension-quickstart.md) | Extension developer quick-start: project structure, build, debug, and extend |
-| [CodeDesigner.Mips64LE.Common/CheatEngine/README.md](CodeDesigner.Mips64LE.Common/CheatEngine/README.md) | Cheat code format reference: line types, address encoding, timer/condition cheats |
 
 ---
 

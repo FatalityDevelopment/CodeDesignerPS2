@@ -1,8 +1,8 @@
-# CodeDesigner.Mips64LE — Console Application & Socket Server
+# CodeDesigner.Ps2 — Console Application & Socket Server
 
 ## Overview
 
-`CodeDesigner.Mips64LE` is the **executable entry point** for the toolkit. It provides:
+`CodeDesigner.Ps2` is the **executable entry point** for the toolkit. It provides:
 
 - A **dual-CPU PS2 emulator** (EE + IOP) that boots a real PS2 BIOS and loads game discs
 - An **embedded TCP socket server** (port 8765) used by the VS Code extension and the MCP bridge
@@ -81,7 +81,7 @@ The emulator starts **paused** at the reset vector so the VS Code extension or M
 | `--steps <N>` | unlimited | Stop after exactly N EE instruction steps (useful for CI testing and benchmarking) |
 
 **Notes:**
-- The BIOS path defaults to `CodeDesigner.Mips64LE.Common/Bios/SCPH-70012_BIOS_V12_USA_200.bin` relative to the repository root.
+- The BIOS path defaults to `CodeDesigner.Ps2.Common/Bios/SCPH-70012_BIOS_V12_USA_200.bin` relative to the repository root.
 - **ZIP support:** Pass a `.zip` file to `--disc` and the emulator will automatically extract the first ISO/BIN found inside to the system temp directory. Subsequent runs reuse the cached extraction if the ZIP hasn't changed.
 - The emulator includes a **built-in debug session** that automatically tracks PC frequency, execution hotspots, and performance metrics — no extra configuration needed.
 
@@ -340,7 +340,7 @@ Labels are applied to disassembly output, CDS compilation, pointer scanning, and
 
 ```bash
 # Build
-cd CodeDesigner.Mips64LE
+cd CodeDesigner.Ps2
 dotnet build
 
 # Run with emulator and socket server
@@ -366,5 +366,5 @@ dotnet run -- --recompile --elf /path/to/game.elf --out ./recomp_out
 - [SOCKET_COMMUNICATION.md](../SOCKET_COMMUNICATION.md) — full socket command/response JSON protocol
 - [ASSEMBLER_DISASSEMBLER_INTEGRATION.md](../ASSEMBLER_DISASSEMBLER_INTEGRATION.md) — assemble/disassemble detail
 - [PINE_EXTENSION_PROPOSAL.md](../PINE_EXTENSION_PROPOSAL.md) — PCSX2 debugger extension protocol spec
-- [CodeDesigner.Mips64LE.Common/README.md](../CodeDesigner.Mips64LE.Common/README.md) — core library architecture
-- [CodeDesigner.Mips64LE.McpServer/README.md](../CodeDesigner.Mips64LE.McpServer/README.md) — MCP bridge for GitHub Copilot
+- [CodeDesigner.Ps2.Common/README.md](../CodeDesigner.Ps2.Common/README.md) — core library architecture
+- [CodeDesigner.Ps2.McpServer/README.md](../CodeDesigner.Ps2.McpServer/README.md) — MCP bridge for GitHub Copilot

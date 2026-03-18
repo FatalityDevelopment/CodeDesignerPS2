@@ -13,8 +13,8 @@ This guide will help you get started with the MIPS assembler and disassembler in
 ### 1. Build the C# Backend
 
 ```bash
-cd CodeDesigner.Mips64LE
-dotnet build
+cd CodeDesigner.Ps2
+dotnet build CodeDesigner.Ps2.sln
 ```
 
 ### 2. Start the Emulator
@@ -182,7 +182,7 @@ The Live Disassembler lets you pause EE execution at any instruction address and
 ### Step 1 — Ensure the emulator is running
 
 ```bash
-cd CodeDesigner.Mips64LE
+cd CodeDesigner.Ps2
 dotnet run -- --run
 ```
 
@@ -259,7 +259,7 @@ See [SOCKET_COMMUNICATION.md](SOCKET_COMMUNICATION.md) for the full command refe
 - Read the full documentation in `ASSEMBLER_DISASSEMBLER_INTEGRATION.md`
 - Explore the supported instruction set
 - Try assembling/disassembling your own MIPS programs
-- Check the emulator API in `CodeDesigner.Mips64LE.Common/Emulator/` for loading and running ELF/IRX images
+- Check the emulator API in `CodeDesigner.Ps2.Emulator/` for loading and running ELF/IRX images
 
 ## Support
 
