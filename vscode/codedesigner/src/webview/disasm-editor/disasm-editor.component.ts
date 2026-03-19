@@ -24,12 +24,13 @@ import { EditOverlayComponent, EditOverlayOpenData, EditOverlaySaveEvent } from 
 import { ConverterOverlayComponent, ConvertRequest, ConvertResult } from './components/converter-overlay.component';
 import { PorterOverlayComponent, PortRequest, PortResultPayload } from './components/porter-overlay.component';
 import { MemoryCardOverlayComponent, McListResult, McActionResult } from './components/memory-card-overlay.component';
+import { ScannerOverlayComponent, ScanRequest, ScanResult } from './components/scanner-overlay.component';
 import './disasm-editor.css';
 
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, ScannerOverlayComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -237,6 +238,13 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Reference to memory card overlay component */
   private readonly mcOverlayRef = viewChild<MemoryCardOverlayComponent>('mcOverlayComp');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Scanner Overlay State
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Reference to scanner overlay component */
+  private readonly scannerOverlayRef = viewChild<ScannerOverlayComponent>('scannerOverlayComp');
 
   /** Signal-based state (new architecture) */
   protected readonly signals = inject(EditorState);
@@ -578,6 +586,34 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onMcDelete(event: { mcPath: string; saveName: string }): void {
     this.vscode.postMessage({ type: 'mcDelete', mcPath: event.mcPath, saveName: event.saveName });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Scanner Overlay Event Handlers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  protected onScannerOverlayClose(): void {
+    this.signals.panels.scannerOverlay.set(false);
+  }
+
+  protected onScanValue(event: ScanRequest): void {
+    this.vscode.postMessage({
+      type:              'scanValue',
+      value:             event.value,
+      comparison:        event.comparison,
+      dataType:          event.dataType,
+      startAddress:      event.startAddress,
+      endAddress:        event.endAddress,
+      region:            event.region,
+      previousAddresses: event.previousAddresses,
+    });
+  }
+
+  protected onScannerNavigate(address: string): void {
+    const addr = parseInt(address, 16);
+    if (!isNaN(addr)) {
+      this.gotoRuntime.navigate?.(addr);
+    }
   }
 
   private focusVirtualGrid(): void {
@@ -1486,6 +1522,24 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.handleConverterOverlayMessage(data);
     this.handlePorterOverlayMessage(data);
     this.handleMemoryCardMessage(data);
+    this.handleScannerMessage(data);
+  }
+
+  private openScannerOverlay(): void {
+    this.zone.run(() => {
+      this.scannerOverlayRef()?.open();
+      this.signals.panels.scannerOverlay.set(true);
+    });
+  }
+
+  private handleScannerMessage(data: Record<string, unknown>): void {
+    if (data['type'] !== 'scanValueResult') { return; }
+    this.zone.run(() => {
+      this.scannerOverlayRef()?.setResult({
+        entries: data['entries'] as ScanResult['entries'] | undefined,
+        error:   data['error']   as string | undefined,
+      });
+    });
   }
 
   private registerServiceSubscriptions(params: {
@@ -2190,6 +2244,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     const mcBtn = document.getElementById('mc-btn')!;
 
     mcBtn.addEventListener('click', () => this.openMemoryCardOverlay());
+
+    // ── Scanner overlay (Angular-only) ───────────────────────────────────────
+    const scannerBtn = document.getElementById('scanner-btn');
+    if (scannerBtn) {
+      scannerBtn.addEventListener('click', () => this.openScannerOverlay());
+    }
 
     // ── Search ────────────────────────────────────────────────────────────────
     const clearSearchMatches = () => this.clearSearchMatches({

@@ -101,6 +101,8 @@ namespace CodeDesigner.Ps2.Bridge
         public List<PortCheatResult>? PortCheatResults { get; set; }
         // MC_LIST field
         public List<McSaveInfo>? McSaves { get; set; }
+        // SCANVALUE results
+        public List<ScanValueResult>? ScanResults { get; set; }
         // New PINE extended command response fields
         public float? FPS { get; set; }
         public string? SymbolAddress { get; set; }

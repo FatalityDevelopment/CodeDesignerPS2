@@ -418,6 +418,16 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PORTCHEATS":
                         return HandlePortCheats(command.Data, command.SourceDumpPath, command.TargetDumpPath);
 
+                    case "SCANVALUE":
+                        return HandleScanValue(
+                            command.Address    ?? 0,
+                            command.EndAddress ?? 0x02000000u,
+                            command.ScanValue,
+                            command.Comparison,
+                            command.DataType,
+                            command.Region,
+                            command.ScanAddresses);
+
                     case "MC_LIST":
                         return HandleMcList(command.McPath);
 
