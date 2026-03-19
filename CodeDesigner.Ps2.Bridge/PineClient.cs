@@ -621,6 +621,13 @@ namespace CodeDesigner.Ps2.Bridge
                 byte[] val = GetRegister(0, CatFpr, (byte)i);
                 fpr[i] = ReadU32LE(val, 0);
             }
+            // FPR accumulator (optional; ignore failures on older PCSX2 builds).
+            try
+            {
+                byte[] accVal = GetRegister(0, CatFpr, 32);
+                fprAcc = ReadU32LE(accVal, 0);
+            }
+            catch { /* ACC not exposed on older builds */ }
 
             // FCR (32 × 32-bit control regs; UI uses 0 and 31)
             var fcr = new uint[32];
@@ -659,8 +666,9 @@ namespace CodeDesigner.Ps2.Bridge
                 byte[] val = GetRegister(0, CatVu0i, (byte)i);
                 uint raw = ReadU32LE(val, 0);
                 vu0i[i] = raw;
-                if (i == 21) vu0I = raw;
-                else if (i == 22) vu0Q = raw;
+                if (i == 21) vu0Q = raw;      // vi21 = Q
+                else if (i == 22) vu0I = raw; // vi22 = I
+                else if (i == 23) vu0P = raw; // vi23 = P
             }
 
             // P is not exposed via the VU0 register categories; leave as 0 (not used by PCSX2 debugger).
