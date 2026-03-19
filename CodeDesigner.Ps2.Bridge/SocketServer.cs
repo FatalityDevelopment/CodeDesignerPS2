@@ -3489,6 +3489,20 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleRestart()
         {
+            // In PCSX2 PINE bridge mode, delegate the reset to the external emulator.
+            if (IsPineMode)
+            {
+                try
+                {
+                    PineClient!.Reset();
+                    return CreateSuccessResponse("Restarted");
+                }
+                catch (Exception ex)
+                {
+                    return CreateErrorResponse($"PINE reset failed: {ex.Message}");
+                }
+            }
+
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
