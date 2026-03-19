@@ -43,6 +43,8 @@ interface CommandMessage {
     ExportDir?: string;
     ImportDir?: string;
     McOverwrite?: boolean;
+    // Save-state file path (SAVESTATETOFILE / LOADSTATEFROMFILE)
+    FilePath?: string;
 }
 
 /**
@@ -870,6 +872,17 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'STEPOVER' });
         if (!response.Success) {
             throw new Error(response.Error || 'StepOver failed');
+        }
+    }
+
+    /**
+     * PCSX2 PINE: save emulator state to a named file path.
+     * Uses the SAVESTATETOFILE command which delegates to PineClient.SaveStateFile (opcode 0x22).
+     */
+    public async saveStateFile(filePath: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'SAVESTATETOFILE', FilePath: filePath });
+        if (!response.Success) {
+            throw new Error(response.Error || 'SaveStateFile failed');
         }
     }
 
