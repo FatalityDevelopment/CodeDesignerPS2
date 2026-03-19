@@ -420,7 +420,7 @@ app-bottom-panel {
 
 .debug-panel {
     width: 320px;
-    min-width: 320px;
+    min-width: 180px;
     display: none;
     flex-direction: column;
     background: #1e1e1e;
@@ -428,10 +428,30 @@ app-bottom-panel {
     overflow: hidden;
     font-family: monospace;
     font-size: 12px;
+    position: relative;
 }
 
 .debug-panel.visible {
     display: flex;
+}
+
+/* ── Debug-panel resize handle (left edge, drag to change width) ── */
+.debug-resize-handle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 5px;
+    cursor: ew-resize;
+    background: transparent;
+    z-index: 100;
+    transition: background 0.15s;
+}
+
+.debug-resize-handle:hover,
+.debug-resize-handle:active {
+    background: var(--vscode-sash-hoverBorder, #007acc);
+    opacity: 0.5;
 }
 
 #debug-tabs,
@@ -1023,7 +1043,7 @@ app-bottom-panel {
 #bottom-panel {
     flex-shrink: 0;
     height: 200px;
-    min-height: 120px;
+    min-height: 80px;
     display: none;
     flex-direction: column;
     background: #1e1e1e;
@@ -1031,10 +1051,30 @@ app-bottom-panel {
     overflow: hidden;
     font-family: monospace;
     font-size: 12px;
+    position: relative;
 }
 
 #bottom-panel.visible {
     display: flex;
+}
+
+/* ── Bottom-panel resize handle (top edge, drag to change height) ── */
+.bottom-resize-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5px;
+    cursor: ns-resize;
+    background: transparent;
+    z-index: 100;
+    transition: background 0.15s;
+}
+
+.bottom-resize-handle:hover,
+.bottom-resize-handle:active {
+    background: var(--vscode-sash-hoverBorder, #007acc);
+    opacity: 0.5;
 }
 
 #bottom-panel-header {

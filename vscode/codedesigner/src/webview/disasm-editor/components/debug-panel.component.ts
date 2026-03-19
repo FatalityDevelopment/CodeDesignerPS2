@@ -6,6 +6,7 @@ import {
   output,
   signal,
   computed,
+  OnDestroy,
 } from '@angular/core';
 import { RegisterData } from '../disasm-editor.service';
 
@@ -56,7 +57,8 @@ export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
-    <div class="debug-panel" [class.visible]="visible()">
+    <div class="debug-panel" [class.visible]="visible()" [style.width.px]="panelWidth()" [style.minWidth.px]="MIN_WIDTH">
+      <div class="debug-resize-handle" (mousedown)="onResizeMouseDown($event)"></div>
       <div class="debug-tabs">
         @for (tab of tabs; track tab.id) {
           <button
@@ -115,7 +117,15 @@ export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 
     '(click)': 'onHostClick($event)',
   },
 })
-export class DebugPanelComponent {
+export class DebugPanelComponent implements OnDestroy {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Resize constants
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  readonly MIN_WIDTH = 180;
+  private readonly MAX_WIDTH = 800;
+  private readonly STORAGE_KEY = 'codedesigner.debugPanel.width';
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Inputs
   // ═══════════════════════════════════════════════════════════════════════════
@@ -148,6 +158,9 @@ export class DebugPanelComponent {
   // ═══════════════════════════════════════════════════════════════════════════
 
   readonly activeTab = signal<DebugTab>('registers');
+
+  /** Current panel width in pixels, persisted to localStorage */
+  readonly panelWidth = signal(this._loadWidth());
 
   readonly tabs: { id: DebugTab; label: string }[] = [
     { id: 'registers', label: 'GPR' },
@@ -511,5 +524,58 @@ export class DebugPanelComponent {
     if (i >= 16 && i <= 23) return 'dbg-reg-s';
     if (i === 26 || i === 27) return 'dbg-reg-k';
     return 'dbg-reg-special';
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Resize logic
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private _resizeCleanup: (() => void) | null = null;
+
+  ngOnDestroy(): void {
+    this._resizeCleanup?.();
+  }
+
+  onResizeMouseDown(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = this.panelWidth();
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (e: MouseEvent) => {
+      // Moving left (negative delta) increases width; moving right decreases it.
+      const newWidth = Math.max(this.MIN_WIDTH, Math.min(this.MAX_WIDTH, startWidth + (startX - e.clientX)));
+      this.panelWidth.set(newWidth);
+    };
+
+    const onMouseUp = () => {
+      cleanup();
+      localStorage.setItem(this.STORAGE_KEY, String(this.panelWidth()));
+    };
+
+    const cleanup = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      this._resizeCleanup = null;
+    };
+
+    this._resizeCleanup = cleanup;
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  private _loadWidth(): number {
+    try {
+      const saved = localStorage.getItem(this.STORAGE_KEY);
+      if (saved) {
+        const w = parseInt(saved, 10);
+        if (!isNaN(w)) return Math.max(this.MIN_WIDTH, Math.min(this.MAX_WIDTH, w));
+      }
+    } catch { /* ignore */ }
+    return 320;
   }
 }
