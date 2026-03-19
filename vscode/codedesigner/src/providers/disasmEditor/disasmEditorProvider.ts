@@ -620,6 +620,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this._handleMcImport(webviewPanel.webview, message.mcPath as string ?? '');
       } else if (message.type === 'mcDelete') {
         await this._handleMcDelete(webviewPanel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
+      } else if (message.type === 'scanValue') {
+        await this._handleScanValue(webviewPanel.webview, message);
       }
     });
 
@@ -1136,6 +1138,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleMcImport(panel.webview, message.mcPath as string ?? '');
             } else if (message.type === 'mcDelete') {
                 await this._handleMcDelete(panel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
+            } else if (message.type === 'scanValue') {
+                await this._handleScanValue(panel.webview, message);
             }
         });
 
@@ -1922,6 +1926,36 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       webview.postMessage({ type: 'mcActionResult', message: msg });
     } catch (err: any) {
       webview.postMessage({ type: 'mcActionResult', error: err?.message ?? String(err) });
+    }
+  }
+
+  // ── Memory Value Scanner ──────────────────────────────────────────────────
+
+  /**
+   * Perform a SCANVALUE request and post the results back to the webview.
+   * Handles both full-range scans and filter (refine) scans.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async _handleScanValue(webview: vscode.Webview, message: any): Promise<void> {
+    if (!this.socketClient?.isConnected()) {
+      webview.postMessage({ type: 'scanValueResult', error: 'Not connected to emulator server' });
+      return;
+    }
+    try {
+      const entries = await this.socketClient.scanValue(
+        message.startAddress as number,
+        message.endAddress   as number,
+        message.value        as string,
+        message.comparison   as string,
+        message.dataType     as string,
+        message.region       as string,
+        message.previousAddresses as number[] | undefined,
+      );
+      webview.postMessage({ type: 'scanValueResult', entries });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      getOutputChannel().error('[Scanner] ' + errMsg);
+      webview.postMessage({ type: 'scanValueResult', error: errMsg });
     }
   }
 }

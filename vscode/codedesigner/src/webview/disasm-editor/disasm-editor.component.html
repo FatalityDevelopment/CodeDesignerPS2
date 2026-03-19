@@ -10,6 +10,7 @@
     <button class="header-tool-btn" id="converter-btn" title="Cheat Code Converter">&#8645; Converter</button>
     <button class="header-tool-btn" id="porter-btn" title="Cheat Code Porter">&#8651; Port</button>
     <button class="header-tool-btn" id="mc-btn" title="Memory Card Manager">&#x1F4BE; Memory Card</button>
+    <button class="header-tool-btn" id="scanner-btn" title="Memory Value Scanner">&#128269; Scanner</button>
 
 </div>
 <!-- New Angular component-based panels -->
@@ -144,3 +145,7 @@
     (exportSave)="onMcExport($event)"
     (importSave)="onMcImport($event)"
     (deleteSave)="onMcDelete($event)" />
+<app-scanner-overlay #scannerOverlayComp
+    (close$)="onScannerOverlayClose()"
+    (scan$)="onScanValue($event)"
+    (navigate$)="onScannerNavigate($event)" />

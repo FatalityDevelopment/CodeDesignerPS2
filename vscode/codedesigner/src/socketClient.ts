@@ -45,6 +45,12 @@ interface CommandMessage {
     McOverwrite?: boolean;
     // Save-state file path (SAVESTATETOFILE / LOADSTATEFROMFILE)
     FilePath?: string;
+    // SCANVALUE fields
+    Comparison?: string;
+    DataType?: string;
+    ScanValue?: string;
+    EndAddress?: number;
+    ScanAddresses?: number[];
 }
 
 /**
@@ -96,6 +102,14 @@ export interface IntegerEntry {
     address: string;
     value:   number;
     hex:     string;
+}
+
+/**
+ * One result entry returned by the SCANVALUE command.
+ */
+export interface ScanValueResult {
+    address: string;
+    value:   string;
 }
 
 /**
@@ -239,6 +253,8 @@ interface CommandResponse {
     PortCheatResults?: Array<Record<string, unknown>>;
     // MC_LIST fields
     McSaves?: McSaveInfo[];
+    // SCANVALUE results
+    ScanResults?: ScanValueResult[];
 }
 
 /**
@@ -1259,7 +1275,45 @@ export class SocketClient {
     }
 
     /**
-     * Search for a query string/pattern in a memory region using the C# backend.
+     * Scan live memory for addresses whose value matches a comparison against a target value.
+     * On first scan (no previousAddresses) the entire [startAddress, endAddress) range is searched.
+     * On subsequent scans pass previousAddresses to refine (filter) the existing result set.
+     *
+     * @param startAddress    Inclusive start of the scan range.
+     * @param endAddress      Exclusive end of the scan range.
+     * @param value           Value to compare (decimal or 0x-prefixed hex).
+     * @param comparison      "eq" | "ne" | "lt" | "gt" | "le" | "ge"
+     * @param dataType        "uint8"|"int8"|"uint16"|"int16"|"uint32"|"int32"|"uint64"|"int64"|"float32"|"float64"
+     * @param region          "ee" or "iop".
+     * @param previousAddresses  Previous result addresses for refinement scans.
+     */
+    public async scanValue(
+        startAddress: number,
+        endAddress: number,
+        value: string,
+        comparison: string,
+        dataType: string,
+        region: string,
+        previousAddresses?: number[]
+    ): Promise<ScanValueResult[]> {
+        const command: CommandMessage = {
+            Command:       'SCANVALUE',
+            Address:       startAddress,
+            EndAddress:    endAddress,
+            ScanValue:     value,
+            Comparison:    comparison,
+            DataType:      dataType,
+            Region:        region,
+            ScanAddresses: previousAddresses,
+        };
+        const response = await this.sendCommand(command, 300000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanValue failed');
+        }
+        return response.ScanResults ?? [];
+    }
+
+    /**
      * For live panels pass address+length+region; for file panels pass fileData.
      * @param address   Virtual start address (used for live searches and match address calculation).
      * @param length    Byte length (required for live searches, ignored when fileData provided).

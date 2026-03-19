@@ -64,5 +64,16 @@ namespace CodeDesigner.Ps2.Bridge
         public uint? Offset { get; set; }
         /// <summary>Maximum result count for LISTFUNCTIONS / LISTGLOBALS.</summary>
         public ushort? MaxCount { get; set; }
+        // SCANVALUE fields
+        /// <summary>Scan comparison operator: "eq", "ne", "lt", "gt", "le", "ge".</summary>
+        public string? Comparison { get; set; }
+        /// <summary>Scan data type: "uint8","int8","uint16","int16","uint32","int32","uint64","int64","float32","float64".</summary>
+        public string? DataType { get; set; }
+        /// <summary>Value to scan for (decimal or 0x-prefixed hex string).</summary>
+        public string? ScanValue { get; set; }
+        /// <summary>Exclusive end address for SCANVALUE range scans.</summary>
+        public uint? EndAddress { get; set; }
+        /// <summary>Previous result addresses for SCANVALUE filter (refine) scans.</summary>
+        public List<uint>? ScanAddresses { get; set; }
     }
 }
