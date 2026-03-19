@@ -1536,8 +1536,9 @@ export class DisasmEditorComponent implements AfterViewInit {
     if (data['type'] !== 'scanValueResult') { return; }
     this.zone.run(() => {
       this.scannerOverlayRef()?.setResult({
-        entries: data['entries'] as ScanResult['entries'] | undefined,
-        error:   data['error']   as string | undefined,
+        entries:       data['entries']       as ScanResult['entries'] | undefined,
+        error:         data['error']         as string | undefined,
+        serverMessage: data['serverMessage'] as string | undefined,
       });
     });
   }
