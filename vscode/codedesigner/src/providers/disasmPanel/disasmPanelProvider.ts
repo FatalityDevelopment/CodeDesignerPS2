@@ -1078,6 +1078,18 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             await this.socketClient.saveStateFile(filePath);
             out.info(`PCSX2 state saved to '${filePath}'.`);
             vscode.window.showInformationMessage(`PCSX2 state saved: ${path.basename(filePath)}`);
+
+            // Extract memory dumps from the .p2s archive so they appear in snapshot
+            // history. This uses the C# server's existing ZipFile extraction code.
+            try {
+                await this.socketClient.extractP2s(filePath);
+                out.info(`PCSX2 state extracted for history: ${filePath}.extracted`);
+            } catch (exErr: any) {
+                out.warn(`Could not extract .p2s for history (${filePath}): ${exErr?.message ?? exErr}`);
+            }
+
+            // Refresh the snapshot list so the new entry is visible immediately.
+            this.loadSnapshotsForGame(isoName);
         } catch (err: any) {
             out.error(`PCSX2 save state failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`PCSX2 save state failed: ${err?.message ?? err}`);
@@ -1086,10 +1098,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /** Re-open all .bin files from an earlier snapshot folder. */
     private async handleOpenSnapshot(snapshotPath: string): Promise<void> {
+        // For PCSX2 .p2s snapshots, open the .bin files from the companion extracted directory.
+        const dirPath = snapshotPath.endsWith('.p2s')
+            ? snapshotPath + '.extracted'
+            : snapshotPath;
+
         try {
-            const files = fs.readdirSync(snapshotPath)
+            const files = fs.readdirSync(dirPath)
                 .filter(f => f.endsWith('.bin'))
-                .map(f => path.join(snapshotPath, f));
+                .map(f => path.join(dirPath, f));
 
             for (const f of files) {
                 const uri = vscode.Uri.file(f);
@@ -1118,9 +1135,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         out.info(`Reloading snapshot from ${snapshotPath}`);
         try {
-            const regions = await this.socketClient.loadSnapshot(snapshotPath);
-            out.info(`Snapshot reloaded — ${regions.length} region(s) restored.`);
-            vscode.window.showInformationMessage(`Snapshot restored (${regions.length} region(s)). Emulator is paused.`);
+            // PCSX2 .p2s snapshots are reloaded via the PINE socket (LOADSTATEFROMFILE).
+            // Internal emulator snapshots use the LOADSNAPSHOT memory-restore path.
+            if (snapshotPath.endsWith('.p2s')) {
+                await this.socketClient.loadStateFile(snapshotPath);
+                out.info(`PCSX2 state loaded from '${snapshotPath}'.`);
+                vscode.window.showInformationMessage(`PCSX2 state restored: ${path.basename(snapshotPath)}`);
+            } else {
+                const regions = await this.socketClient.loadSnapshot(snapshotPath);
+                out.info(`Snapshot reloaded — ${regions.length} region(s) restored.`);
+                vscode.window.showInformationMessage(`Snapshot restored (${regions.length} region(s)). Emulator is paused.`);
+            }
         } catch (err: any) {
             out.error(`Reload snapshot failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Reload snapshot failed: ${err?.message ?? err}`);
@@ -1144,7 +1169,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * Scan the snapshots/<isoName>/ directory and populate this.snapshots.
-     * Snapshot entries are stored in snapshot-info.json inside each snapshot folder.
+     * Handles two snapshot formats:
+     *  - Internal emulator: <date>/<name>/ directory with snapshot-info.json + .bin files
+     *  - PCSX2 save states: <date>/<name>.p2s file with a companion <name>.p2s.extracted/ directory
+     * Previously-deleted snapshots are automatically excluded because this always
+     * re-reads the current filesystem state.
      */
     private loadSnapshotsForGame(isoName: string): void {
         if (!isoName || !this.workspaceRoot) {
@@ -1163,7 +1192,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 return;
             }
 
-            // Walk: <isoFolder>/<date>/<name>/snapshot-info.json
+            // Walk: <isoFolder>/<date>/...
             const dateDirs = fs.readdirSync(isoFolder, { withFileTypes: true })
                 .filter(d => d.isDirectory())
                 .map(d => d.name)
@@ -1172,13 +1201,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
             for (const dateDir of dateDirs) {
                 const datePath = path.join(isoFolder, dateDir);
-                const nameDirs = fs.readdirSync(datePath, { withFileTypes: true })
-                    .filter(d => d.isDirectory())
-                    .map(d => d.name);
+                const dirEntries = fs.readdirSync(datePath, { withFileTypes: true });
 
-                for (const nameDir of nameDirs) {
-                    const snapPath = path.join(datePath, nameDir);
+                // ── Internal-emulator snapshots: sub-directories ──────────────
+                for (const dirent of dirEntries.filter(d => d.isDirectory())) {
+                    const snapPath = path.join(datePath, dirent.name);
                     const infoPath = path.join(snapPath, 'snapshot-info.json');
+
                     if (fs.existsSync(infoPath)) {
                         try {
                             const info = JSON.parse(fs.readFileSync(infoPath, 'utf-8')) as SnapshotInfoFile;
@@ -1192,16 +1221,46 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                             });
                         } catch { /* skip malformed info files */ }
                     } else {
-                        // Fallback for snapshots without info file (legacy)
-                        entries.push({
-                            label:     nameDir,
-                            name:      nameDir,
-                            timestamp: '',
-                            path:      snapPath,
-                            date:      dateDir,
-                            isoName,
-                        });
+                        // Legacy fallback: only include if the directory contains .bin files.
+                        const hasBins = fs.readdirSync(snapPath).some(f => f.endsWith('.bin'));
+                        if (hasBins) {
+                            entries.push({
+                                label:     dirent.name,
+                                name:      dirent.name,
+                                timestamp: '',
+                                path:      snapPath,
+                                date:      dateDir,
+                                isoName,
+                            });
+                        }
                     }
+                }
+
+                // ── PCSX2 save states: .p2s files ─────────────────────────────
+                for (const dirent of dirEntries.filter(d => d.isFile() && d.name.endsWith('.p2s'))) {
+                    const p2sPath = path.join(datePath, dirent.name);
+                    const snapName = path.basename(dirent.name, '.p2s');
+
+                    // Use the extracted companion directory as the snapshot path when
+                    // available so the history reader can access memory dumps directly.
+                    const extractedDir    = p2sPath + '.extracted';
+                    const extractedInfo   = path.join(extractedDir, 'snapshot-info.json');
+                    const snapshotDirPath = fs.existsSync(extractedInfo) ? extractedDir : p2sPath;
+
+                    let timestamp = '';
+                    try {
+                        const stat = fs.statSync(p2sPath);
+                        timestamp = stat.mtime.toLocaleTimeString();
+                    } catch { /* ignore */ }
+
+                    entries.push({
+                        label:     snapName,
+                        name:      snapName,
+                        timestamp,
+                        path:      snapshotDirPath,
+                        date:      dateDir,
+                        isoName,
+                    });
                 }
             }
         } catch (err: any) {
