@@ -11,7 +11,7 @@ import {
   SymInteger,
 } from './disasm-editor.service';
 import { EditorState } from './state/editor.state';
-import { SearchMode, DisasmRow as DisasmRowType, HistoryEntry, CallStackEntry } from './state/types';
+import { SearchMode, DisasmRow as DisasmRowType, HistoryEntry, CallStackEntry, ModuleEntry } from './state/types';
 import { HexViewComponent } from './components/hex-view.component';
 import { SearchPanelComponent } from './components/search-panel.component';
 import { AddressInputPanelComponent } from './components/address-input-panel.component';
@@ -123,6 +123,9 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Threads for bottom panel */
   protected readonly bottomPanelThreads = signal<ThreadEntry[]>([]);
+
+  /** IOP modules for bottom panel */
+  protected readonly bottomPanelModules = signal<ModuleEntry[]>([]);
 
   /** Breakpoints for bottom panel */
   protected readonly bottomPanelBreakpoints = signal<Set<number>>(new Set());
@@ -440,6 +443,8 @@ export class DisasmEditorComponent implements AfterViewInit {
   protected onBottomPanelTabSelected(tab: BottomTab): void {
     if (tab === 'threads' && this.svc.state.isLive) {
       this.vscode.postMessage({ type: 'getThreads' });
+    } else if (tab === 'modules' && this.svc.state.isLive) {
+      this.vscode.postMessage({ type: 'getModules' });
     }
   }
 
@@ -1809,6 +1814,8 @@ export class DisasmEditorComponent implements AfterViewInit {
         params.vscode.postMessage({ type: 'getThreads' });
       } else if (tab === 'breakpoints') {
         params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
+      } else if (tab === 'modules') {
+        params.vscode.postMessage({ type: 'getModules' });
       }
     };
 
@@ -1930,6 +1937,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const symbolsPanelVisible = this.symbolsPanelVisible;
     const bottomPanelCallStack = this.bottomPanelCallStack;
     const bottomPanelThreads = this.bottomPanelThreads;
+    const bottomPanelModules = this.bottomPanelModules;
     const bottomPanelBreakpoints = this.bottomPanelBreakpoints;
     const gotoStatus = this.gotoStatus;
     const gotoValue = this.gotoValue;
@@ -2364,6 +2372,10 @@ export class DisasmEditorComponent implements AfterViewInit {
     svc.threadsReceived$.subscribe(threads => {
       signals.threads.set(threads ?? []);
       bottomPanelThreads.set(threads ?? []);
+    });
+    // Subscribe to modules response from extension host
+    svc.modulesReceived$.subscribe(modules => {
+      bottomPanelModules.set(modules ?? []);
     });
 
     // ── Cleanup ───────────────────────────────────────────────────────────────

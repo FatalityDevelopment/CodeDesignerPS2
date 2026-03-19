@@ -70,6 +70,17 @@ export interface ThreadEntry {
   entryPc: number;
 }
 
+export interface ModuleEntry {
+  name:     string;
+  version:  number;
+  textAddr: string;
+  entry:    string;
+  gp:       string;
+  textSize: number;
+  dataSize: number;
+  bssSize:  number;
+}
+
 export interface RegisterData {
   pc?: number;
   hi?: number;

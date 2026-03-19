@@ -540,7 +540,11 @@ namespace CodeDesigner.Ps2.Bridge
                     case "LOAD_STATE_FILE":
                     case "LOADSTATEFILE":
                         return HandleLoadStateFile(command.FilePath);
-                    
+
+                    case "EXTRACTP2S":
+                    case "EXTRACT_P2S":
+                        return HandleExtractP2s(command.FilePath);
+
                     default:
                         // Echo for unknown commands
                         return $"Echo: {message}";
@@ -2437,6 +2441,109 @@ namespace CodeDesigner.Ps2.Bridge
                 catch (Exception ex) { return CreateErrorResponse($"PINE LoadStateFile failed: {ex.Message}"); }
             }
             return CreateErrorResponse("LOADSTATEFROMFILE requires PINE mode; use LOADSNAPSHOT for the internal emulator");
+        }
+
+        /// <summary>
+        /// Extract memory dump files from a PCSX2 .p2s save-state archive to a
+        /// companion directory (<paramref name="filePath"/>.extracted/).  Reuses the same ZipFile
+        /// pattern as <see cref="OpenDiscStream"/>.  Writes snapshot-info.json so
+        /// the history reader can treat the extracted folder as a normal snapshot.
+        /// Returns the extracted directory path in Message and the region list in
+        /// Regions.  Subsequent calls reuse the cached extraction if the .p2s file
+        /// has not changed.
+        /// </summary>
+        private string HandleExtractP2s(string? filePath)
+        {
+            if (string.IsNullOrEmpty(filePath))
+                return CreateErrorResponse("FilePath is required for EXTRACTP2S");
+
+            if (!File.Exists(filePath))
+                return CreateErrorResponse($"File not found: {filePath}");
+
+            try
+            {
+                string extractDir = filePath + ".extracted";
+                string infoPath   = Path.Combine(extractDir, "snapshot-info.json");
+
+                // Return cached extraction if already done and the .p2s hasn't changed.
+                if (File.Exists(infoPath) &&
+                    File.GetLastWriteTimeUtc(infoPath) >= File.GetLastWriteTimeUtc(filePath))
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = true,
+                        Command = "EXTRACTP2S",
+                        Message = extractDir,
+                    });
+                }
+
+                Directory.CreateDirectory(extractDir);
+
+                // Memory entries: the name inside the .p2s zip → output filename + region metadata.
+                // Output filenames match the convention used by HandleSnapshot so that the
+                // snapshot history reader can process both internal and PCSX2 snapshots.
+                var memEntries = new[]
+                {
+                    (ZipName: "eeMemory.bin",  OutFile: "EEmem.bin",  Label: "EE Main RAM", Base: 0x00000000u),
+                    (ZipName: "iopMemory.bin", OutFile: "IOPmem.bin", Label: "IOP RAM",     Base: EeIopMirrorBase),
+                };
+
+                var regions  = new List<SnapshotRegion>();
+                using var archive = ZipFile.OpenRead(filePath);
+
+                foreach (var mem in memEntries)
+                {
+                    var entry = archive.Entries.FirstOrDefault(e =>
+                        string.Equals(e.Name, mem.ZipName, StringComparison.OrdinalIgnoreCase));
+
+                    if (entry == null) { continue; }
+
+                    string outPath = Path.Combine(extractDir, mem.OutFile);
+                    entry.ExtractToFile(outPath, overwrite: true);
+
+                    regions.Add(new SnapshotRegion
+                    {
+                        Label       = mem.Label,
+                        File        = mem.OutFile,
+                        BaseAddress = mem.Base,
+                        Size        = (int)new FileInfo(outPath).Length,
+                    });
+                }
+
+                if (regions.Count == 0)
+                    return CreateErrorResponse("No memory dump files (eeMemory.bin, iopMemory.bin) found in the .p2s archive");
+
+                // Write snapshot-info.json so the TypeScript history reader can use the
+                // extracted directory exactly like an internal-emulator snapshot folder.
+                string snapName = Path.GetFileNameWithoutExtension(filePath);
+                var info = new
+                {
+                    name      = snapName,
+                    timestamp = DateTime.UtcNow.ToString("o"),
+                    isoName   = string.Empty,
+                    regions   = regions.Select(r => new
+                    {
+                        Label       = r.Label,
+                        File        = r.File,
+                        BaseAddress = r.BaseAddress,
+                        Size        = r.Size,
+                    }),
+                };
+                File.WriteAllText(infoPath,
+                    JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true }));
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "EXTRACTP2S",
+                    Message = extractDir,
+                    Regions = regions,
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"EXTRACTP2S failed: {ex.Message}");
+            }
         }
 
         /// <summary>

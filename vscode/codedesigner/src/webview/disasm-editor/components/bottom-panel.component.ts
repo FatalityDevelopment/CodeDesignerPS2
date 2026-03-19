@@ -7,12 +7,12 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { CallStackEntry, ThreadEntry } from '../state/types';
+import { CallStackEntry, ModuleEntry, ThreadEntry } from '../state/types';
 
-export type BottomTab = 'callstack' | 'threads' | 'breakpoints';
+export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules';
 
 /**
- * BottomPanelComponent - Displays callstack, threads, and breakpoints in 3 tabs.
+ * BottomPanelComponent - Displays callstack, threads, breakpoints, and modules in 4 tabs.
  *
  * Uses signal inputs for reactive updates without zone.js.
  */
@@ -27,6 +27,7 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints';
         <button class="bottom-tab" [class.active]="activeTab() === 'callstack'" (click)="selectTab('callstack')">Call Stack</button>
         <button class="bottom-tab" [class.active]="activeTab() === 'threads'" (click)="selectTab('threads')">Threads</button>
         <button class="bottom-tab" [class.active]="activeTab() === 'breakpoints'" (click)="selectTab('breakpoints')">Breakpoints</button>
+        <button class="bottom-tab" [class.active]="activeTab() === 'modules'" (click)="selectTab('modules')">Modules</button>
         <button class="bottom-refresh-btn" (click)="onRefreshClick()">⟳</button>
       </div>
 
@@ -120,6 +121,38 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints';
           </table>
         </div>
       }
+
+      @if (activeTab() === 'modules') {
+        <div class="bottom-tab-content active">
+          <table class="dbg-table">
+            <thead><tr>
+              <th class="dbg-th">Name</th>
+              <th class="dbg-th">Version</th>
+              <th class="dbg-th">Entry</th>
+              <th class="dbg-th">GP</th>
+              <th class="dbg-th">Text</th>
+              <th class="dbg-th">Data</th>
+              <th class="dbg-th">BSS</th>
+            </tr></thead>
+            <tbody>
+              @if (!modules().length) {
+                <tr><td colspan="7" class="dbg-td-empty">No modules</td></tr>
+              }
+              @for (m of modules(); track m.name) {
+                <tr class="dbg-table-row clickable" (click)="navigateToAddress.emit(parseHex(m.textAddr))">
+                  <td class="dbg-td-func">{{ m.name }}</td>
+                  <td class="dbg-td-num">{{ formatVersion(m.version) }}</td>
+                  <td class="dbg-td-addr mono">{{ m.entry }}</td>
+                  <td class="dbg-td-addr mono">{{ m.gp }}</td>
+                  <td class="dbg-td-num">{{ m.textSize }}</td>
+                  <td class="dbg-td-num">{{ m.dataSize }}</td>
+                  <td class="dbg-td-num">{{ m.bssSize }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
     </div>
   `,
 })
@@ -129,6 +162,7 @@ export class BottomPanelComponent {
   readonly callStack = input<CallStackEntry[]>([]);
   readonly threads = input<ThreadEntry[]>([]);
   readonly breakpoints = input<Set<number>>(new Set());
+  readonly modules = input<ModuleEntry[]>([]);
 
   // Outputs
   readonly navigateToAddress = output<number>();
@@ -158,6 +192,19 @@ export class BottomPanelComponent {
 
   toHex(n: number, pad = 8): string {
     return n.toString(16).toUpperCase().padStart(pad, '0');
+  }
+
+  parseHex(s: string): number {
+    return parseInt(s.replace(/^0x/i, ''), 16) || 0;
+  }
+
+  /**
+   * Format a BCD-encoded IOP module version as "Major.Minor".
+   * IOP versions are stored as a 16-bit BCD value where the high byte is the
+   * major version and the low byte is the minor version (e.g. 0x0101 → "1.1").
+   */
+  formatVersion(v: number): string {
+    return `${(v >> 8) & 0xFF}.${v & 0xFF}`;
   }
 }
 

@@ -224,6 +224,8 @@ interface CommandResponse {
     Matches?:   SearchMatch[];
     // GETTHREADS
     Threads?: ThreadEntry[];
+    // GETMODULES
+    Modules?: ModuleEntry[];
     // Per-address analysis comments produced when an instruction executes.
     // Keyed by hex address string (e.g. "80001234"), value is the analysis comment.
     InstructionAnalysis?: Record<string, string>;
@@ -292,6 +294,20 @@ export interface ThreadEntry {
     sp: number;
     priority: number;
     entryPc: number;
+}
+
+/**
+ * One IOP module entry returned by GETMODULES.
+ */
+export interface ModuleEntry {
+    name:     string;
+    version:  number;
+    textAddr: string;
+    entry:    string;
+    gp:       string;
+    textSize: number;
+    dataSize: number;
+    bssSize:  number;
 }
 
 /**
@@ -1293,6 +1309,51 @@ export class SocketClient {
             priority: t.priority ?? 0,
             entryPc:  t.entryPc  ?? 0,
         }));
+    }
+
+    /**
+     * Get the list of loaded IOP modules (PINE mode only).
+     */
+    public async getModules(): Promise<ModuleEntry[]> {
+        const command: CommandMessage = { Command: 'GETMODULES' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetModules failed');
+        }
+        return (response.Modules ?? []).map(m => ({
+            name:     m.name     ?? '',
+            version:  m.version  ?? 0,
+            textAddr: m.textAddr ?? '0x00000000',
+            entry:    m.entry    ?? '0x00000000',
+            gp:       m.gp       ?? '0x00000000',
+            textSize: m.textSize ?? 0,
+            dataSize: m.dataSize ?? 0,
+            bssSize:  m.bssSize  ?? 0,
+        }));
+    }
+
+    /**
+     * PCSX2 PINE: load emulator state from a named .p2s file path.
+     * Uses the LOADSTATEFROMFILE command which delegates to PineClient.LoadStateFile (opcode 0x23).
+     */
+    public async loadStateFile(filePath: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'LOADSTATEFROMFILE', FilePath: filePath });
+        if (!response.Success) {
+            throw new Error(response.Error || 'LoadStateFile failed');
+        }
+    }
+
+    /**
+     * Extract memory dump files from a PCSX2 .p2s save-state archive to a
+     * companion directory (<path>.extracted/) via the EXTRACTP2S server command.
+     * Returns the path to the extracted directory on success.
+     */
+    public async extractP2s(filePath: string): Promise<string> {
+        const response = await this.sendCommand({ Command: 'EXTRACTP2S', FilePath: filePath });
+        if (!response.Success) {
+            throw new Error(response.Error || 'ExtractP2s failed');
+        }
+        return response.Message ?? (filePath + '.extracted');
     }
 
     /**
