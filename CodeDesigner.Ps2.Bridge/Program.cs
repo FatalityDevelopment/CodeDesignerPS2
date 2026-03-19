@@ -506,8 +506,17 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
+        // Maximum seconds to wait for RunEmulator to initialise the scheduler after
+        // STARTEMULATOR is received.  BIOS loading takes < 500 ms on typical hardware;
+        // 30 s covers pathologically slow I/O without risking a TypeScript client timeout.
+        private const int EmulatorStartTimeoutSeconds = 30;
+
         private static string HandleStartEmulatorMode(SocketServer server, CommandMessage command)
         {
+            // Capture the newly-started task reference outside the lock so we can poll
+            // it after releasing RuntimeModeLock (avoids holding the lock while sleeping).
+            Task startTask;
+
             lock (RuntimeModeLock)
             {
                 if (ActiveEmulatorTask != null && !ActiveEmulatorTask.IsCompleted)
@@ -543,6 +552,10 @@ namespace CodeDesigner.Ps2.Bridge
                     server.PineClient = null;
                 }
 
+                // Clear any stale scheduler from a previous run so the wait loop below
+                // detects when the newly-started RunEmulator task sets the new one.
+                server.Scheduler = null;
+
                 ActiveEmulatorTask = Task.Run(async () =>
                 {
                     try
@@ -555,13 +568,37 @@ namespace CodeDesigner.Ps2.Bridge
                     }
                 });
 
+                startTask = ActiveEmulatorTask;
+            } // release RuntimeModeLock before blocking so STARTPCSX2/STARTEMULATOR from
+              // other clients aren't held up while we wait for BIOS loading.
+
+            // Wait until RunEmulator has set the scheduler (BIOS loaded, emulator paused
+            // at the reset vector) before returning success.  Without this wait, TypeScript
+            // immediately sends RESUME which arrives while Scheduler is still null, causing
+            // "Emulator not running — no scheduler attached" and leaving the emulator
+            // permanently paused.  ProcessCommand is synchronous so Thread.Sleep is used.
+            var waitStart = DateTime.UtcNow;
+            while (server.Scheduler == null
+                   && !startTask.IsCompleted
+                   && (DateTime.UtcNow - waitStart).TotalSeconds < EmulatorStartTimeoutSeconds)
+            {
+                Thread.Sleep(50);
+            }
+
+            if (server.Scheduler == null)
                 return JsonSerializer.Serialize(new CommandResponse
                 {
-                    Success = true,
+                    Success = false,
                     Command = "STARTEMULATOR",
-                    Message = "Built-in emulator mode started"
+                    Error = "Emulator failed to start — check BIOS path and disc image."
                 });
-            }
+
+            return JsonSerializer.Serialize(new CommandResponse
+            {
+                Success = true,
+                Command = "STARTEMULATOR",
+                Message = "Built-in emulator mode started"
+            });
         }
 
         private static async Task StartSocketServer()
