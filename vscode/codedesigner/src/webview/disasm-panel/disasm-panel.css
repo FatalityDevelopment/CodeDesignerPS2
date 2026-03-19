@@ -218,6 +218,36 @@ app-cheats-tab {
     cursor: not-allowed;
 }
 
+#emu-step-into-btn,
+#emu-step-over-btn {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: inherit;
+    padding: 1px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+    display: none;
+}
+
+#emu-status-bar.status-paused #emu-step-into-btn,
+#emu-status-bar.status-paused #emu-step-over-btn {
+    display: inline-block;
+}
+
+#emu-step-into-btn:hover:not(:disabled),
+#emu-step-over-btn:hover:not(:disabled) {
+    background: rgba(255,255,255,0.18);
+}
+
+#emu-step-into-btn:disabled,
+#emu-step-over-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 .container {
     display: flex;
     flex-direction: column;

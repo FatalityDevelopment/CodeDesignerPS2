@@ -1214,16 +1214,25 @@ namespace CodeDesigner.Ps2.Bridge
         /// Translate EE addresses from the UI/bridge into a PINE-friendly virtual address.
         /// The VSCode UI uses physical bases for EE RAM/BIOS, while PCSX2 PINE expects
         /// EE virtual addresses. We map physical and uncached mirrors into KSEG0,
-        /// while leaving already-virtual ranges (KSEG0/KSEG1, scratchpad, IOP mirror) intact.
+        /// while IOP mirror addresses are mapped to KSEG1 to avoid PCSX2 TLB lookups.
         /// </summary>
         private static uint TranslatePineAddress(uint address, bool useIop)
         {
-            if (useIop)
-                return address; // IOP mirror is already a valid EE virtual window.
+            // IOP mirror: map to KSEG1 (0xBC000000+) to bypass TLB in PCSX2.
+            // Reading the IOP region as a user-space virtual address triggers TLB exceptions
+            // in PCSX2. KSEG1 (0xA0000000–0xBFFFFFFF) bypasses TLB entirely:
+            //   virtual 0xBC000000 = physical 0x1C000000 = EE IOP mirror base.
+            // Addresses may arrive in two formats; both are normalised to the same IOP offset:
+            //   • EE mirror format: 0x1C000000+offset → offset = address - EeIopMirrorBase
+            //   • Direct IOP physical: 0x00000000+offset → offset = address
+            // Both yield the same KSEG1 result: 0xBC000000 + iopOffset.
+            if (useIop || (address >= EeIopMirrorBase && address < EeIopMirrorEnd))
+            {
+                uint iopOffset = address >= EeIopMirrorBase ? address - EeIopMirrorBase : address;
+                return 0xBC000000u + iopOffset;
+            }
 
-            // Preserve IOP mirror and scratchpad addresses (already valid EE virtual ranges).
-            if (address >= EeIopMirrorBase && address < EeIopMirrorEnd)
-                return address;
+            // Preserve scratchpad address (hardware-fixed EE VTLB page, no TLB needed).
             if (address >= 0x70000000u &&
                 address < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
                 return address;
