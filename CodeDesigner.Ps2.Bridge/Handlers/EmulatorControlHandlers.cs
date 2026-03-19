@@ -229,8 +229,19 @@ namespace CodeDesigner.Ps2.Bridge
         {
             if (string.IsNullOrEmpty(filePath))
                 return CreateErrorResponse("FilePath is required for EXTRACTP2S");
+
+            // PCSX2 acknowledges the SAVESTATETOFILE PINE command before it finishes
+            // writing the file.  Poll briefly so the extraction does not race the flush.
             if (!File.Exists(filePath))
-                return CreateErrorResponse($"File not found: {filePath}");
+            {
+                const int maxAttempts  = 50;
+                const int pollInterval = 100; // ms
+                for (int attempt = 0; attempt < maxAttempts && !File.Exists(filePath); attempt++)
+                    Thread.Sleep(pollInterval);
+
+                if (!File.Exists(filePath))
+                    return CreateErrorResponse($"File not found: {filePath}");
+            }
 
             try
             {
