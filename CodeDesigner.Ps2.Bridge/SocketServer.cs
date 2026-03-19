@@ -2088,7 +2088,8 @@ namespace CodeDesigner.Ps2.Bridge
                 try   { PineClient!.StepInto(); return CreateSuccessResponse("StepInto initiated"); }
                 catch (Exception ex) { return CreateErrorResponse($"PINE StepInto failed: {ex.Message}"); }
             }
-            return CreateErrorResponse("STEPINTO requires PINE mode");
+            // Non-PINE fallback: behave like a single step (same as STEP command).
+            return HandleStep();
         }
 
         private string HandleStepOver()
@@ -2098,7 +2099,8 @@ namespace CodeDesigner.Ps2.Bridge
                 try   { PineClient!.StepOver(); return CreateSuccessResponse("StepOver initiated"); }
                 catch (Exception ex) { return CreateErrorResponse($"PINE StepOver failed: {ex.Message}"); }
             }
-            return CreateErrorResponse("STEPOVER requires PINE mode");
+            // Non-PINE fallback: behave like a single step (same as STEP command).
+            return HandleStep();
         }
 
         private string HandleStepOut()
@@ -2108,7 +2110,8 @@ namespace CodeDesigner.Ps2.Bridge
                 try   { PineClient!.StepOut(); return CreateSuccessResponse("StepOut initiated"); }
                 catch (Exception ex) { return CreateErrorResponse($"PINE StepOut failed: {ex.Message}"); }
             }
-            return CreateErrorResponse("STEPOUT requires PINE mode");
+            // Non-PINE fallback: behave like a single step (same as STEP command).
+            return HandleStep();
         }
 
         private string HandleGetFps()

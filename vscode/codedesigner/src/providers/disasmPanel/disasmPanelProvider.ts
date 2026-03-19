@@ -219,7 +219,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.handleSnapshot();
                     break;
                 case 'snapshotPcsx2':
-                    await this.handleSnapshot();
+                    await this.handleSnapshotPcsx2();
                     break;
                 case 'importBin':
                     await this.handleImportBin();
@@ -1030,6 +1030,57 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         } catch (err: any) {
             out.error(`Snapshot failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Snapshot failed: ${err?.message ?? err}`);
+        }
+    }
+
+    /**
+     * Save PCSX2 emulator state to a named .p2s file via the PINE socket bridge
+     * (SAVESTATETOFILE command → PineClient.SaveStateFile opcode 0x22).
+     * Only available in PINE mode.
+     */
+    private async handleSnapshotPcsx2(): Promise<void> {
+        const out = getOutputChannel();
+
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+
+        const isoName = this.selectedGameName || 'unknown_game';
+        const baseDir = this.workspaceRoot
+            ? path.join(this.workspaceRoot, 'snapshots')
+            : path.join(require('os').tmpdir(), 'ps2snapshots');
+
+        // Prompt user for a save-state name (used as the .p2s file name).
+        const snapName = await vscode.window.showInputBox({
+            title: 'Save PCSX2 State',
+            prompt: 'Enter a name for this save state',
+            placeHolder: 'e.g. before_boss_fight',
+            ignoreFocusOut: true,
+        });
+        if (snapName === undefined) { return; } // cancelled
+
+        const safeName = (snapName.trim() || 'savestate').replace(/[^a-zA-Z0-9_\-]/g, '_');
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const saveDir = path.join(baseDir, isoName, dateStr);
+        try { fs.mkdirSync(saveDir, { recursive: true }); } catch (mkErr: any) {
+            if (mkErr?.code !== 'EEXIST') {
+                out.error(`Could not create save-state directory: ${mkErr?.message ?? mkErr}`);
+                vscode.window.showErrorMessage(`Could not create save-state directory: ${mkErr?.message ?? mkErr}`);
+                return;
+            }
+        }
+
+        const filePath = path.join(saveDir, `${safeName}.p2s`);
+        out.info(`Saving PCSX2 state → ${filePath}`);
+
+        try {
+            await this.socketClient.saveStateFile(filePath);
+            out.info(`PCSX2 state saved to '${filePath}'.`);
+            vscode.window.showInformationMessage(`PCSX2 state saved: ${path.basename(filePath)}`);
+        } catch (err: any) {
+            out.error(`PCSX2 save state failed: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`PCSX2 save state failed: ${err?.message ?? err}`);
         }
     }
 
