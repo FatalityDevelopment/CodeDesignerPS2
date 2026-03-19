@@ -1784,23 +1784,51 @@ namespace CodeDesigner.Ps2.Bridge
                 try
                 {
                     var snap = PineClient!.GetRegisters();
-                    var pineGpr     = snap.GPR.Select(v => (ulong)v).ToList();
-                    var pineGprLo32 = snap.GPR.ToList();
-                    // PINE MsgGetRegisters only returns lower 32-bit halves of each GPR.
-                    // Hi32 / UpLo32 / UpHi32 are unavailable and filled with zeros.
-                    var pineZeros   = Enumerable.Repeat(0u, 32).ToList();
+                    var pineGpr     = snap.Gpr.ToList();
+                    var pineGprLo32 = snap.GprLo32.ToList();
+                    var pineGprHi32 = snap.GprHi32.ToList();
+                    var pineGprUpLo = snap.GprUpLo32.ToList();
+                    var pineGprUpHi = snap.GprUpHi32.ToList();
                     return JsonSerializer.Serialize(new CommandResponse
                     {
                         Success   = true,
                         Command   = "GETREGS",
                         GPR       = pineGpr,
                         GPR_Lo32  = pineGprLo32,
-                        GPR_Hi32  = pineZeros,
-                        GPR_UpLo32 = pineZeros,
-                        GPR_UpHi32 = pineZeros,
+                        GPR_Hi32  = pineGprHi32,
+                        GPR_UpLo32 = pineGprUpLo,
+                        GPR_UpHi32 = pineGprUpHi,
                         GPR_PC    = snap.PC,
                         GPR_HI    = snap.HI,
                         GPR_LO    = snap.LO,
+                        GPR_HI1   = snap.HI1,
+                        GPR_LO1   = snap.LO1,
+                        GPR_SA    = snap.SA,
+                        COP0_Status = snap.Cop0.Length > 12 ? snap.Cop0[12] : 0,
+                        COP0_Cause  = snap.Cop0.Length > 13 ? snap.Cop0[13] : 0,
+                        COP0_EPC    = snap.Cop0.Length > 14 ? snap.Cop0[14] : 0,
+                        COP0_Count  = snap.Cop0.Length > 9  ? snap.Cop0[9]  : 0,
+                        COP0_Regs   = snap.Cop0.Select(v => (ulong)v).ToList(),
+                        FPR         = snap.Fpr.ToList(),
+                        FPR_ACC     = snap.FprAcc,
+                        FCR0        = snap.Fcr0,
+                        FCR31       = snap.Fcr31,
+                        VU0F_X      = snap.Vu0fX.ToList(),
+                        VU0F_Y      = snap.Vu0fY.ToList(),
+                        VU0F_Z      = snap.Vu0fZ.ToList(),
+                        VU0F_W      = snap.Vu0fW.ToList(),
+                        VU0F_ACC_X  = snap.Vu0AccX,
+                        VU0F_ACC_Y  = snap.Vu0AccY,
+                        VU0F_ACC_Z  = snap.Vu0AccZ,
+                        VU0F_ACC_W  = snap.Vu0AccW,
+                        VU0F_Q      = snap.Vu0Q,
+                        VU0F_P      = snap.Vu0P,
+                        VU0F_I      = snap.Vu0I,
+                        VU0I        = snap.Vu0i.ToList(),
+                        VU0_Status  = snap.Vu0i.Length > 16 ? snap.Vu0i[16] : 0,
+                        VU0_MAC     = snap.Vu0i.Length > 17 ? snap.Vu0i[17] : 0,
+                        VU0_Clip    = snap.Vu0i.Length > 18 ? snap.Vu0i[18] : 0,
+                        GS_Priv     = snap.GsPriv.ToList(),
                     });
                 }
                 catch (Exception ex) { return CreateErrorResponse($"PINE GetRegisters error: {ex.Message}"); }
@@ -4920,7 +4948,6 @@ namespace CodeDesigner.Ps2.Bridge
         public string Name { get; set; } = string.Empty;
     }
 }
-
 
 
 

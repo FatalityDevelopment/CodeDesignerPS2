@@ -854,6 +854,26 @@ export class SocketClient {
     }
 
     /**
+     * PCSX2 PINE: step into (non-blocking). Emulator will run until the next pause/breakpoint.
+     */
+    public async stepInto(): Promise<void> {
+        const response = await this.sendCommand({ Command: 'STEPINTO' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'StepInto failed');
+        }
+    }
+
+    /**
+     * PCSX2 PINE: step over (non-blocking). Emulator will run until the next pause/breakpoint.
+     */
+    public async stepOver(): Promise<void> {
+        const response = await this.sendCommand({ Command: 'STEPOVER' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'StepOver failed');
+        }
+    }
+
+    /**
      * Restart the emulator (reset both CPUs to power-on state, then pause)
      */
     public async restart(): Promise<void> {

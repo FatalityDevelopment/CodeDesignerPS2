@@ -26,13 +26,21 @@ import {
          [class.status-paused]="isPaused()">
       <span id="emu-status-dot">●</span>
       <span id="emu-status-text">{{statusText()}}</span>
-      <button id="emu-play-pause-btn" (click)="togglePause.emit()" title="Pause/Resume emulator">
-        {{isPaused() ? '▶ Resume' : '⏸ Pause'}}
-      </button>
-      <button id="emu-step-btn" (click)="step.emit()" [disabled]="!isConnected() || !isPaused()"
-              title="Single step one EE instruction (only while paused)">
-        ▷| Step
-      </button>
+       <button id="emu-play-pause-btn" (click)="togglePause.emit()" title="Pause/Resume emulator">
+         {{isPaused() ? '▶ Resume' : '⏸ Pause'}}
+       </button>
+       <button id="emu-step-btn" (click)="step.emit()" [disabled]="!isConnected() || !isPaused()"
+               title="Single step one EE instruction (only while paused)">
+         ▷| Step
+       </button>
+       <button id="emu-step-into-btn" (click)="stepInto.emit()" [disabled]="!isConnected() || !isPaused()"
+               title="Step into (PCSX2 PINE)">
+         ▷▷ Step In
+       </button>
+       <button id="emu-step-over-btn" (click)="stepOver.emit()" [disabled]="!isConnected() || !isPaused()"
+               title="Step over (PCSX2 PINE)">
+         ▷▷| Step Over
+       </button>
     </div>
   `,
 })
@@ -42,6 +50,8 @@ export class PanelStatusBarComponent {
 
   readonly togglePause = output<void>();
   readonly step = output<void>();
+  readonly stepInto = output<void>();
+  readonly stepOver = output<void>();
 
   readonly statusText = computed(() => {
     if (this.isPaused()) { return '⏸ PAUSED'; }

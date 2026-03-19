@@ -106,9 +106,8 @@ import { EmuOption, SnapshotEntry } from '../types';
 
       @if (isPcsx2Selected()) {
         <div class="row">
-          <button class="pseudo-disabled-btn" (click)="snapshotPcsx2Click.emit()"
-                  title="PCSX2 snapshot handler not wired yet">
-            Take Snapshot (PCSX2 - TODO)
+          <button id="snapshotPcsx2Btn" (click)="snapshotPcsx2Click.emit()" [disabled]="!isConnected()">
+            Take Snapshot (PCSX2)
           </button>
         </div>
       }
