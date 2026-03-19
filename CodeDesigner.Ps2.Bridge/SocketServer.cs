@@ -420,6 +420,16 @@ namespace CodeDesigner.Ps2.Bridge
                     case "GETTHREADS":
                         return HandleGetThreads();
 
+                    case "GETIOPTHREADS":
+                    case "GET_IOP_THREADS":
+                    case "IOPTHREADS":
+                        return HandleGetIopThreads();
+
+                    case "PINEDISASSEMBLE":
+                    case "PINE_DISASSEMBLE":
+                    case "PINE_DISASM":
+                        return HandlePineDisassemble(command.CpuSel, command.Address, command.Length.HasValue ? (ushort?)command.Length.Value : null);
+
                     case "LISTDISCELFS":
                         return HandleListDiscElfs(command.IsoPath);
 
@@ -2704,6 +2714,68 @@ namespace CodeDesigner.Ps2.Bridge
             return JsonSerializer.Serialize(response);
         }
 
+        private string HandleGetIopThreads()
+        {
+            if (!IsPineMode)
+                return CreateErrorResponse("GETIOPTHREADS requires PINE mode");
+            try
+            {
+                var pineThreads = PineClient!.GetIOPThreads();
+                var pineThreadEntries = pineThreads.Select(t => new ThreadEntry
+                {
+                    Id       = (int)t.TID,
+                    Status   = t.Status switch
+                    {
+                        1  => "Running",
+                        2  => "Ready",
+                        4  => "Waiting",
+                        8  => "Suspended",
+                        16 => "Dormant",
+                        _  => $"0x{t.Status:X2}",
+                    },
+                    Pc       = t.PC,
+                    Sp       = t.StackTop,
+                    Priority = (int)t.Priority,
+                    EntryPc  = t.EntryPoint,
+                }).ToList();
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "GETIOPTHREADS",
+                    Threads = pineThreadEntries,
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"PINE GETIOPTHREADS failed: {ex.Message}");
+            }
+        }
+
+        private string HandlePineDisassemble(byte? cpuSel, uint? address, ushort? count)
+        {
+            if (cpuSel  == null) return CreateErrorResponse("CpuSel is required for PINEDISASSEMBLE (0=EE, 1=IOP)");
+            if (address == null) return CreateErrorResponse("Address is required for PINEDISASSEMBLE");
+            if (!IsPineMode)     return CreateErrorResponse("PINEDISASSEMBLE requires PINE mode; use DISASSEMBLE for static disassembly");
+            try
+            {
+                var lines = PineClient!.Disassemble(cpuSel.Value, address.Value, count ?? 32);
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success          = true,
+                    Command          = "PINEDISASSEMBLE",
+                    DisassemblyLines = lines.Select(l => new PineDisassemblyLineInfo
+                    {
+                        Address = $"0x{l.Address:X8}",
+                        Text    = l.Text,
+                    }).ToList(),
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"PINE Disassemble failed: {ex.Message}");
+            }
+        }
+
         /// <summary>Read a little-endian 32-bit word from the EE physical RAM.</summary>
         private static uint ReadEEWord(PS2MemoryBus bus, uint physAddr)
         {
@@ -4819,6 +4891,7 @@ namespace CodeDesigner.Ps2.Bridge
         public List<PineStackFrameInfo>?  StackFrames  { get; set; }
         public List<IopModuleInfo>?       Modules      { get; set; }
         public List<PineSymbolInfo>?      PineSymbols  { get; set; }
+        public List<PineDisassemblyLineInfo>? DisassemblyLines { get; set; }
         public List<PineLocalInfo>?       LocalVars    { get; set; }
     }
 
@@ -5065,6 +5138,16 @@ namespace CodeDesigner.Ps2.Bridge
 
         [System.Text.Json.Serialization.JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
+    }
+
+    /// <summary>One disassembled instruction line returned by PINEDISASSEMBLE.</summary>
+    public class PineDisassemblyLineInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
+        public string Address { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("text")]
+        public string Text { get; set; } = string.Empty;
     }
 }
 
