@@ -829,15 +829,22 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             await this.socketClient.restart();
             out.info('Emulator restarted — re-opening views and registering breakpoints…');
 
-            // Re-initialize every live panel with fresh data from the restarted
-            // scheduler (RAM is freshly zeroed, BIOS ROM is reloaded).
-            for (const r of LIVE_REGIONS) {
-                await this.editorProvider.openLiveMemoryView(
-                    r.region, r.address, r.size, r.label);
-            }
+            if (this._bridgeMode) {
+                // In PCSX2 mode the external emulator manages its own memory; just
+                // re-register breakpoints and leave the live panels blank until the
+                // user manually navigates or pauses.
+                await this._registerBreakpointsAndResume();
+            } else {
+                // Re-initialize every live panel with fresh data from the restarted
+                // scheduler (RAM is freshly zeroed, BIOS ROM is reloaded).
+                for (const r of LIVE_REGIONS) {
+                    await this.editorProvider.openLiveMemoryView(
+                        r.region, r.address, r.size, r.label);
+                }
 
-            // Re-register all known breakpoints then resume deterministically.
-            await this._registerBreakpointsAndResume();
+                // Re-register all known breakpoints then resume deterministically.
+                await this._registerBreakpointsAndResume();
+            }
         } catch (err: any) {
             out.error(`Restart failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Restart failed: ${err?.message ?? err}`);
@@ -1276,6 +1283,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * push them to the editor provider for display in the Labels tab.
      */
     private loadGameLabels(isoName: string): void {
+        // Always update the editor provider's current game context so user-created
+        // labels are saved to the correct per-game file.
+        this.editorProvider.setCurrentGame(isoName, this.workspaceRoot);
+
         if (!isoName || !this.workspaceRoot) {
             this.editorProvider.setGameLabels([]);
             return;

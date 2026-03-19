@@ -86,6 +86,14 @@ import { EmuOption, SnapshotEntry } from '../types';
 
       @if (isPcsx2Selected()) {
         <div class="row">
+          <button id="restartPcsx2Btn" (click)="restartClick.emit()" [disabled]="!isConnected()">
+            ⟳ Restart
+          </button>
+        </div>
+      }
+
+      @if (isPcsx2Selected()) {
+        <div class="row">
           <button id="startPcsx2Btn" (click)="startPcsx2Click.emit()">▶ Start PCSX2</button>
         </div>
       }

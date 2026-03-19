@@ -1042,6 +1042,24 @@ export class DisasmEditorComponent implements AfterViewInit {
       const commentMatch = row.comment.match(/0x([0-9A-F]{8})/i) || row.comment.match(/\b([0-9A-F]{8})\b/i);
       if (commentMatch) {
         params.navigateToAddress(parseInt(commentMatch[1], 16));
+        return;
+      }
+    }
+
+    // Check if the current row's address matches a known pointer entry, and if
+    // so navigate to the pointsTo address (pointer dereference navigation).
+    if (params.state.symPointers && params.state.symPointers.length > 0) {
+      const rowAddrNorm = row.addr.replace(/^0x/i, '').toUpperCase().padStart(8, '0');
+      const ptrEntry = params.state.symPointers.find(p => {
+        const pAddrNorm = p.address.replace(/^0x/i, '').toUpperCase().padStart(8, '0');
+        return pAddrNorm === rowAddrNorm;
+      });
+      if (ptrEntry) {
+        const target = parseInt(ptrEntry.pointsTo.replace(/^0x/i, ''), 16);
+        if (!isNaN(target) && target !== 0) {
+          params.navigateToAddress(target);
+          return;
+        }
       }
     }
   }

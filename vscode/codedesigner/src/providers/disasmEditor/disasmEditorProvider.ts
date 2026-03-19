@@ -64,6 +64,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _gameLabels: LabelEntry[] = [];
   /** Labels derived from live-resolved Pointer Manager entries. Shown as an overlay in the instruction display. */
   private _pointerLabels: LabelEntry[] = [];
+  /** Current game (ISO) name — used to resolve the per-game labels.json path. */
+  private _currentGameName: string = '';
+  /** Workspace root — used to resolve the per-game labels.json path. */
+  private _workspaceRoot: string = '';
   /** Suppress repeated live read retries after emulator-side connection failures. */
   private _liveReadBackoffUntil = 0;
   private _liveReadFailureActive = false;
@@ -126,23 +130,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     this._gameLabels = labels;
     // Broadcast updated merged labels to all live panels
     if (this._livePanels.length > 0) {
-      // If connected, fetch server labels and merge; otherwise just send game labels
-      if (this.socketClient?.isConnected()) {
-        this.socketClient.getLabels().then(serverLabels => {
-          const merged = this._mergeLabels(serverLabels, this._gameLabels);
-          for (const p of this._livePanels) {
-            p.webview.postMessage({ type: 'labelsUpdated', labels: merged });
-          }
-        }).catch(() => {
-          for (const p of this._livePanels) {
-            p.webview.postMessage({ type: 'labelsUpdated', labels: this._gameLabels });
-          }
-        });
-      } else {
-        for (const p of this._livePanels) {
-          p.webview.postMessage({ type: 'labelsUpdated', labels: this._gameLabels });
-        }
-      }
+      this._broadcastMergedLabels();
     }
   }
 
@@ -150,11 +138,16 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * Set the live-resolved labels from the Pointer Manager.
    * Broadcasts a `pointerLabelsUpdated` message to all open live panels so the
    * instruction display can overlay the label names for matching addresses.
+   * Also merges them into the labels list so the Labels tab shows struct labels too.
    */
   public setPointerLabels(labels: LabelEntry[]): void {
     this._pointerLabels = labels;
     for (const p of this._livePanels) {
       p.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
+    }
+    // Refresh the merged labels list so the Labels tab is kept in sync.
+    if (this._livePanels.length > 0) {
+      this._broadcastMergedLabels();
     }
   }
 
@@ -167,11 +160,105 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Build the fully-merged label list (server + game + pointer labels) and
+   * broadcast a `labelsUpdated` message to all live panels.
+   */
+  private _broadcastMergedLabels(): void {
+    const broadcast = (base: LabelEntry[]) => {
+      let merged = this._gameLabels.length > 0 ? this._mergeLabels(base, this._gameLabels) : base;
+      if (this._pointerLabels.length > 0) { merged = this._mergeLabels(merged, this._pointerLabels); }
+      for (const p of this._livePanels) {
+        p.webview.postMessage({ type: 'labelsUpdated', labels: merged });
+      }
+    };
+
+    if (this.socketClient?.isConnected()) {
+      this.socketClient.getLabels()
+        .then(serverLabels => broadcast(serverLabels))
+        .catch(() => broadcast([]));
+    } else {
+      broadcast([]);
+    }
+  }
+
+  /**
    * Called by DisasmPanelProvider to propagate sidebar-initiated pause/resume
    * to all editor panels' live-bar state.
    */
   public notifyPauseState(paused: boolean): void {
     this._broadcastStatus(paused);
+  }
+
+  /**
+   * Set the currently active game name and workspace root.
+   * Called by DisasmPanelProvider when the selected game changes.
+   * Used to resolve the per-game labels.json path for user-created labels.
+   */
+  public setCurrentGame(gameName: string, workspaceRoot: string): void {
+    this._currentGameName = gameName;
+    this._workspaceRoot = workspaceRoot;
+  }
+
+  /**
+   * Returns the path to the per-game labels.json file, or null if the game
+   * name or workspace root is not set.
+   */
+  private _gameLabelsPath(): string | null {
+    if (!this._currentGameName || !this._workspaceRoot) { return null; }
+    return path.join(this._workspaceRoot, 'snapshots', this._currentGameName, 'labels.json');
+  }
+
+  /**
+   * Save a label entry to the per-game labels.json file on disk.
+   * Creates the directory and file if they don't exist yet.
+   */
+  private _saveGameLabel(address: number, labelName: string, comment: string | undefined): void {
+    const labelsPath = this._gameLabelsPath();
+    if (!labelsPath) { return; }
+    try {
+      const dir = path.dirname(labelsPath);
+      if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
+
+      let entries: LabelEntry[] = [];
+      if (fs.existsSync(labelsPath)) {
+        const raw = fs.readFileSync(labelsPath, 'utf-8');
+        const doc = JSON.parse(raw) as { symbol?: LabelEntry[] };
+        entries = doc.symbol ?? (Array.isArray(doc) ? doc as LabelEntry[] : []);
+      }
+
+      const addrStr = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
+      const idx = entries.findIndex(e => e.address.toLowerCase() === addrStr.toLowerCase());
+      const entry: LabelEntry = { address: addrStr, label: labelName, comment };
+      if (idx >= 0) { entries[idx] = entry; } else { entries.push(entry); }
+
+      fs.writeFileSync(labelsPath, JSON.stringify({ symbol: entries }, null, 2), 'utf-8');
+      // Update the in-memory cache so the merged list stays consistent.
+      this._gameLabels = entries;
+    } catch (err: any) {
+      console.error(`[LABELS] Failed to save game label: ${err?.message ?? err}`);
+    }
+  }
+
+  /**
+   * Remove a label entry from the per-game labels.json file on disk.
+   */
+  private _deleteGameLabel(address: number): void {
+    const labelsPath = this._gameLabelsPath();
+    if (!labelsPath || !fs.existsSync(labelsPath)) { return; }
+    try {
+      const raw = fs.readFileSync(labelsPath, 'utf-8');
+      const doc = JSON.parse(raw) as { symbol?: LabelEntry[] };
+      let entries: LabelEntry[] = doc.symbol ?? (Array.isArray(doc) ? doc as LabelEntry[] : []);
+
+      const addrStr = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
+      entries = entries.filter(e => e.address.toLowerCase() !== addrStr.toLowerCase());
+
+      fs.writeFileSync(labelsPath, JSON.stringify({ symbol: entries }, null, 2), 'utf-8');
+      // Update the in-memory cache so the merged list stays consistent.
+      this._gameLabels = entries;
+    } catch (err: any) {
+      console.error(`[LABELS] Failed to delete game label: ${err?.message ?? err}`);
+    }
   }
 
   /**
@@ -1478,6 +1565,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     if (this._gameLabels.length > 0) {
       labels = this._mergeLabels(labels, this._gameLabels);
     }
+    // Merge struct/pointer manager labels so they appear in the Labels tab alongside
+    // user and server labels.
+    if (this._pointerLabels.length > 0) {
+      labels = this._mergeLabels(labels, this._pointerLabels);
+    }
 
     panel.webview.postMessage({ type: 'symbols', labels, strings, functions });
 
@@ -1562,8 +1654,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Add (or update) a label in the backend database and send back a fresh
-   * label list so the symbols panel refreshes instantly.
+   * Add (or update) a user-created label.
+   *
+   * When a game is active (ISO name and workspace root are set), the label is
+   * saved to the per-game `snapshots/<isoName>/labels.json` file on disk so
+   * it is scoped to that game and does not pollute the global server database.
+   * When no game context is available, the label falls back to the server's
+   * global database (legacy behaviour, e.g. binary file panels).
+   *
+   * After saving, the fresh merged label list is broadcast to the panel.
    */
   private async handleAddLabel(
     panel: vscode.WebviewPanel,
@@ -1571,11 +1670,22 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     labelName: string,
     comment: string | undefined
   ): Promise<void> {
-    if (!this.socketClient?.isConnected()) { return; }
     try {
-      await this.socketClient.addLabel(address, labelName, comment);
-      let labels = await this.socketClient.getLabels();
-      if (this._gameLabels.length > 0) { labels = this._mergeLabels(labels, this._gameLabels); }
+      if (this._gameLabelsPath()) {
+        // Per-game storage: save directly to snapshots/<isoName>/labels.json.
+        this._saveGameLabel(address, labelName, comment);
+      } else if (this.socketClient?.isConnected()) {
+        // Fallback: global server database (no game selected or no workspace).
+        await this.socketClient.addLabel(address, labelName, comment);
+      } else {
+        return;
+      }
+
+      let labels = this.socketClient?.isConnected()
+        ? await this.socketClient.getLabels().catch(() => [] as LabelEntry[])
+        : [];
+      labels = this._mergeLabels(labels, this._gameLabels);
+      if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
       panel.webview.postMessage({ type: 'labelsUpdated', labels });
     } catch (err: any) {
       console.error(`[SYMBOLS] AddLabel failed: ${err?.message ?? err}`);
@@ -1583,17 +1693,30 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Delete a label in the backend database and send back a fresh label list.
+   * Delete a user-created label.
+   *
+   * Mirrors the per-game / global fallback logic of handleAddLabel.
    */
   private async handleDeleteLabel(
     panel: vscode.WebviewPanel,
     address: number
   ): Promise<void> {
-    if (!this.socketClient?.isConnected()) { return; }
     try {
-      await this.socketClient.deleteLabel(address);
-      let labels = await this.socketClient.getLabels();
-      if (this._gameLabels.length > 0) { labels = this._mergeLabels(labels, this._gameLabels); }
+      if (this._gameLabelsPath()) {
+        // Per-game storage: remove from snapshots/<isoName>/labels.json.
+        this._deleteGameLabel(address);
+      } else if (this.socketClient?.isConnected()) {
+        // Fallback: global server database.
+        await this.socketClient.deleteLabel(address);
+      } else {
+        return;
+      }
+
+      let labels = this.socketClient?.isConnected()
+        ? await this.socketClient.getLabels().catch(() => [] as LabelEntry[])
+        : [];
+      labels = this._mergeLabels(labels, this._gameLabels);
+      if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
       panel.webview.postMessage({ type: 'labelsUpdated', labels });
     } catch (err: any) {
       console.error(`[SYMBOLS] DeleteLabel failed: ${err?.message ?? err}`);
