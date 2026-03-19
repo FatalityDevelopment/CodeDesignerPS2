@@ -6,6 +6,7 @@ import {
   output,
   signal,
   computed,
+  OnDestroy,
 } from '@angular/core';
 import { CallStackEntry, ModuleEntry, ThreadEntry } from '../state/types';
 
@@ -22,7 +23,8 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules';
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
-    <div id="bottom-panel" class="bottom-panel" [class.visible]="visible()">
+    <div id="bottom-panel" class="bottom-panel" [class.visible]="visible()" [style.height.px]="panelHeight()">
+      <div class="bottom-resize-handle" (mousedown)="onResizeMouseDown($event)"></div>
       <div class="bottom-tabs">
         <button class="bottom-tab" [class.active]="activeTab() === 'callstack'" (click)="selectTab('callstack')">Call Stack</button>
         <button class="bottom-tab" [class.active]="activeTab() === 'threads'" (click)="selectTab('threads')">Threads</button>
@@ -156,7 +158,15 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules';
     </div>
   `,
 })
-export class BottomPanelComponent {
+export class BottomPanelComponent implements OnDestroy {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Resize constants
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private readonly MIN_HEIGHT = 80;
+  private readonly MAX_HEIGHT = 700;
+  private readonly STORAGE_KEY = 'codedesigner.bottomPanel.height';
+
   // Inputs
   readonly visible = input(false);
   readonly callStack = input<CallStackEntry[]>([]);
@@ -175,6 +185,9 @@ export class BottomPanelComponent {
 
   // Internal state
   readonly activeTab = signal<BottomTab>('callstack');
+
+  /** Current panel height in pixels, persisted to localStorage */
+  readonly panelHeight = signal(this._loadHeight());
 
   // Sorted breakpoints array for @for iteration
   readonly sortedBreakpoints = computed(() =>
@@ -205,6 +218,59 @@ export class BottomPanelComponent {
    */
   formatVersion(v: number): string {
     return `${(v >> 8) & 0xFF}.${v & 0xFF}`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Resize logic
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private _resizeCleanup: (() => void) | null = null;
+
+  ngOnDestroy(): void {
+    this._resizeCleanup?.();
+  }
+
+  onResizeMouseDown(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startHeight = this.panelHeight();
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (e: MouseEvent) => {
+      // Moving up (negative delta) increases height; moving down decreases it.
+      const newHeight = Math.max(this.MIN_HEIGHT, Math.min(this.MAX_HEIGHT, startHeight + (startY - e.clientY)));
+      this.panelHeight.set(newHeight);
+    };
+
+    const onMouseUp = () => {
+      cleanup();
+      localStorage.setItem(this.STORAGE_KEY, String(this.panelHeight()));
+    };
+
+    const cleanup = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      this._resizeCleanup = null;
+    };
+
+    this._resizeCleanup = cleanup;
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  private _loadHeight(): number {
+    try {
+      const saved = localStorage.getItem(this.STORAGE_KEY);
+      if (saved) {
+        const h = parseInt(saved, 10);
+        if (!isNaN(h)) return Math.max(this.MIN_HEIGHT, Math.min(this.MAX_HEIGHT, h));
+      }
+    } catch { /* ignore */ }
+    return 200;
   }
 }
 
