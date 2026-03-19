@@ -23,6 +23,6 @@ builder.Services.AddSingleton<SocketBridgeClient>();
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithTools<Mips64LeTools>();
+    .WithTools<CodeDesignerPs2Tools>();
 
 await builder.Build().RunAsync();
