@@ -13,7 +13,14 @@ namespace CodeDesigner.Ps2.Bridge
 
         static async Task Main(string[] args)
         {
-            Console.WriteLine("MIPS64 Emotion Engine - PlayStation 2 Toolkit");
+            Console.WriteLine(@"  ___         _     ___         _                   
+ / __|___  __| |___|   \ ___ __(_)__ _ _ _  ___ _ _ 
+| (__/ _ \/ _` / -_) |) / -_|_-< / _` | ' \/ -_) '_|
+ \___\___/\__,_\___|___/\___/__/_\__, |_||_\___|_|  
+                                 |___/              
+
+");
+            Console.WriteLine("Version 1.00 - PlayStation 2 Toolkit");
             Console.WriteLine();
 
             if (HasFlag(args, "--help"))

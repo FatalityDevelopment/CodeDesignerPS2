@@ -1,5 +1,5 @@
 {
-  "selectedEmulator": "C:\\Users\\tholu\\Desktop\\pcsx2\\bin\\pcsx2-qtx64-dbg.exe",
+  "selectedEmulator": "../../CodeDesigner.Ps2.Bridge/bin/Debug/net8.0/CodeDesigner.Ps2.Bridge.exe",
   "selectedBios": "../../CodeDesigner.Ps2.Common/Bios/SCPH-70012_BIOS_V12_USA_200.bin",
   "selectedGame": "c:\\Users\\tholu\\Desktop\\SOCOM II - U.S. Navy SEALs.iso"
 }

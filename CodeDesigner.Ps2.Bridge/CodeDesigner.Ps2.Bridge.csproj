@@ -33,15 +33,27 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Isos\" />
-    <Folder Include="Dumps\" />
+    <Folder Include="Resources\Isos\" />
+    <Folder Include="Resources\Dumps\" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Isos\Gameshark 2 v4 PS2.zip">
+    <None Update="Resources\Bios\SCPH-70004_BIOS_V12_PAL_200.BIN">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Bios\SCPH-70012_BIOS_V12_USA_200.bin">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Bios\scph10000.bin">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Isos\Gameshark 2 v4 PS2.zip">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="ps2-labels.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\MemoryCards\Mcd001.ps2">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
