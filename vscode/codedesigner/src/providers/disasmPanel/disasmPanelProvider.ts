@@ -219,7 +219,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.handleSnapshot();
                     break;
                 case 'snapshotPcsx2':
-                    this.handlePcsx2SnapshotStub();
+                    await this.handleSnapshot();
                     break;
                 case 'importBin':
                     await this.handleImportBin();
@@ -235,6 +235,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'step':
                     await this.handleStep();
+                    break;
+                case 'stepInto':
+                    await this.handleStepInto();
+                    break;
+                case 'stepOver':
+                    await this.handleStepOver();
                     break;
                 case 'togglePause':
                     await this.handleTogglePause();
@@ -777,6 +783,34 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         await this.editorProvider.stepAndBroadcast();
     }
 
+    /** PCSX2 PINE: step into (non-blocking). Marks sidebar as running until next pause event. */
+    private async handleStepInto(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        try {
+            await this.socketClient.stepInto();
+            this._setPauseState(false);
+        } catch (err: any) {
+            getOutputChannel().error(`Step Into failed: ${err?.message ?? err}`);
+        }
+    }
+
+    /** PCSX2 PINE: step over (non-blocking). Marks sidebar as running until next pause event. */
+    private async handleStepOver(): Promise<void> {
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+        try {
+            await this.socketClient.stepOver();
+            this._setPauseState(false);
+        } catch (err: any) {
+            getOutputChannel().error(`Step Over failed: ${err?.message ?? err}`);
+        }
+    }
+
     /** Restart the emulator: send RESTART command via socket, keeping the connection alive. */
     private async handleRestart(): Promise<void> {
         const out = getOutputChannel();
@@ -935,13 +969,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             out.error(`Import failed: ${err?.message ?? err}`);
             vscode.window.showErrorMessage(`Import failed: ${err?.message ?? err}`);
         }
-    }
-
-    /** Temporary placeholder until native PCSX2 snapshot plumbing is implemented. */
-    private handlePcsx2SnapshotStub(): void {
-        const out = getOutputChannel();
-        out.info('[PCSX2] Snapshot requested, but PCSX2 snapshot handler is not implemented yet.');
-        out.info('[PCSX2] TODO: wire to PCSX2 save-state/snapshot API once available.');
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────

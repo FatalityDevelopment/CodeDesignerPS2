@@ -164,6 +164,14 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
     this.bridge.postMessage({ command: 'step' });
   }
 
+  stepInto(): void {
+    this.bridge.postMessage({ command: 'stepInto' });
+  }
+
+  stepOver(): void {
+    this.bridge.postMessage({ command: 'stepOver' });
+  }
+
   // ── Tab navigation ───────────────────────────────────────────────────────
 
   setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile'): void {

@@ -113,18 +113,95 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>EE register snapshot returned by <see cref="GetRegisters"/>.</summary>
         public sealed class RegisterSnapshot
         {
-            /// <summary>All 32 EE general-purpose registers (lower 32-bit halves).</summary>
-            public uint[] GPR { get; }
-            /// <summary>EE program counter (KSEG0-normalised).</summary>
+            public ulong[] Gpr { get; }
+            public uint[] GprLo32 { get; }
+            public uint[] GprHi32 { get; }
+            public uint[] GprUpLo32 { get; }
+            public uint[] GprUpHi32 { get; }
             public uint PC  { get; }
-            /// <summary>HI multiply/divide result register (lower 32 bits).</summary>
             public uint HI  { get; }
-            /// <summary>LO multiply/divide result register (lower 32 bits).</summary>
             public uint LO  { get; }
+            public uint HI1 { get; }
+            public uint LO1 { get; }
+            public uint SA  { get; }
+            public uint[] Cop0 { get; }
+            public uint[] Fpr { get; }
+            public uint FprAcc { get; }
+            public uint[] Fcr { get; }
+            public uint Fcr0 => (Fcr.Length > 0) ? Fcr[0] : 0;
+            public uint Fcr31 => (Fcr.Length > 31) ? Fcr[31] : 0;
+            public uint[] Vu0fX { get; }
+            public uint[] Vu0fY { get; }
+            public uint[] Vu0fZ { get; }
+            public uint[] Vu0fW { get; }
+            public uint Vu0AccX { get; }
+            public uint Vu0AccY { get; }
+            public uint Vu0AccZ { get; }
+            public uint Vu0AccW { get; }
+            public uint Vu0Q { get; }
+            public uint Vu0P { get; }
+            public uint Vu0I { get; }
+            public uint[] Vu0i { get; }
+            public ulong[] GsPriv { get; }
 
-            internal RegisterSnapshot(uint[] gpr, uint pc, uint hi, uint lo)
+            internal RegisterSnapshot(
+                ulong[] gpr,
+                uint[] gprLo32,
+                uint[] gprHi32,
+                uint[] gprUpLo32,
+                uint[] gprUpHi32,
+                uint pc,
+                uint hi,
+                uint lo,
+                uint hi1,
+                uint lo1,
+                uint sa,
+                uint[] cop0,
+                uint[] fpr,
+                uint fprAcc,
+                uint[] fcr,
+                uint[] vu0fX,
+                uint[] vu0fY,
+                uint[] vu0fZ,
+                uint[] vu0fW,
+                uint vu0AccX,
+                uint vu0AccY,
+                uint vu0AccZ,
+                uint vu0AccW,
+                uint vu0Q,
+                uint vu0P,
+                uint vu0I,
+                uint[] vu0i,
+                ulong[] gsPriv)
             {
-                GPR = gpr; PC = pc; HI = hi; LO = lo;
+                Gpr = gpr;
+                GprLo32 = gprLo32;
+                GprHi32 = gprHi32;
+                GprUpLo32 = gprUpLo32;
+                GprUpHi32 = gprUpHi32;
+                PC = pc;
+                HI = hi;
+                LO = lo;
+                HI1 = hi1;
+                LO1 = lo1;
+                SA = sa;
+                Cop0 = cop0;
+                Fpr = fpr;
+                FprAcc = fprAcc;
+                Fcr = fcr;
+                Vu0fX = vu0fX;
+                Vu0fY = vu0fY;
+                Vu0fZ = vu0fZ;
+                Vu0fW = vu0fW;
+                Vu0AccX = vu0AccX;
+                Vu0AccY = vu0AccY;
+                Vu0AccZ = vu0AccZ;
+                Vu0AccW = vu0AccW;
+                Vu0Q = vu0Q;
+                Vu0P = vu0P;
+                Vu0I = vu0I;
+                Vu0i = vu0i;
+                GsPriv = gsPriv;
             }
         }
 
@@ -454,18 +531,187 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public RegisterSnapshot GetRegisters()
         {
-            // Reply: [size(4)][IPC_OK(1)][r0..r31(128)][PC(4)][HI(4)][LO(4)] = 145 bytes
-            byte[] rep = SendReceive(BuildSingleRequest(MsgGetRegisters), expectedReplySize: 145);
-            if (rep[4] != IPC_OK) throw PineFail("MsgGetRegisters");
+            // PINE MsgGetRegisters returns r0–r31 (lower 32), PC, HI, LO.
+            // To expose *all* registers to the UI, we augment this with
+            // category-wise MsgGetRegister calls (u128) for every EE register set.
+            var gprLo32   = new uint[32];
+            var gprHi32   = new uint[32];
+            var gprUpLo32 = new uint[32];
+            var gprUpHi32 = new uint[32];
+            var gpr64     = new ulong[32];
 
-            var gpr = new uint[32];
+            uint pc = 0, hi = 0, lo = 0;
+
+            // First, use the bulk GetRegisters reply when available to populate
+            // the basic GPR + PC/HI/LO fields (fast path, works with legacy PCSX2).
+            try
+            {
+                byte[] rep = SendReceive(BuildSingleRequest(MsgGetRegisters), expectedReplySize: 145);
+                if (rep[4] == IPC_OK && rep.Length >= 145)
+                {
+                    for (int i = 0; i < 32; i++)
+                    {
+                        uint val = ReadU32LE(rep, 5 + i * 4);
+                        gprLo32[i] = val;
+                        gpr64[i] = val;
+                    }
+                    pc = ReadU32LE(rep, 5 + 128);
+                    hi = ReadU32LE(rep, 5 + 132);
+                    lo = ReadU32LE(rep, 5 + 136);
+                }
+            }
+            catch
+            {
+                // Ignore bulk failure; we'll fall back to per-register reads.
+            }
+
+            // Category constants from DebugInterface.h (EECAT_*)
+            const byte CatGpr    = 0;
+            const byte CatCp0    = 1;
+            const byte CatFpr    = 2;
+            const byte CatFcr    = 3;
+            const byte CatVu0f   = 4;
+            const byte CatVu0i   = 5;
+            const byte CatGsPriv = 6;
+
+            // Helper to ensure an array has the expected length (defensive for legacy replies).
+            static T[] EnsureLength<T>(T[] arr, int len) => arr.Length == len ? arr : new T[len];
+
+            // Fill GPR/PC/HI/LO from GetRegister to capture upper 96 bits too.
+            for (int i = 0; i < 35; i++)
+            {
+                byte[] val = GetRegister(cpuSel: 0, cat: CatGpr, num: (byte)i);
+                SplitU128(val, out uint lo32, out uint hi32, out uint upLo32, out uint upHi32,
+                    out ulong lo64, out _);
+                if (i < 32)
+                {
+                    gprLo32[i]   = lo32;
+                    gprHi32[i]   = hi32;
+                    gprUpLo32[i] = upLo32;
+                    gprUpHi32[i] = upHi32;
+                    gpr64[i]     = lo64;
+                }
+                else if (i == 32)
+                {
+                    pc = lo32;
+                }
+                else if (i == 33)
+                {
+                    hi = lo32;
+                }
+                else if (i == 34)
+                {
+                    lo = lo32;
+                }
+            }
+
+            // COP0 (32 × 32-bit)
+            var cop0 = new uint[32];
             for (int i = 0; i < 32; i++)
-                gpr[i] = ReadU32LE(rep, 5 + i * 4);
+            {
+                byte[] val = GetRegister(0, CatCp0, (byte)i);
+                cop0[i] = ReadU32LE(val, 0);
+            }
 
-            uint pc = ReadU32LE(rep, 5 + 128);
-            uint hi = ReadU32LE(rep, 5 + 132);
-            uint lo = ReadU32LE(rep, 5 + 136);
-            return new RegisterSnapshot(gpr, pc, hi, lo);
+            // FPR (32 × 32-bit floats as raw bits)
+            var fpr = new uint[32];
+            uint fprAcc = 0;
+            for (int i = 0; i < 32; i++)
+            {
+                byte[] val = GetRegister(0, CatFpr, (byte)i);
+                fpr[i] = ReadU32LE(val, 0);
+            }
+            // FPR accumulator (optional; ignore failures on older PCSX2 builds).
+            try
+            {
+                byte[] accVal = GetRegister(0, CatFpr, 32);
+                fprAcc = ReadU32LE(accVal, 0);
+            }
+            catch { /* ACC not exposed on older builds */ }
+
+            // FCR (32 × 32-bit control regs; UI uses 0 and 31)
+            var fcr = new uint[32];
+            for (int i = 0; i < 32; i++)
+            {
+                byte[] val = GetRegister(0, CatFcr, (byte)i);
+                fcr[i] = ReadU32LE(val, 0);
+            }
+
+            // VU0 float registers (vf0–vf31, ACC at index 32)
+            var vu0fX = new uint[32];
+            var vu0fY = new uint[32];
+            var vu0fZ = new uint[32];
+            var vu0fW = new uint[32];
+            uint vu0AccX = 0, vu0AccY = 0, vu0AccZ = 0, vu0AccW = 0;
+            uint vu0Q = 0, vu0P = 0, vu0I = 0;
+
+            for (int i = 0; i < 33; i++)
+            {
+                byte[] val = GetRegister(0, CatVu0f, (byte)i);
+                SplitVector(val, out uint x, out uint y, out uint z, out uint w);
+                if (i < 32)
+                {
+                    vu0fX[i] = x; vu0fY[i] = y; vu0fZ[i] = z; vu0fW[i] = w;
+                }
+                else
+                {
+                    vu0AccX = x; vu0AccY = y; vu0AccZ = z; vu0AccW = w;
+                }
+            }
+
+            // VU0 integer/control registers (vi00–vi31)
+            var vu0i = new uint[32];
+            for (int i = 0; i < 32; i++)
+            {
+                byte[] val = GetRegister(0, CatVu0i, (byte)i);
+                uint raw = ReadU32LE(val, 0);
+                vu0i[i] = raw;
+                if (i == 21) vu0Q = raw;      // vi21 = Q
+                else if (i == 22) vu0I = raw; // vi22 = I
+                else if (i == 23) vu0P = raw; // vi23 = P
+            }
+
+            // P is not exposed via the VU0 register categories; leave as 0 (not used by PCSX2 debugger).
+
+            // GS privileged registers (19 × 64-bit)
+            var gsPriv = new ulong[19];
+            for (int i = 0; i < 19; i++)
+            {
+                byte[] val = GetRegister(0, CatGsPriv, (byte)i);
+                SplitU128(val, out _, out _, out _, out _, out ulong lo64, out _);
+                gsPriv[i] = lo64;
+            }
+
+            return new RegisterSnapshot(
+                gpr64,
+                EnsureLength(gprLo32, 32),
+                EnsureLength(gprHi32, 32),
+                EnsureLength(gprUpLo32, 32),
+                EnsureLength(gprUpHi32, 32),
+                pc,
+                hi,
+                lo,
+                0,   // HI1 not exposed by PCSX2
+                0,   // LO1 not exposed by PCSX2
+                0,   // SA not exposed by PCSX2
+                cop0,
+                fpr,
+                fprAcc,
+                fcr,
+                vu0fX,
+                vu0fY,
+                vu0fZ,
+                vu0fW,
+                vu0AccX,
+                vu0AccY,
+                vu0AccZ,
+                vu0AccW,
+                vu0Q,
+                vu0P,
+                vu0I,
+                vu0i,
+                gsPriv
+            );
         }
 
         // ═════════════════════════════════════════════════════════════════════
@@ -1134,6 +1380,24 @@ namespace CodeDesigner.Ps2.Bridge
                     | (buf[offset + 1] <<  8)
                     | (buf[offset + 2] << 16)
                     | (buf[offset + 3] << 24));
+
+        private static void SplitU128(byte[] buf, out uint lo32, out uint hi32, out uint upLo32, out uint upHi32, out ulong lo64, out ulong hi64)
+        {
+            lo32    = ReadU32LE(buf, 0);
+            hi32    = ReadU32LE(buf, 4);
+            upLo32  = ReadU32LE(buf, 8);
+            upHi32  = ReadU32LE(buf, 12);
+            lo64    = ((ulong)hi32 << 32) | lo32;
+            hi64    = ((ulong)upHi32 << 32) | upLo32;
+        }
+
+        private static void SplitVector(byte[] buf, out uint x, out uint y, out uint z, out uint w)
+        {
+            x = ReadU32LE(buf, 0);
+            y = ReadU32LE(buf, 4);
+            z = ReadU32LE(buf, 8);
+            w = ReadU32LE(buf, 12);
+        }
 
         private static InvalidOperationException PineFail(string op)
             => new InvalidOperationException($"PINE IPC_FAIL on {op}");
