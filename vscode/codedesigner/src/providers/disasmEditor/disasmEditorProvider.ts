@@ -1942,7 +1942,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       return;
     }
     try {
-      const entries = await this.socketClient.scanValue(
+      const { results: entries, message: serverMsg } = await this.socketClient.scanValue(
         message.startAddress as number,
         message.endAddress   as number,
         message.value        as string,
@@ -1951,7 +1951,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         message.region       as string,
         message.previousAddresses as number[] | undefined,
       );
-      webview.postMessage({ type: 'scanValueResult', entries });
+      webview.postMessage({ type: 'scanValueResult', entries, serverMessage: serverMsg });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       getOutputChannel().error('[Scanner] ' + errMsg);

@@ -546,10 +546,11 @@ namespace CodeDesigner.Ps2.Bridge
                         return $"Echo: {message}";
                 }
             }
-            catch (JsonException)
+            catch (JsonException ex)
             {
-                // If not JSON, just echo back
-                return $"Echo: {message}";
+                // Return a proper JSON error response so clients don't get an
+                // unparseable "Echo:" reply that hides the real failure.
+                return CreateErrorResponse($"Invalid command JSON: {ex.Message}");
             }
             catch (Exception ex)
             {

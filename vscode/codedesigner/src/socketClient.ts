@@ -1295,7 +1295,7 @@ export class SocketClient {
         dataType: string,
         region: string,
         previousAddresses?: number[]
-    ): Promise<ScanValueResult[]> {
+    ): Promise<{ results: ScanValueResult[]; message?: string }> {
         const command: CommandMessage = {
             Command:       'SCANVALUE',
             Address:       startAddress,
@@ -1308,9 +1308,12 @@ export class SocketClient {
         };
         const response = await this.sendCommand(command, 300000);
         if (!response.Success) {
-            throw new Error(response.Error || 'ScanValue failed');
+            throw new Error(
+                response.Error
+                    || `ScanValue failed (value="${value}", type=${dataType}, range=0x${startAddress.toString(16)}-0x${endAddress.toString(16)})`
+            );
         }
-        return response.ScanResults ?? [];
+        return { results: response.ScanResults ?? [], message: response.Message ?? undefined };
     }
 
     /**

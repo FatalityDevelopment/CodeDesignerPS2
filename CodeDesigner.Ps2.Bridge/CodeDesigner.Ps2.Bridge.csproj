@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CodeDesigner.Ps2.TestProject" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="Coprocessors\**" />
     <Compile Remove="Instructions\**" />
     <Compile Remove="Tests\**" />

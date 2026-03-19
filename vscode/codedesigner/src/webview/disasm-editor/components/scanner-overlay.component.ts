@@ -35,6 +35,8 @@ export interface ScanResultEntry {
 export interface ScanResult {
   entries?: ScanResultEntry[];
   error?: string;
+  /** Server-side informational message (e.g. "Results capped at N"). */
+  serverMessage?: string;
 }
 
 @Component({
@@ -204,7 +206,11 @@ export class ScannerOverlayComponent {
     this.hasResults.set(true);
     this._previousAddresses = entries.map(e => parseInt(e.address, 16));
     const count = entries.length;
-    this.statusMessage.set(`Found ${count} address${count !== 1 ? 'es' : ''}.`);
+    let msg = `Found ${count} address${count !== 1 ? 'es' : ''}.`;
+    if (result.serverMessage) {
+      msg += ' ' + result.serverMessage;
+    }
+    this.statusMessage.set(msg);
     this.statusOk.set(true);
     this.statusError.set(false);
   }

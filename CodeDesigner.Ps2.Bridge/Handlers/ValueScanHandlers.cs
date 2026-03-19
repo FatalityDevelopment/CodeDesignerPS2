@@ -14,12 +14,19 @@ namespace CodeDesigner.Ps2.Bridge
         private const long MaxValueScanBytes = 256L * 1024 * 1024;
 
         /// <summary>
+        /// Maximum number of result entries a single SCANVALUE command will return.
+        /// Keeps the JSON response size manageable; clients can narrow the range
+        /// or refine with a filter scan when this cap is reached.
+        /// </summary>
+        private const int MaxScanResults = 100_000;
+
+        /// <summary>
         /// Handle SCANVALUE — scans a live memory range for values that match a
         /// comparison operator, or refines a previous result set (filter scan).
         /// </summary>
         /// <param name="startAddress">Inclusive start of the scan range.</param>
         /// <param name="endAddress">Exclusive end of the scan range.</param>
-        /// <param name="scanValue">Value to compare against (decimal or 0x-prefixed hex).</param>
+        /// <param name="scanValue">Value to compare against (decimal, 0x-prefixed hex, or bare hex).</param>
         /// <param name="comparison">Operator: "eq","ne","lt","gt","le","ge".</param>
         /// <param name="dataType">Data type: "uint8","int8","uint16","int16","uint32","int32","uint64","int64","float32","float64".</param>
         /// <param name="region">"ee" or "iop".</param>
@@ -33,82 +40,142 @@ namespace CodeDesigner.Ps2.Bridge
             string? region,
             List<uint>? previousAddresses)
         {
-            if (Scheduler == null && PineClient == null)
-                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
-
-            if (string.IsNullOrWhiteSpace(scanValue))
-                return CreateErrorResponse("ScanValue is required");
-
-            bool useIop   = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-            int  typeSize = GetScanTypeSize(dataType);
-            var  results  = new List<ScanValueResult>();
-
-            if (previousAddresses != null && previousAddresses.Count > 0)
+            try
             {
-                // Filter (refine) scan: re-read each previous address.
-                foreach (uint addr in previousAddresses)
+                if (Scheduler == null && PineClient == null)
+                    return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+
+                if (string.IsNullOrWhiteSpace(scanValue))
+                    return CreateErrorResponse("ScanValue is required");
+
+                bool useIop   = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+                int  typeSize = GetScanTypeSize(dataType);
+
+                // Validate the scan value upfront so we get a clear error instead of
+                // silently matching nothing.
+                string? parseError = ValidateScanValue(scanValue, dataType);
+                if (parseError != null)
+                    return CreateErrorResponse(parseError);
+
+                var  results  = new List<ScanValueResult>();
+                bool capped   = false;
+
+                if (previousAddresses != null && previousAddresses.Count > 0)
                 {
-                    byte[] bytes;
-                    try { bytes = ReadLiveBytes(addr, typeSize, useIop); }
+                    // Filter (refine) scan: re-read each previous address.
+                    foreach (uint addr in previousAddresses)
+                    {
+                        byte[] bytes;
+                        try { bytes = ReadLiveBytes(addr, typeSize, useIop); }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[SCANVALUE] Skipping 0x{addr:X8}: {ex.Message}");
+                            continue;
+                        }
+
+                        if (ScanValueMatches(bytes, 0, scanValue, comparison, dataType))
+                        {
+                            results.Add(new ScanValueResult
+                            {
+                                Address = $"0x{addr:X8}",
+                                Value   = FormatScanValue(bytes, 0, dataType),
+                            });
+                            if (results.Count >= MaxScanResults) { capped = true; break; }
+                        }
+                    }
+                }
+                else
+                {
+                    // Full range scan.
+                    if (endAddress <= startAddress)
+                        return CreateErrorResponse("End address must be greater than start address");
+
+                    long rangeLen = Math.Min((long)(endAddress - startAddress), MaxValueScanBytes);
+
+                    byte[] ram;
+                    try
+                    {
+                        ram = ReadScanRam(startAddress, (int)rangeLen, useIop);
+                    }
                     catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"[SCANVALUE] Skipping 0x{addr:X8}: {ex.Message}");
-                        continue;
+                        return CreateErrorResponse($"Failed to read memory: {ex.Message}");
                     }
 
-                    if (ScanValueMatches(bytes, 0, scanValue, comparison, dataType))
+                    for (int offset = 0; offset + typeSize <= ram.Length; offset += typeSize)
                     {
-                        results.Add(new ScanValueResult
+                        if (ScanValueMatches(ram, offset, scanValue, comparison, dataType))
                         {
-                            Address = $"0x{addr:X8}",
-                            Value   = FormatScanValue(bytes, 0, dataType),
-                        });
+                            uint addr = startAddress + (uint)offset;
+                            results.Add(new ScanValueResult
+                            {
+                                Address = $"0x{addr:X8}",
+                                Value   = FormatScanValue(ram, offset, dataType),
+                            });
+                            if (results.Count >= MaxScanResults) { capped = true; break; }
+                        }
                     }
+                }
+
+                var response = new CommandResponse
+                {
+                    Success     = true,
+                    Command     = "SCANVALUE",
+                    ScanResults = results,
+                };
+                if (capped)
+                    response.Message = $"Results capped at {MaxScanResults}. Narrow the range or use Filter Search.";
+
+                return JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"SCANVALUE failed: {ex.Message}");
+            }
+        }
+
+        // ── Bulk RAM reader (optimised for full-range scans) ─────────────────────
+
+        /// <summary>
+        /// Reads a contiguous block of RAM for scanning.  For the built-in
+        /// emulator this copies directly from the RAM array (fast block-copy);
+        /// for PINE mode it delegates to the batched ReadBytes path.
+        /// </summary>
+        private byte[] ReadScanRam(uint startAddress, int length, bool useIop)
+        {
+            if (IsPineMode)
+            {
+                uint pineAddr = TranslatePineAddress(startAddress, useIop);
+                return PineClient!.ReadBytes(pineAddr, length);
+            }
+
+            // Built-in emulator: use fast Array.Copy for aligned EE main RAM.
+            if (!useIop)
+            {
+                uint physAddr;
+                if (startAddress >= 0x80000000u && startAddress < 0xC0000000u)
+                    physAddr = startAddress & 0x1FFFFFFFu;
+                else if (startAddress >= 0x20000000u && startAddress < 0x22000000u)
+                    physAddr = startAddress - 0x20000000u;
+                else
+                    physAddr = startAddress;
+
+                byte[] ram = Scheduler!.EE.Bus.Ram;
+                if (physAddr + (uint)length <= (uint)ram.Length)
+                {
+                    var buf = new byte[length];
+                    Array.Copy(ram, (int)physAddr, buf, 0, length);
+                    return buf;
                 }
             }
-            else
-            {
-                // Full range scan.
-                if (endAddress <= startAddress)
-                    return CreateErrorResponse("End address must be greater than start address");
 
-                long rangeLen = Math.Min((long)(endAddress - startAddress), MaxValueScanBytes);
-
-                byte[] ram;
-                try
-                {
-                    ram = ReadLiveBytes(startAddress, (int)rangeLen, useIop);
-                }
-                catch (Exception ex)
-                {
-                    return CreateErrorResponse($"Failed to read memory: {ex.Message}");
-                }
-
-                for (int offset = 0; offset + typeSize <= ram.Length; offset += typeSize)
-                {
-                    if (ScanValueMatches(ram, offset, scanValue, comparison, dataType))
-                    {
-                        uint addr = startAddress + (uint)offset;
-                        results.Add(new ScanValueResult
-                        {
-                            Address = $"0x{addr:X8}",
-                            Value   = FormatScanValue(ram, offset, dataType),
-                        });
-                    }
-                }
-            }
-
-            return JsonSerializer.Serialize(new CommandResponse
-            {
-                Success     = true,
-                Command     = "SCANVALUE",
-                ScanResults = results,
-            });
+            // Fallback: byte-by-byte read (handles IOP, mixed regions, BIOS, etc.)
+            return ReadLiveBytes(startAddress, length, useIop);
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────────
 
-        private static int GetScanTypeSize(string? dataType) =>
+        internal static int GetScanTypeSize(string? dataType) =>
             (dataType ?? "uint32").ToUpperInvariant() switch
             {
                 "UINT8"   or "INT8"               => 1,
@@ -120,7 +187,53 @@ namespace CodeDesigner.Ps2.Bridge
                 _                                 => 4,
             };
 
-        private static bool ScanValueMatches(byte[] mem, int offset, string? rawValue, string? comparison, string? dataType)
+        /// <summary>
+        /// Pre-validates the scan value string before iterating over memory.
+        /// Returns null when valid, or an error message when invalid.
+        /// </summary>
+        internal static string? ValidateScanValue(string? rawValue, string? dataType)
+        {
+            string dt = (dataType ?? "uint32").ToUpperInvariant();
+            string sv = rawValue?.Trim() ?? "";
+            if (sv.Length == 0)
+                return "ScanValue is required";
+
+            try
+            {
+                switch (dt)
+                {
+                    case "UINT8":
+                        ParseScanUInt8(sv); break;
+                    case "INT8":
+                        ParseScanInt64(sv); break;
+                    case "UINT16":
+                    case "UINT32": case "4BYTE":
+                    case "UINT64": case "8BYTE":
+                        ParseScanUInt64(sv); break;
+                    case "INT16":
+                    case "INT32":
+                    case "INT64":
+                        ParseScanInt64(sv); break;
+                    case "FLOAT32": case "FLOAT":
+                        float.Parse(sv, System.Globalization.CultureInfo.InvariantCulture); break;
+                    case "FLOAT64": case "DOUBLE":
+                        double.Parse(sv, System.Globalization.CultureInfo.InvariantCulture); break;
+                    default:
+                        ParseScanUInt64(sv); break;
+                }
+                return null;
+            }
+            catch (FormatException)
+            {
+                return $"Cannot parse \"{sv}\" as {dt}. Use decimal, 0x-prefixed hex, or plain hex digits.";
+            }
+            catch (OverflowException)
+            {
+                return $"Value \"{sv}\" is out of range for {dt}.";
+            }
+        }
+
+        internal static bool ScanValueMatches(byte[] mem, int offset, string? rawValue, string? comparison, string? dataType)
         {
             string dt  = (dataType   ?? "uint32").ToUpperInvariant();
             string cmp = (comparison ?? "eq").ToUpperInvariant();
@@ -217,7 +330,7 @@ namespace CodeDesigner.Ps2.Bridge
             };
         }
 
-        private static string FormatScanValue(byte[] mem, int offset, string? dataType)
+        internal static string FormatScanValue(byte[] mem, int offset, string? dataType)
         {
             string dt = (dataType ?? "uint32").ToUpperInvariant();
             try
@@ -242,28 +355,58 @@ namespace CodeDesigner.Ps2.Bridge
             catch (ArgumentException) { return "?"; }
         }
 
-        // Parse helpers that accept both 0x-prefixed hex and plain decimal.
-        private static byte ParseScanUInt8(string s)
+        // Parse helpers that accept 0x-prefixed hex, bare hex, and plain decimal.
+
+        /// <summary>
+        /// Returns true when the string looks like a bare hex value (contains
+        /// at least one hex-letter A–F and only hex digits 0–9, A–F).
+        /// </summary>
+        internal static bool LooksLikeBareHex(string s)
         {
-            s = s.Trim();
-            return s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                ? Convert.ToByte(s[2..], 16)
-                : byte.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
+            if (s.Length == 0) return false;
+            bool hasHexLetter = false;
+            foreach (char c in s)
+            {
+                if (c >= '0' && c <= '9') continue;
+                if ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
+                {
+                    hasHexLetter = true;
+                    continue;
+                }
+                return false; // non-hex character
+            }
+            return hasHexLetter;
         }
 
-        private static ulong ParseScanUInt64(string s)
+        internal static byte ParseScanUInt8(string s)
         {
             s = s.Trim();
-            return s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                ? Convert.ToUInt64(s[2..], 16)
-                : ulong.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
+            if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                return Convert.ToByte(s[2..], 16);
+            if (LooksLikeBareHex(s))
+                return Convert.ToByte(s, 16);
+            return byte.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        private static long ParseScanInt64(string s)
+        internal static ulong ParseScanUInt64(string s)
+        {
+            s = s.Trim();
+            if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                return Convert.ToUInt64(s[2..], 16);
+            if (LooksLikeBareHex(s))
+                return Convert.ToUInt64(s, 16);
+            return ulong.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        internal static long ParseScanInt64(string s)
         {
             s = s.Trim();
             if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
                 return (long)Convert.ToUInt64(s[2..], 16);
+            if (s.StartsWith("-"))
+                return long.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
+            if (LooksLikeBareHex(s))
+                return (long)Convert.ToUInt64(s, 16);
             return long.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
         }
     }
