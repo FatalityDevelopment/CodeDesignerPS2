@@ -1803,7 +1803,7 @@ namespace CodeDesigner.Ps2.Bridge
                         GPR_LO    = snap.LO,
                         GPR_HI1   = snap.HI1,
                         GPR_LO1   = snap.LO1,
-                        GPR_SA    = snap.SA,
+                        GPR_SA    = (int)snap.SA,
                         COP0_Status = snap.Cop0.Length > 12 ? snap.Cop0[12] : 0,
                         COP0_Cause  = snap.Cop0.Length > 13 ? snap.Cop0[13] : 0,
                         COP0_EPC    = snap.Cop0.Length > 14 ? snap.Cop0[14] : 0,
@@ -1826,7 +1826,7 @@ namespace CodeDesigner.Ps2.Bridge
                         VU0F_I      = snap.Vu0I,
                         VU0I        = snap.Vu0i.ToList(),
                         VU0_Status  = snap.Vu0i.Length > 16 ? snap.Vu0i[16] : 0,
-                        VU0_MAC     = snap.Vu0i.Length > 17 ? snap.Vu0i[17] : 0,
+                        VU0_MAC     = (ushort)(snap.Vu0i.Length > 17 ? snap.Vu0i[17] : 0),
                         VU0_Clip    = snap.Vu0i.Length > 18 ? snap.Vu0i[18] : 0,
                         GS_Priv     = snap.GsPriv.ToList(),
                     });
