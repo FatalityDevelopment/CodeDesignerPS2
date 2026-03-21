@@ -21,21 +21,28 @@ namespace CodeDesigner.Ps2.CheatEngine
 
         public static CheatBlock Parse(string block)
         {
-            // Match the first #label line; [^\r\n]+ means a newline is not required at
-            // end-of-block (handles single-line blocks and last-line labels correctly).
-            var labelMatch = Regex.Match(block, @"(#[^\r\n]+)");
-            string label   = labelMatch.Success ? labelMatch.Groups[1].Value.TrimEnd() : string.Empty;
-            var cheatBlock = new CheatBlock { Label = label };
+            var cheatBlock = new CheatBlock();
 
-            // Capture any lines that are neither a #label nor a hex code pair as description text.
-            var textLines = new List<string>();
+            // The first non-blank, non-code text line is the label (# prefix optional and stripped).
+            // Any further non-code text lines become description text (BlockText).
+            bool foundLabel   = false;
+            var  textLines    = new List<string>();
             foreach (var rawLine in block.Split(new[] { "\r\n", "\n" }, System.StringSplitOptions.None))
             {
                 var trimmed = rawLine.Trim();
                 if (string.IsNullOrWhiteSpace(trimmed)) continue;
-                if (trimmed.StartsWith("#"))             continue; // label line
-                if (_hexCodeLine.IsMatch(trimmed))       continue; // hex code pair
-                textLines.Add(trimmed);
+                if (_hexCodeLine.IsMatch(trimmed))       continue; // hex code pair — skip
+
+                if (!foundLabel)
+                {
+                    // Strip a single optional leading # and use the rest as the label.
+                    cheatBlock.Label = trimmed.StartsWith('#') ? trimmed.Substring(1).Trim() : trimmed;
+                    foundLabel       = true;
+                }
+                else
+                {
+                    textLines.Add(trimmed);
+                }
             }
             if (textLines.Count > 0)
                 cheatBlock.BlockText = string.Join("\n", textLines);
