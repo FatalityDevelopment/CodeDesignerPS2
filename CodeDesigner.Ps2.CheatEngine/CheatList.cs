@@ -26,14 +26,14 @@ namespace CodeDesigner.Ps2.CheatEngine
             if (string.IsNullOrWhiteSpace(_cheatListText))
                 return _cheatList;
 
-            // Walk line by line so that a new #label line always starts a new block even
-            // when there is no blank line between blocks.  This handles the common pattern
-            // of pasting cheat lists where each named cheat is on consecutive lines without
-            // blank separators:
-            //   #Infinite Health
+            // Walk line by line so that any text line (name/label) above code lines always
+            // starts a new block, even without blank lines between blocks.  This handles the
+            // common pattern of pasting cheat lists where names have no # prefix:
+            //   Infinite Health
             //   20123456 000003E8
-            //   #Max Ammo
+            //   Max Ammo
             //   20789ABC 000001F4
+            // The # prefix is still accepted for backward compatibility.
             var lines = _cheatListText.Split(new[] { "\r\n", "\n" }, System.StringSplitOptions.None);
             var currentBlockLines = new List<string>();
             bool currentBlockHasCodes = false;
@@ -61,14 +61,17 @@ namespace CodeDesigner.Ps2.CheatEngine
                     continue;
                 }
 
-                // A #label line that arrives while the current block already has at least
-                // one code line means a new cheat block is starting.
-                if (trimmed.StartsWith("#") && currentBlockHasCodes)
+                bool isCode = _codeLine.IsMatch(trimmed);
+
+                // Any text line (with or without # prefix) that arrives while the current
+                // block already has at least one code line means a new cheat block is
+                // starting.  The text line becomes the name/label of the new block.
+                if (!isCode && currentBlockHasCodes)
                     FlushBlock();
 
                 currentBlockLines.Add(trimmed);
 
-                if (_codeLine.IsMatch(trimmed))
+                if (isCode)
                     currentBlockHasCodes = true;
             }
 
