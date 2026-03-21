@@ -1,55 +1,66 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    CodeDesigner installer — sets up the VS Code extension and emulator configuration.
+    CodeDesigner end-user installer.
 
 .DESCRIPTION
-    This script:
-      1. Prompts for the CodeDesigner binary folder (the compiled CodeDesigner.Ps2.Bridge
-         executable) and optionally the PCSX2 binary folder.
-      2. Asks for the BIOS file path(s) and game ISO file/folder.
-      3. Writes emu-settings.json into a user-chosen workspace folder so that VS Code
-         picks it up immediately.
-      4. Installs the CodeDesigner .vsix extension into VS Code.
+    Run this script from the CodeDesigner distributable package to get everything
+    working in minutes.  No GitHub account, no source code, no compilers needed.
 
-    Run this script on Windows with PowerShell 5.1+ (or PowerShell 7+).
+    The script auto-detects the CodeDesigner executable and .vsix extension that
+    are bundled in the same folder — you only need to supply:
+
+      • Where you want to keep your workspace/project files
+      • The path to your PS2 BIOS dump
+      • Optionally, the path(s) to your game ISO files
+
+    It then:
+      1. Writes emu-settings.json into your workspace folder.
+      2. Installs the CodeDesigner VS Code extension (.vsix).
+
+    Prerequisites
+    ─────────────
+    • Windows 10/11 with PowerShell 5.1+
+    • Visual Studio Code  https://code.visualstudio.com/
+    • .NET 8 Runtime      https://dotnet.microsoft.com/download/dotnet/8.0
+      (any of: ".NET Runtime", ".NET Desktop Runtime", or "ASP.NET Core Runtime")
+
+.PARAMETER WorkspaceDir
+    Folder where emu-settings.json will be written.
+    Defaults to a "CodeDesigner" folder in your Documents.
+
+.PARAMETER BiosPaths
+    One or more paths to PS2 BIOS dump files.
+
+.PARAMETER GamePaths
+    One or more paths to game .iso/.zip files, or a folder to scan.
+
+.PARAMETER Pcsx2BinDir
+    Path to an installed PCSX2 binary folder (optional).
+    If the distributable package contains a PCSX2 folder, it is used automatically.
 
 .EXAMPLE
-    # Interactive installation
+    # Double-click or run from PowerShell — fully interactive
     .\Install-CodeDesigner.ps1
 
 .EXAMPLE
-    # Provide all paths up-front (unattended mode)
+    # Scripted / unattended install
     .\Install-CodeDesigner.ps1 `
-        -CodeDesignerBinDir "C:\Tools\CodeDesigner\bin" `
-        -Pcsx2BinDir        "C:\Tools\pcsx2\bin" `
-        -BiosPaths          @("C:\PS2\bios\SCPH-70012.bin") `
-        -GamePaths          @("C:\PS2\isos\MySocomGame.iso") `
-        -WorkspaceDir       "C:\MyProject" `
-        -VsixPath           "C:\Tools\CodeDesigner\codedesigner.vsix"
+        -WorkspaceDir "C:\MyProject" `
+        -BiosPaths    @("C:\PS2\bios\SCPH-70012.bin") `
+        -GamePaths    @("C:\PS2\isos")
 #>
 [CmdletBinding()]
 param(
-    # Path to the folder that contains CodeDesigner.Ps2.Bridge.exe (or the equivalent).
-    [string]$CodeDesignerBinDir,
-
-    # Path to the folder that contains the PCSX2 executable (optional).
-    [string]$Pcsx2BinDir,
-
-    # One or more BIOS file paths.
+    [string]  $WorkspaceDir,
     [string[]]$BiosPaths,
-
-    # One or more game ISO / ZIP paths (or a single directory whose contents are
-    # enumerated for .iso and .zip files).
     [string[]]$GamePaths,
-
-    # The workspace/project folder where emu-settings.json will be written.
-    # Defaults to the current directory if omitted.
-    [string]$WorkspaceDir,
-
-    # Path to the .vsix file to install.  If omitted the script searches the
-    # CodeDesignerBinDir (and its parent) for a .vsix file.
-    [string]$VsixPath
+    # Advanced: override the auto-detected CodeDesigner exe folder.
+    [string]  $CodeDesignerBinDir,
+    # Advanced: override the auto-detected .vsix path.
+    [string]  $VsixPath,
+    # Advanced: specify a PCSX2 bin folder (only needed when not bundled).
+    [string]  $Pcsx2BinDir
 )
 
 Set-StrictMode -Version Latest
@@ -97,29 +108,12 @@ function Find-Executable {
     return $null
 }
 
-function Find-VsixInTree {
-    param([string]$StartDir)
-    # Search up to 3 levels up from StartDir for a *.vsix file
-    $dir = $StartDir
-    for ($i = 0; $i -lt 4; $i++) {
-        $found = Get-ChildItem -Path $dir -Filter '*.vsix' -ErrorAction SilentlyContinue |
-                 Select-Object -First 1
-        if ($found) { return $found.FullName }
-        $parent = Split-Path $dir -Parent
-        if (-not $parent -or $parent -eq $dir) { break }
-        $dir = $parent
-    }
-    return $null
-}
-
 function Install-VsixExtension {
     param([string]$VsixFile)
-
     $codeCmds = @('code', 'code-insiders', 'codium')
     foreach ($cmd in $codeCmds) {
-        $codePath = Get-Command $cmd -ErrorAction SilentlyContinue
-        if ($codePath) {
-            Write-Host "Installing extension using '$cmd'..." -ForegroundColor Yellow
+        if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+            Write-Host "Installing extension via '$cmd'..." -ForegroundColor Yellow
             & $cmd --install-extension $VsixFile --force
             if ($LASTEXITCODE -eq 0) {
                 Write-Host 'Extension installed successfully.' -ForegroundColor Green
@@ -146,89 +140,95 @@ Write-Host 'CodeDesigner — PlayStation 2 Toolkit Installer' -ForegroundColor W
 Write-Host 'Version 1.0' -ForegroundColor DarkGray
 Write-Host ''
 
-# ── Step 1 — Workspace directory ─────────────────────────────────────────────
+# ── Auto-detect bundled files ─────────────────────────────────────────────────
+#
+# When the developer sends you this package the layout is:
+#
+#   CodeDesignerSetup\
+#       Install-CodeDesigner.ps1   ← this script
+#       codedesigner.vsix
+#       CodeDesigner\
+#           CodeDesigner.Ps2.Bridge.exe   (+ supporting DLLs)
+#       PCSX2\                            (optional)
+#           pcsx2-qtx64.exe   (+ supporting DLLs)
+#
+# We resolve all paths relative to the folder this script lives in so the
+# end user never has to type any binary paths.
 
-Write-Header 'Step 1 of 5 — Workspace / project folder'
-Write-Host 'emu-settings.json will be placed in this folder so VS Code can find it.'
-Write-Host ''
+$packageDir = $PSScriptRoot
 
-if (-not $WorkspaceDir) {
-    $WorkspaceDir = Read-NonEmptyString `
-        -Prompt 'Enter the workspace folder path' `
-        -Default (Get-Location).Path
-}
-if (-not (Test-Path $WorkspaceDir -PathType Container)) {
-    Write-Host "Creating directory: $WorkspaceDir" -ForegroundColor Yellow
-    New-Item -ItemType Directory -Path $WorkspaceDir -Force | Out-Null
-}
-Write-Host "Workspace: $WorkspaceDir" -ForegroundColor Green
-
-# ── Step 2 — CodeDesigner binary folder ──────────────────────────────────────
-
-Write-Header 'Step 2 of 5 — CodeDesigner binary folder'
-Write-Host 'This is the folder that contains CodeDesigner.Ps2.Bridge.exe (the built console'
-Write-Host 'application).  If you have not built the project yet, run Build-Artifacts.ps1 first.'
-Write-Host ''
-
-if (-not $CodeDesignerBinDir) {
-    $CodeDesignerBinDir = Read-NonEmptyString `
-        -Prompt 'Enter the path to the CodeDesigner bin folder'
-}
-
+# -- Locate CodeDesigner executable --
 $cdExeNames = @(
     'CodeDesigner.Ps2.Bridge.exe',
     'CodeDesigner.Ps2.exe',
     'CodeDesigner.Ps2.Bridge'
 )
-$cdExe = Find-Executable -Dir $CodeDesignerBinDir -Names $cdExeNames
-
-if ($cdExe) {
-    Write-Host "Found CodeDesigner executable: $cdExe" -ForegroundColor Green
+$cdBinDir = if ($CodeDesignerBinDir) {
+    $CodeDesignerBinDir
 } else {
-    Write-Warning "Could not locate a CodeDesigner executable in '$CodeDesignerBinDir'."
-    Write-Warning 'The emulators entry will still be written — verify the path manually.'
-    $cdExe = Join-Path $CodeDesignerBinDir 'CodeDesigner.Ps2.Bridge.exe'
+    Join-Path $packageDir 'CodeDesigner'
+}
+$cdExe = Find-Executable -Dir $cdBinDir -Names $cdExeNames
+
+# -- Locate .vsix --
+if (-not $VsixPath) {
+    $candidate = Join-Path $packageDir 'codedesigner.vsix'
+    if (Test-Path $candidate -PathType Leaf) { $VsixPath = $candidate }
 }
 
-# ── Step 3 — PCSX2 binary folder (optional) ──────────────────────────────────
+# -- Check for bundled PCSX2 --
+$bundledPcsx2Dir = Join-Path $packageDir 'PCSX2'
+$hasBundledPcsx2 = Test-Path $bundledPcsx2Dir -PathType Container
 
-Write-Header 'Step 3 of 5 — PCSX2 binary folder (optional)'
-Write-Host 'CodeDesigner can connect to PCSX2 via the PINE protocol.'
-Write-Host 'Skip this step if you only want to use the built-in emulator.'
+# -- Announce what we found --
+Write-Host 'Detected package layout:' -ForegroundColor Cyan
+if ($cdExe -and (Test-Path $cdExe)) {
+    Write-Host "  CodeDesigner : $cdExe" -ForegroundColor Green
+} else {
+    Write-Host "  CodeDesigner : not found in $cdBinDir" -ForegroundColor Red
+}
+if ($VsixPath -and (Test-Path $VsixPath)) {
+    Write-Host "  Extension    : $VsixPath" -ForegroundColor Green
+} else {
+    Write-Host "  Extension    : .vsix not found in $packageDir" -ForegroundColor Yellow
+}
+if ($hasBundledPcsx2) {
+    Write-Host "  PCSX2        : bundled in $bundledPcsx2Dir" -ForegroundColor Green
+}
 Write-Host ''
 
-$includePcsx2 = Confirm-YesNo -Prompt 'Configure PCSX2 integration?' -DefaultYes $false
-
-$pcsx2Exe = $null
-if ($includePcsx2) {
-    if (-not $Pcsx2BinDir) {
-        $Pcsx2BinDir = Read-NonEmptyString `
-            -Prompt 'Enter the path to the PCSX2 bin folder'
-    }
-
-    $pcsx2ExeNames = @(
-        'pcsx2-qtx64.exe',
-        'pcsx2-qtx64-dbg.exe',
-        'pcsx2-qt.exe',
-        'pcsx2.exe',
-        'PCSX2.exe'
-    )
-    $pcsx2Exe = Find-Executable -Dir $Pcsx2BinDir -Names $pcsx2ExeNames
-
-    if ($pcsx2Exe) {
-        Write-Host "Found PCSX2 executable: $pcsx2Exe" -ForegroundColor Green
-    } else {
-        Write-Warning "Could not locate a PCSX2 executable in '$Pcsx2BinDir'."
-        Write-Warning 'Verify that PCSX2 (with PINE server support) is installed in that folder.'
-        $pcsx2Exe = Join-Path $Pcsx2BinDir 'pcsx2-qtx64.exe'
-    }
+if (-not $cdExe -or -not (Test-Path $cdExe)) {
+    Write-Warning "CodeDesigner executable not found in the expected location."
+    Write-Warning "Expected: $cdBinDir\CodeDesigner.Ps2.Bridge.exe"
+    Write-Warning "Make sure you extracted the full package before running this installer."
+    $cdExe = Join-Path $cdBinDir 'CodeDesigner.Ps2.Bridge.exe'
 }
 
-# ── Step 4 — BIOS file(s) ────────────────────────────────────────────────────
+# ── Step 1 — Workspace folder ─────────────────────────────────────────────────
 
-Write-Header 'Step 4 of 5 — PS2 BIOS file(s)'
-Write-Host 'CodeDesigner requires a PS2 BIOS dump to run the built-in emulator.'
-Write-Host 'Common file names: SCPH-70012_BIOS_V12_USA_200.bin, scph10000.bin, etc.'
+Write-Header 'Step 1 of 3 — Workspace folder'
+Write-Host 'This is the folder VS Code will open as your project.'
+Write-Host 'emu-settings.json (emulator configuration) will be saved here.'
+Write-Host ''
+
+$defaultWorkspace = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'CodeDesigner'
+if (-not $WorkspaceDir) {
+    $WorkspaceDir = Read-NonEmptyString `
+        -Prompt 'Enter the workspace folder path' `
+        -Default $defaultWorkspace
+}
+if (-not (Test-Path $WorkspaceDir -PathType Container)) {
+    Write-Host "Creating folder: $WorkspaceDir" -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $WorkspaceDir -Force | Out-Null
+}
+Write-Host "Workspace: $WorkspaceDir" -ForegroundColor Green
+
+# ── Step 2 — PS2 BIOS file(s) ────────────────────────────────────────────────
+
+Write-Header 'Step 2 of 3 — PS2 BIOS file'
+Write-Host 'CodeDesigner needs a PS2 BIOS dump to run the built-in emulator.'
+Write-Host 'This is a file you dump from your own PS2 console.'
+Write-Host 'Common file names: SCPH-70012_BIOS_V12_USA_200.bin, scph10000.bin'
 Write-Host ''
 
 $biosEntries = [System.Collections.Generic.List[hashtable]]::new()
@@ -241,23 +241,25 @@ if ($BiosPaths -and $BiosPaths.Count -gt 0) {
     }
 } else {
     do {
-        $biosPath = Read-NonEmptyString -Prompt 'Enter the full path to a PS2 BIOS file'
+        $biosPath = Read-NonEmptyString -Prompt 'Enter the full path to your PS2 BIOS file'
         if (-not (Test-Path $biosPath -PathType Leaf)) {
-            Write-Warning "File not found: $biosPath — adding anyway (verify path later)."
+            Write-Warning "File not found: $biosPath"
+            Write-Warning 'Check the path and try again, or press Enter to add it anyway.'
+            $addAnyway = Confirm-YesNo -Prompt 'Add this path anyway?' -DefaultYes $true
+            if (-not $addAnyway) { continue }
         }
-        $biosName = Read-NonEmptyString `
-            -Prompt 'Friendly name for this BIOS' `
-            -Default ([System.IO.Path]::GetFileNameWithoutExtension($biosPath))
+        $defaultName = [System.IO.Path]::GetFileNameWithoutExtension($biosPath)
+        $biosName = Read-NonEmptyString -Prompt 'Friendly name for this BIOS' -Default $defaultName
         $biosEntries.Add(@{ name = $biosName; path = $biosPath })
-        Write-Host "Added BIOS: $biosPath" -ForegroundColor Green
+        Write-Host "Added: $biosPath" -ForegroundColor Green
     } while (Confirm-YesNo -Prompt 'Add another BIOS file?' -DefaultYes $false)
 }
 
-# ── Step 5 — Game ISO(s) ─────────────────────────────────────────────────────
+# ── Step 3 — Game ISO(s) ──────────────────────────────────────────────────────
 
-Write-Header 'Step 5 of 5 — Game ISO / disc image(s)'
+Write-Header 'Step 3 of 3 — Game disc images (optional)'
 Write-Host 'Enter paths to your game .iso or .zip files, or a folder that contains them.'
-Write-Host 'You can skip this step and add games later via the Settings tab in VS Code.'
+Write-Host 'You can also add or change games later from the Settings tab inside VS Code.'
 Write-Host ''
 
 $gameEntries = [System.Collections.Generic.List[hashtable]]::new()
@@ -265,7 +267,6 @@ $gameEntries = [System.Collections.Generic.List[hashtable]]::new()
 if ($GamePaths -and $GamePaths.Count -gt 0) {
     foreach ($gp in $GamePaths) {
         if (Test-Path $gp -PathType Container) {
-            # It's a directory — enumerate .iso and .zip files inside it
             $files = Get-ChildItem -Path $gp -Include '*.iso','*.zip' -File -ErrorAction SilentlyContinue
             foreach ($f in $files) {
                 $gameName = [System.IO.Path]::GetFileNameWithoutExtension($f.FullName)
@@ -279,10 +280,10 @@ if ($GamePaths -and $GamePaths.Count -gt 0) {
         }
     }
 } else {
-    $addGames = Confirm-YesNo -Prompt 'Do you want to add game ISO paths now?' -DefaultYes $true
+    $addGames = Confirm-YesNo -Prompt 'Do you want to add game disc images now?' -DefaultYes $true
     if ($addGames) {
         do {
-            Write-Host 'You can enter a .iso/.zip file path, or a folder path to scan for games.'
+            Write-Host 'Tip: enter a folder path to add all .iso/.zip files inside it.'
             $gamePath = Read-NonEmptyString -Prompt 'Game path (file or folder)'
             if (Test-Path $gamePath -PathType Container) {
                 $files = Get-ChildItem -Path $gamePath -Include '*.iso','*.zip' -File -ErrorAction SilentlyContinue
@@ -292,23 +293,63 @@ if ($GamePaths -and $GamePaths.Count -gt 0) {
                     foreach ($f in $files) {
                         $gameName = [System.IO.Path]::GetFileNameWithoutExtension($f.FullName)
                         $gameEntries.Add(@{ name = $gameName; path = $f.FullName })
-                        Write-Host "Added game: $($f.FullName)" -ForegroundColor Green
+                        Write-Host "Added: $($f.FullName)" -ForegroundColor Green
                     }
                 }
-            } elseif (Test-Path $gamePath -PathType Leaf) {
-                $gameName = Read-NonEmptyString `
-                    -Prompt 'Friendly name for this game' `
-                    -Default ([System.IO.Path]::GetFileNameWithoutExtension($gamePath))
-                $gameEntries.Add(@{ name = $gameName; path = $gamePath })
-                Write-Host "Added game: $gamePath" -ForegroundColor Green
             } else {
-                Write-Warning "Path not found: $gamePath — adding anyway."
+                if (-not (Test-Path $gamePath -PathType Leaf)) {
+                    Write-Warning "Path not found: $gamePath — adding anyway."
+                }
                 $gameName = Read-NonEmptyString `
                     -Prompt 'Friendly name for this game' `
                     -Default ([System.IO.Path]::GetFileNameWithoutExtension($gamePath))
                 $gameEntries.Add(@{ name = $gameName; path = $gamePath })
+                Write-Host "Added: $gamePath" -ForegroundColor Green
             }
         } while (Confirm-YesNo -Prompt 'Add another game?' -DefaultYes $false)
+    }
+}
+
+# ── PCSX2 (auto-configured from bundle or user-supplied) ─────────────────────
+
+$pcsx2Exe = $null
+$pcsx2ExeNames = @(
+    'pcsx2-qtx64.exe',
+    'pcsx2-qtx64-dbg.exe',
+    'pcsx2-qt.exe',
+    'pcsx2.exe',
+    'PCSX2.exe'
+)
+
+if ($hasBundledPcsx2) {
+    $pcsx2Exe = Find-Executable -Dir $bundledPcsx2Dir -Names $pcsx2ExeNames
+    if ($pcsx2Exe) {
+        Write-Host ''
+        Write-Host "PCSX2 auto-configured from bundle: $pcsx2Exe" -ForegroundColor Green
+    } else {
+        Write-Warning "PCSX2 folder found but no executable located in: $bundledPcsx2Dir"
+    }
+} elseif ($Pcsx2BinDir) {
+    $pcsx2Exe = Find-Executable -Dir $Pcsx2BinDir -Names $pcsx2ExeNames
+    if (-not $pcsx2Exe) {
+        Write-Warning "PCSX2 executable not found in '$Pcsx2BinDir'."
+        $pcsx2Exe = Join-Path $Pcsx2BinDir 'pcsx2-qtx64.exe'
+    } else {
+        Write-Host "PCSX2 found: $pcsx2Exe" -ForegroundColor Green
+    }
+} else {
+    # Ask only if not already handled
+    Write-Host ''
+    $addPcsx2 = Confirm-YesNo -Prompt 'Do you have PCSX2 installed and want to configure it?' -DefaultYes $false
+    if ($addPcsx2) {
+        $Pcsx2BinDir = Read-NonEmptyString -Prompt 'Enter the path to your PCSX2 folder'
+        $pcsx2Exe = Find-Executable -Dir $Pcsx2BinDir -Names $pcsx2ExeNames
+        if (-not $pcsx2Exe) {
+            Write-Warning "Could not locate a PCSX2 executable in '$Pcsx2BinDir'."
+            $pcsx2Exe = Join-Path $Pcsx2BinDir 'pcsx2-qtx64.exe'
+        } else {
+            Write-Host "PCSX2 found: $pcsx2Exe" -ForegroundColor Green
+        }
     }
 }
 
@@ -340,30 +381,19 @@ Write-Host $settingsJson -ForegroundColor DarkGray
 
 Write-Header 'Installing VS Code extension'
 
-if (-not $VsixPath) {
-    # Try to find a .vsix near the CodeDesigner bin dir
-    $VsixPath = Find-VsixInTree -StartDir $CodeDesignerBinDir
-}
-if (-not $VsixPath) {
-    # Search the script's own directory and its parent
-    $scriptDir = $PSScriptRoot
-    $VsixPath = Find-VsixInTree -StartDir $scriptDir
-}
-
 if ($VsixPath -and (Test-Path $VsixPath -PathType Leaf)) {
-    Write-Host "Using .vsix: $VsixPath" -ForegroundColor Cyan
+    Write-Host "Extension file: $VsixPath" -ForegroundColor Cyan
     $installed = Install-VsixExtension -VsixFile $VsixPath
     if (-not $installed) {
         Write-Warning 'Automatic extension install failed.'
-        Write-Warning "Please install the extension manually:"
-        Write-Warning "  code --install-extension `"$VsixPath`""
+        Write-Host ''
+        Write-Host 'To install manually, open a terminal and run:' -ForegroundColor Yellow
+        Write-Host "  code --install-extension `"$VsixPath`"" -ForegroundColor Yellow
     }
 } else {
-    Write-Warning 'No .vsix file was found.  Skipping extension installation.'
-    Write-Host 'To install the extension manually, run:' -ForegroundColor Yellow
-    Write-Host '  code --install-extension <path-to-codedesigner.vsix>' -ForegroundColor Yellow
-    Write-Host ''
-    Write-Host 'To build the .vsix yourself, run Build-Artifacts.ps1 first.' -ForegroundColor Yellow
+    Write-Warning 'codedesigner.vsix was not found in the package folder.'
+    Write-Host 'To install the extension manually, drag the .vsix onto VS Code' -ForegroundColor Yellow
+    Write-Host 'or run: code --install-extension <path-to-codedesigner.vsix>' -ForegroundColor Yellow
 }
 
 # ── Done ──────────────────────────────────────────────────────────────────────
@@ -376,14 +406,13 @@ Write-Host ''
 Write-Host 'Next steps:' -ForegroundColor White
 Write-Host '  1. Open VS Code in your workspace folder:'
 Write-Host "       code `"$WorkspaceDir`""
-Write-Host '  2. The CodeDesigner sidebar panel will appear on the left.'
-Write-Host '  3. Select an emulator, BIOS and game from the Settings tab.'
-Write-Host '  4. Click Connect (or Run) to start a session.'
-if ($includePcsx2 -and $pcsx2Exe) {
+Write-Host '  2. The CodeDesigner icon will appear in the VS Code sidebar.'
+Write-Host '  3. In the Settings tab, select your BIOS and game, then click Connect.'
+if ($pcsx2Exe) {
     Write-Host ''
     Write-Host 'PCSX2 notes:' -ForegroundColor Cyan
-    Write-Host '  • Make sure PCSX2 is built with the CodeDesigner PINE server patch.'
-    Write-Host '  • Start PCSX2 first, then click "Start PCSX2" in the Settings tab.'
-    Write-Host '  • The PINE slot defaults to 28011; change it in emu-settings.json if needed.'
+    Write-Host '  • Make sure PCSX2 was built with the CodeDesigner PINE server patch.'
+    Write-Host '  • Start PCSX2, load your game, then click "Start PCSX2" in VS Code.'
+    Write-Host '  • The PINE slot defaults to 28011; edit emu-settings.json to change it.'
 }
 Write-Host ''
