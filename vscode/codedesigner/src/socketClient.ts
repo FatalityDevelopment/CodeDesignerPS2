@@ -344,6 +344,8 @@ export interface DiscElfEntry {
  * Result for a single cheat code line produced by PORTCHEATS.
  */
 export interface PortCheatResult {
+    /** Zero-based index of the cheat block; use this to distinguish blocks that share the same label. */
+    blockIndex: number;
     /** The #Name label of the cheat block this line belongs to. */
     blockName: string;
     /** Any non-label, non-code description text found in the cheat block. Null when absent. */
@@ -1495,6 +1497,7 @@ export class SocketClient {
         }
         const raw = response.PortCheatResults as Array<Record<string, unknown>> ?? [];
         const results: PortCheatResult[] = raw.map(r => ({
+            blockIndex:   (r['BlockIndex']   as number)  ?? 0,
             blockName:    (r['BlockName']    as string)  ?? '',
             blockText:    (r['BlockText']    as string | null) ?? null,
             originalCode: (r['OriginalCode'] as string)  ?? '',
