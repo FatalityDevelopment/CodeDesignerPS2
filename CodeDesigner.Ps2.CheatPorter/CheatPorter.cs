@@ -75,8 +75,9 @@ namespace CodeDesigner.Ps2.CheatPorter
             }
 
             // ── Phase 2: emit per-block / per-cheat results using the cache ───────
-            foreach (var block in blocks)
+            for (int blockIdx = 0; blockIdx < blocks.Count; blockIdx++)
             {
+                var block = blocks[blockIdx];
                 string blockName = block.Label ?? string.Empty;
                 logLines.Add($"--- {(string.IsNullOrWhiteSpace(blockName) ? "(unnamed block)" : blockName)} ---");
 
@@ -94,6 +95,7 @@ namespace CodeDesigner.Ps2.CheatPorter
 
                     var result = new PortCheatResult
                     {
+                        BlockIndex   = blockIdx,
                         BlockName    = blockName,
                         BlockText    = block.BlockText,
                         OriginalCode = origCode,

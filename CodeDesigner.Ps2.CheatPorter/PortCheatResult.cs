@@ -7,6 +7,12 @@ namespace CodeDesigner.Ps2.CheatPorter
     /// </summary>
     public class PortCheatResult
     {
+        /// <summary>
+        /// Zero-based index of the cheat block this line belongs to within the original block list.
+        /// Use this to distinguish blocks that share the same <see cref="BlockName"/> label.
+        /// </summary>
+        public int BlockIndex { get; set; }
+
         /// <summary>The #Name label of the cheat block this line belongs to.</summary>
         public string BlockName { get; set; } = string.Empty;
 

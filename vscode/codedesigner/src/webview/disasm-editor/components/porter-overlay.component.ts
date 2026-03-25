@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 
 export interface PorterResult {
+  blockIndex: number;
   blockName: string;
   blockText: string | null;
   originalCode: string;
@@ -35,6 +36,7 @@ export interface PortResultPayload {
  * Internal grouping for rendering cards.
  */
 interface PorterGroup {
+  blockIndex: number;
   blockName: string;
   blockText: string | null;
   entries: PorterResult[];
@@ -112,7 +114,7 @@ interface PorterGroup {
         @if (groups().length === 0 && hasResults()) {
           <div class="porter-no-results">No cheat codes found in input.</div>
         }
-        @for (group of groups(); track group.blockName) {
+        @for (group of groups(); track group.blockIndex) {
           <div class="porter-result-card">
             <div class="porter-result-header">
               <input type="checkbox"
@@ -280,7 +282,7 @@ export class PorterOverlayComponent {
 
   toggleGroup(group: PorterGroup, checked: boolean): void {
     const updated = this.groups().map(g =>
-      g.blockName === group.blockName ? { ...g, checked } : g
+      g.blockIndex === group.blockIndex ? { ...g, checked } : g
     );
     this.groups.set(updated);
   }
@@ -294,7 +296,7 @@ export class PorterOverlayComponent {
     const lines: string[] = [];
     for (const group of selectedGroups) {
       const entries = this._resultData.filter(
-        e => e.blockName === group.blockName && e.found && e.newCode
+        e => e.blockIndex === group.blockIndex && e.found && e.newCode
       );
       if (entries.length === 0) { continue; }
       if (group.blockName) { lines.push(group.blockName); }
@@ -333,17 +335,19 @@ export class PorterOverlayComponent {
   }
 
   private buildGroups(results: PorterResult[]): PorterGroup[] {
-    const map = new Map<string, PorterResult[]>();
+    const map = new Map<number, PorterResult[]>();
     for (const r of results) {
-      if (!map.has(r.blockName)) { map.set(r.blockName, []); }
-      map.get(r.blockName)!.push(r);
+      const arr = map.get(r.blockIndex) ?? [];
+      arr.push(r);
+      map.set(r.blockIndex, arr);
     }
     const groups: PorterGroup[] = [];
-    for (const [blockName, entries] of map) {
+    for (const [blockIndex, entries] of map) {
       const allFound = entries.every(e => e.found);
       const anyFound = entries.some(e => e.found);
       groups.push({
-        blockName,
+        blockIndex,
+        blockName: entries[0]?.blockName ?? '',
         blockText: entries[0]?.blockText ?? null,
         entries,
         allFound,
