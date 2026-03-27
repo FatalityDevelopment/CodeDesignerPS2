@@ -179,6 +179,7 @@ export class EditorState {
     converterOverlay: signal(false),
     porterOverlay: signal(false),
     scannerOverlay: signal(false),
+    structOverlay: signal(false),
   };
 
   // ═══════════════════════════════════════════════════════════════════════════

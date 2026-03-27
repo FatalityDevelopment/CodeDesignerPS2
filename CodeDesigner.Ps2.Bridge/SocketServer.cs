@@ -39,6 +39,12 @@ namespace CodeDesigner.Ps2.Bridge
         private readonly Dictionary<uint, (string Label, string? Comment)> _labels = new();
 
         /// <summary>
+        /// User-defined struct definitions loaded from ps2MemMap.json at construction time.
+        /// Key = struct name (case-sensitive).
+        /// </summary>
+        private readonly Dictionary<string, StructEntry> _structs = new(StringComparer.Ordinal);
+
+        /// <summary>
         /// When set, the READMEM command reads live memory from this scheduler.
         /// </summary>
         public DualCpuScheduler? Scheduler { get; set; }
@@ -105,6 +111,7 @@ namespace CodeDesigner.Ps2.Bridge
         {
             _port = port;
             LoadLabels();
+            LoadStructs();
         }
 
         /// <summary>
@@ -160,6 +167,105 @@ namespace CodeDesigner.Ps2.Bridge
                     Console.WriteLine($"[Labels] Failed to load {labelsPath}: {ex.Message}");
                 }
             }
+        }
+
+        /// <summary>
+        /// Load struct definitions from the "structs" array in ps2MemMap.json.
+        /// Searches the same paths as <see cref="LoadLabels"/>.
+        /// </summary>
+        private void LoadStructs()
+        {
+            var searchPaths = new[]
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
+                Path.Combine(Directory.GetCurrentDirectory(),       "ps2MemMap.json")
+            };
+
+            foreach (var path in searchPaths)
+            {
+                if (!File.Exists(path)) continue;
+                try
+                {
+                    var json = File.ReadAllText(path);
+                    using var doc = JsonDocument.Parse(json);
+                    if (!doc.RootElement.TryGetProperty("structs", out var structsEl))
+                    {
+                        Console.WriteLine($"[Structs] No 'structs' array in {path}; 0 struct(s) loaded");
+                        return;
+                    }
+
+                    foreach (var s in structsEl.EnumerateArray())
+                    {
+                        var name    = s.TryGetProperty("name",        out var np) ? np.GetString() : null;
+                        var baseAddr = s.TryGetProperty("baseAddress", out var bp) ? bp.GetString() : null;
+
+                        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(baseAddr)) continue;
+
+                        var entry = new StructEntry { Name = name!, BaseAddress = baseAddr! };
+
+                        if (s.TryGetProperty("members", out var membersEl))
+                        {
+                            foreach (var m in membersEl.EnumerateArray())
+                            {
+                                int  offset     = m.TryGetProperty("offset", out var op) ? op.GetInt32() : 0;
+                                string? mName   = m.TryGetProperty("name",   out var mn) ? mn.GetString() : null;
+                                if (!string.IsNullOrWhiteSpace(mName))
+                                    entry.Members.Add(new StructMemberEntry { Offset = offset, Name = mName! });
+                            }
+                        }
+
+                        _structs[name!] = entry;
+                    }
+                    Console.WriteLine($"[Structs] Loaded {_structs.Count} struct(s) from {path}");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Structs] Failed to load structs from {path}: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Persist both label symbols and struct definitions to ps2MemMap.json.
+        /// This is the single authoritative write path for the memory-map file so that
+        /// <see cref="LabelHandlers.SaveLabels"/> and <see cref="StructHandlers.SaveStructs"/>
+        /// always produce a consistent file without duplicating write logic.
+        /// </summary>
+        internal void SaveMemoryMap()
+        {
+            var searchPaths = new[]
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
+                Path.Combine(Directory.GetCurrentDirectory(),       "ps2MemMap.json")
+            };
+
+            string savePath = searchPaths[0];
+            foreach (var p in searchPaths)
+            {
+                if (File.Exists(p)) { savePath = p; break; }
+            }
+
+            var symbols = _labels
+                .OrderBy(kv => kv.Key)
+                .Select(kv => new LabelEntry
+                {
+                    Address = $"0x{kv.Key:X8}",
+                    Label   = kv.Value.Label,
+                    Comment = kv.Value.Comment
+                })
+                .ToList();
+
+            var structs = _structs.Values
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var json = JsonSerializer.Serialize(
+                new { symbol = symbols, structs },
+                new JsonSerializerOptions { WriteIndented = true });
+
+            File.WriteAllText(savePath, json);
+            Console.WriteLine($"[MemMap] Saved {_labels.Count} symbol(s) and {_structs.Count} struct(s) to {savePath}");
         }
 
         public async Task StartAsync()
@@ -427,6 +533,18 @@ namespace CodeDesigner.Ps2.Bridge
                             command.DataType,
                             command.Region,
                             command.ScanAddresses);
+
+                    case "GETSTRUCTS":
+                        return HandleGetStructs();
+
+                    case "ADDSTRUCT":
+                        return HandleAddStruct(command.StructName, command.StructBaseAddress);
+
+                    case "DELETESTRUCT":
+                        return HandleDeleteStruct(command.StructName);
+
+                    case "ADDSTRUCTMEMBER":
+                        return HandleAddStructMember(command.StructName, command.MemberOffset, command.MemberName);
 
                     case "MC_LIST":
                         return HandleMcList(command.McPath);

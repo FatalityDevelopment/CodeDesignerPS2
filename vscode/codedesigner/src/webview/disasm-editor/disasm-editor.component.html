@@ -11,6 +11,7 @@
     <button class="header-tool-btn" id="porter-btn" title="Cheat Code Porter">&#8651; Port</button>
     <button class="header-tool-btn" id="mc-btn" title="Memory Card Manager">&#x1F4BE; Memory Card</button>
     <button class="header-tool-btn" id="scanner-btn" title="Memory Value Scanner">&#128269; Scanner</button>
+    <button class="header-tool-btn" id="struct-btn" title="Struct Offset Calculator">&#128208; Struct</button>
 
 </div>
 <!-- New Angular component-based panels -->
@@ -149,3 +150,8 @@
     (close$)="onScannerOverlayClose()"
     (scan$)="onScanValue($event)"
     (navigate$)="onScannerNavigate($event)" />
+<app-struct-offset-overlay #structOverlayComp
+    (close$)="onStructOverlayClose()"
+    (loadStructs$)="onStructLoadStructs()"
+    (saveStruct$)="onSaveStruct($event)"
+    (addMember$)="onAddStructMember($event)" />

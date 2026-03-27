@@ -51,6 +51,11 @@ interface CommandMessage {
     ScanValue?: string;
     EndAddress?: number;
     ScanAddresses?: number[];
+    // ADDSTRUCT / DELETESTRUCT / ADDSTRUCTMEMBER fields
+    StructName?: string;
+    StructBaseAddress?: string;
+    MemberOffset?: number;
+    MemberName?: string;
 }
 
 /**
@@ -110,6 +115,23 @@ export interface IntegerEntry {
 export interface ScanValueResult {
     address: string;
     value:   string;
+}
+
+/**
+ * One member field inside a struct definition.
+ */
+export interface StructMemberEntry {
+    offset: number;
+    name:   string;
+}
+
+/**
+ * A user-defined struct with a name, base address, and optional member list.
+ */
+export interface StructEntry {
+    name:        string;
+    baseAddress: string;
+    members:     StructMemberEntry[];
 }
 
 /**
@@ -255,6 +277,8 @@ interface CommandResponse {
     McSaves?: McSaveInfo[];
     // SCANVALUE results
     ScanResults?: ScanValueResult[];
+    // GETSTRUCTS results
+    Structs?: StructEntry[];
 }
 
 /**
@@ -1633,6 +1657,61 @@ export class SocketClient {
         );
         if (!response.Success) {
             throw new Error(response.Error || 'MC_FORMAT failed');
+        }
+    }
+
+    /**
+     * Fetch all struct definitions from the server.
+     */
+    public async getStructs(): Promise<StructEntry[]> {
+        const response = await this.sendCommand({ Command: 'GETSTRUCTS' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'GETSTRUCTS failed');
+        }
+        return response.Structs ?? [];
+    }
+
+    /**
+     * Add or update a struct definition (name + base address).
+     * @param name        Unique struct name.
+     * @param baseAddress Base address as a hex string (e.g. "0x80200000").
+     */
+    public async addStruct(name: string, baseAddress: string): Promise<void> {
+        const response = await this.sendCommand({
+            Command: 'ADDSTRUCT',
+            StructName: name,
+            StructBaseAddress: baseAddress,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'ADDSTRUCT failed');
+        }
+    }
+
+    /**
+     * Delete a struct definition by name.
+     */
+    public async deleteStruct(name: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'DELETESTRUCT', StructName: name });
+        if (!response.Success) {
+            throw new Error(response.Error || 'DELETESTRUCT failed');
+        }
+    }
+
+    /**
+     * Add or update a member field in an existing struct.
+     * @param structName   Name of the parent struct.
+     * @param offset       Byte offset of the member within the struct.
+     * @param memberName   Human-readable name for the member.
+     */
+    public async addStructMember(structName: string, offset: number, memberName: string): Promise<void> {
+        const response = await this.sendCommand({
+            Command: 'ADDSTRUCTMEMBER',
+            StructName: structName,
+            MemberOffset: offset,
+            MemberName: memberName,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'ADDSTRUCTMEMBER failed');
         }
     }
 }

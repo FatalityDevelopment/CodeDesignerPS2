@@ -75,5 +75,14 @@ namespace CodeDesigner.Ps2.Bridge
         public uint? EndAddress { get; set; }
         /// <summary>Previous result addresses for SCANVALUE filter (refine) scans.</summary>
         public List<uint>? ScanAddresses { get; set; }
+        // ADDSTRUCT / DELETESTRUCT / ADDSTRUCTMEMBER fields
+        /// <summary>Struct name for ADDSTRUCT / DELETESTRUCT / ADDSTRUCTMEMBER.</summary>
+        public string? StructName { get; set; }
+        /// <summary>Struct base address (hex string, e.g. "0x80200000") for ADDSTRUCT.</summary>
+        public string? StructBaseAddress { get; set; }
+        /// <summary>Member byte offset for ADDSTRUCTMEMBER.</summary>
+        public int? MemberOffset { get; set; }
+        /// <summary>Member name for ADDSTRUCTMEMBER.</summary>
+        public string? MemberName { get; set; }
     }
 }

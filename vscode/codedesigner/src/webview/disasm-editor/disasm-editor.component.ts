@@ -25,12 +25,13 @@ import { ConverterOverlayComponent, ConvertRequest, ConvertResult } from './comp
 import { PorterOverlayComponent, PortRequest, PortResultPayload } from './components/porter-overlay.component';
 import { MemoryCardOverlayComponent, McListResult, McActionResult } from './components/memory-card-overlay.component';
 import { ScannerOverlayComponent, ScanRequest, ScanResult } from './components/scanner-overlay.component';
+import { StructOffsetOverlayComponent, StructEntryData, AddStructEvent, AddStructMemberEvent } from './components/struct-offset-overlay.component';
 import './disasm-editor.css';
 
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, ScannerOverlayComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -245,6 +246,13 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Reference to scanner overlay component */
   private readonly scannerOverlayRef = viewChild<ScannerOverlayComponent>('scannerOverlayComp');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Struct Offset Overlay State
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Reference to struct offset overlay component */
+  private readonly structOverlayRef = viewChild<StructOffsetOverlayComponent>('structOverlayComp');
 
   /** Signal-based state (new architecture) */
   protected readonly signals = inject(EditorState);
@@ -614,6 +622,31 @@ export class DisasmEditorComponent implements AfterViewInit {
     if (!isNaN(addr)) {
       this.gotoRuntime.navigate?.(addr);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Struct Offset Overlay Event Handlers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  protected onStructOverlayClose(): void {
+    this.signals.panels.structOverlay.set(false);
+  }
+
+  protected onStructLoadStructs(): void {
+    this.vscode.postMessage({ type: 'getStructs' });
+  }
+
+  protected onSaveStruct(event: AddStructEvent): void {
+    this.vscode.postMessage({ type: 'addStruct', name: event.name, baseAddress: event.baseAddress });
+  }
+
+  protected onAddStructMember(event: AddStructMemberEvent): void {
+    this.vscode.postMessage({
+      type:        'addStructMember',
+      structName:  event.structName,
+      offset:      event.offset,
+      memberName:  event.memberName,
+    });
   }
 
   private focusVirtualGrid(): void {
@@ -1523,6 +1556,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.handlePorterOverlayMessage(data);
     this.handleMemoryCardMessage(data);
     this.handleScannerMessage(data);
+    this.handleStructMessage(data);
   }
 
   private openScannerOverlay(): void {
@@ -1541,6 +1575,27 @@ export class DisasmEditorComponent implements AfterViewInit {
         serverMessage: data['serverMessage'] as string | undefined,
       });
     });
+  }
+
+  private openStructOverlay(): void {
+    const cursorRow = this.signals.currentRow();
+    const cursorAddr = cursorRow ? parseInt(cursorRow.addr || '0', 16) : 0;
+    this.zone.run(() => {
+      this.structOverlayRef()?.open(cursorAddr);
+      this.signals.panels.structOverlay.set(true);
+    });
+  }
+
+  private handleStructMessage(data: Record<string, unknown>): void {
+    if (data['type'] === 'getStructsResult') {
+      this.zone.run(() => {
+        this.structOverlayRef()?.setStructs((data['structs'] as StructEntryData[]) ?? []);
+      });
+    } else if (data['type'] === 'addStructResult' || data['type'] === 'addStructMemberResult') {
+      this.zone.run(() => {
+        this.structOverlayRef()?.setStructs((data['structs'] as StructEntryData[]) ?? []);
+      });
+    }
   }
 
   private registerServiceSubscriptions(params: {
@@ -2250,6 +2305,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     const scannerBtn = document.getElementById('scanner-btn');
     if (scannerBtn) {
       scannerBtn.addEventListener('click', () => this.openScannerOverlay());
+    }
+
+    // ── Struct offset overlay (Angular-only) ─────────────────────────────────
+    const structBtn = document.getElementById('struct-btn');
+    if (structBtn) {
+      structBtn.addEventListener('click', () => this.openStructOverlay());
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
