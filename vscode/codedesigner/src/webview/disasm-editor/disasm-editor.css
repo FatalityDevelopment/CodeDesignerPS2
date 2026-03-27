@@ -2716,3 +2716,270 @@ app-bottom-panel {
 .scanner-result-value {
     color: #d4d4d4;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Struct Offset Overlay
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+#struct-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+#struct-overlay.visible {
+    display: flex;
+}
+
+#struct-overlay-box {
+    background: #252526;
+    border: 1px solid #3e3e42;
+    border-radius: 4px;
+    width: 520px;
+    max-width: 92vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    font-family: monospace;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    overflow: hidden;
+}
+
+#struct-overlay-header {
+    display: flex;
+    align-items: center;
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    padding: 8px 12px;
+    flex-shrink: 0;
+}
+
+#struct-overlay-title {
+    color: #d4d4d4;
+    font-size: 12px;
+    font-weight: bold;
+    flex: 1;
+}
+
+#struct-overlay-close {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+}
+
+#struct-overlay-close:hover {
+    color: #fff;
+}
+
+#struct-overlay-body {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px;
+    gap: 6px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.struct-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.struct-cell-label {
+    color: #9cdcfe;
+    font-size: 11px;
+    font-family: monospace;
+    white-space: nowrap;
+    width: 72px;
+    flex-shrink: 0;
+}
+
+.struct-cell-input {
+    flex: 1;
+    background: #1e1e1e;
+    border: 1px solid #3e3e42;
+    color: #d4d4d4;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 4px 6px;
+    outline: none;
+    border-radius: 2px;
+    min-width: 0;
+}
+
+.struct-cell-input:focus {
+    border-color: #007acc;
+}
+
+.struct-cell-select {
+    flex: 1;
+    background: #3c3c3c;
+    border: 1px solid #3e3e42;
+    color: #d4d4d4;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 4px 6px;
+    outline: none;
+    border-radius: 2px;
+    min-width: 0;
+}
+
+.struct-cell-select:focus {
+    border-color: #007acc;
+}
+
+.struct-addr-input {
+    width: 120px;
+    background: #1e1e1e;
+    border: 1px solid #3e3e42;
+    color: #d4d4d4;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 4px 6px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.struct-addr-input:focus {
+    border-color: #007acc;
+}
+
+.struct-mode-btn {
+    background: #3c3c3c;
+    border: 1px solid #555;
+    color: #d4d4d4;
+    padding: 3px 9px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.struct-mode-btn:hover {
+    background: #4a4a4a;
+}
+
+.struct-mode-active {
+    background: #007acc;
+    border-color: #007acc;
+    color: #fff;
+}
+
+.struct-action-btn {
+    background: #007acc;
+    border: 1px solid #007acc;
+    color: #fff;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+    outline: none;
+    border-radius: 2px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.struct-action-btn:hover:not(:disabled) {
+    background: #1a88d8;
+}
+
+.struct-action-btn:disabled {
+    background: #3c3c3c;
+    border-color: #555;
+    color: #777;
+    cursor: default;
+}
+
+#struct-calc-btn {
+    min-width: 80px;
+}
+
+#struct-offset-result {
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: 2px;
+    background: #1e1e1e;
+    border: 1px solid #3e3e42;
+}
+
+.struct-result-ok    { color: #4ec9b0; }
+.struct-result-error { color: #f44747; }
+
+#struct-status {
+    font-family: monospace;
+    font-size: 11px;
+    min-height: 14px;
+    padding: 0 2px;
+    color: #858585;
+    flex-shrink: 0;
+}
+
+.struct-status-ok    { color: #4ec9b0; }
+.struct-status-error { color: #f44747; }
+
+.struct-empty-note {
+    color: #858585;
+    font-size: 11px;
+    font-family: monospace;
+    font-style: italic;
+}
+
+.struct-divider {
+    border-top: 1px solid #3e3e42;
+    margin: 4px 0;
+    flex-shrink: 0;
+}
+
+#struct-members-header {
+    color: #9cdcfe;
+    font-size: 11px;
+    font-family: monospace;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+#struct-members-list {
+    overflow-y: auto;
+    border: 1px solid #3e3e42;
+    border-radius: 2px;
+    background: #1e1e1e;
+    max-height: 180px;
+    flex-shrink: 0;
+}
+
+#struct-members-list::-webkit-scrollbar { width: 8px; }
+#struct-members-list::-webkit-scrollbar-thumb { background: #424242; border-radius: 4px; }
+
+.struct-member-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-family: monospace;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.struct-member-offset {
+    color: #569cd6;
+    min-width: 60px;
+    flex-shrink: 0;
+}
+
+.struct-member-name {
+    color: #d4d4d4;
+}

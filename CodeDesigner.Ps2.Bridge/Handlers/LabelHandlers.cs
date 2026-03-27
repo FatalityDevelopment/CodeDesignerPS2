@@ -71,33 +71,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private void SaveLabels()
         {
-            var searchPaths = new[]
-            {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
-                Path.Combine(Directory.GetCurrentDirectory(),       "ps2MemMap.json")
-            };
-
-            string savePath = searchPaths[0];
-            foreach (var p in searchPaths)
-            {
-                if (File.Exists(p)) { savePath = p; break; }
-            }
-
-            var symbols = _labels
-                .OrderBy(kv => kv.Key)
-                .Select(kv => new LabelEntry
-                {
-                    Address = $"0x{kv.Key:X8}",
-                    Label   = kv.Value.Label,
-                    Comment = kv.Value.Comment
-                })
-                .ToList();
-
-            var json = JsonSerializer.Serialize(new { symbol = symbols },
-                new JsonSerializerOptions { WriteIndented = true });
-
-            File.WriteAllText(savePath, json);
-            Console.WriteLine($"[Labels] Saved {_labels.Count} symbol(s) to {savePath}");
+            SaveMemoryMap();
         }
     }
 }

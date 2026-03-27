@@ -8,3 +8,5 @@ export { ContextMenuComponent, type ContextMenuData } from './context-menu.compo
 export { DebugPanelComponent, type DebugTab } from './debug-panel.component';
 export { MemoryCardOverlayComponent } from './memory-card-overlay.component';
 export type { McSaveEntry, McListResult, McActionResult } from './memory-card-overlay.component';
+export { StructOffsetOverlayComponent } from './struct-offset-overlay.component';
+export type { StructEntryData, AddStructEvent, AddStructMemberEvent } from './struct-offset-overlay.component';

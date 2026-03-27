@@ -622,6 +622,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this._handleMcDelete(webviewPanel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
       } else if (message.type === 'scanValue') {
         await this._handleScanValue(webviewPanel.webview, message);
+      } else if (message.type === 'getStructs') {
+        await this._handleGetStructs(webviewPanel.webview);
+      } else if (message.type === 'addStruct') {
+        await this._handleAddStruct(webviewPanel.webview, message.name as string, message.baseAddress as string);
+      } else if (message.type === 'addStructMember') {
+        await this._handleAddStructMember(webviewPanel.webview, message.structName as string, message.offset as number, message.memberName as string);
       }
     });
 
@@ -1140,6 +1146,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleMcDelete(panel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
             } else if (message.type === 'scanValue') {
                 await this._handleScanValue(panel.webview, message);
+            } else if (message.type === 'getStructs') {
+                await this._handleGetStructs(panel.webview);
+            } else if (message.type === 'addStruct') {
+                await this._handleAddStruct(panel.webview, message.name as string, message.baseAddress as string);
+            } else if (message.type === 'addStructMember') {
+                await this._handleAddStructMember(panel.webview, message.structName as string, message.offset as number, message.memberName as string);
             }
         });
 
@@ -1956,6 +1968,48 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       const errMsg = err instanceof Error ? err.message : String(err);
       getOutputChannel().error('[Scanner] ' + errMsg);
       webview.postMessage({ type: 'scanValueResult', error: errMsg });
+    }
+  }
+
+  /** Fetch all struct definitions and post back to webview. */
+  private async _handleGetStructs(webview: vscode.Webview): Promise<void> {
+    if (!this.socketClient?.isConnected()) {
+      webview.postMessage({ type: 'getStructsResult', structs: [] });
+      return;
+    }
+    try {
+      const structs = await this.socketClient.getStructs();
+      webview.postMessage({ type: 'getStructsResult', structs });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      getOutputChannel().error('[Struct] ' + errMsg);
+      webview.postMessage({ type: 'getStructsResult', structs: [] });
+    }
+  }
+
+  /** Add or update a struct definition. */
+  private async _handleAddStruct(webview: vscode.Webview, name: string, baseAddress: string): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      await this.socketClient.addStruct(name, baseAddress);
+      const structs = await this.socketClient.getStructs();
+      webview.postMessage({ type: 'addStructResult', structs });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      getOutputChannel().error('[Struct] ' + errMsg);
+    }
+  }
+
+  /** Add a member to an existing struct. */
+  private async _handleAddStructMember(webview: vscode.Webview, structName: string, offset: number, memberName: string): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    try {
+      await this.socketClient.addStructMember(structName, offset, memberName);
+      const structs = await this.socketClient.getStructs();
+      webview.postMessage({ type: 'addStructMemberResult', structs });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      getOutputChannel().error('[Struct] ' + errMsg);
     }
   }
 }
