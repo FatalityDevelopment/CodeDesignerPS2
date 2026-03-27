@@ -649,6 +649,10 @@ export class DisasmEditorComponent implements AfterViewInit {
     });
   }
 
+  protected onReadStructPointer(pointerAddress: string): void {
+    this.vscode.postMessage({ type: 'readPointerAt', address: pointerAddress });
+  }
+
   private focusVirtualGrid(): void {
     this.virtualGridRef()?.focus();
   }
@@ -1594,6 +1598,10 @@ export class DisasmEditorComponent implements AfterViewInit {
     } else if (data['type'] === 'addStructResult' || data['type'] === 'addStructMemberResult') {
       this.zone.run(() => {
         this.structOverlayRef()?.setStructs((data['structs'] as StructEntryData[]) ?? []);
+      });
+    } else if (data['type'] === 'readPointerAtResult') {
+      this.zone.run(() => {
+        this.structOverlayRef()?.setResolvedBase((data['value'] as string) ?? '');
       });
     }
   }
