@@ -51,17 +51,19 @@ export interface AddStructMemberEvent {
         <label class="struct-cell-label">Input</label>
         <button class="struct-mode-btn"
                 [class.struct-mode-active]="inputMode() === 'known'"
-                (click)="inputMode.set('known')">Known Struct</button>
+                (click)="switchMode('known')">Known Struct</button>
         <button class="struct-mode-btn"
                 [class.struct-mode-active]="inputMode() === 'manual'"
-                (click)="inputMode.set('manual')">Manual</button>
+                (click)="switchMode('manual')">Manual</button>
       </div>
 
       <!-- Known struct: dropdown -->
       @if (inputMode() === 'known') {
         <div class="struct-row">
           <label class="struct-cell-label">Struct</label>
-          @if (structs().length > 0) {
+          @if (structsLoading()) {
+            <span class="struct-empty-note">Loading&hellip;</span>
+          } @else if (structs().length > 0) {
             <select id="struct-select"
                     class="struct-cell-select"
                     [value]="selectedStructName()"
@@ -72,12 +74,12 @@ export interface AddStructMemberEvent {
               }
             </select>
           } @else {
-            <span class="struct-empty-note">No structs defined yet. Switch to Manual or add via the fields below.</span>
+            <span class="struct-empty-note">No structs defined yet. Switch to Manual to enter a pointer manually.</span>
           }
         </div>
       }
 
-      <!-- Manual: struct name + base address inputs -->
+      <!-- Manual: struct name + pointer address inputs -->
       @if (inputMode() === 'manual') {
         <div class="struct-row">
           <label class="struct-cell-label">Name</label>
@@ -90,14 +92,16 @@ export interface AddStructMemberEvent {
                  (input)="manualName.set(asInput($event).value)" />
         </div>
         <div class="struct-row">
-          <label class="struct-cell-label">Base Addr</label>
-          <input id="struct-base-input"
+          <label class="struct-cell-label">Pointer</label>
+          <input id="struct-pointer-input"
                  class="struct-addr-input"
                  type="text"
                  spellcheck="false"
-                 placeholder="0x80200000"
-                 [value]="manualBaseText()"
-                 (input)="manualBaseText.set(asInput($event).value)" />
+                 placeholder="0x00401244"
+                 [value]="manualPointerText()"
+                 (input)="manualPointerText.set(asInput($event).value)"
+                 (blur)="onPointerBlur()"
+                 (keydown.enter)="onPointerBlur()" />
           <button class="struct-action-btn"
                   title="Save struct definition to server"
                   [disabled]="!canSaveStruct()"
@@ -105,9 +109,27 @@ export interface AddStructMemberEvent {
         </div>
       }
 
+      <!-- Resolved base address (read-only, shown for both modes when pointer selected/entered) -->
+      @if (activePointerAddress()) {
+        <div class="struct-row">
+          <label class="struct-cell-label">Base Addr</label>
+          @if (pointerReading()) {
+            <span class="struct-empty-note">Reading&hellip;</span>
+          } @else {
+            <input id="struct-base-resolved"
+                   class="struct-addr-input"
+                   type="text"
+                   readonly
+                   spellcheck="false"
+                   placeholder="connect to emulator to read"
+                   [value]="resolvedBaseText()" />
+          }
+        </div>
+      }
+
       <!-- Target address -->
       <div class="struct-row">
-        <label class="struct-cell-label">Address</label>
+        <label class="struct-cell-label">Target Address</label>
         <input id="struct-addr-input"
                class="struct-addr-input"
                type="text"
@@ -188,15 +210,22 @@ export class StructOffsetOverlayComponent {
   readonly saveStruct$   = output<AddStructEvent>();
   readonly addMember$    = output<AddStructMemberEvent>();
   readonly loadStructs$  = output<void>();
+  /** Emitted when a pointer address should be dereferenced (read 4 bytes LE). */
+  readonly readPointer$  = output<string>();
 
   // ── State ───────────────────────────────────────────────────────────────────
 
   readonly visible            = signal(false);
   readonly inputMode          = signal<'known' | 'manual'>('known');
   readonly structs            = signal<StructEntryData[]>([]);
+  readonly structsLoading     = signal(false);
   readonly selectedStructName = signal('');
   readonly manualName         = signal('');
-  readonly manualBaseText     = signal('');
+  /** Pointer address entered in manual mode (to be dereferenced). */
+  readonly manualPointerText  = signal('');
+  /** Resolved base address: the 4-byte LE value read from the pointer. */
+  readonly resolvedBaseText   = signal('');
+  readonly pointerReading     = signal(false);
   readonly targetAddrText     = signal('');
   readonly offsetResult       = signal<number | null>(null);
   readonly offsetError        = signal(false);
@@ -215,23 +244,28 @@ export class StructOffsetOverlayComponent {
     this.structs().find(s => s.name === this.activeStructName()) ?? null
   );
 
-  readonly activeBaseAddress = computed((): number => {
+  /** The pointer address currently in use (struct's baseAddress or manual input). */
+  readonly activePointerAddress = computed((): string => {
     if (this.inputMode() === 'known') {
       const s = this.activeStruct();
-      return s ? this._parseAddress(s.baseAddress) : NaN;
+      return s ? s.baseAddress : '';
     }
-    return this._parseAddress(this.manualBaseText());
+    return this.manualPointerText().trim();
   });
 
+  /** Parsed numeric value of the resolved (dereferenced) base address. */
+  readonly activeBaseAddress = computed((): number =>
+    this._parseHex(this.resolvedBaseText())
+  );
+
   readonly canCalculate = computed(() => {
-    const base = this.activeBaseAddress();
-    const target = this._parseAddress(this.targetAddrText());
-    return !isNaN(base) && !isNaN(target) &&
-           (this.inputMode() === 'known' ? !!this.selectedStructName() : !!this.manualBaseText().trim());
+    const base   = this.activeBaseAddress();
+    const target = this._parseHex(this.targetAddrText());
+    return !isNaN(base) && !isNaN(target) && !!this.resolvedBaseText();
   });
 
   readonly canSaveStruct = computed(() =>
-    !!this.manualName().trim() && !isNaN(this._parseAddress(this.manualBaseText()))
+    !!this.manualName().trim() && !!this.manualPointerText().trim()
   );
 
   readonly offsetDisplay = computed(() => {
@@ -252,6 +286,7 @@ export class StructOffsetOverlayComponent {
     this.offsetError.set(false);
     this.memberName.set('');
     this._clearStatus();
+    this.structsLoading.set(true);
     this.visible.set(true);
     this.loadStructs$.emit();
     requestAnimationFrame(() => this.addrInputRef()?.nativeElement.focus());
@@ -267,10 +302,27 @@ export class StructOffsetOverlayComponent {
   /** Called by parent after a GETSTRUCTS response arrives. */
   setStructs(list: StructEntryData[]): void {
     this.structs.set(list);
-    // Keep selected struct valid
+    this.structsLoading.set(false);
     if (this.selectedStructName() && !list.find(s => s.name === this.selectedStructName())) {
       this.selectedStructName.set('');
+      this.resolvedBaseText.set('');
     }
+    // If a struct is already selected, re-read its pointer to refresh the resolved base.
+    if (this.inputMode() === 'known' && this.selectedStructName()) {
+      const s = list.find(ss => ss.name === this.selectedStructName());
+      if (s?.baseAddress) {
+        this._emitReadPointer(s.baseAddress);
+      }
+    }
+  }
+
+  /** Called by parent with the 4-byte LE value read from the pointer address. */
+  setResolvedBase(hexValue: string): void {
+    this.resolvedBaseText.set(hexValue);
+    this.pointerReading.set(false);
+    this.offsetResult.set(null);
+    this.offsetError.set(false);
+    this._clearStatus();
   }
 
   /** Called by parent after a struct is saved to refresh the list. */
@@ -280,9 +332,17 @@ export class StructOffsetOverlayComponent {
 
   // ── Event Handlers ──────────────────────────────────────────────────────────
 
+  switchMode(mode: 'known' | 'manual'): void {
+    this.inputMode.set(mode);
+    this.resolvedBaseText.set('');
+    this.offsetResult.set(null);
+    this.offsetError.set(false);
+    this._clearStatus();
+  }
+
   calculate(): void {
     const base   = this.activeBaseAddress();
-    const target = this._parseAddress(this.targetAddrText());
+    const target = this._parseHex(this.targetAddrText());
 
     if (isNaN(base) || isNaN(target)) {
       this._setStatus('Invalid address.', false);
@@ -304,12 +364,12 @@ export class StructOffsetOverlayComponent {
 
   saveStruct(): void {
     const name = this.manualName().trim();
-    const base = this.manualBaseText().trim();
-    if (!name || isNaN(this._parseAddress(base))) {
-      this._setStatus('Please enter a valid name and base address.', false);
+    const ptr  = this.manualPointerText().trim();
+    if (!name || !ptr) {
+      this._setStatus('Please enter a valid name and pointer address.', false);
       return;
     }
-    this.saveStruct$.emit({ name, baseAddress: base });
+    this.saveStruct$.emit({ name, baseAddress: ptr });
     this._setStatus(`Struct '${name}' saved.`, true);
   }
 
@@ -325,9 +385,24 @@ export class StructOffsetOverlayComponent {
 
   onStructSelect(value: string): void {
     this.selectedStructName.set(value);
+    this.resolvedBaseText.set('');
     this.offsetResult.set(null);
     this.offsetError.set(false);
     this._clearStatus();
+    if (value) {
+      const s = this.structs().find(ss => ss.name === value);
+      if (s?.baseAddress) {
+        this._emitReadPointer(s.baseAddress);
+      }
+    }
+  }
+
+  /** Triggered on blur or Enter for the manual pointer input. */
+  onPointerBlur(): void {
+    const ptr = this.manualPointerText().trim();
+    if (ptr) {
+      this._emitReadPointer(ptr);
+    }
   }
 
   onBackdropClick(event: MouseEvent): void {
@@ -345,17 +420,23 @@ export class StructOffsetOverlayComponent {
 
   // ── Private Helpers ─────────────────────────────────────────────────────────
 
+  private _emitReadPointer(pointerAddress: string): void {
+    this.resolvedBaseText.set('');
+    this.pointerReading.set(true);
+    this.readPointer$.emit(pointerAddress);
+  }
+
   /** Format a non-negative byte offset as a zero-padded hex string (e.g. 0x002C). */
   private _toHexOffset(offset: number): string {
     return '0x' + offset.toString(16).toUpperCase().padStart(4, '0');
   }
 
-  private _parseAddress(text: string): number {
+  private _parseHex(text: string): number {
     const t = (text || '').trim();
-    if (t.toLowerCase().startsWith('0x')) {
-      return parseInt(t, 16);
-    }
-    return parseInt(t, 10);
+    if (!t) { return NaN; }
+    const hex = t.toLowerCase().startsWith('0x') ? t.slice(2) : t;
+    if (!hex) { return NaN; }
+    return parseInt(hex, 16);
   }
 
   private _setStatus(msg: string, ok: boolean): void {

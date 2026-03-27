@@ -628,6 +628,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this._handleAddStruct(webviewPanel.webview, message.name as string, message.baseAddress as string);
       } else if (message.type === 'addStructMember') {
         await this._handleAddStructMember(webviewPanel.webview, message.structName as string, message.offset as number, message.memberName as string);
+      } else if (message.type === 'readPointerAt') {
+        await this._handleReadPointerAt(webviewPanel.webview, message.address as string);
       }
     });
 
@@ -1152,6 +1154,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleAddStruct(panel.webview, message.name as string, message.baseAddress as string);
             } else if (message.type === 'addStructMember') {
                 await this._handleAddStructMember(panel.webview, message.structName as string, message.offset as number, message.memberName as string);
+            } else if (message.type === 'readPointerAt') {
+                await this._handleReadPointerAt(panel.webview, message.address as string);
             }
         });
 
@@ -2010,6 +2014,32 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       getOutputChannel().error('[Struct] ' + errMsg);
+    }
+  }
+
+  /**
+   * Read 4 bytes from the live emulator at the given address and return the
+   * little-endian uint32 value as an 8-digit uppercase hex string (e.g. "000C0000").
+   */
+  private async _handleReadPointerAt(webview: vscode.Webview, addressStr: string): Promise<void> {
+    if (!this.socketClient?.isConnected()) {
+      webview.postMessage({ type: 'readPointerAtResult', value: '' });
+      return;
+    }
+    try {
+      const addr = parseInt(addressStr.startsWith('0x') || addressStr.startsWith('0X')
+        ? addressStr.slice(2) : addressStr, 16);
+      if (isNaN(addr)) {
+        webview.postMessage({ type: 'readPointerAtResult', value: '' });
+        return;
+      }
+      const buf = await this.socketClient.readMemory(addr, 4, 'ee');
+      const value = buf.readUInt32LE(0);
+      webview.postMessage({ type: 'readPointerAtResult', value: '0x' + value.toString(16).toUpperCase().padStart(8, '0') });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      getOutputChannel().error('[Struct] readPointerAt: ' + errMsg);
+      webview.postMessage({ type: 'readPointerAtResult', value: '' });
     }
   }
 }
