@@ -1357,15 +1357,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Convert any virtual/logical alias to its physical equivalent before
         // doing the offset calculation.
         //   KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip top 3 bits → physical
-        //   EE RAM uncached mirror (0x20100000–0x21FFFFFF): subtract 0x20000000
-        //   EE RAM uncached+accelerated (0x30100000–0x31FFFFFF): subtract 0x30000000
+        //   EE RAM uncached mirror (0x20000000–0x21FFFFFF): subtract 0x20000000
+        //   EE RAM uncached+accelerated (0x30000000–0x31FFFFFF): subtract 0x30000000
         const addrU32 = address >>> 0;
         let physAddress: number;
         if (addrU32 >= 0x80000000 && addrU32 < 0xC0000000)
             physAddress = (addrU32 & 0x1FFFFFFF) >>> 0;
-        else if (addrU32 >= 0x20100000 && addrU32 <= 0x21FFFFFF)
+        else if (addrU32 >= 0x20000000 && addrU32 <= 0x21FFFFFF)
             physAddress = (addrU32 - 0x20000000) >>> 0;
-        else if (addrU32 >= 0x30100000 && addrU32 <= 0x31FFFFFF)
+        else if (addrU32 >= 0x30000000 && addrU32 <= 0x31FFFFFF)
             physAddress = (addrU32 - 0x30000000) >>> 0;
         else
             physAddress = addrU32;
@@ -1431,9 +1431,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /** Code-type byte for GameShark/CodeBreaker Joker (conditional) addresses. */
     private static readonly CHEAT_TYPE_JOKER   = 0xD0;
     /** Upper bound (inclusive) of the 32 MB EE RAM address space (physical). */
-    private static readonly MAX_EE_RAM_ADDRESS = 0x1FFFFF;
-    /** KSEG0 virtual address base — OR with a physical EE address to get KSEG0. */
-    private static readonly KSEG0_BASE         = 0x80000000;
+    private static readonly MAX_EE_RAM_ADDRESS = 0x1FFFFFF;
+    /** EE uncached user-space mirror base — OR with a physical EE address to get the EE uncached address. */
+    private static readonly EE_UNCACHED_BASE   = 0x20000000;
 
     // ── Archive cheat helpers ─────────────────────────────────────────────────
 
@@ -1449,9 +1449,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * Build archive labels from currently-enabled archive cheats.
      *
      * Rules:
-     * - Each code line whose address byte is NOT D0 generates a label at KSEG0
-     *   virtual address `0x80AAAAAA` (where `AAAAAA` is the lower 24-bit address
-     *   field of the code), provided the address is in the 32 MB EE RAM range.
+     * - Each code line whose address byte is NOT D0 generates a label at the
+     *   EE uncached user-space mirror address `0x20AAAAAA` (where `AAAAAA` is
+     *   the lower 24-bit address field of the code), provided the address is
+     *   in the 32 MB EE RAM range.  This format matches the cheat code address
+     *   convention so the label display reflects the same EE memory values as
+     *   the cheat codes themselves.
      * - Code lines whose first byte IS D0 are "Joker" addresses.  The very first
      *   joker address encountered (across all enabled cheats) gets a single
      *   `joker` label; all subsequent joker lines are ignored.
@@ -1478,9 +1481,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // D0 = Joker/conditional address
                 if (typeByte === DisasmPanelProvider.CHEAT_TYPE_JOKER) {
                     if (!jokerLabelled && addrField <= DisasmPanelProvider.MAX_EE_RAM_ADDRESS) {
-                        const kseg0 = (DisasmPanelProvider.KSEG0_BASE | addrField) >>> 0;
+                        const eeAddr = (DisasmPanelProvider.EE_UNCACHED_BASE | addrField) >>> 0;
                         labels.push({
-                            address: `0x${kseg0.toString(16).padStart(8, '0')}`,
+                            address: `0x${eeAddr.toString(16).padStart(8, '0')}`,
                             label:   'joker',
                         });
                         jokerLabelled = true;
@@ -1494,12 +1497,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
 
             for (const { address, line } of validCodes) {
-                const kseg0 = (DisasmPanelProvider.KSEG0_BASE | address) >>> 0;
+                const eeAddr = (DisasmPanelProvider.EE_UNCACHED_BASE | address) >>> 0;
                 const labelName = validCodes.length > 1
                     ? `Archive_${safeName}_Line_${line}`
                     : `Archive_${safeName}`;
                 labels.push({
-                    address: `0x${kseg0.toString(16).padStart(8, '0')}`,
+                    address: `0x${eeAddr.toString(16).padStart(8, '0')}`,
                     label:   labelName,
                 });
             }
