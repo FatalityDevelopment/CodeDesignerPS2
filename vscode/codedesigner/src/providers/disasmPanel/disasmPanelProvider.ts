@@ -1505,8 +1505,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         let gameTitle = '';
         try {
             const info = await this.socketClient.getPcsx2GameInfo();
-            serial    = (info.ID ?? '').trim();
-            gameTitle = (info.Title ?? '').trim();
+            // Strip embedded null bytes that the PINE protocol may include in
+            // string responses (the null terminator is counted in strSize on
+            // the C# side), then trim surrounding whitespace.
+            serial    = (info.ID    ?? '').replace(/\0/g, '').trim();
+            gameTitle = (info.Title ?? '').replace(/\0/g, '').trim();
         } catch (err: any) {
             out.warn(`Archive cheats: could not get PCSX2 game info — ${err?.message ?? err}`);
             this.webview?.postMessage({ command: 'archiveCheatsError', error: 'Could not read game info from PCSX2.' });
