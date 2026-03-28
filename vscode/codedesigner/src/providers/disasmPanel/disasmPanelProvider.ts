@@ -1610,13 +1610,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * Try to obtain a GitHub access token from VS Code's built-in GitHub
-     * authentication provider.  Returns undefined when the user is not signed
-     * in so callers can gracefully degrade rather than throw.
+     * authentication provider.  Prompts the user to sign in if no session
+     * exists yet.  Returns undefined only if the user cancels the prompt.
      */
     private static async _getGitHubToken(): Promise<string | undefined> {
         try {
-            // silent: true — never prompts; just returns null if not signed in.
-            const session = await vscode.authentication.getSession('github', [], { silent: true });
+            // createIfNone: true — shows the sign-in / trust dialog when no
+            // session is available, so the user can grant access on demand.
+            const session = await vscode.authentication.getSession('github', [], { createIfNone: true });
             return session?.accessToken;
         } catch {
             return undefined;
