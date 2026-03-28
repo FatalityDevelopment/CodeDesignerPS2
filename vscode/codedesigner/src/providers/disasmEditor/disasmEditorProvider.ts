@@ -45,6 +45,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     totalBytes: number;
     physBaseAddress: number;  // pre-computed physical base for fast address lookup
   }> = [];
+  /** The single open intro/splash panel. Undefined when the user closes it. */
+  private _introPanel: vscode.WebviewPanel | undefined;
 
   /**
    * Per-panel cache of the most recent scanner results (strings, functions, pointers,
@@ -663,6 +665,59 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (readyReceived) { await sendInit(fileData); }
     });
   }
+
+    /**
+     * Open a splash-screen intro panel showing logo2.png.
+     * Called after all live memory panels are opened so it takes focus.
+     * If the panel is already open (e.g. after reconnect), it is simply revealed.
+     */
+    openIntroPanel(): void {
+        if (this._introPanel) {
+            this._introPanel.reveal(undefined, false);
+            return;
+        }
+        const panel = vscode.window.createWebviewPanel(
+            'disasm.intro',
+            'CodeDesigner',
+            vscode.ViewColumn.One,
+            {
+                enableScripts: false,
+                retainContextWhenHidden: true,
+                localResourceRoots: [this._extensionUri]
+            }
+        );
+        this._introPanel = panel;
+        panel.onDidDispose(() => { this._introPanel = undefined; });
+        const imgUri = panel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'resources', 'logo2.png')
+        );
+        panel.webview.html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${panel.webview.cspSource};">
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: #1e1e1e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+</style>
+</head>
+<body>
+<img src="${imgUri}" alt="CodeDesigner">
+</body>
+</html>`;
+    }
 
     /**
      * Open a live memory view panel (no backing file — pages fetched via socket).

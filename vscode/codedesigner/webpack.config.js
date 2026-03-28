@@ -70,6 +70,10 @@ const extensionConfig = {
         {
           from: 'src/resources/*.svg',
           to: 'resources/[name][ext]'
+        },
+        {
+          from: 'src/resources/*.png',
+          to: 'resources/[name][ext]'
         }
       ]
     })
