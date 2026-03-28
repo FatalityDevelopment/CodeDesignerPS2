@@ -2204,6 +2204,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
+        this.editorProvider.openIntroPanel();
     }
 
     /**
