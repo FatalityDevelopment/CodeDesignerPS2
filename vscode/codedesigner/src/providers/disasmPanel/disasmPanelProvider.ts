@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as child_process from 'child_process';
 import { getOutputChannel, getDebugChannel } from '../../extension';
 import { SocketClient, LabelEntry, DiscElfEntry } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
@@ -60,6 +61,11 @@ const LIVE_REGIONS = [
     { region: 'ee',  address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad'    },
 ];
 
+/** URL and branch for the cheat code archive repository. */
+const ARCHIVE_REPO_URL    = 'https://github.com/TylerDev888/CheatCodeArchive.git';
+const ARCHIVE_REMOTE      = 'origin';
+const ARCHIVE_BRANCH      = 'main';
+
 export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
     private emulatorTerminal?: vscode.Terminal;
@@ -84,6 +90,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _activeCdsContent: string = '';
     /** Diagnostic collection for CDS compilation errors — shows red squiggles in the editor. */
     private _cdsDiagnostics!: vscode.DiagnosticCollection;
+    /** Path to the extension's global storage directory (set in register()). */
+    private _globalStoragePath: string = '';
+    /** In-flight archive sync promise — reused so concurrent callers don't start duplicate clones. */
+    private _archiveSyncPromise: Promise<void> | null = null;
 
     /** Returns the workspace root directory (used by DisasmEditorProvider for history lookup). */
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
@@ -105,6 +115,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
         this.extensionPath = context.extensionPath;
+        this._globalStoragePath = context.globalStorageUri.fsPath;
+
+        // Sync the CheatCodeArchive repo in the background so cheats are
+        // available without blocking the UI.
+        this._syncArchiveRepo().catch(err =>
+            getOutputChannel().warn(`CheatCodeArchive sync: ${err?.message ?? err}`)
+        );
 
         // Create the diagnostic collection for CDS compilation errors.
         // Adding it to context.subscriptions ensures it is disposed (and all
@@ -1524,7 +1541,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         out.info(`Archive cheats: searching for serial "${serial}" (${gameTitle})…`);
 
         try {
-            const result = await DisasmPanelProvider._fetchArchiveForSerial(serial);
+            const result = await this._fetchArchiveForSerial(serial);
             if (!result) {
                 out.warn(`Archive cheats: no entry found for serial "${serial}".`);
                 this._archiveCheats    = [];
@@ -1609,73 +1626,135 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Try to obtain a GitHub access token from VS Code's built-in GitHub
-     * authentication provider.  Prompts the user to sign in if no session
-     * exists yet.  Returns undefined only if the user cancels the prompt.
+     * Run a git command and return its stdout.
+     * Rejects if git exits with a non-zero code, with a user-friendly message
+     * when git itself is not found in PATH.
      */
-    private static async _getGitHubToken(): Promise<string | undefined> {
-        try {
-            // createIfNone: true — shows the sign-in / trust dialog when no
-            // session is available, so the user can grant access on demand.
-            const session = await vscode.authentication.getSession('github', [], { createIfNone: true });
-            return session?.accessToken;
-        } catch {
-            return undefined;
-        }
+    private _runGit(args: string[], cwd?: string): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const proc = child_process.spawn('git', args, {
+                cwd,
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            let stdout = '';
+            let stderr = '';
+            proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+            proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+            proc.on('error', (err: NodeJS.ErrnoException) => {
+                if (err.code === 'ENOENT') {
+                    reject(new Error(
+                        'git not found in PATH — please install Git and ensure it is on your PATH, ' +
+                        'then reload the window.'
+                    ));
+                } else {
+                    reject(err);
+                }
+            });
+            proc.on('close', (code: number | null) => {
+                if (code === 0) {
+                    resolve(stdout);
+                } else {
+                    reject(new Error(`git ${args[0]} exited with code ${code}: ${stderr.trim()}`));
+                }
+            });
+        });
     }
 
     /**
-     * Fetch the cheats.yaml from the CheatCodeArchive for the given PS2 serial.
-     * Uses the GitHub Code Search API to locate the file, then fetches the raw YAML.
+     * Clone TylerDev888/CheatCodeArchive (branch: main) into the extension's
+     * global storage the first time it is called; on subsequent calls it pulls
+     * the latest changes.  Returns the shared in-flight promise if a sync is
+     * already running so concurrent callers do not start duplicate operations.
+     */
+    private _syncArchiveRepo(): Promise<void> {
+        if (this._archiveSyncPromise) {
+            return this._archiveSyncPromise;
+        }
+
+        this._archiveSyncPromise = (async () => {
+            const archiveDir = path.join(this._globalStoragePath, 'CheatCodeArchive');
+            await fs.promises.mkdir(this._globalStoragePath, { recursive: true });
+
+            const isCloned = fs.existsSync(path.join(archiveDir, '.git'));
+            if (isCloned) {
+                getOutputChannel().info('CheatCodeArchive: pulling latest changes…');
+                await this._runGit(['pull', '--ff-only', ARCHIVE_REMOTE, ARCHIVE_BRANCH], archiveDir);
+                getOutputChannel().info('CheatCodeArchive: up to date.');
+            } else {
+                getOutputChannel().info('CheatCodeArchive: cloning repository…');
+                await this._runGit([
+                    'clone',
+                    '--branch', ARCHIVE_BRANCH,
+                    ARCHIVE_REPO_URL,
+                    archiveDir,
+                ]);
+                getOutputChannel().info('CheatCodeArchive: clone complete.');
+            }
+        })().finally(() => {
+            // Allow future start-up syncs to run again (e.g. after a window reload).
+            this._archiveSyncPromise = null;
+        });
+
+        return this._archiveSyncPromise;
+    }
+
+    /**
+     * Recursively walk `dir` looking for a `cheats.yaml` file that contains
+     * the given PS2 serial as an exact token (not a substring of a longer
+     * serial).  Returns the full path of the first match, or null if none found.
+     */
+    private async _findCheatFile(dir: string, serial: string): Promise<string | null> {
+        // Build a pattern that matches the serial only as a standalone value —
+        // not as a prefix/suffix of a longer serial like 'SLUS-123456'.
+        const escapedSerial = serial.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const serialRe = new RegExp(`(?<![A-Z0-9-])${escapedSerial}(?![A-Z0-9-])`, 'i');
+
+        let entries: fs.Dirent[];
+        try {
+            entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        } catch {
+            return null;
+        }
+
+        for (const entry of entries) {
+            // Skip hidden directories (e.g. .git)
+            if (entry.name.startsWith('.')) { continue; }
+
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                const sub = await this._findCheatFile(full, serial);
+                if (sub) { return sub; }
+            } else if (entry.name === 'cheats.yaml') {
+                try {
+                    const content = await fs.promises.readFile(full, 'utf-8');
+                    if (serialRe.test(content)) { return full; }
+                } catch {
+                    /* skip unreadable files */
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Fetch the cheats.yaml from the local CheatCodeArchive clone for the given
+     * PS2 serial.  If the archive has not been cloned yet it is cloned now.
      * Returns null when no matching file is found.
      */
-    private static async _fetchArchiveForSerial(serial: string): Promise<{
+    private async _fetchArchiveForSerial(serial: string): Promise<{
         game: string; cheatType: string; cheats: ArchiveCheat[];
     } | null> {
-        const token = await DisasmPanelProvider._getGitHubToken();
+        const archiveDir = path.join(this._globalStoragePath, 'CheatCodeArchive');
 
-        const headers: Record<string, string> = {
-            'Accept':     'application/vnd.github.v3+json',
-            'User-Agent': 'CodeDesigner-VSCode-Extension',
-        };
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
+        // Clone on demand if the background sync hasn't finished yet (or failed).
+        if (!fs.existsSync(path.join(archiveDir, '.git'))) {
+            await this._syncArchiveRepo();
         }
 
-        const searchUrl =
-            `https://api.github.com/search/code?q=${encodeURIComponent(`"${serial}"`)}` +
-            `+in:file+repo:TylerDev888/CheatCodeArchive+filename:cheats.yaml`;
+        const yamlPath = await this._findCheatFile(archiveDir, serial);
+        if (!yamlPath) { return null; }
 
-        const searchRes = await fetch(searchUrl, { headers });
-        if (!searchRes.ok) {
-            if (searchRes.status === 401 || searchRes.status === 403) {
-                throw new Error(
-                    `GitHub search returned HTTP ${searchRes.status}. ` +
-                    `Sign in to GitHub in VS Code (Accounts menu) and try again.`
-                );
-            }
-            throw new Error(`GitHub search returned HTTP ${searchRes.status}`);
-        }
-
-        const searchData = await searchRes.json() as {
-            items?: Array<{ path: string }>;
-        };
-
-        const items = searchData.items ?? [];
-        if (items.length === 0) { return null; }
-
-        // Prefer the first match (most relevant according to GitHub search).
-        const filePath = items[0].path;
-        const rawUrl   =
-            `https://raw.githubusercontent.com/TylerDev888/CheatCodeArchive/main/` +
-            filePath.split('/').map(encodeURIComponent).join('/');
-
-        const rawRes = await fetch(rawUrl, { headers: { 'User-Agent': 'CodeDesigner-VSCode-Extension' } });
-        if (!rawRes.ok) {
-            throw new Error(`Raw YAML fetch returned HTTP ${rawRes.status}`);
-        }
-
-        const yaml = await rawRes.text();
+        const yaml = await fs.promises.readFile(yamlPath, 'utf-8');
         return DisasmPanelProvider._parseArchiveYaml(yaml);
     }
 
