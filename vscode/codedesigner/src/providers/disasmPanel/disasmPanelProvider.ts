@@ -1609,6 +1609,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
+     * Try to obtain a GitHub access token from VS Code's built-in GitHub
+     * authentication provider.  Returns undefined when the user is not signed
+     * in so callers can gracefully degrade rather than throw.
+     */
+    private static async _getGitHubToken(): Promise<string | undefined> {
+        try {
+            // silent: true — never prompts; just returns null if not signed in.
+            const session = await vscode.authentication.getSession('github', [], { silent: true });
+            return session?.accessToken;
+        } catch {
+            return undefined;
+        }
+    }
+
+    /**
      * Fetch the cheats.yaml from the CheatCodeArchive for the given PS2 serial.
      * Uses the GitHub Code Search API to locate the file, then fetches the raw YAML.
      * Returns null when no matching file is found.
@@ -1616,10 +1631,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private static async _fetchArchiveForSerial(serial: string): Promise<{
         game: string; cheatType: string; cheats: ArchiveCheat[];
     } | null> {
+        const token = await DisasmPanelProvider._getGitHubToken();
+
         const headers: Record<string, string> = {
             'Accept':     'application/vnd.github.v3+json',
             'User-Agent': 'CodeDesigner-VSCode-Extension',
         };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
 
         const searchUrl =
             `https://api.github.com/search/code?q=${encodeURIComponent(`"${serial}"`)}` +
@@ -1627,6 +1647,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         const searchRes = await fetch(searchUrl, { headers });
         if (!searchRes.ok) {
+            if (searchRes.status === 401 || searchRes.status === 403) {
+                throw new Error(
+                    `GitHub search returned HTTP ${searchRes.status}. ` +
+                    `Sign in to GitHub in VS Code (Accounts menu) and try again.`
+                );
+            }
             throw new Error(`GitHub search returned HTTP ${searchRes.status}`);
         }
 

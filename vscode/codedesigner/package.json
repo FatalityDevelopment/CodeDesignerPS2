@@ -208,7 +208,13 @@
           }
         ]
       }
-    }
+    },
+    "authentication": [
+      {
+        "id": "github",
+        "label": "GitHub"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
