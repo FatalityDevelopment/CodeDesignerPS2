@@ -1472,6 +1472,25 @@ export class SocketClient {
     }
 
     /**
+     * PCSX2 PINE: query the currently running game's metadata.
+     * Returns the game title, serial ID (e.g. "SLUS-20265"), UUID, and version.
+     * Only available when the server is in PINE bridge mode (--pcsx2).
+     */
+    public async getPcsx2GameInfo(): Promise<{ Title: string; ID: string; UUID: string; Version: string }> {
+        const response = await this.sendCommand({ Command: 'PCSX2GAMEINFO' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PCSX2GAMEINFO failed');
+        }
+        const data = JSON.parse(response.Data ?? '{}') as Record<string, string>;
+        return {
+            Title:   data['Title']   ?? '',
+            ID:      data['ID']      ?? '',
+            UUID:    data['UUID']    ?? '',
+            Version: data['Version'] ?? '',
+        };
+    }
+
+    /**
      * Convert PS2 cheat codes between raw and a device-specific encrypted format.
      * @param codes      Multi-line cheat code text to convert.
      * @param direction  'toRaw' — decrypt device codes → raw hex pairs;

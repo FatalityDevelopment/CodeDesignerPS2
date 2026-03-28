@@ -62,9 +62,15 @@ interface InitMsg {
   selectedGameName?: string;
   isConnected?: boolean;
   isPaused?: boolean;
+  isPcsx2?: boolean;
   selectedEmulator?: string;
   selectedBios?: string;
   selectedGame?: string;
+}
+
+interface Pcsx2ModeChangedMsg {
+  command: 'pcsx2ModeChanged';
+  isPcsx2: boolean;
 }
 
 @Component({
@@ -83,6 +89,7 @@ interface InitMsg {
 export class DisasmPanelComponent implements OnInit, OnDestroy {
   isConnected = false;
   isPaused = false;
+  isPcsx2 = false;
   emulators: EmuOption[] = [];
   biosOptions: EmuOption[] = [];
   gameOptions: EmuOption[] = [];
@@ -103,6 +110,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       this.bridge.on<ConnectionStatusMsg>('connectionStatus').subscribe(msg => {
         this.isConnected = msg.connected;
         this.isPaused = false;
+        if (!msg.connected) { this.isPcsx2 = false; }
+      }),
+      this.bridge.on<Pcsx2ModeChangedMsg>('pcsx2ModeChanged').subscribe(msg => {
+        this.isPcsx2 = msg.isPcsx2;
       }),
       this.bridge.on<PausedMsg>('paused').subscribe(msg => {
         this.isPaused = msg.paused;
@@ -127,6 +138,7 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
         // opens after auto-connect has already succeeded.
         if (msg.isConnected !== undefined) { this.isConnected = msg.isConnected; }
         if (msg.isPaused    !== undefined) { this.isPaused    = msg.isPaused;    }
+        if (msg.isPcsx2     !== undefined) { this.isPcsx2     = msg.isPcsx2;     }
       }),
       this.bridge.on<BrowseGameResultMsg>('browseGameResult').subscribe(msg => {
         if (msg.filePath) {

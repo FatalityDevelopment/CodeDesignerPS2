@@ -64,6 +64,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _gameLabels: LabelEntry[] = [];
   /** Labels derived from live-resolved Pointer Manager entries. Shown as an overlay in the instruction display. */
   private _pointerLabels: LabelEntry[] = [];
+  /** Labels derived from enabled archive cheats from the CheatCodeArchive. */
+  private _archiveLabels: LabelEntry[] = [];
   /** Current game (ISO) name — used to resolve the per-game labels.json path. */
   private _currentGameName: string = '';
   /** Workspace root — used to resolve the per-game labels.json path. */
@@ -135,6 +137,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Set labels derived from enabled archive cheats (CheatCodeArchive).
+   * Broadcasts the merged label list to all open live panels so the disassembly
+   * display shows archive cheat names at their target addresses.
+   */
+  public setArchiveLabels(labels: LabelEntry[]): void {
+    this._archiveLabels = labels;
+    if (this._livePanels.length > 0) {
+      this._broadcastMergedLabels();
+    }
+  }
+
+  /**
    * Set the live-resolved labels from the Pointer Manager.
    * Broadcasts a `pointerLabelsUpdated` message to all open live panels so the
    * instruction display can overlay the label names for matching addresses.
@@ -160,13 +174,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Build the fully-merged label list (server + game + pointer labels) and
+   * Build the fully-merged label list (server + game + pointer + archive labels) and
    * broadcast a `labelsUpdated` message to all live panels.
    */
   private _broadcastMergedLabels(): void {
     const broadcast = (base: LabelEntry[]) => {
       let merged = this._gameLabels.length > 0 ? this._mergeLabels(base, this._gameLabels) : base;
       if (this._pointerLabels.length > 0) { merged = this._mergeLabels(merged, this._pointerLabels); }
+      if (this._archiveLabels.length > 0) { merged = this._mergeLabels(merged, this._archiveLabels); }
       for (const p of this._livePanels) {
         p.webview.postMessage({ type: 'labelsUpdated', labels: merged });
       }
