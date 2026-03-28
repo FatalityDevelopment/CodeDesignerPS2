@@ -5,6 +5,7 @@ import { getOutputChannel, getDebugChannel } from '../../extension';
 import { SocketClient, LabelEntry, DiscElfEntry } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
+import { ArchiveCheat } from '../../webview/disasm-panel/types';
 
 interface EmuSettings {
     bios?: Array<{ name: string; path: string }>;
@@ -75,6 +76,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _pendingRunMode: 'emulator' | 'pcsx2' | null = null;
     /** True when the current connection is through the PCSX2 PINE bridge. */
     private _bridgeMode: boolean = false;
+    /** Archive cheats fetched from CheatCodeArchive for the current PCSX2 game. */
+    private _archiveCheats: ArchiveCheat[] = [];
+    /** Cheat type string reported by the archive YAML (e.g. "CodeBreaker"). */
+    private _archiveCheatType: string = '';
     private _activeCdsFilePath: string = '';
     private _activeCdsContent: string = '';
     /** Diagnostic collection for CDS compilation errors — shows red squiggles in the editor. */
@@ -261,6 +266,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'applyCheats':
                     await this.handleApplyCheats(msg.cheatText ?? '');
                     break;
+                case 'fetchArchiveCheats':
+                    await this.handleFetchArchiveCheats();
+                    break;
+                case 'toggleArchiveCheat':
+                    await this.handleToggleArchiveCheat(msg.index as number, msg.enabled as boolean);
+                    break;
+                case 'applyAllArchiveCheats':
+                    await this.handleApplyAllArchiveCheats();
+                    break;
                 case 'compileCds':
                     await this.handleCompileCds();
                     break;
@@ -421,6 +435,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             selectedGameName: this.selectedGameName,
             isConnected: this.socketClient.isConnected(),
             isPaused: this._paused,
+            isPcsx2: this._bridgeMode,
             selectedEmulator: this.selectedEmulatorPath,
             selectedBios: this.selectedBiosPath,
             selectedGame: this.selectedGamePath,
@@ -652,6 +667,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.socketClient.startPcsx2(host, slot);
                     this._bridgeMode = true;
                     this._setPauseState(false);
+                    // Notify webview of PCSX2 mode so the cheats tab shows the archive section.
+                    this.webview?.postMessage({ command: 'pcsx2ModeChanged', isPcsx2: true });
+                    // Auto-fetch archive cheats for the running game.
+                    void this.handleFetchArchiveCheats();
                 }
             } catch (err: any) {
                 out.error(`Run failed: ${err?.message ?? err}`);
@@ -1389,6 +1408,298 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             out.error(`ApplyCheats error: ${err?.message ?? err}`);
             this.webview?.postMessage({ command: 'cheatsApplied', success: false, error: err?.message ?? String(err) });
         }
+    }
+
+    // ── Archive cheat constants ───────────────────────────────────────────────
+    /** Code-type byte for GameShark/CodeBreaker Joker (conditional) addresses. */
+    private static readonly CHEAT_TYPE_JOKER   = 0xD0;
+    /** Upper bound (inclusive) of the 32 MB EE RAM address space (physical). */
+    private static readonly MAX_EE_RAM_ADDRESS = 0x1FFFFF;
+    /** KSEG0 virtual address base — OR with a physical EE address to get KSEG0. */
+    private static readonly KSEG0_BASE         = 0x80000000;
+
+    // ── Archive cheat helpers ─────────────────────────────────────────────────
+
+    /**
+     * Sanitise a cheat name for use in a label: replace runs of non-alphanumeric
+     * characters with a single underscore and strip leading/trailing underscores.
+     */
+    private static _sanitiseLabelName(name: string): string {
+        return name.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    }
+
+    /**
+     * Build archive labels from currently-enabled archive cheats.
+     *
+     * Rules:
+     * - Each code line whose address byte is NOT D0 generates a label at KSEG0
+     *   virtual address `0x80AAAAAA` (where `AAAAAA` is the lower 24-bit address
+     *   field of the code), provided the address is in the 32 MB EE RAM range.
+     * - Code lines whose first byte IS D0 are "Joker" addresses.  The very first
+     *   joker address encountered (across all enabled cheats) gets a single
+     *   `joker` label; all subsequent joker lines are ignored.
+     * - Multi-code cheats get numbered suffixes: `Archive_Name_Line_1`, etc.
+     *   Single-code cheats get just `Archive_Name`.
+     */
+    private _buildArchiveLabels(): LabelEntry[] {
+        const labels: LabelEntry[] = [];
+        let jokerLabelled = false;
+
+        for (const cheat of this._archiveCheats) {
+            const safeName = DisasmPanelProvider._sanitiseLabelName(cheat.name);
+            // Count how many non-joker codes have valid EE RAM addresses
+            const validCodes: Array<{ address: number; line: number }> = [];
+
+            for (let i = 0; i < cheat.codes.length; i++) {
+                const code = cheat.codes[i];
+                const match = /^([0-9a-f]{2})([0-9a-f]{6})\s+[0-9a-f]{8}/i.exec(code);
+                if (!match) { continue; }
+
+                const typeByte = parseInt(match[1], 16);
+                const addrField = parseInt(match[2], 16);
+
+                // D0 = Joker/conditional address
+                if (typeByte === DisasmPanelProvider.CHEAT_TYPE_JOKER) {
+                    if (!jokerLabelled && addrField <= DisasmPanelProvider.MAX_EE_RAM_ADDRESS) {
+                        const kseg0 = (DisasmPanelProvider.KSEG0_BASE | addrField) >>> 0;
+                        labels.push({
+                            address: `0x${kseg0.toString(16).padStart(8, '0')}`,
+                            label:   'joker',
+                        });
+                        jokerLabelled = true;
+                    }
+                    continue; // skip joker for regular label generation
+                }
+
+                // Only label addresses in the 32 MB EE RAM range
+                if (addrField > DisasmPanelProvider.MAX_EE_RAM_ADDRESS) { continue; }
+                validCodes.push({ address: addrField, line: i + 1 });
+            }
+
+            for (const { address, line } of validCodes) {
+                const kseg0 = (DisasmPanelProvider.KSEG0_BASE | address) >>> 0;
+                const labelName = validCodes.length > 1
+                    ? `Archive_${safeName}_Line_${line}`
+                    : `Archive_${safeName}`;
+                labels.push({
+                    address: `0x${kseg0.toString(16).padStart(8, '0')}`,
+                    label:   labelName,
+                });
+            }
+        }
+
+        return labels;
+    }
+
+    /**
+     * Fetch archive cheats from CheatCodeArchive for the currently running PCSX2
+     * game, then broadcast them to the webview and update the label overlays.
+     */
+    private async handleFetchArchiveCheats(): Promise<void> {
+        if (!this._bridgeMode) { return; }
+
+        const out = getOutputChannel();
+        this.webview?.postMessage({ command: 'archiveCheatsLoading' });
+
+        let serial = '';
+        let gameTitle = '';
+        try {
+            const info = await this.socketClient.getPcsx2GameInfo();
+            serial    = (info.ID ?? '').trim();
+            gameTitle = (info.Title ?? '').trim();
+        } catch (err: any) {
+            out.warn(`Archive cheats: could not get PCSX2 game info — ${err?.message ?? err}`);
+            this.webview?.postMessage({ command: 'archiveCheatsError', error: 'Could not read game info from PCSX2.' });
+            return;
+        }
+
+        if (!serial) {
+            this.webview?.postMessage({ command: 'archiveCheatsError', error: 'No game serial available (is a game running?).' });
+            return;
+        }
+
+        out.info(`Archive cheats: searching for serial "${serial}" (${gameTitle})…`);
+
+        try {
+            const result = await DisasmPanelProvider._fetchArchiveForSerial(serial);
+            if (!result) {
+                out.warn(`Archive cheats: no entry found for serial "${serial}".`);
+                this._archiveCheats    = [];
+                this._archiveCheatType = '';
+                this.webview?.postMessage({ command: 'archiveCheatsLoaded', cheats: [], game: gameTitle, serial });
+                return;
+            }
+
+            this._archiveCheats    = result.cheats;
+            this._archiveCheatType = result.cheatType;
+
+            out.info(`Archive cheats: loaded ${result.cheats.length} cheats for "${result.game}".`);
+            this.webview?.postMessage({
+                command:   'archiveCheatsLoaded',
+                cheats:    this._archiveCheats,
+                game:      result.game || gameTitle,
+                serial,
+                cheatType: result.cheatType,
+            });
+
+            // Broadcast labels for all archive cheats immediately — labels are
+            // always shown regardless of whether the cheat is toggled on.
+            this.editorProvider.setArchiveLabels(this._buildArchiveLabels());
+        } catch (err: any) {
+            out.error(`Archive cheats fetch error: ${err?.message ?? err}`);
+            this.webview?.postMessage({ command: 'archiveCheatsError', error: `Fetch failed: ${err?.message ?? err}` });
+        }
+    }
+
+    /**
+     * Toggle a single archive cheat on or off.
+     * Enabling a cheat immediately writes its codes into emulator memory.
+     * Disabling only updates the label overlays (cheat effects persist in RAM
+     * until the game overwrites them).
+     */
+    private async handleToggleArchiveCheat(index: number, enabled: boolean): Promise<void> {
+        if (index < 0 || index >= this._archiveCheats.length) { return; }
+
+        this._archiveCheats[index].enabled = enabled;
+
+        if (enabled && this.socketClient.isConnected()) {
+            const cheat = this._archiveCheats[index];
+            const cheatText = `#${cheat.name}\n${cheat.codes.join('\n')}`;
+            try {
+                await this.socketClient.applyCheats(cheatText);
+            } catch (err: any) {
+                getOutputChannel().error(`Archive cheat apply error: ${err?.message ?? err}`);
+            }
+        }
+
+        // Always refresh label overlays regardless of apply success.
+        this.editorProvider.setArchiveLabels(this._buildArchiveLabels());
+
+        // Reflect updated state back to the webview.
+        this.webview?.postMessage({ command: 'archiveCheatsUpdated', cheats: this._archiveCheats });
+    }
+
+    /**
+     * Re-apply every currently-enabled archive cheat to emulator memory in one batch.
+     */
+    private async handleApplyAllArchiveCheats(): Promise<void> {
+        const enabled = this._archiveCheats.filter(c => c.enabled);
+        if (enabled.length === 0) { return; }
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+
+        const lines: string[] = [];
+        for (const cheat of enabled) {
+            lines.push(`#${cheat.name}`);
+            lines.push(...cheat.codes);
+        }
+
+        try {
+            await this.socketClient.applyCheats(lines.join('\n'));
+            this.webview?.postMessage({ command: 'cheatsApplied', success: true });
+        } catch (err: any) {
+            getOutputChannel().error(`ApplyAllArchiveCheats error: ${err?.message ?? err}`);
+            this.webview?.postMessage({ command: 'cheatsApplied', success: false, error: err?.message ?? String(err) });
+        }
+    }
+
+    /**
+     * Fetch the cheats.yaml from the CheatCodeArchive for the given PS2 serial.
+     * Uses the GitHub Code Search API to locate the file, then fetches the raw YAML.
+     * Returns null when no matching file is found.
+     */
+    private static async _fetchArchiveForSerial(serial: string): Promise<{
+        game: string; cheatType: string; cheats: ArchiveCheat[];
+    } | null> {
+        const headers: Record<string, string> = {
+            'Accept':     'application/vnd.github.v3+json',
+            'User-Agent': 'CodeDesigner-VSCode-Extension',
+        };
+
+        const searchUrl =
+            `https://api.github.com/search/code?q=${encodeURIComponent(`"${serial}"`)}` +
+            `+in:file+repo:TylerDev888/CheatCodeArchive+filename:cheats.yaml`;
+
+        const searchRes = await fetch(searchUrl, { headers });
+        if (!searchRes.ok) {
+            throw new Error(`GitHub search returned HTTP ${searchRes.status}`);
+        }
+
+        const searchData = await searchRes.json() as {
+            items?: Array<{ path: string }>;
+        };
+
+        const items = searchData.items ?? [];
+        if (items.length === 0) { return null; }
+
+        // Prefer the first match (most relevant according to GitHub search).
+        const filePath = items[0].path;
+        const rawUrl   =
+            `https://raw.githubusercontent.com/TylerDev888/CheatCodeArchive/main/` +
+            filePath.split('/').map(encodeURIComponent).join('/');
+
+        const rawRes = await fetch(rawUrl, { headers: { 'User-Agent': 'CodeDesigner-VSCode-Extension' } });
+        if (!rawRes.ok) {
+            throw new Error(`Raw YAML fetch returned HTTP ${rawRes.status}`);
+        }
+
+        const yaml = await rawRes.text();
+        return DisasmPanelProvider._parseArchiveYaml(yaml);
+    }
+
+    /**
+     * Minimal YAML parser for the specific structure used by CheatCodeArchive.
+     * Handles the top-level scalar fields and the `cheats` list.
+     */
+    private static _parseArchiveYaml(yaml: string): {
+        game: string; cheatType: string; cheats: ArchiveCheat[];
+    } {
+        const field = (key: string): string => {
+            const m = new RegExp(`^${key}:\\s*"([^"]*)"`, 'm').exec(yaml);
+            return m?.[1] ?? '';
+        };
+
+        const game      = field('game');
+        const cheatType = field('cheat_type');
+
+        // Split the cheats block into individual entries.
+        const cheatsSectionIdx = yaml.indexOf('\ncheats:');
+        if (cheatsSectionIdx === -1) {
+            return { game, cheatType, cheats: [] };
+        }
+        const cheatsSection = yaml.substring(cheatsSectionIdx);
+
+        const entryRe = /\n  - name:\s*"([^"]+)"/g;
+        const entries: Array<{ name: string; start: number }> = [];
+        let m: RegExpExecArray | null;
+        while ((m = entryRe.exec(cheatsSection)) !== null) {
+            entries.push({ name: m[1], start: m.index });
+        }
+
+        const cheats: ArchiveCheat[] = [];
+        for (let i = 0; i < entries.length; i++) {
+            const start   = entries[i].start;
+            const end     = i + 1 < entries.length ? entries[i + 1].start : cheatsSection.length;
+            const block   = cheatsSection.substring(start, end);
+
+            const author  = /\n    author:\s*"([^"]*)"/.exec(block)?.[1];
+            const notes   = /\n    notes:\s*"([^"]*)"/.exec(block)?.[1];
+
+            const codes: string[] = [];
+            const codeRe = /\n      - "([^"]+)"/g;
+            let cm: RegExpExecArray | null;
+            while ((cm = codeRe.exec(block)) !== null) {
+                codes.push(cm[1]);
+            }
+
+            if (codes.length > 0) {
+                cheats.push({ name: entries[i].name, author, notes, codes, enabled: false });
+            }
+        }
+
+        return { game, cheatType, cheats };
     }
 
     /** Compile the active .cds file and return GameShark codes to the CDS tab. */

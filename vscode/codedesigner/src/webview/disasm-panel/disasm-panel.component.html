@@ -46,6 +46,7 @@
 <div id="tab-cheats" class="tab-content" [style.display]="activeTab === 'cheats' ? 'flex' : 'none'">
   <app-cheats-tab
     [isConnected]="isConnected"
+    [isPcsx2]="isPcsx2"
     [(cheatText)]="cheatText"
   />
 </div>

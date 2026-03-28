@@ -1,3 +1,12 @@
+/** A single cheat entry from the CheatCodeArchive. */
+export interface ArchiveCheat {
+  name: string;
+  author?: string;
+  notes?: string;
+  codes: string[];
+  enabled: boolean;
+}
+
 export interface EmuOption {
   label: string;
   value: string;
