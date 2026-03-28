@@ -1225,7 +1225,9 @@ namespace CodeDesigner.Ps2.Bridge
             if (rep.Length < 9) return string.Empty;
             int strSize = (int)ReadU32LE(rep, 5);
             if (strSize <= 0 || 9 + strSize > rep.Length) return string.Empty;
-            return Encoding.UTF8.GetString(rep, 9, strSize);
+            // PINE includes the null terminator in strSize; strip it so callers
+            // receive a clean managed string without embedded \0 characters.
+            return Encoding.UTF8.GetString(rep, 9, strSize).TrimEnd('\0');
         }
 
         // ── Request builders ──────────────────────────────────────────────────
