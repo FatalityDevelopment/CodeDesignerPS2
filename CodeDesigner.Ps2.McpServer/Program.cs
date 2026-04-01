@@ -16,8 +16,10 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-// Register the socket bridge client as a singleton so all tools share it
-builder.Services.AddSingleton<SocketBridgeClient>();
+// Register the socket bridge client as a singleton so all tools share it.
+// Construct the instance via factory so the DI container does not attempt to
+// resolve primitive constructor parameters (string, int) which would fail.
+builder.Services.AddSingleton(sp => new SocketBridgeClient());
 
 // Register the MCP server with stdio transport and auto-discover tool types
 builder.Services

@@ -207,7 +207,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             using var doc = JsonDocument.Parse(memJson);
             if (doc.RootElement.TryGetProperty("Data", out var dataEl))
                 base64Data = dataEl.GetString();
-            if (doc.RootElement.TryGetProperty("Error", out var errEl))
+            if (doc.RootElement.TryGetProperty("Error", out var errEl) &&
+                errEl.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errEl.GetString()))
                 return $"Error reading memory: {errEl.GetString()}";
         }
         catch
@@ -288,7 +289,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (root.TryGetProperty("Error", out var err))
+            if (root.TryGetProperty("Error", out var err) &&
+                err.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(err.GetString()))
                 return $"Error: {err.GetString()}";
 
             var pc = root.TryGetProperty("PC", out var pcProp) ? pcProp.GetUInt32() : 0u;
@@ -1007,7 +1009,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("Error", out var errProp))
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
             if (!root.TryGetProperty("Results", out var results))
@@ -1053,7 +1056,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("Error", out var errProp))
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
             if (!root.TryGetProperty("Results", out var results))
@@ -1090,7 +1094,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("Error", out var errProp))
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
             if (!root.TryGetProperty("Results", out var results))
@@ -1135,7 +1140,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("Error", out var errProp))
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
             if (!root.TryGetProperty("Data", out var dataProp))
@@ -1170,7 +1176,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("Error", out var errProp))
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
             var sb = new StringBuilder();
@@ -1250,7 +1257,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("Error", out var errProp))
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
             if (!root.TryGetProperty("Labels", out var labelsArr))
@@ -1284,7 +1292,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("Error", out var errProp))
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
             var key = root.TryGetProperty("Strings", out _) ? "Strings" : "strings";
@@ -1314,7 +1323,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("Error", out var errProp))
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
             if (!root.TryGetProperty("Functions", out var arr))
