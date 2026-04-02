@@ -1248,6 +1248,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
                 // ── Internal-emulator snapshots: sub-directories ──────────────
                 for (const dirent of dirEntries.filter(d => d.isDirectory())) {
+                    // Skip .extracted directories (PCSX2 snapshot extraction folders)
+                    if (dirent.name.endsWith('.extracted')) {
+                        continue;
+                    }
+
                     const snapPath = path.join(datePath, dirent.name);
                     const infoPath = path.join(snapPath, 'snapshot-info.json');
 

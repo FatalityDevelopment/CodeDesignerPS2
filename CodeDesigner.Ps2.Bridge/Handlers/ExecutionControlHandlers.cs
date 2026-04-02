@@ -41,7 +41,11 @@ namespace CodeDesigner.Ps2.Bridge
             // immediately re-fire the moment execution resumes.
             bool wasAtBreakpoint = Scheduler.LastBreakpointHit.HasValue;
             if (wasAtBreakpoint)
+            {
                 Scheduler.StepOne();
+                // Clear the last breakpoint hit so we don't keep re-triggering
+                Scheduler.LastBreakpointHit = null;
+            }
 
             Scheduler.Paused = false;
             return CreateSuccessResponse("Resumed");

@@ -127,6 +127,17 @@ namespace CodeDesigner.Ps2.Common
                     }
                 }
 
+                // Check for LUI+ADDIU or LUI+ORI patterns and append pointer target hint
+                uint? pointerTarget = TryGetPointerLoadTarget(instruction, cpu);
+                if (pointerTarget.HasValue && (lookupLabel != null || bus != null))
+                {
+                    string? hint = BuildTargetHint(pointerTarget.Value, bus, lookupLabel);
+                    if (hint != null)
+                        analysis += $" → 0x{pointerTarget.Value:X8} {hint}";
+                    else
+                        analysis += $" → 0x{pointerTarget.Value:X8}";
+                }
+
                 return $"; {analysis}";
             }
             catch
@@ -138,6 +149,57 @@ namespace CodeDesigner.Ps2.Common
         // -----------------------------------------------------------------------
         // Branch / jump target resolution helpers
         // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Attempts to detect LUI+ADDIU or LUI+ORI pointer load patterns.
+        /// When an ADDIU or ORI instruction uses a register that was recently loaded
+        /// with LUI, returns the combined 32-bit address.
+        /// </summary>
+        /// <param name="instruction">The 32-bit instruction word (ADDIU or ORI).</param>
+        /// <param name="cpu">CPU state with register values from prior LUI.</param>
+        /// <returns>The combined pointer address, or null if not a pointer load pattern.</returns>
+        private static uint? TryGetPointerLoadTarget(uint instruction, CpuState? cpu)
+        {
+            if (cpu == null) return null;
+
+            uint opcode = (instruction >> 26) & 0x3Fu;
+            
+            // ADDIU = opcode 0x09, ORI = opcode 0x0D
+            if (opcode != 0x09u && opcode != 0x0Du)
+                return null;
+
+            uint rs = (instruction >> 21) & 0x1Fu;  // source register
+            uint rt = (instruction >> 16) & 0x1Fu;  // target register
+            ushort imm = (ushort)(instruction & 0xFFFFu);
+
+            // For ADDIU: addr = (rs upper 16 bits) + sign_extend(imm)
+            // For ORI:   addr = (rs upper 16 bits) | imm
+            // Check if rs contains a value that looks like it came from LUI
+            // (upper 16 bits set, lower 16 bits zero or near-zero)
+            long rsValue = cpu.RegsLo[rs];
+            uint rsUpper = (uint)(rsValue >> 16) & 0xFFFFu;
+            uint rsLower = (uint)rsValue & 0xFFFFu;
+
+            // LUI sets upper 16 bits and zeros lower 16 bits
+            // We accept a small tolerance for the lower bits (≤ 0x100) to handle
+            // cases where there may have been a small offset added
+            if (rsUpper == 0 || rsLower > 0x100)
+                return null;
+
+            if (opcode == 0x09u) // ADDIU
+            {
+                // Sign-extend the immediate for ADDIU
+                int offset = (short)imm;
+                uint addr = (uint)(rsValue + offset);
+                return addr;
+            }
+            else // ORI = 0x0D
+            {
+                // OR the immediate (zero-extend)
+                uint addr = (uint)rsValue | imm;
+                return addr;
+            }
+        }
 
         /// <summary>
         /// Attempts to compute the target address of a branch or jump instruction.
