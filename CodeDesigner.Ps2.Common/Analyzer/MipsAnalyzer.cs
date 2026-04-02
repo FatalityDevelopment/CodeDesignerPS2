@@ -176,7 +176,7 @@ namespace CodeDesigner.Ps2.Common
             // For ORI:   addr = (rs upper 16 bits) | imm
             // Check if rs contains a value that looks like it came from LUI
             // (upper 16 bits set, lower 16 bits zero or near-zero)
-            long rsValue = cpu.RegsLo[rs];
+            ulong rsValue = cpu.RegsLo[rs];
             uint rsUpper = (uint)(rsValue >> 16) & 0xFFFFu;
             uint rsLower = (uint)rsValue & 0xFFFFu;
 
@@ -190,7 +190,7 @@ namespace CodeDesigner.Ps2.Common
             {
                 // Sign-extend the immediate for ADDIU
                 int offset = (short)imm;
-                uint addr = (uint)(rsValue + offset);
+                uint addr = (uint)((long)rsValue + offset);
                 return addr;
             }
             else // ORI = 0x0D
