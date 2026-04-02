@@ -35,13 +35,17 @@ namespace CodeDesigner.Ps2.Bridge
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
-            // If the emulator is paused at a breakpoint, execute the breakpoint
-            // instruction once before releasing the run gate.  This advances PC
-            // past the breakpoint address so the same breakpoint does not
-            // immediately re-fire the moment execution resumes.
-            bool wasAtBreakpoint = Scheduler.LastBreakpointHit.HasValue;
-            if (wasAtBreakpoint)
+            // If the emulator is paused at a breakpoint, temporarily remove the
+            // breakpoint, step once, then restore it. This prevents the same
+            // breakpoint from immediately re-firing when execution resumes.
+            uint? breakpointToRestore = null;
+            if (Scheduler.LastBreakpointHit.HasValue)
+            {
+                breakpointToRestore = Scheduler.LastBreakpointHit.Value;
+                Scheduler.Breakpoints.Remove(breakpointToRestore.Value);
                 Scheduler.StepOne();
+                Scheduler.Breakpoints.Add(breakpointToRestore.Value);
+            }
 
             Scheduler.Paused = false;
             return CreateSuccessResponse("Resumed");

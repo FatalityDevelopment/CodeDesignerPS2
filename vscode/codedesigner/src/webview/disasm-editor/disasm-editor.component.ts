@@ -1114,8 +1114,16 @@ export class DisasmEditorComponent implements AfterViewInit {
     if (row.comment) {
       const commentMatch = row.comment.match(/0x([0-9A-F]{8})/i) || row.comment.match(/\b([0-9A-F]{8})\b/i);
       if (commentMatch) {
-        params.navigateToAddress(parseInt(commentMatch[1], 16));
-        return;
+        const address = parseInt(commentMatch[1], 16);
+        // Validate address is in valid EE address ranges:
+        // Physical: 0x00000000-0x1FFFFFFF (512MB)
+        // KSEG0/1: 0x80000000-0xBFFFFFFF
+        const isPhysical = address <= 0x1FFFFFFF;
+        const isKseg = address >= 0x80000000 && address <= 0xBFFFFFFF;
+        if (isPhysical || isKseg) {
+          params.navigateToAddress(address);
+          return;
+        }
       }
     }
 
