@@ -256,7 +256,15 @@ public sealed class Ps2HddImage : IDisposable
         ExportFileFromPartition(part, fileName, outputPath);
     }
 
-    /// <summary>Imports a file from the host into a partition.</summary>
+    /// <summary>
+    /// Imports a file from the host into a partition.
+    /// <para>
+    /// <b>Not yet implemented.</b> PFS write support (allocation bitmap management,
+    /// inode creation, directory entry creation) is not yet available. Use PCSX2's
+    /// built-in HDD tools or the pfsshell utility for write operations.
+    /// </para>
+    /// </summary>
+    /// <exception cref="NotSupportedException">Always thrown — PFS write support is pending.</exception>
     public void ImportFile(string partitionId, string inputPath, bool overwrite = false)
     {
         EnsureOpen();
