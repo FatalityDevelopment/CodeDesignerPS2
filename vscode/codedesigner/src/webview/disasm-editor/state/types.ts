@@ -19,6 +19,7 @@ export type SearchMode = 'text' | 'bytes' | 'string' | 'regex';
 
 export interface SearchMatch {
   instructionIndex: number;
+  address: number;
   field: string;
   start: number;
   length: number;
