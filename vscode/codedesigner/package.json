@@ -13,7 +13,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TylerDev888/Mips64LE.git"
+    "url": "git+https://github.com/TylerDev888/MipsR9500.git"
   },
   "contributes": {
     "viewsContainers": {

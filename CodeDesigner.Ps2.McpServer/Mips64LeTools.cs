@@ -13,7 +13,7 @@ namespace CodeDesigner.Ps2.McpServer.Tools;
 /// socket server running on localhost:8765 and returns a human-readable result.
 /// </summary>
 [McpServerToolType]
-public sealed class Mips64LeTools(SocketBridgeClient bridge)
+public sealed class MipsR9500Tools(SocketBridgeClient bridge)
 {
     // -------------------------------------------------------------------------
     // Helpers
