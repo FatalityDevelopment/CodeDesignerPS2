@@ -1503,9 +1503,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
   /**
-   * Unified search via C# backend — works for both live and file-based panels.
-   * For live panels pass region and omit fileData.
-   * For file panels pass fileData and omit region.
+   * Unified search — works for both live and file-based panels.
+   *
+   * File-based panels: bytes/string modes are implemented in TypeScript
+   * (no C# backend required). text/regex modes use the C# backend when
+   * connected, otherwise fall back to searching only the address and raw-byte
+   * fields so that search always produces some results without the server.
+   *
+   * Live panels: always delegate to the C# backend (which reads live memory).
    */
   private async handleSearch(
     panel: vscode.WebviewPanel,
@@ -1516,19 +1521,165 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     region?: string,
     fileData?: Buffer
   ): Promise<void> {
+    if (fileData) {
+      // File-based panel: prefer the C# backend for text/regex (full disassembly
+      // search) but fall back to pure TypeScript so search always works.
+      if ((mode === 'text' || mode === 'regex') && this.socketClient?.isConnected()) {
+        try {
+          const matches = await this.socketClient.search(
+            baseAddress, length, query, mode, undefined, fileData
+          );
+          panel.webview.postMessage({ type: 'searchResults', matches });
+          return;
+        } catch (err: any) {
+          console.warn(`[SEARCH] C# backend search failed, falling back to TypeScript: ${err?.message ?? err}`);
+        }
+      }
+      // TypeScript implementation: always available for all modes.
+      const matches = this.searchFileData(fileData, baseAddress, query, mode);
+      panel.webview.postMessage({ type: 'searchResults', matches });
+      return;
+    }
+
+    // Live panel: delegate to C# backend.
     if (!this.socketClient?.isConnected()) {
       panel.webview.postMessage({ type: 'searchResults', matches: [] });
       return;
     }
     try {
       const matches = await this.socketClient.search(
-        baseAddress, length, query, mode, region, fileData
+        baseAddress, length, query, mode, region
       );
       panel.webview.postMessage({ type: 'searchResults', matches });
     } catch (err: any) {
       console.error(`[SEARCH] Failed: ${err?.message ?? err}`);
       panel.webview.postMessage({ type: 'searchResults', matches: [] });
     }
+  }
+
+  /**
+   * Parse a hex byte pattern string (e.g. "0x12 34 AB CD" or "12,34,AB").
+   * Returns null if the pattern is invalid.
+   */
+  private parseBytePattern(pattern: string): number[] | null {
+    const cleaned = pattern.replace(/0x/gi, '').replace(/[,\s]+/g, ' ').trim();
+    if (!cleaned) { return null; }
+    const parts = cleaned.split(/\s+/);
+    const result: number[] = [];
+    for (const p of parts) {
+      if (!/^[0-9a-fA-F]{1,2}$/.test(p)) { return null; }
+      result.push(parseInt(p, 16));
+    }
+    return result.length > 0 ? result : null;
+  }
+
+  /**
+   * Pure TypeScript implementation of file-based search — no C# backend needed.
+   *
+   * • bytes  — hex byte-pattern match in the raw binary.
+   * • string — UTF-8 byte-sequence match in the raw binary.
+   * • text   — case-insensitive substring search across the address and raw-byte
+   *            hex fields of each 4-byte instruction (partial; full opcode/args
+   *            search is only available when the C# backend is connected).
+   * • regex  — same as text but uses a RegExp.
+   */
+  private searchFileData(
+    fileData: Buffer,
+    startAddress: number,
+    query: string,
+    mode: string
+  ): SearchMatch[] {
+    const matches: SearchMatch[] = [];
+
+    if (mode === 'bytes') {
+      const pattern = this.parseBytePattern(query);
+      if (!pattern || pattern.length === 0) { return []; }
+      for (let i = 0; i <= fileData.length - pattern.length; i++) {
+        let found = true;
+        for (let j = 0; j < pattern.length; j++) {
+          if (fileData[i + j] !== pattern[j]) { found = false; break; }
+        }
+        if (found) {
+          matches.push({
+            instructionIndex: Math.floor(i / 4),
+            address: startAddress + i,
+            field: 'bytes',
+            start: 0,
+            length: pattern.length * 3 - 1,
+          });
+          i += pattern.length - 1;
+        }
+      }
+      return matches;
+    }
+
+    if (mode === 'string') {
+      const strBytes = Buffer.from(query, 'utf8');
+      if (strBytes.length === 0) { return []; }
+      for (let i = 0; i <= fileData.length - strBytes.length; i++) {
+        let found = true;
+        for (let j = 0; j < strBytes.length; j++) {
+          if (fileData[i + j] !== strBytes[j]) { found = false; break; }
+        }
+        if (found) {
+          matches.push({
+            instructionIndex: Math.floor(i / 4),
+            address: startAddress + i,
+            field: 'bytes',
+            start: 0,
+            length: strBytes.length * 3 - 1,
+          });
+          i += strBytes.length - 1;
+        }
+      }
+      return matches;
+    }
+
+    // text / regex — search the address and raw-byte hex fields.
+    const useRegex = mode === 'regex';
+    let rx: RegExp | null = null;
+    if (useRegex) {
+      try { rx = new RegExp(query, 'gi'); } catch { return []; }
+    }
+    const queryLower = query.toLowerCase();
+
+    for (let i = 0; i + 3 < fileData.length; i += 4) {
+      const addr = startAddress + i;
+      const idx  = Math.floor(i / 4);
+
+      const addrStr  = addr.toString(16).toUpperCase().padStart(8, '0');
+      const bytesStr = [
+        fileData[i + 3].toString(16).toUpperCase().padStart(2, '0'),
+        fileData[i + 2].toString(16).toUpperCase().padStart(2, '0'),
+        fileData[i + 1].toString(16).toUpperCase().padStart(2, '0'),
+        fileData[i + 0].toString(16).toUpperCase().padStart(2, '0'),
+      ].join('');
+
+      const fields: Array<{ name: string; text: string }> = [
+        { name: 'addr',  text: addrStr  },
+        { name: 'bytes', text: bytesStr },
+      ];
+
+      for (const { name, text } of fields) {
+        if (useRegex && rx) {
+          rx.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = rx.exec(text)) !== null) {
+            matches.push({ instructionIndex: idx, address: addr, field: name, start: m.index, length: m[0].length });
+            if (m[0].length === 0) { rx.lastIndex++; }
+          }
+        } else {
+          const textLower = text.toLowerCase();
+          let fi = 0;
+          while ((fi = textLower.indexOf(queryLower, fi)) >= 0) {
+            matches.push({ instructionIndex: idx, address: addr, field: name, start: fi, length: query.length });
+            fi += query.length;
+          }
+        }
+      }
+    }
+
+    return matches;
   }
 
   /**
