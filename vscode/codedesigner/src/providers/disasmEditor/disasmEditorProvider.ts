@@ -2300,17 +2300,16 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         webview.postMessage({ type: 'hddActionResult', error: 'Not connected to emulator.' });
         return;
       }
-      // Get file list first, then export each file
+      // Get file list first, then export each entry (including directories, which
+      // the server exports recursively).
       const files = await this.socketClient.hddListFiles(hddPath, partitionId);
       let exported = 0;
       for (const file of files) {
-        if (!file.IsDirectory) {
-          try {
-            await this.socketClient.hddExport(hddPath, partitionId, file.Name, exportDir);
-            exported++;
-          } catch (err: any) {
-            getOutputChannel().warn(`[HDD] Failed to export "${file.Name}": ${err?.message}`);
-          }
+        try {
+          await this.socketClient.hddExport(hddPath, partitionId, file.Name, exportDir);
+          exported++;
+        } catch (err: any) {
+          getOutputChannel().warn(`[HDD] Failed to export "${file.Name}": ${err?.message}`);
         }
       }
       const msg = `Exported ${exported} file(s) from "${partitionId}" to ${exportDir}`;
