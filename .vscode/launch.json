@@ -18,9 +18,9 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "program": "${workspaceFolder}/CodeDesigner.Ps2.Bridge/bin/Debug/net8.0/CodeDesigner.Ps2.Bridge.dll",
       "args": ["--help"],
-      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "cwd": "${workspaceFolder}/CodeDesigner.Ps2.Bridge",
       "console": "internalConsole",
       "stopAtEntry": false
     },
@@ -29,9 +29,9 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "program": "${workspaceFolder}/CodeDesigner.Ps2.Bridge/bin/Debug/net8.0/CodeDesigner.Ps2.Bridge.dll",
       "args": ["--graphics-info"],
-      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "cwd": "${workspaceFolder}/CodeDesigner.Ps2.Bridge",
       "console": "internalConsole",
       "stopAtEntry": false
     },
@@ -40,9 +40,9 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "program": "${workspaceFolder}/CodeDesigner.Ps2.Bridge/bin/Debug/net8.0/CodeDesigner.Ps2.Bridge.dll",
       "args": ["--server"],
-      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "cwd": "${workspaceFolder}/CodeDesigner.Ps2.Bridge",
       "console": "internalConsole",
       "stopAtEntry": false
     },
@@ -51,9 +51,9 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "program": "${workspaceFolder}/CodeDesigner.Ps2.Bridge/bin/Debug/net8.0/CodeDesigner.Ps2.Bridge.dll",
       "args": ["--run"],
-      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "cwd": "${workspaceFolder}/CodeDesigner.Ps2.Bridge",
       "console": "internalConsole",
       "stopAtEntry": false
     },
@@ -62,9 +62,9 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "program": "${workspaceFolder}/CodeDesigner.Ps2.Bridge/bin/Debug/net8.0/CodeDesigner.Ps2.Bridge.dll",
       "args": ["--run", "--steps", "10000000"],
-      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "cwd": "${workspaceFolder}/CodeDesigner.Ps2.Bridge",
       "console": "internalConsole",
       "stopAtEntry": false
     },
@@ -73,13 +73,13 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "program": "${workspaceFolder}/CodeDesigner.Ps2.Bridge/bin/Debug/net8.0/CodeDesigner.Ps2.Bridge.dll",
       "args": [
         "--run",
         "--disc",
-        "${workspaceFolder}/CodeDesigner.Mips64LE/Isos/Gameshark 2 v4 PS2.zip"
+        "${workspaceFolder}/CodeDesigner.Ps2.Bridge/Isos/Gameshark 2 v4 PS2.zip"
       ],
-      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "cwd": "${workspaceFolder}/CodeDesigner.Ps2.Bridge",
       "console": "internalConsole",
       "stopAtEntry": false
     },
@@ -88,15 +88,15 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/CodeDesigner.Mips64LE/bin/Debug/net8.0/CodeDesigner.Mips64LE.dll",
+      "program": "${workspaceFolder}/CodeDesigner.Ps2.Bridge/bin/Debug/net8.0/CodeDesigner.Ps2.Bridge.dll",
       "args": [
         "--run",
         "--disc",
-        "${workspaceFolder}/CodeDesigner.Mips64LE/Isos/Gameshark 2 v4 PS2.zip",
+        "${workspaceFolder}/CodeDesigner.Ps2.Bridge/Isos/Gameshark 2 v4 PS2.zip",
         "--steps",
         "1000000"
       ],
-      "cwd": "${workspaceFolder}/CodeDesigner.Mips64LE",
+      "cwd": "${workspaceFolder}/CodeDesigner.Ps2.Bridge",
       "console": "internalConsole",
       "stopAtEntry": false
     }
