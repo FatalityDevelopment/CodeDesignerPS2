@@ -63,4 +63,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="SharpCompress" Version="0.38.0" />
+  </ItemGroup>
+
 </Project>
