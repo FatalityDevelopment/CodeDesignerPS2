@@ -7,7 +7,7 @@
       "type": "process",
       "args": [
         "build",
-        "${workspaceFolder}/CodeDesigner.Mips64LE.sln"
+        "${workspaceFolder}/CodeDesigner.MipsR9500.sln"
       ],
       "problemMatcher": "$msCompile"
     },

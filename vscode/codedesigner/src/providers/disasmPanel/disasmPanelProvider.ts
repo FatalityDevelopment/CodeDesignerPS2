@@ -577,9 +577,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const out = getOutputChannel();
         const resolvedExe = this.getControlServerExecutablePath(selectedEmulatorPath);
         if (!resolvedExe) {
-            out.error('Connect requires CodeDesigner.Mips64LE.exe in emu-settings.json.');
+            out.error('Connect requires CodeDesigner.MipsR9500.exe in emu-settings.json.');
             vscode.window.showErrorMessage(
-                'Connect requires CodeDesigner.Mips64LE.exe in emu-settings.json. Add it and try again.'
+                'Connect requires CodeDesigner.MipsR9500.exe in emu-settings.json. Add it and try again.'
             );
             this.cleanupProcess();
             return;
@@ -596,7 +596,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             out.error(`CodeDesigner executable not found: ${resolvedExe}`);
             vscode.window.showErrorMessage(
                 `CodeDesigner not found: ${resolvedExe}\n` +
-                'Build the project first: cd CodeDesigner.Mips64LE && dotnet build'
+                'Build the project first: cd CodeDesigner.MipsR9500 && dotnet build'
             );
             this.cleanupProcess();
             return;
