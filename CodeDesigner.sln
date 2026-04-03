@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.3.11512.155 d18.3
+VisualStudioVersion = 18.3.11512.155
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Bridge", "CodeDesigner.Ps2.Bridge\CodeDesigner.Ps2.Bridge.csproj", "{F853B404-EBF3-47DA-B9DE-E634DF32BC6F}"
 EndProject
@@ -26,6 +26,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.CdsLanguage", "CodeDesigner.Ps2.CdsLanguage\CodeDesigner.Ps2.CdsLanguage.csproj", "{B7C8D9E0-F1A2-3456-1234-567890123457}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.MemoryCardManager", "CodeDesigner.Ps2.MemoryCardManager\CodeDesigner.Ps2.MemoryCardManager.csproj", "{C8D9E0F1-A2B3-4567-2345-678901234568}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.HddManager", "CodeDesigner.Ps2.HddManager\CodeDesigner.Ps2.HddManager.csproj", "{46FB3EE2-029F-43BF-B49E-2743889204F3}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -177,6 +179,18 @@ Global
 		{C8D9E0F1-A2B3-4567-2345-678901234568}.Release|x64.Build.0 = Release|Any CPU
 		{C8D9E0F1-A2B3-4567-2345-678901234568}.Release|x86.ActiveCfg = Release|Any CPU
 		{C8D9E0F1-A2B3-4567-2345-678901234568}.Release|x86.Build.0 = Release|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Debug|x64.Build.0 = Debug|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Debug|x86.Build.0 = Debug|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Release|x64.ActiveCfg = Release|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Release|x64.Build.0 = Release|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Release|x86.ActiveCfg = Release|Any CPU
+		{46FB3EE2-029F-43BF-B49E-2743889204F3}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -39,6 +39,11 @@ namespace CodeDesigner.Ps2.Bridge
         public string? ExportDir { get; set; }
         public string? ImportDir { get; set; }
         public bool?   McOverwrite { get; set; }
+        // HDD_LIST / HDD_LIST_FILES / HDD_EXPORT / HDD_IMPORT / HDD_DELETE / HDD_CREATE fields
+        public string? HddPath { get; set; }
+        public string? PartitionId { get; set; }
+        public string? FileName { get; set; }
+        public int?    HddSizeGb { get; set; }
         // Runtime mode control fields
         public string? Pcsx2Host { get; set; }
         public int? Pcsx2Slot { get; set; }
