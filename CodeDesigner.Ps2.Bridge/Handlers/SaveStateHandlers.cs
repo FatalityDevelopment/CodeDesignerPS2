@@ -88,5 +88,40 @@ namespace CodeDesigner.Ps2.Bridge
             }
             return CreateErrorResponse("FRAMEADVANCE requires PINE mode");
         }
+
+        private string HandlePineVersion()
+        {
+            if (!IsPineMode) return CreateErrorResponse("PINEVERSION requires PINE mode");
+            try
+            {
+                string ver = PineClient!.GetVersion();
+                return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "PINEVERSION", Message = ver, Data = ver });
+            }
+            catch (Exception ex) { return CreateErrorResponse($"PINE GetVersion failed: {ex.Message}"); }
+        }
+
+        private string HandlePineSaveStateSlot(byte? slot)
+        {
+            if (slot == null) return CreateErrorResponse("StateSlot is required (0–9)");
+            if (!IsPineMode) return CreateErrorResponse("PINESAVESTATE requires PINE mode");
+            try
+            {
+                PineClient!.SaveState(slot.Value);
+                return CreateSuccessResponse($"State saved to slot {slot}");
+            }
+            catch (Exception ex) { return CreateErrorResponse($"PINE SaveState slot {slot} failed: {ex.Message}"); }
+        }
+
+        private string HandlePineLoadStateSlot(byte? slot)
+        {
+            if (slot == null) return CreateErrorResponse("StateSlot is required (0–9)");
+            if (!IsPineMode) return CreateErrorResponse("PINELOADSTATE requires PINE mode");
+            try
+            {
+                PineClient!.LoadState(slot.Value);
+                return CreateSuccessResponse($"State loaded from slot {slot}");
+            }
+            catch (Exception ex) { return CreateErrorResponse($"PINE LoadState slot {slot} failed: {ex.Message}"); }
+        }
     }
 }

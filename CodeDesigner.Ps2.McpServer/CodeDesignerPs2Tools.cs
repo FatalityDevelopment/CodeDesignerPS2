@@ -1092,6 +1092,929 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
     }
 
     // -------------------------------------------------------------------------
+    // Emulator control — extended
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "reset_emulator")]
+    [Description("Send a CPU reset signal to the PS2 emulator (PINE) or reset the internal scheduler. " +
+                 "Unlike restart_emulator (which reloads the BIOS and disc), this performs a softer " +
+                 "hardware-level reset. Works in both internal and PINE/PCSX2 modes.")]
+    public async Task<string> ResetEmulator(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "RESET" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "step_into")]
+    [Description("Step into the next PS2 EE instruction (follows calls into subroutines). " +
+                 "In PINE/PCSX2 mode this uses the native PCSX2 step-into command; " +
+                 "in internal emulator mode it behaves identically to step. " +
+                 "The emulator must already be paused.")]
+    public async Task<string> StepInto(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "STEPINTO" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "step_over")]
+    [Description("Step over the next PS2 EE instruction (skips into subroutines, executing them fully). " +
+                 "In PINE/PCSX2 mode this uses the native PCSX2 step-over command; " +
+                 "in internal emulator mode it behaves identically to step. " +
+                 "The emulator must already be paused.")]
+    public async Task<string> StepOver(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "STEPOVER" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "step_out")]
+    [Description("Step out of the current PS2 EE subroutine, running until the next return instruction. " +
+                 "In PINE/PCSX2 mode this uses the native PCSX2 step-out command; " +
+                 "in internal emulator mode it behaves identically to step. " +
+                 "The emulator must already be paused.")]
+    public async Task<string> StepOut(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "STEPOUT" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Framerate / limiter / frame advance (PINE mode)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "get_fps")]
+    [Description("Read the current emulated framerate from PCSX2 via the PINE socket. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> GetFps(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETFPS" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (root.TryGetProperty("FPS", out var fps))
+                return $"FPS: {fps.GetSingle():F2}";
+            return SimpleMessage(json);
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "set_limiter_mode")]
+    [Description("Set the PCSX2 speed limiter mode via the PINE socket. " +
+                 "mode: 0=Nominal (default 60 fps), 1=Turbo (maximum speed), 2=Slomo (slow motion), 3=Unlimited. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> SetLimiterMode(
+        [Description("Limiter mode: 0=Nominal, 1=Turbo, 2=Slomo, 3=Unlimited.")] byte mode,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "SETLIMITER", LimiterMode = mode }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "frame_advance")]
+    [Description("Advance the PCSX2 emulator by a fixed number of video frames then pause. " +
+                 "Useful for frame-by-frame analysis. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> FrameAdvance(
+        [Description("Number of frames to advance (1–255).")] byte frameCount,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "FRAMEADVANCE", FrameCount = frameCount }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Breakpoint listing (PINE mode)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "list_breakpoints")]
+    [Description("List all active PC breakpoints set in PCSX2 via the PINE socket. " +
+                 "cpuSel: 0=EE only, 1=IOP only, 255=both (default). " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> ListBreakpoints(
+        [Description("CPU selector: 0=EE, 1=IOP, 255=both (default).")] byte cpuSel = 0xFF,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "LISTBP", CpuSel = cpuSel }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("Breakpoints", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== Active Breakpoints ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string addr    = item.TryGetProperty("address", out var a) ? (a.GetString() ?? "?") : "?";
+                bool   enabled = item.TryGetProperty("enabled", out var e) && e.GetBoolean();
+                string cpu     = item.TryGetProperty("cpu",     out var c) ? (c.GetString() ?? "?") : "?";
+                sb.AppendLine($"  {addr}  [{cpu}]  {(enabled ? "enabled" : "disabled")}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no breakpoints)";
+        }
+        catch { return json; }
+    }
+
+    // -------------------------------------------------------------------------
+    // Symbol / debug info (PINE mode)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "get_symbol")]
+    [Description("Look up the EE function symbol name for a given virtual address via PINE. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> GetSymbol(
+        [Description("Virtual EE address to look up (hex or decimal).")] string address,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedAddress = TryParseAddress(address);
+        if (parsedAddress is null)
+            return $"Error: invalid address '{address}'.";
+
+        var json = await bridge.SendAsync(new { Command = "GETSYMBOL", Address = parsedAddress.Value }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+
+            string symAddr = root.TryGetProperty("SymbolAddress", out var sa) ? (sa.GetString() ?? "?") : "?";
+            string symName = root.TryGetProperty("SymbolName",    out var sn) ? (sn.GetString() ?? "?") : "?";
+            return $"0x{parsedAddress.Value:X8}  →  {symAddr}  {symName}";
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "get_symbol_by_name")]
+    [Description("Look up an EE symbol address and size by its demangled name via PINE. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> GetSymbolByName(
+        [Description("Demangled symbol name to look up.")] string symbolName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETSYMBOLBYNAME", SymbolName = symbolName }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+
+            string symAddr = root.TryGetProperty("SymbolAddress", out var sa) ? (sa.GetString() ?? "?") : "?";
+            uint   symSize = root.TryGetProperty("SymbolSize",    out var ss) ? ss.GetUInt32()           : 0u;
+            return $"{symbolName}  →  {symAddr}  size={symSize}";
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "get_call_stack")]
+    [Description("Walk the EE call stack and return each frame's entry point, current PC, " +
+                 "stack pointer, and frame size. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> GetCallStack(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETSTACK" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("StackFrames", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== Call Stack ===");
+            int frameIdx = 0;
+            foreach (var item in arr.EnumerateArray())
+            {
+                string entry     = item.TryGetProperty("entry",     out var e)  ? (e.GetString()  ?? "?") : "?";
+                string pc        = item.TryGetProperty("pc",        out var p)  ? (p.GetString()  ?? "?") : "?";
+                string sp        = item.TryGetProperty("sp",        out var s)  ? (s.GetString()  ?? "?") : "?";
+                uint   stackSize = item.TryGetProperty("stackSize", out var ss) ? ss.GetUInt32()           : 0u;
+                sb.AppendLine($"  #{frameIdx,-2}  entry={entry}  pc={pc}  sp={sp}  frameSize={stackSize}");
+                frameIdx++;
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(empty call stack)";
+        }
+        catch { return json; }
+    }
+
+    // -------------------------------------------------------------------------
+    // IOP threads and modules (PINE mode)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "get_iop_threads")]
+    [Description("List all IOP (I/O Processor) OS threads via the PINE socket. " +
+                 "Returns thread ID, status, PC, stack pointer, priority, and entry point for each IOP thread. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> GetIopThreads(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETIOPTHREADS" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("Threads", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== IOP Threads ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                int    id     = item.TryGetProperty("id",       out var idProp)  ? idProp.GetInt32()   : -1;
+                string status = item.TryGetProperty("status",   out var stProp)  ? (stProp.GetString() ?? "?") : "?";
+                uint   pc     = item.TryGetProperty("pc",       out var pcProp)  ? pcProp.GetUInt32()  : 0u;
+                uint   sp     = item.TryGetProperty("sp",       out var spProp)  ? spProp.GetUInt32()  : 0u;
+                int    pri    = item.TryGetProperty("priority", out var priProp) ? priProp.GetInt32()  : 0;
+                uint   entry  = item.TryGetProperty("entryPc",  out var eProp)   ? eProp.GetUInt32()   : 0u;
+                sb.AppendLine($"  Thread {id,-3}  [{status,-9}]  PC=0x{pc:X8}  SP=0x{sp:X8}  Pri={pri,-3}  Entry=0x{entry:X8}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no IOP threads found)";
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "get_modules")]
+    [Description("List all loaded IOP modules (IRX files) via the PINE socket. " +
+                 "Returns name, version, text/data addresses and sizes for each module. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> GetModules(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETMODULES" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("Modules", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== IOP Modules ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string name     = item.TryGetProperty("name",     out var n)  ? (n.GetString()  ?? "?") : "?";
+                ushort version  = item.TryGetProperty("version",  out var v)  ? v.GetUInt16()            : (ushort)0;
+                string textAddr = item.TryGetProperty("textAddr", out var ta) ? (ta.GetString() ?? "?") : "?";
+                uint   textSize = item.TryGetProperty("textSize", out var ts) ? ts.GetUInt32()           : 0u;
+                uint   dataSize = item.TryGetProperty("dataSize", out var ds) ? ds.GetUInt32()           : 0u;
+                sb.AppendLine($"  {name,-20}  v{version:X4}  text={textAddr}  +{textSize / 1024}KB code  +{dataSize / 1024}KB data");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no modules found)";
+        }
+        catch { return json; }
+    }
+
+    // -------------------------------------------------------------------------
+    // Fine-grained register access (PINE mode)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "pine_get_register")]
+    [Description("Read any EE or IOP CPU register by category and index via the PINE socket. " +
+                 "Returns a 128-bit value as a hex string (little-endian). " +
+                 "cpuSel: 0=EE, 1=IOP. " +
+                 "EE categories: 0=GPR (32 regs), 1=CP0 (32 regs), 2=FPR (32 regs), 3=FCR (32 regs), 4=VU0F (33 regs, vf0–vf31+ACC), 5=VU0I (32 regs), 6=GS (19 priv regs). " +
+                 "IOP categories: 0=GPR (32 regs). " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> PineGetRegister(
+        [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
+        [Description("Register category (see tool description).")] byte registerCategory,
+        [Description("Register index within the category.")] int registerIndex,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "GETREGISTER", CpuSel = cpuSel, RegisterCategory = registerCategory, RegisterIndex = registerIndex },
+            cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (root.TryGetProperty("RegisterValue", out var rv))
+                return $"Register [{(cpuSel == 0 ? "EE" : "IOP")}] cat={registerCategory} idx={registerIndex} = 0x{rv.GetString()}";
+            return SimpleMessage(json);
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "pine_set_register")]
+    [Description("Write any EE or IOP CPU register by category and index via the PINE socket. " +
+                 "The emulator must be paused. " +
+                 "cpuSel: 0=EE, 1=IOP. For categories see pine_get_register. " +
+                 "registerValue: hex string up to 32 characters (128-bit little-endian). " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> PineSetRegister(
+        [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
+        [Description("Register category (see pine_get_register description).")] byte registerCategory,
+        [Description("Register index within the category.")] int registerIndex,
+        [Description("New value as a hex string (up to 32 hex chars = 128 bits, little-endian).")] string registerValue,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "PINESETREG", CpuSel = cpuSel, RegisterCategory = registerCategory, RegisterIndex = registerIndex, RegisterValue = registerValue },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // PCSX2 symbol database (PINE mode)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "list_functions")]
+    [Description("Retrieve a paginated list of EE function symbols from the PCSX2 symbol database via PINE. " +
+                 "Each entry includes address, size in bytes, and name. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> ListFunctions(
+        [Description("Pagination offset (0-based index of the first result to return).")] uint offset = 0,
+        [Description("Maximum number of results to return (1–65535, default 256).")] ushort maxCount = 256,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "LISTFUNCTIONS", Offset = offset, MaxCount = maxCount },
+            cancellationToken);
+        return FormatPineSymbols(json, "Functions", "PineSymbols");
+    }
+
+    [McpServerTool(Name = "list_globals")]
+    [Description("Retrieve a paginated list of EE global variable symbols from the PCSX2 symbol database via PINE. " +
+                 "Each entry includes address, size in bytes, and name. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> ListGlobals(
+        [Description("Pagination offset (0-based index of the first result to return).")] uint offset = 0,
+        [Description("Maximum number of results to return (1–65535, default 256).")] ushort maxCount = 256,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "LISTGLOBALS", Offset = offset, MaxCount = maxCount },
+            cancellationToken);
+        return FormatPineSymbols(json, "Globals", "PineSymbols");
+    }
+
+    [McpServerTool(Name = "get_locals")]
+    [Description("List the parameters and local variables for the EE function that contains a given address via PINE. " +
+                 "Each entry includes storage type (global/register/stack), value/offset, and name. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> GetLocals(
+        [Description("Virtual EE address inside the function whose locals should be retrieved (hex or decimal).")] string address,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedAddress = TryParseAddress(address);
+        if (parsedAddress is null)
+            return $"Error: invalid address '{address}'.";
+
+        var json = await bridge.SendAsync(new { Command = "GETLOCALS", Address = parsedAddress.Value }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("LocalVars", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== Locals @ 0x{parsedAddress.Value:X8} ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string storage = item.TryGetProperty("storageType", out var st) ? (st.GetString() ?? "?") : "?";
+                int    value   = item.TryGetProperty("value",       out var v)  ? v.GetInt32()             : 0;
+                string name    = item.TryGetProperty("name",        out var n)  ? (n.GetString()   ?? "?") : "?";
+                sb.AppendLine($"  [{storage,-8}]  {value,8}  {name}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no locals found)";
+        }
+        catch { return json; }
+    }
+
+    // -------------------------------------------------------------------------
+    // PINE live disassembly
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "pine_disassemble")]
+    [Description("Disassemble instructions at a given address on EE or IOP via the PINE live-memory interface. " +
+                 "Unlike the offline 'disassemble' tool, this reads directly from the running PCSX2 memory. " +
+                 "cpuSel: 0=EE, 1=IOP. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> PineDisassemble(
+        [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
+        [Description("Virtual start address (hex or decimal).")] string address,
+        [Description("Number of instructions to disassemble (1–1000, default 32).")] ushort count = 32,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedAddress = TryParseAddress(address);
+        if (parsedAddress is null)
+            return $"Error: invalid address '{address}'.";
+
+        var json = await bridge.SendAsync(
+            new { Command = "PINEDISASSEMBLE", CpuSel = cpuSel, Address = parsedAddress.Value, Length = (int)count },
+            cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("DisassemblyLines", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            foreach (var item in arr.EnumerateArray())
+            {
+                string addr = item.TryGetProperty("address", out var a) ? (a.GetString() ?? "?") : "?";
+                string text = item.TryGetProperty("text",    out var t) ? (t.GetString() ?? "")  : "";
+                sb.AppendLine($"  {addr}  {text}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no disassembly)";
+        }
+        catch { return json; }
+    }
+
+    // -------------------------------------------------------------------------
+    // Save-state file management (PINE mode)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "save_state_file")]
+    [Description("Save the current PCSX2 emulator state to a named file path via the PINE socket. " +
+                 "Unlike snapshot (which dumps raw memory), this saves a full .p2s save-state file " +
+                 "that can be loaded back with load_state_file. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> SaveStateFile(
+        [Description("Absolute file path where the save state should be written (e.g. '/saves/slot1.p2s').")] string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "SAVESTATETOFILE", FilePath = filePath }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "load_state_file")]
+    [Description("Load a PCSX2 save-state file (.p2s) into the running emulator via the PINE socket. " +
+                 "Unlike load_snapshot (which restores raw memory), this loads a full PCSX2-format save state. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> LoadStateFile(
+        [Description("Absolute path to the .p2s save-state file to load.")] string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "LOADSTATEFROMFILE", FilePath = filePath }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "extract_p2s")]
+    [Description("Extract the memory dump files (EEmem.bin, IOPmem.bin) from a PCSX2 .p2s save-state archive " +
+                 "into a companion directory alongside the .p2s file. " +
+                 "The extraction is cached — if the .p2s file has not changed since the last extraction it " +
+                 "returns immediately. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> ExtractP2s(
+        [Description("Absolute path to the .p2s PCSX2 save-state file to extract.")] string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "EXTRACTP2S", FilePath = filePath }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Direct PINE protocol commands (PINE mode)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "pine_version")]
+    [Description("Query the PINE IPC protocol version string from PCSX2. " +
+                 "Useful for checking that the connected PCSX2 supports the expected PINE extension level. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> PineVersion(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "PINEVERSION" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pine_save_state_slot")]
+    [Description("Save the current PCSX2 emulator state to a numbered save-state slot (0–9) via PINE. " +
+                 "Unlike save_state_file, this uses the built-in numbered slots managed by PCSX2. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> PineSaveStateSlot(
+        [Description("Save-state slot index (0–9).")] byte slot,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "PINESAVESTATE", StateSlot = slot }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pine_load_state_slot")]
+    [Description("Load a PCSX2 save-state from a numbered slot (0–9) via PINE. " +
+                 "Unlike load_state_file, this uses the built-in numbered slots managed by PCSX2. " +
+                 "Only available when the server was started with --pcsx2.")]
+    public async Task<string> PineLoadStateSlot(
+        [Description("Save-state slot index (0–9).")] byte slot,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "PINELOADSTATE", StateSlot = slot }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Memory card management (no emulator required — offline PS2 FAT)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "mc_list")]
+    [Description("List all save-game directories on a PS2 memory card image file. " +
+                 "Returns save name, file count, creation/modification timestamps, and total size for each save. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> McList(
+        [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "MC_LIST", McPath = mcPath }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("McSaves", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== Saves on {mcPath} ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string name    = item.TryGetProperty("Name",       out var n)  ? (n.GetString()  ?? "?") : "?";
+                uint   files   = item.TryGetProperty("FileCount",  out var fc) ? fc.GetUInt32()           : 0u;
+                string created = item.TryGetProperty("Created",    out var cr) ? (cr.GetString() ?? "?") : "?";
+                string modif   = item.TryGetProperty("Modified",   out var mo) ? (mo.GetString() ?? "?") : "?";
+                uint   bytes   = item.TryGetProperty("TotalBytes", out var tb) ? tb.GetUInt32()           : 0u;
+                sb.AppendLine($"  {name,-32}  {files} file(s)  {bytes / 1024} KB  created={created}  modified={modif}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no saves found)";
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "mc_export")]
+    [Description("Export a single save-game directory from a PS2 memory card image to a folder on disk. " +
+                 "The exported folder can be inspected, backed up, or imported into another memory card. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> McExport(
+        [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
+        [Description("Name of the save to export (as listed by mc_list, e.g. 'BASCUS-97133BUILTIN').")] string saveName,
+        [Description("Absolute path to the directory where the save folder should be written.")] string exportDir,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "MC_EXPORT", McPath = mcPath, SaveName = saveName, ExportDir = exportDir },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "mc_import")]
+    [Description("Import a save-game directory into a PS2 memory card image. " +
+                 "The save directory must follow PS2 memory card conventions (one subdirectory per save). " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> McImport(
+        [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
+        [Description("Absolute path to the save directory to import.")] string importDir,
+        [Description("Whether to overwrite an existing save with the same name (default false).")] bool overwrite = false,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "MC_IMPORT", McPath = mcPath, ImportDir = importDir, McOverwrite = overwrite },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "mc_delete")]
+    [Description("Delete a single save-game directory from a PS2 memory card image. " +
+                 "This operation cannot be undone. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> McDelete(
+        [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
+        [Description("Name of the save to delete (as listed by mc_list).")] string saveName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "MC_DELETE", McPath = mcPath, SaveName = saveName },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "mc_format")]
+    [Description("Create a new blank PS2 memory card image file (8 MB). " +
+                 "If a file already exists at the path it will be overwritten with a freshly formatted card. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> McFormat(
+        [Description("Absolute path where the new memory card image should be created.")] string mcPath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "MC_FORMAT", McPath = mcPath }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // HDD image manager (no emulator required — offline APA/PFS)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "hdd_list")]
+    [Description("Open a PS2 HDD image file and list all APA partitions on it. " +
+                 "Returns partition ID, name, type, size, creation timestamp, and file count for each partition. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> HddList(
+        [Description("Absolute path to the PS2 HDD image file (e.g. 'hdd.raw').")] string hddPath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "HDD_LIST", HddPath = hddPath }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("HddPartitions", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== Partitions on {hddPath} ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string id       = item.TryGetProperty("Id",         out var idProp)  ? (idProp.GetString()      ?? "?") : "?";
+                string name     = item.TryGetProperty("Name",       out var n)       ? (n.GetString()           ?? "?") : "?";
+                string type     = item.TryGetProperty("TypeName",   out var t)       ? (t.GetString()           ?? "?") : "?";
+                ulong  bytes    = item.TryGetProperty("TotalBytes", out var tb)      ? tb.GetUInt64()                    : 0ul;
+                string created  = item.TryGetProperty("Created",    out var cr)      ? (cr.GetString()          ?? "?") : "?";
+                uint   files    = item.TryGetProperty("FileCount",  out var fc)      ? fc.GetUInt32()                    : 0u;
+                sb.AppendLine($"  {id,-20}  {name,-30}  [{type}]  {bytes / (1024 * 1024)} MB  {files} file(s)  created={created}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no partitions found)";
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "hdd_list_files")]
+    [Description("List all files in a specific partition on a PS2 HDD image. " +
+                 "Returns file name, size, type (file/directory), and modification timestamp. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> HddListFiles(
+        [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
+        [Description("Partition ID to list files from (as shown by hdd_list, e.g. '__common' or 'BASLUS-12345').")] string partitionId,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "HDD_LIST_FILES", HddPath = hddPath, PartitionId = partitionId },
+            cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("HddFiles", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== Files in partition '{partitionId}' ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string name   = item.TryGetProperty("Name",        out var n)  ? (n.GetString()  ?? "?") : "?";
+                ulong  size   = item.TryGetProperty("Size",        out var s)  ? s.GetUInt64()            : 0ul;
+                bool   isDir  = item.TryGetProperty("IsDirectory", out var d)  && d.GetBoolean();
+                string modif  = item.TryGetProperty("Modified",    out var mo) ? (mo.GetString() ?? "?") : "?";
+                string tag    = isDir ? "[DIR]" : "     ";
+                sb.AppendLine($"  {tag}  {name,-40}  {size,10} bytes  modified={modif}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no files found)";
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "hdd_export")]
+    [Description("Export a single file from a PS2 HDD partition to a directory on disk. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> HddExport(
+        [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
+        [Description("Partition ID containing the file (as shown by hdd_list).")] string partitionId,
+        [Description("File name to export (as shown by hdd_list_files).")] string fileName,
+        [Description("Absolute path to the output directory.")] string exportDir,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "HDD_EXPORT", HddPath = hddPath, PartitionId = partitionId, FileName = fileName, ExportDir = exportDir },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "hdd_import")]
+    [Description("Import a file into a specific partition on a PS2 HDD image. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> HddImport(
+        [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
+        [Description("Partition ID to import the file into (as shown by hdd_list).")] string partitionId,
+        [Description("Absolute path to the file or directory to import.")] string importDir,
+        [Description("Whether to overwrite an existing file with the same name (default false).")] bool overwrite = false,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "HDD_IMPORT", HddPath = hddPath, PartitionId = partitionId, ImportDir = importDir, McOverwrite = overwrite },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "hdd_delete")]
+    [Description("Delete a partition from a PS2 HDD image. " +
+                 "This operation cannot be undone. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> HddDelete(
+        [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
+        [Description("Partition ID to delete (as shown by hdd_list).")] string partitionId,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "HDD_DELETE", HddPath = hddPath, PartitionId = partitionId },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "hdd_create")]
+    [Description("Create a new blank PS2 HDD image file with an initialised APA partition table. " +
+                 "If a file already exists at the path it will be overwritten. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> HddCreate(
+        [Description("Absolute path where the new HDD image should be created.")] string hddPath,
+        [Description("Image size in gigabytes (default 40 GB).")] int sizeGb = 40,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "HDD_CREATE", HddPath = hddPath, HddSizeGb = sizeGb },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Struct / memory-map viewer
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "get_structs")]
+    [Description("Return all user-defined PS2 memory struct definitions stored on the server. " +
+                 "Each struct has a name, base address, and an ordered list of member fields with byte offsets. " +
+                 "Works in both internal emulator and PINE modes.")]
+    public async Task<string> GetStructs(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETSTRUCTS" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("Structs", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            foreach (var item in arr.EnumerateArray())
+            {
+                string name = item.TryGetProperty("Name",        out var n)  ? (n.GetString()  ?? "?") : "?";
+                string addr = item.TryGetProperty("BaseAddress", out var a)  ? (a.GetString()  ?? "?") : "?";
+                sb.AppendLine($"struct {name}  @ {addr}");
+                if (item.TryGetProperty("Members", out var members))
+                {
+                    foreach (var m in members.EnumerateArray())
+                    {
+                        int    offset = m.TryGetProperty("Offset", out var o)  ? o.GetInt32()            : 0;
+                        string mname  = m.TryGetProperty("Name",   out var mn) ? (mn.GetString() ?? "?") : "?";
+                        sb.AppendLine($"  +0x{offset:X3}  {mname}");
+                    }
+                }
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no structs defined)";
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "add_struct")]
+    [Description("Create or update a named PS2 memory struct definition with a base address. " +
+                 "Use add_struct_member to add fields after creating the struct. " +
+                 "Works in both internal emulator and PINE modes.")]
+    public async Task<string> AddStruct(
+        [Description("Unique name for this struct (e.g. 'PlayerState').")] string structName,
+        [Description("Base address of the struct in EE memory (hex or decimal, e.g. '0x80200000').")] string baseAddress,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "ADDSTRUCT", StructName = structName, StructBaseAddress = baseAddress },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "delete_struct")]
+    [Description("Remove a named PS2 memory struct definition. " +
+                 "Works in both internal emulator and PINE modes.")]
+    public async Task<string> DeleteStruct(
+        [Description("Name of the struct to delete.")] string structName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "DELETESTRUCT", StructName = structName },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "add_struct_member")]
+    [Description("Add or update a named member field in an existing PS2 memory struct definition. " +
+                 "Use get_structs to browse current definitions. " +
+                 "Works in both internal emulator and PINE modes.")]
+    public async Task<string> AddStructMember(
+        [Description("Name of the struct to add the member to.")] string structName,
+        [Description("Byte offset of the member within the struct (e.g. 0 for the first field).")] int memberOffset,
+        [Description("Display name for the member field (e.g. 'health' or 'posX').")] string memberName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "ADDSTRUCTMEMBER", StructName = structName, MemberOffset = memberOffset, MemberName = memberName },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Value scan (memory search by value)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "scan_value")]
+    [Description("Scan EE main RAM (or a custom address range) for a specific value of a given data type. " +
+                 "Supports numeric data types and comparison operators. " +
+                 "Works in both internal emulator and PINE modes.\n\n" +
+                 "dataType values: uint8, int8, uint16, int16, uint32, int32, uint64, int64, float32, float64.\n" +
+                 "comparison values: eq (equal), ne (not equal), lt (less than), gt (greater than), le (≤), ge (≥).\n\n" +
+                 "Returns up to 100,000 matching addresses. Narrow the range or use filter mode (pass previousAddresses) to refine results.")]
+    public async Task<string> ScanValue(
+        [Description("Value to scan for (decimal or 0x-prefixed hex string, e.g. '100' or '0x64' for uint32).")] string scanValue,
+        [Description("Data type to interpret memory as (e.g. 'uint32', 'float32').")] string dataType,
+        [Description("Comparison operator: 'eq', 'ne', 'lt', 'gt', 'le', 'ge' (default 'eq').")] string comparison = "eq",
+        [Description("Scan start address (hex or decimal). Leave null to scan all of EE RAM.")] string? startAddress = null,
+        [Description("Exclusive scan end address (hex or decimal). Leave null to scan to end of EE RAM.")] string? endAddress = null,
+        [Description("Comma-separated list of hex addresses to re-check (filter/refine mode). Leave null for a full scan.")] string? previousAddresses = null,
+        CancellationToken cancellationToken = default)
+    {
+        uint? start = startAddress != null ? TryParseAddress(startAddress) : null;
+        uint? end   = endAddress   != null ? TryParseAddress(endAddress)   : null;
+
+        List<uint>? prevList = null;
+        if (!string.IsNullOrWhiteSpace(previousAddresses))
+        {
+            prevList = [];
+            foreach (var part in previousAddresses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                uint? a = TryParseAddress(part);
+                if (a.HasValue) prevList.Add(a.Value);
+            }
+        }
+
+        var json = await bridge.SendAsync(new
+        {
+            Command = "SCANVALUE",
+            ScanValue = scanValue,
+            DataType = dataType,
+            Comparison = comparison,
+            Address = start,
+            EndAddress = end,
+            ScanAddresses = prevList,
+        }, cancellationToken);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("ScanResults", out var arr))
+                return SimpleMessage(json);
+
+            string? msg = root.TryGetProperty("Message", out var msgProp) ? msgProp.GetString() : null;
+            var sb = new StringBuilder();
+            int count = 0;
+            foreach (var item in arr.EnumerateArray())
+            {
+                string addr = item.TryGetProperty("address", out var a) ? (a.GetString() ?? "?") : "?";
+                string val  = item.TryGetProperty("value",   out var v) ? (v.GetString() ?? "?") : "?";
+                sb.AppendLine($"  {addr}  {val}");
+                count++;
+            }
+
+            string header = $"Found {count} match(es):\n";
+            if (!string.IsNullOrEmpty(msg)) header += msg + "\n";
+            return count > 0 ? header + sb.ToString().TrimEnd() : "(no matches found)";
+        }
+        catch { return json; }
+    }
+
+    // -------------------------------------------------------------------------
     // Private formatting helpers
     // -------------------------------------------------------------------------
 
@@ -1819,6 +2742,38 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             }
 
             return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private static string FormatPineSymbols(string json, string label, string arrayKey)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var errProp))
+                return $"Error: {errProp.GetString()}";
+
+            uint total = root.TryGetProperty("TotalSymbols", out var totalProp) ? totalProp.GetUInt32() : 0u;
+
+            if (!root.TryGetProperty(arrayKey, out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine(total > 0 ? $"=== {label} (total: {total}) ===" : $"=== {label} ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string addr = item.TryGetProperty("address", out var a) ? (a.GetString() ?? "?") : "?";
+                uint   size = item.TryGetProperty("size",    out var s) ? s.GetUInt32()           : 0u;
+                string name = item.TryGetProperty("name",    out var n) ? (n.GetString()   ?? "?") : "?";
+                sb.AppendLine($"  {addr}  size={size,6}  {name}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : $"(no {label.ToLowerInvariant()} found)";
         }
         catch
         {

@@ -65,6 +65,8 @@ namespace CodeDesigner.Ps2.Bridge
         public string? SymbolName { get; set; }
         /// <summary>File path for SAVESTATETOFILE / LOADSTATEFROMFILE.</summary>
         public string? FilePath { get; set; }
+        /// <summary>Save-state slot index (0–9) for PINESAVESTATE / PINELOADSTATE.</summary>
+        public byte? StateSlot { get; set; }
         /// <summary>Pagination offset for LISTFUNCTIONS / LISTGLOBALS.</summary>
         public uint? Offset { get; set; }
         /// <summary>Maximum result count for LISTFUNCTIONS / LISTGLOBALS.</summary>
