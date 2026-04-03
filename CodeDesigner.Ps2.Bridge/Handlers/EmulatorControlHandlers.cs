@@ -5,6 +5,8 @@ using System.IO.Compression;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using SharpCompress.Archives;
+using SharpCompress.Common;
 using CodeDesigner.Ps2.Emulator;
 using CodeDesigner.Ps2.Emulator.IOP;
 
@@ -263,15 +265,15 @@ namespace CodeDesigner.Ps2.Bridge
                 };
 
                 var regions  = new List<SnapshotRegion>();
-                using var archive = ZipFile.OpenRead(filePath);
+                using var archive = ArchiveFactory.Open(filePath);
 
-                foreach (var mem in memEntries)
+                foreach (var entry in archive.Entries)
                 {
-                    var entry = archive.Entries.FirstOrDefault(e =>
-                        string.Equals(e.Name, mem.ZipName, StringComparison.OrdinalIgnoreCase));
-                    if (entry == null) { continue; }
+                    var mem = Array.Find(memEntries, m =>
+                        string.Equals(Path.GetFileName(entry.Key), m.ZipName, StringComparison.OrdinalIgnoreCase));
+                    if (mem == default) continue;
                     string outPath = Path.Combine(extractDir, mem.OutFile);
-                    entry.ExtractToFile(outPath, overwrite: true);
+                    entry.WriteToFile(outPath, new ExtractionOptions { Overwrite = true });
                     regions.Add(new SnapshotRegion { Label = mem.Label, File = mem.OutFile, BaseAddress = mem.Base, Size = (int)new FileInfo(outPath).Length });
                 }
 
