@@ -43,6 +43,11 @@ interface CommandMessage {
     ExportDir?: string;
     ImportDir?: string;
     McOverwrite?: boolean;
+    // HDD_* fields
+    HddPath?: string;
+    PartitionId?: string;
+    FileName?: string;
+    HddSizeGb?: number;
     // Save-state file path (SAVESTATETOFILE / LOADSTATEFROMFILE)
     FilePath?: string;
     // SCANVALUE fields
@@ -275,6 +280,9 @@ interface CommandResponse {
     PortCheatResults?: Array<Record<string, unknown>>;
     // MC_LIST fields
     McSaves?: McSaveInfo[];
+    // HDD_LIST / HDD_LIST_FILES fields
+    HddPartitions?: HddPartitionInfo[];
+    HddFiles?: HddFileEntryInfo[];
     // SCANVALUE results
     ScanResults?: ScanValueResult[];
     // GETSTRUCTS results
@@ -299,6 +307,30 @@ export interface McSaveInfo {
 export interface McFileInfo {
     Name: string;
     Size: number;
+}
+
+/**
+ * One partition entry returned by HDD_LIST.
+ */
+export interface HddPartitionInfo {
+    Id:          string;
+    Name:        string;
+    StartSector: number;
+    TotalBytes:  number;
+    TypeName:    string;
+    FileCount:   number;
+    Created:     string;
+    Files:       HddFileEntryInfo[];
+}
+
+/**
+ * One file entry within a PS2 HDD partition.
+ */
+export interface HddFileEntryInfo {
+    Name:        string;
+    Size:        number;
+    IsDirectory: boolean;
+    Modified:    string;
 }
 
 /**
@@ -1676,6 +1708,98 @@ export class SocketClient {
         );
         if (!response.Success) {
             throw new Error(response.Error || 'MC_FORMAT failed');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // HDD Image Manager
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * List all partitions on a PS2 HDD raw image.
+     * @param hddPath Absolute path to the HDD.raw file.
+     */
+    public async hddList(hddPath: string): Promise<HddPartitionInfo[]> {
+        const response = await this.sendCommand({ Command: 'HDD_LIST', HddPath: hddPath });
+        if (!response.Success) {
+            throw new Error(response.Error || 'HDD_LIST failed');
+        }
+        return response.HddPartitions ?? [];
+    }
+
+    /**
+     * List files within a specific partition on a PS2 HDD image.
+     * @param hddPath     Absolute path to the HDD.raw file.
+     * @param partitionId Partition ID (e.g. "__common", "__system").
+     */
+    public async hddListFiles(hddPath: string, partitionId: string): Promise<HddFileEntryInfo[]> {
+        const response = await this.sendCommand(
+            { Command: 'HDD_LIST_FILES', HddPath: hddPath, PartitionId: partitionId }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'HDD_LIST_FILES failed');
+        }
+        return response.HddFiles ?? [];
+    }
+
+    /**
+     * Export a file from an HDD partition to the host filesystem.
+     * @param hddPath     Absolute path to the HDD.raw file.
+     * @param partitionId Partition ID.
+     * @param fileName    Name of the file to export.
+     * @param exportDir   Destination directory on the host.
+     */
+    public async hddExport(hddPath: string, partitionId: string, fileName: string, exportDir: string): Promise<string> {
+        const response = await this.sendCommand(
+            { Command: 'HDD_EXPORT', HddPath: hddPath, PartitionId: partitionId, FileName: fileName, ExportDir: exportDir }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'HDD_EXPORT failed');
+        }
+        return response.Data ?? exportDir;
+    }
+
+    /**
+     * Import a file from the host into an HDD partition.
+     * @param hddPath     Absolute path to the HDD.raw file.
+     * @param partitionId Partition ID.
+     * @param importDir   Path to the file/directory to import.
+     * @param overwrite   Whether to overwrite existing files.
+     */
+    public async hddImport(hddPath: string, partitionId: string, importDir: string, overwrite: boolean): Promise<void> {
+        const response = await this.sendCommand(
+            { Command: 'HDD_IMPORT', HddPath: hddPath, PartitionId: partitionId, ImportDir: importDir, McOverwrite: overwrite }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'HDD_IMPORT failed');
+        }
+    }
+
+    /**
+     * Delete a partition from an HDD image.
+     * @param hddPath     Absolute path to the HDD.raw file.
+     * @param partitionId Partition ID to delete.
+     */
+    public async hddDelete(hddPath: string, partitionId: string): Promise<void> {
+        const response = await this.sendCommand(
+            { Command: 'HDD_DELETE', HddPath: hddPath, PartitionId: partitionId }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'HDD_DELETE failed');
+        }
+    }
+
+    /**
+     * Create a new blank PS2 HDD raw image.
+     * @param hddPath Absolute path for the new HDD.raw file.
+     * @param sizeGb  Size in GB (default 40).
+     */
+    public async hddCreate(hddPath: string, sizeGb: number = 40): Promise<void> {
+        const response = await this.sendCommand(
+            { Command: 'HDD_CREATE', HddPath: hddPath, HddSizeGb: sizeGb }
+        );
+        if (!response.Success) {
+            throw new Error(response.Error || 'HDD_CREATE failed');
         }
     }
 

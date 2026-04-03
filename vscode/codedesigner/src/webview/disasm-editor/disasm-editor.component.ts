@@ -24,6 +24,7 @@ import { EditOverlayComponent, EditOverlayOpenData, EditOverlaySaveEvent } from 
 import { ConverterOverlayComponent, ConvertRequest, ConvertResult } from './components/converter-overlay.component';
 import { PorterOverlayComponent, PortRequest, PortResultPayload } from './components/porter-overlay.component';
 import { MemoryCardOverlayComponent, McListResult, McActionResult } from './components/memory-card-overlay.component';
+import { HddOverlayComponent, HddListResult, HddActionResult } from './components/hdd-overlay.component';
 import { ScannerOverlayComponent, ScanRequest, ScanResult } from './components/scanner-overlay.component';
 import { StructOffsetOverlayComponent, StructEntryData, AddStructEvent, AddStructMemberEvent } from './components/struct-offset-overlay.component';
 import './disasm-editor.css';
@@ -31,7 +32,7 @@ import './disasm-editor.css';
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -239,6 +240,13 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Reference to memory card overlay component */
   private readonly mcOverlayRef = viewChild<MemoryCardOverlayComponent>('mcOverlayComp');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HDD Overlay State
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Reference to HDD overlay component */
+  private readonly hddOverlayRef = viewChild<HddOverlayComponent>('hddOverlayComp');
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Scanner Overlay State
@@ -594,6 +602,34 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onMcDelete(event: { mcPath: string; saveName: string }): void {
     this.vscode.postMessage({ type: 'mcDelete', mcPath: event.mcPath, saveName: event.saveName });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HDD Overlay Event Handlers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  protected onHddBrowse(): void {
+    this.vscode.postMessage({ type: 'browseHdd' });
+  }
+
+  protected onHddNew(): void {
+    this.vscode.postMessage({ type: 'newHdd' });
+  }
+
+  protected onHddList(hddPath: string): void {
+    this.vscode.postMessage({ type: 'hddList', hddPath });
+  }
+
+  protected onHddExport(event: { hddPath: string; partitionId: string }): void {
+    this.vscode.postMessage({ type: 'hddExport', hddPath: event.hddPath, partitionId: event.partitionId });
+  }
+
+  protected onHddViewFiles(event: { hddPath: string; partitionId: string }): void {
+    this.vscode.postMessage({ type: 'hddListFiles', hddPath: event.hddPath, partitionId: event.partitionId });
+  }
+
+  protected onHddDelete(event: { hddPath: string; partitionId: string }): void {
+    this.vscode.postMessage({ type: 'hddDelete', hddPath: event.hddPath, partitionId: event.partitionId });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1562,11 +1598,53 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
   }
 
+  private openHddOverlay(): void {
+    this.zone.run(() => {
+      this.hddOverlayRef()?.open();
+    });
+  }
+
+  private handleHddMessage(data: Record<string, unknown>): void {
+    if (data['type'] === 'browseHddResult') {
+      if (data['filePath']) {
+        this.zone.run(() => this.hddOverlayRef()?.setHddPath(data['filePath'] as string));
+      }
+      return;
+    }
+
+    if (data['type'] === 'newHddResult') {
+      if (data['filePath']) {
+        this.zone.run(() => this.hddOverlayRef()?.setHddPath(data['filePath'] as string));
+      }
+      return;
+    }
+
+    if (data['type'] === 'hddListResult') {
+      this.zone.run(() => {
+        this.hddOverlayRef()?.setListResult({
+          partitions: data['partitions'] as HddListResult['partitions'],
+          error: data['error'] as string | undefined,
+        });
+      });
+      return;
+    }
+
+    if (data['type'] === 'hddActionResult') {
+      this.zone.run(() => {
+        this.hddOverlayRef()?.setActionResult({
+          message: data['message'] as string | undefined,
+          error: data['error'] as string | undefined,
+        });
+      });
+    }
+  }
+
   private handleWindowMessage(data: Record<string, unknown>): void {
     this.handleEditOverlayMessage(data);
     this.handleConverterOverlayMessage(data);
     this.handlePorterOverlayMessage(data);
     this.handleMemoryCardMessage(data);
+    this.handleHddMessage(data);
     this.handleScannerMessage(data);
     this.handleStructMessage(data);
   }
@@ -2316,6 +2394,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     const mcBtn = document.getElementById('mc-btn')!;
 
     mcBtn.addEventListener('click', () => this.openMemoryCardOverlay());
+
+    // ── HDD overlay (Angular-only) ──────────────────────────────────────────
+    const hddBtn = document.getElementById('hdd-btn');
+    if (hddBtn) {
+      hddBtn.addEventListener('click', () => this.openHddOverlay());
+    }
 
     // ── Scanner overlay (Angular-only) ───────────────────────────────────────
     const scannerBtn = document.getElementById('scanner-btn');

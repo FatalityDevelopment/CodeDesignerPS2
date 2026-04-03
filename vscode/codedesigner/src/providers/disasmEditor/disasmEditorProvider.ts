@@ -637,6 +637,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this._handleMcImport(webviewPanel.webview, message.mcPath as string ?? '');
       } else if (message.type === 'mcDelete') {
         await this._handleMcDelete(webviewPanel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
+      } else if (message.type === 'browseHdd') {
+        await this._handleBrowseHdd(webviewPanel.webview);
+      } else if (message.type === 'newHdd') {
+        await this._handleNewHdd(webviewPanel.webview);
+      } else if (message.type === 'hddList') {
+        await this._handleHddList(webviewPanel.webview, message.hddPath as string ?? '');
+      } else if (message.type === 'hddExport') {
+        await this._handleHddExport(webviewPanel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
+      } else if (message.type === 'hddListFiles') {
+        await this._handleHddListFiles(webviewPanel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
+      } else if (message.type === 'hddDelete') {
+        await this._handleHddDelete(webviewPanel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
       } else if (message.type === 'scanValue') {
         await this._handleScanValue(webviewPanel.webview, message);
       } else if (message.type === 'getStructs') {
@@ -1216,6 +1228,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleMcImport(panel.webview, message.mcPath as string ?? '');
             } else if (message.type === 'mcDelete') {
                 await this._handleMcDelete(panel.webview, message.mcPath as string ?? '', message.saveName as string ?? '');
+            } else if (message.type === 'browseHdd') {
+                await this._handleBrowseHdd(panel.webview);
+            } else if (message.type === 'newHdd') {
+                await this._handleNewHdd(panel.webview);
+            } else if (message.type === 'hddList') {
+                await this._handleHddList(panel.webview, message.hddPath as string ?? '');
+            } else if (message.type === 'hddExport') {
+                await this._handleHddExport(panel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
+            } else if (message.type === 'hddListFiles') {
+                await this._handleHddListFiles(panel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
+            } else if (message.type === 'hddDelete') {
+                await this._handleHddDelete(panel.webview, message.hddPath as string ?? '', message.partitionId as string ?? '');
             } else if (message.type === 'scanValue') {
                 await this._handleScanValue(panel.webview, message);
             } else if (message.type === 'getStructs') {
@@ -2012,6 +2036,154 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       webview.postMessage({ type: 'mcActionResult', message: msg });
     } catch (err: any) {
       webview.postMessage({ type: 'mcActionResult', error: err?.message ?? String(err) });
+    }
+  }
+
+  // ── HDD Image Manager ────────────────────────────────────────────────────
+
+  /**
+   * Open a file-picker so the user can select an existing HDD.raw image.
+   * Posts 'browseHddResult' with the chosen path back to the webview.
+   */
+  private async _handleBrowseHdd(webview: vscode.Webview): Promise<void> {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      filters: {
+        'PS2 HDD Images': ['raw', 'img'],
+        'All Files': ['*'],
+      },
+      title: 'Open PS2 HDD Image',
+    });
+    if (uris && uris.length > 0) {
+      webview.postMessage({ type: 'browseHddResult', filePath: uris[0].fsPath });
+    }
+  }
+
+  /**
+   * Open a save-file dialog so the user can create a new blank HDD image.
+   * Calls HDD_CREATE on the socket server, then posts 'newHddResult' back.
+   */
+  private async _handleNewHdd(webview: vscode.Webview): Promise<void> {
+    const uri = await vscode.window.showSaveDialog({
+      filters: {
+        'PS2 HDD Images': ['raw'],
+        'All Files': ['*'],
+      },
+      title: 'Create New PS2 HDD Image',
+    });
+    if (!uri) { return; }
+    const hddPath = uri.fsPath;
+    try {
+      if (!this.socketClient?.isConnected()) {
+        vscode.window.showErrorMessage('Not connected to the emulator. Cannot create HDD image via socket.');
+        return;
+      }
+      await this.socketClient.hddCreate(hddPath, 40);
+      webview.postMessage({ type: 'newHddResult', filePath: hddPath });
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      vscode.window.showErrorMessage(`Failed to create HDD image: ${msg}`);
+      webview.postMessage({ type: 'hddActionResult', error: msg });
+    }
+  }
+
+  /**
+   * List the partitions on a PS2 HDD image and post the result back to the webview.
+   */
+  private async _handleHddList(webview: vscode.Webview, hddPath: string): Promise<void> {
+    if (!hddPath) { return; }
+    try {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'hddListResult', error: 'Not connected to emulator.' });
+        return;
+      }
+      const partitions = await this.socketClient.hddList(hddPath);
+      webview.postMessage({ type: 'hddListResult', partitions });
+    } catch (err: any) {
+      webview.postMessage({ type: 'hddListResult', error: err?.message ?? String(err) });
+    }
+  }
+
+  /**
+   * List files in a specific HDD partition.
+   */
+  private async _handleHddListFiles(webview: vscode.Webview, hddPath: string, partitionId: string): Promise<void> {
+    if (!hddPath || !partitionId) { return; }
+    try {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'hddActionResult', error: 'Not connected to emulator.' });
+        return;
+      }
+      const files = await this.socketClient.hddListFiles(hddPath, partitionId);
+      const fileList = files.map(f => `${f.Name} (${f.Size} bytes)`).join('\n');
+      const msg = files.length === 0
+        ? `Partition "${partitionId}" is empty.`
+        : `Files in "${partitionId}":\n${fileList}`;
+      getOutputChannel().info(`[HDD] ${msg}`);
+      webview.postMessage({ type: 'hddActionResult', message: `${files.length} file(s) in "${partitionId}".` });
+    } catch (err: any) {
+      webview.postMessage({ type: 'hddActionResult', error: err?.message ?? String(err) });
+    }
+  }
+
+  /**
+   * Export all files from a partition. Prompts the user to pick an output
+   * directory, then calls HDD_EXPORT for each file and posts the result back.
+   */
+  private async _handleHddExport(webview: vscode.Webview, hddPath: string, partitionId: string): Promise<void> {
+    if (!hddPath || !partitionId) { return; }
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      title: `Export "${partitionId}" — Choose Destination Folder`,
+    });
+    if (!uris || uris.length === 0) { return; }
+    const exportDir = uris[0].fsPath;
+    try {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'hddActionResult', error: 'Not connected to emulator.' });
+        return;
+      }
+      // Get file list first, then export each file
+      const files = await this.socketClient.hddListFiles(hddPath, partitionId);
+      let exported = 0;
+      for (const file of files) {
+        if (!file.IsDirectory) {
+          try {
+            await this.socketClient.hddExport(hddPath, partitionId, file.Name, exportDir);
+            exported++;
+          } catch (err: any) {
+            getOutputChannel().warn(`[HDD] Failed to export "${file.Name}": ${err?.message}`);
+          }
+        }
+      }
+      const msg = `Exported ${exported} file(s) from "${partitionId}" to ${exportDir}`;
+      getOutputChannel().info(`[HDD] ${msg}`);
+      webview.postMessage({ type: 'hddActionResult', message: msg });
+    } catch (err: any) {
+      webview.postMessage({ type: 'hddActionResult', error: err?.message ?? String(err) });
+    }
+  }
+
+  /**
+   * Delete a partition from an HDD image and post the result back.
+   */
+  private async _handleHddDelete(webview: vscode.Webview, hddPath: string, partitionId: string): Promise<void> {
+    if (!hddPath || !partitionId) { return; }
+    try {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'hddActionResult', error: 'Not connected to emulator.' });
+        return;
+      }
+      await this.socketClient.hddDelete(hddPath, partitionId);
+      const msg = `Deleted partition "${partitionId}" from HDD image.`;
+      getOutputChannel().info(`[HDD] ${msg}`);
+      webview.postMessage({ type: 'hddActionResult', message: msg });
+    } catch (err: any) {
+      webview.postMessage({ type: 'hddActionResult', error: err?.message ?? String(err) });
     }
   }
 

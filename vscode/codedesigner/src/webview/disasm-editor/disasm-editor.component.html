@@ -10,6 +10,7 @@
     <button class="header-tool-btn" id="converter-btn" title="Cheat Code Converter">&#8645; Converter</button>
     <button class="header-tool-btn" id="porter-btn" title="Cheat Code Porter">&#8651; Port</button>
     <button class="header-tool-btn" id="mc-btn" title="Memory Card Manager">&#x1F4BE; Memory Card</button>
+    <button class="header-tool-btn" id="hdd-btn" title="HDD Image Manager">&#x1F4BF; HDD</button>
     <button class="header-tool-btn" id="scanner-btn" title="Memory Value Scanner">&#128269; Scanner</button>
     <button class="header-tool-btn" id="struct-btn" title="Struct Offset Calculator">&#128208; Struct</button>
 
@@ -146,6 +147,13 @@
     (exportSave)="onMcExport($event)"
     (importSave)="onMcImport($event)"
     (deleteSave)="onMcDelete($event)" />
+<app-hdd-overlay #hddOverlayComp
+    (browseHdd)="onHddBrowse()"
+    (newHdd)="onHddNew()"
+    (listPartitions)="onHddList($event)"
+    (exportPartition)="onHddExport($event)"
+    (viewFiles)="onHddViewFiles($event)"
+    (deletePartition)="onHddDelete($event)" />
 <app-scanner-overlay #scannerOverlayComp
     (close$)="onScannerOverlayClose()"
     (scan$)="onScanValue($event)"

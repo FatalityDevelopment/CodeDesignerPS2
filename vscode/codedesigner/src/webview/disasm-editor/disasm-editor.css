@@ -2406,6 +2406,278 @@ app-bottom-panel {
     color: #858585;
 }
 
+/* ── HDD Image Manager overlay ──────────────────────────────────────────── */
+
+#hdd-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 1000;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+}
+
+#hdd-overlay.visible {
+    display: flex;
+}
+
+#hdd-overlay-box {
+    background: #252526;
+    border: 1px solid #3e3e42;
+    border-radius: 6px;
+    width: min(780px, 95vw);
+    max-height: calc(100vh - 40px);
+    margin: 20px auto;
+    display: flex;
+    flex-direction: column;
+    font-family: monospace;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    overflow: hidden;
+}
+
+#hdd-overlay-header {
+    display: flex;
+    align-items: center;
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    padding: 10px 14px;
+    flex-shrink: 0;
+}
+
+#hdd-overlay-title {
+    color: #d4d4d4;
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+}
+
+#hdd-overlay-close {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+}
+
+#hdd-overlay-close:hover {
+    color: #fff;
+}
+
+#hdd-overlay-body {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 14px;
+    gap: 10px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.hdd-field-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.hdd-path-input {
+    flex: 1;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #3e3e42;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: monospace;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.hdd-browse-btn,
+.hdd-new-btn {
+    flex: 0 0 auto;
+    padding: 4px 10px;
+    font-size: 12px;
+    background: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #555;
+    cursor: pointer;
+    font-family: monospace;
+    border-radius: 2px;
+}
+
+.hdd-browse-btn:hover,
+.hdd-new-btn:hover {
+    background: #505050;
+}
+
+.hdd-controls-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+#hdd-load-btn {
+    padding: 5px 12px;
+    font-size: 12px;
+    font-family: monospace;
+    flex-shrink: 0;
+    cursor: pointer;
+    border-radius: 2px;
+    background: #007acc;
+    border: 1px solid #007acc;
+    color: #fff;
+}
+
+#hdd-load-btn:hover:not(:disabled) {
+    background: #1a88d8;
+}
+
+#hdd-load-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.hdd-status {
+    font-size: 12px;
+    font-family: monospace;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #858585;
+}
+
+.hdd-status.hdd-status-ok    { color: #4ec9b0; }
+.hdd-status.hdd-status-error { color: #f44747; }
+
+#hdd-partitions-area {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 80px;
+}
+
+.hdd-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: monospace;
+}
+
+.hdd-table th {
+    text-align: left;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #858585;
+    border-bottom: 1px solid #3e3e42;
+    white-space: nowrap;
+}
+
+.hdd-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid #2e2e2e;
+    vertical-align: middle;
+    color: #d4d4d4;
+}
+
+.hdd-row:hover td {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.hdd-row:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.hdd-row:nth-child(even):hover td {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.hdd-row-empty td {
+    color: transparent;
+    border-bottom: 1px solid #2e2e2e;
+    user-select: none;
+}
+
+.hdd-col-name     { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hdd-col-type     { width: 80px;  text-align: center; }
+.hdd-col-files    { width: 44px;  text-align: center; }
+.hdd-col-size     { width: 70px;  text-align: right;  white-space: nowrap; }
+.hdd-col-created  { width: 130px; font-size: 11px;    color: #858585; white-space: nowrap; }
+.hdd-col-actions  { width: 180px; text-align: right;  white-space: nowrap; }
+
+.hdd-action-btn {
+    padding: 2px 8px;
+    font-size: 11px;
+    font-family: monospace;
+    margin-left: 4px;
+    background: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #555;
+    cursor: pointer;
+    border-radius: 2px;
+}
+
+.hdd-action-btn:hover {
+    background: #505050;
+}
+
+.hdd-delete-btn:hover {
+    background: #6a2020;
+    color: #ffaaaa;
+    border-color: #8a3030;
+}
+
+.hdd-confirm-delete {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-family: monospace;
+    color: #d4d4d4;
+    white-space: nowrap;
+}
+
+.hdd-paging-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 6px 0 2px;
+    font-family: monospace;
+}
+
+.hdd-page-btn {
+    padding: 3px 10px;
+    font-size: 12px;
+    font-family: monospace;
+    background: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #555;
+    cursor: pointer;
+    border-radius: 2px;
+}
+
+.hdd-page-btn:hover:not(:disabled) {
+    background: #505050;
+}
+
+.hdd-page-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.hdd-page-info {
+    font-size: 12px;
+    font-family: monospace;
+    color: #858585;
+}
+
 /* ── Grid context menu ───────────────────────────────────────────────────── */
 
 .context-menu {
