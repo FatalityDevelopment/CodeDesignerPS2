@@ -1,12 +1,12 @@
 {
   "servers": {
-    "mips64le": {
+    "codedesigner": {
       "type": "stdio",
       "command": "dotnet",
       "args": [
         "run",
         "--project",
-        "${SolutionDir}\\CodeDesigner.Mips64LE.McpServer"
+        "${SolutionDir}\\CodeDesigner.Ps2.McpServer"
       ]
     }
   }

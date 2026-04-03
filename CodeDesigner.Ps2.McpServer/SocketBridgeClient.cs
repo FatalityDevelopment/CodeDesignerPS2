@@ -13,16 +13,25 @@ namespace CodeDesigner.Ps2.McpServer;
 /// mode, which the VS Code extension also uses.  Both clients (extension and
 /// MCP bridge) connect to that same server; the server handles each connection
 /// independently so there is no port conflict.
+///
+/// The port can be overridden via the CODEDESIGNER_PORT environment variable
+/// to support connecting to test instances or alternative emulator sessions.
 /// </summary>
 public sealed class SocketBridgeClient
 {
     private readonly string _host;
     private readonly int _port;
 
-    public SocketBridgeClient(string host = "127.0.0.1", int port = 8765)
+    public SocketBridgeClient(string? host = null, int? port = null)
     {
-        _host = host;
-        _port = port;
+        // Allow override via environment variables for test instances
+        _host = host 
+            ?? Environment.GetEnvironmentVariable("CODEDESIGNER_HOST") 
+            ?? "127.0.0.1";
+        
+        _port = port 
+            ?? (int.TryParse(Environment.GetEnvironmentVariable("CODEDESIGNER_PORT"), out int envPort) ? envPort : 0)
+            ?? 8765;
     }
 
     /// <summary>

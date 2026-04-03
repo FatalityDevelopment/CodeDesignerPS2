@@ -101,6 +101,59 @@ Then reference the binary in settings:
 }
 ```
 
+### Option C — Connect to test instances or custom ports
+
+When running test instances or multiple emulator sessions on different ports, specify the connection details using command-line arguments or environment variables:
+
+**Via command-line arguments:**
+
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "codedesigner-test": {
+        "type": "stdio",
+        "command": "dotnet",
+        "args": [
+          "run",
+          "--project",
+          "/absolute/path/to/CodeDesigner.Ps2.McpServer",
+          "--",
+          "--port",
+          "8766"
+        ]
+      }
+    }
+  }
+}
+```
+
+**Via environment variables:**
+
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "codedesigner-test": {
+        "type": "stdio",
+        "command": "dotnet",
+        "args": [
+          "run",
+          "--project",
+          "/absolute/path/to/CodeDesigner.Ps2.McpServer"
+        ],
+        "env": {
+          "CODEDESIGNER_PORT": "8766",
+          "CODEDESIGNER_HOST": "127.0.0.1"
+        }
+      }
+    }
+  }
+}
+```
+
+This is particularly useful when debugging memory issues with AI — you can run the test suite on a custom port and connect to it with a dedicated MCP server instance.
+
 ---
 
 ## Available MCP Tools
@@ -259,3 +312,60 @@ Once registered you can ask Copilot things like:
 | MCP server not listed in Copilot | Reload VS Code after editing `settings.json`; check **Output → MCP** log. |
 | Extension connects but memory/register reads fail | Do **not** run `--server` while the extension is active. Use `--run` instead; both the extension and the MCP bridge share the embedded server on port 8765. |
 | Debugger commands fail (PAUSE/RESUME/STEP/SETBP/GETPC/GETREGS) in PCSX2 mode | These require the PINE debugger extension PR. See `PINE_EXTENSION_PROPOSAL.md` for the C++ implementation. Basic memory commands (READMEM/WRITEMEM/APPLYCHEATS) work with standard upstream PINE. |
+
+---
+
+## Using with Test Instances
+
+When debugging memory issues with AI during test execution, you can run test instances of the emulator on custom ports and connect MCP server instances to them. This allows you to inspect memory state and interact with the emulator programmatically from Copilot while tests are running.
+
+### Example workflow:
+
+1. **Start a test emulator instance** on a custom port (e.g., 8766):
+
+```csharp
+// In your test setup:
+var scheduler = new DualCpuScheduler();
+var socketServer = new SocketServer(8766);
+socketServer.Scheduler = scheduler;
+_ = socketServer.StartAsync(CancellationToken.None);
+```
+
+2. **Configure a dedicated MCP server** in your settings to connect to the test port:
+
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "codedesigner": {
+        "type": "stdio",
+        "command": "dotnet",
+        "args": ["run", "--project", "/path/to/CodeDesigner.Ps2.McpServer"]
+      },
+      "codedesigner-test": {
+        "type": "stdio",
+        "command": "dotnet",
+        "args": [
+          "run",
+          "--project",
+          "/path/to/CodeDesigner.Ps2.McpServer",
+          "--",
+          "--port",
+          "8766"
+        ]
+      }
+    }
+  }
+}
+```
+
+3. **Use Copilot to debug the test instance:**
+   - *"@codedesigner-test read memory from 0x80010000"*
+   - *"@codedesigner-test get current register state"*
+   - *"@codedesigner-test scan for strings in the region 0x80100000 to 0x80200000"*
+
+The main `codedesigner` server connects to the default port (8765) for the VSCode extension and regular debugging, while `codedesigner-test` connects to your test instance on port 8766.
+
+**Environment Variable Alternative:**
+
+You can also set `CODEDESIGNER_PORT=8766` before launching VSCode to make the default MCP server connect to the test port, but using multiple named servers is cleaner for switching between instances.
