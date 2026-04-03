@@ -1605,6 +1605,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             address: startAddress + i,
             field: 'bytes',
             start: 0,
+            // Display length of space-separated hex bytes: "AB CD EF" = n*3-1 chars
             length: pattern.length * 3 - 1,
           });
           i += pattern.length - 1;
@@ -1627,6 +1628,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             address: startAddress + i,
             field: 'bytes',
             start: 0,
+            // Display length of space-separated hex bytes: "AB CD EF" = n*3-1 chars
             length: strBytes.length * 3 - 1,
           });
           i += strBytes.length - 1;
