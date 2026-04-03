@@ -7,10 +7,12 @@ import {
   model,
   OnDestroy,
   inject,
+  viewChild,
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { VsCodeBridgeService } from '../../shared/vscode-bridge.service';
 import { ArchiveCheat } from '../types';
+import { JokerMakerOverlayComponent } from './joker-maker-overlay.component';
 
 interface CheatsAppliedMsg {
   command: 'cheatsApplied';
@@ -43,6 +45,7 @@ interface ArchiveCheatsUpdatedMsg {
 @Component({
   selector: 'app-cheats-tab',
   standalone: true,
+  imports: [JokerMakerOverlayComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
@@ -110,11 +113,16 @@ interface ArchiveCheatsUpdatedMsg {
         <button id="cheatsUpdateBtn" (click)="onApplyCheats()" [disabled]="!isConnected()">
           Update
         </button>
+        <button id="jokerMakerBtn" (click)="openJokerMaker()" title="Build a Joker/button-combo code">
+          🕹️ Joker Maker
+        </button>
       </div>
       @if (cheatMessage()) {
         <div class="cheat-message" [class.cheat-error]="cheatError()">{{cheatMessage()}}</div>
       }
     </div>
+
+    <app-joker-maker-overlay #jokerOverlay />
   `,
 })
 export class CheatsTabComponent implements OnDestroy {
@@ -124,6 +132,8 @@ export class CheatsTabComponent implements OnDestroy {
   readonly isConnected = input(false);
   /** True when the sidebar is connected in PCSX2 PINE bridge mode. */
   readonly isPcsx2 = input(false);
+
+  private readonly jokerOverlay = viewChild.required<JokerMakerOverlayComponent>('jokerOverlay');
 
   /** Two-way bound cheat text — parent can push text in (e.g. from CDS tab). */
   readonly cheatText = model('');
@@ -191,5 +201,9 @@ export class CheatsTabComponent implements OnDestroy {
 
   onApplyCheats(): void {
     this.bridge.postMessage({ command: 'applyCheats', cheatText: this.cheatText() });
+  }
+
+  openJokerMaker(): void {
+    this.jokerOverlay().open();
   }
 }

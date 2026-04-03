@@ -906,3 +906,209 @@ app-cds-tab {
     font-size: 12px;
     color: var(--vscode-descriptionForeground);
 }
+
+/* ── Joker Maker button ──────────────────────────────────────────────────── */
+
+#jokerMakerBtn {
+    background: var(--vscode-button-secondaryBackground, #3c3c3c);
+    color: var(--vscode-button-secondaryForeground, #cccccc);
+    border: 1px solid var(--vscode-button-border, transparent);
+    border-radius: 2px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: 6px;
+}
+
+#jokerMakerBtn:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #4c4c4c);
+}
+
+/* ── Joker Maker overlay ─────────────────────────────────────────────────── */
+
+#joker-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+#joker-overlay.visible {
+    display: flex;
+}
+
+#joker-overlay-box {
+    background: var(--vscode-editor-background, #1e1e1e);
+    border: 1px solid var(--vscode-panel-border, #3e3e42);
+    border-radius: 4px;
+    width: 340px;
+    max-width: 95vw;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#joker-overlay-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d30);
+    border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+    flex-shrink: 0;
+}
+
+#joker-overlay-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--vscode-editor-foreground);
+}
+
+#joker-overlay-close {
+    background: transparent;
+    border: none;
+    color: var(--vscode-editor-foreground);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    opacity: 0.7;
+}
+
+#joker-overlay-close:hover {
+    opacity: 1;
+}
+
+#joker-overlay-body {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    max-height: 80vh;
+}
+
+.joker-hint {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground, #888);
+    margin: 0;
+}
+
+.joker-button-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 10px;
+}
+
+.joker-btn-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 3px 6px;
+    border-radius: 2px;
+    border: 1px solid transparent;
+    color: var(--vscode-editor-foreground);
+    user-select: none;
+}
+
+.joker-btn-label:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.joker-btn-label.joker-btn-checked {
+    background: var(--vscode-diffEditor-insertedLineBackground, rgba(0, 100, 0, 0.2));
+    border-color: rgba(80, 200, 80, 0.3);
+}
+
+.joker-btn-label input[type="checkbox"] {
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.joker-config-row {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+    font-size: 11px;
+    padding: 6px 8px;
+    background: var(--vscode-input-background, #2a2a2a);
+    border: 1px solid var(--vscode-input-border, #3c3c3c);
+    border-radius: 2px;
+    color: var(--vscode-descriptionForeground, #888);
+    flex-wrap: wrap;
+}
+
+.joker-config-label {
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.joker-config-value {
+    word-break: break-word;
+}
+
+.joker-output-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.joker-output-label {
+    flex-shrink: 0;
+    font-weight: bold;
+    color: var(--vscode-editor-foreground);
+}
+
+.joker-output-code {
+    font-family: monospace;
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: #7ec87e;
+    background: var(--vscode-input-background, #1e1e1e);
+    border: 1px solid var(--vscode-input-border, #3c3c3c);
+    padding: 3px 8px;
+    border-radius: 2px;
+    flex: 1;
+    text-align: center;
+}
+
+.joker-copy-btn {
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 3px 10px;
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #ffffff);
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.joker-copy-btn:hover {
+    background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.joker-actions-row {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.joker-clear-btn {
+    font-size: 11px;
+    padding: 3px 10px;
+    background: var(--vscode-button-secondaryBackground, #3c3c3c);
+    color: var(--vscode-button-secondaryForeground, #cccccc);
+    border: 1px solid var(--vscode-button-border, transparent);
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.joker-clear-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #4c4c4c);
+}
