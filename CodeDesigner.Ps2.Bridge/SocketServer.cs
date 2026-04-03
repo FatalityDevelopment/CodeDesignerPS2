@@ -561,6 +561,24 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MC_FORMAT":
                         return HandleMcFormat(command.McPath);
 
+                    case "HDD_LIST":
+                        return HandleHddList(command.HddPath);
+
+                    case "HDD_LIST_FILES":
+                        return HandleHddListFiles(command.HddPath, command.PartitionId);
+
+                    case "HDD_EXPORT":
+                        return HandleHddExport(command.HddPath, command.PartitionId, command.FileName, command.ExportDir);
+
+                    case "HDD_IMPORT":
+                        return HandleHddImport(command.HddPath, command.PartitionId, command.ImportDir, command.McOverwrite ?? false);
+
+                    case "HDD_DELETE":
+                        return HandleHddDelete(command.HddPath, command.PartitionId);
+
+                    case "HDD_CREATE":
+                        return HandleHddCreate(command.HddPath, command.HddSizeGb ?? 40);
+
                     case "PING":
                         return CreateSuccessResponse("PONG");
 

@@ -101,6 +101,9 @@ namespace CodeDesigner.Ps2.Bridge
         public List<PortCheatResult>? PortCheatResults { get; set; }
         // MC_LIST field
         public List<McSaveInfo>? McSaves { get; set; }
+        // HDD_LIST / HDD_LIST_FILES fields
+        public List<HddPartitionInfo>? HddPartitions { get; set; }
+        public List<HddFileEntryInfo>? HddFiles { get; set; }
         // SCANVALUE results
         public List<ScanValueResult>? ScanResults { get; set; }
         // GETSTRUCTS results
