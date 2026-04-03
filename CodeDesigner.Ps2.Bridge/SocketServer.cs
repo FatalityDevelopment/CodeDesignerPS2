@@ -677,6 +677,20 @@ namespace CodeDesigner.Ps2.Bridge
                     case "EXTRACT_P2S":
                         return HandleExtractP2s(command.FilePath);
 
+                    case "PINEVERSION":
+                    case "PINE_VERSION":
+                        return HandlePineVersion();
+
+                    case "PINESAVESTATE":
+                    case "PINE_SAVESTATE":
+                    case "PINE_SAVE_STATE":
+                        return HandlePineSaveStateSlot(command.StateSlot);
+
+                    case "PINELOADSTATE":
+                    case "PINE_LOADSTATE":
+                    case "PINE_LOAD_STATE":
+                        return HandlePineLoadStateSlot(command.StateSlot);
+
                     default:
                         // Echo for unknown commands
                         return $"Echo: {message}";
