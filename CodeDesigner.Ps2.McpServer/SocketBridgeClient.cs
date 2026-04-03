@@ -29,9 +29,18 @@ public sealed class SocketBridgeClient
             ?? Environment.GetEnvironmentVariable("CODEDESIGNER_HOST") 
             ?? "127.0.0.1";
         
-        _port = port 
-            ?? (int.TryParse(Environment.GetEnvironmentVariable("CODEDESIGNER_PORT"), out int envPort) ? envPort : 0)
-            ?? 8765;
+        if (port.HasValue)
+        {
+            _port = port.Value;
+        }
+        else if (int.TryParse(Environment.GetEnvironmentVariable("CODEDESIGNER_PORT"), out int envPort))
+        {
+            _port = envPort;
+        }
+        else
+        {
+            _port = 8765;
+        }
     }
 
     /// <summary>
