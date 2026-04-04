@@ -514,11 +514,10 @@ namespace CodeDesigner.Ps2.Bridge
                 int patLen   = pattern.Count;
                 var patBytes = pattern.Select(b => (byte)b).ToArray();
 
-                // Scan in 1 MB chunks to avoid allocating a single huge buffer.
-                // Overlap each chunk by (patLen - 1) bytes so patterns that straddle
-                // a chunk boundary are still found.
-                int  chunkSize = PineScanChunkSize;
-                int  overlap   = Math.Max(0, patLen - 1);
+                // Ensure chunk size is always larger than the pattern so the advance
+                // step is always positive (no infinite-loop risk for very long patterns).
+                int  chunkSize = Math.Max(PineScanChunkSize, patLen + 1);
+                int  overlap   = patLen - 1;   // bytes to re-read from the previous chunk
                 uint scanPos   = start;
 
                 while (scanPos < end)
@@ -542,10 +541,10 @@ namespace CodeDesigner.Ps2.Bridge
 
                     if (chunkEnd >= end) break;
 
-                    // Advance by (chunkSize - overlap) so the next chunk begins slightly
-                    // before where this chunk ended, covering cross-boundary patterns.
-                    uint advance = (uint)Math.Max(1, chunkSize - overlap);
-                    scanPos += advance;
+                    // Advance so the next chunk starts (patLen-1) bytes before the end
+                    // of this chunk, covering patterns that straddle the boundary.
+                    int advance = chunkSize - overlap;   // always >= 1 since chunkSize > overlap
+                    scanPos += (uint)advance;
                 }
 
                 var response = new CommandResponse
@@ -566,6 +565,8 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>
         /// Reads bytes in 1 MB chunks in PINE mode to avoid sending one huge PINE request.
         /// In internal mode delegates directly to <see cref="ReadLiveBytes"/> (RAM is local).
+        /// For IOP in PINE mode the same explicit KSEG1 translation used by
+        /// <see cref="HandleReadMem"/> is applied: <c>0xBC000000 + iopOffset</c>.
         /// </summary>
         private byte[] ReadLiveBytesChunked(uint startAddress, int length, bool useIop)
         {
@@ -581,11 +582,21 @@ namespace CodeDesigner.Ps2.Bridge
             while (remaining > 0)
             {
                 int  toRead   = Math.Min(remaining, PineScanChunkSize);
-                uint pineAddr = TranslatePineAddress(addr, useIop);
-                byte[] chunk  = PineClient!.ReadBytes(pineAddr, toRead);
-                int copyLen   = Math.Min(chunk.Length, toRead);
+                uint pineAddr;
+                if (useIop)
+                {
+                    // Use the same explicit KSEG1 IOP translation as HandleReadMem.
+                    uint iopOffset = addr < EeIopMirrorBase ? addr : addr - EeIopMirrorBase;
+                    pineAddr = 0xBC000000u + iopOffset;
+                }
+                else
+                {
+                    pineAddr = TranslatePineAddress(addr, useIop: false);
+                }
+                byte[] chunk = PineClient!.ReadBytes(pineAddr, toRead);
+                int copyLen  = Math.Min(chunk.Length, toRead);
                 Buffer.BlockCopy(chunk, 0, result, destOffset, copyLen);
-                destOffset += toRead;
+                destOffset += copyLen;
                 addr       += (uint)toRead;
                 remaining  -= toRead;
             }
