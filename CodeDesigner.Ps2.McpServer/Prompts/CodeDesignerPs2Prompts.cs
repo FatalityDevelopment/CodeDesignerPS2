@@ -219,28 +219,75 @@ public sealed class CodeDesignerPs2Prompts
         - Workflow bottlenecks
         - Suggested MCP improvements
 
+        ## 9. Progress Reports — Critical for Long Sessions
+
+        This system supports multi-hour, multi-session investigations.  A **progress
+        report** is a Markdown file stored in the `memories/` folder that keeps your
+        findings alive between sessions.
+
+        ### At the START of every session
+
+        1. Call `list_progress_reports` to discover all existing reports.
+        2. If a report exists for the current game/task, call `get_progress_report`
+           to load it and resume from where you left off.
+        3. If no report exists, create one early in the session with `save_progress_report`.
+
+        ### During the session
+
+        Call `save_progress_report` after every major milestone, including:
+
+        - Discovering a new base pointer or dynamic address
+        - Confirming a memory structure layout
+        - Successfully applying a cheat code
+        - Any finding that would cost significant time to rediscover
+
+        ### Report naming
+
+        Choose a short, descriptive hyphen-separated name unique to the task:
+
+        - ✅ `socom2-player-health`
+        - ✅ `gtavc-vehicle-struct-session2`
+        - ✅ `mgs3-codec-addresses`
+        - ❌ `report`, `progress`, `save1`
+
+        ### Report content (Markdown)
+
+        Each report must contain:
+
+        - **Game name and disc version**
+        - **Current objective** — what are we trying to find or patch?
+        - **Discovered addresses** — with labels, offsets, and structure context
+        - **Confirmed findings** — watchpoint results, disassembly notes, call graphs
+        - **Cheat codes developed** — working codes with confidence level
+        - **Next steps** — specific actions to take in the next session
+
+        💡 *Your progress report is your memory across sessions — keep it detailed.*
+
         ---
 
         # 🧠 Recommended Workflow
 
-        1. Pause the emulator: `pause_emulator`
-        2. **Snapshot baseline state**: `take_snapshot` with a descriptive name
+        1. **Load progress report**: `list_progress_reports` → `get_progress_report` (resume from last session)
+        2. Pause the emulator: `pause_emulator`
+        3. **Snapshot baseline state**: `snapshot` with a descriptive name
            (e.g. `session_start_beforeany_writes`)
-        3. Identify the target value's approximate RAM range
-        4. Scan for the value: `scan_value` or `read_memory_region` with a pattern
-        5. Narrow down candidates by modifying and re-scanning
-        6. Set a watchpoint on the candidate: `set_memory_watchpoint`
-        7. Resume and trigger the game action: `resume_emulator`
-        8. Read the watchpoint hit: `get_watchpoint_hit` → records the writing PC
-        9. **Navigate VS Code to the hit PC**: `navigate_to(pc)`
-        10. Disassemble around the PC: `disassemble_memory`
-        11. Trace callers: `trace_calls` to build the full call graph
-        12. Label the base pointer and all discovered offsets: `add_label`
-        13. **Snapshot confirmed state**: `take_snapshot` with a name describing what was found
+        4. Identify the target value's approximate RAM range
+        5. Scan for the value: `scan_value` or `read_memory_region` with a pattern
+        6. Narrow down candidates by modifying and re-scanning
+        7. Set a watchpoint on the candidate: `set_memory_watchpoint`
+        8. Resume and trigger the game action: `resume_emulator`
+        9. Read the watchpoint hit: `get_watchpoint_hit` → records the writing PC
+        10. **Navigate VS Code to the hit PC**: `navigate_to(pc)`
+        11. Disassemble around the PC: `disassemble_memory`
+        12. Trace callers: `trace_calls` to build the full call graph
+        13. Label the base pointer and all discovered offsets: `add_label`
+        14. **Update progress report**: `save_progress_report` with new findings
+        15. **Snapshot confirmed state**: `snapshot` with a name describing what was found
             (e.g. `player_health_base_confirmed_80200000`)
-        14. Build the structure map and document it
-        15. Inject a patch if needed: `compile_cds` + `apply_cheats`
-        16. **Snapshot post-patch state**: `take_snapshot` before and after any memory write
+        16. Build the structure map and document it
+        17. Inject a patch if needed: `compile_cds` + `apply_cheats`
+        18. **Snapshot post-patch state**: `snapshot` before and after any memory write
+        19. **Final progress report update**: `save_progress_report` with session summary and next steps
 
         ---
 
@@ -251,6 +298,7 @@ public sealed class CodeDesignerPs2Prompts
         - **Label early, label often** — future sessions depend on it
         - **Snapshot frequently** — use descriptive file names that make the state self-evident
         - **Call `navigate_to` constantly** — keep VS Code in sync with your research
+        - **Update your progress report** — it is your memory across sessions
         - Think like a **reverse engineer** — every byte tells a story
         - Build **reusable knowledge** — your work outlives this session
         """;

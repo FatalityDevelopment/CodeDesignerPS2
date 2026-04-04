@@ -13,7 +13,7 @@ namespace CodeDesigner.Ps2.McpServer.Tools;
 /// socket server running on localhost:8765 and returns a human-readable result.
 /// </summary>
 [McpServerToolType]
-public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
+public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressReportManager reports)
 {
     // -------------------------------------------------------------------------
     // Helpers
@@ -23,8 +23,21 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
         new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>
+    /// Terse rules reminder prepended to every substantive tool response so
+    /// the agent is continually nudged to follow operational guidelines without
+    /// burning significant extra tokens.
+    /// </summary>
+    private const string RulesHeader =
+        "📋 [Rules: navigate_to after discoveries · label all findings · snapshot at milestones · update progress report when important]";
+
+    /// <summary>Prepends the rules header to any non-empty result string.</summary>
+    private static string WithRules(string result) =>
+        string.IsNullOrEmpty(result) ? result : $"{RulesHeader}\n\n{result}";
+
+    /// <summary>
     /// Return the "Message" or "Error" field from the JSON response, or the
-    /// raw JSON if neither field is present.
+    /// raw JSON if neither field is present.  Non-error results are prefixed
+    /// with the short rules header to keep the agent on track.
     /// </summary>
     private static string SimpleMessage(string json)
     {
@@ -37,9 +50,9 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 return $"Error: {err.GetString()}";
 
             if (root.TryGetProperty("Message", out var msg) && msg.ValueKind == JsonValueKind.String)
-                return msg.GetString() ?? json;
+                return WithRules(msg.GetString() ?? json);
 
-            return json;
+            return WithRules(json);
         }
         catch
         {
@@ -1861,6 +1874,101 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
     }
 
     // -------------------------------------------------------------------------
+    // Progress reports — persistent session memory
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "list_progress_reports")]
+    [Description(
+        "List all progress report files saved in the memories folder. " +
+        "Call this at the start of every session to discover previous work. " +
+        "Returns the sanitised file names (without .md extension) of all reports.")]
+    public Task<string> ListProgressReports()
+    {
+        var names = reports.ListReports();
+        if (names.Count == 0)
+            return Task.FromResult(WithRules($"No progress reports found in: {reports.MemoriesPath}"));
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Progress reports in {reports.MemoriesPath}:");
+        foreach (var name in names)
+            sb.AppendLine($"  {name}");
+        return Task.FromResult(WithRules(sb.ToString().TrimEnd()));
+    }
+
+    [McpServerTool(Name = "get_progress_report")]
+    [Description(
+        "Read a previously saved progress report from the memories folder. " +
+        "Load this at the start of each session to resume from where you left off. " +
+        "The report contains discovered addresses, structure maps, labels, and pending objectives.")]
+    public Task<string> GetProgressReport(
+        [Description(
+            "The report name as returned by list_progress_reports " +
+            "(e.g. 'socom2-player-health', 'gtavc-vehicle-struct').")] string name)
+    {
+        try
+        {
+            var content = reports.GetReport(name);
+            if (content is null)
+                return Task.FromResult($"Error: no progress report named '{ProgressReportManager.SanitiseName(name)}' found.");
+            return Task.FromResult(WithRules(content));
+        }
+        catch (ArgumentException ex)
+        {
+            return Task.FromResult($"Error: {ex.Message}");
+        }
+    }
+
+    [McpServerTool(Name = "save_progress_report")]
+    [Description(
+        "Create or overwrite a progress report in the memories folder. " +
+        "The name should be a short, descriptive summary unique to the task " +
+        "(e.g. 'socom2-player-health', 'gtavc-vehicle-struct-session2'). " +
+        "Save after every major milestone so future sessions can resume seamlessly. " +
+        "Content should be Markdown and include: game/version, current objective, " +
+        "discovered addresses with labels, structure maps, and next steps.")]
+    public Task<string> SaveProgressReport(
+        [Description(
+            "Short unique name for this report. Use hyphens as separators. " +
+            "Examples: 'socom2-player-health', 'gtavc-vehicle-struct', 'mgs3-codec-addresses'.")] string name,
+        [Description(
+            "Full Markdown content of the progress report. Include: game name, current objective, " +
+            "all discovered addresses with their labels, structure maps, watchpoint findings, " +
+            "confirmed cheat codes, and a clear list of next steps.")] string content)
+    {
+        try
+        {
+            reports.SaveReport(name, content);
+            var sanitised = ProgressReportManager.SanitiseName(name);
+            return Task.FromResult(WithRules(
+                $"Progress report '{sanitised}' saved to {reports.MemoriesPath}/{sanitised}.md"));
+        }
+        catch (ArgumentException ex)
+        {
+            return Task.FromResult($"Error: {ex.Message}");
+        }
+    }
+
+    [McpServerTool(Name = "delete_progress_report")]
+    [Description(
+        "Delete a progress report from the memories folder. " +
+        "Use only when a task is fully complete and the report is no longer needed.")]
+    public Task<string> DeleteProgressReport(
+        [Description("The report name to delete (as returned by list_progress_reports).")] string name)
+    {
+        try
+        {
+            bool deleted = reports.DeleteReport(name);
+            return Task.FromResult(deleted
+                ? WithRules($"Progress report '{ProgressReportManager.SanitiseName(name)}' deleted.")
+                : $"Error: no progress report named '{ProgressReportManager.SanitiseName(name)}' found.");
+        }
+        catch (ArgumentException ex)
+        {
+            return Task.FromResult($"Error: {ex.Message}");
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Struct / memory-map viewer
     // -------------------------------------------------------------------------
 
@@ -2542,7 +2650,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine(line);
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no results)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no results)");
         }
         catch
         {
@@ -2580,7 +2688,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  {asm,-32}  ->  {hex}");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no results)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no results)");
         }
         catch
         {
@@ -2626,7 +2734,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             if (hasErrors)
                 sb.Insert(0, "Compiled with errors:\n");
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no output)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no output)");
         }
         catch
         {
@@ -2662,7 +2770,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine();
             }
 
-            return sb.ToString().TrimEnd();
+            return WithRules(sb.ToString().TrimEnd());
         }
         catch
         {
@@ -2743,7 +2851,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             if (root.TryGetProperty("VU0_Clip", out var vu0clipProp))
                 sb.AppendLine($"  Clip   = 0x{vu0clipProp.GetUInt32():X8}");
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : json;
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : json);
         }
         catch
         {
@@ -2778,7 +2886,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine();
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no labels)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no labels)");
         }
         catch
         {
@@ -2809,7 +2917,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  {addr}  \"{value}\"");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no strings found)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no strings found)");
         }
         catch
         {
@@ -2839,7 +2947,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  {addr}  {label}");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no functions found)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no functions found)");
         }
         catch
         {
@@ -2868,7 +2976,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  {addr}  →  {pointsTo}");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no pointers found)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no pointers found)");
         }
         catch
         {
@@ -2898,7 +3006,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  {addr}  {value,14:G6}  ({raw})");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no floats found)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no floats found)");
         }
         catch
         {
@@ -2928,7 +3036,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  {addr}  {val,12}  ({hex})");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no integers found)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no integers found)");
         }
         catch
         {
@@ -2959,7 +3067,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  0x{addr:X8}  [{fld}] offset={start} len={len}");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no matches)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no matches)");
         }
         catch
         {
@@ -2993,7 +3101,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  Thread {id,-3}  [{status,-9}]  PC=0x{pc:X8}  SP=0x{sp:X8}  Pri={pri,-3}  Entry=0x{entry:X8}");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no threads found)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no threads found)");
         }
         catch
         {
@@ -3025,7 +3133,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  [{label}]  base=0x{baseA:X8}  size={size / 1024} KB  → {file}");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json));
         }
         catch
         {
@@ -3056,7 +3164,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  [{label}]  size={size / 1024} KB  ← {file}");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json));
         }
         catch
         {
@@ -3094,7 +3202,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 sb.AppendLine($"  {name,-20}  {size / 1024,6} KB  {path}{tag}");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no ELF/IRX files found)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no ELF/IRX files found)");
         }
         catch
         {
@@ -3131,7 +3239,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                     sb.AppendLine($"  {f.GetString()}");
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json));
         }
         catch
         {
@@ -3199,7 +3307,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 }
             }
 
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json));
         }
         catch
         {
@@ -3231,7 +3339,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 string name = item.TryGetProperty("name",    out var n) ? (n.GetString()   ?? "?") : "?";
                 sb.AppendLine($"  {addr}  size={size,6}  {name}");
             }
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : $"(no {label.ToLowerInvariant()} found)";
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : $"(no {label.ToLowerInvariant()} found)");
         }
         catch
         {
