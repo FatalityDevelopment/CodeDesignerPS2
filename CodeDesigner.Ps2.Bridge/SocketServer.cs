@@ -760,6 +760,10 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MC_FORMAT":
                         return HandleMcFormat(command.McPath);
 
+                    case "MC_READ_FILE":
+                    case "MC_READFILE":
+                        return HandleMcReadFile(command.McPath, command.SaveName, command.McFileName);
+
                     case "HDD_LIST":
                         return HandleHddList(command.HddPath);
 
@@ -894,6 +898,14 @@ namespace CodeDesigner.Ps2.Bridge
                     case "READ_MEM_REGION":
                     case "READMEM_REGION":
                         return HandleReadMemRegion(
+                            command.Address    ?? 0,
+                            command.EndAddress ?? 0,
+                            command.SearchPattern,
+                            command.Region);
+
+                    case "SCANPATTERN":
+                    case "SCAN_PATTERN":
+                        return HandleScanPattern(
                             command.Address    ?? 0,
                             command.EndAddress ?? 0,
                             command.SearchPattern,

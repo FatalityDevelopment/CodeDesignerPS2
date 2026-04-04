@@ -1768,6 +1768,34 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
         return SimpleMessage(json);
     }
 
+    [McpServerTool(Name = "mc_read_file")]
+    [Description("Read the raw bytes of a specific file inside a PS2 memory card save directory. " +
+                 "Returns the file contents as a base64-encoded string. " +
+                 "Useful for inspecting save-game data, icon files (ICON.SYS), thumbnails, etc. " +
+                 "Use mc_list to enumerate save names and the files each save contains. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> McReadFile(
+        [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
+        [Description("Name of the save directory (as listed by mc_list, e.g. 'BASCUS-97133BUILTIN').")] string saveName,
+        [Description("Name of the file within the save directory (e.g. 'ICON.SYS', 'SCUS-97133').")] string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "MC_READ_FILE", McPath = mcPath, SaveName = saveName, McFileName = fileName },
+            cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            string message = root.TryGetProperty("Message", out var msg) ? (msg.GetString() ?? "") : "";
+            string data    = root.TryGetProperty("Data",    out var dat) ? (dat.GetString() ?? "") : "";
+            return $"{message}\nbase64: {data}";
+        }
+        catch { return json; }
+    }
+
     // -------------------------------------------------------------------------
     // HDD image manager (no emulator required — offline APA/PFS)
     // -------------------------------------------------------------------------
@@ -2288,7 +2316,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     [McpServerTool(Name = "read_memory_region")]
     [Description(
         "Read a contiguous region of EE RAM in one call and optionally search for a byte pattern within it.\n\n" +
-        "Unlike read_memory (which is capped at 64 KB), this tool can read up to 16 MB in a single request " +
+        "Unlike read_memory (which is capped at 64 KB), this tool can read up to 32 MB in a single request " +
         "— useful for scanning large RAM windows (e.g. the full 32 MB EE main RAM at 0x00000000–0x02000000).\n\n" +
         "Returns:\n" +
         "  • 'bytes'   — the raw region as a hex string (two hex chars per byte, no spaces).\n" +
@@ -2374,6 +2402,89 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
             }
 
             return sb.ToString().TrimEnd();
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    [McpServerTool(Name = "scan_pattern")]
+    [Description(
+        "Scan live EE RAM (or IOP RAM) for a byte pattern and return all matching addresses.\n\n" +
+        "Unlike read_memory_region (which also returns raw bytes), this tool returns only the match " +
+        "addresses — making it efficient for searching across the full 32 MB EE main RAM without " +
+        "transferring megabytes of data.  Ideal for locating raw file buffers, magic signatures, " +
+        "or any known byte sequence loaded into game memory.\n\n" +
+        "Defaults to scanning all of EE main RAM (0x00000000–0x02000000, 32 MB) or IOP RAM " +
+        "(0x00000000–0x00200000, 2 MB) when start/end are omitted.\n\n" +
+        "In PINE/PCSX2 mode the scan is performed in 1 MB chunks to avoid large single requests.\n\n" +
+        "search_pattern format: comma-separated byte values (decimal or 0x-hex), " +
+        "e.g. '0x4D,0x57,0x6F,0x33' or '77,87,111,51'.")]
+    public async Task<string> ScanPattern(
+        [Description("Byte pattern to search for — comma-separated values (decimal or 0x-hex), e.g. '0x4D,0x57,0x6F,0x33'.")] string searchPattern,
+        [Description("Inclusive start address (hex or decimal). Omit or use '0' to start from the beginning of the region.")] string startAddress = "0",
+        [Description("Exclusive end address (hex or decimal). Omit or use '0' to scan to the end of the region (32 MB for EE, 2 MB for IOP).")] string endAddress = "0",
+        [Description("Memory region: 'ee' for EE main RAM (default) or 'iop' for IOP RAM.")] string region = "ee",
+        CancellationToken cancellationToken = default)
+    {
+        uint? start = TryParseAddress(startAddress);
+        uint? end   = TryParseAddress(endAddress);
+        if (start is null) return $"Error: invalid startAddress '{startAddress}'.";
+        if (end   is null) return $"Error: invalid endAddress '{endAddress}'.";
+
+        if (string.IsNullOrWhiteSpace(searchPattern))
+            return "Error: searchPattern is required.";
+
+        var pattern = new List<int>();
+        foreach (var part in searchPattern.Split(','))
+        {
+            var trimmed = part.Trim();
+            int value;
+            if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(trimmed[2..], System.Globalization.NumberStyles.HexNumber, null, out value))
+                    return $"Error: invalid byte value '{trimmed}' in searchPattern.";
+            }
+            else
+            {
+                if (!int.TryParse(trimmed, out value))
+                    return $"Error: invalid byte value '{trimmed}' in searchPattern.";
+            }
+            if (value < 0 || value > 255)
+                return $"Error: byte value {value} is out of range (0–255) in searchPattern.";
+            pattern.Add(value);
+        }
+
+        var json = await bridge.SendAsync(
+            new { Command = "SCANPATTERN", Address = start.Value, EndAddress = end.Value,
+                  SearchPattern = pattern, Region = region },
+            cancellationToken);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+
+            var sb = new StringBuilder();
+            if (root.TryGetProperty("Message", out var msgProp))
+                sb.AppendLine(msgProp.GetString());
+
+            if (root.TryGetProperty("MatchAddresses", out var matchesProp) &&
+                matchesProp.ValueKind == JsonValueKind.Array)
+            {
+                int count = matchesProp.GetArrayLength();
+                sb.AppendLine($"Matches ({count}):");
+                foreach (var m in matchesProp.EnumerateArray())
+                    sb.AppendLine($"  0x{m.GetUInt32():X8}");
+                if (count == 0)
+                    sb.AppendLine("  (none)");
+            }
+
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json);
         }
         catch
         {
