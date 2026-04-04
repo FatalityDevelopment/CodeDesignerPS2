@@ -1074,6 +1074,36 @@ export class SocketClient {
     }
 
     /**
+     * Resume PCSX2 and block until any registered memory watchpoint fires
+     * (the watched address value changes), then return hit details.
+     *
+     * Only supported in PINE mode. Uses memory polling (~5 ms interval);
+     * the returned PC is approximate.
+     *
+     * @param timeoutMs - Maximum wait time in milliseconds (default 15 000).
+     * @returns Watchpoint hit info: watchpoint ID, virtual address, and approximate PC.
+     */
+    public async runUntilWatchpoint(timeoutMs: number = 15_000): Promise<{
+        watchpointId: string;
+        hitAddress:   number;
+        hitPC:        number;
+    }> {
+        const command: CommandMessage = {
+            Command: 'RUNUNTILWATCHPOINT',
+            TimeoutMs: timeoutMs,
+        };
+        const response = await this.sendCommand(command, timeoutMs + 5_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'RunUntilWatchpoint failed');
+        }
+        return {
+            watchpointId: response.WatchpointHitId      ?? '',
+            hitAddress:   response.WatchpointHitAddress ?? 0,
+            hitPC:        response.WatchpointHitPC      ?? 0,
+        };
+    }
+
+    /**
      * Take a snapshot: write all memory regions to .bin files in outputPath.
      * Returns the list of written region descriptors.
      */

@@ -2117,11 +2117,14 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
     [McpServerTool(Name = "set_memory_watchpoint")]
     [Description(
         "Set a write watchpoint on a range of EE RAM.\n\n" +
-        "When the emulator writes to any byte within [address, address+size), execution pauses " +
-        "and the triggering instruction's PC is recorded.  Use get_watchpoint_hit to read the result, " +
-        "or call get_pc immediately after the emulator pauses — the response includes watchpoint hit info.\n\n" +
+        "In PINE mode (PCSX2): a software watchpoint is registered — the current memory is snapshotted " +
+        "and compared on each check.  Use run_until_watchpoint (blocking: resumes PCSX2 and waits until " +
+        "a change is detected) or get_watchpoint_hit (non-blocking: checks once and returns immediately " +
+        "whether the value has changed since the last check).\n\n" +
+        "In internal-emulator mode: a hardware watchpoint fires synchronously inside EE.Step() and pauses " +
+        "execution immediately; use get_watchpoint_hit or get_pc after the emulator pauses.\n\n" +
         "Returns a watchpoint ID (e.g. 'wp-0') that can be passed to clear_memory_watchpoint.\n\n" +
-        "Note: only supported in the internal emulator mode (not PINE/PCSX2).")]
+        "Note: only write watchpoints are currently supported.")]
     public async Task<string> SetMemoryWatchpoint(
         [Description("EE virtual address to watch (hex or decimal).")] string address,
         [Description("Number of bytes to watch (1–256, default 4).")] int size = 4,
@@ -2196,8 +2199,13 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
 
     [McpServerTool(Name = "get_watchpoint_hit")]
     [Description(
-        "Return details of the most recently fired memory watchpoint: the watchpoint ID, the physical " +
-        "EE address that was written, the size of the write, and the PC of the instruction that caused it.\n\n" +
+        "Check whether any registered memory watchpoint has fired and return the details.\n\n" +
+        "In PINE mode (PCSX2): non-blocking — reads current memory at all watched addresses once and " +
+        "compares against the last snapshot.  Returns the first changed watchpoint with the approximate " +
+        "PC at the moment the change was detected.  Use run_until_watchpoint for a blocking variant " +
+        "that resumes PCSX2 and waits for a change automatically.\n\n" +
+        "In internal-emulator mode: returns the most recently fired watchpoint recorded synchronously " +
+        "inside EE.Step().\n\n" +
         "The watchpoint hit info is also included in the get_pc response (WatchpointHitAddress / " +
         "WatchpointHitPC / WatchpointHitId fields) so you do not always need a separate call.")]
     public async Task<string> GetWatchpointHit(CancellationToken cancellationToken = default)
@@ -2300,6 +2308,40 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
                 return $"Error: {err.GetString()}";
             // On success HandleRunUntilPc returns HandleGetRegisters() output.
             return FormatRegisters(json);
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "run_until_watchpoint")]
+    [Description(
+        "Resume PCSX2 and block until any registered memory watchpoint fires (value at the watched " +
+        "address changes), then return the watchpoint hit details.\n\n" +
+        "This is the PINE/PCSX2 equivalent of the internal emulator's automatic pause on a hardware " +
+        "watchpoint.  Because the PINE protocol does not expose hardware watchpoints, detection is done " +
+        "by polling memory every ~5 ms; the PC returned is approximate — sampled at the moment the " +
+        "change is detected, which may be a few instructions after the actual write.\n\n" +
+        "At least one watchpoint must be set via set_memory_watchpoint before calling this tool.\n\n" +
+        "On timeout PCSX2 is paused so you can inspect state with get_registers / get_pc.")]
+    public async Task<string> RunUntilWatchpoint(
+        [Description("Timeout in milliseconds before giving up (default 15 000).")] int timeoutMs = 15_000,
+        CancellationToken cancellationToken = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeoutMs + 5_000);
+
+        var json = await bridge.SendAsync(
+            new { Command = "RUNUNTILWATCHPOINT", TimeoutMs = timeoutMs },
+            cts.Token);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+            if (root.TryGetProperty("Message", out var msg) && msg.ValueKind == JsonValueKind.String)
+                return msg.GetString() ?? json;
+            return json;
         }
         catch { return json; }
     }

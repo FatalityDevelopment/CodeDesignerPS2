@@ -90,6 +90,26 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private bool IsPineMode => PineClient != null && Scheduler == null;
 
+        // ── PINE software watchpoints ──────────────────────────────────────────
+        // PCSX2's PINE protocol does not expose hardware watchpoints, so we
+        // implement them in software: we snapshot the watched memory when the
+        // watchpoint is set and poll for changes on demand (GETWATCHPOINTHIT) or
+        // in a blocking loop (RUNUNTILWATCHPOINT).
+
+        /// <summary>Tracks software watchpoints active in PINE mode.</summary>
+        private sealed class PineSoftwareWatchpoint
+        {
+            public string Id              { get; init; } = "";
+            public uint   VirtualAddress  { get; init; }
+            public int    Size            { get; init; }
+            /// <summary>Snapshot of the watched memory bytes at the last check.</summary>
+            public byte[] Snapshot        { get; set; }  = Array.Empty<byte>();
+        }
+
+        private readonly List<PineSoftwareWatchpoint> _pineWatchpoints    = new();
+        private readonly object                        _pineWatchpointLock = new();
+        private int                                    _pineWatchpointCounter;
+
         /// <summary>
         /// Set to <c>true</c> by <see cref="HandleRestart"/> to ask the emulator
         /// run-loop (in Program.cs) to perform a full hardware reset: create a
@@ -855,6 +875,10 @@ namespace CodeDesigner.Ps2.Bridge
                     case "RUNUNTILPC":
                     case "RUN_UNTIL_PC":
                         return HandleRunUntilPc(command.TargetPc, command.TimeoutMs ?? 10_000);
+
+                    case "RUNUNTILWATCHPOINT":
+                    case "RUN_UNTIL_WATCHPOINT":
+                        return HandleRunUntilWatchpoint(command.TimeoutMs ?? 15_000);
 
                     default:
                         // Echo for unknown commands
