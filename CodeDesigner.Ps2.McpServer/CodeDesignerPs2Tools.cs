@@ -732,8 +732,8 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
     public async Task<string> Search(
         [Description("Text, regex, or hex byte pattern to search for.")] string query,
         [Description("Virtual start address (hex or decimal).")] string address,
-        [Description("Number of bytes to search.")] int length,
-        [Description("Search mode: 'text' (default), 'regex', 'bytes', or 'string'.")] string searchMode = "text",
+        [Description("Number of bytes to search (hex or decimal, e.g. '0x500000' or 5242880).")] string length,
+        [Description("Search mode: 'text' (default), 'regex', 'bytes', or 'string'.")] string type = "text",
         [Description("Memory region: 'ee' (default) or 'iop'.")] string region = "ee",
         CancellationToken cancellationToken = default)
     {
@@ -741,14 +741,18 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
         if (parsedAddress is null)
             return $"Error: invalid address '{address}'.";
 
+        uint? parsedLength = TryParseAddress(length);
+        if (parsedLength is null)
+            return $"Error: invalid length '{length}'.";
+
         var json = await bridge.SendAsync(
             new
             {
                 Command = "SEARCH",
                 Query = query,
                 Address = parsedAddress.Value,
-                Length = length,
-                SearchMode = searchMode,
+                Length = (int)parsedLength.Value,
+                SearchMode = type,
                 Region = region
             },
             cancellationToken);
