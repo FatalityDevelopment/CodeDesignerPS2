@@ -433,7 +433,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// <c>{"type":"ai_activity",...}</c> notification to every subscribed stream
         /// except <paramref name="requesterStream"/> (so VSCode's own reads never echo back).
         /// </summary>
-        private void TryPushActivityNotification(string requestMessage, string responseMessage, NetworkStream requesterStream)
+        private async Task TryPushActivityNotification(string requestMessage, string responseMessage, NetworkStream requesterStream)
         {
             try
             {
@@ -480,7 +480,7 @@ namespace CodeDesigner.Ps2.Bridge
                 foreach (var sub in subscribers)
                 {
                     if (ReferenceEquals(sub, requesterStream)) { continue; }
-                    try { sub.WriteAsync(bytes, 0, bytes.Length); }
+                    try { await sub.WriteAsync(bytes, 0, bytes.Length); }
                     catch { /* subscriber disconnected; removal handled by its own HandleClientAsync */ }
                 }
             }

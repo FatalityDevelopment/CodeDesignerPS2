@@ -268,6 +268,8 @@ export class DisasmEditorComponent implements AfterViewInit {
   /** VS Code API reference for posting messages */
   private readonly vscode = getVsCodeApi();
   private readonly injector = inject(Injector);
+  /** Cached reference to the Follow AI toolbar button (set in initEditorLogic). */
+  private _followAiBtn: HTMLElement | null = null;
 
   constructor(private zone: NgZone, private svc: DisasmEditorService) {}
 
@@ -1653,10 +1655,10 @@ export class DisasmEditorComponent implements AfterViewInit {
   private handleFollowAiMessage(data: Record<string, unknown>): void {
     if (data['type'] !== 'followAiState') { return; }
     const enabled = !!data['enabled'];
-    const followAiBtn = document.getElementById('follow-ai-btn');
-    if (followAiBtn) {
-      followAiBtn.classList.toggle('active', enabled);
-      followAiBtn.title = enabled
+    const btn = this._followAiBtn;
+    if (btn) {
+      btn.classList.toggle('active', enabled);
+      btn.title = enabled
         ? 'Follow AI — ON (click to disable)'
         : 'Follow AI — automatically navigate to the address the AI is working at';
     }
@@ -2428,6 +2430,7 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     // ── Follow AI toggle ──────────────────────────────────────────────────────
     const followAiBtn = document.getElementById('follow-ai-btn');
+    this._followAiBtn = followAiBtn;
     if (followAiBtn) {
       followAiBtn.addEventListener('click', () => {
         vscode.postMessage({ type: 'toggleFollowAi' });
