@@ -1647,6 +1647,19 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.handleHddMessage(data);
     this.handleScannerMessage(data);
     this.handleStructMessage(data);
+    this.handleFollowAiMessage(data);
+  }
+
+  private handleFollowAiMessage(data: Record<string, unknown>): void {
+    if (data['type'] !== 'followAiState') { return; }
+    const enabled = !!data['enabled'];
+    const followAiBtn = document.getElementById('follow-ai-btn');
+    if (followAiBtn) {
+      followAiBtn.classList.toggle('active', enabled);
+      followAiBtn.title = enabled
+        ? 'Follow AI — ON (click to disable)'
+        : 'Follow AI — automatically navigate to the address the AI is working at';
+    }
   }
 
   private openScannerOverlay(): void {
@@ -2411,6 +2424,14 @@ export class DisasmEditorComponent implements AfterViewInit {
     const structBtn = document.getElementById('struct-btn');
     if (structBtn) {
       structBtn.addEventListener('click', () => this.openStructOverlay());
+    }
+
+    // ── Follow AI toggle ──────────────────────────────────────────────────────
+    const followAiBtn = document.getElementById('follow-ai-btn');
+    if (followAiBtn) {
+      followAiBtn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'toggleFollowAi' });
+      });
     }
 
     // ── Search ────────────────────────────────────────────────────────────────

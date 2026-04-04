@@ -33,6 +33,24 @@ namespace CodeDesigner.Ps2.Bridge
         private CancellationTokenSource? _cancellationTokenSource;
 
         /// <summary>
+        /// Streams of clients that have subscribed to AI activity push notifications.
+        /// </summary>
+        private readonly List<NetworkStream> _activitySubscribers = new();
+        private readonly object _subscribersLock = new();
+
+        /// <summary>
+        /// Commands that carry a target <see cref="CommandMessage.Address"/> and are
+        /// interesting enough to push as an AI-activity notification.
+        /// </summary>
+        private static readonly HashSet<string> _activityAddressCommands = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "READMEM", "WRITEMEM", "LOADBIN", "DISASSEMBLE",
+            "SETBP", "CLEARBP",
+            "SCANSTRINGS", "SCANFUNCTIONS", "SCANPOINTERS", "SCANFLOATS", "SCANINTEGERS",
+            "SCANVALUE",
+        };
+
+        /// <summary>
         /// Symbol/label database loaded from ps2MemMap.json at construction time.
         /// Key = virtual address (uint), Value = (Label, optional Comment).
         /// </summary>
@@ -313,6 +331,7 @@ namespace CodeDesigner.Ps2.Bridge
                 var stream = client.GetStream();
                 var buffer = new byte[8192]; // Increased buffer size
                 var messageBuffer = new StringBuilder();
+                bool isSubscriber = false;
 
                 try
                 {
@@ -343,10 +362,32 @@ namespace CodeDesigner.Ps2.Bridge
                             {
                                 MessageReceived?.Invoke(this, message);
 
+                                // Handle SUBSCRIBE_ACTIVITY without going through ProcessCommand.
+                                if (IsSubscribeActivityCommand(message))
+                                {
+                                    if (!isSubscriber)
+                                    {
+                                        lock (_subscribersLock) { _activitySubscribers.Add(stream); }
+                                        isSubscriber = true;
+                                    }
+                                    var ackBytes = Encoding.UTF8.GetBytes(
+                                        CreateSuccessResponse("Subscribed to AI activity notifications") + "\n");
+                                    await stream.WriteAsync(ackBytes, 0, ackBytes.Length, cancellationToken);
+                                    continue;
+                                }
+
                                 // Process command and generate response
                                 var response = ProcessCommand(message);
                                 var responseBytes = Encoding.UTF8.GetBytes(response + "\n");
                                 await stream.WriteAsync(responseBytes, 0, responseBytes.Length, cancellationToken);
+
+                                // Push an activity notification to subscribed clients (e.g. the
+                                // VSCode extension) when the command originates from a non-subscriber
+                                // (e.g. the MCP server).  This lets the editor follow the AI's work.
+                                if (!isSubscriber)
+                                {
+                                    _ = Task.Run(() => TryPushActivityNotification(message, response, stream));
+                                }
                             }
                         }
                     }
@@ -357,10 +398,93 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 finally
                 {
+                    if (isSubscriber)
+                    {
+                        lock (_subscribersLock) { _activitySubscribers.Remove(stream); }
+                    }
                     Console.WriteLine("Client disconnected.");
                     ClientDisconnected?.Invoke(this, EventArgs.Empty);
                 }
             }
+        }
+
+        /// <summary>
+        /// Returns <c>true</c> when the raw JSON message is a SUBSCRIBE_ACTIVITY command.
+        /// Uses a lightweight property lookup to avoid a full deserialization round-trip.
+        /// </summary>
+        private static bool IsSubscribeActivityCommand(string message)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(message);
+                if (doc.RootElement.TryGetProperty("Command", out var cmd) ||
+                    doc.RootElement.TryGetProperty("command", out cmd))
+                {
+                    return string.Equals(cmd.GetString(), "SUBSCRIBE_ACTIVITY", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch { /* malformed JSON — not a subscribe command */ }
+            return false;
+        }
+
+        /// <summary>
+        /// Parses <paramref name="requestMessage"/> to extract a target address and, if the
+        /// command is one of the interesting address-based operations, pushes a JSON
+        /// <c>{"type":"ai_activity",...}</c> notification to every subscribed stream
+        /// except <paramref name="requesterStream"/> (so VSCode's own reads never echo back).
+        /// </summary>
+        private void TryPushActivityNotification(string requestMessage, string responseMessage, NetworkStream requesterStream)
+        {
+            try
+            {
+                List<NetworkStream> subscribers;
+                lock (_subscribersLock) { subscribers = new List<NetworkStream>(_activitySubscribers); }
+                if (subscribers.Count == 0) { return; }
+
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var command = JsonSerializer.Deserialize<CommandMessage>(requestMessage, options);
+                if (command == null) { return; }
+
+                string? notificationJson = null;
+                var cmdUpper = command.Command?.ToUpperInvariant();
+
+                if (cmdUpper != null && command.Address.HasValue && _activityAddressCommands.Contains(cmdUpper))
+                {
+                    notificationJson = JsonSerializer.Serialize(new
+                    {
+                        type    = "ai_activity",
+                        command = command.Command,
+                        address = command.Address.Value,
+                        region  = command.Region ?? "ee",
+                    });
+                }
+                else if (cmdUpper == "GETPC")
+                {
+                    // Extract the PC from the response's PC field.
+                    var resp = JsonSerializer.Deserialize<CommandResponse>(responseMessage, options);
+                    if (resp?.Success == true && resp.PC.HasValue)
+                    {
+                        notificationJson = JsonSerializer.Serialize(new
+                        {
+                            type    = "ai_activity",
+                            command = "GETPC",
+                            address = resp.PC.Value,
+                            region  = "ee",
+                        });
+                    }
+                }
+
+                if (notificationJson == null) { return; }
+
+                var bytes = Encoding.UTF8.GetBytes(notificationJson + "\n");
+                foreach (var sub in subscribers)
+                {
+                    if (ReferenceEquals(sub, requesterStream)) { continue; }
+                    try { sub.WriteAsync(bytes, 0, bytes.Length); }
+                    catch { /* subscriber disconnected; removal handled by its own HandleClientAsync */ }
+                }
+            }
+            catch { /* ignore any notification errors */ }
         }
 
         /// <summary>
