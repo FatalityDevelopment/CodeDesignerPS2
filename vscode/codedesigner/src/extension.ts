@@ -95,6 +95,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('codedesigner.pointerManager.refresh', () =>
 			pointerManagerProvider.refresh()
+		),
+		vscode.commands.registerCommand('codedesigner.openStructCalculator', () =>
+			editorProvider.openStructCalculator()
 		)
 	);
 

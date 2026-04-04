@@ -119,6 +119,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * `gotoAddressReceived$` subject, which the component uses to move the cursor.
    * Called by external providers (e.g. the Pointer Manager tree view).
    */
+  public openStructCalculator(): void {
+    if (this._livePanels.length === 0) { return; }
+    this._livePanels[0].reveal(undefined, false);
+    this._livePanels[0].webview.postMessage({ type: 'openStructCalculator' });
+  }
+
   public navigateToAddress(address: number): void {
     const physAddr = DisasmEditorProvider._toPhysAddr(address);
     const target = this._livePanelInfo.find(info =>

@@ -1680,6 +1680,11 @@ export class DisasmEditorComponent implements AfterViewInit {
   }
 
   private handleWindowMessage(data: Record<string, unknown>): void {
+    // Handle extension-driven overlay open requests (e.g. from tree-view header button).
+    if (data['type'] === 'openStructCalculator') {
+      this.zone.run(() => this.openStructOverlay());
+      return;
+    }
     this.handleEditOverlayMessage(data);
     this.handleConverterOverlayMessage(data);
     this.handlePorterOverlayMessage(data);
@@ -2496,12 +2501,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     const scannerBtn = document.getElementById('scanner-btn');
     if (scannerBtn) {
       scannerBtn.addEventListener('click', () => this.openScannerOverlay());
-    }
-
-    // ── Struct offset overlay (Angular-only) ─────────────────────────────────
-    const structBtn = document.getElementById('struct-btn');
-    if (structBtn) {
-      structBtn.addEventListener('click', () => this.openStructOverlay());
     }
 
     // ── Label Manager overlay (Angular-only) ─────────────────────────────────
