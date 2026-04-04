@@ -432,23 +432,11 @@ namespace CodeDesigner.Ps2.Emulator
             // overlaps a registered watchpoint the scheduler captures the current PC
             // and pauses execution.  The callback fires synchronously during EE.Step(),
             // which is why RunSlice checks LastWatchpointHit immediately after each step.
-            EE.Bus.OnWriteWatchpointHit = (physAddr, size) =>
+            EE.Bus.OnWriteWatchpointHit = (wp, physAddr, size) =>
             {
-                // Find the watchpoint ID that covers this address.
-                string wpId = string.Empty;
-                var wps = EE.Bus.WriteWatchpoints;
-                for (int i = 0; i < wps.Count; i++)
-                {
-                    var wp = wps[i];
-                    if (physAddr < wp.PhysEnd && physAddr + (uint)size > wp.PhysStart)
-                    {
-                        wpId = wp.Id;
-                        break;
-                    }
-                }
                 LastWatchpointHit = new WatchpointHitInfo
                 {
-                    WatchpointId = wpId,
+                    WatchpointId = wp.Id,
                     PhysAddress  = physAddr,
                     Size         = size,
                     PC           = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL),

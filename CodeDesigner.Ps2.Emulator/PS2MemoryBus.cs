@@ -174,17 +174,28 @@ namespace CodeDesigner.Ps2.Emulator
         /// <summary>
         /// Called synchronously (on the EE execution thread) whenever a write
         /// to EE RAM overlaps an entry in <see cref="WriteWatchpoints"/>.
-        /// The arguments are the physical address and byte-size of the write.
-        /// Wired by <see cref="DualCpuScheduler"/> to capture the CPU's PC and
-        /// pause execution.
+        /// The arguments are the matched watchpoint, the physical address, and
+        /// the byte-size of the triggering write.  Wired by
+        /// <see cref="DualCpuScheduler"/> to capture the CPU's PC and pause.
         /// </summary>
-        internal System.Action<uint, int>? OnWriteWatchpointHit;
+        internal System.Action<MemoryWatchpoint, uint, int>? OnWriteWatchpointHit;
+
+        /// <summary>
+        /// Tests whether physical address range [<paramref name="physAddr"/>,
+        /// <paramref name="physAddr"/> + <paramref name="size"/>) overlaps
+        /// <paramref name="wp"/>'s monitored range.  Extracted as a shared
+        /// helper so both <see cref="CheckWriteWatchpoint"/> and the
+        /// <see cref="DualCpuScheduler"/> callback use the identical condition.
+        /// </summary>
+        internal static bool WatchpointOverlaps(MemoryWatchpoint wp, uint physAddr, int size)
+            => physAddr < wp.PhysEnd && physAddr + (uint)size > wp.PhysStart;
 
         /// <summary>
         /// Checks whether <paramref name="physAddr"/> overlaps any entry in
         /// <see cref="WriteWatchpoints"/> and, if so, invokes
-        /// <see cref="OnWriteWatchpointHit"/>.  Called at the end of every EE
-        /// RAM write path when at least one watchpoint is registered.
+        /// <see cref="OnWriteWatchpointHit"/> with the matching watchpoint.
+        /// Called at the end of every EE RAM write path when at least one
+        /// watchpoint is registered.
         /// </summary>
         private void CheckWriteWatchpoint(uint physAddr, int size)
         {
@@ -192,9 +203,9 @@ namespace CodeDesigner.Ps2.Emulator
             for (int i = 0; i < wps.Count; i++)
             {
                 var wp = wps[i];
-                if (physAddr < wp.PhysEnd && physAddr + (uint)size > wp.PhysStart)
+                if (WatchpointOverlaps(wp, physAddr, size))
                 {
-                    OnWriteWatchpointHit?.Invoke(physAddr, size);
+                    OnWriteWatchpointHit?.Invoke(wp, physAddr, size);
                     return; // fire once per write
                 }
             }

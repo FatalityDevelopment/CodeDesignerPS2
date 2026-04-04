@@ -239,8 +239,12 @@ namespace CodeDesigner.Ps2.Bridge
                     try { instrWord = Scheduler.EE.Bus.ReadWord(prePc); } catch { /* skip unreadable */ }
 
                     uint opcode = instrWord >> 26;
-                    bool isCall = opcode == 3                              // JAL
-                               || (opcode == 0 && (instrWord & 0x3Fu) == 9u); // JALR
+                    // JAL (opcode 3): always a call.
+                    // JALR (opcode 0, funct 9): require rs != $zero so we don't match
+                    // the degenerate encoding where rs=0 (target=0, not a real call).
+                    uint rs = (instrWord >> 21) & 0x1Fu;
+                    bool isCall = opcode == 3                                          // JAL
+                               || (opcode == 0 && (instrWord & 0x3Fu) == 9u && rs != 0u); // JALR
 
                     // Execute one EE instruction (stays paused).
                     Scheduler.StepOne();
