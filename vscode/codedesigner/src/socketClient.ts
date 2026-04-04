@@ -435,6 +435,19 @@ export interface RecompileResult {
 }
 
 /**
+ * Pushed unsolicited by the server when an MCP client performs an address-based
+ * operation (READMEM, WRITEMEM, DISASSEMBLE, GETPC, …).  Used by the VSCode
+ * extension to implement "Follow AI" mode — navigate the disassembly cursor to
+ * the address the AI is currently working with.
+ */
+export interface AiActivityEvent {
+    type:    'ai_activity';
+    command: string;
+    address: number;
+    region:  string;
+}
+
+/**
  * Socket client for communication with C# server
  */
 export class SocketClient {
@@ -447,6 +460,11 @@ export class SocketClient {
     private messageHandlers: Array<(message: string) => void> = [];
     private connectionHandlers: Array<() => void> = [];
     private disconnectionHandlers: Array<() => void> = [];
+    /**
+     * Handlers registered via onActivityNotification() — invoked when the server
+     * pushes an unsolicited AI-activity event (type === "ai_activity").
+     */
+    private _activityHandlers: Array<(event: AiActivityEvent) => void> = [];
     /**
      * FIFO queue of one-time response handlers added by sendCommand().
      * Using a dedicated queue (with shift()) avoids the Array.forEach +
@@ -527,6 +545,21 @@ export class SocketClient {
                     
                     if (message.length > 0) {
                         console.log(`[SOCKET] Complete message received (${message.length} chars): ${message.substring(0, 100)}...`);
+
+                        // Detect server-pushed notifications (have a "type" field but no
+                        // "Success" field — all CommandResponse objects carry "Success").
+                        // These must NOT consume a pending FIFO response slot.
+                        let parsed: Record<string, unknown> | null = null;
+                        try { parsed = JSON.parse(message); } catch { /* not JSON */ }
+                        if (parsed && typeof parsed['type'] === 'string' && !('Success' in parsed)) {
+                            if (parsed['type'] === 'ai_activity') {
+                                const evt = parsed as unknown as AiActivityEvent;
+                                this._activityHandlers.forEach(h => h(evt));
+                            }
+                            this.messageHandlers.forEach(handler => handler(message));
+                            continue;
+                        }
+
                         // Dispatch to the first pending one-time response handler (FIFO).
                         // shift() is safe here: it removes the element before calling it,
                         // so there is no splice-during-iteration issue.
@@ -638,6 +671,28 @@ export class SocketClient {
      */
     public onDisconnected(handler: () => void): void {
         this.disconnectionHandlers.push(handler);
+    }
+
+    /**
+     * Register a handler for server-pushed AI-activity notifications.
+     * Called when the server broadcasts an unsolicited ai_activity event
+     * (e.g. because the MCP AI assistant performed a memory read or write).
+     */
+    public onActivityNotification(handler: (event: AiActivityEvent) => void): void {
+        this._activityHandlers.push(handler);
+    }
+
+    /**
+     * Send a SUBSCRIBE_ACTIVITY command to opt-in to AI-activity push notifications.
+     * After calling this, the server will push {"type":"ai_activity",...} messages
+     * whenever another client (e.g. the MCP server) performs an address-based operation.
+     */
+    public async subscribeActivity(): Promise<void> {
+        try {
+            await this.sendCommand({ Command: 'SUBSCRIBE_ACTIVITY' });
+        } catch (err) {
+            console.warn('[SOCKET] subscribeActivity failed:', err);
+        }
     }
 
     /**

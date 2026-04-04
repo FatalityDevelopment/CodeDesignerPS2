@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
@@ -78,6 +78,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _liveReadFailureMessage = '';
 
   /**
+   * When true, the editor automatically navigates to the address the AI (MCP
+   * server) is currently working with.  Toggled by the "Follow AI" toolbar
+   * button in every live disassembly panel.
+   */
+  private _followAiEnabled = false;
+
+  /**
    * Optional callback invoked when the emulator's pause state changes (e.g. breakpoint hit).
    * Set by DisasmPanelProvider so it can update the sidebar status bar.
    */
@@ -124,6 +131,20 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
   constructor(socketClient: SocketClient | null, private readonly _extensionUri: vscode.Uri) {
     this.socketClient = socketClient;
+    if (socketClient) {
+      // Subscribe to AI-activity notifications whenever a connection is established.
+      socketClient.onConnected(() => {
+        if (this._followAiEnabled) {
+          socketClient.subscribeActivity();
+        }
+      });
+      // Navigate the disassembly view when the AI works at a known address.
+      socketClient.onActivityNotification((event: AiActivityEvent) => {
+        if (this._followAiEnabled) {
+          this.navigateToAddress(event.address);
+        }
+      });
+    }
   }
 
   /**
@@ -204,6 +225,32 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public notifyPauseState(paused: boolean): void {
     this._broadcastStatus(paused);
+  }
+
+  /**
+   * Enable or disable "Follow AI" mode.
+   * When enabled, the disassembly cursor automatically navigates to whichever
+   * address the MCP AI server is currently working with.
+   * Sends `SUBSCRIBE_ACTIVITY` to the socket server when turning on (if connected).
+   */
+  public setFollowAiEnabled(enabled: boolean): void {
+    if (this._followAiEnabled === enabled) { return; }
+    this._followAiEnabled = enabled;
+    if (enabled && this.socketClient?.isConnected()) {
+      this.socketClient.subscribeActivity();
+    }
+    this._broadcastFollowAiState();
+  }
+
+  /** Returns the current Follow AI toggle state. */
+  public get followAiEnabled(): boolean { return this._followAiEnabled; }
+
+  /** Broadcast the current Follow AI state to all live panels. */
+  private _broadcastFollowAiState(): void {
+    const msg = { type: 'followAiState', enabled: this._followAiEnabled };
+    for (const p of this._livePanels) {
+      p.webview.postMessage(msg);
+    }
   }
 
   /**
@@ -825,6 +872,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 if (this._pointerLabels.length > 0) {
                     panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
                 }
+                // Sync the Follow AI toggle state so the toolbar button reflects
+                // the current setting even when the panel was just opened.
+                panel.webview.postMessage({ type: 'followAiState', enabled: this._followAiEnabled });
                 return;
             }
             if (message.type === 'bootstrapError') {
@@ -1250,6 +1300,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleAddStructMember(panel.webview, message.structName as string, message.offset as number, message.memberName as string);
             } else if (message.type === 'readPointerAt') {
                 await this._handleReadPointerAt(panel.webview, message.address as string);
+            } else if (message.type === 'toggleFollowAi') {
+                this.setFollowAiEnabled(!this._followAiEnabled);
             }
         });
 
