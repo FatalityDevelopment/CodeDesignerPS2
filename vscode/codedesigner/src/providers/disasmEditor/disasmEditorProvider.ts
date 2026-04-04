@@ -247,8 +247,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const bytes = await this.socketClient!.readMemory(baseNum, 4, 'ee');
         if (bytes.length >= 4) {
           const ptrVal = bytes.readUInt32LE(0) >>> 0;
-          // Sanity-check: must be a non-zero plausible PS2 EE address.
-          if (ptrVal > 0 && ptrVal <= 0x3FFFFFFF) {
+          // Sanity-check: must be a non-zero address in a valid PS2 EE range.
+          // Physical (0x00000001–0x1FFFFFFF), scratchpad (0x70000000–0x70003FFF),
+          // KSEG0 (0x80000000–0x9FFFFFFF), and KSEG1 (0xA0000000–0xBFFFFFFF)
+          // are all legitimate target addresses; reject 0 and anything >= 0xC0000000.
+          if (ptrVal > 0 && ptrVal < 0xC0000000) {
             dataBase = ptrVal;
           }
         }
