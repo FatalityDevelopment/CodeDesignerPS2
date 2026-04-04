@@ -3133,7 +3133,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
                 sb.AppendLine($"  [{label}]  base=0x{baseA:X8}  size={size / 1024} KB  → {file}");
             }
 
-            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json));
+            return sb.Length > 0 ? WithRules(sb.ToString().TrimEnd()) : SimpleMessage(json);
         }
         catch
         {
@@ -3164,7 +3164,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
                 sb.AppendLine($"  [{label}]  size={size / 1024} KB  ← {file}");
             }
 
-            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json));
+            return sb.Length > 0 ? WithRules(sb.ToString().TrimEnd()) : SimpleMessage(json);
         }
         catch
         {
@@ -3239,7 +3239,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
                     sb.AppendLine($"  {f.GetString()}");
             }
 
-            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json));
+            return sb.Length > 0 ? WithRules(sb.ToString().TrimEnd()) : SimpleMessage(json);
         }
         catch
         {
@@ -3307,7 +3307,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
                 }
             }
 
-            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : SimpleMessage(json));
+            return sb.Length > 0 ? WithRules(sb.ToString().TrimEnd()) : SimpleMessage(json);
         }
         catch
         {

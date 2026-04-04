@@ -42,8 +42,11 @@ public sealed class ProgressReportManager
     /// <summary>
     /// Reads a report by sanitised name, or <see langword="null"/> if it does not exist.
     /// </summary>
-    public string? GetReport(string name) =>
-        File.Exists(ResolvePath(name)) ? File.ReadAllText(ResolvePath(name)) : null;
+    public string? GetReport(string name)
+    {
+        var path = ResolvePath(name);
+        return File.Exists(path) ? File.ReadAllText(path) : null;
+    }
 
     /// <summary>Creates or overwrites a report with the given Markdown content.</summary>
     public void SaveReport(string name, string content)
