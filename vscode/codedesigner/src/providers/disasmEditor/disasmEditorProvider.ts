@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent, StructEntry } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
@@ -66,6 +66,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _gameLabels: LabelEntry[] = [];
   /** Labels derived from live-resolved Pointer Manager entries. Shown as an overlay in the instruction display. */
   private _pointerLabels: LabelEntry[] = [];
+  /** Labels derived from live-resolved struct member definitions (C# backend). Merged with pointer labels. */
+  private _structLabels: LabelEntry[] = [];
   /** Labels derived from enabled archive cheats from the CheatCodeArchive. */
   private _archiveLabels: LabelEntry[] = [];
   /** Current game (ISO) name — used to resolve the per-game labels.json path. */
@@ -182,14 +184,101 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public setPointerLabels(labels: LabelEntry[]): void {
     this._pointerLabels = labels;
+    const combined = this._mergedPointerAndStructLabels();
     for (const p of this._livePanels) {
-      p.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
+      p.webview.postMessage({ type: 'pointerLabelsUpdated', labels: combined });
     }
     // Refresh the merged labels list so the Labels tab is kept in sync.
     if (this._livePanels.length > 0) {
       this._broadcastMergedLabels();
     }
   }
+
+  /** Returns the merged set of pointer-manager labels and struct-derived labels. */
+  private _mergedPointerAndStructLabels(): LabelEntry[] {
+    if (this._structLabels.length === 0) { return this._pointerLabels; }
+    if (this._pointerLabels.length === 0) { return this._structLabels; }
+    return this._mergeLabels(this._pointerLabels, this._structLabels);
+  }
+
+  /**
+   * Fetch all struct definitions from the C# backend, resolve member addresses
+   * using live-memory pointer reads, and broadcast the resulting labels via
+   * `pointerLabelsUpdated` so they appear as overlays in the instruction display.
+   *
+   * Each struct's `baseAddress` is treated as a pointer variable in PS2 memory.
+   * We dereference it to obtain the actual data-struct base, then add each
+   * member's offset to produce the resolved label address.  If the dereference
+   * fails (emulator not connected, or invalid pointer) we fall back to using
+   * `baseAddress + offset` directly.
+   */
+  public async refreshStructLabels(): Promise<void> {
+    if (!this.socketClient?.isConnected()) {
+      if (this._structLabels.length > 0) {
+        this._structLabels = [];
+        this._broadcastPointerLabels();
+      }
+      return;
+    }
+    try {
+      const structs = await this.socketClient.getStructs();
+      await this._resolveStructLabelsFrom(structs);
+    } catch {
+      // Non-fatal: struct resolution failures are silently ignored.
+    }
+  }
+
+  /** Resolve label entries from a freshly-fetched struct list and broadcast if the result has changed. */
+  private async _resolveStructLabelsFrom(structs: StructEntry[]): Promise<void> {
+    const labels: LabelEntry[] = [];
+    for (const s of structs) {
+      const baseHex = s.baseAddress.replace(/^0x/i, '');
+      const baseNum = parseInt(baseHex, 16) >>> 0;
+      if (isNaN(baseNum)) { continue; }
+
+      // Add the struct pointer address itself as a top-level label.
+      labels.push({ address: s.baseAddress, label: s.name });
+
+      if (s.members.length === 0) { continue; }
+
+      // Try to dereference the pointer to find the struct data base.
+      let dataBase: number | undefined;
+      try {
+        const bytes = await this.socketClient!.readMemory(baseNum, 4, 'ee');
+        if (bytes.length >= 4) {
+          const ptrVal = bytes.readUInt32LE(0) >>> 0;
+          // Sanity-check: must be a non-zero plausible PS2 EE address.
+          if (ptrVal > 0 && ptrVal <= 0x3FFFFFFF) {
+            dataBase = ptrVal;
+          }
+        }
+      } catch {
+        dataBase = undefined;
+      }
+
+      // Fall back to using the base address directly if dereference fails.
+      const memberBase = dataBase ?? baseNum;
+      for (const m of s.members) {
+        const addr = (memberBase + m.offset) >>> 0;
+        const addrStr = '0x' + addr.toString(16).toUpperCase().padStart(8, '0');
+        labels.push({ address: addrStr, label: m.name });
+      }
+    }
+    this._structLabels = labels;
+    this._broadcastPointerLabels();
+  }
+
+  /** Broadcast the merged pointer + struct labels to all live panels. */
+  private _broadcastPointerLabels(): void {
+    const combined = this._mergedPointerAndStructLabels();
+    for (const p of this._livePanels) {
+      p.webview.postMessage({ type: 'pointerLabelsUpdated', labels: combined });
+    }
+    if (this._livePanels.length > 0) {
+      this._broadcastMergedLabels();
+    }
+  }
+
 
   /** Merge server labels with game-specific labels. Game labels take priority on conflicts. */
   private _mergeLabels(serverLabels: LabelEntry[], gameLabels: LabelEntry[]): LabelEntry[] {
@@ -200,13 +289,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Build the fully-merged label list (server + game + pointer + archive labels) and
+   * Build the fully-merged label list (server + game + pointer + struct + archive labels) and
    * broadcast a `labelsUpdated` message to all live panels.
    */
   private _broadcastMergedLabels(): void {
     const broadcast = (base: LabelEntry[]) => {
       let merged = this._gameLabels.length > 0 ? this._mergeLabels(base, this._gameLabels) : base;
       if (this._pointerLabels.length > 0) { merged = this._mergeLabels(merged, this._pointerLabels); }
+      if (this._structLabels.length > 0) { merged = this._mergeLabels(merged, this._structLabels); }
       if (this._archiveLabels.length > 0) { merged = this._mergeLabels(merged, this._archiveLabels); }
       for (const p of this._livePanels) {
         p.webview.postMessage({ type: 'labelsUpdated', labels: merged });
@@ -819,8 +909,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.sendLiveDisasmPage(existingInfo.panel, region, baseAddress, totalBytes, 0);
                 await this.sendLiveHexView(existingInfo.panel, region, baseAddress, baseAddress,
                     DisasmEditorProvider.INSTRUCTION_SIZE);
-                if (this._pointerLabels.length > 0) {
-                    existingInfo.panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
+                if (this._pointerLabels.length > 0 || this._structLabels.length > 0) {
+                    existingInfo.panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._mergedPointerAndStructLabels() });
                 }
             }
             return;
@@ -872,8 +962,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         DisasmEditorProvider.INSTRUCTION_SIZE);
                 }
                 // Send any already-resolved struct labels so they appear immediately.
-                if (this._pointerLabels.length > 0) {
-                    panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._pointerLabels });
+                if (this._pointerLabels.length > 0 || this._structLabels.length > 0) {
+                    panel.webview.postMessage({ type: 'pointerLabelsUpdated', labels: this._mergedPointerAndStructLabels() });
                 }
                 // Sync the Follow AI toggle state so the toolbar button reflects
                 // the current setting even when the panel was just opened.
@@ -2447,6 +2537,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       await this.socketClient.addStruct(name, baseAddress);
       const structs = await this.socketClient.getStructs();
       webview.postMessage({ type: 'addStructResult', structs });
+      // Update struct labels in all open panels so the instruction display reflects
+      // the newly-created struct without requiring a manual refresh.
+      await this._resolveStructLabelsFrom(structs);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       getOutputChannel().error('[Struct] ' + errMsg);
@@ -2460,6 +2553,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       await this.socketClient.addStructMember(structName, offset, memberName);
       const structs = await this.socketClient.getStructs();
       webview.postMessage({ type: 'addStructMemberResult', structs });
+      // Update struct labels in all open panels so the instruction display reflects
+      // the newly-added member without requiring a manual refresh.
+      await this._resolveStructLabelsFrom(structs);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       getOutputChannel().error('[Struct] ' + errMsg);

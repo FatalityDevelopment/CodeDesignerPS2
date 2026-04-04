@@ -111,6 +111,8 @@ export function activate(context: vscode.ExtensionContext) {
 		pointerManagerProvider.onDidChangeTreeData(() => {
 			pointerManagerProvider.getResolvedLabels().then(labels => {
 				editorProvider.setPointerLabels(labels);
+				// Also re-resolve struct labels so the combined overlay stays current.
+				editorProvider.refreshStructLabels().catch(() => { /* non-fatal */ });
 			}).catch(() => { /* ignore — not connected */ });
 		})
 	);
@@ -135,6 +137,9 @@ export function activate(context: vscode.ExtensionContext) {
 		// require reading pointer values from the emulator).
 		pointerManagerProvider.getResolvedLabels().then(labels => {
 			editorProvider.setPointerLabels(labels);
+			// Also resolve struct labels from the C# backend now that the emulator
+			// is connected and struct pointer values can be read from live memory.
+			editorProvider.refreshStructLabels().catch(() => { /* non-fatal */ });
 		}).catch(() => { /* ignore — emulator may not be ready yet */ });
 	});
 
