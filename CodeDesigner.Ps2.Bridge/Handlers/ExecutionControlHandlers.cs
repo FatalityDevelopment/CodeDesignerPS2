@@ -256,6 +256,18 @@ namespace CodeDesigner.Ps2.Bridge
                 PC      = normalizedPc,
                 BreakpointHitAddress = bpHit,
             };
+
+            // Include watchpoint hit info so the frontend can distinguish a
+            // watchpoint pause from a regular breakpoint pause without an
+            // extra round-trip.
+            var wpHit = Scheduler.LastWatchpointHit;
+            if (wpHit != null)
+            {
+                response.WatchpointHitAddress = wpHit.PhysAddress;
+                response.WatchpointHitPC      = NormalizePcToKseg0(wpHit.PC);
+                response.WatchpointHitId      = wpHit.WatchpointId;
+            }
+
             return JsonSerializer.Serialize(response);
         }
     }

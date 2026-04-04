@@ -115,6 +115,28 @@ namespace CodeDesigner.Ps2.Emulator
         public uint? LastBreakpointHit { get; private set; }
 
         /// <summary>
+        /// Details of the most-recently fired memory write watchpoint, or <c>null</c>
+        /// if no watchpoint has triggered since the last resume.  Cleared automatically
+        /// when <see cref="Paused"/> is set to <c>false</c> (i.e. on resume).
+        /// </summary>
+        public WatchpointHitInfo? LastWatchpointHit { get; private set; }
+
+        /// <summary>
+        /// Exposes the EE bus write-watchpoint collection.  Callers may add or remove
+        /// <see cref="MemoryWatchpoint"/> entries while the scheduler is paused.
+        /// </summary>
+        public System.Collections.Generic.List<MemoryWatchpoint> WriteWatchpoints
+            => EE.Bus.WriteWatchpoints;
+
+        /// <summary>Counter used to assign unique IDs to new watchpoints.</summary>
+        private int _watchpointIdCounter;
+
+        /// <summary>
+        /// Generates the next unique watchpoint identifier string (e.g. "wp-0", "wp-1").
+        /// </summary>
+        public string NextWatchpointId() => $"wp-{_watchpointIdCounter++}";
+
+        /// <summary>
         /// When <c>true</c>, <see cref="RunSlice"/> returns immediately without
         /// executing any instructions.  Set via the socket PAUSE/RESUME commands.
         /// </summary>
@@ -127,6 +149,7 @@ namespace CodeDesigner.Ps2.Emulator
                 else
                 {
                     LastBreakpointHit = null;
+                    LastWatchpointHit = null;
                     _runGate.Set();
                 }
             }
@@ -158,6 +181,7 @@ namespace CodeDesigner.Ps2.Emulator
             if (!Paused) return;
 
             LastBreakpointHit = null;
+            LastWatchpointHit = null;
 
             // Execute exactly one EE instruction.
             EE.Step();
@@ -403,6 +427,34 @@ namespace CodeDesigner.Ps2.Emulator
             //   → iopIntcIrq(0) (bit 0 = VBlank) and iopIntcIrq(11) (bit 11 = EvBlank).
             EE.VBlankStarted += (_, _) => IOP.Bus.RaiseInterrupt(0);   // IOP VBlank-start (bit 0)
             EE.VBlankEnded   += (_, _) => IOP.Bus.RaiseInterrupt(11);  // IOP EvBlank (bit 11)
+
+            // Wire the bus write-watchpoint callback so that when any EE RAM write
+            // overlaps a registered watchpoint the scheduler captures the current PC
+            // and pauses execution.  The callback fires synchronously during EE.Step(),
+            // which is why RunSlice checks LastWatchpointHit immediately after each step.
+            EE.Bus.OnWriteWatchpointHit = (physAddr, size) =>
+            {
+                // Find the watchpoint ID that covers this address.
+                string wpId = string.Empty;
+                var wps = EE.Bus.WriteWatchpoints;
+                for (int i = 0; i < wps.Count; i++)
+                {
+                    var wp = wps[i];
+                    if (physAddr < wp.PhysEnd && physAddr + (uint)size > wp.PhysStart)
+                    {
+                        wpId = wp.Id;
+                        break;
+                    }
+                }
+                LastWatchpointHit = new WatchpointHitInfo
+                {
+                    WatchpointId = wpId,
+                    PhysAddress  = physAddr,
+                    Size         = size,
+                    PC           = (uint)(EE.Cpu.PC & 0xFFFFFFFFUL),
+                    Type         = WatchpointType.Write,
+                };
+            };
         }
 
         /// <summary>
@@ -670,6 +722,16 @@ namespace CodeDesigner.Ps2.Emulator
                 // ── EE step ───────────────────────────────────────────────────
                 EE.Step();
                 TotalEeSteps++;
+
+                // ── Write watchpoint check (post-execution) ───────────────────
+                // The bus callback fires synchronously during EE.Step() and sets
+                // LastWatchpointHit.  If it fired, pause and return so the client
+                // can inspect the CPU state at the triggering instruction.
+                if (LastWatchpointHit != null)
+                {
+                    Paused = true;
+                    return;
+                }
 
                 // ── IOP step(s) (proportional, interleaved after each EE step) ─
                 _iopAccumulator++;

@@ -91,5 +91,28 @@ namespace CodeDesigner.Ps2.Bridge
         public int? MemberOffset { get; set; }
         /// <summary>Member name for ADDSTRUCTMEMBER.</summary>
         public string? MemberName { get; set; }
+
+        // READMEMREGION fields
+        /// <summary>
+        /// Optional byte pattern to search for within the memory region (READMEMREGION).
+        /// Each element is an unsigned byte value (0–255).
+        /// </summary>
+        public List<int>? SearchPattern { get; set; }
+
+        // SETWATCHPOINT / CLEARWATCHPOINT fields
+        /// <summary>Watchpoint identifier for CLEARWATCHPOINT.</summary>
+        public string? WatchpointId { get; set; }
+        /// <summary>Watchpoint access type for SETWATCHPOINT: "write", "read", or "readwrite".</summary>
+        public string? WatchpointType { get; set; }
+
+        // TRACECALLS fields
+        /// <summary>Maximum number of EE instructions to trace for TRACECALLS (default 10 000).</summary>
+        public int? MaxInstructions { get; set; }
+
+        // RUNUNTILPC fields
+        /// <summary>Target EE virtual address for RUNUNTILPC.</summary>
+        public uint? TargetPc { get; set; }
+        /// <summary>Timeout in milliseconds for RUNUNTILPC (default 10 000).</summary>
+        public int? TimeoutMs { get; set; }
     }
 }

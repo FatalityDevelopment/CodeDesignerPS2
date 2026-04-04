@@ -61,6 +61,16 @@ interface CommandMessage {
     StructBaseAddress?: string;
     MemberOffset?: number;
     MemberName?: string;
+    // READMEMREGION fields
+    SearchPattern?: number[];
+    // SETWATCHPOINT / CLEARWATCHPOINT fields
+    WatchpointId?: string;
+    WatchpointType?: string;
+    // TRACECALLS fields
+    MaxInstructions?: number;
+    // RUNUNTILPC fields
+    TargetPc?: number;
+    TimeoutMs?: number;
 }
 
 /**
@@ -287,6 +297,17 @@ interface CommandResponse {
     ScanResults?: ScanValueResult[];
     // GETSTRUCTS results
     Structs?: StructEntry[];
+    // READMEMREGION results
+    MatchAddresses?: number[];
+    // SETWATCHPOINT / LISTWATCHPOINTS results
+    WatchpointId?: string;
+    Watchpoints?: WatchpointInfo[];
+    // Watchpoint hit info (GETPC / GETWATCHPOINTHIT)
+    WatchpointHitAddress?: number;
+    WatchpointHitPC?: number;
+    WatchpointHitId?: string;
+    // TRACECALLS result
+    TracedCalls?: CallTraceEntry[];
 }
 
 /**
@@ -331,6 +352,30 @@ export interface HddFileEntryInfo {
     Size:        number;
     IsDirectory: boolean;
     Modified:    string;
+}
+
+/**
+ * Summary of a single active memory watchpoint returned by listWatchpoints().
+ */
+export interface WatchpointInfo {
+    /** Unique watchpoint identifier (e.g. "wp-0"). */
+    Id:      string;
+    /** Virtual EE address as an 8-digit hex string (e.g. "01E7EA60"). */
+    Address: string;
+    /** Number of bytes watched. */
+    Size:    number;
+    /** Access type: "write", "read", or "readwrite". */
+    Type:    string;
+}
+
+/**
+ * A single JAL/JALR call-site record returned by traceCalls().
+ * From = address of the call instruction (KSEG0 hex string).
+ * To   = resolved call target after the delay slot (KSEG0 hex string).
+ */
+export interface CallTraceEntry {
+    From: string;
+    To:   string;
 }
 
 /**
@@ -870,6 +915,165 @@ export class SocketClient {
     }
 
     /**
+     * Read a contiguous region of EE RAM (up to 16 MB) in one call.
+     * Optionally search for a byte pattern within the result.
+     *
+     * @param start          - Inclusive start virtual EE address.
+     * @param end            - Exclusive end virtual EE address (must be > start).
+     * @param searchPattern  - Optional byte pattern to search for.
+     * @param region         - "ee" (default) or "iop".
+     * @returns              - Hex-string of all bytes and list of absolute match addresses.
+     */
+    public async readMemoryRegion(
+        start: number,
+        end: number,
+        searchPattern?: number[],
+        region: string = 'ee',
+    ): Promise<{ bytes: string; matches: number[] }> {
+        const command: CommandMessage = {
+            Command: 'READMEMREGION',
+            Address: start,
+            EndAddress: end,
+            SearchPattern: searchPattern,
+            Region: region,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ReadMemRegion failed');
+        }
+        return {
+            bytes:   response.Data ?? '',
+            matches: response.MatchAddresses ?? [],
+        };
+    }
+
+    /**
+     * Set a write watchpoint on [address, address+size).
+     * When any EE store instruction writes to the range the emulator pauses.
+     *
+     * @param address - Start virtual EE address to watch.
+     * @param size    - Number of bytes to watch (default 4).
+     * @param type    - "write" (default); "read"/"readwrite" reserved for future use.
+     * @returns       - Assigned watchpoint ID (e.g. "wp-0").
+     */
+    public async setWatchpoint(
+        address: number,
+        size: number = 4,
+        type: string = 'write',
+    ): Promise<string> {
+        const command: CommandMessage = {
+            Command: 'SETWATCHPOINT',
+            Address: address,
+            Length: size,
+            WatchpointType: type,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'SetWatchpoint failed');
+        }
+        return response.WatchpointId ?? '';
+    }
+
+    /**
+     * Remove the watchpoint with the given ID.
+     * @param id - Watchpoint ID returned by setWatchpoint().
+     */
+    public async clearWatchpoint(id: string): Promise<void> {
+        const command: CommandMessage = { Command: 'CLEARWATCHPOINT', WatchpointId: id };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ClearWatchpoint failed');
+        }
+    }
+
+    /** Remove every registered watchpoint. */
+    public async clearAllWatchpoints(): Promise<void> {
+        const command: CommandMessage = { Command: 'CLEARALLWATCHPOINTS' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ClearAllWatchpoints failed');
+        }
+    }
+
+    /** Return all currently active watchpoints. */
+    public async listWatchpoints(): Promise<WatchpointInfo[]> {
+        const command: CommandMessage = { Command: 'LISTWATCHPOINTS' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ListWatchpoints failed');
+        }
+        return response.Watchpoints ?? [];
+    }
+
+    /**
+     * Return the details of the most recently fired watchpoint.
+     * Throws if no watchpoint has fired since the last resume.
+     */
+    public async getWatchpointHit(): Promise<{
+        watchpointId: string;
+        physAddress: number;
+        hitPC: number;
+    }> {
+        const command: CommandMessage = { Command: 'GETWATCHPOINTHIT' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'GetWatchpointHit failed');
+        }
+        return {
+            watchpointId: response.WatchpointHitId   ?? '',
+            physAddress:  response.WatchpointHitAddress ?? 0,
+            hitPC:        response.WatchpointHitPC    ?? 0,
+        };
+    }
+
+    /**
+     * Step the emulator instruction-by-instruction from the current PC to endPc,
+     * recording every JAL/JALR call site encountered.
+     * The emulator must be paused before calling this method.
+     *
+     * @param endPc           - Exclusive target PC at which tracing stops.
+     * @param maxInstructions - Safety cap on instructions stepped (default 10 000).
+     * @returns               - Ordered list of { From, To } call-site entries.
+     */
+    public async traceCalls(
+        endPc: number,
+        maxInstructions: number = 10_000,
+    ): Promise<CallTraceEntry[]> {
+        const command: CommandMessage = {
+            Command: 'TRACECALLS',
+            EndAddress: endPc,
+            MaxInstructions: maxInstructions,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'TraceCalls failed');
+        }
+        return response.TracedCalls ?? [];
+    }
+
+    /**
+     * Resume the emulator and block (server-side) until the EE PC reaches
+     * targetPc.  Returns the full register dump at the hit point.
+     *
+     * @param targetPc  - EE virtual address to run to.
+     * @param timeoutMs - Timeout in milliseconds (default 10 000).
+     * @returns         - Full register dump (same shape as getRegisters()).
+     */
+    public async runUntilPc(targetPc: number, timeoutMs: number = 10_000): Promise<RegisterDump> {
+        const command: CommandMessage = {
+            Command: 'RUNUNTILPC',
+            TargetPc: targetPc,
+            TimeoutMs: timeoutMs,
+        };
+        // Give the TCP socket extra headroom over the server-side timeout.
+        const response = await this.sendCommand(command, timeoutMs + 5_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'RunUntilPc failed');
+        }
+        return this.parseRegisterDump(response);
+    }
+
+    /**
      * Take a snapshot: write all memory regions to .bin files in outputPath.
      * Returns the list of written region descriptors.
      */
@@ -965,9 +1169,18 @@ export class SocketClient {
     }
 
     /**
-     * Get the current EE PC and paused/breakpoint state
+     * Get the current EE PC and paused/breakpoint state.
+     * When a memory watchpoint fires the response also includes
+     * watchpointHitAddress, watchpointHitPC, and watchpointHitId.
      */
-    public async getPC(): Promise<{ paused: boolean; pc: number; breakpointHitAddress?: number }> {
+    public async getPC(): Promise<{
+        paused: boolean;
+        pc: number;
+        breakpointHitAddress?: number;
+        watchpointHitAddress?: number;
+        watchpointHitPC?: number;
+        watchpointHitId?: string;
+    }> {
         const command: CommandMessage = { Command: 'GETPC' };
         const response = await this.sendCommand(command);
         if (!response.Success) {
@@ -977,6 +1190,9 @@ export class SocketClient {
             paused: response.Paused ?? false,
             pc: response.PC ?? 0,
             breakpointHitAddress: response.BreakpointHitAddress ?? undefined,
+            watchpointHitAddress: response.WatchpointHitAddress ?? undefined,
+            watchpointHitPC:      response.WatchpointHitPC      ?? undefined,
+            watchpointHitId:      response.WatchpointHitId      ?? undefined,
         };
     }
 
@@ -1080,6 +1296,11 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'GetRegisters failed');
         }
+        return this.parseRegisterDump(response);
+    }
+
+    /** Convert a raw CommandResponse (from GETREGS or RUNUNTILPC) to a RegisterDump. */
+    private parseRegisterDump(response: CommandResponse): RegisterDump {
         return {
             gpr:        response.GPR        ?? new Array(32).fill(0),
             gprLo32:    response.GPR_Lo32   ?? new Array(32).fill(0),

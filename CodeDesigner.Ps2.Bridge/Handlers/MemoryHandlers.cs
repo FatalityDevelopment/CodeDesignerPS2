@@ -369,5 +369,74 @@ namespace CodeDesigner.Ps2.Bridge
             }
             return bytes;
         }
+
+        // Maximum region size for READMEMREGION (16 MB — covers all of EE main RAM).
+        private const int MaxReadMemRegionSize = 16 * 1024 * 1024;
+
+        /// <summary>
+        /// Handle READMEMREGION command — reads a contiguous address range and
+        /// optionally searches for a byte pattern within the result.
+        /// Returns the region as a hex string and a list of absolute EE addresses
+        /// where the pattern was found.
+        /// </summary>
+        /// <param name="start">Inclusive start virtual EE address.</param>
+        /// <param name="end">Exclusive end virtual EE address (must be &gt; start).</param>
+        /// <param name="searchPattern">
+        /// Optional byte sequence to search for.  Each element is an unsigned byte
+        /// value (0–255).  Pass <c>null</c> to skip the pattern search.
+        /// </param>
+        /// <param name="region">"ee" (default) or "iop".</param>
+        private string HandleReadMemRegion(uint start, uint end, IList<int>? searchPattern, string? region)
+        {
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+
+            if (end <= start)
+                return CreateErrorResponse("EndAddress must be greater than Address");
+
+            long regionSize = (long)end - start;
+            if (regionSize > MaxReadMemRegionSize)
+                return CreateErrorResponse($"Region too large — maximum is {MaxReadMemRegionSize / (1024 * 1024)} MB " +
+                                           $"(requested {regionSize / (1024 * 1024.0):F1} MB)");
+
+            bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+
+            try
+            {
+                byte[] bytes = ReadLiveBytes(start, (int)regionSize, useIop);
+
+                // Pattern search (simple sliding window — region is at most 16 MB).
+                List<uint>? matchAddresses = null;
+                if (searchPattern != null && searchPattern.Count > 0)
+                {
+                    matchAddresses = new List<uint>();
+                    int patLen = searchPattern.Count;
+                    int limit  = bytes.Length - patLen;
+                    for (int i = 0; i <= limit; i++)
+                    {
+                        bool found = true;
+                        for (int j = 0; j < patLen; j++)
+                        {
+                            if (bytes[i + j] != (byte)searchPattern[j]) { found = false; break; }
+                        }
+                        if (found)
+                            matchAddresses.Add(start + (uint)i);
+                    }
+                }
+
+                var response = new CommandResponse
+                {
+                    Success        = true,
+                    Command        = "READMEMREGION",
+                    Data           = Convert.ToHexString(bytes),
+                    MatchAddresses = matchAddresses,
+                };
+                return System.Text.Json.JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ReadMemRegion error: {ex.Message}");
+            }
+        }
     }
 }

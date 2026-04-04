@@ -2015,6 +2015,296 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
     }
 
     // -------------------------------------------------------------------------
+    // Memory region read + search, watchpoints, call tracing, run-until-PC
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "read_memory_region")]
+    [Description(
+        "Read a contiguous region of EE RAM in one call and optionally search for a byte pattern within it.\n\n" +
+        "Unlike read_memory (which is capped at 64 KB), this tool can read up to 16 MB in a single request " +
+        "— useful for scanning large RAM windows (e.g. the full 32 MB EE main RAM at 0x00000000–0x02000000).\n\n" +
+        "Returns:\n" +
+        "  • 'bytes'   — the raw region as a hex string (two hex chars per byte, no spaces).\n" +
+        "  • 'matches' — list of absolute EE virtual addresses where search_pattern was found " +
+        "(empty list when no pattern is supplied or no match is found).\n\n" +
+        "search_pattern format: comma-separated decimal byte values, e.g. '0x4D,0x57,0x6F,0x33' or " +
+        "'77,87,111,51'.  Hex prefix '0x' is accepted per element.")]
+    public async Task<string> ReadMemoryRegion(
+        [Description("Inclusive start virtual EE address (hex or decimal).")] string startAddress,
+        [Description("Exclusive end virtual EE address (hex or decimal). Must be greater than startAddress.")] string endAddress,
+        [Description("Optional byte pattern to search for — comma-separated byte values (decimal or 0x-hex), " +
+                     "e.g. '0x4D,0x57,0x6F,0x33'. Omit to skip the search.")] string? searchPattern = null,
+        [Description("Memory region: 'ee' for EE RAM (default) or 'iop' for IOP RAM.")] string region = "ee",
+        CancellationToken cancellationToken = default)
+    {
+        uint? start = TryParseAddress(startAddress);
+        uint? end   = TryParseAddress(endAddress);
+        if (start is null) return $"Error: invalid startAddress '{startAddress}'.";
+        if (end   is null) return $"Error: invalid endAddress '{endAddress}'.";
+
+        // Parse the optional search pattern ("0x4D,0x57" or "77,87").
+        List<int>? pattern = null;
+        if (!string.IsNullOrWhiteSpace(searchPattern))
+        {
+            pattern = new List<int>();
+            foreach (var part in searchPattern.Split(','))
+            {
+                var trimmed = part.Trim();
+                int value;
+                if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!int.TryParse(trimmed[2..], System.Globalization.NumberStyles.HexNumber, null, out value))
+                        return $"Error: invalid byte value '{trimmed}' in search_pattern.";
+                }
+                else
+                {
+                    if (!int.TryParse(trimmed, out value))
+                        return $"Error: invalid byte value '{trimmed}' in search_pattern.";
+                }
+                if (value < 0 || value > 255)
+                    return $"Error: byte value {value} is out of range (0–255) in search_pattern.";
+                pattern.Add(value);
+            }
+        }
+
+        var json = await bridge.SendAsync(
+            new { Command = "READMEMREGION", Address = start.Value, EndAddress = end.Value,
+                  SearchPattern = pattern, Region = region },
+            cancellationToken);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Region: 0x{start.Value:X8} – 0x{end.Value:X8} ({end.Value - start.Value:N0} bytes)");
+
+            if (root.TryGetProperty("Data", out var dataProp) && dataProp.ValueKind == JsonValueKind.String)
+            {
+                var hex = dataProp.GetString() ?? string.Empty;
+                // Show first 256 bytes as a formatted hex dump preview.
+                int previewBytes = Math.Min(hex.Length / 2, 256);
+                sb.AppendLine($"Bytes (first {previewBytes} of {hex.Length / 2} shown): {hex[..(previewBytes * 2)]}");
+            }
+
+            if (root.TryGetProperty("MatchAddresses", out var matchesProp) &&
+                matchesProp.ValueKind == JsonValueKind.Array)
+            {
+                int count = matchesProp.GetArrayLength();
+                sb.AppendLine($"Pattern matches ({count}):");
+                foreach (var m in matchesProp.EnumerateArray())
+                    sb.AppendLine($"  0x{m.GetUInt32():X8}");
+                if (count == 0)
+                    sb.AppendLine("  (none)");
+            }
+            else if (pattern != null)
+            {
+                sb.AppendLine("Pattern matches: (none)");
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    [McpServerTool(Name = "set_memory_watchpoint")]
+    [Description(
+        "Set a write watchpoint on a range of EE RAM.\n\n" +
+        "When the emulator writes to any byte within [address, address+size), execution pauses " +
+        "and the triggering instruction's PC is recorded.  Use get_watchpoint_hit to read the result, " +
+        "or call get_pc immediately after the emulator pauses — the response includes watchpoint hit info.\n\n" +
+        "Returns a watchpoint ID (e.g. 'wp-0') that can be passed to clear_memory_watchpoint.\n\n" +
+        "Note: only supported in the internal emulator mode (not PINE/PCSX2).")]
+    public async Task<string> SetMemoryWatchpoint(
+        [Description("EE virtual address to watch (hex or decimal).")] string address,
+        [Description("Number of bytes to watch (1–256, default 4).")] int size = 4,
+        [Description("Access type to monitor: 'write' (default). 'read' and 'readwrite' are reserved for future use.")] string type = "write",
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedAddress = TryParseAddress(address);
+        if (parsedAddress is null)
+            return $"Error: invalid address '{address}'.";
+
+        var json = await bridge.SendAsync(
+            new { Command = "SETWATCHPOINT", Address = parsedAddress.Value, Length = size, WatchpointType = type },
+            cancellationToken);
+
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "clear_memory_watchpoint")]
+    [Description("Remove a previously registered memory watchpoint by its ID (e.g. 'wp-0'). " +
+                 "Use 'clear_all_memory_watchpoints' to remove all watchpoints at once.")]
+    public async Task<string> ClearMemoryWatchpoint(
+        [Description("Watchpoint ID to remove (e.g. 'wp-0'), as returned by set_memory_watchpoint.")] string watchpointId,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "CLEARWATCHPOINT", WatchpointId = watchpointId },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "clear_all_memory_watchpoints")]
+    [Description("Remove every registered memory watchpoint.")]
+    public async Task<string> ClearAllMemoryWatchpoints(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "CLEARALLWATCHPOINTS" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "list_memory_watchpoints")]
+    [Description("List all currently active memory watchpoints: ID, address, size, and access type.")]
+    public async Task<string> ListMemoryWatchpoints(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "LISTWATCHPOINTS" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("Watchpoints", out var wps) ||
+                wps.ValueKind != JsonValueKind.Array)
+                return "No watchpoints registered.";
+
+            int count = wps.GetArrayLength();
+            if (count == 0) return "No watchpoints registered.";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Active watchpoints ({count}):");
+            foreach (var wp in wps.EnumerateArray())
+            {
+                string id   = wp.TryGetProperty("Id",      out var idP)   ? idP.GetString()   ?? "?" : "?";
+                string addr = wp.TryGetProperty("Address", out var addrP) ? addrP.GetString() ?? "?" : "?";
+                int    sz   = wp.TryGetProperty("Size",    out var szP)   ? szP.GetInt32()       : 0;
+                string ty   = wp.TryGetProperty("Type",    out var tyP)   ? tyP.GetString()   ?? "?" : "?";
+                sb.AppendLine($"  {id}: 0x{addr} size={sz} type={ty}");
+            }
+            return sb.ToString().TrimEnd();
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "get_watchpoint_hit")]
+    [Description(
+        "Return details of the most recently fired memory watchpoint: the watchpoint ID, the physical " +
+        "EE address that was written, the size of the write, and the PC of the instruction that caused it.\n\n" +
+        "The watchpoint hit info is also included in the get_pc response (WatchpointHitAddress / " +
+        "WatchpointHitPC / WatchpointHitId fields) so you do not always need a separate call.")]
+    public async Task<string> GetWatchpointHit(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETWATCHPOINTHIT" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+            if (root.TryGetProperty("Message", out var msg) && msg.ValueKind == JsonValueKind.String)
+                return msg.GetString() ?? json;
+            return json;
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "trace_calls")]
+    [Description(
+        "Step the emulator instruction-by-instruction from the current PC to end_pc and record every " +
+        "JAL / JALR call site hit along the way.\n\n" +
+        "The emulator must already be paused before calling this tool. " +
+        "Execution stops when end_pc is reached, max_instructions is exhausted, or another " +
+        "breakpoint/watchpoint fires.\n\n" +
+        "Because MIPS has branch delay slots, the call target is resolved after the delay-slot " +
+        "instruction executes — the 'to' address in each entry is the actual entry point of the callee.\n\n" +
+        "Returns a list of { from, to } hex address pairs.")]
+    public async Task<string> TraceCalls(
+        [Description("Exclusive end EE virtual address at which tracing stops (hex or decimal).")] string endPc,
+        [Description("Maximum number of EE instructions to step through (default 10 000).")] int maxInstructions = 10_000,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedEnd = TryParseAddress(endPc);
+        if (parsedEnd is null)
+            return $"Error: invalid endPc '{endPc}'.";
+
+        var json = await bridge.SendAsync(
+            new { Command = "TRACECALLS", EndAddress = parsedEnd.Value, MaxInstructions = maxInstructions },
+            cancellationToken);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("TracedCalls", out var calls) ||
+                calls.ValueKind != JsonValueKind.Array)
+                return SimpleMessage(json);
+
+            int count = calls.GetArrayLength();
+            if (count == 0) return "No call sites found in the specified range.";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Traced {count} call(s):");
+            foreach (var call in calls.EnumerateArray())
+            {
+                string from = call.TryGetProperty("From", out var f) ? f.GetString() ?? "?" : "?";
+                string to   = call.TryGetProperty("To",   out var t) ? t.GetString() ?? "?" : "?";
+                sb.AppendLine($"  0x{from} → 0x{to}");
+            }
+            return sb.ToString().TrimEnd();
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "run_until_pc")]
+    [Description(
+        "Resume the emulator and block until the EE program counter reaches target_pc, then return " +
+        "the full register state atomically at the hit.\n\n" +
+        "Equivalent to: set_breakpoint(target_pc) + resume_emulator + wait + get_registers, " +
+        "but performed atomically on the server side with a configurable timeout.\n\n" +
+        "On timeout the emulator is paused at whatever PC it reached; an error message is returned " +
+        "so the caller can still inspect state with get_registers / get_pc.")]
+    public async Task<string> RunUntilPc(
+        [Description("Target EE virtual address to run to (hex or decimal).")] string targetPc,
+        [Description("Timeout in milliseconds before giving up (default 10 000).")] int timeoutMs = 10_000,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedTarget = TryParseAddress(targetPc);
+        if (parsedTarget is null)
+            return $"Error: invalid targetPc '{targetPc}'.";
+
+        // Use a longer cancellation timeout than the server-side timeout so that
+        // the TCP socket stays open until the server-side polling finishes.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeoutMs + 5_000);
+
+        var json = await bridge.SendAsync(
+            new { Command = "RUNUNTILPC", TargetPc = parsedTarget.Value, TimeoutMs = timeoutMs },
+            cts.Token);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+            // On success HandleRunUntilPc returns HandleGetRegisters() output.
+            return FormatRegisters(json);
+        }
+        catch { return json; }
+    }
+
+    // -------------------------------------------------------------------------
     // Private formatting helpers
     // -------------------------------------------------------------------------
 
