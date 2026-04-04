@@ -11,6 +11,7 @@ namespace CodeDesigner.Ps2.Bridge
         public bool Success { get; set; }
         public string? Command { get; set; }
         public string? Message { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? Error { get; set; }
         public string? Data { get; set; }
         public List<InstructionResult>? Results { get; set; }
@@ -121,6 +122,12 @@ namespace CodeDesigner.Ps2.Bridge
         public List<PineSymbolInfo>?      PineSymbols  { get; set; }
         public List<PineDisassemblyLineInfo>? DisassemblyLines { get; set; }
         public List<PineLocalInfo>?       LocalVars    { get; set; }
+
+        // GETNAVHISTORY results
+        public List<NavHistoryEntry>? NavHistory { get; set; }
+
+        // GETADDRESSHISTORY results
+        public List<AddressHistoryEntry>? AddressHistory { get; set; }
 
         // READMEMREGION results
         /// <summary>

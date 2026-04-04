@@ -92,6 +92,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Member name for ADDSTRUCTMEMBER.</summary>
         public string? MemberName { get; set; }
 
+        // RECORDNAV / GETADDRESSHISTORY fields
+        /// <summary>Navigation source label (e.g. "user", "mcp", "navigate") for RECORDNAV.</summary>
+        public string? NavSource { get; set; }
+        /// <summary>Root directory to scan for snapshot-info.json files (GETADDRESSHISTORY).</summary>
+        public string? SnapshotDir { get; set; }
+
         // READMEMREGION fields
         /// <summary>
         /// Optional byte pattern to search for within the memory region (READMEMREGION).

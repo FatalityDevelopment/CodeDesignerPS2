@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using CodeDesigner.Ps2.Emulator;
@@ -12,12 +13,15 @@ namespace CodeDesigner.Ps2.Bridge
 
         /// <summary>
         /// Handle SETWATCHPOINT command — registers a memory write watchpoint on a
-        /// range of EE RAM.  When any EE store instruction writes to an address in
-        /// the range the emulator pauses and records the triggering PC so it can be
-        /// inspected via GETPC / GETWATCHPOINTHIT.
+        /// range of EE RAM.
         /// <para>
-        /// PINE mode is not supported (PCSX2's PINE protocol does not expose
-        /// software watchpoints); an error is returned in that case.
+        /// In PINE mode a software watchpoint is implemented: the current memory
+        /// contents are snapshotted and compared on subsequent GETWATCHPOINTHIT /
+        /// RUNUNTILWATCHPOINT calls; no PCSX2 changes are required.
+        /// </para>
+        /// <para>
+        /// In internal-emulator mode the scheduler's hardware watchpoint fires
+        /// synchronously inside EE.Step() and pauses execution immediately.
         /// </para>
         /// </summary>
         /// <param name="address">Start virtual EE address of the range to watch.</param>
@@ -25,14 +29,51 @@ namespace CodeDesigner.Ps2.Bridge
         /// <param name="watchpointType">"write" (default), "read", or "readwrite".</param>
         private string HandleSetWatchpoint(uint? address, int? size, string? watchpointType)
         {
-            if (IsPineMode)
-                return CreateErrorResponse("Watchpoints are not supported in PINE mode");
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (address == null)
                 return CreateErrorResponse("Address is required for SETWATCHPOINT");
 
             int watchSize = Math.Clamp(size ?? 4, 1, 256);
+
+            // ── PINE mode: software watchpoint via memory snapshot ────────────
+            if (IsPineMode)
+            {
+                if (PineClient == null)
+                    return CreateErrorResponse("PINE client is not connected");
+
+                byte[] snapshot;
+                try { snapshot = PineClient.ReadBytes(address.Value, watchSize); }
+                catch (Exception ex)
+                {
+                    return CreateErrorResponse(
+                        $"Failed to read memory at 0x{address.Value:X8} for watchpoint snapshot: {ex.Message}");
+                }
+
+                string id;
+                lock (_pineWatchpointLock)
+                {
+                    id = $"wp-{_pineWatchpointCounter++}";
+                    _pineWatchpoints.Add(new PineSoftwareWatchpoint
+                    {
+                        Id             = id,
+                        VirtualAddress = address.Value,
+                        Size           = watchSize,
+                        Snapshot       = snapshot,
+                    });
+                }
+
+                var pineResp = new CommandResponse
+                {
+                    Success      = true,
+                    Command      = "SETWATCHPOINT",
+                    WatchpointId = id,
+                    Message      = $"Watchpoint {id} set at 0x{address.Value:X8} ({watchSize} byte(s), write) — polling mode (PINE)",
+                };
+                return JsonSerializer.Serialize(pineResp);
+            }
+
+            // ── Internal emulator mode ────────────────────────────────────────
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
 
             WatchpointType type = WatchpointType.Write;
             if (!string.IsNullOrEmpty(watchpointType))
@@ -45,18 +86,16 @@ namespace CodeDesigner.Ps2.Bridge
                 };
             }
 
-            // Only write watchpoints are implemented for the internal emulator.
             if (type != WatchpointType.Write)
                 return CreateErrorResponse("Only write watchpoints are currently supported for the internal emulator");
 
-            // Normalise virtual → physical for the range comparison.
             uint physStart = NormalizeBreakpointToPhysical(address.Value);
             uint physEnd   = physStart + (uint)watchSize;
 
-            string id = Scheduler.NextWatchpointId();
+            string emulId = Scheduler.NextWatchpointId();
             var wp = new MemoryWatchpoint
             {
-                Id             = id,
+                Id             = emulId,
                 VirtualAddress = address.Value,
                 PhysStart      = physStart,
                 PhysEnd        = physEnd,
@@ -69,8 +108,8 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 Success      = true,
                 Command      = "SETWATCHPOINT",
-                WatchpointId = id,
-                Message      = $"Watchpoint {id} set at 0x{address.Value:X8} ({watchSize} byte(s), write)",
+                WatchpointId = emulId,
+                Message      = $"Watchpoint {emulId} set at 0x{address.Value:X8} ({watchSize} byte(s), write)",
             };
             return JsonSerializer.Serialize(response);
         }
@@ -82,16 +121,25 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleClearWatchpoint(string? watchpointId)
         {
-            if (IsPineMode)
-                return CreateErrorResponse("Watchpoints are not supported in PINE mode");
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
             if (string.IsNullOrWhiteSpace(watchpointId))
                 return CreateErrorResponse("WatchpointId is required for CLEARWATCHPOINT");
 
+            if (IsPineMode)
+            {
+                int removed;
+                lock (_pineWatchpointLock)
+                    removed = _pineWatchpoints.RemoveAll(w => w.Id == watchpointId);
+                return removed > 0
+                    ? CreateSuccessResponse($"Watchpoint {watchpointId} cleared")
+                    : CreateErrorResponse($"No watchpoint found with ID '{watchpointId}'");
+            }
+
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+
             var list = Scheduler.WriteWatchpoints;
-            int removed = list.RemoveAll(w => w.Id == watchpointId);
-            return removed > 0
+            int removedEmul = list.RemoveAll(w => w.Id == watchpointId);
+            return removedEmul > 0
                 ? CreateSuccessResponse($"Watchpoint {watchpointId} cleared")
                 : CreateErrorResponse($"No watchpoint found with ID '{watchpointId}'");
         }
@@ -104,12 +152,22 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleClearAllWatchpoints()
         {
             if (IsPineMode)
-                return CreateErrorResponse("Watchpoints are not supported in PINE mode");
+            {
+                int count;
+                lock (_pineWatchpointLock)
+                {
+                    count = _pineWatchpoints.Count;
+                    _pineWatchpoints.Clear();
+                }
+                return CreateSuccessResponse($"Cleared {count} watchpoint(s)");
+            }
+
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
-            int count = Scheduler.WriteWatchpoints.Count;
+
+            int emulCount = Scheduler.WriteWatchpoints.Count;
             Scheduler.WriteWatchpoints.Clear();
-            return CreateSuccessResponse($"Cleared {count} watchpoint(s)");
+            return CreateSuccessResponse($"Cleared {emulCount} watchpoint(s)");
         }
 
         // ── LISTWATCHPOINTS ───────────────────────────────────────────────────
@@ -120,7 +178,28 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleListWatchpoints()
         {
             if (IsPineMode)
-                return CreateErrorResponse("Watchpoints are not supported in PINE mode");
+            {
+                List<WatchpointInfo> pineInfos;
+                lock (_pineWatchpointLock)
+                {
+                    pineInfos = _pineWatchpoints.Select(w => new WatchpointInfo
+                    {
+                        Id      = w.Id,
+                        Address = w.VirtualAddress.ToString("X8"),
+                        Size    = w.Size,
+                        Type    = "write",
+                    }).ToList();
+                }
+
+                var pineResp = new CommandResponse
+                {
+                    Success    = true,
+                    Command    = "LISTWATCHPOINTS",
+                    Watchpoints = pineInfos,
+                };
+                return JsonSerializer.Serialize(pineResp);
+            }
+
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
@@ -148,15 +227,71 @@ namespace CodeDesigner.Ps2.Bridge
         // ── GETWATCHPOINTHIT ─────────────────────────────────────────────────
 
         /// <summary>
-        /// Handle GETWATCHPOINTHIT command — returns the details of the most
-        /// recently fired watchpoint (watchpoint ID, physical address, PC at the
-        /// time of the write, and size).  Returns an error if no watchpoint has
-        /// fired since the last resume.
+        /// Handle GETWATCHPOINTHIT command.
+        /// <para>
+        /// In PINE mode this is a non-blocking poll: it reads the current memory at
+        /// every registered watchpoint address and compares it against the last
+        /// snapshot.  The first changed watchpoint is returned; its snapshot is
+        /// updated so repeated calls keep advancing.  The PC is sampled at the
+        /// moment the change is detected (approximate — may be several instructions
+        /// after the actual write).
+        /// </para>
+        /// <para>
+        /// In internal-emulator mode it returns <see cref="DualCpuScheduler.LastWatchpointHit"/>
+        /// which is set synchronously inside EE.Step().
+        /// </para>
         /// </summary>
         private string HandleGetWatchpointHit()
         {
+            // ── PINE mode: poll all watched addresses for changes ─────────────
             if (IsPineMode)
-                return CreateErrorResponse("Watchpoints are not supported in PINE mode");
+            {
+                if (PineClient == null)
+                    return CreateErrorResponse("PINE client is not connected");
+
+                List<PineSoftwareWatchpoint> wps;
+                lock (_pineWatchpointLock)
+                    wps = new List<PineSoftwareWatchpoint>(_pineWatchpoints);
+
+                if (wps.Count == 0)
+                    return CreateErrorResponse("No watchpoints registered — use SETWATCHPOINT first");
+
+                foreach (var wp in wps)
+                {
+                    byte[] current;
+                    try { current = PineClient.ReadBytes(wp.VirtualAddress, wp.Size); }
+                    catch { continue; }
+
+                    if (current.SequenceEqual(wp.Snapshot))
+                        continue;
+
+                    // Value changed — sample approximate PC and update snapshot.
+                    uint pc = 0;
+                    try { pc = PineClient.GetProgramCounter(out _); }
+                    catch { /* best-effort */ }
+
+                    // Reference assignment is atomic; no lock needed to update the snapshot.
+                    wp.Snapshot = current;
+
+                    uint normalizedPc = NormalizePcToKseg0(pc);
+                    var pineResp = new CommandResponse
+                    {
+                        Success              = true,
+                        Command              = "GETWATCHPOINTHIT",
+                        WatchpointId         = wp.Id,
+                        WatchpointHitAddress = wp.VirtualAddress,
+                        WatchpointHitPC      = normalizedPc,
+                        WatchpointHitId      = wp.Id,
+                        Message              = $"Watchpoint {wp.Id} fired: value changed at " +
+                                              $"0x{wp.VirtualAddress:X8}, approximate PC: 0x{normalizedPc:X8}",
+                    };
+                    return JsonSerializer.Serialize(pineResp);
+                }
+
+                return CreateErrorResponse("No watchpoint has fired since the last check");
+            }
+
+            // ── Internal emulator mode ────────────────────────────────────────
             if (Scheduler == null)
                 return CreateErrorResponse("Emulator not running — no scheduler attached");
 
@@ -164,19 +299,111 @@ namespace CodeDesigner.Ps2.Bridge
             if (hit == null)
                 return CreateErrorResponse("No watchpoint has fired since the last resume");
 
-            uint normalizedPc = NormalizePcToKseg0(hit.PC);
+            uint normalizedEmulPc = NormalizePcToKseg0(hit.PC);
             var response = new CommandResponse
             {
-                Success            = true,
-                Command            = "GETWATCHPOINTHIT",
-                WatchpointId       = hit.WatchpointId,
+                Success              = true,
+                Command              = "GETWATCHPOINTHIT",
+                WatchpointId         = hit.WatchpointId,
                 WatchpointHitAddress = hit.PhysAddress,
-                WatchpointHitPC    = normalizedPc,
-                WatchpointHitId    = hit.WatchpointId,
+                WatchpointHitPC      = normalizedEmulPc,
+                WatchpointHitId      = hit.WatchpointId,
                 Message = $"Watchpoint {hit.WatchpointId} fired: write of {hit.Size} byte(s) " +
-                          $"at 0x{hit.PhysAddress:X8} by instruction at 0x{normalizedPc:X8}",
+                          $"at 0x{hit.PhysAddress:X8} by instruction at 0x{normalizedEmulPc:X8}",
             };
             return JsonSerializer.Serialize(response);
+        }
+
+        // ── RUNUNTILWATCHPOINT ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Handle RUNUNTILWATCHPOINT command — resumes PCSX2, polls all registered
+        /// software watchpoints until any watched memory range changes, then pauses
+        /// PCSX2 and returns the watchpoint hit details.
+        /// <para>
+        /// This is the PINE-mode equivalent of the internal emulator's automatic
+        /// pause on hardware watchpoint fire.  Because PCSX2's PINE protocol does
+        /// not expose hardware watchpoints we implement the detection via memory
+        /// polling; the PC returned is approximate (sampled at the moment the change
+        /// is detected, which may be a few instructions after the actual write).
+        /// </para>
+        /// <para>
+        /// At least one watchpoint must be registered via SETWATCHPOINT before
+        /// calling this command.
+        /// </para>
+        /// </summary>
+        /// <param name="timeoutMs">Maximum milliseconds to wait before giving up.</param>
+        private string HandleRunUntilWatchpoint(int timeoutMs)
+        {
+            if (!IsPineMode)
+                return CreateErrorResponse(
+                    "RUNUNTILWATCHPOINT is only supported in PINE mode; " +
+                    "with the internal emulator the scheduler pauses automatically when a watchpoint fires.");
+            if (PineClient == null)
+                return CreateErrorResponse("PINE client is not connected");
+
+            if (timeoutMs <= 0) timeoutMs = 15_000;
+
+            List<PineSoftwareWatchpoint> wps;
+            lock (_pineWatchpointLock)
+                wps = new List<PineSoftwareWatchpoint>(_pineWatchpoints);
+
+            if (wps.Count == 0)
+                return CreateErrorResponse("No watchpoints registered — use SETWATCHPOINT first");
+
+            try
+            {
+                PineClient.Resume();
+
+                var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+                while (DateTime.UtcNow < deadline)
+                {
+                    foreach (var wp in wps)
+                    {
+                        byte[] current;
+                        try { current = PineClient.ReadBytes(wp.VirtualAddress, wp.Size); }
+                        catch { continue; }
+
+                        if (current.SequenceEqual(wp.Snapshot))
+                            continue;
+
+                        // Hit — pause PCSX2 and sample PC.
+                        try { PineClient.Pause(); } catch { /* best-effort */ }
+
+                        uint pc = 0;
+                        try { pc = PineClient.GetProgramCounter(out _); }
+                        catch { /* best-effort */ }
+
+                        // Reference assignment is atomic; no lock needed to update the snapshot.
+                        wp.Snapshot = current;
+
+                        uint normalizedPc = NormalizePcToKseg0(pc);
+                        var hitResp = new CommandResponse
+                        {
+                            Success              = true,
+                            Command              = "RUNUNTILWATCHPOINT",
+                            WatchpointId         = wp.Id,
+                            WatchpointHitAddress = wp.VirtualAddress,
+                            WatchpointHitPC      = normalizedPc,
+                            WatchpointHitId      = wp.Id,
+                            Message              = $"Watchpoint {wp.Id} fired: value changed at " +
+                                                  $"0x{wp.VirtualAddress:X8}, approximate PC: 0x{normalizedPc:X8}",
+                        };
+                        return JsonSerializer.Serialize(hitResp);
+                    }
+
+                    Thread.Sleep(10);
+                }
+
+                // Timeout — pause so the caller can inspect state.
+                try { PineClient.Pause(); } catch { /* best-effort */ }
+                return CreateErrorResponse(
+                    $"Timeout: no watchpoint fired within {timeoutMs} ms");
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"RUNUNTILWATCHPOINT error: {ex.Message}");
+            }
         }
 
         // ── TRACECALLS ────────────────────────────────────────────────────────

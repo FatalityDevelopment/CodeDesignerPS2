@@ -71,6 +71,10 @@ interface CommandMessage {
     // RUNUNTILPC fields
     TargetPc?: number;
     TimeoutMs?: number;
+    // RECORDNAV fields
+    NavSource?: string;
+    // GETADDRESSHISTORY fields
+    SnapshotDir?: string;
 }
 
 /**
@@ -147,6 +151,26 @@ export interface StructEntry {
     name:        string;
     baseAddress: string;
     members:     StructMemberEntry[];
+}
+
+/**
+ * One entry in the server-side navigation history.
+ */
+export interface NavHistoryEntry {
+    Address:   string;
+    Label?:    string;
+    Source:    string;
+    Timestamp: string;
+}
+
+/**
+ * One historical 4-byte value at an address, read from a saved snapshot.
+ */
+export interface AddressHistoryEntry {
+    SnapshotName: string;
+    Timestamp:    string;
+    Value:        string;
+    Disasm?:      string;
 }
 
 /**
@@ -1071,6 +1095,36 @@ export class SocketClient {
             throw new Error(response.Error || 'RunUntilPc failed');
         }
         return this.parseRegisterDump(response);
+    }
+
+    /**
+     * Resume PCSX2 and block until any registered memory watchpoint fires
+     * (the watched address value changes), then return hit details.
+     *
+     * Only supported in PINE mode. Uses memory polling (~5 ms interval);
+     * the returned PC is approximate.
+     *
+     * @param timeoutMs - Maximum wait time in milliseconds (default 15 000).
+     * @returns Watchpoint hit info: watchpoint ID, virtual address, and approximate PC.
+     */
+    public async runUntilWatchpoint(timeoutMs: number = 15_000): Promise<{
+        watchpointId: string;
+        hitAddress:   number;
+        hitPC:        number;
+    }> {
+        const command: CommandMessage = {
+            Command: 'RUNUNTILWATCHPOINT',
+            TimeoutMs: timeoutMs,
+        };
+        const response = await this.sendCommand(command, timeoutMs + 5_000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'RunUntilWatchpoint failed');
+        }
+        return {
+            watchpointId: response.WatchpointHitId      ?? '',
+            hitAddress:   response.WatchpointHitAddress ?? 0,
+            hitPC:        response.WatchpointHitPC      ?? 0,
+        };
     }
 
     /**
@@ -2132,5 +2186,72 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'ADDSTRUCTMEMBER failed');
         }
+    }
+
+    // ── Navigation history ────────────────────────────────────────────────────
+
+    /**
+     * Record a navigation event in the server-side history.
+     * Called by the VS Code extension whenever the user navigates in the disasm editor.
+     * @param address  EE virtual address navigated to.
+     * @param source   'user' for VS Code user action, 'mcp' for AI-driven navigation.
+     */
+    public async recordNav(address: number, source: 'user' | 'mcp' = 'user'): Promise<void> {
+        try {
+            await this.sendCommand({ Command: 'RECORDNAV', Address: address, NavSource: source });
+        } catch { /* non-fatal */ }
+    }
+
+    /**
+     * Fetch the server-side navigation history.
+     */
+    public async getNavHistory(): Promise<NavHistoryEntry[]> {
+        const response = await this.sendCommand({ Command: 'GETNAVHISTORY' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'GETNAVHISTORY failed');
+        }
+        return (response as any).NavHistory ?? [];
+    }
+
+    /**
+     * Clear the server-side navigation history.
+     */
+    public async clearNavHistory(): Promise<void> {
+        const response = await this.sendCommand({ Command: 'CLEARNAVHISTORY' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'CLEARNAVHISTORY failed');
+        }
+    }
+
+    /**
+     * Tell the VS Code disasm editor to navigate to the given address.
+     * The server pushes an ai_activity notification; Follow AI mode in the
+     * VS Code extension automatically scrolls the disasm view.
+     */
+    public async navigateTo(address: number): Promise<void> {
+        const response = await this.sendCommand({ Command: 'NAVIGATETO', Address: address });
+        if (!response.Success) {
+            throw new Error(response.Error || 'NAVIGATETO failed');
+        }
+    }
+
+    /**
+     * Read historical 4-byte values at `address` across all snapshots in `snapshotDir`.
+     * @param address      EE virtual address to look up.
+     * @param snapshotDir  Root directory to scan for snapshot-info.json files.
+     */
+    public async getAddressSnapshotHistory(
+        address: number,
+        snapshotDir: string,
+    ): Promise<AddressHistoryEntry[]> {
+        const response = await this.sendCommand({
+            Command: 'GETADDRESSHISTORY',
+            Address: address,
+            SnapshotDir: snapshotDir,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'GETADDRESSHISTORY failed');
+        }
+        return (response as any).AddressHistory ?? [];
     }
 }

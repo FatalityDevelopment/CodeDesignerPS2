@@ -48,6 +48,7 @@ namespace CodeDesigner.Ps2.Bridge
             "SETBP", "CLEARBP",
             "SCANSTRINGS", "SCANFUNCTIONS", "SCANPOINTERS", "SCANFLOATS", "SCANINTEGERS",
             "SCANVALUE",
+            "NAVIGATETO",
         };
 
         /// <summary>
@@ -89,6 +90,71 @@ namespace CodeDesigner.Ps2.Bridge
         /// <see cref="Scheduler"/> is present).
         /// </summary>
         private bool IsPineMode => PineClient != null && Scheduler == null;
+
+        // ── PINE software watchpoints ──────────────────────────────────────────
+        // PCSX2's PINE protocol does not expose hardware watchpoints, so we
+        // implement them in software: we snapshot the watched memory when the
+        // watchpoint is set and poll for changes on demand (GETWATCHPOINTHIT) or
+        // in a blocking loop (RUNUNTILWATCHPOINT).
+
+        /// <summary>Tracks software watchpoints active in PINE mode.</summary>
+        private sealed class PineSoftwareWatchpoint
+        {
+            public string Id              { get; init; } = "";
+            public uint   VirtualAddress  { get; init; }
+            public int    Size            { get; init; }
+            /// <summary>Snapshot of the watched memory bytes at the last check.</summary>
+            public byte[] Snapshot        { get; set; }  = Array.Empty<byte>();
+        }
+
+        private readonly List<PineSoftwareWatchpoint> _pineWatchpoints    = new();
+        private readonly object                        _pineWatchpointLock = new();
+        private int                                    _pineWatchpointCounter;
+
+        // ── Navigation history ────────────────────────────────────────────────
+        // A bounded circular log of recently visited EE addresses, populated
+        // automatically from address-bearing socket commands and from explicit
+        // RECORDNAV calls sent by the VS Code extension when the user navigates
+        // the disasm editor.
+
+        private const int MaxNavHistory = 200;
+        private readonly List<NavHistoryEntry> _navHistory     = new();
+        private readonly object                _navHistoryLock = new();
+
+        /// <summary>
+        /// Record an address in the navigation history.  If the same address is
+        /// already present it is moved to the end (most-recent position).
+        /// Resolves the optional label from the loaded symbols dictionary.
+        /// </summary>
+        internal void RecordNavEntry(uint address, string source)
+        {
+            // Normalise to KSEG0 for a canonical display address.
+            uint display  = NormalizePcToKseg0(address);
+            string addrStr = $"0x{display:X8}";
+
+            // Try to find a label — check both the KSEG0 address and the
+            // physical address (labels may be stored under either form).
+            string? label = null;
+            uint phys = NormalizeBreakpointToPhysical(address);
+            if (_labels.TryGetValue(display, out var l1)) label = l1.Label;
+            else if (_labels.TryGetValue(phys, out var l2)) label = l2.Label;
+
+            var entry = new NavHistoryEntry
+            {
+                Address   = addrStr,
+                Label     = label,
+                Source    = source,
+                Timestamp = DateTime.UtcNow.ToString("o"),
+            };
+
+            lock (_navHistoryLock)
+            {
+                _navHistory.RemoveAll(e => e.Address == addrStr);
+                _navHistory.Add(entry);
+                if (_navHistory.Count > MaxNavHistory)
+                    _navHistory.RemoveAt(0);
+            }
+        }
 
         /// <summary>
         /// Set to <c>true</c> by <see cref="HandleRestart"/> to ask the emulator
@@ -506,6 +572,15 @@ namespace CodeDesigner.Ps2.Bridge
                     return CreateErrorResponse("Invalid command format");
                 }
 
+                // Auto-record navigation history for any address-bearing command.
+                var cmdNorm = command.Command.ToUpperInvariant();
+                if (command.Address.HasValue &&
+                    _activityAddressCommands.Contains(cmdNorm) &&
+                    cmdNorm != "NAVIGATETO") // NAVIGATETO records explicitly in its handler
+                {
+                    RecordNavEntry(command.Address.Value, "mcp");
+                }
+
                 switch (command.Command.ToUpperInvariant())
                 {
                     case "STARTPCSX2":
@@ -855,6 +930,33 @@ namespace CodeDesigner.Ps2.Bridge
                     case "RUNUNTILPC":
                     case "RUN_UNTIL_PC":
                         return HandleRunUntilPc(command.TargetPc, command.TimeoutMs ?? 10_000);
+
+                    case "RUNUNTILWATCHPOINT":
+                    case "RUN_UNTIL_WATCHPOINT":
+                        return HandleRunUntilWatchpoint(command.TimeoutMs ?? 15_000);
+
+                    // ── Navigation history ────────────────────────────────────
+                    case "GETNAVHISTORY":
+                    case "GET_NAV_HISTORY":
+                        return HandleGetNavHistory();
+
+                    case "RECORDNAV":
+                    case "RECORD_NAV":
+                        return HandleRecordNav(command.Address, command.NavSource ?? "user");
+
+                    case "CLEARNAVHISTORY":
+                    case "CLEAR_NAV_HISTORY":
+                        return HandleClearNavHistory();
+
+                    // ── Navigate VS Code disasm view ──────────────────────────
+                    case "NAVIGATETO":
+                    case "NAVIGATE_TO":
+                        return HandleNavigateTo(command.Address);
+
+                    // ── Snapshot address history ──────────────────────────────
+                    case "GETADDRESSHISTORY":
+                    case "GET_ADDRESS_HISTORY":
+                        return HandleGetAddressHistory(command.Address, command.SnapshotDir);
 
                     default:
                         // Echo for unknown commands

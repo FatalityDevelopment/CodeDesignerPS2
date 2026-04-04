@@ -116,10 +116,10 @@ namespace CodeDesigner.Ps2.Bridge
                     {
                         uint pineAddr = TranslatePineAddress(baseAddr, useIop);
                         byte[] bytes  = PineClient!.ReadBytes(pineAddr, size);
-                        string filePath = Path.Combine(outputPath, file);
-                        File.WriteAllBytes(filePath, bytes);
-                        written.Add(new SnapshotRegion { Label = label, File = filePath, BaseAddress = baseAddr, Size = bytes.Length });
+                        File.WriteAllBytes(Path.Combine(outputPath, file), bytes);
+                        written.Add(new SnapshotRegion { Label = label, File = file, BaseAddress = baseAddr, Size = bytes.Length });
                     }
+                    WriteSnapshotInfo(outputPath, written);
                     return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "SNAPSHOT", Regions = written });
                 }
                 catch (Exception ex)
@@ -134,7 +134,7 @@ namespace CodeDesigner.Ps2.Bridge
                 Directory.CreateDirectory(outputPath);
                 var regions = new[]
                 {
-                    (Label: "EE Main RAM",  File: "EEmem.bin",    Bytes: Scheduler.EE.Bus.Ram,        Base: 0x00000000u),
+                    (Label: "EE Main RAM",  File: "EEmem.bin",     Bytes: Scheduler.EE.Bus.Ram,        Base: 0x00000000u),
                     (Label: "BIOS ROM",     File: "BIOSrom.bin",   Bytes: Scheduler.EE.Bus.Bios,       Base: PS2MemoryBus.BiosRomPhysBase),
                     (Label: "Scratchpad",   File: "Scratchpad.bin",Bytes: Scheduler.EE.Bus.Scratchpad, Base: 0x70000000u),
                     (Label: "IOP RAM",      File: "IOPmem.bin",    Bytes: Scheduler.IOP.Bus.Ram,       Base: EeIopMirrorBase),
@@ -142,16 +142,48 @@ namespace CodeDesigner.Ps2.Bridge
                 var written = new List<SnapshotRegion>();
                 foreach (var (label, file, bytes, baseAddr) in regions)
                 {
-                    string filePath = Path.Combine(outputPath, file);
-                    File.WriteAllBytes(filePath, bytes);
-                    written.Add(new SnapshotRegion { Label = label, File = filePath, BaseAddress = baseAddr, Size = bytes.Length });
+                    File.WriteAllBytes(Path.Combine(outputPath, file), bytes);
+                    written.Add(new SnapshotRegion { Label = label, File = file, BaseAddress = baseAddr, Size = bytes.Length });
                 }
+                WriteSnapshotInfo(outputPath, written);
                 return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "SNAPSHOT", Regions = written });
             }
             catch (Exception ex)
             {
                 return CreateErrorResponse("Snapshot error: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Write a <c>snapshot-info.json</c> file alongside the .bin files.
+        /// The format is compatible with what the VS Code extension writes, so
+        /// snapshots taken by the MCP agent are visible in the disasm History tab
+        /// and can be read by <c>GETADDRESSHISTORY</c>.
+        /// </summary>
+        private static void WriteSnapshotInfo(string outputPath, List<SnapshotRegion> regions)
+        {
+            try
+            {
+                string name = Path.GetFileName(outputPath.TrimEnd(Path.DirectorySeparatorChar,
+                                                                  Path.AltDirectorySeparatorChar));
+                var info = new
+                {
+                    name,
+                    timestamp = DateTime.UtcNow.ToString("o"),
+                    isoName   = string.Empty,
+                    regions   = regions.Select(r => new
+                    {
+                        r.Label,
+                        r.File,
+                        r.BaseAddress,
+                        r.Size,
+                    }).ToList(),
+                };
+                File.WriteAllText(
+                    Path.Combine(outputPath, "snapshot-info.json"),
+                    JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            catch { /* non-fatal: snapshot files are still usable without the info file */ }
         }
 
         /// <summary>
