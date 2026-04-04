@@ -1693,9 +1693,17 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   private handleStructMessage(data: Record<string, unknown>): void {
     if (data['type'] === 'getStructsResult') {
-      this.zone.run(() => {
-        this.structOverlayRef()?.setStructs((data['structs'] as StructEntryData[]) ?? []);
-      });
+      const structs = data['structs'];
+      if (structs !== undefined && structs !== null) {
+        this.zone.run(() => {
+          this.structOverlayRef()?.setStructs(structs as StructEntryData[]);
+        });
+      } else {
+        // Not connected or request failed — stop loading spinner but keep existing list
+        this.zone.run(() => {
+          this.structOverlayRef()?.stopLoading();
+        });
+      }
     } else if (data['type'] === 'addStructResult' || data['type'] === 'addStructMemberResult') {
       this.zone.run(() => {
         this.structOverlayRef()?.setStructs((data['structs'] as StructEntryData[]) ?? []);

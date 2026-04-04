@@ -3178,6 +3178,25 @@ app-bottom-panel {
     min-width: 80px;
 }
 
+.struct-refresh-btn {
+    background: transparent;
+    border: 1px solid #555;
+    color: #ccc;
+    padding: 2px 6px;
+    cursor: pointer;
+    font-size: 13px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    margin-left: 4px;
+    line-height: 1;
+}
+
+.struct-refresh-btn:hover {
+    background: #3c3c3c;
+    border-color: #888;
+    color: #fff;
+}
+
 #struct-offset-result {
     font-family: monospace;
     font-size: 13px;

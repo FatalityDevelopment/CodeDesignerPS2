@@ -62,6 +62,7 @@ export interface AddStructMemberEvent {
             }
             <option value="manual">&#x270F; Manual</option>
           </select>
+          <button class="struct-refresh-btn" title="Refresh struct list" (click)="refresh()">&#x21BB;</button>
         }
       </div>
 
@@ -240,6 +241,17 @@ export class StructOffsetOverlayComponent {
       this.visible.set(false);
       this.close$.emit();
     }
+  }
+
+  /** Re-fetch the struct list from the server without closing the overlay. */
+  refresh(): void {
+    this.structsLoading.set(true);
+    this.loadStructs$.emit();
+  }
+
+  /** Stop loading spinner without changing the struct list (e.g. when not connected). */
+  stopLoading(): void {
+    this.structsLoading.set(false);
   }
 
   /** Called by parent after a GETSTRUCTS response arrives. */

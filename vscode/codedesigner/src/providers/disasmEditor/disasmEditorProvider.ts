@@ -2520,16 +2520,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Fetch all struct definitions and post back to webview. */
   private async _handleGetStructs(webview: vscode.Webview): Promise<void> {
     if (!this.socketClient?.isConnected()) {
-      webview.postMessage({ type: 'getStructsResult', structs: [] });
+      // Don't clear existing structs — send null so the overlay keeps what it had
+      webview.postMessage({ type: 'getStructsResult', structs: [], connected: false });
       return;
     }
     try {
       const structs = await this.socketClient.getStructs();
-      webview.postMessage({ type: 'getStructsResult', structs });
+      webview.postMessage({ type: 'getStructsResult', structs, connected: true });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       getOutputChannel().error('[Struct] ' + errMsg);
-      webview.postMessage({ type: 'getStructsResult', structs: [] });
+      webview.postMessage({ type: 'getStructsResult', structs: [], connected: false });
     }
   }
 
