@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using CodeDesigner.Ps2.CheatConverter;
+using CodeDesigner.Ps2.McpServer.Prompts;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -28,7 +29,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     /// burning significant extra tokens.
     /// </summary>
     private const string RulesHeader =
-        "📋 [Rules: navigate_to after discoveries · label all findings · snapshot at milestones · update progress report when important]";
+        "📋 [Rules: call session_start at the beginning of every session · navigate_to after discoveries · label all findings · snapshot at milestones · update progress report when important]";
 
     /// <summary>Prepends the rules header to any non-empty result string.</summary>
     private static string WithRules(string result) =>
@@ -72,6 +73,38 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
         var json = await bridge.SendAsync(new { Command = "PING" }, cancellationToken);
         return SimpleMessage(json);
     }
+
+    [McpServerTool(Name = "session_start")]
+    [Description(
+        "CALL THIS FIRST at the beginning of every session. " +
+        "Returns the full Code Designer operational guidelines so the agent is properly " +
+        "configured before taking any other action. " +
+        "Also lists all existing progress reports so previous session work can be resumed. " +
+        "This tool is the primary way to load guidelines — do not rely on prompts/get.")]
+    public Task<string> SessionStart()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(CodeDesignerPs2Prompts.CheatMasterSystemPrompt);
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine();
+
+        var reportNames = reports.ListReports();
+        if (reportNames.Count == 0)
+        {
+            sb.AppendLine("📂 **No progress reports found.** This appears to be a new session.");
+            sb.AppendLine("   Create one early with `save_progress_report` using a descriptive name.");
+        }
+        else
+        {
+            sb.AppendLine("📂 **Existing progress reports** (call `get_progress_report` to resume one):");
+            foreach (var name in reportNames)
+                sb.AppendLine($"   - {name}");
+        }
+
+        return Task.FromResult(sb.ToString().TrimEnd());
+    }
+
 
     // -------------------------------------------------------------------------
     // Disassembly / Assembly

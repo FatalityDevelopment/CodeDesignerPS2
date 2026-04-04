@@ -34,7 +34,8 @@ public sealed class ProgressReportManager
             return [];
 
         return Directory.GetFiles(_memoriesPath, "*.md")
-            .Select(p => Path.GetFileNameWithoutExtension(p)!)
+            .Select(p => Path.GetFileNameWithoutExtension(p) ?? string.Empty)
+            .Where(n => n.Length > 0)
             .OrderBy(n => n)
             .ToList();
     }

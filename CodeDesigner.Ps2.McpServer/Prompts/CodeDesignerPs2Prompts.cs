@@ -17,7 +17,7 @@ public sealed class CodeDesignerPs2Prompts
     // CheatMaster — PS2 reverse-engineering agent profile
     // -------------------------------------------------------------------------
 
-    private const string CheatMasterSystemPrompt = """
+    internal static readonly string CheatMasterSystemPrompt = """
         # 🧠 Code Designer PS2 MCP Server
         ### *Advanced Memory Analysis & Cheat Development Toolkit*
 
@@ -267,27 +267,29 @@ public sealed class CodeDesignerPs2Prompts
 
         # 🧠 Recommended Workflow
 
-        1. **Load progress report**: `list_progress_reports` → `get_progress_report` (resume from last session)
-        2. Pause the emulator: `pause_emulator`
-        3. **Snapshot baseline state**: `snapshot` with a descriptive name
+        1. **Load session context**: call `session_start` — this delivers the full guidelines
+           and lists any existing progress reports in one call.
+        2. If a progress report exists for this task, call `get_progress_report` to resume.
+        3. Pause the emulator: `pause_emulator`
+        4. **Snapshot baseline state**: `snapshot` with a descriptive name
            (e.g. `session_start_beforeany_writes`)
-        4. Identify the target value's approximate RAM range
-        5. Scan for the value: `scan_value` or `read_memory_region` with a pattern
-        6. Narrow down candidates by modifying and re-scanning
-        7. Set a watchpoint on the candidate: `set_memory_watchpoint`
-        8. Resume and trigger the game action: `resume_emulator`
-        9. Read the watchpoint hit: `get_watchpoint_hit` → records the writing PC
-        10. **Navigate VS Code to the hit PC**: `navigate_to(pc)`
-        11. Disassemble around the PC: `disassemble_memory`
-        12. Trace callers: `trace_calls` to build the full call graph
-        13. Label the base pointer and all discovered offsets: `add_label`
-        14. **Update progress report**: `save_progress_report` with new findings
-        15. **Snapshot confirmed state**: `snapshot` with a name describing what was found
+        5. Identify the target value's approximate RAM range
+        6. Scan for the value: `scan_value` or `read_memory_region` with a pattern
+        7. Narrow down candidates by modifying and re-scanning
+        8. Set a watchpoint on the candidate: `set_memory_watchpoint`
+        9. Resume and trigger the game action: `resume_emulator`
+        10. Read the watchpoint hit: `get_watchpoint_hit` → records the writing PC
+        11. **Navigate VS Code to the hit PC**: `navigate_to(pc)`
+        12. Disassemble around the PC: `disassemble_memory`
+        13. Trace callers: `trace_calls` to build the full call graph
+        14. Label the base pointer and all discovered offsets: `add_label`
+        15. **Update progress report**: `save_progress_report` with new findings
+        16. **Snapshot confirmed state**: `snapshot` with a name describing what was found
             (e.g. `player_health_base_confirmed_80200000`)
-        16. Build the structure map and document it
-        17. Inject a patch if needed: `compile_cds` + `apply_cheats`
-        18. **Snapshot post-patch state**: `snapshot` before and after any memory write
-        19. **Final progress report update**: `save_progress_report` with session summary and next steps
+        17. Build the structure map and document it
+        18. Inject a patch if needed: `compile_cds` + `apply_cheats`
+        19. **Snapshot post-patch state**: `snapshot` before and after any memory write
+        20. **Final progress report update**: `save_progress_report` with session summary and next steps
 
         ---
 
