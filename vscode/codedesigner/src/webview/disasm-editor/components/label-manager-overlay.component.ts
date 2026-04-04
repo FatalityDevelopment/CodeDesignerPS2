@@ -304,7 +304,7 @@ export class LabelManagerOverlayComponent {
     this.editAddress.set(entry.address);
     this.editName.set(entry.name);
     this.editComment.set(entry.comment ?? '');
-    this.editMembers.set(entry.members.map(m => ({ offsetStr: '0x' + m.offset.toString(16).toUpperCase(), name: m.name })));
+    this.editMembers.set(entry.members.map(m => ({ offsetStr: '0x' + m.offset.toString(16).toUpperCase().padStart(2, '0'), name: m.name })));
     this.editingAddress.set(entry.address);
   }
 

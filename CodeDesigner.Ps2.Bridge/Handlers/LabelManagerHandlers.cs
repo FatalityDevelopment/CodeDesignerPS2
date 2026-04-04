@@ -129,9 +129,7 @@ namespace CodeDesigner.Ps2.Bridge
             if (setName.Equals("Built-in", StringComparison.OrdinalIgnoreCase))
             {
                 LabelMgr.SetContext(workspaceDir, gameId);
-                // Reset active set; merged labels will be built-in only.
-                // (Reflect by setting the internal field via a temporary approach.)
-                LabelMgr.SetActiveSet(workspaceDir, gameId, "\0"); // invalid → no set loaded
+                LabelMgr.ClearActiveSet();
                 SyncLegacyDictsFromLabelManager();
                 return JsonSerializer.Serialize(new CommandResponse
                 {

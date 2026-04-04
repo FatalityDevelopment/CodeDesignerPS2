@@ -81,7 +81,7 @@ namespace CodeDesigner.Ps2.LabelManager
 
                     entries.Add(new LabelEntry
                     {
-                        Address = NormaliseAddress(addr),
+                        Address = NormalizeAddress(addr),
                         Name    = label,
                         Comment = comment,
                     });
@@ -100,6 +100,15 @@ namespace CodeDesigner.Ps2.LabelManager
 
         /// <summary>The read-only built-in label set (PS2 system symbols).</summary>
         public LabelSet BuiltIn => _builtIn;
+
+        /// <summary>
+        /// Clears the active user set. The merged label list will contain only the
+        /// built-in symbols until <see cref="SetActiveSet"/> is called again.
+        /// </summary>
+        public void ClearActiveSet()
+        {
+            ActiveSetName = null;
+        }
 
         /// <summary>
         /// Set the current game context so that subsequent calls that omit
@@ -202,9 +211,9 @@ namespace CodeDesigner.Ps2.LabelManager
         public LabelSet AddOrUpdate(string workspaceDir, string gameId, string setName, LabelEntry entry)
         {
             var set = LoadSet(workspaceDir, gameId, setName) ?? new LabelSet { SetName = setName, GameId = gameId };
-            entry.Address = NormaliseAddress(entry.Address);
+            entry.Address = NormalizeAddress(entry.Address);
             var idx = set.Entries.FindIndex(e =>
-                NormaliseAddress(e.Address).Equals(entry.Address, StringComparison.OrdinalIgnoreCase));
+                NormalizeAddress(e.Address).Equals(entry.Address, StringComparison.OrdinalIgnoreCase));
             if (idx >= 0)
                 set.Entries[idx] = entry;
             else
@@ -220,8 +229,8 @@ namespace CodeDesigner.Ps2.LabelManager
         {
             var set = LoadSet(workspaceDir, gameId, setName);
             if (set is null) throw new InvalidOperationException($"Label set '{setName}' not found.");
-            var norm = NormaliseAddress(address);
-            set.Entries.RemoveAll(e => NormaliseAddress(e.Address).Equals(norm, StringComparison.OrdinalIgnoreCase));
+            var norm = NormalizeAddress(address);
+            set.Entries.RemoveAll(e => NormalizeAddress(e.Address).Equals(norm, StringComparison.OrdinalIgnoreCase));
             SaveSet(set, workspaceDir, gameId);
             return set;
         }
@@ -236,7 +245,7 @@ namespace CodeDesigner.Ps2.LabelManager
 
             // Built-in first (lower priority)
             foreach (var e in _builtIn.Entries)
-                dict[NormaliseAddress(e.Address)] = e;
+                dict[NormalizeAddress(e.Address)] = e;
 
             // User set overlays (higher priority)
             var ws  = workspaceDir ?? _workspaceDir;
@@ -248,7 +257,7 @@ namespace CodeDesigner.Ps2.LabelManager
                 if (set is not null)
                 {
                     foreach (var e in set.Entries)
-                        dict[NormaliseAddress(e.Address)] = e;
+                        dict[NormalizeAddress(e.Address)] = e;
                 }
             }
 
@@ -306,7 +315,7 @@ namespace CodeDesigner.Ps2.LabelManager
 
                     entries.Add(new LabelEntry
                     {
-                        Address = NormaliseAddress(addr),
+                        Address = NormalizeAddress(addr),
                         Name    = label,
                         Comment = comment,
                     });
@@ -346,7 +355,7 @@ namespace CodeDesigner.Ps2.LabelManager
             return name;
         }
 
-        internal static string NormaliseAddress(string raw)
+        internal static string NormalizeAddress(string raw)
         {
             if (raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
                 raw = raw[2..];
