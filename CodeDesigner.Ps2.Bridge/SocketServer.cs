@@ -19,6 +19,7 @@ using CodeDesigner.Ps2.Emulator.Hardware;
 using CodeDesigner.Ps2.Emulator.IOP;
 using CodeDesigner.Ps2.CheatPorter;
 using CheatPorterLib = CodeDesigner.Ps2.CheatPorter.CheatPorter;
+using CodeDesigner.Ps2.LabelManager;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -62,6 +63,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// Key = struct name (case-sensitive).
         /// </summary>
         private readonly Dictionary<string, StructEntry> _structs = new(StringComparer.Ordinal);
+
+        /// <summary>Central label manager: manages per-game label sets and the built-in symbols.</summary>
+        internal readonly Ps2LabelManager LabelMgr = new();
 
         /// <summary>
         /// When set, the READMEM command reads live memory from this scheduler.
@@ -196,6 +200,46 @@ namespace CodeDesigner.Ps2.Bridge
             _port = port;
             LoadLabels();
             LoadStructs();
+        }
+
+        /// <summary>
+        /// Rebuild the legacy <c>_labels</c> and <c>_structs</c> dictionaries from the
+        /// LabelManager's merged view (built-in + active user set).  This keeps all
+        /// existing handlers working without modification while the new LabelManager
+        /// becomes the single source of truth.
+        /// </summary>
+        internal void SyncLegacyDictsFromLabelManager()
+        {
+            _labels.Clear();
+            _structs.Clear();
+
+            foreach (var entry in LabelMgr.GetMergedLabels())
+            {
+                // Parse address
+                var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    ? entry.Address[2..] : entry.Address;
+                if (!uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber, null, out uint addr))
+                    continue;
+
+                // Plain label (no members)
+                if (entry.Members.Count == 0)
+                {
+                    _labels[addr] = (entry.Name, entry.Comment);
+                }
+                else
+                {
+                    // Struct entry — goes in _structs (keyed by name) and also in _labels (pointer addr)
+                    _labels[addr] = (entry.Name, entry.Comment);
+                    var se = new StructEntry
+                    {
+                        Name        = entry.Name,
+                        BaseAddress = entry.Address,
+                    };
+                    foreach (var m in entry.Members)
+                        se.Members.Add(new StructMemberEntry { Offset = m.Offset, Name = m.Name });
+                    _structs[entry.Name] = se;
+                }
+            }
         }
 
         /// <summary>
@@ -744,6 +788,34 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "ADDSTRUCTMEMBER":
                         return HandleAddStructMember(command.StructName, command.MemberOffset, command.MemberName);
+
+                    // ── Label Manager commands ────────────────────────────────────────
+                    case "GETLABELSETS":
+                        return HandleGetLabelSets(command.WorkspaceDir, command.GameId);
+
+                    case "GETLABELSET":
+                        return HandleGetLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
+
+                    case "SETACTIVELABELSET":
+                        return HandleSetActiveLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
+
+                    case "CREATELABELSET":
+                        return HandleCreateLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
+
+                    case "DELETELABELSET":
+                        return HandleDeleteLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
+
+                    case "ADDLABELENTRY":
+                        return HandleAddLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntry);
+
+                    case "DELETELABELENTRY":
+                        return HandleDeleteLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.Address);
+
+                    case "IMPORTLABELSET":
+                        return HandleImportLabelSet(command.WorkspaceDir, command.GameId, command.SetName, command.Data);
+
+                    case "EXPORTLABELSET":
+                        return HandleExportLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
 
                     case "MC_LIST":
                         return HandleMcList(command.McPath);

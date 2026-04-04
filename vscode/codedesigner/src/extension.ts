@@ -104,6 +104,12 @@ export function activate(context: vscode.ExtensionContext) {
 		disasmPanelProvider.notifyPauseState(paused);
 	};
 
+	// Wire struct / label set changes from the DisasmEditorProvider to the STRUCTS panel.
+	// This keeps the tree view in sync with whatever label set is active in the editor.
+	editorProvider.onStructsChanged = (structs) => {
+		pointerManagerProvider.setServerStructs(structs);
+	};
+
 	// Wire pointer-manager label changes to the disasm instruction display.
 	// Whenever the user adds, edits, or deletes a pointer/child label, resolve
 	// all live addresses and push the results to any open live panels.
@@ -146,6 +152,8 @@ export function activate(context: vscode.ExtensionContext) {
 	socketClient.onDisconnected(() => {
 		outputChannel.warn('Disconnected from C# server');
 		vscode.window.showWarningMessage('Disconnected from C# server');
+		// Clear server structs so the STRUCTS panel falls back to local pointers.
+		pointerManagerProvider.setServerStructs([]);
 		// Update the sidebar status bar to STOPPED so the user knows the
 		// connection dropped (covers server crashes / unexpected disconnects).
 		disasmPanelProvider.notifyDisconnected();

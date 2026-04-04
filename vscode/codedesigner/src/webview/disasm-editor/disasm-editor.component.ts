@@ -27,12 +27,13 @@ import { MemoryCardOverlayComponent, McListResult, McActionResult } from './comp
 import { HddOverlayComponent, HddListResult, HddActionResult } from './components/hdd-overlay.component';
 import { ScannerOverlayComponent, ScanRequest, ScanResult } from './components/scanner-overlay.component';
 import { StructOffsetOverlayComponent, StructEntryData, AddStructEvent, AddStructMemberEvent } from './components/struct-offset-overlay.component';
+import { LabelManagerOverlayComponent, LabelManagerAction, LabelSetPayload } from './components/label-manager-overlay.component';
 import './disasm-editor.css';
 
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent, LabelManagerOverlayComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -261,6 +262,13 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Reference to struct offset overlay component */
   private readonly structOverlayRef = viewChild<StructOffsetOverlayComponent>('structOverlayComp');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Label Manager Overlay State
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Reference to label manager overlay component */
+  private readonly labelManagerRef = viewChild<LabelManagerOverlayComponent>('labelManagerComp');
 
   /** Signal-based state (new architecture) */
   protected readonly signals = inject(EditorState);
@@ -689,6 +697,36 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onReadStructPointer(pointerAddress: string): void {
     this.vscode.postMessage({ type: 'readPointerAt', address: pointerAddress });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Label Manager Overlay Event Handlers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private openLabelManager(): void {
+    this.signals.panels.labelManager.set(true);
+    this.labelManagerRef()?.open();
+  }
+
+  protected onLabelManagerClose(): void {
+    this.signals.panels.labelManager.set(false);
+  }
+
+  protected onLabelManagerAction(action: LabelManagerAction): void {
+    this.vscode.postMessage({ type: 'labelManagerAction', action });
+  }
+
+  protected onLabelImportFile(event: Event): void {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) { return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const json = e.target?.result as string;
+      const setName = file.name.replace(/\.json$/i, '');
+      this.vscode.postMessage({ type: 'labelManagerAction', action: { type: 'importSet', setName, json } });
+    };
+    reader.readAsText(file);
+    (event.target as HTMLInputElement).value = '';
   }
 
   private focusVirtualGrid(): void {
@@ -1650,6 +1688,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.handleScannerMessage(data);
     this.handleStructMessage(data);
     this.handleFollowAiMessage(data);
+    this.handleLabelManagerMessage(data);
   }
 
   private handleFollowAiMessage(data: Record<string, unknown>): void {
@@ -1713,6 +1752,35 @@ export class DisasmEditorComponent implements AfterViewInit {
         this.structOverlayRef()?.setResolvedBase((data['value'] as string) ?? '');
       });
     }
+  }
+
+  private handleLabelManagerMessage(data: Record<string, unknown>): void {
+    const type = data['type'] as string | undefined;
+    if (!type?.startsWith('labelManager')) { return; }
+    this.zone.run(() => {
+      const lm = this.labelManagerRef();
+      if (!lm) { return; }
+      if (type === 'labelManagerSets') {
+        lm.setSets((data['sets'] as string[]) ?? []);
+      } else if (type === 'labelManagerSet') {
+        lm.setActiveSet(data['set'] as LabelSetPayload);
+      } else if (type === 'labelManagerExport') {
+        // Trigger a file download via a temporary <a> element.
+        const json    = data['json'] as string;
+        const setName = data['setName'] as string;
+        const blob = new Blob([json], { type: 'application/json' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = (setName || 'labels') + '.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (type === 'labelManagerError') {
+        lm.showStatus((data['message'] as string) ?? 'Error', true);
+      } else if (type === 'labelManagerStatus') {
+        lm.showStatus((data['message'] as string) ?? '');
+      }
+    });
   }
 
   private registerServiceSubscriptions(params: {
@@ -2434,6 +2502,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     const structBtn = document.getElementById('struct-btn');
     if (structBtn) {
       structBtn.addEventListener('click', () => this.openStructOverlay());
+    }
+
+    // ── Label Manager overlay (Angular-only) ─────────────────────────────────
+    const labelsBtn = document.getElementById('labels-btn');
+    if (labelsBtn) {
+      labelsBtn.addEventListener('click', () => this.openLabelManager());
     }
 
     // ── Follow AI toggle ──────────────────────────────────────────────────────
