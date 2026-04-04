@@ -1879,15 +1879,15 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             var sb = new StringBuilder();
             foreach (var item in arr.EnumerateArray())
             {
-                string name = item.TryGetProperty("Name",        out var n)  ? (n.GetString()  ?? "?") : "?";
-                string addr = item.TryGetProperty("BaseAddress", out var a)  ? (a.GetString()  ?? "?") : "?";
+                string name = item.TryGetProperty("name",        out var n)  ? (n.GetString()  ?? "?") : "?";
+                string addr = item.TryGetProperty("baseAddress", out var a)  ? (a.GetString()  ?? "?") : "?";
                 sb.AppendLine($"struct {name}  @ {addr}");
-                if (item.TryGetProperty("Members", out var members))
+                if (item.TryGetProperty("members", out var members))
                 {
                     foreach (var m in members.EnumerateArray())
                     {
-                        int    offset = m.TryGetProperty("Offset", out var o)  ? o.GetInt32()            : 0;
-                        string mname  = m.TryGetProperty("Name",   out var mn) ? (mn.GetString() ?? "?") : "?";
+                        int    offset = m.TryGetProperty("offset", out var o)  ? o.GetInt32()            : 0;
+                        string mname  = m.TryGetProperty("name",   out var mn) ? (mn.GetString() ?? "?") : "?";
                         sb.AppendLine($"  +0x{offset:X3}  {mname}");
                     }
                 }
@@ -1939,6 +1939,128 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             new { Command = "ADDSTRUCTMEMBER", StructName = structName, MemberOffset = memberOffset, MemberName = memberName },
             cancellationToken);
         return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Navigation history & snapshot line history
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "get_nav_history")]
+    [Description("Return the server-side navigation history: the list of EE addresses recently " +
+                 "visited by AI commands (READMEM, DISASSEMBLE, SETBP …) and by VS Code user " +
+                 "navigation events (RECORDNAV).  Entries are sorted oldest-first, newest-last. " +
+                 "Works in both internal emulator and PINE modes.")]
+    public async Task<string> GetNavHistory(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETNAVHISTORY" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("NavHistory", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            var entries = arr.EnumerateArray().ToList();
+            if (entries.Count == 0) return "(navigation history is empty)";
+            sb.AppendLine($"Navigation history ({entries.Count} entries, newest last):");
+            foreach (var item in entries)
+            {
+                string addr  = item.TryGetProperty("Address",   out var a)   ? (a.GetString()  ?? "?") : "?";
+                string? lbl  = item.TryGetProperty("Label",     out var l) && l.ValueKind == JsonValueKind.String
+                                   ? l.GetString() : null;
+                string src   = item.TryGetProperty("Source",    out var s)   ? (s.GetString()  ?? "?") : "?";
+                string ts    = item.TryGetProperty("Timestamp", out var t)   ? (t.GetString()  ?? "?") : "?";
+                string name  = lbl != null ? $"{addr}  {lbl}" : addr;
+                sb.AppendLine($"  {name,-40} [{src}]  {ts}");
+            }
+            return sb.ToString().TrimEnd();
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "clear_nav_history")]
+    [Description("Clear the server-side navigation history. " +
+                 "Works in both internal emulator and PINE modes.")]
+    public async Task<string> ClearNavHistory(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "CLEARNAVHISTORY" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "navigate_to")]
+    [Description("Tell the VS Code disasm editor to jump to a specific EE virtual address. " +
+                 "When the VS Code extension has 'Follow AI' mode enabled, the disasm view " +
+                 "automatically scrolls to this address so the user can follow your research " +
+                 "in real time.  Also records the address in the server-side navigation history. " +
+                 "Call this whenever you move your focus to a new address during an investigation. " +
+                 "Works in both internal emulator and PINE modes.")]
+    public async Task<string> NavigateTo(
+        [Description("EE virtual address to navigate to (hex or decimal, e.g. '0x8054ABCD').")] string address,
+        CancellationToken cancellationToken = default)
+    {
+        // Parse address to uint so the server can push an ai_activity notification.
+        uint addr = address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? Convert.ToUInt32(address, 16)
+            : address.StartsWith("0X", StringComparison.OrdinalIgnoreCase)
+                ? Convert.ToUInt32(address, 16)
+                : uint.Parse(address);
+
+        var json = await bridge.SendAsync(
+            new { Command = "NAVIGATETO", Address = addr },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "get_address_snapshot_history")]
+    [Description("Read the historical 4-byte value at a specific EE virtual address across every " +
+                 "memory snapshot in a directory tree.  Mirrors the History tab in the VS Code " +
+                 "disasm editor — shows how the value at an address changed between snapshots. " +
+                 "Scans all subdirectories of snapshotDir recursively for snapshot-info.json files. " +
+                 "Works in both internal emulator and PINE modes.")]
+    public async Task<string> GetAddressSnapshotHistory(
+        [Description("EE virtual address to look up (hex or decimal, e.g. '0x80200000').")] string address,
+        [Description("Root directory to scan for snapshots (e.g. '/workspace/snapshots/SOCOM2/').")] string snapshotDir,
+        CancellationToken cancellationToken = default)
+    {
+        uint addr = address.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ||
+                    address.StartsWith("0X", StringComparison.OrdinalIgnoreCase)
+            ? Convert.ToUInt32(address, 16)
+            : uint.Parse(address);
+
+        var json = await bridge.SendAsync(
+            new { Command = "GETADDRESSHISTORY", Address = addr, SnapshotDir = snapshotDir },
+            cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("AddressHistory", out var arr))
+                return SimpleMessage(json);
+
+            var entries = arr.EnumerateArray().ToList();
+            if (entries.Count == 0)
+                return $"No snapshot history found for {address} in {snapshotDir}";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Snapshot history for {address} ({entries.Count} snapshot(s)):");
+            foreach (var item in entries)
+            {
+                string name   = item.TryGetProperty("SnapshotName", out var n) ? (n.GetString() ?? "?") : "?";
+                string value  = item.TryGetProperty("Value",        out var v) ? (v.GetString() ?? "?") : "?";
+                string ts     = item.TryGetProperty("Timestamp",    out var t) ? (t.GetString() ?? "?") : "?";
+                string? disasm = item.TryGetProperty("Disasm", out var d) && d.ValueKind == JsonValueKind.String
+                                    ? d.GetString() : null;
+                string dis = disasm != null ? $"  {disasm}" : string.Empty;
+                sb.AppendLine($"  [{name}]  0x{value}{dis}  ({ts})");
+            }
+            return sb.ToString().TrimEnd();
+        }
+        catch { return json; }
     }
 
     // -------------------------------------------------------------------------
@@ -2892,10 +3014,10 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge)
             sb.AppendLine("Snapshot written:");
             foreach (var item in arr.EnumerateArray())
             {
-                string label = item.TryGetProperty("label", out var lProp) ? (lProp.GetString() ?? "?") : "?";
-                string file = item.TryGetProperty("file", out var fProp) ? (fProp.GetString() ?? "?") : "?";
-                uint baseA = item.TryGetProperty("baseAddress", out var bProp) ? bProp.GetUInt32() : 0u;
-                int size = item.TryGetProperty("size", out var sProp) ? sProp.GetInt32() : 0;
+                string label = item.TryGetProperty("Label", out var lProp) ? (lProp.GetString() ?? "?") : "?";
+                string file  = item.TryGetProperty("File",  out var fProp) ? (fProp.GetString() ?? "?") : "?";
+                uint   baseA = item.TryGetProperty("BaseAddress", out var bProp) ? bProp.GetUInt32() : 0u;
+                int    size  = item.TryGetProperty("Size",  out var sProp) ? sProp.GetInt32() : 0;
                 sb.AppendLine($"  [{label}]  base=0x{baseA:X8}  size={size / 1024} KB  → {file}");
             }
 

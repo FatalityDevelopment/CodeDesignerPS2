@@ -123,6 +123,12 @@ namespace CodeDesigner.Ps2.Bridge
         public List<PineDisassemblyLineInfo>? DisassemblyLines { get; set; }
         public List<PineLocalInfo>?       LocalVars    { get; set; }
 
+        // GETNAVHISTORY results
+        public List<NavHistoryEntry>? NavHistory { get; set; }
+
+        // GETADDRESSHISTORY results
+        public List<AddressHistoryEntry>? AddressHistory { get; set; }
+
         // READMEMREGION results
         /// <summary>
         /// Absolute EE virtual addresses where the requested <c>SearchPattern</c>

@@ -126,6 +126,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     if (target) {
         target.panel.reveal(undefined, false);
         target.panel.webview.postMessage({ type: 'gotoAddress', address });
+        // Record this navigation in the server-side history so the AI can
+        // query what the user has been looking at.
+        this.socketClient?.recordNav(address, 'user').catch(() => { /* non-fatal */ });
     }
   }
 
