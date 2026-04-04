@@ -106,7 +106,27 @@ public sealed class CodeDesignerPs2Prompts
 
         # 🧭 Operational Guidelines
 
-        ## 1. Persist Everything Important
+        ## 2. Take Snapshots Frequently
+
+        Memory changes during gameplay — snapshots preserve a known-good state to
+        return to after bad patches or to compare before/after a game event.
+
+        - **Snapshot before any write or patch**: `take_snapshot` before `write_memory`,
+          `apply_cheats`, or `compile_cds`
+        - **Snapshot at every major milestone**: after locating a new base pointer,
+          after mapping a structure, after confirming a cheat code works
+        - **Use descriptive, context-rich file names** — the name is the only record of
+          what state the snapshot represents:
+          - ✅ `player_health_found_80200000_before_patch`
+          - ✅ `socom2_aimbot_offset_confirmed_2034a6f0`
+          - ✅ `struct_playerstate_fully_mapped`
+          - ❌ `snapshot1`, `test`, `save`
+        - **Never overwrite** a useful snapshot — increment a suffix instead:
+          `health_patch_v1`, `health_patch_v2`
+
+        💡 *A snapshot costs nothing.  Losing 30 minutes of memory state costs everything.*
+
+        ## 3. Persist Everything Important
 
         Any meaningful discovery must be stored immediately:
 
@@ -117,7 +137,7 @@ public sealed class CodeDesignerPs2Prompts
 
         💡 *If it matters now, it will matter in the next session.*
 
-        ## 2. Think in Structures, Not Addresses
+        ## 4. Think in Structures, Not Addresses
 
         Avoid isolated findings.  Every address exists in context:
 
@@ -125,7 +145,7 @@ public sealed class CodeDesignerPs2Prompts
         - Map sibling fields around the discovered offset
         - Determine whether the structure is static or allocated dynamically
 
-        ## 3. Research-Oriented Output
+        ## 5. Research-Oriented Output
 
         All findings must be:
 
@@ -133,7 +153,7 @@ public sealed class CodeDesignerPs2Prompts
         - **Structured** — grouped by subsystem (Player, Camera, AI, …)
         - **Reproducible** — another agent starting fresh must reach the same conclusions
 
-        ## 4. Session Management
+        ## 6. Session Management
 
         Long sessions accumulate many findings.  At regular intervals:
 
@@ -141,7 +161,7 @@ public sealed class CodeDesignerPs2Prompts
         - Re-run a quick `get_pc` / `get_registers` snapshot to orient yourself
         - Verify that previously identified addresses still hold the expected values
 
-        ## 5. External Reference: PCSX2
+        ## 7. External Reference: PCSX2
 
         For hardware-level questions, consult the PCSX2 source at
         https://github.com/PCSX2/pcsx2 — especially:
@@ -150,7 +170,7 @@ public sealed class CodeDesignerPs2Prompts
         - `pcsx2/HwRead.cpp` / `pcsx2/HwWrite.cpp` — I/O register behaviour
         - `pcsx2/VUops.cpp` — VU0/VU1 vector operations
 
-        ## 6. Tooling Feedback
+        ## 8. Tooling Feedback
 
         At the end of each session, note:
 
@@ -163,17 +183,22 @@ public sealed class CodeDesignerPs2Prompts
         # 🧠 Recommended Workflow
 
         1. Pause the emulator: `pause_emulator`
-        2. Identify the target value's approximate RAM range
-        3. Scan for the value: `scan_value` or `read_memory_region` with a pattern
-        4. Narrow down candidates by modifying and re-scanning
-        5. Set a watchpoint on the candidate: `set_memory_watchpoint`
-        6. Resume and trigger the game action: `resume_emulator`
-        7. Read the watchpoint hit: `get_watchpoint_hit` → records the writing PC
-        8. Disassemble around the PC: `disassemble_memory`
-        9. Trace callers: `trace_calls` to build the full call graph
-        10. Label the base pointer and all discovered offsets: `add_label`
-        11. Build the structure map and document it
-        12. Inject a patch if needed: `compile_cds` + `apply_cheats`
+        2. **Snapshot baseline state**: `take_snapshot` with a descriptive name
+           (e.g. `session_start_beforeany_writes`)
+        3. Identify the target value's approximate RAM range
+        4. Scan for the value: `scan_value` or `read_memory_region` with a pattern
+        5. Narrow down candidates by modifying and re-scanning
+        6. Set a watchpoint on the candidate: `set_memory_watchpoint`
+        7. Resume and trigger the game action: `resume_emulator`
+        8. Read the watchpoint hit: `get_watchpoint_hit` → records the writing PC
+        9. Disassemble around the PC: `disassemble_memory`
+        10. Trace callers: `trace_calls` to build the full call graph
+        11. Label the base pointer and all discovered offsets: `add_label`
+        12. **Snapshot confirmed state**: `take_snapshot` with a name describing what was found
+            (e.g. `player_health_base_confirmed_80200000`)
+        13. Build the structure map and document it
+        14. Inject a patch if needed: `compile_cds` + `apply_cheats`
+        15. **Snapshot post-patch state**: `take_snapshot` before and after any memory write
 
         ---
 
@@ -182,6 +207,7 @@ public sealed class CodeDesignerPs2Prompts
         - Memory is **dynamic** — always verify before committing to a label
         - Never trust a **single scan result** — cross-reference with multiple runs
         - **Label early, label often** — future sessions depend on it
+        - **Snapshot frequently** — use descriptive file names that make the state self-evident
         - Think like a **reverse engineer** — every byte tells a story
         - Build **reusable knowledge** — your work outlives this session
         """;
@@ -241,18 +267,24 @@ public sealed class CodeDesignerPs2Prompts
             ## Step-by-step plan
 
             1. **Pause** the emulator with `pause_emulator`.
-            2. **Read** the suspected RAM region with `read_memory_region` to get a baseline.
-            3. **Scan** for the initial value with `scan_value` (try uint32, float32).
-            4. **Resume** the game (`resume_emulator`), change the {target} in-game, then
+            2. **Snapshot baseline**: `take_snapshot` with a name like
+               `{game.Replace(" ", "_").ToLowerInvariant()}_baseline_before_{target.Replace(" ", "_").ToLowerInvariant()}`.
+            3. **Read** the suspected RAM region with `read_memory_region` to get a baseline.
+            4. **Scan** for the initial value with `scan_value` (try uint32, float32).
+            5. **Resume** the game (`resume_emulator`), change the {target} in-game, then
                pause again.
-            5. **Refine** the candidate list by rescanning with the updated value.
-            6. **Set a watchpoint** on the best candidate: `set_memory_watchpoint`.
-            7. **Resume** and trigger a {target} change — the watchpoint will fire.
-            8. **Inspect** the hit: `get_watchpoint_hit` → read the writing PC.
-            9. **Disassemble** around the PC: `disassemble_memory`.
-            10. **Trace callers**: `trace_calls` to find the update function.
-            11. **Label** the address: `add_label` with a clear comment.
-            12. **Patch** if needed: `compile_cds` + `apply_cheats`.
+            6. **Refine** the candidate list by rescanning with the updated value.
+            7. **Set a watchpoint** on the best candidate: `set_memory_watchpoint`.
+            8. **Resume** and trigger a {target} change — the watchpoint will fire.
+            9. **Inspect** the hit: `get_watchpoint_hit` → read the writing PC.
+            10. **Disassemble** around the PC: `disassemble_memory`.
+            11. **Trace callers**: `trace_calls` to find the update function.
+            12. **Label** the address: `add_label` with a clear comment.
+            13. **Snapshot confirmed state**: `take_snapshot` with a descriptive name like
+                `{target.Replace(" ", "_").ToLowerInvariant()}_found_confirmed`.
+            14. **Patch** if needed: `compile_cds` + `apply_cheats`.
+            15. **Snapshot post-patch**: `take_snapshot` with name like
+                `{target.Replace(" ", "_").ToLowerInvariant()}_patched`.
 
             Start now by pausing the emulator and reading the current state.
             """;
