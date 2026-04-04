@@ -815,6 +815,47 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PINE_LOAD_STATE":
                         return HandlePineLoadStateSlot(command.StateSlot);
 
+                    case "READMEMREGION":
+                    case "READ_MEM_REGION":
+                    case "READMEM_REGION":
+                        return HandleReadMemRegion(
+                            command.Address    ?? 0,
+                            command.EndAddress ?? 0,
+                            command.SearchPattern,
+                            command.Region);
+
+                    case "SETWATCHPOINT":
+                    case "SET_WATCHPOINT":
+                        return HandleSetWatchpoint(command.Address, command.Length, command.WatchpointType);
+
+                    case "CLEARWATCHPOINT":
+                    case "CLEAR_WATCHPOINT":
+                        return HandleClearWatchpoint(command.WatchpointId);
+
+                    case "CLEARALLWATCHPOINTS":
+                    case "CLEAR_ALL_WATCHPOINTS":
+                    case "CLEARWATCHPOINTS":
+                        return HandleClearAllWatchpoints();
+
+                    case "LISTWATCHPOINTS":
+                    case "LIST_WATCHPOINTS":
+                        return HandleListWatchpoints();
+
+                    case "GETWATCHPOINTHIT":
+                    case "GET_WATCHPOINT_HIT":
+                    case "WATCHPOINTHIT":
+                        return HandleGetWatchpointHit();
+
+                    case "TRACECALLS":
+                    case "TRACE_CALLS":
+                        return HandleTraceCalls(
+                            command.EndAddress,
+                            command.MaxInstructions ?? 10_000);
+
+                    case "RUNUNTILPC":
+                    case "RUN_UNTIL_PC":
+                        return HandleRunUntilPc(command.TargetPc, command.TimeoutMs ?? 10_000);
+
                     default:
                         // Echo for unknown commands
                         return $"Echo: {message}";

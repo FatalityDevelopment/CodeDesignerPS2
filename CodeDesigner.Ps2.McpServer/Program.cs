@@ -1,4 +1,5 @@
 using CodeDesigner.Ps2.McpServer;
+using CodeDesigner.Ps2.McpServer.Prompts;
 using CodeDesigner.Ps2.McpServer.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -46,6 +47,7 @@ builder.Services.AddSingleton(sp => new SocketBridgeClient(host, port));
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithTools<CodeDesignerPs2Tools>();
+    .WithTools<CodeDesignerPs2Tools>()
+    .WithPrompts<CodeDesignerPs2Prompts>();
 
 await builder.Build().RunAsync();

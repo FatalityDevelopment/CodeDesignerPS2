@@ -160,6 +160,57 @@ namespace CodeDesigner.Ps2.Emulator
         /// </summary>
         public byte[] Scratchpad => _scratchpad;
 
+        // ── Write watchpoints ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Active write watchpoints.  When any EE RAM write overlaps a watchpoint's
+        /// physical address range, <see cref="OnWriteWatchpointHit"/> is invoked with
+        /// the physical address and byte-size of the triggering access.
+        /// Modify only while the emulator is paused.
+        /// </summary>
+        public System.Collections.Generic.List<MemoryWatchpoint> WriteWatchpoints { get; }
+            = new System.Collections.Generic.List<MemoryWatchpoint>();
+
+        /// <summary>
+        /// Called synchronously (on the EE execution thread) whenever a write
+        /// to EE RAM overlaps an entry in <see cref="WriteWatchpoints"/>.
+        /// The arguments are the matched watchpoint, the physical address, and
+        /// the byte-size of the triggering write.  Wired by
+        /// <see cref="DualCpuScheduler"/> to capture the CPU's PC and pause.
+        /// </summary>
+        internal System.Action<MemoryWatchpoint, uint, int>? OnWriteWatchpointHit;
+
+        /// <summary>
+        /// Tests whether physical address range [<paramref name="physAddr"/>,
+        /// <paramref name="physAddr"/> + <paramref name="size"/>) overlaps
+        /// <paramref name="wp"/>'s monitored range.  Extracted as a shared
+        /// helper so both <see cref="CheckWriteWatchpoint"/> and the
+        /// <see cref="DualCpuScheduler"/> callback use the identical condition.
+        /// </summary>
+        internal static bool WatchpointOverlaps(MemoryWatchpoint wp, uint physAddr, int size)
+            => physAddr < wp.PhysEnd && physAddr + (uint)size > wp.PhysStart;
+
+        /// <summary>
+        /// Checks whether <paramref name="physAddr"/> overlaps any entry in
+        /// <see cref="WriteWatchpoints"/> and, if so, invokes
+        /// <see cref="OnWriteWatchpointHit"/> with the matching watchpoint.
+        /// Called at the end of every EE RAM write path when at least one
+        /// watchpoint is registered.
+        /// </summary>
+        private void CheckWriteWatchpoint(uint physAddr, int size)
+        {
+            var wps = WriteWatchpoints;
+            for (int i = 0; i < wps.Count; i++)
+            {
+                var wp = wps[i];
+                if (WatchpointOverlaps(wp, physAddr, size))
+                {
+                    OnWriteWatchpointHit?.Invoke(wp, physAddr, size);
+                    return; // fire once per write
+                }
+            }
+        }
+
         public PS2MemoryBus()
         {
             // Wire GIF to GS so GIFtag processing forwards register writes.
@@ -216,10 +267,15 @@ namespace CodeDesigner.Ps2.Emulator
             if (paddr >= IopRamMirrorBase && paddr < IopRamMirrorEnd && IopRam != null)
             {
                 IopRam[(paddr - IopRamMirrorBase) & IopRamMask] = value;
+                if (WriteWatchpoints.Count > 0) CheckWriteWatchpoint(paddr, 1);
                 return;
             }
             (byte[] region, uint offset, bool ro) = MapPhysicalWrite(paddr);
-            if (!ro) region[offset] = value;
+            if (!ro)
+            {
+                region[offset] = value;
+                if (WriteWatchpoints.Count > 0) CheckWriteWatchpoint(paddr, 1);
+            }
         }
 
         // -----------------------------------------------------------------------
@@ -401,6 +457,7 @@ namespace CodeDesigner.Ps2.Emulator
                 IopRam[off + 1] = (byte)(value >> 8);
                 IopRam[off + 2] = (byte)(value >> 16);
                 IopRam[off + 3] = (byte)(value >> 24);
+                if (WriteWatchpoints.Count > 0) CheckWriteWatchpoint(paddr, 4);
                 return;
             }
 
@@ -411,6 +468,7 @@ namespace CodeDesigner.Ps2.Emulator
                 region[offset + 1] = (byte)(value >> 8);
                 region[offset + 2] = (byte)(value >> 16);
                 region[offset + 3] = (byte)(value >> 24);
+                if (WriteWatchpoints.Count > 0) CheckWriteWatchpoint(paddr, 4);
             }
         }
 
