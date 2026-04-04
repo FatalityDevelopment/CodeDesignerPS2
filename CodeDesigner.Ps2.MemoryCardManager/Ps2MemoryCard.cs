@@ -323,6 +323,28 @@ public sealed class Ps2MemoryCard : IDisposable
         _stream!.Flush();
     }
 
+    /// <summary>
+    /// Reads the raw bytes of a specific file within a named save.
+    /// </summary>
+    /// <param name="saveName">Save directory name (e.g. <c>"BASCUS-97133BUILTIN"</c>).</param>
+    /// <param name="fileName">File name within the save directory (e.g. <c>"ICON.SYS"</c>).</param>
+    /// <returns>Raw file contents.</returns>
+    /// <exception cref="KeyNotFoundException">
+    /// Thrown when the save or file is not found on the card.
+    /// </exception>
+    public byte[] ReadFile(string saveName, string fileName)
+    {
+        EnsureOpen();
+        var (entry, _) = FindSave(saveName);
+        foreach (var f in ReadDirEntries(entry.Cluster))
+        {
+            if ((f.Mode & DfExists) == 0 || (f.Mode & DfFile) == 0) continue;
+            if (string.Equals(f.Name, fileName, StringComparison.OrdinalIgnoreCase))
+                return ReadFileData(f);
+        }
+        throw new KeyNotFoundException($"File '{fileName}' not found in save '{saveName}'.");
+    }
+
     /// <summary>Deletes a named save from the memory card.</summary>
     public void DeleteSave(string saveName)
     {

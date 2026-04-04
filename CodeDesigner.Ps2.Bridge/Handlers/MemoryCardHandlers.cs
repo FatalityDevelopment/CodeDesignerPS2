@@ -92,6 +92,26 @@ namespace CodeDesigner.Ps2.Bridge
             catch (Exception ex) { return CreateErrorResponse($"MC_DELETE error: {ex.Message}"); }
         }
 
+        private string HandleMcReadFile(string? mcPath, string? saveName, string? fileName)
+        {
+            if (string.IsNullOrWhiteSpace(mcPath))   return CreateErrorResponse("McPath is required");
+            if (string.IsNullOrWhiteSpace(saveName))  return CreateErrorResponse("SaveName is required");
+            if (string.IsNullOrWhiteSpace(fileName))  return CreateErrorResponse("McFileName is required");
+            if (!File.Exists(mcPath)) return CreateErrorResponse($"Memory card file not found: {mcPath}");
+            try
+            {
+                using var mc = Ps2MemoryCard.Open(mcPath);
+                byte[] data = mc.ReadFile(saveName, fileName);
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true, Command = "MC_READ_FILE",
+                    Message = $"Read {data.Length} bytes from '{saveName}/{fileName}'",
+                    Data    = Convert.ToBase64String(data),
+                });
+            }
+            catch (Exception ex) { return CreateErrorResponse($"MC_READ_FILE error: {ex.Message}"); }
+        }
+
         private string HandleMcFormat(string? mcPath)
         {
             if (string.IsNullOrWhiteSpace(mcPath)) return CreateErrorResponse("McPath is required");

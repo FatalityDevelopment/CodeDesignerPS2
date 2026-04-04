@@ -33,9 +33,10 @@ namespace CodeDesigner.Ps2.Bridge
         // PORTCHEATS fields
         public string? SourceDumpPath { get; set; }
         public string? TargetDumpPath { get; set; }
-        // MC_LIST / MC_EXPORT / MC_IMPORT / MC_DELETE / MC_FORMAT fields
+        // MC_LIST / MC_EXPORT / MC_IMPORT / MC_DELETE / MC_FORMAT / MC_READ_FILE fields
         public string? McPath { get; set; }
         public string? SaveName { get; set; }
+        public string? McFileName { get; set; }
         public string? ExportDir { get; set; }
         public string? ImportDir { get; set; }
         public bool?   McOverwrite { get; set; }

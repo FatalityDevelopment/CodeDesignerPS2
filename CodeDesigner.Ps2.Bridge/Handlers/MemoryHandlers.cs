@@ -32,6 +32,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// The VSCode UI uses physical bases for EE RAM/BIOS, while PCSX2 PINE expects
         /// EE virtual addresses. We map physical and uncached mirrors into KSEG0,
         /// while IOP mirror addresses are mapped to KSEG1 to avoid PCSX2 TLB lookups.
+        /// For IOP reads prefer <see cref="HandleReadMem"/> which adds bounds checks.
         /// </summary>
         private static uint TranslatePineAddress(uint address, bool useIop)
         {
@@ -93,11 +94,26 @@ namespace CodeDesigner.Ps2.Bridge
                 if (IsPineMode)
                 {
                     // ── PINE path: forward read to PCSX2 ─────────────────────
-                    // PINE addresses the EE virtual memory map directly.
-                    // IOP region is not separately accessible; callers should use
-                    // EE physical addresses in that case.
-                    uint pineAddr = TranslatePineAddress(address, useIop);
-                    bytes = PineClient!.ReadBytes(pineAddr, length);
+                    // IOP RAM is accessed via KSEG1 of the EE IOP mirror (0xBC000000+).
+                    // The read is capped at IOP RAM size (2 MB) to avoid reading past
+                    // the mirror boundary into undefined EE memory that could crash PCSX2.
+                    if (useIop)
+                    {
+                        uint iopOffset = address < EeIopMirrorBase
+                            ? address
+                            : address - EeIopMirrorBase;
+                        uint iopLimit  = (uint)IopMemoryBus.RamSize;
+                        if (iopOffset >= iopLimit)
+                            return CreateErrorResponse($"IOP address 0x{address:X8} is beyond IOP RAM (2 MB)");
+                        int safeLen = (int)Math.Min((uint)length, iopLimit - iopOffset);
+                        uint pineAddr = 0xBC000000u + iopOffset;
+                        bytes = PineClient!.ReadBytes(pineAddr, safeLen);
+                    }
+                    else
+                    {
+                        uint pineAddr = TranslatePineAddress(address, useIop: false);
+                        bytes = PineClient!.ReadBytes(pineAddr, length);
+                    }
                 }
                 else
                 {
@@ -370,8 +386,14 @@ namespace CodeDesigner.Ps2.Bridge
             return bytes;
         }
 
-        // Maximum region size for READMEMREGION (16 MB — covers all of EE main RAM).
-        private const int MaxReadMemRegionSize = 16 * 1024 * 1024;
+        // Maximum region size for READMEMREGION (32 MB — covers all of EE main RAM).
+        private const int MaxReadMemRegionSize = 32 * 1024 * 1024;
+
+        // Maximum pattern-only scan size (also 32 MB for full EE RAM coverage).
+        private const int MaxScanPatternSize = 32 * 1024 * 1024;
+
+        // Chunk size when reading large regions in PINE mode (avoids single giant PINE request).
+        private const int PineScanChunkSize = 1 * 1024 * 1024; // 1 MB per chunk
 
         /// <summary>
         /// Handle READMEMREGION command — reads a contiguous address range and
@@ -403,9 +425,9 @@ namespace CodeDesigner.Ps2.Bridge
 
             try
             {
-                byte[] bytes = ReadLiveBytes(start, (int)regionSize, useIop);
+                byte[] bytes = ReadLiveBytesChunked(start, (int)regionSize, useIop);
 
-                // Pattern search (simple sliding window — region is at most 16 MB).
+                // Pattern search (simple sliding window — region is at most 32 MB).
                 List<uint>? matchAddresses = null;
                 if (searchPattern != null && searchPattern.Count > 0)
                 {
@@ -437,6 +459,138 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 return CreateErrorResponse($"ReadMemRegion error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Handle SCANPATTERN command — scans a memory range for a byte pattern and
+        /// returns only the matching addresses, without returning the raw region bytes.
+        /// Supports up to 32 MB (full EE main RAM).  In PINE mode the scan is done
+        /// in 1 MB chunks to keep individual PINE requests manageable.
+        /// </summary>
+        /// <param name="start">Inclusive start address (default 0 = start of EE RAM).</param>
+        /// <param name="end">Exclusive end address (0 = use default max for region).</param>
+        /// <param name="pattern">Byte sequence to search for — must not be empty.</param>
+        /// <param name="region">"ee" (default) or "iop".</param>
+        private string HandleScanPattern(uint start, uint end, IList<int>? pattern, string? region)
+        {
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+
+            if (pattern == null || pattern.Count == 0)
+                return CreateErrorResponse("SearchPattern is required for SCANPATTERN");
+
+            bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+
+            // Default scan range when end is 0
+            if (end == 0)
+            {
+                end = useIop
+                    ? (uint)IopMemoryBus.RamSize   // IOP: 2 MB
+                    : 0x02000000u;                 // EE:  32 MB
+            }
+
+            if (end <= start)
+                return CreateErrorResponse("EndAddress must be greater than Address");
+
+            long regionSize = (long)end - start;
+            if (regionSize > MaxScanPatternSize)
+                return CreateErrorResponse($"Scan range too large — maximum is {MaxScanPatternSize / (1024 * 1024)} MB " +
+                                           $"(requested {regionSize / (1024 * 1024.0):F1} MB)");
+
+            // For IOP in PINE mode, clamp to IOP RAM size to avoid reading past valid IOP memory.
+            if (useIop && IsPineMode)
+            {
+                uint iopLimit = (uint)IopMemoryBus.RamSize;
+                if (end > iopLimit)
+                    end = iopLimit;
+                if (start >= end)
+                    return CreateErrorResponse("Start address is beyond IOP RAM size");
+                regionSize = end - start;
+            }
+
+            try
+            {
+                var matchAddresses = new List<uint>();
+                int patLen   = pattern.Count;
+                var patBytes = pattern.Select(b => (byte)b).ToArray();
+
+                // Scan in 1 MB chunks to avoid allocating a single huge buffer.
+                // Overlap each chunk by (patLen - 1) bytes so patterns that straddle
+                // a chunk boundary are still found.
+                int  chunkSize = PineScanChunkSize;
+                int  overlap   = Math.Max(0, patLen - 1);
+                uint scanPos   = start;
+
+                while (scanPos < end)
+                {
+                    uint chunkEnd = (uint)Math.Min((long)scanPos + chunkSize, end);
+                    int  len      = (int)(chunkEnd - scanPos);
+
+                    byte[] chunk = ReadLiveBytesChunked(scanPos, len, useIop);
+
+                    int limit = chunk.Length - patLen;
+                    for (int i = 0; i <= limit; i++)
+                    {
+                        bool found = true;
+                        for (int j = 0; j < patLen; j++)
+                        {
+                            if (chunk[i + j] != patBytes[j]) { found = false; break; }
+                        }
+                        if (found)
+                            matchAddresses.Add(scanPos + (uint)i);
+                    }
+
+                    if (chunkEnd >= end) break;
+
+                    // Advance by (chunkSize - overlap) so the next chunk begins slightly
+                    // before where this chunk ended, covering cross-boundary patterns.
+                    uint advance = (uint)Math.Max(1, chunkSize - overlap);
+                    scanPos += advance;
+                }
+
+                var response = new CommandResponse
+                {
+                    Success        = true,
+                    Command        = "SCANPATTERN",
+                    MatchAddresses = matchAddresses,
+                    Message        = $"Scanned {regionSize:N0} bytes in {region ?? "ee"}, found {matchAddresses.Count} match(es)",
+                };
+                return System.Text.Json.JsonSerializer.Serialize(response);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ScanPattern error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Reads bytes in 1 MB chunks in PINE mode to avoid sending one huge PINE request.
+        /// In internal mode delegates directly to <see cref="ReadLiveBytes"/> (RAM is local).
+        /// </summary>
+        private byte[] ReadLiveBytesChunked(uint startAddress, int length, bool useIop)
+        {
+            if (!IsPineMode)
+                return ReadLiveBytes(startAddress, length, useIop);
+
+            // PINE mode: break the read into 1 MB chunks.
+            var result = new byte[length];
+            int remaining  = length;
+            int destOffset = 0;
+            uint addr      = startAddress;
+
+            while (remaining > 0)
+            {
+                int  toRead   = Math.Min(remaining, PineScanChunkSize);
+                uint pineAddr = TranslatePineAddress(addr, useIop);
+                byte[] chunk  = PineClient!.ReadBytes(pineAddr, toRead);
+                int copyLen   = Math.Min(chunk.Length, toRead);
+                Buffer.BlockCopy(chunk, 0, result, destOffset, copyLen);
+                destOffset += toRead;
+                addr       += (uint)toRead;
+                remaining  -= toRead;
+            }
+
+            return result;
         }
     }
 }
