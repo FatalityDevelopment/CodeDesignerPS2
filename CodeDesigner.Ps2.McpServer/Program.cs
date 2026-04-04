@@ -17,9 +17,10 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-// Parse optional --host and --port arguments for connecting to specific instances
+// Parse optional --host, --port, and --memories-path arguments
 string? host = null;
 int? port = null;
+string? memoriesPath = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -36,12 +37,24 @@ for (int i = 0; i < args.Length; i++)
             i++;
         }
     }
+    else if (args[i] == "--memories-path" && i + 1 < args.Length)
+    {
+        memoriesPath = args[i + 1];
+        i++;
+    }
 }
+
+// Allow environment-variable override for memories path
+memoriesPath ??= Environment.GetEnvironmentVariable("CODEDESIGNER_MEMORIES_PATH")
+              ?? Path.Combine(AppContext.BaseDirectory, "memories");
 
 // Register the socket bridge client as a singleton so all tools share it.
 // Construct the instance via factory so the DI container does not attempt to
 // resolve primitive constructor parameters (string, int) which would fail.
 builder.Services.AddSingleton(sp => new SocketBridgeClient(host, port));
+
+// Register the progress report manager; creates the memories directory on startup.
+builder.Services.AddSingleton(new ProgressReportManager(memoriesPath));
 
 // Register the MCP server with stdio transport and auto-discover tool types
 builder.Services
