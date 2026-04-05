@@ -1057,6 +1057,19 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to clear all breakpoints: ${err?.message ?? err}`);
                 }
+            } else if (message.type === 'getWatchValues') {
+                if (!this._canIssueLiveBackendRequest()) { return; }
+                const addresses: number[] = Array.isArray(message.addresses) ? message.addresses as number[] : [];
+                if (addresses.length === 0) { return; }
+                const values: Record<string, number> = {};
+                for (const addr of addresses) {
+                    try {
+                        const buf = await this.socketClient!.readMemory(addr, 4, 'ee');
+                        values[String(addr)] =
+                            (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24)) >>> 0;
+                    } catch { /* skip unreadable addresses */ }
+                }
+                panel.webview.postMessage({ type: 'watchValues', values });
             } else if (message.type === 'step') {
                 await this.stepAndBroadcast();
             } else if (message.type === 'getStatus') {

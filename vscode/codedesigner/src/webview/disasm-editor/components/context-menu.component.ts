@@ -15,6 +15,8 @@ export interface ContextMenuData {
   address: string;
   /** Whether a breakpoint is currently set at this address. */
   hasBreakpoint: boolean;
+  /** Whether a watch is currently set at this address. */
+  hasWatch: boolean;
   /** Whether the instruction has a branch/jump target (enables "Go to Target"). */
   hasTarget: boolean;
 }
@@ -65,6 +67,19 @@ export interface ContextMenuData {
     <div class="ctx-menu-separator"></div>
     <div
       class="ctx-menu-item"
+      [class.disabled]="data()?.hasWatch"
+      (click)="onAddWatch()">
+      <span class="ctx-menu-icon">👁</span>Add Watch
+    </div>
+    <div
+      class="ctx-menu-item"
+      [class.disabled]="!data()?.hasWatch"
+      (click)="onRemoveWatch()">
+      <span class="ctx-menu-icon">🚫</span>Remove Watch
+    </div>
+    <div class="ctx-menu-separator"></div>
+    <div
+      class="ctx-menu-item"
       [class.disabled]="!data()?.hasTarget"
       (click)="onGotoTarget()">
       <span class="ctx-menu-icon">→</span>Go to Target Address
@@ -94,6 +109,8 @@ export class ContextMenuComponent {
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly setBreakpoint = output<void>();
   readonly removeBreakpoint = output<void>();
+  readonly addWatch = output<void>();
+  readonly removeWatch = output<void>();
   readonly gotoTarget = output<void>();
   readonly editRow = output<void>();
   readonly closed = output<void>();
@@ -157,6 +174,18 @@ export class ContextMenuComponent {
   onRemoveBreakpoint(): void {
     if (!this.data()?.hasBreakpoint) { return; } // Disabled
     this.removeBreakpoint.emit();
+    this.close();
+  }
+
+  onAddWatch(): void {
+    if (this.data()?.hasWatch) { return; } // Disabled
+    this.addWatch.emit();
+    this.close();
+  }
+
+  onRemoveWatch(): void {
+    if (!this.data()?.hasWatch) { return; } // Disabled
+    this.removeWatch.emit();
     this.close();
   }
 

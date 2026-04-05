@@ -53,6 +53,7 @@ export interface DisasmEditorState {
   isLive: boolean;
   breakpoints: Set<number>;
   breakpointHitAddress: number | undefined;
+  watches: Set<number>;
   /** The virtual PC address where the emulator is currently paused.  Tracked
    *  separately from `cursor` so that the PC indicator stays visible even
    *  after the user navigates the cursor away from the paused instruction. */
@@ -125,6 +126,7 @@ export class DisasmEditorService implements OnDestroy {
     isLive: false,
     breakpoints: new Set<number>(),
     breakpointHitAddress: undefined,
+    watches: new Set<number>(),
     pcAddress: undefined,
     symLabels: [],
     symStrings: [],
