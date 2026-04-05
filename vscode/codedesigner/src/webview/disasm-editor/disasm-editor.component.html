@@ -71,6 +71,8 @@
     #contextMenu
     (setBreakpoint)="onCtxSetBreakpoint()"
     (removeBreakpoint)="onCtxRemoveBreakpoint()"
+    (addWatch)="onCtxAddWatch()"
+    (removeWatch)="onCtxRemoveWatch()"
     (gotoTarget)="onCtxGotoTarget()"
     (editRow)="onCtxEdit()"
     (addToLabelManager)="onCtxAddToLabelManager()"
@@ -108,7 +110,12 @@
     [registers]="debugPanelRegisters()"
     [stackBytes]="debugPanelStackBytes()"
     [stackBase]="debugPanelStackBase()"
+    [watches]="debugPanelWatches()"
+    [watchValues]="debugPanelWatchValues()"
     (editRegister)="onDebugEditRegister($event)"
+    (removeWatch)="onDebugPanelRemoveWatch($event)"
+    (clearAllWatches)="onDebugPanelClearAllWatches()"
+    (navigateToWatchAddress)="onDebugPanelNavigateWatch($event)"
   />
 </div>
 <!-- Angular BottomPanel (Phase 8) -->

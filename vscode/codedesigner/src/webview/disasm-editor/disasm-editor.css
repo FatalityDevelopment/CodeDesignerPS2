@@ -571,6 +571,37 @@ app-bottom-panel {
     color: #4ec9b0;
 }
 
+/* ── Inspect Tab (Watches + Stack) ── */
+
+.inspect-tab-content {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+.inspect-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 8px;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+    background: #252526;
+}
+
+.inspect-section-title {
+    color: #858585;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.inspect-section-stack {
+    margin-top: 8px;
+    border-top: 1px solid #3e3e42;
+}
+
 /* ── Quad-word (128-bit) GPR column header and value layout ── */
 
 .dbg-qw-header {

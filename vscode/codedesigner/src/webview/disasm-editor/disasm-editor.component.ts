@@ -92,6 +92,8 @@ export class DisasmEditorComponent implements AfterViewInit {
   private readonly contextMenuRuntime = {
     setBreakpoint: null as (() => void) | null,
     removeBreakpoint: null as (() => void) | null,
+    addWatch: null as (() => void) | null,
+    removeWatch: null as (() => void) | null,
     gotoTarget: null as (() => void) | null,
     edit: null as (() => void) | null,
     addToLabelManager: null as (() => void) | null,
@@ -112,6 +114,12 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   /** Stack base address for debug panel */
   protected readonly debugPanelStackBase = signal(0);
+
+  /** Watches for debug panel Inspect tab */
+  protected readonly debugPanelWatches = signal<Set<number>>(new Set());
+
+  /** Current memory values for each watch address */
+  protected readonly debugPanelWatchValues = signal<Map<number, number>>(new Map());
 
   // Debug panel callback (set by initEditorLogic)
   private _debugEditRegisterCallback: ((regType: string, regIdx: number, currentValue: string) => void) | null = null;
@@ -415,6 +423,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     // Determine menu state
     const addr = parseInt(event.row.addr, 16);
     const hasBreakpoint = this.svc.state.breakpoints.has(addr);
+    const hasWatch = this.svc.state.watches.has(addr);
     const hasTarget = !!(event.row.args.match(/\$([0-9A-F]{8})/i) ||
                           event.row.args.match(/0x([0-9A-F]{8})/i));
 
@@ -422,6 +431,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const menuData: ContextMenuData = {
       address: event.row.addr,
       hasBreakpoint,
+      hasWatch,
       hasTarget,
       currentLabel: event.row.label || undefined,
     };
@@ -434,6 +444,14 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onCtxRemoveBreakpoint(): void {
     this.contextMenuRuntime.removeBreakpoint?.();
+  }
+
+  protected onCtxAddWatch(): void {
+    this.contextMenuRuntime.addWatch?.();
+  }
+
+  protected onCtxRemoveWatch(): void {
+    this.contextMenuRuntime.removeWatch?.();
   }
 
   protected onCtxGotoTarget(): void {
@@ -458,6 +476,21 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onDebugEditRegister(event: { regType: string; regIdx: number; currentValue: string }): void {
     this._debugEditRegisterCallback?.(event.regType, event.regIdx, event.currentValue);
+  }
+
+  protected onDebugPanelRemoveWatch(addr: number): void {
+    this.svc.state.watches.delete(addr);
+    this.debugPanelWatches.set(new Set(this.svc.state.watches));
+  }
+
+  protected onDebugPanelClearAllWatches(): void {
+    this.svc.state.watches.clear();
+    this.debugPanelWatches.set(new Set());
+    this.debugPanelWatchValues.set(new Map());
+  }
+
+  protected onDebugPanelNavigateWatch(addr: number): void {
+    this.bottomPanelRuntime.navigate?.(addr);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1036,6 +1069,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     debugPanelRegisters: WritableSignal<RegisterData | null>;
     debugPanelStackBytes: WritableSignal<number[]>;
     debugPanelStackBase: WritableSignal<number>;
+    debugPanelWatches: WritableSignal<Set<number>>;
+    debugPanelWatchValues: WritableSignal<Map<number, number>>;
     bottomPanelCallStack: WritableSignal<CallStackEntry[]>;
     bottomPanelBreakpoints: WritableSignal<Set<number>>;
     setpcStatus: WritableSignal<string>;
@@ -1113,6 +1148,10 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.debugPanelRegisters.set(params.registers);
       params.debugPanelStackBytes.set(params.stackBytes);
       params.debugPanelStackBase.set(params.stackBase);
+      params.debugPanelWatches.set(new Set(params.state.watches));
+      if (params.state.watches.size > 0) {
+        params.vscode.postMessage({ type: 'getWatchValues', addresses: Array.from(params.state.watches) });
+      }
       const typedFrames = params.buildCallStackFrames(params.registers, params.stackBytes, params.stackBase, params.state.symLabels ?? []);
       params.signals.callStack.set(typedFrames);
       params.bottomPanelCallStack.set(typedFrames);
@@ -1691,6 +1730,10 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.zone.run(() => this.openStructOverlay());
       return;
     }
+    if (data['type'] === 'watchValues') {
+      this.handleWatchValuesMessage(data);
+      return;
+    }
     this.handleEditOverlayMessage(data);
     this.handleConverterOverlayMessage(data);
     this.handlePorterOverlayMessage(data);
@@ -1700,6 +1743,18 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.handleStructMessage(data);
     this.handleFollowAiMessage(data);
     this.handleLabelManagerMessage(data);
+  }
+
+  private handleWatchValuesMessage(data: Record<string, unknown>): void {
+    const values = data['values'] as Record<string, number> | undefined;
+    if (!values) { return; }
+    this.zone.run(() => {
+      const map = new Map<number, number>();
+      for (const [k, v] of Object.entries(values)) {
+        map.set(parseInt(k, 10), v);
+      }
+      this.debugPanelWatchValues.set(map);
+    });
   }
 
   private handleFollowAiMessage(data: Record<string, unknown>): void {
@@ -1806,6 +1861,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     debugPanelRegisters: WritableSignal<RegisterData | null>;
     debugPanelStackBytes: WritableSignal<number[]>;
     debugPanelStackBase: WritableSignal<number>;
+    debugPanelWatches: WritableSignal<Set<number>>;
+    debugPanelWatchValues: WritableSignal<Map<number, number>>;
     bottomPanelCallStack: WritableSignal<CallStackEntry[]>;
     bottomPanelBreakpoints: WritableSignal<Set<number>>;
     buildCallStackFrames: (
@@ -1902,6 +1959,8 @@ export class DisasmEditorComponent implements AfterViewInit {
         debugPanelRegisters: params.debugPanelRegisters,
         debugPanelStackBytes: params.debugPanelStackBytes,
         debugPanelStackBase: params.debugPanelStackBase,
+        debugPanelWatches: params.debugPanelWatches,
+        debugPanelWatchValues: params.debugPanelWatchValues,
         bottomPanelCallStack: params.bottomPanelCallStack,
         bottomPanelBreakpoints: params.bottomPanelBreakpoints,
         requestRefresh: params.requestRefresh,
@@ -2006,6 +2065,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     debugPanelRegisters: WritableSignal<RegisterData | null>;
     debugPanelStackBytes: WritableSignal<number[]>;
     debugPanelStackBase: WritableSignal<number>;
+    debugPanelWatches: WritableSignal<Set<number>>;
+    debugPanelWatchValues: WritableSignal<Map<number, number>>;
     bottomPanelCallStack: WritableSignal<CallStackEntry[]>;
     bottomPanelBreakpoints: WritableSignal<Set<number>>;
     buildCallStackFrames: (
@@ -2085,6 +2146,30 @@ export class DisasmEditorComponent implements AfterViewInit {
         params.vscode.postMessage({ type: 'clearBreakpoint', address: addr });
         params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
         params.renderDisassembly();
+      }
+    };
+
+    this.contextMenuRuntime.addWatch = () => {
+      if (!this._ctxRow || this._ctxGlobalIndex < 0) { return; }
+      const addr = parseInt(this._ctxRow.addr, 16);
+      if (!params.state.watches.has(addr)) {
+        params.state.watches.add(addr);
+        params.debugPanelWatches.set(new Set(params.state.watches));
+        if (params.state.isLive) {
+          params.vscode.postMessage({ type: 'getWatchValues', addresses: Array.from(params.state.watches) });
+        }
+      }
+    };
+
+    this.contextMenuRuntime.removeWatch = () => {
+      if (!this._ctxRow || this._ctxGlobalIndex < 0) { return; }
+      const addr = parseInt(this._ctxRow.addr, 16);
+      if (params.state.watches.has(addr)) {
+        params.state.watches.delete(addr);
+        params.debugPanelWatches.set(new Set(params.state.watches));
+        const vals = new Map(params.debugPanelWatchValues());
+        vals.delete(addr);
+        params.debugPanelWatchValues.set(vals);
       }
     };
 
@@ -2265,6 +2350,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     const debugPanelRegisters = this.debugPanelRegisters;
     const debugPanelStackBytes = this.debugPanelStackBytes;
     const debugPanelStackBase = this.debugPanelStackBase;
+    const debugPanelWatches = this.debugPanelWatches;
+    const debugPanelWatchValues = this.debugPanelWatchValues;
     const bottomPanelVisible = this.bottomPanelVisible;
     const symbolsPanelVisible = this.symbolsPanelVisible;
     const bottomPanelCallStack = this.bottomPanelCallStack;
@@ -2444,6 +2531,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       debugPanelRegisters,
       debugPanelStackBytes,
       debugPanelStackBase,
+      debugPanelWatches,
+      debugPanelWatchValues,
       bottomPanelCallStack,
       bottomPanelBreakpoints,
       buildCallStackFrames,
@@ -2657,6 +2746,8 @@ export class DisasmEditorComponent implements AfterViewInit {
         debugPanelRegisters,
         debugPanelStackBytes,
         debugPanelStackBase,
+        debugPanelWatches,
+        debugPanelWatchValues,
         bottomPanelCallStack,
         bottomPanelBreakpoints,
         buildCallStackFrames,

@@ -42,7 +42,7 @@ const COP2_REG_CTL = [
   'c2c24', 'c2c25', 'TPC', 'CMSAR0', 'FBRST', 'VPU-STAT', 'c2c30', 'CMSAR1',
 ];
 
-export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 'gs' | 'stack';
+export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 'gs' | 'inspect';
 
 /**
  * DebugPanelComponent - Displays CPU registers across 8 tabs.
@@ -104,9 +104,44 @@ export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 
         <div class="debug-tab-content active" [innerHTML]="gsHtml()"></div>
       }
 
-      <!-- Stack Tab -->
-      @if (activeTab() === 'stack') {
-        <div class="debug-tab-content active" [innerHTML]="stackHtml()"></div>
+      <!-- Inspect Tab (Stack + Watches) -->
+      @if (activeTab() === 'inspect') {
+        <div class="debug-tab-content active inspect-tab-content">
+
+          <!-- Watches Section -->
+          <div class="inspect-section-header">
+            <span class="inspect-section-title">Watches</span>
+            <button class="bp-clear-all-btn" (click)="clearAllWatches.emit()">Clear All</button>
+          </div>
+          <table class="dbg-table">
+            <thead><tr>
+              <th class="dbg-th">Address</th>
+              <th class="dbg-th">Value (u32)</th>
+              <th class="dbg-th"></th>
+            </tr></thead>
+            <tbody>
+              @if (!sortedWatches().length) {
+                <tr><td colspan="3" class="dbg-td-empty">No watches — right-click an instruction to add one</td></tr>
+              }
+              @for (addr of sortedWatches(); track addr) {
+                <tr class="dbg-table-row clickable" (click)="navigateToWatchAddress.emit(addr)">
+                  <td class="dbg-td-addr dbg-bp-addr mono">0x{{ toHex(addr) }}</td>
+                  <td class="dbg-td-type mono">{{ getWatchValue(addr) }}</td>
+                  <td class="dbg-td-del">
+                    <button class="dbg-bp-del-btn"
+                      (click)="$event.stopPropagation(); removeWatch.emit(addr)">✕</button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+
+          <!-- Stack Trace Section -->
+          <div class="inspect-section-header inspect-section-stack">
+            <span class="inspect-section-title">Stack</span>
+          </div>
+          <div [innerHTML]="stackHtml()"></div>
+        </div>
       }
     </div>
   `,
@@ -146,12 +181,27 @@ export class DebugPanelComponent implements OnDestroy {
   readonly codeStart = input(0);
   readonly codeEnd = input(0x02000000);
 
+  /** Watch addresses to display in the Inspect tab. */
+  readonly watches = input<Set<number>>(new Set());
+
+  /** Current memory values for watched addresses (address -> 32-bit value). */
+  readonly watchValues = input<Map<number, number>>(new Map());
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Outputs
   // ═══════════════════════════════════════════════════════════════════════════
 
   /** Emitted when user wants to edit a register */
   readonly editRegister = output<{ regType: string; regIdx: number; currentValue: string }>();
+
+  /** Emitted when the user clicks the delete button for a watch entry. */
+  readonly removeWatch = output<number>();
+
+  /** Emitted when the user clicks "Clear All" in the watches section. */
+  readonly clearAllWatches = output<void>();
+
+  /** Emitted when the user clicks a watch row (navigate to address). */
+  readonly navigateToWatchAddress = output<number>();
 
   // ═══════════════════════════════════════════════════════════════════════════
   // State
@@ -162,6 +212,11 @@ export class DebugPanelComponent implements OnDestroy {
   /** Current panel width in pixels, persisted to localStorage */
   readonly panelWidth = signal(this._loadWidth());
 
+  /** Sorted array of watch addresses for @for iteration. */
+  readonly sortedWatches = computed(() =>
+    Array.from(this.watches()).sort((a, b) => a - b),
+  );
+
   readonly tabs: { id: DebugTab; label: string }[] = [
     { id: 'registers', label: 'GPR' },
     { id: 'cop0', label: 'CP0' },
@@ -170,7 +225,7 @@ export class DebugPanelComponent implements OnDestroy {
     { id: 'vu0f', label: 'VU0f' },
     { id: 'vu0i', label: 'VU0i' },
     { id: 'gs', label: 'GS' },
-    { id: 'stack', label: 'Stack' },
+    { id: 'inspect', label: 'Inspect' },
   ];
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -482,6 +537,15 @@ export class DebugPanelComponent implements OnDestroy {
   // ═══════════════════════════════════════════════════════════════════════════
   // Utility Methods
   // ═══════════════════════════════════════════════════════════════════════════
+
+  toHex(n: number, pad = 8): string {
+    return (n >>> 0).toString(16).toUpperCase().padStart(pad, '0');
+  }
+
+  getWatchValue(addr: number): string {
+    const val = this.watchValues().get(addr);
+    return val !== undefined ? `0x${this.toHex(val)}` : '—';
+  }
 
   private hex32(n: number): string {
     return (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
