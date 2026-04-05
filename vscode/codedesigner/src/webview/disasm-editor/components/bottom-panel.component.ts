@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 import { CallStackEntry, ModuleEntry, ThreadEntry } from '../state/types';
 
-export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules';
+export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'watches';
 
 /**
  * BottomPanelComponent - Displays callstack, threads, breakpoints, and modules in 4 tabs.
@@ -29,6 +29,7 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules';
         <button class="bottom-tab" [class.active]="activeTab() === 'callstack'" (click)="selectTab('callstack')">Call Stack</button>
         <button class="bottom-tab" [class.active]="activeTab() === 'threads'" (click)="selectTab('threads')">Threads</button>
         <button class="bottom-tab" [class.active]="activeTab() === 'breakpoints'" (click)="selectTab('breakpoints')">Breakpoints</button>
+        <button class="bottom-tab" [class.active]="activeTab() === 'watches'" (click)="selectTab('watches')">Watches</button>
         <button class="bottom-tab" [class.active]="activeTab() === 'modules'" (click)="selectTab('modules')">Modules</button>
         <button class="bottom-refresh-btn" (click)="onRefreshClick()">⟳</button>
       </div>
@@ -124,6 +125,36 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules';
         </div>
       }
 
+      @if (activeTab() === 'watches') {
+        <div class="bottom-tab-content active">
+          <div class="breakpoints-header">
+            <button class="bp-clear-all-btn" (click)="clearAllWatches.emit()">Clear All</button>
+          </div>
+          <table class="dbg-table">
+            <thead><tr>
+              <th class="dbg-th">Address</th>
+              <th class="dbg-th">Value (u32)</th>
+              <th class="dbg-th"></th>
+            </tr></thead>
+            <tbody>
+              @if (!sortedWatches().length) {
+                <tr><td colspan="3" class="dbg-td-empty">No watches — right-click an instruction to add one</td></tr>
+              }
+              @for (addr of sortedWatches(); track addr) {
+                <tr class="dbg-table-row clickable" (click)="navigateToWatchAddress.emit(addr)">
+                  <td class="dbg-td-addr dbg-bp-addr mono">0x{{ toHex(addr) }}</td>
+                  <td class="dbg-td-type mono">{{ getWatchValue(addr) }}</td>
+                  <td class="dbg-td-del">
+                    <button class="dbg-bp-del-btn"
+                      (click)="$event.stopPropagation(); removeWatch.emit(addr)">✕</button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+
       @if (activeTab() === 'modules') {
         <div class="bottom-tab-content active">
           <table class="dbg-table">
@@ -173,12 +204,17 @@ export class BottomPanelComponent implements OnDestroy {
   readonly threads = input<ThreadEntry[]>([]);
   readonly breakpoints = input<Set<number>>(new Set());
   readonly modules = input<ModuleEntry[]>([]);
+  readonly watches = input<Set<number>>(new Set());
+  readonly watchValues = input<Map<number, number>>(new Map());
 
   // Outputs
   readonly navigateToAddress = output<number>();
   readonly toggleBreakpoint = output<number>();
   readonly removeBreakpoint = output<number>();
   readonly clearAllBreakpoints = output<void>();
+  readonly removeWatch = output<number>();
+  readonly clearAllWatches = output<void>();
+  readonly navigateToWatchAddress = output<number>();
   readonly selectThread = output<number>();
   readonly refreshTab = output<BottomTab>();
   readonly tabSelected = output<BottomTab>();
@@ -192,6 +228,11 @@ export class BottomPanelComponent implements OnDestroy {
   // Sorted breakpoints array for @for iteration
   readonly sortedBreakpoints = computed(() =>
     Array.from(this.breakpoints()).sort((a, b) => a - b),
+  );
+
+  // Sorted watches array for @for iteration
+  readonly sortedWatches = computed(() =>
+    Array.from(this.watches()).sort((a, b) => a - b),
   );
 
   selectTab(tab: BottomTab): void {
@@ -209,6 +250,11 @@ export class BottomPanelComponent implements OnDestroy {
 
   parseHex(s: string): number {
     return parseInt(s.replace(/^0x/i, ''), 16) || 0;
+  }
+
+  getWatchValue(addr: number): string {
+    const val = this.watchValues().get(addr);
+    return val !== undefined ? `0x${val.toString(16).toUpperCase().padStart(8, '0')}` : '—';
   }
 
   /**
