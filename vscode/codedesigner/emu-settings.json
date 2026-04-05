@@ -31,6 +31,10 @@
     {
       "type": "pcsx2",
       "path": "C:\\Users\\tholu\\Desktop\\pcsx2\\bin\\pcsx2-qtx64-dbg.exe"
+    },
+    {
+      "type": "pcsx2-qtx64-dbg",
+      "path": "c:\\Users\\tholu\\Desktop\\CodeDesigner\\pcsx2\\bin\\pcsx2-qtx64-dbg.exe"
     }
   ]
 }
