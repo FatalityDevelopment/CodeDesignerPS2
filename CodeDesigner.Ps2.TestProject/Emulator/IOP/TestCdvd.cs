@@ -4,6 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Ps2.Emulator;
 using CodeDesigner.Ps2.Emulator.Hardware;
 using CodeDesigner.Ps2.Emulator.IOP;
+using CodeDesigner.Ps2.IsoManager;
 using CodeDesigner.Ps2.Common.Cpu.Instructions.EE;
 
 
@@ -184,7 +185,7 @@ namespace CodeDesigner.Ps2.TestProject
             var cdvd = new Cdvd();
             cdvd.LoadImage(iso);
 
-            Cdvd.IsoEntry? entry = cdvd.FindFile("system.cnf");
+            IsoEntry? entry = cdvd.FindFile("system.cnf");
             Assert.IsNotNull(entry, "FindFile must locate SYSTEM.CNF case-insensitively");
             Assert.AreEqual((uint)content.Length, entry!.Value.Size,
                 "IsoEntry.Size must match the file content length");
@@ -209,7 +210,7 @@ namespace CodeDesigner.Ps2.TestProject
             var cdvd = new Cdvd();
             cdvd.LoadImage(iso);
 
-            Cdvd.IsoEntry? entry = cdvd.FindFile("SYSTEM.CNF");
+            IsoEntry? entry = cdvd.FindFile("SYSTEM.CNF");
             Assert.IsNotNull(entry, "File must be found");
 
             byte[] data = cdvd.ReadFile(entry!.Value);
