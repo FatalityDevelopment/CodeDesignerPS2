@@ -22,7 +22,7 @@ public sealed class Ps2HddImage : IDisposable
     private const int PfsBlockSize = 8192;                   // 16 sectors
     private const int PfsSectorsPerBlock = PfsBlockSize / SectorSize; // 16
     private const int PfsSuperblockOffset = 0x2000;          // byte offset within partition (block 1)
-    private const int InodeSize = 512;                       // 1 inode = 512 bytes
+    private const int InodeSize = 1024;                      // 1 inode = 1024 bytes (pfs_inode_t)
     private const int MaxInodeDataBlocks = 114;              // direct block pointers per inode
 
     // PFS inode mode flags
@@ -472,54 +472,43 @@ public sealed class Ps2HddImage : IDisposable
             inode.Data[i] = ReadBlockInfo(span.Slice(40 + i * 8));
         }
 
-        int metaOffset = 40 + MaxInodeDataBlocks * 8; // 40 + 912 = 952
-        if (metaOffset + 80 <= data.Length)
-        {
-            // Metadata starts at offset 952 in the inode for the 512-byte variant
-            // But with 114 data blocks × 8 bytes = 912, starting at 40 => 952
-            // For PS2 PFS, the inode layout packs metadata after data blocks
-        }
-
-        // In the standard PS2 PFS inode (512 bytes), metadata is at these offsets:
-        // The actual offsets depend on the PFS version, but commonly:
-        // After the 114 block pointers (at offset 40 + 114*8 = 952), metadata follows.
-        // However, for 512-byte inodes, we use a compact layout.
-
-        // PS2 PFS inode metadata layout (standard):
+        // PS2 PFS inode metadata layout (from ps2sdk pfs_inode_t, 1024 bytes total):
         // offset 0x00: checksum (4)
         // offset 0x04: magic (4)
         // offset 0x08: inode_block (8)
         // offset 0x10: next_segment (8)
         // offset 0x18: last_segment (8)
         // offset 0x20: unused (8)
-        // offset 0x28: data[0..113] (912)
-        // offset 0x1B8: mode (2)
-        // offset 0x1BA: attr (2)
-        // offset 0x1BC: uid (2)
-        // offset 0x1BE: gid (2)
-        // offset 0x1C0: atime (8)
-        // offset 0x1C8: ctime (8)
-        // offset 0x1D0: mtime (8)
-        // offset 0x1D8: size (8)
-        // offset 0x1E0: number_blocks (4)
-        // offset 0x1E4: number_data (4)
-        // offset 0x1E8: number_segdesg (4)
-        // offset 0x1EC: subpart (4)
+        // offset 0x28: data[0..113] (114 * 8 = 912 bytes)
+        // offset 0x3B8: mode (2)
+        // offset 0x3BA: attr (2)
+        // offset 0x3BC: uid (2)
+        // offset 0x3BE: gid (2)
+        // offset 0x3C0: atime (8)
+        // offset 0x3C8: ctime (8)
+        // offset 0x3D0: mtime (8)
+        // offset 0x3D8: size (8)
+        // offset 0x3E0: number_blocks (4)
+        // offset 0x3E4: number_data (4)
+        // offset 0x3E8: number_segdesg (4)
+        // offset 0x3EC: subpart (4)
+        // offset 0x3F0: reserved[4] (16)
+        // Total: 0x400 = 1024 bytes
 
-        if (data.Length >= 0x1F0)
+        if (data.Length >= 0x3F0)
         {
-            inode.Mode = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(0x1B8));
-            inode.Attr = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(0x1BA));
-            inode.Uid = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(0x1BC));
-            inode.Gid = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(0x1BE));
-            inode.ATime = ReadPfsTimestamp(span.Slice(0x1C0, 8));
-            inode.CTime = ReadPfsTimestamp(span.Slice(0x1C8, 8));
-            inode.MTime = ReadPfsTimestamp(span.Slice(0x1D0, 8));
-            inode.Size = BinaryPrimitives.ReadInt64LittleEndian(span.Slice(0x1D8));
-            inode.NumberBlocks = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0x1E0));
-            inode.NumberData = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0x1E4));
-            inode.NumberSegdesg = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0x1E8));
-            inode.SubPart = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0x1EC));
+            inode.Mode = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(0x3B8));
+            inode.Attr = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(0x3BA));
+            inode.Uid = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(0x3BC));
+            inode.Gid = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(0x3BE));
+            inode.ATime = ReadPfsTimestamp(span.Slice(0x3C0, 8));
+            inode.CTime = ReadPfsTimestamp(span.Slice(0x3C8, 8));
+            inode.MTime = ReadPfsTimestamp(span.Slice(0x3D0, 8));
+            inode.Size = BinaryPrimitives.ReadInt64LittleEndian(span.Slice(0x3D8));
+            inode.NumberBlocks = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0x3E0));
+            inode.NumberData = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0x3E4));
+            inode.NumberSegdesg = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0x3E8));
+            inode.SubPart = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0x3EC));
         }
 
         return inode;
@@ -686,9 +675,17 @@ public sealed class Ps2HddImage : IDisposable
     {
         PfsSuperblock sb = ReadPfsSuperblock(part);
         var rootInode = ReadInode(part, sb.Root);
-        var dirData = ReadInodeData(part, rootInode);
+        ExportEntryFromDir(part, rootInode, fileName, outputPath, partId: part.Id);
+    }
 
-        // Find the file in the root directory
+    /// <summary>
+    /// Finds <paramref name="entryName"/> inside <paramref name="dirInode"/> and exports it
+    /// (recursively for directories) into <paramref name="outputDir"/>.
+    /// </summary>
+    private void ExportEntryFromDir(ApaPartition part, PfsInode dirInode, string entryName, string outputDir, string partId = "")
+    {
+        var dirData = ReadInodeData(part, dirInode);
+
         int offset = 0;
         while (offset + 8 < dirData.Length)
         {
@@ -702,7 +699,7 @@ public sealed class Ps2HddImage : IDisposable
             if (pLen > 0 && offset + 8 + pLen <= dirData.Length)
             {
                 string name = Encoding.ASCII.GetString(dirData, offset + 8, pLen).TrimEnd('\0');
-                if (name == fileName)
+                if (name == entryName)
                 {
                     var fileBlockRef = new BlockInfo { Number = inodeRef, SubPart = sub, Count = 1 };
                     var fileInode = ReadInode(part, fileBlockRef);
@@ -710,23 +707,19 @@ public sealed class Ps2HddImage : IDisposable
                     bool isDir = (fileInode.Mode & PfsAttrSubdir) != 0;
                     if (isDir)
                     {
-                        // Export directory recursively
-                        string dirPath = Path.Combine(outputPath, fileName);
+                        string dirPath = Path.Combine(outputDir, entryName);
                         Directory.CreateDirectory(dirPath);
+                        // Recursively export all entries inside this directory
                         var subEntries = ReadDirectoryEntries(part, fileInode);
                         foreach (var entry in subEntries)
                         {
-                            if (!entry.IsDirectory)
-                            {
-                                // Read sub-entry data from directory
-                                ExportSubFile(part, fileInode, entry.Name, dirPath);
-                            }
+                            ExportEntryFromDir(part, fileInode, entry.Name, dirPath);
                         }
                     }
                     else
                     {
                         var fileData = ReadInodeData(part, fileInode);
-                        string outFile = Path.Combine(outputPath, fileName);
+                        string outFile = Path.Combine(outputDir, entryName);
                         Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);
                         File.WriteAllBytes(outFile, fileData.AsSpan(0, (int)Math.Min(fileInode.Size, fileData.Length)).ToArray());
                     }
@@ -737,39 +730,9 @@ public sealed class Ps2HddImage : IDisposable
             offset += aLen;
         }
 
-        throw new FileNotFoundException($"File '{fileName}' not found in partition '{part.Id}'.");
-    }
-
-    private void ExportSubFile(ApaPartition part, PfsInode parentDirInode, string fileName, string outputDir)
-    {
-        var dirData = ReadInodeData(part, parentDirInode);
-
-        int offset = 0;
-        while (offset + 8 < dirData.Length)
-        {
-            uint inodeRef = BinaryPrimitives.ReadUInt32LittleEndian(dirData.AsSpan(offset));
-            byte sub = dirData[offset + 4];
-            byte pLen = dirData[offset + 5];
-            ushort aLen = BinaryPrimitives.ReadUInt16LittleEndian(dirData.AsSpan(offset + 6));
-
-            if (aLen == 0) break;
-
-            if (pLen > 0 && offset + 8 + pLen <= dirData.Length)
-            {
-                string name = Encoding.ASCII.GetString(dirData, offset + 8, pLen).TrimEnd('\0');
-                if (name == fileName)
-                {
-                    var fileBlockRef = new BlockInfo { Number = inodeRef, SubPart = sub, Count = 1 };
-                    var fileInode = ReadInode(part, fileBlockRef);
-                    var fileData = ReadInodeData(part, fileInode);
-                    string outFile = Path.Combine(outputDir, fileName);
-                    File.WriteAllBytes(outFile, fileData.AsSpan(0, (int)Math.Min(fileInode.Size, fileData.Length)).ToArray());
-                    return;
-                }
-            }
-
-            offset += aLen;
-        }
+        throw new FileNotFoundException(string.IsNullOrEmpty(partId)
+            ? $"Entry '{entryName}' not found."
+            : $"File '{entryName}' not found in partition '{partId}'.");
     }
 
     private void ImportFileToPartition(ApaPartition part, string inputPath, bool overwrite)
@@ -1049,21 +1012,23 @@ public sealed class Ps2HddImage : IDisposable
         BinaryPrimitives.WriteUInt16LittleEndian(rootInode.AsSpan(46), 1);
 
         // Mode = directory + readable + writable + executable
-        BinaryPrimitives.WriteUInt16LittleEndian(rootInode.AsSpan(0x1B8),
+        BinaryPrimitives.WriteUInt16LittleEndian(rootInode.AsSpan(0x3B8),
             (ushort)(PfsAttrSubdir | PfsAttrReadable | PfsAttrWritable | PfsAttrExecutable));
         // number_data = 1
-        BinaryPrimitives.WriteUInt32LittleEndian(rootInode.AsSpan(0x1E4), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(rootInode.AsSpan(0x3E4), 1);
+        // number_blocks = 1
+        BinaryPrimitives.WriteUInt32LittleEndian(rootInode.AsSpan(0x3E0), 1);
         // Size = block size (one block of directory entries)
-        BinaryPrimitives.WriteInt64LittleEndian(rootInode.AsSpan(0x1D8), PfsBlockSize);
+        BinaryPrimitives.WriteInt64LittleEndian(rootInode.AsSpan(0x3D8), PfsBlockSize);
         // Timestamp
         var now = DateTime.UtcNow;
-        WritePfsTimestamp(rootInode.AsSpan(0x1C0), now);
-        WritePfsTimestamp(rootInode.AsSpan(0x1C8), now);
-        WritePfsTimestamp(rootInode.AsSpan(0x1D0), now);
+        WritePfsTimestamp(rootInode.AsSpan(0x3C0), now);
+        WritePfsTimestamp(rootInode.AsSpan(0x3C8), now);
+        WritePfsTimestamp(rootInode.AsSpan(0x3D0), now);
 
-        // Checksum
+        // Checksum = sum of all 32-bit words except the first (checksum word itself)
         uint cksum = 0;
-        for (int i = 1; i < 128 && i * 4 + 4 <= rootInode.Length; i++)
+        for (int i = 1; i < 256 && i * 4 + 4 <= rootInode.Length; i++)
             cksum += BinaryPrimitives.ReadUInt32LittleEndian(rootInode.AsSpan(i * 4));
         BinaryPrimitives.WriteUInt32LittleEndian(rootInode.AsSpan(0), cksum);
 
