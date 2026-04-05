@@ -57,48 +57,47 @@ export function activate(context: vscode.ExtensionContext) {
 	const disasmPanelProvider = new DisasmPanelProvider(socketClient, editorProvider, context.extensionUri);
 	disasmPanelProvider.register(context);
 
-	// ── Pointer Manager tree view ─────────────────────────────────────────────
+	// ── Pointer Manager tree view (commented out — will be expanded later) ────
 	const pointerManagerProvider = new PointerManagerProvider(context);
-	context.subscriptions.push(
-		vscode.window.registerTreeDataProvider('disasm.pointerManager', pointerManagerProvider)
-	);
+	// context.subscriptions.push(
+	// 	vscode.window.registerTreeDataProvider('disasm.pointerManager', pointerManagerProvider)
+	// );
 
-	context.subscriptions.push(
-		vscode.commands.registerCommand('codedesigner.pointerManager.addPointer', () =>
-			pointerManagerProvider.addPointer()
-		),
-		vscode.commands.registerCommand('codedesigner.pointerManager.addChildLabel', (item?: PointerTreeItem) => {
-			if (item && (item.itemType === 'pointer' || item.itemType === 'childPointer' || item.itemType === 'child')) {
-				pointerManagerProvider.addChildLabel(item);
-			} else {
-				vscode.window.showWarningMessage('Select a pointer or label node first to add a child.');
-			}
-		}),
-		vscode.commands.registerCommand('codedesigner.pointerManager.editNode', (item?: PointerTreeItem) => {
-			if (item) { pointerManagerProvider.editNode(item); }
-		}),
-		vscode.commands.registerCommand('codedesigner.pointerManager.deleteNode', (item?: PointerTreeItem) => {
-			if (item) { pointerManagerProvider.deleteNode(item); }
-		}),
-		vscode.commands.registerCommand('codedesigner.pointerManager.goToAddress', (addressOrItem: string | PointerTreeItem | undefined) => {
-			let addrStr: string | undefined;
-			if (typeof addressOrItem === 'string') {
-				addrStr = addressOrItem;
-			} else if (addressOrItem instanceof PointerTreeItem) {
-				addrStr = addressOrItem.address;
-			}
-			if (!addrStr) { return; }
-			const addr = parseInt(addrStr.replace(/^0x/i, ''), 16);
-			// Validate the parsed value is a 32-bit address before navigating.
-			if (isNaN(addr) || addr < 0 || addr > 0xFFFFFFFF) { return; }
-			editorProvider.navigateToAddress(addr >>> 0);
-		}),
-		vscode.commands.registerCommand('codedesigner.pointerManager.refresh', () =>
-			pointerManagerProvider.refresh()
-		),
-		vscode.commands.registerCommand('codedesigner.openStructCalculator', () =>
-			editorProvider.openStructCalculator()
-		)
+	// context.subscriptions.push(
+	// 	vscode.commands.registerCommand('codedesigner.pointerManager.addPointer', () =>
+	// 		pointerManagerProvider.addPointer()
+	// 	),
+	// 	vscode.commands.registerCommand('codedesigner.pointerManager.addChildLabel', (item?: PointerTreeItem) => {
+	// 		if (item && (item.itemType === 'pointer' || item.itemType === 'childPointer' || item.itemType === 'child')) {
+	// 			pointerManagerProvider.addChildLabel(item);
+	// 		} else {
+	// 			vscode.window.showWarningMessage('Select a pointer or label node first to add a child.');
+	// 		}
+	// 	}),
+	// 	vscode.commands.registerCommand('codedesigner.pointerManager.editNode', (item?: PointerTreeItem) => {
+	// 		if (item) { pointerManagerProvider.editNode(item); }
+	// 	}),
+	// 	vscode.commands.registerCommand('codedesigner.pointerManager.deleteNode', (item?: PointerTreeItem) => {
+	// 		if (item) { pointerManagerProvider.deleteNode(item); }
+	// 	}),
+	// 	vscode.commands.registerCommand('codedesigner.pointerManager.goToAddress', (addressOrItem: string | PointerTreeItem | undefined) => {
+	// 		let addrStr: string | undefined;
+	// 		if (typeof addressOrItem === 'string') {
+	// 			addrStr = addressOrItem;
+	// 		} else if (addressOrItem instanceof PointerTreeItem) {
+	// 			addrStr = addressOrItem.address;
+	// 		}
+	// 		if (!addrStr) { return; }
+	// 		const addr = parseInt(addrStr.replace(/^0x/i, ''), 16);
+	// 		// Validate the parsed value is a 32-bit address before navigating.
+	// 		if (isNaN(addr) || addr < 0 || addr > 0xFFFFFFFF) { return; }
+	// 		editorProvider.navigateToAddress(addr >>> 0);
+	// 	}),
+	// 	vscode.commands.registerCommand('codedesigner.pointerManager.refresh', () =>
+	// 		pointerManagerProvider.refresh()
+	// 	),
+	vscode.commands.registerCommand('codedesigner.openStructCalculator', () =>
+		editorProvider.openStructCalculator()
 	);
 
 	// Wire pause-state propagation: when a breakpoint/step pause is detected in the
@@ -109,9 +108,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Wire struct / label set changes from the DisasmEditorProvider to the STRUCTS panel.
 	// This keeps the tree view in sync with whatever label set is active in the editor.
-	editorProvider.onStructsChanged = (structs) => {
-		pointerManagerProvider.setServerStructs(structs);
-	};
+	// (Commented out — structs panel is disabled for now)
+	// editorProvider.onStructsChanged = (structs) => {
+	// 	pointerManagerProvider.setServerStructs(structs);
+	// };
 
 	// Wire pointer-manager label changes to the disasm instruction display.
 	// Whenever the user adds, edits, or deletes a pointer/child label, resolve
@@ -157,8 +157,7 @@ export function activate(context: vscode.ExtensionContext) {
 	socketClient.onDisconnected(() => {
 		outputChannel.warn('Disconnected from C# server');
 		vscode.window.showWarningMessage('Disconnected from C# server');
-		// Clear server structs so the STRUCTS panel falls back to local pointers.
-		pointerManagerProvider.setServerStructs([]);
+		// (Structs panel disabled — pointerManagerProvider.setServerStructs([]) not needed)
 		// Update the sidebar status bar to STOPPED so the user knows the
 		// connection dropped (covers server crashes / unexpected disconnects).
 		disasmPanelProvider.notifyDisconnected();

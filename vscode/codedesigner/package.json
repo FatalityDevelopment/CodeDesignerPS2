@@ -31,11 +31,6 @@
           "type": "webview",
           "id": "disasm.disasmPanel",
           "name": "Emulator"
-        },
-        {
-          "type": "tree",
-          "id": "disasm.pointerManager",
-          "name": "Structs"
         }
       ]
     },

@@ -96,7 +96,20 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
       </select>
 
       <!-- Set management buttons -->
-      <button class="lm-tool-btn" title="New label set" (click)="onNewSet()">&#43; New</button>
+      @if (!showNewSetInput()) {
+        <button class="lm-tool-btn" title="Create a new label set (JSON file) for the current game" (click)="onNewSet()">&#43; New</button>
+      }
+      <!-- Inline new-set input (replaces prompt()) -->
+      @if (showNewSetInput()) {
+        <input class="lm-new-set-input" type="text" spellcheck="false"
+               placeholder="Set name…"
+               [value]="newSetNameInput()"
+               (input)="newSetNameInput.set(asInput($event).value)"
+               (keydown.enter)="onConfirmNewSet()"
+               (keydown.escape)="onCancelNewSet()" />
+        <button class="lm-tool-btn" [disabled]="!newSetNameInput().trim()" (click)="onConfirmNewSet()" title="Create set">&#x2713;</button>
+        <button class="lm-tool-btn" (click)="onCancelNewSet()" title="Cancel">&#xD7;</button>
+      }
       <button class="lm-tool-btn lm-danger-btn"
               title="Delete this label set"
               [disabled]="activeSetIsBuiltIn()"
@@ -148,7 +161,15 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
       <table id="lm-table">
         <thead>
           <tr>
-            <th class="lm-col-vis" title="Visibility in disassembler / structs panel">👁</th>
+            <th class="lm-col-vis" title="Toggle all visibility">
+              <button class="lm-vis-btn lm-vis-all-btn"
+                      [disabled]="activeSetIsBuiltIn() || filteredEntries().length === 0"
+                      [title]="allVisible() ? 'Hide all' : 'Show all'"
+                      (click)="onToggleAllVisibility()">
+                {{ allVisible() ? '👁' : '🙈' }}
+              </button>
+            </th>
+            <th class="lm-col-expand"></th>
             <th class="lm-col-type">Type</th>
             <th class="lm-col-addr">Address</th>
             <th class="lm-col-name">Name</th>
@@ -172,6 +193,13 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   {{ entry.hidden ? '🙈' : '👁' }}
                 </button>
               </td>
+              <td class="lm-col-expand">
+                @if (effectiveType(entry) === 'Struct' && entry.members.length > 0) {
+                  <button class="lm-expand-btn" [title]="isExpanded(entry) ? 'Collapse' : 'Expand members'" (click)="toggleExpand(entry)">
+                    {{ isExpanded(entry) ? '▼' : '▶' }}
+                  </button>
+                }
+              </td>
               <td class="lm-col-type">
                 <span class="lm-type-badge" [class]="typeBadgeClass(entry)">{{ typeBadge(entry) }}</span>
               </td>
@@ -189,9 +217,28 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                 </td>
               }
             </tr>
+            <!-- Struct members tree rows -->
+            @if (isExpanded(entry) && effectiveType(entry) === 'Struct') {
+              @for (member of entry.members; track member.offset) {
+                <tr class="lm-member-sub-row" [class.lm-hidden-row]="entry.hidden">
+                  <td class="lm-col-vis"></td>
+                  <td class="lm-col-expand lm-member-tree-indent">└</td>
+                  <td class="lm-col-type lm-mono lm-member-offset-cell">
+                    +0x{{ member.offset.toString(16).toUpperCase().padStart(2, '0') }}
+                  </td>
+                  <td class="lm-col-addr"></td>
+                  <td class="lm-col-name lm-member-sub-name">{{ member.name }}</td>
+                  <td class="lm-col-comment"></td>
+                  <td class="lm-col-members"></td>
+                  @if (!activeSetIsBuiltIn()) {
+                    <td class="lm-col-actions"></td>
+                  }
+                </tr>
+              }
+            }
           }
           @if (filteredEntries().length === 0) {
-            <tr><td [attr.colspan]="activeSetIsBuiltIn() ? 6 : 7" class="lm-empty-note">
+            <tr><td [attr.colspan]="activeSetIsBuiltIn() ? 7 : 8" class="lm-empty-note">
               @if ((currentSet()?.entries?.length ?? 0) === 0) {
                 @if (activeSetIsBuiltIn()) {
                   This is a read-only built-in set. Click <strong>+ New</strong> to create your own label set, then add labels using the <strong>+ Add Label</strong> button.
@@ -368,11 +415,19 @@ export class LabelManagerOverlayComponent {
   readonly statusMsg     = signal('');
   readonly statusIsError = signal(false);
 
+  // Tree view — track which struct entries are expanded
+  readonly expandedStructs = signal<Set<string>>(new Set());
+
+  // Inline new-set creation (replaces window.prompt)
+  readonly showNewSetInput = signal(false);
+  readonly newSetNameInput = signal('');
+
   // Edit form state
   readonly editAddress       = signal('');
   readonly editName          = signal('');
   readonly editComment       = signal('');
   readonly editType          = signal<string>('Address');
+  readonly editHidden        = signal(false);
   readonly editMembers       = signal<{ offsetStr: string; name: string }[]>([]);
   readonly editArgRegs       = signal('');
   readonly editReturnRegs    = signal('');
@@ -411,6 +466,12 @@ export class LabelManagerOverlayComponent {
   readonly canSave = computed(() =>
     this.editAddress().trim() !== '' && this.editName().trim() !== ''
   );
+
+  /** True when all filtered visible entries have hidden=false (or undefined). */
+  readonly allVisible = computed(() => {
+    const entries = this.filteredEntries();
+    return entries.length > 0 && entries.every(e => !e.hidden);
+  });
 
   // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -495,9 +556,24 @@ export class LabelManagerOverlayComponent {
   }
 
   onNewSet(): void {
-    const name = prompt('Enter a name for the new label set:')?.trim();
+    this.newSetNameInput.set('');
+    this.showNewSetInput.set(true);
+    requestAnimationFrame(() => {
+      (document.querySelector('.lm-new-set-input') as HTMLInputElement | null)?.focus();
+    });
+  }
+
+  onConfirmNewSet(): void {
+    const name = this.newSetNameInput().trim();
     if (!name) { return; }
+    this.showNewSetInput.set(false);
+    this.newSetNameInput.set('');
     this.action$.emit({ type: 'createSet', setName: name });
+  }
+
+  onCancelNewSet(): void {
+    this.showNewSetInput.set(false);
+    this.newSetNameInput.set('');
   }
 
   onDeleteSet(): void {
@@ -521,11 +597,35 @@ export class LabelManagerOverlayComponent {
     this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
   }
 
+  // ── Tree view ─────────────────────────────────────────────────────────────────
+
+  toggleExpand(entry: LabelManagerEntry): void {
+    this.expandedStructs.update(set => {
+      const next = new Set(set);
+      if (next.has(entry.address)) { next.delete(entry.address); } else { next.add(entry.address); }
+      return next;
+    });
+  }
+
+  isExpanded(entry: LabelManagerEntry): boolean {
+    return this.expandedStructs().has(entry.address);
+  }
+
+  onToggleAllVisibility(): void {
+    const makeHidden = this.allVisible();
+    const setName = this.activeSetName();
+    for (const entry of this.filteredEntries()) {
+      const updated: LabelManagerEntry = { ...entry, hidden: makeHidden };
+      this.action$.emit({ type: 'addEntry', setName, entry: updated });
+    }
+  }
+
   onEdit(entry: LabelManagerEntry): void {
     this.editAddress.set(entry.address);
     this.editName.set(entry.name);
     this.editComment.set(entry.comment ?? '');
     this.editType.set(entry.type ?? (entry.members.length > 0 ? 'Struct' : 'Address'));
+    this.editHidden.set(entry.hidden ?? false);
     this.editMembers.set(entry.members.map(m => ({ offsetStr: '0x' + m.offset.toString(16).toUpperCase().padStart(2, '0'), name: m.name })));
     this.editArgRegs.set((entry.argRegs ?? []).join('\n'));
     this.editReturnRegs.set((entry.returnRegs ?? []).join('\n'));
@@ -575,6 +675,8 @@ export class LabelManagerOverlayComponent {
       name,
       comment: this.editComment().trim() || undefined,
       type,
+      // Preserve hidden state when editing; default to false (visible) for new entries.
+      hidden: this.editingAddress() ? this.editHidden() : false,
       members,
       argRegs:       argRegs?.length      ? argRegs      : undefined,
       returnRegs:    returnRegs?.length    ? returnRegs   : undefined,
@@ -636,6 +738,7 @@ export class LabelManagerOverlayComponent {
     this.editName.set('');
     this.editComment.set('');
     this.editType.set('Address');
+    this.editHidden.set(false);
     this.editMembers.set([]);
     this.editArgRegs.set('');
     this.editReturnRegs.set('');
