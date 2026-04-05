@@ -95,7 +95,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     addWatch: null as (() => void) | null,
     removeWatch: null as (() => void) | null,
     gotoTarget: null as (() => void) | null,
-    edit: null as (() => void) | null,
     addToLabelManager: null as (() => void) | null,
   };
 
@@ -456,10 +455,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onCtxGotoTarget(): void {
     this.contextMenuRuntime.gotoTarget?.();
-  }
-
-  protected onCtxEdit(): void {
-    this.contextMenuRuntime.edit?.();
   }
 
   protected onCtxAddToLabelManager(): void {
@@ -2179,19 +2174,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (this._ctxGlobalIndex < 0) { return; }
       params.state.cursor = this._ctxGlobalIndex;
       params.navigateToCurrentRowTarget();
-    };
-
-    this.contextMenuRuntime.edit = () => {
-      if (!this._ctxRow || this._ctxGlobalIndex < 0) { return; }
-      params.openEditOverlayFn(
-        parseInt(this._ctxRow.addr, 16),
-        this._ctxRow.addr,
-        this._ctxRow.op || '',
-        this._ctxRow.args || '',
-        this._ctxRow.bytes || '',
-        this._ctxRow.label || '',
-        this._ctxRow.comment || '',
-      );
     };
 
     this.contextMenuRuntime.addToLabelManager = () => {

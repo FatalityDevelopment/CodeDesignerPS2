@@ -102,6 +102,10 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
               [disabled]="activeSetIsBuiltIn()"
               (click)="onDeleteSet()">&#x1F5D1; Delete Set</button>
 
+      @if (!activeSetIsBuiltIn()) {
+        <button class="lm-tool-btn lm-add-btn" title="Add a new label entry" (click)="onAddLabel()">&#43; Add Label</button>
+      }
+
       <span class="lm-spacer"></span>
 
       <!-- Runtime resolution (PINE only) -->
@@ -189,7 +193,11 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
           @if (filteredEntries().length === 0) {
             <tr><td [attr.colspan]="activeSetIsBuiltIn() ? 6 : 7" class="lm-empty-note">
               @if ((currentSet()?.entries?.length ?? 0) === 0) {
-                No labels yet. Click <strong>+ Add</strong> to create one.
+                @if (activeSetIsBuiltIn()) {
+                  This is a read-only built-in set. Click <strong>+ New</strong> to create your own label set, then add labels using the <strong>+ Add Label</strong> button.
+                } @else {
+                  No labels yet. Click <strong>+ Add Label</strong> in the toolbar to create one.
+                }
               } @else {
                 No labels match the current filter.
               }
@@ -443,10 +451,9 @@ export class LabelManagerOverlayComponent {
     this.currentSet.set(set);
 
     const pending = this._pendingPrefillAddress;
-    this._pendingPrefillAddress = null;
 
     if (pending) {
-      // A context-menu "Add to Label Manager" was triggered — apply the prefill.
+      // A context-menu "Add Label" was triggered — apply the prefill.
       this.clearForm();
       this.editAddress.set('0x' + pending);
       const existing = set.entries.find(
@@ -455,11 +462,14 @@ export class LabelManagerOverlayComponent {
       if (existing) {
         this.onEdit(existing);
       }
-      // If the active set is read-only, guide the user.
+      // If the active set is read-only, keep the pending address so it is
+      // reapplied automatically when the user switches to (or creates) a user set.
       if (set.isBuiltIn) {
-        this.statusMsg.set('Select or create a user label set to add this address.');
+        this.statusMsg.set('Create or select a user label set (via + New) to add this address.');
         this.statusIsError.set(false);
       } else {
+        // Successfully landed on a writable set — clear the pending address and scroll.
+        this._pendingPrefillAddress = null;
         requestAnimationFrame(() => {
           document.getElementById('lm-edit-form')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
@@ -494,6 +504,16 @@ export class LabelManagerOverlayComponent {
     const name = this.activeSetName();
     if (!confirm(`Delete label set "${name}"? This cannot be undone.`)) { return; }
     this.action$.emit({ type: 'deleteSet', setName: name });
+  }
+
+  onAddLabel(): void {
+    this.clearForm();
+    requestAnimationFrame(() => {
+      const form = document.getElementById('lm-edit-form');
+      form?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const firstInput = form?.querySelector('input') as HTMLInputElement | null;
+      firstInput?.focus();
+    });
   }
 
   onToggleVisibility(entry: LabelManagerEntry): void {
