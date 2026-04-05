@@ -375,6 +375,13 @@ export class LabelManagerOverlayComponent {
   /** When editing an existing entry, this holds its original address. */
   readonly editingAddress = signal('');
 
+  /**
+   * Normalised address (no "0x" prefix, uppercase) that should be pre-filled
+   * into the form the next time `setActiveSet` is called after a refresh.
+   * Set by `openWithAddress`; cleared immediately once applied.
+   */
+  private _pendingPrefillAddress: string | null = null;
+
   // ── Computed ──────────────────────────────────────────────────────────────────
   readonly activeSetIsBuiltIn = computed(() =>
     this.activeSetName() === 'Built-in' || (this.currentSet()?.isBuiltIn ?? false)
@@ -404,6 +411,20 @@ export class LabelManagerOverlayComponent {
     this.action$.emit({ type: 'refresh' });
   }
 
+  /**
+   * Opens the overlay pre-filled with the given address.
+   * If the refreshed set already contains an entry for this address, all form
+   * fields are populated so the user can edit the full label definition.
+   * Otherwise only the address field is pre-filled.
+   */
+  openWithAddress(addressHex: string): void {
+    // Store the normalised address so setActiveSet() can apply it once the
+    // refresh response arrives (avoiding a race where clearForm() wipes the field).
+    this._pendingPrefillAddress = addressHex.toUpperCase().replace(/^0x/i, '');
+    this.visible.set(true);
+    this.action$.emit({ type: 'refresh' });
+  }
+
   close(): void {
     if (this.visible()) {
       this.visible.set(false);
@@ -420,8 +441,33 @@ export class LabelManagerOverlayComponent {
   setActiveSet(set: LabelSetPayload): void {
     this.activeSetName.set(set.setName);
     this.currentSet.set(set);
-    this.clearForm();
-    this.statusMsg.set('');
+
+    const pending = this._pendingPrefillAddress;
+    this._pendingPrefillAddress = null;
+
+    if (pending) {
+      // A context-menu "Add to Label Manager" was triggered — apply the prefill.
+      this.clearForm();
+      this.editAddress.set('0x' + pending);
+      const existing = set.entries.find(
+        e => e.address.toUpperCase().replace(/^0x/i, '') === pending,
+      );
+      if (existing) {
+        this.onEdit(existing);
+      }
+      // If the active set is read-only, guide the user.
+      if (set.isBuiltIn) {
+        this.statusMsg.set('Select or create a user label set to add this address.');
+        this.statusIsError.set(false);
+      } else {
+        requestAnimationFrame(() => {
+          document.getElementById('lm-edit-form')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      }
+    } else {
+      this.clearForm();
+      this.statusMsg.set('');
+    }
   }
 
   showStatus(msg: string, isError = false): void {

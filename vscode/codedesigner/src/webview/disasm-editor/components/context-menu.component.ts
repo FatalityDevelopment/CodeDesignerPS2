@@ -17,6 +17,8 @@ export interface ContextMenuData {
   hasBreakpoint: boolean;
   /** Whether the instruction has a branch/jump target (enables "Go to Target"). */
   hasTarget: boolean;
+  /** Existing label text for this address, if any. */
+  currentLabel?: string;
 }
 
 /**
@@ -73,6 +75,9 @@ export interface ContextMenuData {
     <div class="ctx-menu-item" (click)="onEditRow()">
       <span class="ctx-menu-icon">✎</span>Edit / Add Label…
     </div>
+    <div class="ctx-menu-item" aria-label="Add to Label Manager" (click)="onAddToLabelManager()">
+      <span class="ctx-menu-icon" aria-hidden="true">[L]</span>{{ data()?.currentLabel ? 'Edit in Label Manager…' : 'Add to Label Manager…' }}
+    </div>
   `,
   styles: [`
     /* Styles are provided by the parent disasm-editor.css via ViewEncapsulation.None */
@@ -96,6 +101,7 @@ export class ContextMenuComponent {
   readonly removeBreakpoint = output<void>();
   readonly gotoTarget = output<void>();
   readonly editRow = output<void>();
+  readonly addToLabelManager = output<void>();
   readonly closed = output<void>();
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -168,6 +174,11 @@ export class ContextMenuComponent {
 
   onEditRow(): void {
     this.editRow.emit();
+    this.close();
+  }
+
+  onAddToLabelManager(): void {
+    this.addToLabelManager.emit();
     this.close();
   }
 }
