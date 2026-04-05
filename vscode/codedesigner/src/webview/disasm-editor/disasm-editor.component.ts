@@ -94,6 +94,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     removeBreakpoint: null as (() => void) | null,
     gotoTarget: null as (() => void) | null,
     edit: null as (() => void) | null,
+    addToLabelManager: null as (() => void) | null,
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -422,6 +423,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       address: event.row.addr,
       hasBreakpoint,
       hasTarget,
+      currentLabel: event.row.label || undefined,
     };
     this.contextMenuRef()?.open(event.event.clientX, event.event.clientY, menuData);
   }
@@ -440,6 +442,10 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onCtxEdit(): void {
     this.contextMenuRuntime.edit?.();
+  }
+
+  protected onCtxAddToLabelManager(): void {
+    this.contextMenuRuntime.addToLabelManager?.();
   }
 
   protected onCtxClosed(): void {
@@ -2099,6 +2105,14 @@ export class DisasmEditorComponent implements AfterViewInit {
         this._ctxRow.label || '',
         this._ctxRow.comment || '',
       );
+    };
+
+    this.contextMenuRuntime.addToLabelManager = () => {
+      if (!this._ctxRow) { return; }
+      this.zone.run(() => {
+        this.signals.panels.labelManager.set(true);
+        this.labelManagerRef()?.openWithAddress(this._ctxRow!.addr);
+      });
     };
 
     this._debugEditRegisterCallback = (regType: string, regIdx: number, currentValue: string) => {
