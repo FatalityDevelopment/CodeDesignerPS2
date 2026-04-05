@@ -3445,6 +3445,8 @@ app-bottom-panel {
 .lm-struct-row .lm-col-addr { border-left: 2px solid #569cd6; }
 
 .lm-col-vis     { width: 36px; text-align: center; padding: 0 2px !important; }
+.lm-col-expand  { width: 24px; text-align: center; padding: 0 2px !important; }
+.lm-col-type    { width: 60px; }
 .lm-col-addr    { width: 110px; }
 .lm-col-name    { width: 200px; }
 .lm-col-comment { width: auto; }
@@ -3466,6 +3468,37 @@ app-bottom-panel {
 }
 .lm-vis-btn:hover { opacity: 1; }
 .lm-vis-btn:disabled { cursor: default; opacity: 0.3; }
+.lm-vis-all-btn { font-size: 12px; }
+
+/* Tree expand/collapse button */
+.lm-expand-btn {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 9px;
+    padding: 2px 3px;
+    line-height: 1;
+}
+.lm-expand-btn:hover { color: #ccc; }
+
+/* Member sub-rows (struct tree view) */
+.lm-member-sub-row td { background: #1a1a1a; border-bottom: 1px solid #222; padding: 2px 8px; }
+.lm-member-sub-row:hover td { background: #212121; }
+.lm-member-tree-indent { color: #555; font-size: 11px; text-align: center; }
+.lm-member-offset-cell { font-size: 11px; color: #7bafd4; }
+.lm-member-sub-name { font-size: 11px; color: #b0b0b0; }
+
+/* Inline new-set input in toolbar */
+.lm-new-set-input {
+    background: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #0e639c;
+    border-radius: 3px;
+    padding: 3px 6px;
+    font-size: 12px;
+    width: 160px;
+}
 
 .lm-mono { font-family: monospace; color: #9cdcfe; }
 .lm-muted { color: #666; }
