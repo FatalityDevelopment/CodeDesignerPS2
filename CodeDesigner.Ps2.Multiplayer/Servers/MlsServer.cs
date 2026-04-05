@@ -1,11 +1,11 @@
 using System.Net.Sockets;
-using CodeDesigner.Ps2.OnlineServer.Config;
-using CodeDesigner.Ps2.OnlineServer.Models;
-using CodeDesigner.Ps2.OnlineServer.Protocol;
-using CodeDesigner.Ps2.OnlineServer.Storage;
+using CodeDesigner.Ps2.Multiplayer.Config;
+using CodeDesigner.Ps2.Multiplayer.Models;
+using CodeDesigner.Ps2.Multiplayer.Protocol;
+using CodeDesigner.Ps2.Multiplayer.Storage;
 using Microsoft.Extensions.Logging;
 
-namespace CodeDesigner.Ps2.OnlineServer.Servers;
+namespace CodeDesigner.Ps2.Multiplayer.Servers;
 
 /// <summary>
 /// MLS — Medius Lobby Server.
@@ -16,11 +16,11 @@ namespace CodeDesigner.Ps2.OnlineServer.Servers;
 /// </summary>
 public class MlsServer : BaseMediusTcpServer
 {
-    private readonly OnlineServerConfig       _config;
+    private readonly MultiplayerConfig       _config;
     private readonly InMemoryStorage    _store;
     private readonly ILogger<MlsServer> _log;
 
-    public MlsServer(OnlineServerConfig config, InMemoryStorage store, ILogger<MlsServer> log)
+    public MlsServer(MultiplayerConfig config, InMemoryStorage store, ILogger<MlsServer> log)
         : base(log, config)
     {
         _config    = config;
@@ -374,15 +374,19 @@ public class MlsServer : BaseMediusTcpServer
             state.AccountName,
             maxPlayers);
 
+        // Create a matching DME world for this game
+        var dmeWorld = DmeServer.CreateWorld(state.AppId, maxPlayers);
+        game.DmeWorldId = dmeWorld.WorldId;
+
         state.CurrentGameId = game.GameId;
         state.Status        = PlayerStatus.InGameWorld;
 
         var w = new MediusWriter();
         w.Write((int)MediusCallbackStatus.MediusSuccess);
         w.Write(game.GameId);
-        // DME connection info — for LAN play just point back to ourselves
+        // DME connection info
         w.WriteString(_config.ServerIp, 16);
-        w.Write((ushort)10070);  // DME port
+        w.Write((ushort)_config.DmePort);
         w.WritePadding(2);
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.CreateGameResponse, w.ToArray()), ct);
@@ -415,7 +419,7 @@ public class MlsServer : BaseMediusTcpServer
         w.Write((int)MediusCallbackStatus.MediusSuccess);
         w.Write(game.GameId);
         w.WriteString(_config.ServerIp, 16);
-        w.Write((ushort)10070);
+        w.Write((ushort)_config.DmePort);
         w.WritePadding(2);
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.JoinGameResponse, w.ToArray()), ct);

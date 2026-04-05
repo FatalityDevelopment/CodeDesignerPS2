@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.OnlineServer.Protocol;
+namespace CodeDesigner.Ps2.Multiplayer.Protocol;
 
 /// <summary>
 /// Medius protocol string and buffer length constants.

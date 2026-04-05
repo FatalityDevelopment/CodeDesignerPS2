@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
-using CodeDesigner.Ps2.OnlineServer.Models;
+using CodeDesigner.Ps2.Multiplayer.Models;
 
-namespace CodeDesigner.Ps2.OnlineServer.Storage;
+namespace CodeDesigner.Ps2.Multiplayer.Storage;
 
 /// <summary>
 /// Simple thread-safe in-memory store for accounts, channels, and games.

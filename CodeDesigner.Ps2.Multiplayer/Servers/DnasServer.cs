@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
-using CodeDesigner.Ps2.OnlineServer.Config;
+using CodeDesigner.Ps2.Multiplayer.Config;
 using Microsoft.Extensions.Logging;
 
-namespace CodeDesigner.Ps2.OnlineServer.Servers;
+namespace CodeDesigner.Ps2.Multiplayer.Servers;
 
 /// <summary>
 /// DNAS — Dynamic Network Authentication System server.
@@ -25,7 +25,7 @@ namespace CodeDesigner.Ps2.OnlineServer.Servers;
 /// </summary>
 public class DnasServer
 {
-    private readonly OnlineServerConfig  _config;
+    private readonly MultiplayerConfig  _config;
     private readonly ILogger<DnasServer> _log;
     private HttpListener?                _listener;
     private CancellationToken            _ct;
@@ -36,7 +36,7 @@ public class DnasServer
 
     private readonly ConcurrentDictionary<string, byte[]> _responseCache = new();
 
-    public DnasServer(OnlineServerConfig config, ILogger<DnasServer> log)
+    public DnasServer(MultiplayerConfig config, ILogger<DnasServer> log)
     {
         _config = config;
         _log    = log;

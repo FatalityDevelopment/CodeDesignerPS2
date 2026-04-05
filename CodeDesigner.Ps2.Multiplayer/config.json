@@ -5,6 +5,8 @@
     "MuisPort": 10075,
     "MasPort": 10071,
     "MlsPort": 10073,
+    "DmePort": 10070,
+    "NatPort": 10069,
     "DnasPort": 10060,
     "DnasRegion": "us-gw",
     "MaxClients": 1000,

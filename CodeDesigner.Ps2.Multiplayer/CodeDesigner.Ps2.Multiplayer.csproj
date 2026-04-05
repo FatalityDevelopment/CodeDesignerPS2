@@ -5,8 +5,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>CodeDesigner.Ps2.OnlineServer</AssemblyName>
-    <RootNamespace>CodeDesigner.Ps2.OnlineServer</RootNamespace>
+    <AssemblyName>CodeDesigner.Ps2.Multiplayer</AssemblyName>
+    <RootNamespace>CodeDesigner.Ps2.Multiplayer</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

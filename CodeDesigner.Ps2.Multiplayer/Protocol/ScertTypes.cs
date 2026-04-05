@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.OnlineServer.Protocol;
+namespace CodeDesigner.Ps2.Multiplayer.Protocol;
 
 /// <summary>
 /// SCERT (SCE Real-Time) transport layer message type IDs.
@@ -162,6 +162,12 @@ public enum MediusLobbyMessageId : byte
     ClearGameListFilterResponse     = 0x51,
     GetGameListFilter               = 0x52,
     GetGameListFilterResponse0      = 0x53,
+    // Note: 0x54–0x8F covered by the clan/ladder/file/location block below.
+    // In older Medius versions (PS2 era) 0x62–0x65 were used for different
+    // purposes (TicketLogin / GetUniverse).  Those are preserved below for
+    // backwards-compatibility with SOCOM II and similar games; in canonical
+    // horizon-server Medius the same values are InvitePlayerToClan /
+    // CheckMyClanInvitations.
     TicketLogin                     = 0x62,
     TicketLoginResponse             = 0x63,
     GetUniverse                     = 0x64,
@@ -185,10 +191,11 @@ public enum MediusLobbyMessageId : byte
     AddPlayerToClanResponse                     = 0x5F,
     RemovePlayerFromClan                        = 0x60,
     RemovePlayerFromClanResponse                = 0x61,
-    InvitePlayerToClan                          = 0x62,
-    InvitePlayerToClanResponse                  = 0x63,
-    CheckMyClanInvitations                      = 0x64,
-    CheckMyClanInvitationsResponse              = 0x65,
+    // 0x62–0x65 are reserved for TicketLogin/GetUniverse (PS2 game-specific; see above)
+    InvitePlayerToClan                          = 0x62,  // conflicts with TicketLogin in older Medius
+    InvitePlayerToClanResponse                  = 0x63,  // conflicts with TicketLoginResponse in older Medius
+    CheckMyClanInvitations                      = 0x64,  // conflicts with GetUniverse in older Medius
+    CheckMyClanInvitationsResponse              = 0x65,  // conflicts with GetUniverseResponse in older Medius
     RespondToClanInvitation                     = 0x66,
     RespondToClanInvitationResponse             = 0x67,
     RevokeClanInvitation                        = 0x68,

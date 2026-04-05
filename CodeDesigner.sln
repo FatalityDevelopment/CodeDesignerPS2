@@ -29,7 +29,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.LabelManag
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.IsoManager", "CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj", "{E5F6A7B8-C9D0-1234-F012-345678901235}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.OnlineServer", "CodeDesigner.Ps2.OnlineServer\CodeDesigner.Ps2.OnlineServer.csproj", "{E5F6A7B8-C9D0-1234-F012-456789012346}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Multiplayer", "CodeDesigner.Ps2.Multiplayer\CodeDesigner.Ps2.Multiplayer.csproj", "{E5F6A7B8-C9D0-1234-F012-456789012346}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

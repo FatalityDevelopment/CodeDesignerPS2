@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.OnlineServer.Models;
+namespace CodeDesigner.Ps2.Multiplayer.Models;
 
 /// <summary>An in-memory account record.</summary>
 public class MediusAccount

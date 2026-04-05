@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
-using CodeDesigner.Ps2.OnlineServer.Protocol;
+using CodeDesigner.Ps2.Multiplayer.Protocol;
 
-namespace CodeDesigner.Ps2.OnlineServer.Models;
+namespace CodeDesigner.Ps2.Multiplayer.Models;
 
 /// <summary>
 /// A DME game world: an active session that relays RT packets between connected game clients.

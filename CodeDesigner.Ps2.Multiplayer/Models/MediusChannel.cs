@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.OnlineServer.Models;
+namespace CodeDesigner.Ps2.Multiplayer.Models;
 
 /// <summary>A lobby channel that players can join and chat in.</summary>
 public class MediusChannel
