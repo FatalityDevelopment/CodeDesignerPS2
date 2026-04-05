@@ -854,6 +854,15 @@ namespace CodeDesigner.Ps2.Bridge
                     case "HDD_CREATE":
                         return HandleHddCreate(command.HddPath, command.HddSizeGb ?? 40);
 
+                    case "ISO_LIST_FILES":
+                        return HandleIsoListFiles(command.IsoPath);
+
+                    case "ISO_READ_FILE":
+                        return HandleIsoReadFile(command.IsoPath, command.FilePath, command.OutputPath);
+
+                    case "ISO_GET_INFO":
+                        return HandleIsoGetInfo(command.IsoPath);
+
                     case "PING":
                         return CreateSuccessResponse("PONG");
 

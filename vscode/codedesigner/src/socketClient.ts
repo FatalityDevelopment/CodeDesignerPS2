@@ -618,6 +618,11 @@ export class SocketClient {
             this.client = null;
         }
 
+        // Reset the message buffer so that any partial JSON left over from
+        // a previous (dropped) connection cannot combine with data from the
+        // new connection and form a garbled/incorrect response message.
+        this.messageBuffer = '';
+
         this._connectingPromise = new Promise<void>((resolve, reject) => {
             this.client = new net.Socket();
             let isResolved = false;
@@ -691,6 +696,13 @@ export class SocketClient {
                 const wasActuallyConnected = this.wasConnected;
                 this.connected = false;
                 this.wasConnected = false;
+                // Cancel any in-flight requests: they will never receive a response
+                // now that the connection has been dropped.  This mirrors what
+                // disconnect() does for intentional disconnects.
+                const stale = this._pendingResponses.splice(0);
+                for (const handler of stale) {
+                    try { handler('{"Success":false,"Error":"Connection closed"}'); } catch { /* ignore */ }
+                }
                 // Only call disconnect handlers if we were actually connected
                 if (wasActuallyConnected) {
                     this.disconnectionHandlers.forEach(handler => handler());

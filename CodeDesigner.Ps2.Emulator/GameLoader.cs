@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using CodeDesigner.Ps2.Emulator.IOP;
+using CodeDesigner.Ps2.IsoManager;
 
 namespace CodeDesigner.Ps2.Emulator
 {
@@ -148,7 +149,7 @@ namespace CodeDesigner.Ps2.Emulator
         {
             // ── Step 1: find and read SYSTEM.CNF ─────────────────────────────
 
-            Cdvd.IsoEntry? cnfEntry = cdvd.FindFile("SYSTEM.CNF");
+            IsoEntry? cnfEntry = cdvd.FindFile("SYSTEM.CNF");
             if (cnfEntry == null)
                 throw new GameLoadException("SYSTEM.CNF not found on disc.");
 
@@ -163,7 +164,7 @@ namespace CodeDesigner.Ps2.Emulator
 
             // ── Step 3: find the executable on the disc ───────────────────────
 
-            Cdvd.IsoEntry? elfEntry = cdvd.FindFile(bootPath);
+            IsoEntry? elfEntry = cdvd.FindFile(bootPath);
             if (elfEntry == null)
                 throw new GameLoadException(
                     $"Boot executable '{bootPath}' not found on disc.");
@@ -238,7 +239,7 @@ namespace CodeDesigner.Ps2.Emulator
             // Read SYSTEM.CNF for the boot path (informational — no ELF loading).
             try
             {
-                Cdvd.IsoEntry? cnfEntry = cdvd.FindFile("SYSTEM.CNF");
+                IsoEntry? cnfEntry = cdvd.FindFile("SYSTEM.CNF");
                 if (cnfEntry != null)
                 {
                     byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);

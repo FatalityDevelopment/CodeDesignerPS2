@@ -1935,6 +1935,76 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     // -------------------------------------------------------------------------
+    // ISO Manager — PS2 disc image operations
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "iso_list_files")]
+    [Description("Open a PS2 disc image (ISO/BIN or ZIP containing one) and list all files and directories. " +
+                 "Returns disc path, name, LBA, size, and directory flag for each entry. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> IsoListFiles(
+        [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip archive containing an ISO/BIN).")] string isoPath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "ISO_LIST_FILES", IsoPath = isoPath },
+            cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("IsoFiles", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== Files on {isoPath} ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string discPath = item.TryGetProperty("DiscPath", out var dp) ? (dp.GetString() ?? "?") : "?";
+                string name     = item.TryGetProperty("Name",     out var n)  ? (n.GetString()  ?? "?") : "?";
+                uint   lba      = item.TryGetProperty("Lba",      out var l)  ? l.GetUInt32()            : 0u;
+                uint   size     = item.TryGetProperty("Size",     out var s)  ? s.GetUInt32()            : 0u;
+                bool   isDir    = item.TryGetProperty("IsDirectory", out var d) && d.GetBoolean();
+                string tag      = isDir ? "[DIR]" : "     ";
+                sb.AppendLine($"  {tag}  {discPath,-50}  LBA:{lba,6}  {size,10} bytes");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no files found)";
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "iso_read_file")]
+    [Description("Extract a file from a PS2 disc image to disk or return its contents as base64. " +
+                 "Use iso_list_files first to see available files. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> IsoReadFile(
+        [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
+        [Description("Disc path to the file to extract (e.g. 'SYSTEM.CNF' or '/SCUS_123.45;1').")] string filePath,
+        [Description("Optional: absolute path where the file should be written. If omitted, data is returned as base64.")] string? outputPath = null,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "ISO_READ_FILE", IsoPath = isoPath, FilePath = filePath, OutputPath = outputPath },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "iso_get_info")]
+    [Description("Get metadata about a PS2 disc image: format (cooked/raw), sector count, size, and boot ELF. " +
+                 "Does not require the emulator to be running.")]
+    public async Task<string> IsoGetInfo(
+        [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "ISO_GET_INFO", IsoPath = isoPath },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
     // Progress reports — persistent session memory
     // -------------------------------------------------------------------------
 

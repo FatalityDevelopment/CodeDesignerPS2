@@ -105,6 +105,10 @@ namespace CodeDesigner.Ps2.Bridge
         // HDD_LIST / HDD_LIST_FILES fields
         public List<HddPartitionInfo>? HddPartitions { get; set; }
         public List<HddFileEntryInfo>? HddFiles { get; set; }
+        // ISO_LIST_FILES / ISO_GET_INFO fields
+        public List<IsoFileEntryInfo>? IsoFiles { get; set; }
+        public long? IsoSectorCount { get; set; }
+        public bool? IsoIsRawImage { get; set; }
         // SCANVALUE results
         public List<ScanValueResult>? ScanResults { get; set; }
         // GETSTRUCTS results
