@@ -232,6 +232,24 @@ public class DnasServer
     }
 
     // -------------------------------------------------------------------------
+    // Log sanitization — strips control characters that could be used to forge
+    // log entries (CRLF injection / log-forging).
+    // -------------------------------------------------------------------------
+
+    private static string Sanitize(string? value)
+    {
+        if (value is null) return "(null)";
+        // Replace any control character (< 0x20) and DEL (0x7F) with a space
+        var chars = value.ToCharArray();
+        for (int i = 0; i < chars.Length; i++)
+        {
+            if (chars[i] < ' ' || chars[i] == '\x7F')
+                chars[i] = ' ';
+        }
+        return new string(chars);
+    }
+
+    // -------------------------------------------------------------------------
     // FNV-1a 64-bit hash for packet-file matching
     // -------------------------------------------------------------------------
 
