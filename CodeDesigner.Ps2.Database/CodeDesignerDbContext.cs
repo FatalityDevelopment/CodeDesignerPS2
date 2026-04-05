@@ -35,17 +35,26 @@ public class CodeDesignerDbContext : DbContext
     /// <summary>Session-lifecycle tasks belonging to an MCP agent.</summary>
     public DbSet<McpAgentTask> McpAgentTasks { get; set; } = null!;
 
-    /// <summary>Game metadata returned from PCSX2 (title, CRC, cover art, ISO path, etc.).</summary>
+    /// <summary>Game metadata (title, description, cover art).</summary>
     public DbSet<Game> Games { get; set; } = null!;
+
+    /// <summary>Geographic/market regions, e.g. "NTSC-U", "PAL".</summary>
+    public DbSet<GameRegion> GameRegions { get; set; } = null!;
+
+    /// <summary>Specific disc releases of a game (one per region/version).</summary>
+    public DbSet<GameDisc> GameDiscs { get; set; } = null!;
 
     /// <summary>Save-state snapshot metadata for a game session.</summary>
     public DbSet<Snapshot> Snapshots { get; set; } = null!;
 
-    /// <summary>Named collections of cheats associated with a game.</summary>
+    /// <summary>Named collections of cheats associated with a game or disc.</summary>
     public DbSet<CheatList> CheatLists { get; set; } = null!;
 
     /// <summary>Individual cheat entries (CheatBlock) within a cheat list.</summary>
     public DbSet<Cheat> Cheats { get; set; } = null!;
+
+    /// <summary>Individual raw code lines within a cheat.</summary>
+    public DbSet<CheatLine> CheatLines { get; set; } = null!;
 
     // ── Construction ──────────────────────────────────────────────────────────
 
@@ -139,13 +148,42 @@ public class CodeDesignerDbContext : DbContext
             entity.HasIndex(t => new { t.McpAgentId, t.Phase, t.SortOrder });
         });
 
+        // ── GameRegion ─────────────────────────────────────────────────────────
+        modelBuilder.Entity<GameRegion>(entity =>
+        {
+            entity.HasKey(r => r.Id);
+            entity.Property(r => r.Name).HasMaxLength(64).IsRequired();
+            entity.HasIndex(r => r.Name).IsUnique();
+        });
+
         // ── Game ───────────────────────────────────────────────────────────────
         modelBuilder.Entity<Game>(entity =>
         {
             entity.HasKey(g => g.Id);
             entity.Property(g => g.Title).HasMaxLength(512).IsRequired();
-            entity.Property(g => g.CRC).HasMaxLength(16);
-            entity.HasIndex(g => g.CRC);
+            entity.HasIndex(g => g.Title);
+        });
+
+        // ── GameDisc ───────────────────────────────────────────────────────────
+        modelBuilder.Entity<GameDisc>(entity =>
+        {
+            entity.HasKey(d => d.Id);
+            entity.Property(d => d.Serial).HasMaxLength(32);
+            entity.Property(d => d.CRC).HasMaxLength(16);
+
+            entity.HasOne(d => d.Game)
+                  .WithMany(g => g.Discs)
+                  .HasForeignKey(d => d.GameId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.GameRegion)
+                  .WithMany(r => r.Discs)
+                  .HasForeignKey(d => d.GameRegionId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(d => d.CRC);
+            entity.HasIndex(d => d.Serial);
+            entity.HasIndex(d => new { d.GameId, d.GameRegionId });
         });
 
         // ── Snapshot ───────────────────────────────────────────────────────────
@@ -171,6 +209,13 @@ public class CodeDesignerDbContext : DbContext
                   .WithMany(g => g.CheatLists)
                   .HasForeignKey(cl => cl.GameId)
                   .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(cl => cl.GameDisc)
+                  .WithMany(d => d.CheatLists)
+                  .HasForeignKey(cl => cl.GameDiscId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(cl => cl.GameDiscId);
         });
 
         // ── Cheat ──────────────────────────────────────────────────────────────
@@ -178,6 +223,7 @@ public class CodeDesignerDbContext : DbContext
         {
             entity.HasKey(c => c.Id);
             entity.Property(c => c.Label).HasMaxLength(512).IsRequired();
+            entity.Property(c => c.Author).HasMaxLength(256);
 
             entity.HasOne(c => c.CheatList)
                   .WithMany(cl => cl.Cheats)
@@ -185,6 +231,20 @@ public class CodeDesignerDbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(c => new { c.CheatListId, c.SortOrder });
+        });
+
+        // ── CheatLine ──────────────────────────────────────────────────────────
+        modelBuilder.Entity<CheatLine>(entity =>
+        {
+            entity.HasKey(l => l.Id);
+            entity.Property(l => l.Code).HasMaxLength(32).IsRequired();
+
+            entity.HasOne(l => l.Cheat)
+                  .WithMany(c => c.CheatLines)
+                  .HasForeignKey(l => l.CheatId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(l => new { l.CheatId, l.SortOrder });
         });
     }
 }
