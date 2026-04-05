@@ -3411,7 +3411,7 @@ app-bottom-panel {
     vertical-align: middle;
 }
 #lm-table tr:hover td { background: #2a2d2e; }
-.lm-struct-row > td:nth-child(2) { border-left: 2px solid #569cd6; }
+.lm-struct-row .lm-col-addr { border-left: 2px solid #569cd6; }
 
 .lm-col-vis     { width: 36px; text-align: center; padding: 0 2px !important; }
 .lm-col-addr    { width: 110px; }

@@ -97,7 +97,7 @@ export type LabelManagerAction =
       <table id="lm-table">
         <thead>
           <tr>
-            <th class="lm-col-vis" title="Visibility in disassembler / structs panel">&#x1F441;</th>
+            <th class="lm-col-vis" title="Visibility in disassembler / structs panel">👁</th>
             <th class="lm-col-addr">Address</th>
             <th class="lm-col-name">Name</th>
             <th class="lm-col-comment">Comment</th>
@@ -115,7 +115,7 @@ export type LabelManagerAction =
                         [title]="entry.hidden ? 'Hidden — click to show in disassembler / structs' : 'Visible — click to hide from disassembler / structs'"
                         [disabled]="activeSetIsBuiltIn()"
                         (click)="onToggleVisibility(entry)">
-                  {{ entry.hidden ? '&#x1F648;' : '&#x1F441;' }}
+                  {{ entry.hidden ? '🙈' : '👁' }}
                 </button>
               </td>
               <td class="lm-col-addr lm-mono">{{ entry.address }}</td>
