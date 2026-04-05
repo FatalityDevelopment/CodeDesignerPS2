@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace CodeDesigner.Ps2.MemoryCardManager;
+namespace CodeDesigner.Ps2.MCManager;
 
 /// <summary>
 /// Reads and writes PlayStation 2 memory card images (.ps2 format, as used by PCSX2).

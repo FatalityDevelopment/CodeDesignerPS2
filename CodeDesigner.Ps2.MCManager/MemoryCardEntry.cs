@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.MemoryCardManager;
+namespace CodeDesigner.Ps2.MCManager;
 
 /// <summary>Represents a top-level save-game directory on a PS2 memory card.</summary>
 public sealed class MemoryCardEntry
