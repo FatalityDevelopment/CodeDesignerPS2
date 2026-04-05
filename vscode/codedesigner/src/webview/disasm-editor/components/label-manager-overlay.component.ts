@@ -224,7 +224,7 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   <td class="lm-col-vis"></td>
                   <td class="lm-col-expand lm-member-tree-indent">└</td>
                   <td class="lm-col-type lm-mono lm-member-offset-cell">
-                    +0x{{ member.offset.toString(16).toUpperCase().padStart(2, '0') }}
+                    +0x{{ member.offset.toString(16).toUpperCase().padStart(4, '0') }}
                   </td>
                   <td class="lm-col-addr"></td>
                   <td class="lm-col-name lm-member-sub-name">{{ member.name }}</td>
