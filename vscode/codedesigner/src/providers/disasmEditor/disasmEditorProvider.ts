@@ -2682,7 +2682,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           webview.postMessage({ type: 'labelManagerSets', sets });
           // Switch to Built-in after deletion.
           const builtIn = await this.socketClient.getLabelSet(workspaceDir, gameId, 'Built-in');
-          webview.postMessage({ type: 'labelManagerSet', builtIn });
+          webview.postMessage({ type: 'labelManagerSet', set: builtIn });
           webview.postMessage({ type: 'labelManagerStatus', message: `Deleted label set "${action.setName}".` });
           break;
         }

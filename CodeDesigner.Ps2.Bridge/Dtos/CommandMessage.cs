@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -140,16 +141,22 @@ namespace CodeDesigner.Ps2.Bridge
     /// </summary>
     public class LabelManagerEntry
     {
+        [JsonPropertyName("address")]
         public string Address { get; set; } = string.Empty;
+        [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("comment")]
         public string? Comment { get; set; }
+        [JsonPropertyName("members")]
         public List<LabelMemberPayload> Members { get; set; } = [];
     }
 
     /// <summary>One struct member inside a <see cref="LabelManagerEntry"/>.</summary>
     public class LabelMemberPayload
     {
+        [JsonPropertyName("offset")]
         public int Offset { get; set; }
+        [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
     }
 }
