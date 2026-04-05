@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.OnlineServer.Models;
+namespace CodeDesigner.Ps2.Multiplayer.Models;
 
 public enum PlayerStatus
 {
@@ -66,6 +66,19 @@ public class MediusClientState
     public int? CurrentChannelId { get; set; }
     public int? CurrentGameId    { get; set; }
     public int? WorldId          { get; set; }
+
+    // -------------------------------------------------------------------------
+    // DME game server state
+    // -------------------------------------------------------------------------
+
+    /// <summary>ID of the DME world this client is participating in (set after DME auth).</summary>
+    public int? DmeWorldId { get; set; }
+
+    /// <summary>DME slot index within the world (set after DME auth).</summary>
+    public int? DmeClientIndex { get; set; }
+
+    /// <summary>True once the client has completed the DME authentication exchange.</summary>
+    public bool IsDmeAuthenticated { get; set; }
 
     // -------------------------------------------------------------------------
     // Timing

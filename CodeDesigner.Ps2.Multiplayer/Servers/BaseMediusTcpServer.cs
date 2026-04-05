@@ -1,13 +1,13 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
-using CodeDesigner.Ps2.OnlineServer.Config;
-using CodeDesigner.Ps2.OnlineServer.Crypto;
-using CodeDesigner.Ps2.OnlineServer.Models;
-using CodeDesigner.Ps2.OnlineServer.Protocol;
+using CodeDesigner.Ps2.Multiplayer.Config;
+using CodeDesigner.Ps2.Multiplayer.Crypto;
+using CodeDesigner.Ps2.Multiplayer.Models;
+using CodeDesigner.Ps2.Multiplayer.Protocol;
 using Microsoft.Extensions.Logging;
 
-namespace CodeDesigner.Ps2.OnlineServer.Servers;
+namespace CodeDesigner.Ps2.Multiplayer.Servers;
 
 /// <summary>
 /// Abstract TCP server that accepts SCERT connections, manages the per-client
@@ -29,14 +29,14 @@ namespace CodeDesigner.Ps2.OnlineServer.Servers;
 public abstract class BaseMediusTcpServer
 {
     private readonly ILogger      _log;
-    private readonly OnlineServerConfig _config;
+    private readonly MultiplayerConfig _config;
     private TcpListener?         _listener;
 
     private uint _scertIdCounter = 0;
 
     protected readonly ConcurrentDictionary<string, (MediusClientState State, TcpClient Client)> Clients = new();
 
-    protected BaseMediusTcpServer(ILogger log, OnlineServerConfig config)
+    protected BaseMediusTcpServer(ILogger log, MultiplayerConfig config)
     {
         _log    = log;
         _config = config;
@@ -185,6 +185,16 @@ public abstract class BaseMediusTcpServer
                 var mp = MediusPacket.Parse(packet.Payload);
                 if (mp != null)
                     await HandleMediusMessageAsync(mp, state, tcp, ct);
+                else
+                    await HandleRtMessageAsync(RT_MSG_TYPE.RT_MSG_CLIENT_APP_TOSERVER, packet.Payload, state, tcp, ct);
+                break;
+
+            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_BROADCAST:
+            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_SINGLE:
+            case RT_MSG_TYPE.RT_MSG_CLIENT_APP_LIST:
+            case RT_MSG_TYPE.RT_MSG_CLIENT_SET_RECV_FLAG:
+            case RT_MSG_TYPE.RT_MSG_CLIENT_SET_AGG_TIME:
+                await HandleRtMessageAsync(packet.MessageType, packet.Payload, state, tcp, ct);
                 break;
 
             case RT_MSG_TYPE.RT_MSG_CLIENT_DISCONNECT:
@@ -322,6 +332,14 @@ public abstract class BaseMediusTcpServer
         => Task.CompletedTask;
 
     protected virtual Task OnClientDisconnectedAsync(MediusClientState state)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// Called for raw RT transport-layer messages that are NOT decoded as Medius
+    /// application-layer packets (e.g. DME game relay messages).
+    /// </summary>
+    protected virtual Task HandleRtMessageAsync(
+        RT_MSG_TYPE msgType, byte[] payload, MediusClientState state, TcpClient tcp, CancellationToken ct)
         => Task.CompletedTask;
 
     protected abstract Task HandleMediusMessageAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct);

@@ -1,6 +1,6 @@
-namespace CodeDesigner.Ps2.OnlineServer.Config;
+namespace CodeDesigner.Ps2.Multiplayer.Config;
 
-public class OnlineServerConfig
+public class MultiplayerConfig
 {
     // ── Network ──────────────────────────────────────────────────────────────
 
@@ -21,6 +21,9 @@ public class OnlineServerConfig
     /// <summary>MLS (Lobby) server TCP port.</summary>
     public int MlsPort { get; set; } = 10073;
 
+    /// <summary>DME (Demonware Multiplayer Engine) in-game relay TCP port.</summary>
+    public int DmePort { get; set; } = 10070;
+
     // ── DNAS ─────────────────────────────────────────────────────────────────
 
     /// <summary>DNAS authentication server TCP port.</summary>
@@ -31,6 +34,11 @@ public class OnlineServerConfig
     /// under Data/<DnasRegion>/. Valid values: us-gw, eu-gw, gai-gw.
     /// </summary>
     public string DnasRegion { get; set; } = "us-gw";
+
+    // ── NAT ───────────────────────────────────────────────────────────────────
+
+    /// <summary>NAT punchthrough helper UDP port.</summary>
+    public int NatPort { get; set; } = 10069;
 
     // ── Game ─────────────────────────────────────────────────────────────────
 

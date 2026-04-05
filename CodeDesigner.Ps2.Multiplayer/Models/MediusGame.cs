@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.OnlineServer.Models;
+namespace CodeDesigner.Ps2.Multiplayer.Models;
 
 public enum GameWorldStatus
 {
@@ -31,6 +31,12 @@ public class MediusGame
     public int             GenericField3  { get; set; }
     public int             GenericField4  { get; set; }
     public DateTime        CreatedAt      { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// ID of the associated <see cref="DmeWorld"/> created when this game was first made.
+    /// Null if no DME world has been allocated yet.
+    /// </summary>
+    public int?            DmeWorldId     { get; set; }
 
     private readonly List<int> _playerIds = new();
     public IReadOnlyList<int> PlayerIds => _playerIds;
