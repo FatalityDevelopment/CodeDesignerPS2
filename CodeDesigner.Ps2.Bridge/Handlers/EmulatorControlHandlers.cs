@@ -189,11 +189,11 @@ namespace CodeDesigner.Ps2.Bridge
             // Persist metadata to the database so GETSNAPSHOTS can list it efficiently.
             try
             {
-                string snapshotName = Path.GetFileName(outputPath.TrimEnd(
+                string snapshotTitle = Path.GetFileName(outputPath.TrimEnd(
                     Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
                 var snapshotRepo = new DbSnapshotRepository(Db);
-                snapshotRepo.AddSnapshotAsync(outputPath, snapshotName, null, isoName)
+                snapshotRepo.AddSnapshotAsync(outputPath, snapshotTitle, null, isoName)
                             .GetAwaiter().GetResult();
             }
             catch (Exception ex)

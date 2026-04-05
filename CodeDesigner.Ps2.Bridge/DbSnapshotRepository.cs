@@ -71,19 +71,21 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private async Task<int?> ResolveGameIdAsync(string isoName)
         {
+            var lowerName = isoName.ToLowerInvariant();
+
             // Primary: match by IsoPath suffix (e.g. "GoW.iso" or just "GoW").
             var disc = await _db.GameDiscs
                                 .FirstOrDefaultAsync(d =>
                                     d.IsoPath != null &&
-                                    (d.IsoPath.ToLower().EndsWith(isoName.ToLower()) ||
-                                     d.IsoPath.ToLower().EndsWith(isoName.ToLower() + ".iso")));
+                                    (d.IsoPath.ToLower().EndsWith(lowerName) ||
+                                     d.IsoPath.ToLower().EndsWith(lowerName + ".iso")));
 
             if (disc is not null) return disc.GameId;
 
             // Fallback: match by Game.Title.
             var game = await _db.Games
                                 .FirstOrDefaultAsync(g =>
-                                    g.Title.ToLower() == isoName.ToLower());
+                                    g.Title.ToLower() == lowerName);
 
             return game?.Id;
         }

@@ -422,6 +422,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         // Also persist to the DB so the server can serve them via GETALLSETTINGS.
+        // These are written here and read back in loadUserPreferencesFromDb() so the
+        // in-memory state stays consistent with the DB on subsequent connections.
         if (this.socketClient.isConnected()) {
             try {
                 await this.socketClient.setSetting('emu.bios',      JSON.stringify(this.settings.bios      ?? []));
@@ -465,13 +467,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Pull user preferences from the server-side DB after connect and merge them
-     * into the local state.  DB values take priority over the JSON file values
-     * because they represent the most recently saved state.
+     * Pull user preferences and emulator settings from the server-side DB after connect
+     * and merge them into the local state.  DB values take priority over the JSON file
+     * values because they represent the most recently saved state.
      */
     private async loadUserPreferencesFromDb(): Promise<void> {
         try {
-            const settings = await this.socketClient.getAllSettings('ui.');
+            const settings = await this.socketClient.getAllSettings();
             const emu  = settings['ui.selectedEmulator'];
             const bios = settings['ui.selectedBios'];
             const game = settings['ui.selectedGame'];
@@ -487,6 +489,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 this.loadSnapshotsForGame(this.selectedGameName);
                 this.loadGameLabels(this.selectedGameName);
                 changed = true;
+            }
+
+            // Merge emulator-settings arrays from DB if present.
+            const rawBios      = settings['emu.bios'];
+            const rawGames     = settings['emu.games'];
+            const rawEmulators = settings['emu.emulators'];
+
+            if (rawBios) {
+                try { this.settings.bios = JSON.parse(rawBios); changed = true; } catch { /* ignore */ }
+            }
+            if (rawGames) {
+                try { this.settings.games = JSON.parse(rawGames); changed = true; } catch { /* ignore */ }
+            }
+            if (rawEmulators) {
+                try { this.settings.emulators = JSON.parse(rawEmulators); changed = true; } catch { /* ignore */ }
             }
 
             if (changed) {

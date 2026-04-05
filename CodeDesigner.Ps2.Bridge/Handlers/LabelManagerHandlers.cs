@@ -171,14 +171,25 @@ namespace CodeDesigner.Ps2.Bridge
                 var set = LabelRepo.LoadSetAsync(gameId, setName).GetAwaiter().GetResult();
                 if (set is null) return CreateErrorResponse($"Label set '{setName}' not found.");
 
-                // Keep LabelMgr in-memory state up to date so GetMergedLabels() works.
+                // Set the in-memory context so GetMergedLabels() resolves the right game.
                 LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
 
-                // Mirror the DB set into the on-disk path so LabelMgr.SetActiveSet() finds it.
                 if (!string.IsNullOrWhiteSpace(workspaceDir))
+                {
+                    // Mirror the DB set into the on-disk path so LabelMgr's file-based
+                    // helpers (used by GetMergedLabels, RESOLVESTRINGS, etc.) find it.
                     LabelMgr.SaveSet(set, workspaceDir, gameId);
-
-                LabelMgr.SetActiveSet(workspaceDir ?? string.Empty, gameId, setName);
+                    LabelMgr.SetActiveSet(workspaceDir, gameId, setName);
+                }
+                else
+                {
+                    // No workspace supplied: set context only and mark the set active
+                    // by saving to a temp directory so SetActiveSet can locate the file.
+                    var tempDir = Path.Combine(Path.GetTempPath(), "codedesigner_labels");
+                    Directory.CreateDirectory(tempDir);
+                    LabelMgr.SaveSet(set, tempDir, gameId);
+                    LabelMgr.SetActiveSet(tempDir, gameId, setName);
+                }
 
                 // Rebuild _labels / _structs so all existing handlers see the updated data.
                 SyncLegacyDictsFromLabelManager();

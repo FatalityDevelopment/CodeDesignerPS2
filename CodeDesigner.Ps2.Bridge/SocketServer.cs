@@ -28,12 +28,14 @@ namespace CodeDesigner.Ps2.Bridge
     /// <summary>
     /// Socket server for communication with VSCode extension
     /// </summary>
-    public partial class SocketServer
+    public partial class SocketServer : IDisposable
     {
         private TcpListener? _listener;
         private bool _isRunning;
         private readonly int _port;
         private CancellationTokenSource? _cancellationTokenSource;
+        /// <summary>True when <see cref="Db"/> was created by this instance and must be disposed with it.</summary>
+        private readonly bool _ownsDb;
 
         /// <summary>
         /// Streams of clients that have subscribed to AI activity push notifications.
@@ -208,17 +210,24 @@ namespace CodeDesigner.Ps2.Bridge
         public void SignalRestartComplete() => _restartComplete.Set();
 
         public SocketServer(int port = 8765)
-            : this(port, CreateLocalDbContext())
+            : this(port, CreateLocalDbContext(), ownsDb: true)
         {
         }
 
         /// <summary>
         /// Constructor used when the host application (e.g. MCP server) already has a
         /// configured <see cref="CodeDesignerDbContext"/> and wants to share it.
+        /// The caller remains responsible for disposing <paramref name="db"/>.
         /// </summary>
         public SocketServer(int port, CodeDesignerDbContext db)
+            : this(port, db, ownsDb: false)
+        {
+        }
+
+        private SocketServer(int port, CodeDesignerDbContext db, bool ownsDb)
         {
             _port       = port;
+            _ownsDb     = ownsDb;
             Db          = db;
             LabelRepo   = new DbLabelRepository(db);
             SettingsRepo = new DbSettingsRepository(db);
@@ -230,6 +239,13 @@ namespace CodeDesigner.Ps2.Bridge
             // existing handlers continue to work without modification.
             LoadLabels();
             LoadStructs();
+        }
+
+        /// <inheritdoc/>
+        public void Dispose()
+        {
+            if (_ownsDb)
+                Db.Dispose();
         }
 
         /// <summary>
@@ -268,7 +284,7 @@ namespace CodeDesigner.Ps2.Bridge
                     if (!File.Exists(settingsPath)) continue;
 
                     // Only migrate if the target keys are not already set.
-                    bool alreadyMigrated = Db.Settings.Any(s => s.Key == "ui.selectedEmulator");
+                    bool alreadyMigrated = Db.Settings.AnyAsync(s => s.Key == "ui.selectedEmulator").GetAwaiter().GetResult();
                     if (alreadyMigrated) break;
 
                     try

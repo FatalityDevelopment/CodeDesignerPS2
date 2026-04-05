@@ -113,9 +113,8 @@ namespace CodeDesigner.Ps2.Bridge
                 await _db.SaveChangesAsync(); // obtain entity.Id
             }
 
-            // Replace all labels — remove old, add new.
+            // Replace all labels — remove old, add new in a single transaction.
             _db.Labels.RemoveRange(entity.Labels);
-            await _db.SaveChangesAsync();
 
             foreach (var entry in set.Entries)
             {
