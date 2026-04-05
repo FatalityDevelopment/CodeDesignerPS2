@@ -3,7 +3,8 @@ using System.Collections.Generic;
 namespace CodeDesigner.Ps2.Database.Entities;
 
 /// <summary>
-/// Game metadata, populated from PCSX2 disc information.
+/// Game metadata (title, description, cover art). Disc-specific fields such as
+/// CRC, serial, and ISO path live on <see cref="GameDisc"/>.
 /// </summary>
 public class Game
 {
@@ -21,18 +22,12 @@ public class Game
     /// </summary>
     public byte[]? CoverArt { get; set; }
 
-    /// <summary>Absolute path to the ISO image on disk.</summary>
-    public string? IsoPath { get; set; }
-
-    /// <summary>
-    /// PCSX2 CRC hash of the game executable as a hex string (e.g. "EF123456").
-    /// This is the primary identifier used by PCSX2 at runtime.
-    /// </summary>
-    public string? CRC { get; set; }
-
     /// <summary>Snapshots associated with this game.</summary>
     public List<Snapshot> Snapshots { get; set; } = [];
 
-    /// <summary>Cheat lists associated with this game.</summary>
+    /// <summary>Disc releases for this game (one per region/version).</summary>
+    public List<GameDisc> Discs { get; set; } = [];
+
+    /// <summary>Cheat lists directly associated with this game (not disc-specific).</summary>
     public List<CheatList> CheatLists { get; set; } = [];
 }

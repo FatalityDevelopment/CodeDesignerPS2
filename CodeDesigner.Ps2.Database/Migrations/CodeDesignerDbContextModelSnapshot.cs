@@ -23,6 +23,10 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Author")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("CheatListId")
                         .HasColumnType("INTEGER");
 
@@ -37,10 +41,6 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("RawCodes")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<int>("SortOrder")
                         .HasColumnType("INTEGER");
 
@@ -49,6 +49,30 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.HasIndex("CheatListId", "SortOrder");
 
                     b.ToTable("Cheats");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.CheatLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CheatId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheatId", "SortOrder");
+
+                    b.ToTable("CheatLines");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.CheatList", b =>
@@ -63,6 +87,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("GameDiscId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("GameId")
                         .HasColumnType("INTEGER");
 
@@ -76,6 +103,8 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("GameDiscId");
+
                     b.HasIndex("GameId");
 
                     b.ToTable("CheatLists");
@@ -87,17 +116,10 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("CRC")
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
                     b.Property<byte[]>("CoverArt")
                         .HasColumnType("BLOB");
 
                     b.Property<string>("Description")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("IsoPath")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Title")
@@ -107,9 +129,64 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CRC");
+                    b.HasIndex("Title");
 
                     b.ToTable("Games");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.GameDisc", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CRC")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("GameId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("GameRegionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("IsoPath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Serial")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CRC");
+
+                    b.HasIndex("GameRegionId");
+
+                    b.HasIndex("Serial");
+
+                    b.HasIndex("GameId", "GameRegionId");
+
+                    b.ToTable("GameDiscs");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.GameRegion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("GameRegions");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Label", b =>
@@ -398,14 +475,51 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Navigation("CheatList");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.CheatLine", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.Cheat", "Cheat")
+                        .WithMany("CheatLines")
+                        .HasForeignKey("CheatId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Cheat");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.CheatList", b =>
                 {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.GameDisc", "GameDisc")
+                        .WithMany("CheatLists")
+                        .HasForeignKey("GameDiscId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("CodeDesigner.Ps2.Database.Entities.Game", "Game")
                         .WithMany("CheatLists")
                         .HasForeignKey("GameId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Game");
+
+                    b.Navigation("GameDisc");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.GameDisc", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.Game", "Game")
+                        .WithMany("Discs")
+                        .HasForeignKey("GameId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.GameRegion", "GameRegion")
+                        .WithMany("Discs")
+                        .HasForeignKey("GameRegionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Game");
+
+                    b.Navigation("GameRegion");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Label", b =>
@@ -451,6 +565,11 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Navigation("Game");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Cheat", b =>
+                {
+                    b.Navigation("CheatLines");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.CheatList", b =>
                 {
                     b.Navigation("Cheats");
@@ -460,7 +579,19 @@ namespace CodeDesigner.Ps2.Database.Migrations
                 {
                     b.Navigation("CheatLists");
 
+                    b.Navigation("Discs");
+
                     b.Navigation("Snapshots");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.GameDisc", b =>
+                {
+                    b.Navigation("CheatLists");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.GameRegion", b =>
+                {
+                    b.Navigation("Discs");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Label", b =>

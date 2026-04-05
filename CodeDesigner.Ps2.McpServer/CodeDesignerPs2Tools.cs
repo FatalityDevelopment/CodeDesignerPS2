@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using CodeDesigner.Ps2.CheatEngine;
+using CodeDesigner.Ps2.McpServer;
 using CodeDesigner.Ps2.McpServer.Prompts;
 using ModelContextProtocol.Server;
 
@@ -66,8 +67,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "ping")]
-    [Description("Test connectivity to the MIPS64 Emotion Engine emulator backend. " +
-                 "Returns PONG when the socket server is reachable on localhost:8765.")]
+    [DynamicDescription("ping_desc")]
     public async Task<string> Ping(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "PING" }, cancellationToken);
@@ -75,12 +75,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "session_start")]
-    [Description(
-        "CALL THIS FIRST at the beginning of every session. " +
-        "Returns the full Code Designer operational guidelines so the agent is properly " +
-        "configured before taking any other action. " +
-        "Also lists all existing progress reports so previous session work can be resumed. " +
-        "This tool is the primary way to load guidelines — do not rely on prompts/get.")]
+    [DynamicDescription("session_start_desc")]
     public Task<string> SessionStart()
     {
         var sb = new StringBuilder();
@@ -111,9 +106,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "disassemble")]
-    [Description("Disassemble PS2 Emotion Engine MIPS64 machine-code opcodes into assembly text. " +
-                 "Provide 32-bit hex opcodes separated by spaces or newlines (e.g. \"27BDFFD0 AFBF001C\"). " +
-                 "Optionally supply a virtual start address so labels and branch targets are resolved correctly.")]
+    [DynamicDescription("disassemble_desc")]
     public async Task<string> Disassemble(
         [Description("Space- or newline-separated 32-bit hex opcodes to disassemble.")] string opcodes,
         [Description("Optional virtual start address in hex (e.g. '0x80010000') or decimal.")] string? address = null,
@@ -129,8 +122,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "assemble")]
-    [Description("Assemble PS2 Emotion Engine MIPS64 assembly instructions into machine-code hex opcodes. " +
-                 "Provide one instruction per line (e.g. \"addiu $sp,$sp,-0x30\").")]
+    [DynamicDescription("assemble_desc")]
     public async Task<string> Assemble(
         [Description("MIPS64 EE assembly instructions, one per line.")] string assembly,
         CancellationToken cancellationToken = default)
@@ -143,132 +135,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "compile_cds")]
-    [Description(
-        "Compile a Code Designer Script (.cds) source file into PS2 GameShark/Action Replay cheat codes.\n\n" +
-
-        "=== WHAT IS CDS? ===\n" +
-        "Code Designer Script is a PS2 exploit/code-injection language. It lets you write real MIPS64 EE " +
-        "assembly that is packaged as GameShark type-2 codes (2AAAAAAA VVVVVVVV). Each type-2 code writes " +
-        "a 32-bit word to a target address when the cheat engine ticks, so a compiled CDS program installs " +
-        "your machine code into RAM at the addresses you choose. A typical use-case is patching game logic, " +
-        "hooking functions, or injecting a custom payload that runs via a crafted network packet, stack " +
-        "overflow, or function pointer overwrite.\n\n" +
-
-        "=== OUTPUT FORMAT ===\n" +
-        "Every 4-byte word emitted by the compiler becomes one GameShark code:\n" +
-        "  2AAAAAAA VVVVVVVV\n" +
-        "where AAAAAAA is the PS2 EE physical address and VVVVVVVV is the 32-bit value to write. " +
-        "The cheat engine applies these codes once per frame while the game is running.\n\n" +
-
-        "=== DIRECTIVES ===\n" +
-        "  address $XXXXXXXX   — Set the current write cursor to this virtual/physical EE address.\n" +
-        "                        All following instructions/data are emitted from this address onward.\n" +
-        "  hexcode $XXXXXXXX   — Emit exactly 4 raw bytes (big-endian 32-bit word) at the current address.\n" +
-        "                        Used for hand-coded data, packet headers, filler patterns, or magic values.\n" +
-        "  print \"text\"        — Emit the ASCII/UTF-8 bytes of the string as consecutive code words.\n" +
-        "                        Each 4-byte chunk becomes one code. Pads with 0x00 if needed.\n" +
-        "  setreg REG, $VALUE  — Emit a LUI+ADDIU/ORI pair that loads a full 32-bit immediate into REG.\n" +
-        "  setreg REG, :label  — Same but uses the label's resolved address as the immediate.\n\n" +
-
-        "=== LABELS ===\n" +
-        "  Name:               — Define a label at the current address (e.g. fnc_ChatPacket:, str_Message:).\n" +
-        "                        Label names may contain letters, digits, and underscores.\n" +
-        "  :Name               — Reference a label in branch/jump instructions (j :loop, jal :fnc_Name)\n" +
-        "                        or in setreg (setreg t2, :str_Message). Resolved in a two-pass compile.\n" +
-        "  @Name               — Reference a label's address as a raw 32-bit value in hexcode/data context.\n\n" +
-
-        "=== MIPS INSTRUCTION ASSEMBLY ===\n" +
-        "All PS2 EE MIPS64 instructions are supported inline (addiu, sw, lw, jal, j, jr, lui, ori, " +
-        "daddu, sb, lb, lh, sh, lw, ld, sw, sd, beq, bne, bgez, bltz, sll, srl, sra, nop, etc.). " +
-        "Write one instruction per line. Branch delay slots must be filled manually (use nop if needed). " +
-        "Register names: $zero/$0, $at/$1, $v0–$v1, $a0–$a3, $t0–$t9, $s0–$s7, $k0–$k1, $gp, $sp, $fp, $ra.\n\n" +
-
-        "=== COMMENTS ===\n" +
-        "  // single-line comment\n" +
-        "  ;  single-line comment\n" +
-        "  #  single-line comment\n" +
-        "  /* multi-line block comment */\n\n" +
-
-        "=== COMMON PATTERNS ===\n" +
-        "Hook a function at $0022F4DC, redirect to custom code at $000A0000, then jump back:\n" +
-        "  address $0022F4DC\n" +
-        "  jal :fnc_MyHook       // replace the original jal\n" +
-        "  nop\n" +
-        "  j $0022F510           // skip rest of original function\n" +
-        "  nop\n\n" +
-        "Load a pointer and call a function:\n" +
-        "  address $000A0000\n" +
-        "  fnc_MyHook:\n" +
-        "  addiu sp, sp, $fff0\n" +
-        "  sw ra, $0000(sp)\n" +
-        "  setreg a0, $0045D480  // load 32-bit address into $a0 via LUI+ORI\n" +
-        "  jal $0032A420\n" +
-        "  nop\n" +
-        "  lw ra, $0000(sp)\n" +
-        "  jr ra\n" +
-        "  addiu sp, sp, $10\n\n" +
-        "Embed a raw data payload after code:\n" +
-        "  str_Payload:\n" +
-        "  hexcode $140          // packet size field\n" +
-        "  print \"AAAA...\"       // 136-byte filler\n" +
-        "  hexcode $11111111     // overwrite stack slot 1\n" +
-        "  hexcode $20E0EB70     // pointer to t9 in PacketDataPool\n\n" +
-
-        "=== FULL EXAMPLE (network exploit payload) ===\n" +
-        "/*\n" +
-        " * Sends a crafted ChatMessage packet that causes the receiving client to\n" +
-        " * execute the payload at str_Message. Player name must be exactly 3 chars.\n" +
-        " */\n" +
-        "// 1. Replace mute hook with call to our function\n" +
-        "address $0022F4DC\n" +
-        "jal :fnc_ChatPacket\n" +
-        "nop\n" +
-        "j $0022F510\n" +
-        "nop\n\n" +
-        "// 2. Overwrite 'Mute Off' string (used as packet trigger)\n" +
-        "address $00411178\n" +
-        "print \"TOGGLE\"\n\n" +
-        "// 3. Our chat-packet builder (installed in scratch RAM)\n" +
-        "address $000A0000\n" +
-        "fnc_ChatPacket:\n" +
-        "addiu sp, sp, $fff0\n" +
-        "sw ra, $0000(sp)\n" +
-        "setreg a0, $0045D480   // session master pointer\n" +
-        "addiu a1, zero, $0040\n" +
-        "lui a2, $0046\n" +
-        "lw a2, $D574(a2)\n" +
-        "lui a3, $0044\n" +
-        "lw a3, $F9D8(a3)\n" +
-        "lw a3, $0FC8(a3)       // player ID\n" +
-        "ori t0, zero, $9       // chat packet ID\n" +
-        "addiu t1, zero, $140   // data size (must not exceed $1D0)\n" +
-        "setreg t2, :str_Message\n" +
-        "jal $0032A420\n" +
-        "daddu t3, zero, zero\n" +
-        "lw ra, $0000(sp)\n" +
-        "jr ra\n" +
-        "addiu sp, sp, $10\n\n" +
-        "// 4. Packet data — overwrites stack slots on remote client\n" +
-        "str_Message:\n" +
-        "hexcode $140            // data size header\n" +
-        "print \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"   // 136-byte filler\n" +
-        "hexcode $11111111\n" +
-        "hexcode $22222222\n" +
-        "hexcode $33333333\n" +
-        "hexcode $20E0EB70       // pointer to t9 slot in PacketDataPool\n" +
-        "hexcode $00000000\n" +
-        "hexcode $00000000\n" +
-        "hexcode $00000000\n" +
-        "hexcode $00000000\n" +
-        "hexcode $20E0EB84       // pointer to payload entry (must end in $20, not $00)\n\n" +
-        "// 5. Payload — executes on remote client (~30 instructions max before packet splits)\n" +
-        "// address $00E0EB84   (recalculate if payload length changes)\n" +
-        "lui t0, $0045\n" +
-        "lw t0, $D648(t0)        // load player object pointer\n" +
-        "addiu t1, zero, $1\n" +
-        "sb t1, $0FCF(t0)        // set respawn flag\n" +
-        "j $00644D50             // return to packet receiver (drops packet)\n" +
-        "addiu sp, sp, $1d0      // restore SP to packet receiver frame\n")]
+    [DynamicDescription("compile_cds_desc")]
     public async Task<string> CompileCds(
         [Description("CDS source code to compile.")] string sourceCode,
         CancellationToken cancellationToken = default)
@@ -285,9 +152,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "read_memory")]
-    [Description("Read raw bytes from the live PS2 emulator memory and return them as hex. " +
-                 "Requires the emulator to be running (start with `dotnet run -- --run`). " +
-                 "Address supports hex (0x prefix) or decimal. Region is 'ee' (main EE RAM, default) or 'iop'.")]
+    [DynamicDescription("read_memory_desc")]
     public async Task<string> ReadMemory(
         [Description("Virtual address to read from (hex or decimal).")] string address,
         [Description("Number of bytes to read (1–65536, default 256).")] int length = 256,
@@ -306,9 +171,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "write_memory")]
-    [Description("Write arbitrary bytes to live PS2 emulator memory. " +
-                 "Bytes are supplied as a hex string (spaces, commas, and '0x' prefixes are accepted). " +
-                 "Supports EE main RAM, scratchpad, and IOP RAM.")]
+    [DynamicDescription("write_memory_desc")]
     public async Task<string> WriteMemory(
         [Description("Virtual address to write to (hex or decimal).")] string address,
         [Description("Hex-encoded bytes to write, e.g. '27BD FFD0 AFBF 001C' or '0x27,0xBD,0xFF,0xD0'.")] string hexData,
@@ -327,10 +190,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "load_bin")]
-    [Description("Load a binary file from disk directly into live emulator memory at a specified address. " +
-                 "More efficient than write_memory for large files because the data is read locally by the " +
-                 "server rather than transferred over the socket. " +
-                 "Supports EE main RAM, BIOS ROM, scratchpad, and IOP RAM.")]
+    [DynamicDescription("load_bin_desc")]
     public async Task<string> LoadBin(
         [Description("Absolute path to the binary file to load.")] string filePath,
         [Description("Virtual address to load the binary data to (hex or decimal).")] string address,
@@ -349,9 +209,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "disassemble_memory")]
-    [Description("Read bytes from the live PS2 emulator and disassemble them to MIPS64 EE assembly. " +
-                 "Convenience wrapper around read_memory + disassemble. " +
-                 "Each instruction is 4 bytes; 'count' defaults to 32 instructions.")]
+    [DynamicDescription("disassemble_memory_desc")]
     public async Task<string> DisassembleMemory(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of instructions to disassemble (default 32).")] int count = 32,
@@ -408,9 +266,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "apply_cheats")]
-    [Description("Apply PS2 GameShark/Action Replay cheat codes to the live emulator memory. " +
-                 "Parses the supplied cheat code text (raw TTAAAAAA VVVVVVVV format) and writes " +
-                 "each patch directly into EE RAM. Works in both internal emulator mode and PINE/PCSX2 mode.")]
+    [DynamicDescription("apply_cheats_desc")]
     public async Task<string> ApplyCheats(
         [Description("Multi-line GameShark/Action Replay cheat codes in raw format (e.g. '20123456 000003E8').")] string cheatCodes,
         CancellationToken cancellationToken = default)
@@ -423,11 +279,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "port_cheats")]
-    [Description("Port PS2 GameShark cheat codes from one game revision to another by scanning two raw " +
-                 "EE-RAM dump files and relocating addresses using hex-pattern matching. " +
-                 "Four strategies are tried in order: before-window hex pattern, MIPS code-reference " +
-                 "fingerprint, extended anchor search, and pointer scan. " +
-                 "Returns ported codes with confidence scores and method names.")]
+    [DynamicDescription("port_cheats_desc")]
     public async Task<string> PortCheats(
         [Description("Multi-line GameShark cheat codes to port (raw format).")] string cheatCodes,
         [Description("Absolute path to the source EE RAM dump (.bin file, typically EEmem.bin from a snapshot).")] string sourceDumpPath,
@@ -446,8 +298,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_pc")]
-    [Description("Get the current program counter (PC) of the PS2 EE CPU and the emulator pause state. " +
-                 "Returns the PC as a hex address and whether execution is paused.")]
+    [DynamicDescription("get_pc_desc")]
     public async Task<string> GetPc(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETPC" }, cancellationToken);
@@ -473,8 +324,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_registers")]
-    [Description("Get a full register dump of the PS2 EE CPU: all 32 general-purpose registers (GPRs), " +
-                 "HI/LO, COP0 system registers, COP1 FPU floating-point registers, and VU0 vector registers.")]
+    [DynamicDescription("get_registers_desc")]
     public async Task<string> GetRegisters(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETREGS" }, cancellationToken);
@@ -482,12 +332,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "set_register")]
-    [Description("Write a new value to a named EE CPU register. " +
-                 "RegisterName: GPR (requires RegisterIndex 1–31), PC, HI, LO, HI1, LO1, SA, " +
-                 "COP0 (requires RegisterIndex 0–31), FPR (requires RegisterIndex 0–31), " +
-                 "FCR (only FCR31/FCSR is writable), VU0I (requires RegisterIndex 0–15), " +
-                 "VU0F (requires RegisterIndex 0–31, writes the X component). " +
-                 "Values may be decimal or 0x-prefixed hex.")]
+    [DynamicDescription("set_register_desc")]
     public async Task<string> SetRegister(
         [Description("Register type: GPR, PC, HI, LO, HI1, LO1, SA, COP0, FPR, FCR, VU0I, or VU0F.")] string registerName,
         [Description("New register value (decimal or 0x-prefixed hex).")] string value,
@@ -506,8 +351,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_labels")]
-    [Description("Return all symbol labels (with type badges) from the active label set. " +
-                 "Useful for resolving addresses to known function, struct, array, or string labels.")]
+    [DynamicDescription("get_labels_desc")]
     public async Task<string> GetLabels(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETLABELS" }, cancellationToken);
@@ -515,8 +359,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_function_labels")]
-    [Description("Return only Function-typed labels from the active label set, including named " +
-                 "argument and return register annotations. Useful for understanding calling conventions.")]
+    [DynamicDescription("get_function_labels_desc")]
     public async Task<string> GetFunctionLabels(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETLABELS" }, cancellationToken);
@@ -553,9 +396,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "add_label")]
-    [Description("Insert or update a label entry in the active label set. Supports all label types: " +
-                 "Address, Struct, Function, Array, ArrayOfPointers, LinkedList, String. " +
-                 "If a label already exists at the given address it is overwritten.")]
+    [DynamicDescription("add_label_desc")]
     public async Task<string> AddLabel(
         [Description("Virtual address to label (hex or decimal).")] string address,
         [Description("Label name (e.g. 'scePadRead').")] string label,
@@ -594,7 +435,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "delete_label")]
-    [Description("Remove a symbol label from the active label set. Changes are persisted to disk immediately.")]
+    [DynamicDescription("delete_label_desc")]
     public async Task<string> DeleteLabel(
         [Description("Virtual address of the label to remove (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
@@ -611,9 +452,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "resolve_strings")]
-    [Description("Read each String-typed label's memory content from live PCSX2 (PINE mode) and " +
-                 "update the display to show the null-terminated ASCII string alongside the label name. " +
-                 "Requires PINE mode (PCSX2 with PINE enabled).")]
+    [DynamicDescription("resolve_strings_desc")]
     public async Task<string> ResolveStrings(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "RESOLVESTRINGS" }, cancellationToken);
@@ -621,10 +460,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "resolve_linked_list")]
-    [Description("Walk a linked list in live PCSX2 memory starting from the given address, using " +
-                 "nextOffset as the byte offset within each node where the next-node pointer lives. " +
-                 "Assigns indexed labels (Name[0], Name[1], …) to each discovered node. " +
-                 "Requires PINE mode (PCSX2 with PINE enabled).")]
+    [DynamicDescription("resolve_linked_list_desc")]
     public async Task<string> ResolveLinkedList(
         [Description("Virtual address of the first node (hex or decimal).")] string address,
         [Description("Byte offset within each node of the next-node pointer (e.g. 0 or 4).")] int nextOffset,
@@ -662,8 +498,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "scan_strings")]
-    [Description("Scan a region of live PS2 emulator memory for null-terminated ASCII strings. " +
-                 "Returns each string found together with its virtual address.")]
+    [DynamicDescription("scan_strings_desc")]
     public async Task<string> ScanStrings(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -682,9 +517,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "scan_functions")]
-    [Description("Scan a region of live PS2 emulator memory and detect likely MIPS function entry points " +
-                 "(heuristic: ADDIU $sp,$sp,-N prologue pattern and JAL targets). " +
-                 "Returns address and auto-generated or database label for each candidate.")]
+    [DynamicDescription("scan_functions_desc")]
     public async Task<string> ScanFunctions(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -703,10 +536,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "scan_pointers")]
-    [Description("Scan a region of live PS2 emulator memory for 4-byte aligned values that are confirmed " +
-                 "EE memory pointers. Three filters are applied: non-zero and 4-byte aligned, physical " +
-                 "address ≥ 0x10000, and referenced by MIPS code in EE main RAM. " +
-                 "Returns each pointer's address and the value it points to.")]
+    [DynamicDescription("scan_pointers_desc")]
     public async Task<string> ScanPointers(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -725,9 +555,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "scan_floats")]
-    [Description("Scan a region of live PS2 emulator memory for plausible IEEE-754 single-precision floats. " +
-                 "Returns 4-byte aligned values whose absolute magnitude falls between 0.001 and 1,000,000. " +
-                 "NaN, ±Inf, subnormals, and PS2 flush-to-zero values are excluded.")]
+    [DynamicDescription("scan_floats_desc")]
     public async Task<string> ScanFloats(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -746,9 +574,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "scan_integers")]
-    [Description("Scan a region of live PS2 emulator memory for non-zero 4-byte aligned 32-bit integers. " +
-                 "Common fill/sentinel values (0x00000000, 0xFFFFFFFF) are excluded to reduce noise. " +
-                 "Returns each value as both signed decimal and hex.")]
+    [DynamicDescription("scan_integers_desc")]
     public async Task<string> ScanIntegers(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -771,9 +597,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_strings")]
-    [Description("Scan base64-encoded binary data for null-terminated printable ASCII strings of at least 4 characters. " +
-                 "Use read_memory to obtain the base64 data, then pass it here for analysis. " +
-                 "Does not require the emulator to be running if data is already in hand.")]
+    [DynamicDescription("get_strings_desc")]
     public async Task<string> GetStrings(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -791,9 +615,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_functions")]
-    [Description("Scan base64-encoded binary data for MIPS function entry points. " +
-                 "Detects ADDIU $sp,$sp,-N prologues and JAL targets within the block. " +
-                 "Auto-labels each candidate 'FNC_0xADDRESS', respecting any existing database labels.")]
+    [DynamicDescription("get_functions_desc")]
     public async Task<string> GetFunctions(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -811,9 +633,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_pointers")]
-    [Description("Scan base64-encoded binary data for 4-byte aligned values that are confirmed EE memory pointers. " +
-                 "Applies the same three-stage filter as scan_pointers. " +
-                 "Use read_memory to obtain the base64 data.")]
+    [DynamicDescription("get_pointers_desc")]
     public async Task<string> GetPointers(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -831,9 +651,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_floats")]
-    [Description("Scan base64-encoded binary data for plausible IEEE-754 single-precision floats. " +
-                 "Applies the same magnitude filter as scan_floats (0.001–1,000,000 absolute). " +
-                 "Use read_memory to obtain the base64 data.")]
+    [DynamicDescription("get_floats_desc")]
     public async Task<string> GetFloats(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -851,9 +669,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_integers")]
-    [Description("Scan base64-encoded binary data for non-zero 4-byte aligned 32-bit integers. " +
-                 "Applies the same filter as scan_integers (excludes 0x00000000 and 0xFFFFFFFF). " +
-                 "Use read_memory to obtain the base64 data.")]
+    [DynamicDescription("get_integers_desc")]
     public async Task<string> GetIntegers(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -875,10 +691,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "search")]
-    [Description("Search live PS2 emulator memory or a disassembly listing for a text, regex, bytes, or string pattern. " +
-                 "Modes: 'text' (case-insensitive substring, default), 'regex' (case-insensitive), " +
-                 "'bytes' (hex byte pattern, e.g. '27 BD FF D0'), 'string' (raw UTF-8 byte match). " +
-                 "Returns matching instruction addresses and the matched field (addr/bytes/label/op/args/comment).")]
+    [DynamicDescription("search_desc")]
     public async Task<string> Search(
         [Description("Text, regex, or hex byte pattern to search for.")] string query,
         [Description("Virtual start address (hex or decimal).")] string address,
@@ -915,7 +728,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pause_emulator")]
-    [Description("Pause PS2 emulator execution. The emulator must be running via `dotnet run -- --run`.")]
+    [DynamicDescription("pause_emulator_desc")]
     public async Task<string> PauseEmulator(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "PAUSE" }, cancellationToken);
@@ -923,8 +736,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "resume_emulator")]
-    [Description("Resume PS2 emulator execution after a pause or breakpoint hit. " +
-                 "If stopped at a breakpoint, automatically single-steps past it before releasing execution.")]
+    [DynamicDescription("resume_emulator_desc")]
     public async Task<string> ResumeEmulator(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "RESUME" }, cancellationToken);
@@ -932,9 +744,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "step")]
-    [Description("Execute exactly one EE instruction while keeping the emulator paused. " +
-                 "The emulator must already be paused (use pause_emulator or set a breakpoint first). " +
-                 "Returns the new program counter, pause state, and any instruction analysis comment.")]
+    [DynamicDescription("step_desc")]
     public async Task<string> Step(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "STEP" }, cancellationToken);
@@ -968,9 +778,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "restart_emulator")]
-    [Description("Perform a full hardware reset of the PS2 emulator without dropping the socket connection. " +
-                 "The BIOS and disc image are reloaded, existing breakpoints are preserved, " +
-                 "and the emulator is left paused at the reset vector (0xBFC00000).")]
+    [DynamicDescription("restart_emulator_desc")]
     public async Task<string> RestartEmulator(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "RESTART" }, cancellationToken);
@@ -978,9 +786,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "set_breakpoint")]
-    [Description("Set a breakpoint at a virtual address in the PS2 emulator. " +
-                 "Execution pauses when the CPU reaches this address. " +
-                 "Addresses are normalized to physical form internally.")]
+    [DynamicDescription("set_breakpoint_desc")]
     public async Task<string> SetBreakpoint(
         [Description("Virtual address for the breakpoint (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
@@ -997,7 +803,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "clear_breakpoint")]
-    [Description("Remove a previously set breakpoint at a virtual address.")]
+    [DynamicDescription("clear_breakpoint_desc")]
     public async Task<string> ClearBreakpoint(
         [Description("Virtual address of the breakpoint to remove (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
@@ -1014,7 +820,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "clear_all_breakpoints")]
-    [Description("Remove all breakpoints currently set in the PS2 emulator.")]
+    [DynamicDescription("clear_all_breakpoints_desc")]
     public async Task<string> ClearAllBreakpoints(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "CLEARBP_ALL" }, cancellationToken);
@@ -1026,11 +832,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_threads")]
-    [Description("Enumerate PS2 EE OS threads by walking the kernel thread control block (TCB) pool. " +
-                 "Returns thread ID, status (Running/Ready/Waiting/Suspended/Dormant), " +
-                 "current PC, stack pointer, priority, and entry point for each thread found. " +
-                 "If no OS threads are found a single synthetic entry for the live CPU state is returned. " +
-                 "Only available in internal emulator mode (not PINE/PCSX2 mode).")]
+    [DynamicDescription("get_threads_desc")]
     public async Task<string> GetThreads(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETTHREADS" }, cancellationToken);
@@ -1042,10 +844,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "snapshot")]
-    [Description("Save a full memory snapshot of the running PS2 emulator to a directory on disk. " +
-                 "Writes four binary files: EEmem.bin (32 MB EE RAM), BIOSrom.bin (4 MB BIOS), " +
-                 "Scratchpad.bin (16 KB), and IOPmem.bin (IOP RAM). " +
-                 "The output directory is created if it does not exist. Works in both internal and PINE modes.")]
+    [DynamicDescription("snapshot_desc")]
     public async Task<string> Snapshot(
         [Description("Absolute path to the output directory where snapshot files will be written.")] string outputPath,
         CancellationToken cancellationToken = default)
@@ -1058,10 +857,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "load_snapshot")]
-    [Description("Reload a previously saved memory snapshot as a save state into the running PS2 emulator. " +
-                 "Reads EEmem.bin, BIOSrom.bin, Scratchpad.bin, and IOPmem.bin from the given directory " +
-                 "and restores them into the live emulator memory. " +
-                 "The emulator is paused automatically before the restore and remains paused afterwards.")]
+    [DynamicDescription("load_snapshot_desc")]
     public async Task<string> LoadSnapshot(
         [Description("Absolute path to the snapshot directory containing the .bin files to restore.")] string inputPath,
         CancellationToken cancellationToken = default)
@@ -1078,9 +874,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_disc_elfs")]
-    [Description("Open a PS2 disc image (ISO/BIN or ZIP containing one) and list all ELF and IRX files found. " +
-                 "Also reads SYSTEM.CNF to identify the BOOT2 executable. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("list_disc_elfs_desc")]
     public async Task<string> ListDiscElfs(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip archive containing an ISO/BIN).")] string isoPath,
         CancellationToken cancellationToken = default)
@@ -1093,10 +887,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "recompile_elf")]
-    [Description("Extract a named ELF from a PS2 disc image and statically recompile it to C++ source files " +
-                 "using the MIPS64 EE static recompiler. " +
-                 "When elfName is omitted the BOOT2 executable from SYSTEM.CNF is used. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("recompile_elf_desc")]
     public async Task<string> RecompileElf(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
         [Description("Name of the ELF to recompile (e.g. 'SCUS_971.98'). Leave empty to use BOOT2.")] string? elfName = null,
@@ -1115,8 +906,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_status")]
-    [Description("Query the running PCSX2 emulator status via the PINE IPC socket. " +
-                 "Returns Running, Paused, or Shutdown. Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("pcsx2_status_desc")]
     public async Task<string> Pcsx2Status(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "PCSX2STATUS" }, cancellationToken);
@@ -1124,8 +914,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "pcsx2_game_info")]
-    [Description("Query the running game's title, serial ID, UUID, and version from PCSX2 via the PINE IPC socket. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("pcsx2_game_info_desc")]
     public async Task<string> Pcsx2GameInfo(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "PCSX2GAMEINFO" }, cancellationToken);
@@ -1166,10 +955,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "detect_cheat_format")]
-    [Description("Heuristically detect the encryption format of a block of PS2 cheat codes. " +
-                 "Returns the detected format name (Raw, ActionReplay1, ActionReplay2, " +
-                 "ActionReplayMax, GameSharkV3, CodeBreakerV1, or CodeBreakerV7). " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("detect_cheat_format_desc")]
     public Task<string> DetectCheatFormat(
         [Description("Multi-line block of PS2 cheat codes whose format should be identified.")] string codes)
     {
@@ -1188,14 +974,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "convert_cheat")]
-    [Description("Convert PS2 cheat codes between the unencrypted raw format and a " +
-                 "device-specific encrypted format. Does not require the emulator to be running.\n\n" +
-                 "Supported formats: Raw, ActionReplay1, ActionReplay2, ActionReplayMax, " +
-                 "GameSharkV3, CodeBreakerV1, CodeBreakerV7.\n\n" +
-                 "direction='toRaw'    — decrypt device codes → unencrypted hex pairs (TTAAAAAA VVVVVVVV). " +
-                 "The source format is auto-detected when targetFormat is omitted.\n" +
-                 "direction='toEngine' — encrypt raw hex pairs → the chosen device format. " +
-                 "targetFormat is required when direction is 'toEngine'.")]
+    [DynamicDescription("convert_cheat_desc")]
     public Task<string> ConvertCheat(
         [Description("Multi-line block of PS2 cheat codes to convert.")] string codes,
         [Description("Conversion direction: 'toRaw' (decrypt to raw hex) or 'toEngine' (encrypt to device format).")] string direction,
@@ -1250,9 +1029,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "reset_emulator")]
-    [Description("Send a CPU reset signal to the PS2 emulator (PINE) or reset the internal scheduler. " +
-                 "Unlike restart_emulator (which reloads the BIOS and disc), this performs a softer " +
-                 "hardware-level reset. Works in both internal and PINE/PCSX2 modes.")]
+    [DynamicDescription("reset_emulator_desc")]
     public async Task<string> ResetEmulator(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "RESET" }, cancellationToken);
@@ -1260,10 +1037,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "step_into")]
-    [Description("Step into the next PS2 EE instruction (follows calls into subroutines). " +
-                 "In PINE/PCSX2 mode this uses the native PCSX2 step-into command; " +
-                 "in internal emulator mode it behaves identically to step. " +
-                 "The emulator must already be paused.")]
+    [DynamicDescription("step_into_desc")]
     public async Task<string> StepInto(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "STEPINTO" }, cancellationToken);
@@ -1271,10 +1045,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "step_over")]
-    [Description("Step over the next PS2 EE instruction (skips into subroutines, executing them fully). " +
-                 "In PINE/PCSX2 mode this uses the native PCSX2 step-over command; " +
-                 "in internal emulator mode it behaves identically to step. " +
-                 "The emulator must already be paused.")]
+    [DynamicDescription("step_over_desc")]
     public async Task<string> StepOver(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "STEPOVER" }, cancellationToken);
@@ -1282,10 +1053,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "step_out")]
-    [Description("Step out of the current PS2 EE subroutine, running until the next return instruction. " +
-                 "In PINE/PCSX2 mode this uses the native PCSX2 step-out command; " +
-                 "in internal emulator mode it behaves identically to step. " +
-                 "The emulator must already be paused.")]
+    [DynamicDescription("step_out_desc")]
     public async Task<string> StepOut(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "STEPOUT" }, cancellationToken);
@@ -1297,8 +1065,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_fps")]
-    [Description("Read the current emulated framerate from PCSX2 via the PINE socket. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("get_fps_desc")]
     public async Task<string> GetFps(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETFPS" }, cancellationToken);
@@ -1316,9 +1083,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "set_limiter_mode")]
-    [Description("Set the PCSX2 speed limiter mode via the PINE socket. " +
-                 "mode: 0=Nominal (default 60 fps), 1=Turbo (maximum speed), 2=Slomo (slow motion), 3=Unlimited. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("set_limiter_mode_desc")]
     public async Task<string> SetLimiterMode(
         [Description("Limiter mode: 0=Nominal, 1=Turbo, 2=Slomo, 3=Unlimited.")] byte mode,
         CancellationToken cancellationToken = default)
@@ -1328,9 +1093,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "frame_advance")]
-    [Description("Advance the PCSX2 emulator by a fixed number of video frames then pause. " +
-                 "Useful for frame-by-frame analysis. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("frame_advance_desc")]
     public async Task<string> FrameAdvance(
         [Description("Number of frames to advance (1–255).")] byte frameCount,
         CancellationToken cancellationToken = default)
@@ -1344,9 +1107,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_breakpoints")]
-    [Description("List all active PC breakpoints set in PCSX2 via the PINE socket. " +
-                 "cpuSel: 0=EE only, 1=IOP only, 255=both (default). " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("list_breakpoints_desc")]
     public async Task<string> ListBreakpoints(
         [Description("CPU selector: 0=EE, 1=IOP, 255=both (default).")] byte cpuSel = 0xFF,
         CancellationToken cancellationToken = default)
@@ -1380,8 +1141,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_symbol")]
-    [Description("Look up the EE function symbol name for a given virtual address via PINE. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("get_symbol_desc")]
     public async Task<string> GetSymbol(
         [Description("Virtual EE address to look up (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
@@ -1406,8 +1166,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_symbol_by_name")]
-    [Description("Look up an EE symbol address and size by its demangled name via PINE. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("get_symbol_by_name_desc")]
     public async Task<string> GetSymbolByName(
         [Description("Demangled symbol name to look up.")] string symbolName,
         CancellationToken cancellationToken = default)
@@ -1428,9 +1187,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_call_stack")]
-    [Description("Walk the EE call stack and return each frame's entry point, current PC, " +
-                 "stack pointer, and frame size. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("get_call_stack_desc")]
     public async Task<string> GetCallStack(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETSTACK" }, cancellationToken);
@@ -1465,9 +1222,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_iop_threads")]
-    [Description("List all IOP (I/O Processor) OS threads via the PINE socket. " +
-                 "Returns thread ID, status, PC, stack pointer, priority, and entry point for each IOP thread. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("get_iop_threads_desc")]
     public async Task<string> GetIopThreads(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETIOPTHREADS" }, cancellationToken);
@@ -1498,9 +1253,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_modules")]
-    [Description("List all loaded IOP modules (IRX files) via the PINE socket. " +
-                 "Returns name, version, text/data addresses and sizes for each module. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("get_modules_desc")]
     public async Task<string> GetModules(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETMODULES" }, cancellationToken);
@@ -1534,12 +1287,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pine_get_register")]
-    [Description("Read any EE or IOP CPU register by category and index via the PINE socket. " +
-                 "Returns a 128-bit value as a hex string (little-endian). " +
-                 "cpuSel: 0=EE, 1=IOP. " +
-                 "EE categories: 0=GPR (32 regs), 1=CP0 (32 regs), 2=FPR (32 regs), 3=FCR (32 regs), 4=VU0F (33 regs, vf0–vf31+ACC), 5=VU0I (32 regs), 6=GS (19 priv regs). " +
-                 "IOP categories: 0=GPR (32 regs). " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("pine_get_register_desc")]
     public async Task<string> PineGetRegister(
         [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
         [Description("Register category (see tool description).")] byte registerCategory,
@@ -1563,11 +1311,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "pine_set_register")]
-    [Description("Write any EE or IOP CPU register by category and index via the PINE socket. " +
-                 "The emulator must be paused. " +
-                 "cpuSel: 0=EE, 1=IOP. For categories see pine_get_register. " +
-                 "registerValue: hex string up to 32 characters (128-bit little-endian). " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("pine_set_register_desc")]
     public async Task<string> PineSetRegister(
         [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
         [Description("Register category (see pine_get_register description).")] byte registerCategory,
@@ -1586,9 +1330,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_functions")]
-    [Description("Retrieve a paginated list of EE function symbols from the PCSX2 symbol database via PINE. " +
-                 "Each entry includes address, size in bytes, and name. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("list_functions_desc")]
     public async Task<string> ListFunctions(
         [Description("Pagination offset (0-based index of the first result to return).")] uint offset = 0,
         [Description("Maximum number of results to return (1–65535, default 256).")] ushort maxCount = 256,
@@ -1601,9 +1343,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "list_globals")]
-    [Description("Retrieve a paginated list of EE global variable symbols from the PCSX2 symbol database via PINE. " +
-                 "Each entry includes address, size in bytes, and name. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("list_globals_desc")]
     public async Task<string> ListGlobals(
         [Description("Pagination offset (0-based index of the first result to return).")] uint offset = 0,
         [Description("Maximum number of results to return (1–65535, default 256).")] ushort maxCount = 256,
@@ -1616,9 +1356,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_locals")]
-    [Description("List the parameters and local variables for the EE function that contains a given address via PINE. " +
-                 "Each entry includes storage type (global/register/stack), value/offset, and name. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("get_locals_desc")]
     public async Task<string> GetLocals(
         [Description("Virtual EE address inside the function whose locals should be retrieved (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
@@ -1656,10 +1394,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pine_disassemble")]
-    [Description("Disassemble instructions at a given address on EE or IOP via the PINE live-memory interface. " +
-                 "Unlike the offline 'disassemble' tool, this reads directly from the running PCSX2 memory. " +
-                 "cpuSel: 0=EE, 1=IOP. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("pine_disassemble_desc")]
     public async Task<string> PineDisassemble(
         [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
         [Description("Virtual start address (hex or decimal).")] string address,
@@ -1699,10 +1434,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "save_state_file")]
-    [Description("Save the current PCSX2 emulator state to a named file path via the PINE socket. " +
-                 "Unlike snapshot (which dumps raw memory), this saves a full .p2s save-state file " +
-                 "that can be loaded back with load_state_file. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("save_state_file_desc")]
     public async Task<string> SaveStateFile(
         [Description("Absolute file path where the save state should be written (e.g. '/saves/slot1.p2s').")] string filePath,
         CancellationToken cancellationToken = default)
@@ -1712,9 +1444,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "load_state_file")]
-    [Description("Load a PCSX2 save-state file (.p2s) into the running emulator via the PINE socket. " +
-                 "Unlike load_snapshot (which restores raw memory), this loads a full PCSX2-format save state. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("load_state_file_desc")]
     public async Task<string> LoadStateFile(
         [Description("Absolute path to the .p2s save-state file to load.")] string filePath,
         CancellationToken cancellationToken = default)
@@ -1724,11 +1454,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "extract_p2s")]
-    [Description("Extract the memory dump files (EEmem.bin, IOPmem.bin) from a PCSX2 .p2s save-state archive " +
-                 "into a companion directory alongside the .p2s file. " +
-                 "The extraction is cached — if the .p2s file has not changed since the last extraction it " +
-                 "returns immediately. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("extract_p2s_desc")]
     public async Task<string> ExtractP2s(
         [Description("Absolute path to the .p2s PCSX2 save-state file to extract.")] string filePath,
         CancellationToken cancellationToken = default)
@@ -1742,9 +1468,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pine_version")]
-    [Description("Query the PINE IPC protocol version string from PCSX2. " +
-                 "Useful for checking that the connected PCSX2 supports the expected PINE extension level. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("pine_version_desc")]
     public async Task<string> PineVersion(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "PINEVERSION" }, cancellationToken);
@@ -1752,9 +1476,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "pine_save_state_slot")]
-    [Description("Save the current PCSX2 emulator state to a numbered save-state slot (0–9) via PINE. " +
-                 "Unlike save_state_file, this uses the built-in numbered slots managed by PCSX2. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("pine_save_state_slot_desc")]
     public async Task<string> PineSaveStateSlot(
         [Description("Save-state slot index (0–9).")] byte slot,
         CancellationToken cancellationToken = default)
@@ -1764,9 +1486,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "pine_load_state_slot")]
-    [Description("Load a PCSX2 save-state from a numbered slot (0–9) via PINE. " +
-                 "Unlike load_state_file, this uses the built-in numbered slots managed by PCSX2. " +
-                 "Only available when the server was started with --pcsx2.")]
+    [DynamicDescription("pine_load_state_slot_desc")]
     public async Task<string> PineLoadStateSlot(
         [Description("Save-state slot index (0–9).")] byte slot,
         CancellationToken cancellationToken = default)
@@ -1780,9 +1500,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "mc_list")]
-    [Description("List all save-game directories on a PS2 memory card image file. " +
-                 "Returns save name, file count, creation/modification timestamps, and total size for each save. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("mc_list_desc")]
     public async Task<string> McList(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         CancellationToken cancellationToken = default)
@@ -1814,9 +1532,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "mc_export")]
-    [Description("Export a single save-game directory from a PS2 memory card image to a folder on disk. " +
-                 "The exported folder can be inspected, backed up, or imported into another memory card. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("mc_export_desc")]
     public async Task<string> McExport(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         [Description("Name of the save to export (as listed by mc_list, e.g. 'BASCUS-97133BUILTIN').")] string saveName,
@@ -1830,9 +1546,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "mc_import")]
-    [Description("Import a save-game directory into a PS2 memory card image. " +
-                 "The save directory must follow PS2 memory card conventions (one subdirectory per save). " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("mc_import_desc")]
     public async Task<string> McImport(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         [Description("Absolute path to the save directory to import.")] string importDir,
@@ -1846,9 +1560,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "mc_delete")]
-    [Description("Delete a single save-game directory from a PS2 memory card image. " +
-                 "This operation cannot be undone. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("mc_delete_desc")]
     public async Task<string> McDelete(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         [Description("Name of the save to delete (as listed by mc_list).")] string saveName,
@@ -1861,9 +1573,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "mc_format")]
-    [Description("Create a new blank PS2 memory card image file (8 MB). " +
-                 "If a file already exists at the path it will be overwritten with a freshly formatted card. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("mc_format_desc")]
     public async Task<string> McFormat(
         [Description("Absolute path where the new memory card image should be created.")] string mcPath,
         CancellationToken cancellationToken = default)
@@ -1873,11 +1583,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "mc_read_file")]
-    [Description("Read the raw bytes of a specific file inside a PS2 memory card save directory. " +
-                 "Returns the file contents as a base64-encoded string. " +
-                 "Useful for inspecting save-game data, icon files (ICON.SYS), thumbnails, etc. " +
-                 "Use mc_list to enumerate save names and the files each save contains. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("mc_read_file_desc")]
     public async Task<string> McReadFile(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         [Description("Name of the save directory (as listed by mc_list, e.g. 'BASCUS-97133BUILTIN').")] string saveName,
@@ -1905,9 +1611,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "hdd_list")]
-    [Description("Open a PS2 HDD image file and list all APA partitions on it. " +
-                 "Returns partition ID, name, type, size, creation timestamp, and file count for each partition. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("hdd_list_desc")]
     public async Task<string> HddList(
         [Description("Absolute path to the PS2 HDD image file (e.g. 'hdd.raw').")] string hddPath,
         CancellationToken cancellationToken = default)
@@ -1940,9 +1644,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "hdd_list_files")]
-    [Description("List all files in a specific partition on a PS2 HDD image. " +
-                 "Returns file name, size, type (file/directory), and modification timestamp. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("hdd_list_files_desc")]
     public async Task<string> HddListFiles(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID to list files from (as shown by hdd_list, e.g. '__common' or 'BASLUS-12345').")] string partitionId,
@@ -1977,8 +1679,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "hdd_export")]
-    [Description("Export a single file from a PS2 HDD partition to a directory on disk. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("hdd_export_desc")]
     public async Task<string> HddExport(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID containing the file (as shown by hdd_list).")] string partitionId,
@@ -1993,8 +1694,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "hdd_import")]
-    [Description("Import a file into a specific partition on a PS2 HDD image. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("hdd_import_desc")]
     public async Task<string> HddImport(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID to import the file into (as shown by hdd_list).")] string partitionId,
@@ -2009,9 +1709,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "hdd_delete")]
-    [Description("Delete a partition from a PS2 HDD image. " +
-                 "This operation cannot be undone. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("hdd_delete_desc")]
     public async Task<string> HddDelete(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID to delete (as shown by hdd_list).")] string partitionId,
@@ -2024,9 +1722,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "hdd_create")]
-    [Description("Create a new blank PS2 HDD image file with an initialised APA partition table. " +
-                 "If a file already exists at the path it will be overwritten. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("hdd_create_desc")]
     public async Task<string> HddCreate(
         [Description("Absolute path where the new HDD image should be created.")] string hddPath,
         [Description("Image size in gigabytes (default 40 GB).")] int sizeGb = 40,
@@ -2043,9 +1739,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "iso_list_files")]
-    [Description("Open a PS2 disc image (ISO/BIN or ZIP containing one) and list all files and directories. " +
-                 "Returns disc path, name, LBA, size, and directory flag for each entry. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("iso_list_files_desc")]
     public async Task<string> IsoListFiles(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip archive containing an ISO/BIN).")] string isoPath,
         CancellationToken cancellationToken = default)
@@ -2080,9 +1774,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "iso_read_file")]
-    [Description("Extract a file from a PS2 disc image to disk or return its contents as base64. " +
-                 "Use iso_list_files first to see available files. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("iso_read_file_desc")]
     public async Task<string> IsoReadFile(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
         [Description("Disc path to the file to extract (e.g. 'SYSTEM.CNF' or '/SCUS_123.45;1').")] string filePath,
@@ -2096,8 +1788,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "iso_get_info")]
-    [Description("Get metadata about a PS2 disc image: format (cooked/raw), sector count, size, and boot ELF. " +
-                 "Does not require the emulator to be running.")]
+    [DynamicDescription("iso_get_info_desc")]
     public async Task<string> IsoGetInfo(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
         CancellationToken cancellationToken = default)
@@ -2113,10 +1804,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_progress_reports")]
-    [Description(
-        "List all progress report files saved in the memories folder. " +
-        "Call this at the start of every session to discover previous work. " +
-        "Returns the sanitised file names (without .md extension) of all reports.")]
+    [DynamicDescription("list_progress_reports_desc")]
     public Task<string> ListProgressReports()
     {
         var names = reports.ListReports();
@@ -2131,10 +1819,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_progress_report")]
-    [Description(
-        "Read a previously saved progress report from the memories folder. " +
-        "Load this at the start of each session to resume from where you left off. " +
-        "The report contains discovered addresses, structure maps, labels, and pending objectives.")]
+    [DynamicDescription("get_progress_report_desc")]
     public Task<string> GetProgressReport(
         [Description(
             "The report name as returned by list_progress_reports " +
@@ -2154,13 +1839,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "save_progress_report")]
-    [Description(
-        "Create or overwrite a progress report in the memories folder. " +
-        "The name should be a short, descriptive summary unique to the task " +
-        "(e.g. 'socom2-player-health', 'gtavc-vehicle-struct-session2'). " +
-        "Save after every major milestone so future sessions can resume seamlessly. " +
-        "Content should be Markdown and include: game/version, current objective, " +
-        "discovered addresses with labels, structure maps, and next steps.")]
+    [DynamicDescription("save_progress_report_desc")]
     public Task<string> SaveProgressReport(
         [Description(
             "Short unique name for this report. Use hyphens as separators. " +
@@ -2184,9 +1863,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "delete_progress_report")]
-    [Description(
-        "Delete a progress report from the memories folder. " +
-        "Use only when a task is fully complete and the report is no longer needed.")]
+    [DynamicDescription("delete_progress_report_desc")]
     public Task<string> DeleteProgressReport(
         [Description("The report name to delete (as returned by list_progress_reports).")] string name)
     {
@@ -2208,9 +1885,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_structs")]
-    [Description("Return all user-defined PS2 memory struct definitions stored on the server. " +
-                 "Each struct has a name, base address, and an ordered list of member fields with byte offsets. " +
-                 "Works in both internal emulator and PINE modes.")]
+    [DynamicDescription("get_structs_desc")]
     public async Task<string> GetStructs(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETSTRUCTS" }, cancellationToken);
@@ -2245,9 +1920,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "add_struct")]
-    [Description("Create or update a named PS2 memory struct definition with a base address. " +
-                 "Use add_struct_member to add fields after creating the struct. " +
-                 "Works in both internal emulator and PINE modes.")]
+    [DynamicDescription("add_struct_desc")]
     public async Task<string> AddStruct(
         [Description("Unique name for this struct (e.g. 'PlayerState').")] string structName,
         [Description("Base address of the struct in EE memory (hex or decimal, e.g. '0x80200000').")] string baseAddress,
@@ -2260,8 +1933,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "delete_struct")]
-    [Description("Remove a named PS2 memory struct definition. " +
-                 "Works in both internal emulator and PINE modes.")]
+    [DynamicDescription("delete_struct_desc")]
     public async Task<string> DeleteStruct(
         [Description("Name of the struct to delete.")] string structName,
         CancellationToken cancellationToken = default)
@@ -2273,9 +1945,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "add_struct_member")]
-    [Description("Add or update a named member field in an existing PS2 memory struct definition. " +
-                 "Use get_structs to browse current definitions. " +
-                 "Works in both internal emulator and PINE modes.")]
+    [DynamicDescription("add_struct_member_desc")]
     public async Task<string> AddStructMember(
         [Description("Name of the struct to add the member to.")] string structName,
         [Description("Byte offset of the member within the struct (e.g. 0 for the first field).")] int memberOffset,
@@ -2293,10 +1963,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_nav_history")]
-    [Description("Return the server-side navigation history: the list of EE addresses recently " +
-                 "visited by AI commands (READMEM, DISASSEMBLE, SETBP …) and by VS Code user " +
-                 "navigation events (RECORDNAV).  Entries are sorted oldest-first, newest-last. " +
-                 "Works in both internal emulator and PINE modes.")]
+    [DynamicDescription("get_nav_history_desc")]
     public async Task<string> GetNavHistory(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETNAVHISTORY" }, cancellationToken);
@@ -2329,8 +1996,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "clear_nav_history")]
-    [Description("Clear the server-side navigation history. " +
-                 "Works in both internal emulator and PINE modes.")]
+    [DynamicDescription("clear_nav_history_desc")]
     public async Task<string> ClearNavHistory(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "CLEARNAVHISTORY" }, cancellationToken);
@@ -2338,12 +2004,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "navigate_to")]
-    [Description("Tell the VS Code disasm editor to jump to a specific EE virtual address. " +
-                 "When the VS Code extension has 'Follow AI' mode enabled, the disasm view " +
-                 "automatically scrolls to this address so the user can follow your research " +
-                 "in real time.  Also records the address in the server-side navigation history. " +
-                 "Call this whenever you move your focus to a new address during an investigation. " +
-                 "Works in both internal emulator and PINE modes.")]
+    [DynamicDescription("navigate_to_desc")]
     public async Task<string> NavigateTo(
         [Description("EE virtual address to navigate to (hex or decimal, e.g. '0x8054ABCD').")] string address,
         CancellationToken cancellationToken = default)
@@ -2362,11 +2023,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_address_snapshot_history")]
-    [Description("Read the historical 4-byte value at a specific EE virtual address across every " +
-                 "memory snapshot in a directory tree.  Mirrors the History tab in the VS Code " +
-                 "disasm editor — shows how the value at an address changed between snapshots. " +
-                 "Scans all subdirectories of snapshotDir recursively for snapshot-info.json files. " +
-                 "Works in both internal emulator and PINE modes.")]
+    [DynamicDescription("get_address_snapshot_history_desc")]
     public async Task<string> GetAddressSnapshotHistory(
         [Description("EE virtual address to look up (hex or decimal, e.g. '0x80200000').")] string address,
         [Description("Root directory to scan for snapshots (e.g. '/workspace/snapshots/SOCOM2/').")] string snapshotDir,
@@ -2415,12 +2072,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "scan_value")]
-    [Description("Scan EE main RAM (or a custom address range) for a specific value of a given data type. " +
-                 "Supports numeric data types and comparison operators. " +
-                 "Works in both internal emulator and PINE modes.\n\n" +
-                 "dataType values: uint8, int8, uint16, int16, uint32, int32, uint64, int64, float32, float64.\n" +
-                 "comparison values: eq (equal), ne (not equal), lt (less than), gt (greater than), le (≤), ge (≥).\n\n" +
-                 "Returns up to 100,000 matching addresses. Narrow the range or use filter mode (pass previousAddresses) to refine results.")]
+    [DynamicDescription("scan_value_desc")]
     public async Task<string> ScanValue(
         [Description("Value to scan for (decimal or 0x-prefixed hex string, e.g. '100' or '0x64' for uint32).")] string scanValue,
         [Description("Data type to interpret memory as (e.g. 'uint32', 'float32').")] string dataType,
@@ -2488,16 +2140,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "read_memory_region")]
-    [Description(
-        "Read a contiguous region of EE RAM in one call and optionally search for a byte pattern within it.\n\n" +
-        "Unlike read_memory (which is capped at 64 KB), this tool can read up to 32 MB in a single request " +
-        "— useful for scanning large RAM windows (e.g. the full 32 MB EE main RAM at 0x00000000–0x02000000).\n\n" +
-        "Returns:\n" +
-        "  • 'bytes'   — the raw region as a hex string (two hex chars per byte, no spaces).\n" +
-        "  • 'matches' — list of absolute EE virtual addresses where search_pattern was found " +
-        "(empty list when no pattern is supplied or no match is found).\n\n" +
-        "search_pattern format: comma-separated decimal byte values, e.g. '0x4D,0x57,0x6F,0x33' or " +
-        "'77,87,111,51'.  Hex prefix '0x' is accepted per element.")]
+    [DynamicDescription("read_memory_region_desc")]
     public async Task<string> ReadMemoryRegion(
         [Description("Inclusive start virtual EE address (hex or decimal).")] string startAddress,
         [Description("Exclusive end virtual EE address (hex or decimal). Must be greater than startAddress.")] string endAddress,
@@ -2584,17 +2227,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "scan_pattern")]
-    [Description(
-        "Scan live EE RAM (or IOP RAM) for a byte pattern and return all matching addresses.\n\n" +
-        "Unlike read_memory_region (which also returns raw bytes), this tool returns only the match " +
-        "addresses — making it efficient for searching across the full 32 MB EE main RAM without " +
-        "transferring megabytes of data.  Ideal for locating raw file buffers, magic signatures, " +
-        "or any known byte sequence loaded into game memory.\n\n" +
-        "Defaults to scanning all of EE main RAM (0x00000000–0x02000000, 32 MB) or IOP RAM " +
-        "(0x00000000–0x00200000, 2 MB) when start/end are omitted.\n\n" +
-        "In PINE/PCSX2 mode the scan is performed in 1 MB chunks to avoid large single requests.\n\n" +
-        "search_pattern format: comma-separated byte values (decimal or 0x-hex), " +
-        "e.g. '0x4D,0x57,0x6F,0x33' or '77,87,111,51'.")]
+    [DynamicDescription("scan_pattern_desc")]
     public async Task<string> ScanPattern(
         [Description("Byte pattern to search for — comma-separated values (decimal or 0x-hex), e.g. '0x4D,0x57,0x6F,0x33'.")] string searchPattern,
         [Description("Inclusive start address (hex or decimal). Omit or use '0' to start from the beginning of the region.")] string startAddress = "0",
@@ -2667,16 +2300,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "set_memory_watchpoint")]
-    [Description(
-        "Set a write watchpoint on a range of EE RAM.\n\n" +
-        "In PINE mode (PCSX2): a software watchpoint is registered — the current memory is snapshotted " +
-        "and compared on each check.  Use run_until_watchpoint (blocking: resumes PCSX2 and waits until " +
-        "a change is detected) or get_watchpoint_hit (non-blocking: checks once and returns immediately " +
-        "whether the value has changed since the last check).\n\n" +
-        "In internal-emulator mode: a hardware watchpoint fires synchronously inside EE.Step() and pauses " +
-        "execution immediately; use get_watchpoint_hit or get_pc after the emulator pauses.\n\n" +
-        "Returns a watchpoint ID (e.g. 'wp-0') that can be passed to clear_memory_watchpoint.\n\n" +
-        "Note: only write watchpoints are currently supported.")]
+    [DynamicDescription("set_memory_watchpoint_desc")]
     public async Task<string> SetMemoryWatchpoint(
         [Description("EE virtual address to watch (hex or decimal).")] string address,
         [Description("Number of bytes to watch (1–256, default 4).")] int size = 4,
@@ -2695,8 +2319,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "clear_memory_watchpoint")]
-    [Description("Remove a previously registered memory watchpoint by its ID (e.g. 'wp-0'). " +
-                 "Use 'clear_all_memory_watchpoints' to remove all watchpoints at once.")]
+    [DynamicDescription("clear_memory_watchpoint_desc")]
     public async Task<string> ClearMemoryWatchpoint(
         [Description("Watchpoint ID to remove (e.g. 'wp-0'), as returned by set_memory_watchpoint.")] string watchpointId,
         CancellationToken cancellationToken = default)
@@ -2708,7 +2331,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "clear_all_memory_watchpoints")]
-    [Description("Remove every registered memory watchpoint.")]
+    [DynamicDescription("clear_all_memory_watchpoints_desc")]
     public async Task<string> ClearAllMemoryWatchpoints(CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(new { Command = "CLEARALLWATCHPOINTS" }, cancellationToken);
@@ -2716,7 +2339,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "list_memory_watchpoints")]
-    [Description("List all currently active memory watchpoints: ID, address, size, and access type.")]
+    [DynamicDescription("list_memory_watchpoints_desc")]
     public async Task<string> ListMemoryWatchpoints(CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(new { Command = "LISTWATCHPOINTS" }, cancellationToken);
@@ -2750,16 +2373,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "get_watchpoint_hit")]
-    [Description(
-        "Check whether any registered memory watchpoint has fired and return the details.\n\n" +
-        "In PINE mode (PCSX2): non-blocking — reads current memory at all watched addresses once and " +
-        "compares against the last snapshot.  Returns the first changed watchpoint with the approximate " +
-        "PC at the moment the change was detected.  Use run_until_watchpoint for a blocking variant " +
-        "that resumes PCSX2 and waits for a change automatically.\n\n" +
-        "In internal-emulator mode: returns the most recently fired watchpoint recorded synchronously " +
-        "inside EE.Step().\n\n" +
-        "The watchpoint hit info is also included in the get_pc response (WatchpointHitAddress / " +
-        "WatchpointHitPC / WatchpointHitId fields) so you do not always need a separate call.")]
+    [DynamicDescription("get_watchpoint_hit_desc")]
     public async Task<string> GetWatchpointHit(CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(new { Command = "GETWATCHPOINTHIT" }, cancellationToken);
@@ -2777,15 +2391,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "trace_calls")]
-    [Description(
-        "Step the emulator instruction-by-instruction from the current PC to end_pc and record every " +
-        "JAL / JALR call site hit along the way.\n\n" +
-        "The emulator must already be paused before calling this tool. " +
-        "Execution stops when end_pc is reached, max_instructions is exhausted, or another " +
-        "breakpoint/watchpoint fires.\n\n" +
-        "Because MIPS has branch delay slots, the call target is resolved after the delay-slot " +
-        "instruction executes — the 'to' address in each entry is the actual entry point of the callee.\n\n" +
-        "Returns a list of { from, to } hex address pairs.")]
+    [DynamicDescription("trace_calls_desc")]
     public async Task<string> TraceCalls(
         [Description("Exclusive end EE virtual address at which tracing stops (hex or decimal).")] string endPc,
         [Description("Maximum number of EE instructions to step through (default 10 000).")] int maxInstructions = 10_000,
@@ -2827,13 +2433,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "run_until_pc")]
-    [Description(
-        "Resume the emulator and block until the EE program counter reaches target_pc, then return " +
-        "the full register state atomically at the hit.\n\n" +
-        "Equivalent to: set_breakpoint(target_pc) + resume_emulator + wait + get_registers, " +
-        "but performed atomically on the server side with a configurable timeout.\n\n" +
-        "On timeout the emulator is paused at whatever PC it reached; an error message is returned " +
-        "so the caller can still inspect state with get_registers / get_pc.")]
+    [DynamicDescription("run_until_pc_desc")]
     public async Task<string> RunUntilPc(
         [Description("Target EE virtual address to run to (hex or decimal).")] string targetPc,
         [Description("Timeout in milliseconds before giving up (default 10 000).")] int timeoutMs = 10_000,
@@ -2865,15 +2465,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     [McpServerTool(Name = "run_until_watchpoint")]
-    [Description(
-        "Resume PCSX2 and block until any registered memory watchpoint fires (value at the watched " +
-        "address changes), then return the watchpoint hit details.\n\n" +
-        "This is the PINE/PCSX2 equivalent of the internal emulator's automatic pause on a hardware " +
-        "watchpoint.  Because the PINE protocol does not expose hardware watchpoints, detection is done " +
-        "by polling memory every ~5 ms; the PC returned is approximate — sampled at the moment the " +
-        "change is detected, which may be a few instructions after the actual write.\n\n" +
-        "At least one watchpoint must be set via set_memory_watchpoint before calling this tool.\n\n" +
-        "On timeout PCSX2 is paused so you can inspect state with get_registers / get_pc.")]
+    [DynamicDescription("run_until_watchpoint_desc")]
     public async Task<string> RunUntilWatchpoint(
         [Description("Timeout in milliseconds before giving up (default 15 000).")] int timeoutMs = 15_000,
         CancellationToken cancellationToken = default)
