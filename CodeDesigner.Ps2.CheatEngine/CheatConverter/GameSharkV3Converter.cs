@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace CodeDesigner.Ps2.CheatConverter
+namespace CodeDesigner.Ps2.CheatEngine
 {
     /// <summary>
     /// Converter for <b>GameShark PS2 Version 3+ / Xploder 4+ / Xterminator</b> cheat codes.

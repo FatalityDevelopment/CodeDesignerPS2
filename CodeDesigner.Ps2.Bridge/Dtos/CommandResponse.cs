@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using CodeDesigner.Ps2.CheatPorter;
+using CodeDesigner.Ps2.CheatEngine;
 
 namespace CodeDesigner.Ps2.Bridge
 {

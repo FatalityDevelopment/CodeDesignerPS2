@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace CodeDesigner.Ps2.CheatConverter
+namespace CodeDesigner.Ps2.CheatEngine
 {
     /// <summary>
     /// Converter for <b>CodeBreaker PS2 Version 1–6 (CB1/CB5)</b> cheat codes.

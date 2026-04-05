@@ -10,15 +10,15 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using CodeDesigner.Ps2.CheatConverter;
+
 using CodeDesigner.Ps2.MemoryCardManager;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.CheatEngine;
 using CodeDesigner.Ps2.Emulator;
 using CodeDesigner.Ps2.Emulator.Hardware;
 using CodeDesigner.Ps2.Emulator.IOP;
-using CodeDesigner.Ps2.CheatPorter;
-using CheatPorterLib = CodeDesigner.Ps2.CheatPorter.CheatPorter;
+
+using CheatPorterLib = CodeDesigner.Ps2.CheatEngine.CheatPorter;
 using CodeDesigner.Ps2.LabelManager;
 
 namespace CodeDesigner.Ps2.Bridge

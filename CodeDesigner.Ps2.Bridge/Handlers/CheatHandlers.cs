@@ -3,10 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
-using CodeDesigner.Ps2.CheatConverter;
 using CodeDesigner.Ps2.CheatEngine;
 using CodeDesigner.Ps2.Emulator;
-using CheatPorterLib = CodeDesigner.Ps2.CheatPorter.CheatPorter;
+using CheatPorterLib = CodeDesigner.Ps2.CheatEngine.CheatPorter;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -41,7 +40,7 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Handle PORTCHEATS command — delegates to <see cref="CodeDesigner.Ps2.CheatPorter.CheatPorter"/>
+        /// Handle PORTCHEATS command — delegates to <see cref="CodeDesigner.Ps2.CheatEngine.CheatPorter"/>
         /// to port GameShark cheat codes from one EE-RAM dump to another.
         /// </summary>
         private string HandlePortCheats(string? cheatText, string? sourcePath, string? targetPath)
