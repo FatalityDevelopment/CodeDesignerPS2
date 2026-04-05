@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent, StructEntry } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent, StructEntry, LabelManagerEntry, LabelSetPayload } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
@@ -119,6 +119,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * `gotoAddressReceived$` subject, which the component uses to move the cursor.
    * Called by external providers (e.g. the Pointer Manager tree view).
    */
+  public openStructCalculator(): void {
+    if (this._livePanels.length === 0) { return; }
+    this._livePanels[0].reveal(undefined, false);
+    this._livePanels[0].webview.postMessage({ type: 'openStructCalculator' });
+  }
+
   public navigateToAddress(address: number): void {
     const physAddr = DisasmEditorProvider._toPhysAddr(address);
     const target = this._livePanelInfo.find(info =>
@@ -218,11 +224,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         this._structLabels = [];
         this._broadcastPointerLabels();
       }
+      this.onStructsChanged?.([]);
       return;
     }
     try {
       const structs = await this.socketClient.getStructs();
       await this._resolveStructLabelsFrom(structs);
+      this.onStructsChanged?.(structs);
     } catch {
       // Non-fatal: struct resolution failures are silently ignored.
     }
@@ -802,6 +810,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this._handleAddStructMember(webviewPanel.webview, message.structName as string, message.offset as number, message.memberName as string);
       } else if (message.type === 'readPointerAt') {
         await this._handleReadPointerAt(webviewPanel.webview, message.address as string);
+      } else if (message.type === 'labelManagerAction') {
+        await this._handleLabelManagerAction(webviewPanel.webview, message.action as any);
       }
     });
 
@@ -1396,6 +1406,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleAddStructMember(panel.webview, message.structName as string, message.offset as number, message.memberName as string);
             } else if (message.type === 'readPointerAt') {
                 await this._handleReadPointerAt(panel.webview, message.address as string);
+            } else if (message.type === 'labelManagerAction') {
+                await this._handleLabelManagerAction(panel.webview, message.action as any);
             } else if (message.type === 'toggleFollowAi') {
                 this.setFollowAiEnabled(!this._followAiEnabled);
             }
@@ -2541,9 +2553,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       await this.socketClient.addStruct(name, baseAddress);
       const structs = await this.socketClient.getStructs();
       webview.postMessage({ type: 'addStructResult', structs });
-      // Update struct labels in all open panels so the instruction display reflects
-      // the newly-created struct without requiring a manual refresh.
       await this._resolveStructLabelsFrom(structs);
+      this.onStructsChanged?.(structs);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       getOutputChannel().error('[Struct] ' + errMsg);
@@ -2557,9 +2568,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       await this.socketClient.addStructMember(structName, offset, memberName);
       const structs = await this.socketClient.getStructs();
       webview.postMessage({ type: 'addStructMemberResult', structs });
-      // Update struct labels in all open panels so the instruction display reflects
-      // the newly-added member without requiring a manual refresh.
       await this._resolveStructLabelsFrom(structs);
+      this.onStructsChanged?.(structs);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       getOutputChannel().error('[Struct] ' + errMsg);
@@ -2589,6 +2599,131 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       const errMsg = err instanceof Error ? err.message : String(err);
       getOutputChannel().error('[Struct] readPointerAt: ' + errMsg);
       webview.postMessage({ type: 'readPointerAtResult', value: '' });
+    }
+  }
+
+  // ── Label Manager ──────────────────────────────────────────────────────────
+
+  /**
+   * Optional callback invoked whenever the active label set changes.
+   * Extension.ts wires this to refresh the STRUCTS panel.
+   */
+  public onStructsChanged?: (structs: StructEntry[]) => void;
+
+  /** Helper — build workspaceDir and gameId from current context. */
+  private _labelManagerCtx(): { workspaceDir: string; gameId: string } | null {
+    if (!this._workspaceRoot || !this._currentGameName) { return null; }
+    return { workspaceDir: this._workspaceRoot, gameId: this._currentGameName };
+  }
+
+  /** Broadcast the label set to all open panels and optionally notify struct listeners. */
+  private _broadcastLabelSet(set: LabelSetPayload): void {
+    for (const p of this._livePanels) {
+      p.webview.postMessage({ type: 'labelManagerSet', set });
+    }
+    // Convert to StructEntry[] for backward-compat listeners (STRUCTS panel).
+    const structs: StructEntry[] = set.entries
+      .filter(e => e.members.length > 0)
+      .map(e => ({
+        name:        e.name,
+        baseAddress: e.address,
+        members:     e.members.map(m => ({ offset: m.offset, name: m.name })),
+      }));
+    this.onStructsChanged?.(structs);
+  }
+
+  /** Dispatch a LabelManagerAction received from the webview. */
+  private async _handleLabelManagerAction(
+    webview: vscode.Webview,
+    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string },
+  ): Promise<void> {
+    if (!this.socketClient?.isConnected()) {
+      webview.postMessage({ type: 'labelManagerError', message: 'Not connected to CodeDesigner server.' });
+      return;
+    }
+
+    const ctx = this._labelManagerCtx();
+    if (!ctx) {
+      webview.postMessage({ type: 'labelManagerError', message: 'No game selected. Open a disc image first.' });
+      return;
+    }
+    const { workspaceDir, gameId } = ctx;
+
+    try {
+      switch (action.type) {
+        case 'refresh': {
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          webview.postMessage({ type: 'labelManagerSets', sets });
+          // Also send the currently active set (first user set or Built-in).
+          const activeName = sets.find(s => s !== 'Built-in') ?? 'Built-in';
+          const set = await this.socketClient.getLabelSet(workspaceDir, gameId, activeName);
+          webview.postMessage({ type: 'labelManagerSet', set });
+          break;
+        }
+        case 'setActive': {
+          const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameId, action.setName!);
+          webview.postMessage({ type: 'labelManagerSet', set });
+          this._broadcastLabelSet(set);
+          // Refresh labels in the disassembly view.
+          await this.refreshStructLabels();
+          break;
+        }
+        case 'createSet': {
+          const set = await this.socketClient.createLabelSet(workspaceDir, gameId, action.setName!);
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          webview.postMessage({ type: 'labelManagerSets', sets });
+          webview.postMessage({ type: 'labelManagerSet', set });
+          webview.postMessage({ type: 'labelManagerStatus', message: `Created label set "${action.setName}".` });
+          break;
+        }
+        case 'deleteSet': {
+          await this.socketClient.deleteLabelSet(workspaceDir, gameId, action.setName!);
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          webview.postMessage({ type: 'labelManagerSets', sets });
+          // Switch to Built-in after deletion.
+          const builtIn = await this.socketClient.getLabelSet(workspaceDir, gameId, 'Built-in');
+          webview.postMessage({ type: 'labelManagerSet', builtIn });
+          webview.postMessage({ type: 'labelManagerStatus', message: `Deleted label set "${action.setName}".` });
+          break;
+        }
+        case 'addEntry': {
+          const setName = action.setName!;
+          await this.socketClient.setActiveLabelSet(workspaceDir, gameId, setName);
+          const set = await this.socketClient.addLabelEntry(workspaceDir, gameId, setName, action.entry!);
+          webview.postMessage({ type: 'labelManagerSet', set });
+          this._broadcastLabelSet(set);
+          await this.refreshStructLabels();
+          break;
+        }
+        case 'deleteEntry': {
+          const setName = action.setName!;
+          const addr = parseInt((action.address ?? '0').replace(/^0x/i, ''), 16);
+          const set = await this.socketClient.deleteLabelEntry(workspaceDir, gameId, setName, addr);
+          webview.postMessage({ type: 'labelManagerSet', set });
+          this._broadcastLabelSet(set);
+          await this.refreshStructLabels();
+          break;
+        }
+        case 'importSet': {
+          const set = await this.socketClient.importLabelSet(workspaceDir, gameId, action.setName ?? 'Imported', action.json!);
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          webview.postMessage({ type: 'labelManagerSets', sets });
+          webview.postMessage({ type: 'labelManagerSet', set });
+          webview.postMessage({ type: 'labelManagerStatus', message: `Imported "${set.setName}" (${set.entries.length} entries).` });
+          break;
+        }
+        case 'exportSet': {
+          const json = await this.socketClient.exportLabelSet(workspaceDir, gameId, action.setName!);
+          webview.postMessage({ type: 'labelManagerExport', json, setName: action.setName });
+          break;
+        }
+        default:
+          webview.postMessage({ type: 'labelManagerError', message: `Unknown action: ${action.type}` });
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      getOutputChannel().error('[LabelManager] ' + errMsg);
+      webview.postMessage({ type: 'labelManagerError', message: errMsg });
     }
   }
 }

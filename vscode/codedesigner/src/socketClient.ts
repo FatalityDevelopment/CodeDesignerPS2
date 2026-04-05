@@ -75,6 +75,11 @@ interface CommandMessage {
     NavSource?: string;
     // GETADDRESSHISTORY fields
     SnapshotDir?: string;
+    // Label Manager fields
+    WorkspaceDir?: string;
+    GameId?: string;
+    SetName?: string;
+    LabelEntry?: { address: string; name: string; comment?: string; members: { offset: number; name: string }[] };
 }
 
 /**
@@ -151,6 +156,34 @@ export interface StructEntry {
     name:        string;
     baseAddress: string;
     members:     StructMemberEntry[];
+}
+
+// ── Label Manager (unified label/struct) ──────────────────────────────────────
+
+/** One member of a label that acts as a struct pointer. */
+export interface LabelMemberEntry {
+    offset: number;
+    name:   string;
+}
+
+/**
+ * A unified label / struct entry.
+ * When members is empty this is a plain address label.
+ * When members is non-empty it is a struct pointer definition.
+ */
+export interface LabelManagerEntry {
+    address:  string;
+    name:     string;
+    comment?: string;
+    members:  LabelMemberEntry[];
+}
+
+/** A named collection of LabelManagerEntry records for a specific game. */
+export interface LabelSetPayload {
+    setName:   string;
+    gameId?:   string;
+    isBuiltIn: boolean;
+    entries:   LabelManagerEntry[];
 }
 
 /**
@@ -2254,4 +2287,69 @@ export class SocketClient {
         }
         return (response as any).AddressHistory ?? [];
     }
+
+    // ── Label Manager ─────────────────────────────────────────────────────────
+
+    /** List all label set names for a game (always includes "Built-in"). */
+    public async getLabelSets(workspaceDir: string, gameId: string): Promise<string[]> {
+        const response = await this.sendCommand({ Command: 'GETLABELSETS', WorkspaceDir: workspaceDir, GameId: gameId });
+        if (!response.Success) { throw new Error(response.Error || 'GETLABELSETS failed'); }
+        return (response as any).LabelSets ?? [];
+    }
+
+    /** Return the full contents of a label set. Pass "Built-in" for the built-in set. */
+    public async getLabelSet(workspaceDir: string, gameId: string, setName: string): Promise<LabelSetPayload> {
+        const response = await this.sendCommand({ Command: 'GETLABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName });
+        if (!response.Success) { throw new Error(response.Error || 'GETLABELSET failed'); }
+        return (response as any).LabelSet as LabelSetPayload;
+    }
+
+    /** Make a label set active; server reloads _labels/_structs from merged result. */
+    public async setActiveLabelSet(workspaceDir: string, gameId: string, setName: string): Promise<LabelSetPayload> {
+        const response = await this.sendCommand({ Command: 'SETACTIVELABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName });
+        if (!response.Success) { throw new Error(response.Error || 'SETACTIVELABELSET failed'); }
+        return (response as any).LabelSet as LabelSetPayload;
+    }
+
+    /** Create a new empty label set. */
+    public async createLabelSet(workspaceDir: string, gameId: string, setName: string): Promise<LabelSetPayload> {
+        const response = await this.sendCommand({ Command: 'CREATELABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName });
+        if (!response.Success) { throw new Error(response.Error || 'CREATELABELSET failed'); }
+        return (response as any).LabelSet as LabelSetPayload;
+    }
+
+    /** Delete a label set from disk. */
+    public async deleteLabelSet(workspaceDir: string, gameId: string, setName: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'DELETELABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName });
+        if (!response.Success) { throw new Error(response.Error || 'DELETELABELSET failed'); }
+    }
+
+    /** Add or update a label entry in the given set. */
+    public async addLabelEntry(workspaceDir: string, gameId: string, setName: string, entry: LabelManagerEntry): Promise<LabelSetPayload> {
+        const response = await this.sendCommand({ Command: 'ADDLABELENTRY', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName, LabelEntry: entry as any });
+        if (!response.Success) { throw new Error(response.Error || 'ADDLABELENTRY failed'); }
+        return (response as any).LabelSet as LabelSetPayload;
+    }
+
+    /** Delete a label entry by address from the given set. */
+    public async deleteLabelEntry(workspaceDir: string, gameId: string, setName: string, address: number): Promise<LabelSetPayload> {
+        const response = await this.sendCommand({ Command: 'DELETELABELENTRY', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName, Address: address });
+        if (!response.Success) { throw new Error(response.Error || 'DELETELABELENTRY failed'); }
+        return (response as any).LabelSet as LabelSetPayload;
+    }
+
+    /** Import a label set from a JSON string. Returns the imported set. */
+    public async importLabelSet(workspaceDir: string, gameId: string, setName: string, json: string): Promise<LabelSetPayload> {
+        const response = await this.sendCommand({ Command: 'IMPORTLABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName, Data: json });
+        if (!response.Success) { throw new Error(response.Error || 'IMPORTLABELSET failed'); }
+        return (response as any).LabelSet as LabelSetPayload;
+    }
+
+    /** Export a label set; the server returns the JSON string in Data. */
+    public async exportLabelSet(workspaceDir: string, gameId: string, setName: string): Promise<string> {
+        const response = await this.sendCommand({ Command: 'EXPORTLABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName });
+        if (!response.Success) { throw new Error(response.Error || 'EXPORTLABELSET failed'); }
+        return (response as any).Data ?? '';
+    }
 }
+

@@ -160,5 +160,26 @@ namespace CodeDesigner.Ps2.Bridge
         /// call target (<c>To</c>) after the branch delay slot has executed.
         /// </summary>
         public List<CallTraceEntry>? TracedCalls { get; set; }
+
+        // Label Manager results
+        /// <summary>List of label set names for GETLABELSETS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? LabelSets { get; set; }
+        /// <summary>Full label set payload for GETLABELSET / SETACTIVELABELSET / CREATELABELSET etc.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public LabelSetPayload? LabelSet { get; set; }
+    }
+
+    /// <summary>Wire payload for a complete label set returned by label-manager commands.</summary>
+    public class LabelSetPayload
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("setName")]
+        public string SetName { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("gameId")]
+        public string? GameId { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("isBuiltIn")]
+        public bool IsBuiltIn { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("entries")]
+        public List<LabelManagerEntry> Entries { get; set; } = [];
     }
 }

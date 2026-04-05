@@ -121,5 +121,35 @@ namespace CodeDesigner.Ps2.Bridge
         public uint? TargetPc { get; set; }
         /// <summary>Timeout in milliseconds for RUNUNTILPC (default 10 000).</summary>
         public int? TimeoutMs { get; set; }
+
+        // Label Manager fields
+        /// <summary>Workspace root directory for GETLABELSETS / CREATELABELSET etc.</summary>
+        public string? WorkspaceDir { get; set; }
+        /// <summary>Game identifier (ISO serial) for label-set commands.</summary>
+        public string? GameId { get; set; }
+        /// <summary>Label set name for GETLABELSET / SETACTIVELABELSET / CREATELABELSET etc.</summary>
+        public string? SetName { get; set; }
+        /// <summary>Unified label entry payload for ADDLABELENTRY.</summary>
+        public LabelManagerEntry? LabelEntry { get; set; }
+    }
+
+    /// <summary>
+    /// Unified label / struct entry used by the LabelManager socket commands.
+    /// When <see cref="Members"/> is empty this is a plain address label.
+    /// When <see cref="Members"/> is non-empty it acts as a struct pointer definition.
+    /// </summary>
+    public class LabelManagerEntry
+    {
+        public string Address { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Comment { get; set; }
+        public List<LabelMemberPayload> Members { get; set; } = [];
+    }
+
+    /// <summary>One struct member inside a <see cref="LabelManagerEntry"/>.</summary>
+    public class LabelMemberPayload
+    {
+        public int Offset { get; set; }
+        public string Name { get; set; } = string.Empty;
     }
 }

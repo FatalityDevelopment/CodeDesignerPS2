@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getOutputChannel, getSocketClient } from '../../extension';
-import { LabelEntry } from '../../socketClient';
+import { LabelEntry, StructEntry } from '../../socketClient';
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
@@ -83,6 +83,12 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
 
     private _pointers: UserPointer[] = [];
 
+    /**
+     * Server-side structs pushed from DisasmEditorProvider via onStructsChanged.
+     * When non-empty these are shown INSTEAD of local _pointers (server is source-of-truth).
+     */
+    private _serverStructs: StructEntry[] = [];
+
     /** Absolute path to the persisted JSON file, or undefined when unavailable. */
     private _storagePath: string | undefined;
 
@@ -160,7 +166,23 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
 
     async getChildren(element?: PointerTreeItem): Promise<PointerTreeItem[]> {
         if (!element) {
-            // Root level — return all pointers.
+            // Root level — prefer server structs when available (source-of-truth when connected).
+            if (this._serverStructs.length > 0) {
+                return this._serverStructs.map(s =>
+                    new PointerTreeItem(
+                        'pointer',
+                        s.baseAddress,
+                        s.name,
+                        s.members.length > 0
+                            ? vscode.TreeItemCollapsibleState.Collapsed
+                            : vscode.TreeItemCollapsibleState.None,
+                        s.baseAddress,
+                        undefined,
+                        []
+                    )
+                );
+            }
+            // Fallback — local pointers from pointerMap.json.
             return this._pointers.map(p =>
                 new PointerTreeItem(
                     'pointer',
@@ -174,6 +196,27 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
                     []
                 )
             );
+        }
+
+        // Children of a server struct item — show members.
+        if (element.itemType === 'pointer' && this._serverStructs.length > 0) {
+            const serverStruct = this._serverStructs.find(
+                s => s.baseAddress.toLowerCase() === (element.rootPointerAddress ?? element.address).toLowerCase()
+            );
+            if (serverStruct) {
+                return serverStruct.members.map(m => {
+                    const offsetStr = `+0x${m.offset.toString(16).toUpperCase().padStart(4, '0')}`;
+                    return new PointerTreeItem(
+                        'child',
+                        offsetStr,
+                        m.name,
+                        vscode.TreeItemCollapsibleState.None,
+                        serverStruct.baseAddress,
+                        undefined,
+                        [offsetStr]
+                    );
+                });
+            }
         }
 
         if (element.itemType === 'pointer' || element.itemType === 'childPointer') {
@@ -226,6 +269,16 @@ export class PointerManagerProvider implements vscode.TreeDataProvider<PointerTr
     /** Refresh the tree (e.g. after the storage file changes externally). */
     refresh(): void {
         this._load();
+        this._onDidChangeTreeData.fire();
+    }
+
+    /**
+     * Called by DisasmEditorProvider whenever the active label set changes on the server.
+     * Struct-like entries (those with members) are displayed in the STRUCTS panel.
+     * Passing an empty array clears server structs and falls back to local pointers.
+     */
+    setServerStructs(structs: StructEntry[]): void {
+        this._serverStructs = structs;
         this._onDidChangeTreeData.fire();
     }
 

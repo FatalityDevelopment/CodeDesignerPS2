@@ -85,6 +85,11 @@
         "command": "codedesigner.pointerManager.refresh",
         "title": "Refresh Structs",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "codedesigner.openStructCalculator",
+        "title": "Open Struct Offset Calculator",
+        "icon": "$(symbol-class)"
       }
     ],
     "menus": {
@@ -96,6 +101,11 @@
         },
         {
           "command": "codedesigner.pointerManager.refresh",
+          "when": "view == disasm.pointerManager",
+          "group": "navigation"
+        },
+        {
+          "command": "codedesigner.openStructCalculator",
           "when": "view == disasm.pointerManager",
           "group": "navigation"
         }

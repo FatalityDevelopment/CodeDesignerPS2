@@ -180,6 +180,7 @@ export class EditorState {
     porterOverlay: signal(false),
     scannerOverlay: signal(false),
     structOverlay: signal(false),
+    labelManager: signal(false),
   };
 
   // ═══════════════════════════════════════════════════════════════════════════

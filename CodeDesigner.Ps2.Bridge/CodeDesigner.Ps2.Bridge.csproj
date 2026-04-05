@@ -34,6 +34,7 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.Emulator\CodeDesigner.Ps2.Emulator.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.MemoryCardManager\CodeDesigner.Ps2.MemoryCardManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.HddManager\CodeDesigner.Ps2.HddManager.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.LabelManager\CodeDesigner.Ps2.LabelManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Recompiler\CodeDesigner.Ps2.Recompiler.csproj" />
   </ItemGroup>
 
