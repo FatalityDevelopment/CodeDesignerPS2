@@ -11,7 +11,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-using CodeDesigner.Ps2.MemoryCardManager;
+using CodeDesigner.Ps2.MCManager;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.CheatEngine;
 using CodeDesigner.Ps2.Emulator;

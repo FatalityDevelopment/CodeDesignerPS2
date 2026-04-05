@@ -5,8 +5,8 @@
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>CodeDesigner.Ps2.MemoryCardManager</RootNamespace>
-    <AssemblyName>CodeDesigner.Ps2.MemoryCardManager</AssemblyName>
+    <RootNamespace>CodeDesigner.Ps2.MCManager</RootNamespace>
+    <AssemblyName>CodeDesigner.Ps2.MCManager</AssemblyName>
   </PropertyGroup>
 
 </Project>

@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
-using CodeDesigner.Ps2.MemoryCardManager;
+using CodeDesigner.Ps2.MCManager;
 
 namespace CodeDesigner.Ps2.Bridge
 {

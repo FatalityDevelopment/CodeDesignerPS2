@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
-using CodeDesigner.Ps2.MemoryCardManager;
+using CodeDesigner.Ps2.MCManager;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace CodeDesigner.Ps2.TestProject
