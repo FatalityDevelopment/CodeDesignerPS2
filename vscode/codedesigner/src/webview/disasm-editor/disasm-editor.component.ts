@@ -1745,7 +1745,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.zone.run(() => {
       const map = new Map<number, number>();
       for (const [k, v] of Object.entries(values)) {
-        map.set(parseInt(k, 10), v >>> 0);
+        map.set(parseInt(k, 10), v);
       }
       this.debugPanelWatchValues.set(map);
     });

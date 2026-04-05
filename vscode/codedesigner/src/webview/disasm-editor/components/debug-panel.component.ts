@@ -116,19 +116,17 @@ export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 
           <table class="dbg-table">
             <thead><tr>
               <th class="dbg-th">Address</th>
-              <th class="dbg-th">Value</th>
-              <th class="dbg-th">Label</th>
+              <th class="dbg-th">Value (u32)</th>
               <th class="dbg-th"></th>
             </tr></thead>
             <tbody>
               @if (!sortedWatches().length) {
-                <tr><td colspan="4" class="dbg-td-empty">No watches — right-click an instruction to add one</td></tr>
+                <tr><td colspan="3" class="dbg-td-empty">No watches — right-click an instruction to add one</td></tr>
               }
               @for (addr of sortedWatches(); track addr) {
                 <tr class="dbg-table-row clickable" (click)="navigateToWatchAddress.emit(addr)">
                   <td class="dbg-td-addr dbg-bp-addr mono">0x{{ toHex(addr) }}</td>
                   <td class="dbg-td-type mono">{{ getWatchValue(addr) }}</td>
-                  <td class="dbg-td-func">—</td>
                   <td class="dbg-td-del">
                     <button class="dbg-bp-del-btn"
                       (click)="$event.stopPropagation(); removeWatch.emit(addr)">✕</button>

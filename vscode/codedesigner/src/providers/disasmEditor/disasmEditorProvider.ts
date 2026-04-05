@@ -1067,7 +1067,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                         const buf = await this.socketClient!.readMemory(addr, 4, 'ee');
                         values[String(addr)] =
                             (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24)) >>> 0;
-                    } catch { /* skip unreadable addresses */ }
+                    } catch (err: any) {
+                        console.warn(`[LIVE] Watch read failed at 0x${addr.toString(16).toUpperCase()}: ${err?.message ?? err}`);
+                    }
                 }
                 panel.webview.postMessage({ type: 'watchValues', values });
             } else if (message.type === 'step') {
