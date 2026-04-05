@@ -422,6 +422,7 @@ namespace CodeDesigner.Ps2.Bridge
             var seen          = new HashSet<uint>();
             uint current      = startAddress;
             int  index        = 0;
+            // Cap at 4096 nodes to prevent infinite traversal of circular lists or corrupted memory.
             const int MaxNodes = 4096;
 
             while (current != 0 && !seen.Contains(current) && index < MaxNodes)
