@@ -264,6 +264,12 @@ app-cheats-tab {
     color: #e07070;
 }
 
+#emu-status-bar.status-ai-control {
+    background: #3a2800;
+    border-bottom: 1px solid #7a5500;
+    color: #e8a030;
+}
+
 #emu-status-dot {
     font-size: 10px;
     animation: none;
@@ -274,6 +280,12 @@ app-cheats-tab {
     color: #4ec94e;
 }
 
+#emu-status-bar.status-ai-control #emu-status-dot {
+    animation: none;
+    font-size: 14px;
+    line-height: 1;
+}
+
 #emu-status-bar.status-paused #emu-status-dot {
     animation: none;
     color: #e07070;
@@ -282,6 +294,22 @@ app-cheats-tab {
 @keyframes live-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
+}
+
+#emu-mode-select {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: inherit;
+    padding: 1px 4px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
+    border-radius: 2px;
+}
+
+#emu-mode-select:hover {
+    background: rgba(255,255,255,0.14);
 }
 
 #emu-play-pause-btn {
@@ -299,6 +327,7 @@ app-cheats-tab {
 }
 
 #emu-status-bar.status-connected #emu-play-pause-btn,
+#emu-status-bar.status-ai-control #emu-play-pause-btn,
 #emu-status-bar.status-paused #emu-play-pause-btn {
     display: inline-block;
 }
