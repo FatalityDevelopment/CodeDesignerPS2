@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace CodeDesigner.Ps2.CheatPorter
+namespace CodeDesigner.Ps2.CheatEngine
 {
     /// <summary>
     /// Result for a single cheat code line produced by <see cref="CheatPorter.Port"/>.
