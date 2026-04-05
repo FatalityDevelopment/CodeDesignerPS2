@@ -15,7 +15,7 @@ namespace CodeDesigner.Ps2.McpServer.Tools;
 /// socket server running on localhost:8765 and returns a human-readable result.
 /// </summary>
 [McpServerToolType]
-public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressReportManager reports)
+public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseService db)
 {
     // -------------------------------------------------------------------------
     // Helpers
@@ -76,15 +76,59 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
 
     [McpServerTool(Name = "session_start")]
     [DynamicDescription("session_start_desc")]
-    public Task<string> SessionStart()
+    public async Task<string> SessionStart(CancellationToken cancellationToken = default)
     {
         var sb = new StringBuilder();
-        sb.AppendLine(CodeDesignerPs2Prompts.CheatMasterSystemPrompt);
+
+        // Load the lead agent definition from the database (if available) to allow
+        // the agent's rules and guidelines to be configured at runtime without
+        // recompiling.  Fall back to the compiled-in prompt when no DB record exists.
+        var agent = await db.GetLeadAgentAsync(cancellationToken);
+
+        if (agent is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(agent.Description))
+                sb.AppendLine(agent.Description);
+
+            if (!string.IsNullOrWhiteSpace(agent.Rules))
+            {
+                sb.AppendLine();
+                sb.AppendLine("## Rules");
+                sb.AppendLine(agent.Rules);
+            }
+
+            if (!string.IsNullOrWhiteSpace(agent.Guidelines))
+            {
+                sb.AppendLine();
+                sb.AppendLine("## Guidelines");
+                sb.AppendLine(agent.Guidelines);
+            }
+
+            if (!string.IsNullOrWhiteSpace(agent.RecommendedWorkflow))
+            {
+                sb.AppendLine();
+                sb.AppendLine("## Recommended Workflow");
+                sb.AppendLine(agent.RecommendedWorkflow);
+            }
+
+            if (agent.Tasks.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("## Session tasks");
+                foreach (var task in agent.Tasks.OrderBy(t => t.Phase).ThenBy(t => t.SortOrder))
+                    sb.AppendLine($"- [{task.Phase}] {task.Description}");
+            }
+        }
+        else
+        {
+            sb.AppendLine(CodeDesignerPs2Prompts.CheatMasterSystemPrompt);
+        }
+
         sb.AppendLine();
         sb.AppendLine("---");
         sb.AppendLine();
 
-        var reportNames = reports.ListReports();
+        var reportNames = await db.ListMemoriesAsync(cancellationToken);
         if (reportNames.Count == 0)
         {
             sb.AppendLine("📂 **No progress reports found.** This appears to be a new session.");
@@ -97,7 +141,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
                 sb.AppendLine($"   - {name}");
         }
 
-        return Task.FromResult(sb.ToString().TrimEnd());
+        return sb.ToString().TrimEnd();
     }
 
 
@@ -1800,83 +1844,214 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     }
 
     // -------------------------------------------------------------------------
-    // Progress reports — persistent session memory
+    // Progress reports — persistent session memory (database-backed)
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_progress_reports")]
     [DynamicDescription("list_progress_reports_desc")]
-    public Task<string> ListProgressReports()
+    public async Task<string> ListProgressReports(CancellationToken cancellationToken = default)
     {
-        var names = reports.ListReports();
+        var names = await db.ListMemoriesAsync(cancellationToken);
         if (names.Count == 0)
-            return Task.FromResult(WithRules($"No progress reports found in: {reports.MemoriesPath}"));
+            return WithRules("No progress reports found. This appears to be a new session.");
 
         var sb = new StringBuilder();
-        sb.AppendLine($"Progress reports in {reports.MemoriesPath}:");
+        sb.AppendLine("Progress reports (call get_progress_report to load one):");
         foreach (var name in names)
             sb.AppendLine($"  {name}");
-        return Task.FromResult(WithRules(sb.ToString().TrimEnd()));
+        return WithRules(sb.ToString().TrimEnd());
     }
 
     [McpServerTool(Name = "get_progress_report")]
     [DynamicDescription("get_progress_report_desc")]
-    public Task<string> GetProgressReport(
+    public async Task<string> GetProgressReport(
         [Description(
             "The report name as returned by list_progress_reports " +
-            "(e.g. 'socom2-player-health', 'gtavc-vehicle-struct').")] string name)
+            "(e.g. 'socom2-player-health', 'gtavc-vehicle-struct').")] string name,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var content = reports.GetReport(name);
+            var content = await db.GetMemoryAsync(name, cancellationToken);
             if (content is null)
-                return Task.FromResult($"Error: no progress report named '{ProgressReportManager.SanitiseName(name)}' found.");
-            return Task.FromResult(WithRules(content));
+                return $"Error: no progress report named '{McpDatabaseService.SanitiseName(name)}' found.";
+            return WithRules(content);
         }
         catch (ArgumentException ex)
         {
-            return Task.FromResult($"Error: {ex.Message}");
+            return $"Error: {ex.Message}";
         }
     }
 
     [McpServerTool(Name = "save_progress_report")]
     [DynamicDescription("save_progress_report_desc")]
-    public Task<string> SaveProgressReport(
+    public async Task<string> SaveProgressReport(
         [Description(
             "Short unique name for this report. Use hyphens as separators. " +
             "Examples: 'socom2-player-health', 'gtavc-vehicle-struct', 'mgs3-codec-addresses'.")] string name,
         [Description(
             "Full Markdown content of the progress report. Include: game name, current objective, " +
             "all discovered addresses with their labels, structure maps, watchpoint findings, " +
-            "confirmed cheat codes, and a clear list of next steps.")] string content)
+            "confirmed cheat codes, and a clear list of next steps.")] string content,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            reports.SaveReport(name, content);
-            var sanitised = ProgressReportManager.SanitiseName(name);
-            return Task.FromResult(WithRules(
-                $"Progress report '{sanitised}' saved to {reports.MemoriesPath}/{sanitised}.md"));
+            await db.SaveMemoryAsync(name, content, cancellationToken);
+            var sanitised = McpDatabaseService.SanitiseName(name);
+            return WithRules($"Progress report '{sanitised}' saved to the database.");
         }
         catch (ArgumentException ex)
         {
-            return Task.FromResult($"Error: {ex.Message}");
+            return $"Error: {ex.Message}";
         }
     }
 
     [McpServerTool(Name = "delete_progress_report")]
     [DynamicDescription("delete_progress_report_desc")]
-    public Task<string> DeleteProgressReport(
-        [Description("The report name to delete (as returned by list_progress_reports).")] string name)
+    public async Task<string> DeleteProgressReport(
+        [Description("The report name to delete (as returned by list_progress_reports).")] string name,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            bool deleted = reports.DeleteReport(name);
-            return Task.FromResult(deleted
-                ? WithRules($"Progress report '{ProgressReportManager.SanitiseName(name)}' deleted.")
-                : $"Error: no progress report named '{ProgressReportManager.SanitiseName(name)}' found.");
+            bool deleted = await db.DeleteMemoryAsync(name, cancellationToken);
+            return deleted
+                ? WithRules($"Progress report '{McpDatabaseService.SanitiseName(name)}' deleted.")
+                : $"Error: no progress report named '{McpDatabaseService.SanitiseName(name)}' found.";
         }
         catch (ArgumentException ex)
         {
-            return Task.FromResult($"Error: {ex.Message}");
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Settings — application configuration via the socket server database
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "get_setting")]
+    [DynamicDescription("get_setting_desc")]
+    public async Task<string> GetSetting(
+        [Description("Setting key to retrieve (e.g. 'BiosPath', 'DiscPath', 'ui.selectedGame').")] string key,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETSETTING", SettingKey = key }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "set_setting")]
+    [DynamicDescription("set_setting_desc")]
+    public async Task<string> SetSetting(
+        [Description("Setting key to insert or update (e.g. 'BiosPath', 'ui.selectedGame').")] string key,
+        [Description("Value to store. Pass an empty string to clear the value.")] string value,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "SETSETTING", SettingKey = key, SettingValue = value },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "get_all_settings")]
+    [DynamicDescription("get_all_settings_desc")]
+    public async Task<string> GetAllSettings(
+        [Description("Optional key prefix to filter results (e.g. 'ui.' returns only UI settings). Leave blank for all settings.")] string? prefix = null,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "GETALLSETTINGS", SettingPrefix = prefix ?? string.Empty },
+            cancellationToken);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("Data", out var data))
+                return SimpleMessage(json);
+
+            // Data is a JSON-encoded dictionary of key → value pairs.
+            using var dataDoc = JsonDocument.Parse(data.GetString() ?? "{}");
+            var sb = new StringBuilder();
+            foreach (var prop in dataDoc.RootElement.EnumerateObject())
+                sb.AppendLine($"  {prop.Name} = {prop.Value.GetString() ?? "(null)"}");
+
+            return sb.Length > 0
+                ? WithRules(sb.ToString().TrimEnd())
+                : WithRules("(no settings found)");
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    [McpServerTool(Name = "delete_setting")]
+    [DynamicDescription("delete_setting_desc")]
+    public async Task<string> DeleteSetting(
+        [Description("Setting key to remove (e.g. 'ui.selectedGame').")] string key,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "DELETESETTING", SettingKey = key },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Snapshot history — list saved snapshots from the database
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "get_snapshots")]
+    [DynamicDescription("get_snapshots_desc")]
+    public async Task<string> GetSnapshots(
+        [Description("ISO filename or game title used to look up associated snapshots (e.g. 'GoW.iso' or 'God of War').")] string isoName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "GETSNAPSHOTS", IsoName = isoName },
+            cancellationToken);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("Snapshots", out var snapshots))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            int count = 0;
+            foreach (var s in snapshots.EnumerateArray())
+            {
+                var title = s.TryGetProperty("Title", out var t)       ? t.GetString()  ?? "?"  : "?";
+                var path  = s.TryGetProperty("SnapshotPath", out var p) ? p.GetString() ?? "?"  : "?";
+                var date  = s.TryGetProperty("SnapshotDateTime", out var d) ? d.GetString() ?? "?" : "?";
+                var desc  = s.TryGetProperty("Description", out var de) && de.ValueKind == JsonValueKind.String
+                    ? de.GetString() : null;
+
+                sb.AppendLine($"  [{count + 1}] {title}  ({date})");
+                sb.AppendLine($"       Path: {path}");
+                if (!string.IsNullOrWhiteSpace(desc))
+                    sb.AppendLine($"       Note: {desc}");
+                count++;
+            }
+
+            if (count == 0)
+                return WithRules($"No snapshots found for '{isoName}'.");
+
+            return WithRules($"Snapshots for '{isoName}' ({count}):\n" + sb.ToString().TrimEnd());
+        }
+        catch
+        {
+            return json;
         }
     }
 

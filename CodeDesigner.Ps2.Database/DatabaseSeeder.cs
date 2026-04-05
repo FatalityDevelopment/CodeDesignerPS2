@@ -419,20 +419,39 @@ public class DatabaseSeeder
             "the primary volume descriptor title."),
 
         ("list_progress_reports_desc",
-            "List all progress report files saved in the memories folder. " +
+            "List all progress reports stored in the database. " +
             "Call this at the start of a session to check for reports from previous sessions."),
 
         ("get_progress_report_desc",
-            "Read a previously saved progress report from the memories folder. " +
+            "Read a previously saved progress report from the database. " +
             "Load this at the start of a session to resume work from where it was left off."),
 
         ("save_progress_report_desc",
-            "Create or overwrite a progress report in the memories folder. " +
+            "Create or overwrite a progress report in the database. " +
             "The name should be a short identifier for the current task (e.g. 'god-of-war-health')."),
 
         ("delete_progress_report_desc",
-            "Delete a progress report from the memories folder. " +
+            "Delete a progress report from the database. " +
             "Use only when a task is fully complete and the report is no longer needed."),
+
+        ("get_setting_desc",
+            "Read a single application setting from the database by key. " +
+            "Well-known keys include 'BiosPath', 'DiscPath', and 'ui.selectedGame'."),
+
+        ("set_setting_desc",
+            "Insert or update an application setting in the database. " +
+            "Pass an empty string as value to clear the setting without deleting its key."),
+
+        ("get_all_settings_desc",
+            "Return all application settings from the database as a key=value list. " +
+            "Optionally supply a prefix (e.g. 'ui.') to filter to a specific category."),
+
+        ("delete_setting_desc",
+            "Remove an application setting from the database by key."),
+
+        ("get_snapshots_desc",
+            "List all saved memory snapshots for a game, looked up by ISO filename or game title. " +
+            "Returns snapshot titles, paths, and timestamps so you can choose one to load with load_snapshot."),
 
         ("get_structs_desc",
             "Return all user-defined PS2 memory struct definitions stored on the server. " +

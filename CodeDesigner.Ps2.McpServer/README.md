@@ -2,7 +2,7 @@
 
 `CodeDesigner.Ps2.McpServer` is a **stdio-based Model Context Protocol (MCP) server** that bridges GitHub Copilot (and any MCP-compatible client) to the CodeDesigner PS2 socket server.
 
-Once registered, Copilot can query your live disassembler views, read and write emulator memory, inspect and modify registers, compile CDS scripts, apply cheat codes, port cheats between game revisions, scan for data patterns, list disc ELFs, recompile PS2 executables, and much more — directly from the chat panel.
+Once registered, Copilot can query your live disassembler views, read and write emulator memory, inspect and modify registers, compile CDS scripts, apply cheat codes, port cheats between game revisions, scan for data patterns, list disc ELFs, recompile PS2 executables, manage application settings, retrieve snapshot history, and much more — directly from the chat panel.
 
 ---
 
@@ -13,13 +13,23 @@ GitHub Copilot Chat
        │  MCP (stdio)
        ▼
 CodeDesigner.Ps2.McpServer  ← this project
-       │  JSON over TCP :8765
+       │  JSON over TCP :8765          ┐
+       │                               │  settings / snapshots / labels
+       │  SQLite (codedesigner.db) ────┘
        ▼
 CodeDesigner.Ps2 (--run or --pcsx2 mode)
        │
        ▼
 PS2 Emulator / PCSX2 via PINE IPC / Disassembler engine
 ```
+
+The MCP server maintains its own connection to the **SQLite database** (shared with the main emulator process) for:
+
+- **Progress reports** — stored in the `McpMemory` table (replaces flat `.md` files in the `memories/` folder).  Existing `.md` files are imported into the database automatically on first run.
+- **Application settings** — forwarded via the socket server to the `Setting` table.
+- **Snapshot history** — forwarded via the socket server; metadata lives in the `Snapshot` table.
+- **Agent configuration** — the lead `McpAgent` record drives `session_start` rules and guidelines.
+- **Tool descriptions** — loaded from `McpConfig` at startup so `[DynamicDescription]` attributes resolve dynamically.
 
 ### Port assignment
 
@@ -105,6 +115,15 @@ Then reference the binary in settings:
 
 When running test instances or multiple emulator sessions on different ports, specify the connection details using command-line arguments or environment variables:
 
+**Command-line arguments:**
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--host` | `127.0.0.1` | Socket server hostname |
+| `--port` | `8765` | Socket server port |
+| `--db-path` | `<exe>/codedesigner.db` | Path to the SQLite database file |
+| `--memories-path` | `<exe>/memories` | Legacy memories folder (imported into DB on first run) |
+
 **Via command-line arguments:**
 
 ```jsonc
@@ -144,7 +163,8 @@ When running test instances or multiple emulator sessions on different ports, sp
         ],
         "env": {
           "CODEDESIGNER_PORT": "8766",
-          "CODEDESIGNER_HOST": "127.0.0.1"
+          "CODEDESIGNER_HOST": "127.0.0.1",
+          "CODEDESIGNER_DB_PATH": "/path/to/codedesigner.db"
         }
       }
     }
@@ -240,6 +260,23 @@ This is particularly useful when debugging memory issues with AI — you can run
 |---|---|
 | `snapshot` | Save a full memory snapshot (EE RAM, BIOS, Scratchpad, IOP RAM) to disk |
 | `load_snapshot` | Restore a previously saved snapshot into live emulator memory |
+| `get_snapshots` | List all saved snapshots for a game from the database (by ISO name or title) |
+
+### Application Settings
+| Tool | Description |
+|---|---|
+| `get_setting` | Read a single application setting from the database (e.g. `BiosPath`, `DiscPath`) |
+| `set_setting` | Insert or update an application setting |
+| `get_all_settings` | List all settings, optionally filtered by key prefix |
+| `delete_setting` | Remove a setting from the database |
+
+### Progress Reports (database-backed)
+| Tool | Description |
+|---|---|
+| `list_progress_reports` | List all progress reports stored in the database |
+| `get_progress_report` | Read a saved progress report |
+| `save_progress_report` | Create or overwrite a progress report |
+| `delete_progress_report` | Delete a progress report |
 
 ### Disc Image Tools
 | Tool | Description |
@@ -286,6 +323,12 @@ Once registered you can ask Copilot things like:
 **Snapshots:**
 - *"Take a memory snapshot and save it to /tmp/ps2-snapshot"*
 - *"Restore the snapshot from /tmp/ps2-snapshot"*
+- *"List all snapshots for God of War"*
+
+**Settings:**
+- *"What is the current BiosPath setting?"*
+- *"Set DiscPath to /games/GoW.iso"*
+- *"Show all settings with the 'ui.' prefix"*
 
 **Disc tools:**
 - *"List all ELF files on this ISO: /games/game.iso"*
