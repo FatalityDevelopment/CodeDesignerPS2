@@ -367,7 +367,7 @@ public sealed class Ps2IsoImage
         byte[] header = new byte[12];
         if (ReadIsoBytes(0, header, 0, 12) < 12) return false;
 
-        // CD-ROM sync header: byte 0 = 0x00, bytes 1-11 = 0xFF, byte 12 = 0x00
+        // CD-ROM sync header: byte 0 = 0x00, bytes 1-10 = 0xFF, byte 11 = 0x00
         if (header[0] != 0x00 || header[11] != 0x00) return false;
         for (int i = 1; i <= 10; i++)
             if (header[i] != 0xFF) return false;
