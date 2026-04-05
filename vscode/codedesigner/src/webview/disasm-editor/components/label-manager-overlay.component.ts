@@ -13,6 +13,8 @@ export interface LabelManagerEntry {
   address:  string;
   name:     string;
   comment?: string;
+  /** When true, the entry is hidden from the disassembler view and structs panel. */
+  hidden?:  boolean;
   members:  LabelMemberEntry[];
 }
 export interface LabelSetPayload {
@@ -95,6 +97,7 @@ export type LabelManagerAction =
       <table id="lm-table">
         <thead>
           <tr>
+            <th class="lm-col-vis" title="Visibility in disassembler / structs panel">&#x1F441;</th>
             <th class="lm-col-addr">Address</th>
             <th class="lm-col-name">Name</th>
             <th class="lm-col-comment">Comment</th>
@@ -106,7 +109,15 @@ export type LabelManagerAction =
         </thead>
         <tbody>
           @for (entry of filteredEntries(); track entry.address) {
-            <tr [class.lm-struct-row]="entry.members.length > 0">
+            <tr [class.lm-struct-row]="entry.members.length > 0" [class.lm-hidden-row]="entry.hidden">
+              <td class="lm-col-vis">
+                <button class="lm-vis-btn"
+                        [title]="entry.hidden ? 'Hidden — click to show in disassembler / structs' : 'Visible — click to hide from disassembler / structs'"
+                        [disabled]="activeSetIsBuiltIn()"
+                        (click)="onToggleVisibility(entry)">
+                  {{ entry.hidden ? '&#x1F648;' : '&#x1F441;' }}
+                </button>
+              </td>
               <td class="lm-col-addr lm-mono">{{ entry.address }}</td>
               <td class="lm-col-name">{{ entry.name }}</td>
               <td class="lm-col-comment lm-muted">{{ entry.comment ?? '' }}</td>
@@ -128,7 +139,7 @@ export type LabelManagerAction =
             </tr>
           }
           @if (filteredEntries().length === 0) {
-            <tr><td [attr.colspan]="activeSetIsBuiltIn() ? 4 : 5" class="lm-empty-note">
+            <tr><td [attr.colspan]="activeSetIsBuiltIn() ? 5 : 6" class="lm-empty-note">
               @if ((currentSet()?.entries?.length ?? 0) === 0) {
                 No labels yet. Click <strong>+ Add</strong> to create one.
               } @else {
@@ -298,6 +309,11 @@ export class LabelManagerOverlayComponent {
     const name = this.activeSetName();
     if (!confirm(`Delete label set "${name}"? This cannot be undone.`)) { return; }
     this.action$.emit({ type: 'deleteSet', setName: name });
+  }
+
+  onToggleVisibility(entry: LabelManagerEntry): void {
+    const updated: LabelManagerEntry = { ...entry, hidden: !entry.hidden };
+    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
   }
 
   onEdit(entry: LabelManagerEntry): void {

@@ -147,6 +147,12 @@ namespace CodeDesigner.Ps2.Bridge
         public string Name { get; set; } = string.Empty;
         [JsonPropertyName("comment")]
         public string? Comment { get; set; }
+        /// <summary>
+        /// When true the entry is suppressed from the disassembler view and structs panel.
+        /// </summary>
+        [JsonPropertyName("hidden")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Hidden { get; set; }
         [JsonPropertyName("members")]
         public List<LabelMemberPayload> Members { get; set; } = [];
     }

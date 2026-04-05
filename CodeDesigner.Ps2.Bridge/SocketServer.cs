@@ -215,6 +215,9 @@ namespace CodeDesigner.Ps2.Bridge
 
             foreach (var entry in LabelMgr.GetMergedLabels())
             {
+                // Skip entries that have been hidden by the user.
+                if (entry.Hidden) continue;
+
                 // Parse address
                 var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                     ? entry.Address[2..] : entry.Address;

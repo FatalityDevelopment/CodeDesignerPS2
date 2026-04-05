@@ -175,6 +175,8 @@ export interface LabelManagerEntry {
     address:  string;
     name:     string;
     comment?: string;
+    /** When true, the entry is hidden from the disassembler view and structs panel. */
+    hidden?:  boolean;
     members:  LabelMemberEntry[];
 }
 
