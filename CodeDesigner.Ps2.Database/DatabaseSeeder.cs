@@ -103,13 +103,16 @@ public class DatabaseSeeder
         }
 
         // Game — SOCOM II: U.S. Navy SEALs
-        const string socomTitle = "SOCOM II: U.S. Navy SEALs";
-        var socomGame = await _db.Games.FirstOrDefaultAsync(g => g.Title == socomTitle, ct);
+        // Note: Game.Title uses the official colon-separated title.
+        // LabelSet.GameId (used in SeedLabelSetsAsync) is derived from the ISO
+        // filename ("SOCOM II - U.S. Navy SEALs") and is intentionally different.
+        const string socomGameTitle = "SOCOM II: U.S. Navy SEALs";
+        var socomGame = await _db.Games.FirstOrDefaultAsync(g => g.Title == socomGameTitle, ct);
         if (socomGame is null)
         {
             socomGame = new Game
             {
-                Title       = socomTitle,
+                Title       = socomGameTitle,
                 Description = "PlayStation 2 online third-person shooter published by Sony Computer Entertainment America (SCEA). NTSC-U, serial SCUS-97275.",
             };
             _db.Games.Add(socomGame);
@@ -265,8 +268,8 @@ public class DatabaseSeeder
 
                 foreach (var m in membersArr.EnumerateArray())
                 {
-                    int  offset     = m.TryGetProperty("offset", out var offProp) ? offProp.GetInt32() : 0;
-                    var  memberName = m.TryGetProperty("name",   out var mnp)     ? mnp.GetString()    : null;
+                    int offset     = m.TryGetProperty("offset", out var offProp) ? offProp.GetInt32() : 0;
+                    var memberName = m.TryGetProperty("name",   out var mnp)     ? mnp.GetString()    : null;
 
                     if (string.IsNullOrWhiteSpace(memberName)) continue;
 
