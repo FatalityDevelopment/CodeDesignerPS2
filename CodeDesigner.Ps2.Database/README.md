@@ -191,7 +191,7 @@ dotnet ef migrations add <MigrationName> \
   --startup-project CodeDesigner.Ps2
 ```
 
-> The startup project is required because EF tooling needs a runnable host to discover the `DbContextFactory`.
+> The startup project is required because EF tooling needs a runnable host to discover the `DbContext` configuration (connection string and options registered in the application's DI setup).
 
 ### Undo the last migration (before pushing)
 
