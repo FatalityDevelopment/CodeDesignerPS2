@@ -457,6 +457,13 @@ namespace CodeDesigner.Ps2.Bridge
                         var chunk = Encoding.UTF8.GetString(buffer, 0, bytesRead);
                         messageBuffer.Append(chunk);
 
+                        // Optimization: commands are newline-delimited.  A complete message
+                        // can only be present if the latest chunk contains '\n'.  Skipping
+                        // ToString() for partial chunks avoids O(n²) string allocations when
+                        // receiving large payloads (e.g. file data sent with SEARCH commands).
+                        if (chunk.IndexOf('\n') < 0)
+                            continue;
+
                         // Process complete messages (delimited by newline)
                         string bufferContent = messageBuffer.ToString();
                         int newlineIndex;

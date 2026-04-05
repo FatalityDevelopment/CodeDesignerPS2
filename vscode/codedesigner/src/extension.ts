@@ -116,12 +116,14 @@ export function activate(context: vscode.ExtensionContext) {
 	// Wire pointer-manager label changes to the disasm instruction display.
 	// Whenever the user adds, edits, or deletes a pointer/child label, resolve
 	// all live addresses and push the results to any open live panels.
+	// NOTE: Do NOT call refreshStructLabels() here — struct labels come from the
+	// server and are independent of local pointer definitions.  Calling it here
+	// creates an infinite loop: refreshStructLabels → onStructsChanged →
+	// setServerStructs → _onDidChangeTreeData → refreshStructLabels → …
 	context.subscriptions.push(
 		pointerManagerProvider.onDidChangeTreeData(() => {
 			pointerManagerProvider.getResolvedLabels().then(labels => {
 				editorProvider.setPointerLabels(labels);
-				// Also re-resolve struct labels so the combined overlay stays current.
-				editorProvider.refreshStructLabels().catch(() => { /* non-fatal */ });
 			}).catch(() => { /* ignore — not connected */ });
 		})
 	);

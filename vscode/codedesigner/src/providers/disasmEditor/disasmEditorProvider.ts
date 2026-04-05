@@ -2630,6 +2630,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         members:     e.members.map(m => ({ offset: m.offset, name: m.name })),
       }));
     this.onStructsChanged?.(structs);
+    // Re-resolve struct member addresses from live memory so the instruction
+    // display reflects the new label set.  Intentionally fire-and-forget here
+    // (errors are non-fatal) so _broadcastLabelSet stays synchronous.
+    this.refreshStructLabels().catch(() => { /* non-fatal */ });
   }
 
   /** Dispatch a LabelManagerAction received from the webview. */
