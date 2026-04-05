@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.CheatConverter
+namespace CodeDesigner.Ps2.CheatEngine
 {
     /// <summary>
     /// A single decoded PS2 memory-write cheat entry in raw (unencrypted) form.

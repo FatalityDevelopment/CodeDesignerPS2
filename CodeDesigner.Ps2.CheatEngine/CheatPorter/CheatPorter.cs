@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using CodeDesigner.Ps2.CheatEngine;
 
-namespace CodeDesigner.Ps2.CheatPorter
+namespace CodeDesigner.Ps2.CheatEngine
 {
     /// <summary>
     /// Ports PS2 GameShark cheat codes from one game revision to another by scanning two

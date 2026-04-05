@@ -15,7 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CodeDesigner.Ps2.CheatConverter\CodeDesigner.Ps2.CheatConverter.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
   </ItemGroup>
 
 </Project>

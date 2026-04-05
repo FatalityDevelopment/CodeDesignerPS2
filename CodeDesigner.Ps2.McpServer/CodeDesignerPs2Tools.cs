@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.CheatConverter;
+using CodeDesigner.Ps2.CheatEngine;
 using CodeDesigner.Ps2.McpServer.Prompts;
 using ModelContextProtocol.Server;
 

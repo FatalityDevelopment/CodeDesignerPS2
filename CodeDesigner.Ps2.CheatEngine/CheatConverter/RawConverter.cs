@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace CodeDesigner.Ps2.CheatConverter
+namespace CodeDesigner.Ps2.CheatEngine
 {
     /// <summary>
     /// Identity converter for the canonical unencrypted GameShark / Action Replay PS2

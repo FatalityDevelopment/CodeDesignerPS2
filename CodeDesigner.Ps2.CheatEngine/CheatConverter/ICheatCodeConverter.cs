@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace CodeDesigner.Ps2.CheatConverter
+namespace CodeDesigner.Ps2.CheatEngine
 {
     /// <summary>
     /// Converts PS2 cheat codes between a device-specific format and the canonical
