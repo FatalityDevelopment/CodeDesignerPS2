@@ -22,10 +22,10 @@ namespace CodeDesigner.Ps2.OnlineServer.Servers;
 /// </summary>
 public class MuisServer : BaseMediusTcpServer
 {
-    private readonly MediusConfig       _config;
+    private readonly OnlineServerConfig       _config;
     private readonly ILogger<MuisServer> _log;
 
-    public MuisServer(MediusConfig config, ILogger<MuisServer> log)
+    public MuisServer(OnlineServerConfig config, ILogger<MuisServer> log)
         : base(log, config)
     {
         _config    = config;

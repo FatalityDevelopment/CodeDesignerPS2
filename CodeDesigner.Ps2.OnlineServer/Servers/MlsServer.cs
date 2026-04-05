@@ -16,11 +16,11 @@ namespace CodeDesigner.Ps2.OnlineServer.Servers;
 /// </summary>
 public class MlsServer : BaseMediusTcpServer
 {
-    private readonly MediusConfig       _config;
+    private readonly OnlineServerConfig       _config;
     private readonly InMemoryStorage    _store;
     private readonly ILogger<MlsServer> _log;
 
-    public MlsServer(MediusConfig config, InMemoryStorage store, ILogger<MlsServer> log)
+    public MlsServer(OnlineServerConfig config, InMemoryStorage store, ILogger<MlsServer> log)
         : base(log, config)
     {
         _config    = config;

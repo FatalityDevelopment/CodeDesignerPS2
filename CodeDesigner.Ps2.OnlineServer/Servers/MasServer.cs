@@ -19,11 +19,11 @@ namespace CodeDesigner.Ps2.OnlineServer.Servers;
 /// </summary>
 public class MasServer : BaseMediusTcpServer
 {
-    private readonly MediusConfig  _config;
+    private readonly OnlineServerConfig  _config;
     private readonly InMemoryStorage _store;
     private readonly ILogger<MasServer> _log;
 
-    public MasServer(MediusConfig config, InMemoryStorage store, ILogger<MasServer> log)
+    public MasServer(OnlineServerConfig config, InMemoryStorage store, ILogger<MasServer> log)
         : base(log, config)
     {
         _config    = config;

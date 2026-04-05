@@ -29,14 +29,14 @@ namespace CodeDesigner.Ps2.OnlineServer.Servers;
 public abstract class BaseMediusTcpServer
 {
     private readonly ILogger      _log;
-    private readonly MediusConfig _config;
+    private readonly OnlineServerConfig _config;
     private TcpListener?         _listener;
 
     private uint _scertIdCounter = 0;
 
     protected readonly ConcurrentDictionary<string, (MediusClientState State, TcpClient Client)> Clients = new();
 
-    protected BaseMediusTcpServer(ILogger log, MediusConfig config)
+    protected BaseMediusTcpServer(ILogger log, OnlineServerConfig config)
     {
         _log    = log;
         _config = config;
