@@ -466,9 +466,8 @@ export class LabelManagerOverlayComponent {
       }
     } else {
       this.clearForm();
+      this.statusMsg.set('');
     }
-
-    this.statusMsg.set('');
   }
 
   showStatus(msg: string, isError = false): void {

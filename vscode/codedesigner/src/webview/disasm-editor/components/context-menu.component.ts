@@ -75,8 +75,8 @@ export interface ContextMenuData {
     <div class="ctx-menu-item" (click)="onEditRow()">
       <span class="ctx-menu-icon">✎</span>Edit / Add Label…
     </div>
-    <div class="ctx-menu-item" (click)="onAddToLabelManager()">
-      <span class="ctx-menu-icon">🏷</span>{{ data()?.currentLabel ? 'Edit in Label Manager…' : 'Add to Label Manager…' }}
+    <div class="ctx-menu-item" aria-label="Add to Label Manager" (click)="onAddToLabelManager()">
+      <span class="ctx-menu-icon" aria-hidden="true">[L]</span>{{ data()?.currentLabel ? 'Edit in Label Manager…' : 'Add to Label Manager…' }}
     </div>
   `,
   styles: [`
