@@ -172,6 +172,26 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Full label set payload for GETLABELSET / SETACTIVELABELSET / CREATELABELSET etc.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public LabelSetPayload? LabelSet { get; set; }
+
+        // GETSNAPSHOTS results
+        /// <summary>List of snapshot metadata entries returned by GETSNAPSHOTS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<SnapshotInfo>? Snapshots { get; set; }
+    }
+
+    /// <summary>Snapshot metadata wire payload returned by GETSNAPSHOTS.</summary>
+    public class SnapshotInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public int Id { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("title")]
+        public string Title { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("description")]
+        public string? Description { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("snapshotPath")]
+        public string SnapshotPath { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("snapshotDateTime")]
+        public string SnapshotDateTime { get; set; } = string.Empty;
     }
 
     /// <summary>Wire payload for a complete label set returned by label-manager commands.</summary>

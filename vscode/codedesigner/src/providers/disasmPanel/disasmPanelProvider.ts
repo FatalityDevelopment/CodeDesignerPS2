@@ -420,6 +420,23 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         } catch (err: any) {
             getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
         }
+
+        // Also persist to the DB so the server can serve them via GETALLSETTINGS.
+        // These are written here and read back in loadUserPreferencesFromDb() so the
+        // in-memory state stays consistent with the DB on subsequent connections.
+        if (this.socketClient.isConnected()) {
+            try {
+                await this.socketClient.setSetting('emu.bios',      JSON.stringify(this.settings.bios      ?? []));
+                await this.socketClient.setSetting('emu.games',     JSON.stringify(this.settings.games     ?? []));
+                await this.socketClient.setSetting('emu.emulators', JSON.stringify(this.settings.emulators ?? []));
+                if (this.settings.pcsx2?.host != null)
+                    await this.socketClient.setSetting('emu.pcsx2.host', String(this.settings.pcsx2.host));
+                if (this.settings.pcsx2?.slot != null)
+                    await this.socketClient.setSetting('emu.pcsx2.slot', String(this.settings.pcsx2.slot));
+            } catch (err: any) {
+                getOutputChannel().debug(`Could not persist emu-settings to DB: ${err?.message ?? err}`);
+            }
+        }
     }
 
     /** Save current dropdown selections to codedesigner-settings.json in the workspace root. */
@@ -435,6 +452,65 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             await fs.promises.writeFile(settingsPath, JSON.stringify(prefs, null, 2), 'utf-8');
         } catch (err: any) {
             getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
+        }
+
+        // Also persist to the DB so the server can recall them on next startup.
+        if (this.socketClient.isConnected()) {
+            try {
+                await this.socketClient.setSetting('ui.selectedEmulator', this.selectedEmulatorPath);
+                await this.socketClient.setSetting('ui.selectedBios',     this.selectedBiosPath);
+                await this.socketClient.setSetting('ui.selectedGame',     this.selectedGamePath);
+            } catch (err: any) {
+                getOutputChannel().debug(`Could not persist preferences to DB: ${err?.message ?? err}`);
+            }
+        }
+    }
+
+    /**
+     * Pull user preferences and emulator settings from the server-side DB after connect
+     * and merge them into the local state.  DB values take priority over the JSON file
+     * values because they represent the most recently saved state.
+     */
+    private async loadUserPreferencesFromDb(): Promise<void> {
+        try {
+            const settings = await this.socketClient.getAllSettings();
+            const emu  = settings['ui.selectedEmulator'];
+            const bios = settings['ui.selectedBios'];
+            const game = settings['ui.selectedGame'];
+
+            let changed = false;
+            if (emu  && emu  !== this.selectedEmulatorPath) { this.selectedEmulatorPath = emu;  changed = true; }
+            if (bios && bios !== this.selectedBiosPath)     { this.selectedBiosPath = bios;      changed = true; }
+            if (game && game !== this.selectedGamePath)     {
+                this.selectedGamePath = game;
+                this.selectedGameName = game
+                    ? path.basename(game, path.extname(game))
+                    : '';
+                this.loadSnapshotsForGame(this.selectedGameName);
+                this.loadGameLabels(this.selectedGameName);
+                changed = true;
+            }
+
+            // Merge emulator-settings arrays from DB if present.
+            const rawBios      = settings['emu.bios'];
+            const rawGames     = settings['emu.games'];
+            const rawEmulators = settings['emu.emulators'];
+
+            if (rawBios) {
+                try { this.settings.bios = JSON.parse(rawBios); changed = true; } catch { /* ignore */ }
+            }
+            if (rawGames) {
+                try { this.settings.games = JSON.parse(rawGames); changed = true; } catch { /* ignore */ }
+            }
+            if (rawEmulators) {
+                try { this.settings.emulators = JSON.parse(rawEmulators); changed = true; } catch { /* ignore */ }
+            }
+
+            if (changed) {
+                this.postInitMessage();
+            }
+        } catch (err: any) {
+            getOutputChannel().debug(`Could not load preferences from DB: ${err?.message ?? err}`);
         }
     }
 
@@ -2189,6 +2265,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
+
+        // Pull authoritative user preferences from the DB and refresh the UI.
+        await this.loadUserPreferencesFromDb();
+
         const pendingMode = this._pendingRunMode;
         this._pendingRunMode = null;
         if (pendingMode) {

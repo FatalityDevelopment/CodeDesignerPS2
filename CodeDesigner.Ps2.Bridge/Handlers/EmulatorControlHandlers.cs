@@ -155,12 +155,13 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Write a <c>snapshot-info.json</c> file alongside the .bin files.
+        /// Write a <c>snapshot-info.json</c> file alongside the .bin files and persist
+        /// a <see cref="CodeDesigner.Ps2.Database.Entities.Snapshot"/> record to the database.
         /// The format is compatible with what the VS Code extension writes, so
         /// snapshots taken by the MCP agent are visible in the disasm History tab
         /// and can be read by <c>GETADDRESSHISTORY</c>.
         /// </summary>
-        private static void WriteSnapshotInfo(string outputPath, List<SnapshotRegion> regions)
+        private void WriteSnapshotInfo(string outputPath, List<SnapshotRegion> regions, string? isoName = null)
         {
             try
             {
@@ -170,7 +171,7 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     name,
                     timestamp = DateTime.UtcNow.ToString("o"),
-                    isoName   = string.Empty,
+                    isoName   = isoName ?? string.Empty,
                     regions   = regions.Select(r => new
                     {
                         r.Label,
@@ -184,6 +185,21 @@ namespace CodeDesigner.Ps2.Bridge
                     JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true }));
             }
             catch { /* non-fatal: snapshot files are still usable without the info file */ }
+
+            // Persist metadata to the database so GETSNAPSHOTS can list it efficiently.
+            try
+            {
+                string snapshotTitle = Path.GetFileName(outputPath.TrimEnd(
+                    Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+                var snapshotRepo = new DbSnapshotRepository(Db);
+                snapshotRepo.AddSnapshotAsync(outputPath, snapshotTitle, null, isoName)
+                            .GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DB] Could not persist snapshot metadata: {ex.Message}");
+            }
         }
 
         /// <summary>

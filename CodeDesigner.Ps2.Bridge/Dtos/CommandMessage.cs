@@ -132,6 +132,18 @@ namespace CodeDesigner.Ps2.Bridge
         public string? SetName { get; set; }
         /// <summary>Unified label entry payload for ADDLABELENTRY.</summary>
         public LabelManagerEntry? LabelEntry { get; set; }
+
+        // Settings (GETSETTING / SETSETTING / GETALLSETTINGS / DELETESETTING) fields
+        /// <summary>Setting key for GETSETTING / SETSETTING / DELETESETTING.</summary>
+        public string? SettingKey { get; set; }
+        /// <summary>Setting value for SETSETTING.</summary>
+        public string? SettingValue { get; set; }
+        /// <summary>Optional key prefix filter for GETALLSETTINGS (e.g. "emu." or "ui.").</summary>
+        public string? SettingPrefix { get; set; }
+
+        // GETSNAPSHOTS fields
+        /// <summary>ISO / game name for GETSNAPSHOTS.</summary>
+        public string? IsoName { get; set; }
     }
 
     /// <summary>

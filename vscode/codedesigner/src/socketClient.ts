@@ -80,6 +80,12 @@ interface CommandMessage {
     GameId?: string;
     SetName?: string;
     LabelEntry?: { address: string; name: string; comment?: string; members: { offset: number; name: string }[] };
+    // Settings (GETSETTING / SETSETTING / GETALLSETTINGS / DELETESETTING)
+    SettingKey?: string;
+    SettingValue?: string;
+    SettingPrefix?: string;
+    // GETSNAPSHOTS
+    IsoName?: string;
 }
 
 /**
@@ -2401,5 +2407,67 @@ export class SocketClient {
         try { return JSON.parse((response as any).Data ?? '[]') as string[]; }
         catch { return []; }
     }
+
+    // ── DB-backed settings ───────────────────────────────────────────────────
+
+    /**
+     * GETSETTING — retrieves a single application setting from the database.
+     * Returns `null` when the key is not present.
+     */
+    public async getSetting(key: string): Promise<string | null> {
+        const response = await this.sendCommand({ Command: 'GETSETTING', SettingKey: key });
+        if (!response.Success) { throw new Error(response.Error || 'GETSETTING failed'); }
+        return response.Message ?? null;
+    }
+
+    /**
+     * SETSETTING — inserts or updates an application setting in the database.
+     */
+    public async setSetting(key: string, value: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'SETSETTING', SettingKey: key, SettingValue: value });
+        if (!response.Success) { throw new Error(response.Error || 'SETSETTING failed'); }
+    }
+
+    /**
+     * GETALLSETTINGS — returns all settings (optionally filtered by key prefix)
+     * as a `Record<string, string>` map.
+     *
+     * @param prefix  Optional key prefix to filter by (e.g. `"emu."` or `"ui."`).
+     */
+    public async getAllSettings(prefix?: string): Promise<Record<string, string>> {
+        const response = await this.sendCommand({ Command: 'GETALLSETTINGS', SettingPrefix: prefix });
+        if (!response.Success) { throw new Error(response.Error || 'GETALLSETTINGS failed'); }
+        try { return JSON.parse((response as any).Data ?? '{}') as Record<string, string>; }
+        catch { return {}; }
+    }
+
+    /**
+     * DELETESETTING — removes a setting from the database.
+     */
+    public async deleteSetting(key: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'DELETESETTING', SettingKey: key });
+        if (!response.Success) { throw new Error(response.Error || 'DELETESETTING failed'); }
+    }
+
+    // ── DB-backed snapshots ──────────────────────────────────────────────────
+
+    /**
+     * GETSNAPSHOTS — returns snapshot metadata records from the database for
+     * the game identified by `isoName`.
+     */
+    public async getSnapshots(isoName: string): Promise<SnapshotInfo[]> {
+        const response = await this.sendCommand({ Command: 'GETSNAPSHOTS', IsoName: isoName });
+        if (!response.Success) { throw new Error(response.Error || 'GETSNAPSHOTS failed'); }
+        return (response as any).Snapshots ?? [];
+    }
+}
+
+/** Snapshot metadata entry returned by GETSNAPSHOTS. */
+export interface SnapshotInfo {
+    id: number;
+    title: string;
+    description?: string;
+    snapshotPath: string;
+    snapshotDateTime: string;
 }
 
