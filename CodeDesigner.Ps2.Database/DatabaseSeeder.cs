@@ -29,6 +29,7 @@ public class DatabaseSeeder
     public async Task SeedAsync(CancellationToken ct = default)
     {
         await SeedToolDescriptionsAsync(ct);
+        await SeedSettingsAsync(ct);
         await _db.SaveChangesAsync(ct);
     }
 
@@ -52,6 +53,30 @@ public class DatabaseSeeder
                 Value = value,
                 Description = description,
                 UpdatedAt = DateTime.UtcNow,
+            });
+        }
+    }
+
+    // ── Settings ───────────────────────────────────────────────────────────────
+
+    private async Task SeedSettingsAsync(CancellationToken ct)
+    {
+        foreach (var (key, defaultValue, description) in DefaultSettings)
+            await UpsertSettingAsync(key, defaultValue, description, ct);
+    }
+
+    private async Task UpsertSettingAsync(
+        string key, string? defaultValue, string? description, CancellationToken ct)
+    {
+        var existing = await _db.Settings.FindAsync([key], ct);
+        if (existing is null)
+        {
+            _db.Settings.Add(new Setting
+            {
+                Key         = key,
+                Value       = defaultValue,
+                Description = description,
+                UpdatedAt   = DateTime.UtcNow,
             });
         }
     }
@@ -526,5 +551,48 @@ public class DatabaseSeeder
         ("run_until_watchpoint_desc",
             "Resume PCSX2 and block until any registered memory watchpoint fires (value at the " +
             "watched address changes), then pause and return the watchpoint hit details."),
+    ];
+
+    /// <summary>
+    /// Well-known application settings seeded with empty defaults so the DB
+    /// contains the schema even before the user configures anything.
+    /// Rows are only inserted when no row for that key already exists.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Key, string? DefaultValue, string Description)> DefaultSettings =
+    [
+        // ── UI selections ──────────────────────────────────────────────────────
+        ("ui.selectedEmulator",
+            null,
+            "Absolute path of the currently selected emulator executable (e.g. pcsx2-qtx64-dbg.exe or the CodeDesigner bridge binary)."),
+
+        ("ui.selectedBios",
+            null,
+            "Absolute path of the currently selected PS2 BIOS image (e.g. SCPH-70012_BIOS_V12_USA_200.bin)."),
+
+        ("ui.selectedGame",
+            null,
+            "Absolute path of the currently selected game disc image (ISO, ZIP, or BIN/CUE)."),
+
+        // ── Emulator setting arrays (JSON-serialised) ──────────────────────────
+        ("emu.bios",
+            "[]",
+            "JSON array of available BIOS entries ({ name, path }) shown in the BIOS dropdown."),
+
+        ("emu.games",
+            "[]",
+            "JSON array of available game entries ({ name, path }) shown in the game dropdown."),
+
+        ("emu.emulators",
+            "[]",
+            "JSON array of available emulator entries ({ type, path }) shown in the emulator dropdown."),
+
+        // ── PCSX2 PINE connection ──────────────────────────────────────────────
+        ("emu.pcsx2.host",
+            null,
+            "Hostname or IP address for the PCSX2 PINE socket connection (default: localhost)."),
+
+        ("emu.pcsx2.slot",
+            null,
+            "PINE slot number used when connecting to PCSX2 (default: 28011)."),
     ];
 }
