@@ -14,9 +14,11 @@ using System.Threading.Tasks;
 using CodeDesigner.Ps2.MCManager;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.CheatEngine;
+using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Emulator;
 using CodeDesigner.Ps2.Emulator.Hardware;
 using CodeDesigner.Ps2.Emulator.IOP;
+using Microsoft.EntityFrameworkCore;
 
 using CheatPorterLib = CodeDesigner.Ps2.CheatEngine.CheatPorter;
 using CodeDesigner.Ps2.LabelManager;
@@ -66,6 +68,16 @@ namespace CodeDesigner.Ps2.Bridge
 
         /// <summary>Central label manager: manages per-game label sets and the built-in symbols.</summary>
         internal readonly Ps2LabelManager LabelMgr = new();
+
+        // ── Database ──────────────────────────────────────────────────────────
+        /// <summary>Entity Framework database context shared across all repositories.</summary>
+        internal CodeDesignerDbContext Db { get; }
+
+        /// <summary>Persistence layer for label sets backed by the database.</summary>
+        internal DbLabelRepository LabelRepo { get; }
+
+        /// <summary>Persistence layer for application settings backed by the database.</summary>
+        internal DbSettingsRepository SettingsRepo { get; }
 
         /// <summary>
         /// When set, the READMEM command reads live memory from this scheduler.
@@ -196,10 +208,99 @@ namespace CodeDesigner.Ps2.Bridge
         public void SignalRestartComplete() => _restartComplete.Set();
 
         public SocketServer(int port = 8765)
+            : this(port, CreateLocalDbContext())
         {
-            _port = port;
+        }
+
+        /// <summary>
+        /// Constructor used when the host application (e.g. MCP server) already has a
+        /// configured <see cref="CodeDesignerDbContext"/> and wants to share it.
+        /// </summary>
+        public SocketServer(int port, CodeDesignerDbContext db)
+        {
+            _port       = port;
+            Db          = db;
+            LabelRepo   = new DbLabelRepository(db);
+            SettingsRepo = new DbSettingsRepository(db);
+
+            // Migrate legacy flat-file data into the DB on first run (idempotent).
+            MigrateLegacySettingsToDb();
+
+            // Warm up the legacy _labels/_structs dictionaries from the DB so that
+            // existing handlers continue to work without modification.
             LoadLabels();
             LoadStructs();
+        }
+
+        /// <summary>
+        /// Creates a SQLite <see cref="CodeDesignerDbContext"/> stored next to the
+        /// executable (used when the caller does not supply a context).
+        /// </summary>
+        private static CodeDesignerDbContext CreateLocalDbContext()
+        {
+            string dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "codedesigner.db");
+            var opts = new DbContextOptionsBuilder<CodeDesignerDbContext>()
+                .UseSqlite($"Data Source={dbPath}")
+                .Options;
+            var ctx = new CodeDesignerDbContext(opts);
+            ctx.Database.Migrate();
+            return ctx;
+        }
+
+        /// <summary>
+        /// One-time migration: if <c>codedesigner-settings.json</c> is present and the
+        /// <c>ui.selectedEmulator</c> key is not yet in the DB, import the file values as
+        /// <see cref="CodeDesigner.Ps2.Database.Entities.Setting"/> rows, then rename the
+        /// file to <c>.bak</c> so the migration is not repeated on the next startup.
+        /// </summary>
+        private void MigrateLegacySettingsToDb()
+        {
+            try
+            {
+                var searchPaths = new[]
+                {
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "codedesigner-settings.json"),
+                    Path.Combine(Directory.GetCurrentDirectory(),       "codedesigner-settings.json"),
+                };
+
+                foreach (var settingsPath in searchPaths)
+                {
+                    if (!File.Exists(settingsPath)) continue;
+
+                    // Only migrate if the target keys are not already set.
+                    bool alreadyMigrated = Db.Settings.Any(s => s.Key == "ui.selectedEmulator");
+                    if (alreadyMigrated) break;
+
+                    try
+                    {
+                        var json  = File.ReadAllText(settingsPath);
+                        using var doc = JsonDocument.Parse(json);
+                        var root  = doc.RootElement;
+
+                        void Upsert(string key, string? val)
+                        {
+                            if (string.IsNullOrWhiteSpace(val)) return;
+                            SettingsRepo.SetAsync(key, val).GetAwaiter().GetResult();
+                        }
+
+                        if (root.TryGetProperty("selectedEmulator", out var e)) Upsert("ui.selectedEmulator", e.GetString());
+                        if (root.TryGetProperty("selectedBios",     out var b)) Upsert("ui.selectedBios",     b.GetString());
+                        if (root.TryGetProperty("selectedGame",     out var g)) Upsert("ui.selectedGame",     g.GetString());
+
+                        File.Move(settingsPath, settingsPath + ".bak", overwrite: true);
+                        Console.WriteLine($"[DB] Migrated user preferences from {settingsPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[DB] Could not migrate {settingsPath}: {ex.Message}");
+                    }
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DB] Settings migration failed: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -1121,6 +1222,28 @@ namespace CodeDesigner.Ps2.Bridge
                     case "GETADDRESSHISTORY":
                     case "GET_ADDRESS_HISTORY":
                         return HandleGetAddressHistory(command.Address, command.SnapshotDir);
+
+                    // ── Settings (DB-backed) ──────────────────────────────────
+                    case "GETSETTING":
+                    case "GET_SETTING":
+                        return HandleGetSetting(command.SettingKey);
+
+                    case "SETSETTING":
+                    case "SET_SETTING":
+                        return HandleSetSetting(command.SettingKey, command.SettingValue);
+
+                    case "GETALLSETTINGS":
+                    case "GET_ALL_SETTINGS":
+                        return HandleGetAllSettings(command.SettingPrefix);
+
+                    case "DELETESETTING":
+                    case "DELETE_SETTING":
+                        return HandleDeleteSetting(command.SettingKey);
+
+                    // ── Snapshots (DB-backed) ─────────────────────────────────
+                    case "GETSNAPSHOTS":
+                    case "GET_SNAPSHOTS":
+                        return HandleGetSnapshots(command.IsoName);
 
                     default:
                         // Echo for unknown commands
