@@ -224,25 +224,78 @@ namespace CodeDesigner.Ps2.Bridge
                 if (!uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber, null, out uint addr))
                     continue;
 
-                // Plain label (no members)
-                if (entry.Members.Count == 0)
+                switch (entry.Type)
                 {
-                    _labels[addr] = (entry.Name, entry.Comment);
-                }
-                else
-                {
-                    // Struct entry — goes in _structs (keyed by name) and also in _labels (pointer addr)
-                    _labels[addr] = (entry.Name, entry.Comment);
-                    var se = new StructEntry
+                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.Struct:
                     {
-                        Name        = entry.Name,
-                        BaseAddress = entry.Address,
-                    };
-                    foreach (var m in entry.Members)
-                        se.Members.Add(new StructMemberEntry { Offset = m.Offset, Name = m.Name });
-                    _structs[entry.Name] = se;
+                        // Struct entry: goes in _structs (keyed by name) AND in _labels (pointer addr).
+                        _labels[addr] = (entry.Name, entry.Comment);
+                        var se = new StructEntry
+                        {
+                            Name        = entry.Name,
+                            BaseAddress = entry.Address,
+                        };
+                        foreach (var m in entry.Members)
+                            se.Members.Add(new StructMemberEntry { Offset = m.Offset, Name = m.Name });
+                        _structs[entry.Name] = se;
+                        break;
+                    }
+
+                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.Function:
+                    {
+                        // Function: displayed as "FNC_Name". Arg/return regs embedded in comment.
+                        string displayName = CodeDesigner.Ps2.LabelManager.Ps2LabelManager.GetDisplayLabel(entry);
+                        string? comment    = BuildFunctionComment(entry, entry.Comment);
+                        _labels[addr] = (displayName, comment);
+                        break;
+                    }
+
+                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.Array:
+                    {
+                        // Expand to Name[0], Name[1], … when stride + count are known.
+                        _labels[addr] = (entry.Name, entry.Comment);
+                        if (entry.ElementStride.HasValue && entry.ElementStride.Value > 0
+                            && entry.ElementCount.HasValue && entry.ElementCount.Value > 0)
+                        {
+                            uint stride = (uint)entry.ElementStride.Value;
+                            int  count  = entry.ElementCount.Value;
+                            for (int i = 0; i < count; i++)
+                            {
+                                uint elemAddr = addr + stride * (uint)i;
+                                _labels[elemAddr] = ($"{entry.Name}[{i}]", null);
+                            }
+                        }
+                        break;
+                    }
+
+                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.ArrayOfPointers:
+                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.LinkedList:
+                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.String:
+                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.Address:
+                    default:
+                    {
+                        // Plain address label (or types requiring runtime resolution).
+                        _labels[addr] = (entry.Name, entry.Comment);
+                        break;
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// Builds an extended comment for a <see cref="LabelType.Function"/> entry that
+        /// includes arg/return register annotations when present.
+        /// </summary>
+        private static string? BuildFunctionComment(CodeDesigner.Ps2.LabelManager.Models.LabelEntry entry, string? baseComment)
+        {
+            var parts = new System.Collections.Generic.List<string>();
+            if (!string.IsNullOrWhiteSpace(baseComment))
+                parts.Add(baseComment!);
+            if (entry.ArgRegs is { Count: > 0 })
+                parts.Add("args: " + string.Join(", ", entry.ArgRegs));
+            if (entry.ReturnRegs is { Count: > 0 })
+                parts.Add("ret: " + string.Join(", ", entry.ReturnRegs));
+            return parts.Count > 0 ? string.Join(" | ", parts) : null;
         }
 
         /// <summary>
@@ -826,6 +879,14 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "EXPORTLABELSET":
                         return HandleExportLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
+
+                    case "RESOLVESTRINGS":
+                        return HandleResolveStrings();
+
+                    case "RESOLVELINKEDLIST":
+                        if (command.Address is null)
+                            return CreateErrorResponse("Address is required for RESOLVELINKEDLIST");
+                        return HandleResolveLinkedList(command.Address.Value, command.MemberOffset ?? 0);
 
                     case "MC_LIST":
                         return HandleMcList(command.McPath);

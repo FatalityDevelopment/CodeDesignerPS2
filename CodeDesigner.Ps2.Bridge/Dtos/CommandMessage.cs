@@ -135,9 +135,8 @@ namespace CodeDesigner.Ps2.Bridge
     }
 
     /// <summary>
-    /// Unified label / struct entry used by the LabelManager socket commands.
-    /// When <see cref="Members"/> is empty this is a plain address label.
-    /// When <see cref="Members"/> is non-empty it acts as a struct pointer definition.
+    /// Unified label / struct / function / array / string entry used by the
+    /// LabelManager socket commands.
     /// </summary>
     public class LabelManagerEntry
     {
@@ -153,8 +152,33 @@ namespace CodeDesigner.Ps2.Bridge
         [JsonPropertyName("hidden")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool Hidden { get; set; }
+        /// <summary>Semantic label type. Null is backward-compatible (inferred from members).</summary>
+        [JsonPropertyName("type")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Type { get; set; }
         [JsonPropertyName("members")]
         public List<LabelMemberPayload> Members { get; set; } = [];
+        // ── Function ─────────────────────────────────────────────────────────
+        [JsonPropertyName("argRegs")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? ArgRegs { get; set; }
+        [JsonPropertyName("returnRegs")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? ReturnRegs { get; set; }
+        // ── Array ─────────────────────────────────────────────────────────────
+        [JsonPropertyName("elementStride")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? ElementStride { get; set; }
+        [JsonPropertyName("elementCount")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? ElementCount { get; set; }
+        // ── LinkedList ────────────────────────────────────────────────────────
+        [JsonPropertyName("nodeNextOffset")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? NodeNextOffset { get; set; }
+        [JsonPropertyName("nodeSize")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? NodeSize { get; set; }
     }
 
     /// <summary>One struct member inside a <see cref="LabelManagerEntry"/>.</summary>

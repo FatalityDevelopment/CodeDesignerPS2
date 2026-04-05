@@ -161,15 +161,16 @@ export interface StructEntry {
 // ── Label Manager (unified label/struct) ──────────────────────────────────────
 
 /** One member of a label that acts as a struct pointer. */
+export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'ArrayOfPointers' | 'LinkedList' | 'String';
+
 export interface LabelMemberEntry {
     offset: number;
     name:   string;
 }
 
 /**
- * A unified label / struct entry.
- * When members is empty this is a plain address label.
- * When members is non-empty it is a struct pointer definition.
+ * A unified label entry covering all supported label types.
+ * The `type` field controls which extra metadata fields are relevant.
  */
 export interface LabelManagerEntry {
     address:  string;
@@ -177,7 +178,18 @@ export interface LabelManagerEntry {
     comment?: string;
     /** When true, the entry is hidden from the disassembler view and structs panel. */
     hidden?:  boolean;
+    /** Semantic label type. Undefined is backward-compatible (inferred from members). */
+    type?:    LabelType;
     members:  LabelMemberEntry[];
+    // Function
+    argRegs?:    string[];
+    returnRegs?: string[];
+    // Array
+    elementStride?: number;
+    elementCount?:  number;
+    // LinkedList
+    nodeNextOffset?: number;
+    nodeSize?:       number;
 }
 
 /** A named collection of LabelManagerEntry records for a specific game. */
@@ -2364,6 +2376,30 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'EXPORTLABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName });
         if (!response.Success) { throw new Error(response.Error || 'EXPORTLABELSET failed'); }
         return (response as any).Data ?? '';
+    }
+
+    /**
+     * RESOLVESTRINGS — reads each String-typed label from live PCSX2 memory and
+     * updates the server-side display text to include the ASCII content.
+     * Requires PINE (PCSX2) mode.
+     */
+    public async resolveStrings(): Promise<string> {
+        const response = await this.sendCommand({ Command: 'RESOLVESTRINGS' });
+        if (!response.Success) { throw new Error(response.Error || 'RESOLVESTRINGS failed'); }
+        return response.Message ?? '';
+    }
+
+    /**
+     * RESOLVELINKEDLIST — walks a linked list starting at `startAddress` using
+     * `nextOffset` as the byte offset of the next-node pointer within each node.
+     * Returns the ordered list of node address strings.
+     * Requires PINE (PCSX2) mode.
+     */
+    public async resolveLinkedList(startAddress: number, nextOffset: number): Promise<string[]> {
+        const response = await this.sendCommand({ Command: 'RESOLVELINKEDLIST', Address: startAddress, MemberOffset: nextOffset });
+        if (!response.Success) { throw new Error(response.Error || 'RESOLVELINKEDLIST failed'); }
+        try { return JSON.parse((response as any).Data ?? '[]') as string[]; }
+        catch { return []; }
     }
 }
 
