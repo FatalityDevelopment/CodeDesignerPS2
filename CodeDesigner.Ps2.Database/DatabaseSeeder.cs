@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text.Json;
 using CodeDesigner.Ps2.Database.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,6 +32,8 @@ public class DatabaseSeeder
     {
         await SeedToolDescriptionsAsync(ct);
         await SeedSettingsAsync(ct);
+        await SeedGameDataAsync(ct);
+        await SeedLabelSetsAsync(ct);
         await _db.SaveChangesAsync(ct);
     }
 
@@ -79,6 +83,204 @@ public class DatabaseSeeder
                 UpdatedAt   = DateTime.UtcNow,
             });
         }
+    }
+
+    // ── Game data ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Seeds the canonical SOCOM II game, its NTSC-U region, and the SCUS-97275
+    /// disc entry.  All three rows are inserted only when they don't already exist.
+    /// </summary>
+    private async Task SeedGameDataAsync(CancellationToken ct)
+    {
+        // GameRegion — NTSC-U
+        var ntscU = await _db.GameRegions.FirstOrDefaultAsync(r => r.Name == "NTSC-U", ct);
+        if (ntscU is null)
+        {
+            ntscU = new GameRegion { Name = "NTSC-U" };
+            _db.GameRegions.Add(ntscU);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        // Game — SOCOM II: U.S. Navy SEALs
+        const string socomTitle = "SOCOM II: U.S. Navy SEALs";
+        var socomGame = await _db.Games.FirstOrDefaultAsync(g => g.Title == socomTitle, ct);
+        if (socomGame is null)
+        {
+            socomGame = new Game
+            {
+                Title       = socomTitle,
+                Description = "PlayStation 2 online third-person shooter published by Sony Computer Entertainment America (SCEA). NTSC-U, serial SCUS-97275.",
+            };
+            _db.Games.Add(socomGame);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        // GameDisc — SCUS-97275 (CRC left blank for the user to fill in later)
+        const string socomSerial = "SCUS-97275";
+        bool discExists = await _db.GameDiscs.AnyAsync(
+            d => d.Serial == socomSerial && d.GameId == socomGame.Id, ct);
+
+        if (!discExists)
+        {
+            _db.GameDiscs.Add(new GameDisc
+            {
+                GameId       = socomGame.Id,
+                GameRegionId = ntscU.Id,
+                Serial       = socomSerial,
+                CRC          = null,   // populated by the user once known
+                IsoPath      = null,
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+    }
+
+    // ── Label sets ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Seeds the two default label sets for "SOCOM II - U.S. Navy SEALs":
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <b>CodeDesigner labels</b> — the standard PS2 system register / memory-map
+    ///     symbols from the built-in label database.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <b>patch_labels</b> — SOCOM II–specific reverse-engineering labels
+    ///     (functions, globals, AES/ZDB crypto symbols, and struct definitions).
+    ///   </description></item>
+    /// </list>
+    /// Rows are only inserted when the set does not already exist for the game.
+    /// </summary>
+    private async Task SeedLabelSetsAsync(CancellationToken ct)
+    {
+        const string socomGameId = "SOCOM II - U.S. Navy SEALs";
+
+        await SeedLabelSetFromResourceAsync(
+            gameId:      socomGameId,
+            setName:     "CodeDesigner labels",
+            resourceSuffix: "codedesigner_labels.json",
+            ct);
+
+        await SeedLabelSetFromResourceAsync(
+            gameId:      socomGameId,
+            setName:     "patch_labels",
+            resourceSuffix: "socom_patch_labels.json",
+            ct);
+    }
+
+    /// <summary>
+    /// Inserts a <see cref="LabelSet"/> and its child <see cref="Label"/> /
+    /// <see cref="LabelMember"/> rows by reading a JSON seed file embedded in
+    /// this assembly under <c>Resources/SeedData/&lt;resourceSuffix&gt;</c>.
+    /// </summary>
+    /// <remarks>
+    /// The JSON format supports two optional top-level arrays:
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <c>"symbol"</c> — flat address labels
+    ///     (<c>{ address, label, comment? }</c>).
+    ///   </description></item>
+    ///   <item><description>
+    ///     <c>"structs"</c> — struct definitions
+    ///     (<c>{ name, baseAddress, members: [{ offset, name }] }</c>).
+    ///   </description></item>
+    /// </list>
+    /// </remarks>
+    private async Task SeedLabelSetFromResourceAsync(
+        string gameId, string setName, string resourceSuffix, CancellationToken ct)
+    {
+        // Skip when the set already exists — idempotent.
+        bool exists = await _db.LabelSets.AnyAsync(
+            ls => ls.GameId == gameId && ls.SetName == setName, ct);
+        if (exists) return;
+
+        // Load the embedded JSON resource.
+        var asm          = Assembly.GetExecutingAssembly();
+        var resourceName = asm.GetManifestResourceNames()
+                              .FirstOrDefault(n => n.EndsWith(resourceSuffix,
+                                  StringComparison.OrdinalIgnoreCase));
+        if (resourceName is null)
+            return; // resource missing — skip silently
+
+        await using var stream = asm.GetManifestResourceStream(resourceName)!;
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        var root = doc.RootElement;
+
+        var labelSet = new LabelSet
+        {
+            SetName   = setName,
+            GameId    = gameId,
+            IsBuiltIn = false,
+        };
+        _db.LabelSets.Add(labelSet);
+        await _db.SaveChangesAsync(ct); // obtain labelSet.Id
+
+        // ── symbol array ──────────────────────────────────────────────────────
+        if (root.TryGetProperty("symbol", out var symbolArr))
+        {
+            foreach (var sym in symbolArr.EnumerateArray())
+            {
+                var address = sym.TryGetProperty("address", out var ap) ? ap.GetString() : null;
+                var name    = sym.TryGetProperty("label",   out var lp) ? lp.GetString() : null;
+                var comment = sym.TryGetProperty("comment", out var cp)
+                              && cp.ValueKind == JsonValueKind.String
+                              ? cp.GetString() : null;
+
+                if (string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                _db.Labels.Add(new Label
+                {
+                    LabelSetId = labelSet.Id,
+                    Address    = address,
+                    Name       = name,
+                    Comment    = comment,
+                    Type       = LabelType.Address,
+                });
+            }
+        }
+
+        // ── structs array ─────────────────────────────────────────────────────
+        if (root.TryGetProperty("structs", out var structsArr))
+        {
+            foreach (var st in structsArr.EnumerateArray())
+            {
+                var structName    = st.TryGetProperty("name",        out var np) ? np.GetString() : null;
+                var baseAddress   = st.TryGetProperty("baseAddress", out var bp) ? bp.GetString() : null;
+
+                if (string.IsNullOrWhiteSpace(structName) || string.IsNullOrWhiteSpace(baseAddress))
+                    continue;
+
+                var structLabel = new Label
+                {
+                    LabelSetId = labelSet.Id,
+                    Address    = baseAddress,
+                    Name       = structName,
+                    Type       = LabelType.Struct,
+                };
+                _db.Labels.Add(structLabel);
+                await _db.SaveChangesAsync(ct); // obtain structLabel.Id
+
+                if (!st.TryGetProperty("members", out var membersArr)) continue;
+
+                foreach (var m in membersArr.EnumerateArray())
+                {
+                    int  offset     = m.TryGetProperty("offset", out var offProp) ? offProp.GetInt32() : 0;
+                    var  memberName = m.TryGetProperty("name",   out var mnp)     ? mnp.GetString()    : null;
+
+                    if (string.IsNullOrWhiteSpace(memberName)) continue;
+
+                    _db.LabelMembers.Add(new LabelMember
+                    {
+                        LabelId = structLabel.Id,
+                        Offset  = offset,
+                        Name    = memberName,
+                    });
+                }
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
     }
 
     // ── Seed data ──────────────────────────────────────────────────────────────
