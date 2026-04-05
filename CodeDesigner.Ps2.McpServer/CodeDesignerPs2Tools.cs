@@ -506,22 +506,67 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_labels")]
-    [Description("Return all symbol labels and optional comments from the PS2 symbol database (ps2-labels.json). " +
-                 "Useful for resolving addresses to known function or variable names.")]
+    [Description("Return all symbol labels (with type badges) from the active label set. " +
+                 "Useful for resolving addresses to known function, struct, array, or string labels.")]
     public async Task<string> GetLabels(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETLABELS" }, cancellationToken);
         return FormatLabels(json);
     }
 
+    [McpServerTool(Name = "get_function_labels")]
+    [Description("Return only Function-typed labels from the active label set, including named " +
+                 "argument and return register annotations. Useful for understanding calling conventions.")]
+    public async Task<string> GetFunctionLabels(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETLABELS" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
+                return $"Error: {errProp.GetString()}";
+
+            if (!root.TryGetProperty("Labels", out var labelsArr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            foreach (var item in labelsArr.EnumerateArray())
+            {
+                string addr  = item.TryGetProperty("address", out var a) ? (a.GetString() ?? "?") : "?";
+                string label = item.TryGetProperty("label",   out var l) ? (l.GetString() ?? "?") : "?";
+
+                // Only include labels that look like functions (FNC_ prefix from sync).
+                if (!label.StartsWith("FNC_", StringComparison.Ordinal)) continue;
+
+                string? cmt = item.TryGetProperty("comment", out var c) ? c.GetString() : null;
+                sb.Append($"  {addr,-12}  {label}");
+                if (!string.IsNullOrEmpty(cmt))
+                    sb.Append($"  ; {cmt}");
+                sb.AppendLine();
+            }
+
+            return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no function labels defined)");
+        }
+        catch { return json; }
+    }
+
     [McpServerTool(Name = "add_label")]
-    [Description("Insert or update a symbol label in the PS2 label database (ps2-labels.json). " +
-                 "If a label already exists at the given address it is overwritten. " +
-                 "Changes are persisted to disk immediately.")]
+    [Description("Insert or update a label entry in the active label set. Supports all label types: " +
+                 "Address, Struct, Function, Array, ArrayOfPointers, LinkedList, String. " +
+                 "If a label already exists at the given address it is overwritten.")]
     public async Task<string> AddLabel(
         [Description("Virtual address to label (hex or decimal).")] string address,
-        [Description("Label name (e.g. 'scePadRead' or 'FNC_0x80011234').")] string label,
+        [Description("Label name (e.g. 'scePadRead').")] string label,
         [Description("Optional comment to attach to the label.")] string? comment = null,
+        [Description("Label type: Address (default), Struct, Function, Array, ArrayOfPointers, LinkedList, String.")] string? type = null,
+        [Description("For Function: comma-separated argument registers, e.g. 'a0=playerPtr,a1=flags'.")] string? argRegs = null,
+        [Description("For Function: comma-separated return registers, e.g. 'v0=result'.")] string? returnRegs = null,
+        [Description("For Array: byte stride between elements, e.g. 4.")] int? elementStride = null,
+        [Description("For Array: total number of elements (omit if unknown).")] int? elementCount = null,
+        [Description("For LinkedList: byte offset within each node where the next-node pointer lives.")] int? nodeNextOffset = null,
+        [Description("For LinkedList: total size of one node in bytes (informational).")] int? nodeSize = null,
         CancellationToken cancellationToken = default)
     {
         uint? parsedAddress = TryParseAddress(address);
@@ -529,15 +574,27 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
             return $"Error: invalid address '{address}'.";
 
         var json = await bridge.SendAsync(
-            new { Command = "ADDLABEL", Address = parsedAddress.Value, Label = label, Comment = comment },
+            new
+            {
+                Command = "ADDLABEL",
+                Address = parsedAddress.Value,
+                Label   = label,
+                Comment = comment,
+                LabelType = type,
+                ArgRegs      = argRegs?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                ReturnRegs   = returnRegs?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                ElementStride = elementStride,
+                ElementCount  = elementCount,
+                NodeNextOffset = nodeNextOffset,
+                NodeSize      = nodeSize,
+            },
             cancellationToken);
 
         return SimpleMessage(json);
     }
 
     [McpServerTool(Name = "delete_label")]
-    [Description("Remove a symbol label from the PS2 label database (ps2-labels.json). " +
-                 "Changes are persisted to disk immediately.")]
+    [Description("Remove a symbol label from the active label set. Changes are persisted to disk immediately.")]
     public async Task<string> DeleteLabel(
         [Description("Virtual address of the label to remove (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
@@ -551,6 +608,53 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, ProgressRepo
             cancellationToken);
 
         return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "resolve_strings")]
+    [Description("Read each String-typed label's memory content from live PCSX2 (PINE mode) and " +
+                 "update the display to show the null-terminated ASCII string alongside the label name. " +
+                 "Requires PINE mode (PCSX2 with PINE enabled).")]
+    public async Task<string> ResolveStrings(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "RESOLVESTRINGS" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "resolve_linked_list")]
+    [Description("Walk a linked list in live PCSX2 memory starting from the given address, using " +
+                 "nextOffset as the byte offset within each node where the next-node pointer lives. " +
+                 "Assigns indexed labels (Name[0], Name[1], …) to each discovered node. " +
+                 "Requires PINE mode (PCSX2 with PINE enabled).")]
+    public async Task<string> ResolveLinkedList(
+        [Description("Virtual address of the first node (hex or decimal).")] string address,
+        [Description("Byte offset within each node of the next-node pointer (e.g. 0 or 4).")] int nextOffset,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedAddress = TryParseAddress(address);
+        if (parsedAddress is null)
+            return $"Error: invalid address '{address}'.";
+
+        var json = await bridge.SendAsync(
+            new { Command = "RESOLVELINKEDLIST", Address = parsedAddress.Value, MemberOffset = nextOffset },
+            cancellationToken);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.GetProperty("Success").GetBoolean())
+                return $"Error: {(root.TryGetProperty("Error", out var e) ? e.GetString() : "RESOLVELINKEDLIST failed")}";
+
+            string msg = root.TryGetProperty("Message", out var m) ? (m.GetString() ?? "") : "";
+            string? data = root.TryGetProperty("Data", out var d) ? d.GetString() : null;
+            if (data is not null)
+            {
+                var addrs = JsonSerializer.Deserialize<List<string>>(data) ?? [];
+                return $"{msg}\n" + string.Join("\n", addrs.Select((a, i) => $"  [{i}] {a}"));
+            }
+            return msg;
+        }
+        catch { return json; }
     }
 
     // -------------------------------------------------------------------------

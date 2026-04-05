@@ -333,6 +333,36 @@ namespace CodeDesigner.Ps2.LabelManager
             return set;
         }
 
+        // ── Display helpers ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Returns the canonical display text for a label entry.
+        /// <list type="bullet">
+        ///   <item><see cref="LabelType.Function"/> → <c>FNC_Name</c></item>
+        ///   <item><see cref="LabelType.Array"/> / <see cref="LabelType.LinkedList"/> with an
+        ///     index → <c>Name[index]</c></item>
+        ///   <item>Everything else → <c>Name</c></item>
+        /// </list>
+        /// </summary>
+        /// <param name="entry">The label entry to format.</param>
+        /// <param name="elementIndex">Optional element/node index for array or linked-list entries.</param>
+        public static string GetDisplayLabel(LabelEntry entry, int? elementIndex = null)
+        {
+            switch (entry.Type)
+            {
+                case LabelType.Function:
+                    return $"FNC_{entry.Name}";
+
+                case LabelType.Array:
+                case LabelType.ArrayOfPointers:
+                case LabelType.LinkedList:
+                    return elementIndex.HasValue ? $"{entry.Name}[{elementIndex}]" : entry.Name;
+
+                default:
+                    return entry.Name;
+            }
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────
 
         private static string LabelsDir(string workspaceDir, string gameId) =>
