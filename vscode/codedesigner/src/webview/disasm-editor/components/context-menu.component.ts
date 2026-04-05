@@ -87,11 +87,8 @@ export interface ContextMenuData {
       <span class="ctx-menu-icon">→</span>Go to Target Address
     </div>
     <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item" (click)="onEditRow()">
-      <span class="ctx-menu-icon">✎</span>Edit / Add Label…
-    </div>
-    <div class="ctx-menu-item" aria-label="Add to Label Manager" (click)="onAddToLabelManager()">
-      <span class="ctx-menu-icon" aria-hidden="true">[L]</span>{{ data()?.currentLabel ? 'Edit in Label Manager…' : 'Add to Label Manager…' }}
+    <div class="ctx-menu-item" (click)="onAddToLabelManager()">
+      <span class="ctx-menu-icon">&#128211;</span>{{ data()?.currentLabel ? 'Edit Label…' : 'Add Label…' }}
     </div>
   `,
   styles: [`
@@ -117,7 +114,6 @@ export class ContextMenuComponent {
   readonly addWatch = output<void>();
   readonly removeWatch = output<void>();
   readonly gotoTarget = output<void>();
-  readonly editRow = output<void>();
   readonly addToLabelManager = output<void>();
   readonly closed = output<void>();
 
@@ -198,11 +194,6 @@ export class ContextMenuComponent {
   onGotoTarget(): void {
     if (!this.data()?.hasTarget) { return; } // Disabled
     this.gotoTarget.emit();
-    this.close();
-  }
-
-  onEditRow(): void {
-    this.editRow.emit();
     this.close();
   }
 
