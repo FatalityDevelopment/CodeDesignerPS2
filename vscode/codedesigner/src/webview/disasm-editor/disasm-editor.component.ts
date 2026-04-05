@@ -518,6 +518,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.vscode.postMessage({ type: 'getThreads' });
     } else if (tab === 'modules' && this.svc.state.isLive) {
       this.vscode.postMessage({ type: 'getModules' });
+    } else if (tab === 'watches' && this.svc.state.isLive && this.svc.state.watches.size > 0) {
+      this.vscode.postMessage({ type: 'getWatchValues', addresses: Array.from(this.svc.state.watches) });
     }
   }
 
@@ -2231,6 +2233,10 @@ export class DisasmEditorComponent implements AfterViewInit {
         params.vscode.postMessage({ type: 'getThreads' });
       } else if (tab === 'breakpoints') {
         params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
+      } else if (tab === 'watches') {
+        if (params.state.watches.size > 0) {
+          params.vscode.postMessage({ type: 'getWatchValues', addresses: Array.from(params.state.watches) });
+        }
       } else if (tab === 'modules') {
         params.vscode.postMessage({ type: 'getModules' });
       }

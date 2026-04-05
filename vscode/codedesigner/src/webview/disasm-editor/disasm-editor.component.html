@@ -2,7 +2,7 @@
 <div id="header-toolbar">
     <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">&#8862; Symbols</button>
     <button class="header-tool-btn" id="registers-toggle-btn" title="Toggle Registers Panel (Ctrl+Alt+R)">&#8863; Regs</button>
-    <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)">&#8693; Stack</button>
+    <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)">&#8693; Debug Tools</button>
     <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
     <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
     <button class="header-tool-btn live-only" id="setpc-toggle-btn" title="Set PC to Address (Ctrl+Alt+P)">&#9655; Set PC</button>
@@ -125,9 +125,14 @@
     [threads]="bottomPanelThreads()"
     [modules]="bottomPanelModules()"
     [breakpoints]="bottomPanelBreakpoints()"
+    [watches]="debugPanelWatches()"
+    [watchValues]="debugPanelWatchValues()"
     (navigateToAddress)="onBottomPanelNavigate($event)"
     (removeBreakpoint)="onBottomPanelRemoveBreakpoint($event)"
     (clearAllBreakpoints)="onBottomPanelClearAllBreakpoints()"
+    (removeWatch)="onDebugPanelRemoveWatch($event)"
+    (clearAllWatches)="onDebugPanelClearAllWatches()"
+    (navigateToWatchAddress)="onBottomPanelNavigate($event)"
     (tabSelected)="onBottomPanelTabSelected($event)"
     (refreshTab)="onBottomPanelRefresh($event)"
   />
