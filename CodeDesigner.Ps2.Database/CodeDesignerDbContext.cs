@@ -35,6 +35,18 @@ public class CodeDesignerDbContext : DbContext
     /// <summary>Session-lifecycle tasks belonging to an MCP agent.</summary>
     public DbSet<McpAgentTask> McpAgentTasks { get; set; } = null!;
 
+    /// <summary>Game metadata returned from PCSX2 (title, CRC, cover art, ISO path, etc.).</summary>
+    public DbSet<Game> Games { get; set; } = null!;
+
+    /// <summary>Save-state snapshot metadata for a game session.</summary>
+    public DbSet<Snapshot> Snapshots { get; set; } = null!;
+
+    /// <summary>Named collections of cheats associated with a game.</summary>
+    public DbSet<CheatList> CheatLists { get; set; } = null!;
+
+    /// <summary>Individual cheat entries (CheatBlock) within a cheat list.</summary>
+    public DbSet<Cheat> Cheats { get; set; } = null!;
+
     // ── Construction ──────────────────────────────────────────────────────────
 
     public CodeDesignerDbContext(DbContextOptions<CodeDesignerDbContext> options)
@@ -125,6 +137,54 @@ public class CodeDesignerDbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(t => new { t.McpAgentId, t.Phase, t.SortOrder });
+        });
+
+        // ── Game ───────────────────────────────────────────────────────────────
+        modelBuilder.Entity<Game>(entity =>
+        {
+            entity.HasKey(g => g.Id);
+            entity.Property(g => g.Title).HasMaxLength(512).IsRequired();
+            entity.Property(g => g.CRC).HasMaxLength(16);
+            entity.HasIndex(g => g.CRC);
+        });
+
+        // ── Snapshot ───────────────────────────────────────────────────────────
+        modelBuilder.Entity<Snapshot>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.Title).HasMaxLength(512).IsRequired();
+            entity.Property(s => s.SnapshotPath).HasMaxLength(1024).IsRequired();
+
+            entity.HasOne(s => s.Game)
+                  .WithMany(g => g.Snapshots)
+                  .HasForeignKey(s => s.GameId)
+                  .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // ── CheatList ──────────────────────────────────────────────────────────
+        modelBuilder.Entity<CheatList>(entity =>
+        {
+            entity.HasKey(cl => cl.Id);
+            entity.Property(cl => cl.Title).HasMaxLength(512).IsRequired();
+
+            entity.HasOne(cl => cl.Game)
+                  .WithMany(g => g.CheatLists)
+                  .HasForeignKey(cl => cl.GameId)
+                  .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // ── Cheat ──────────────────────────────────────────────────────────────
+        modelBuilder.Entity<Cheat>(entity =>
+        {
+            entity.HasKey(c => c.Id);
+            entity.Property(c => c.Label).HasMaxLength(512).IsRequired();
+
+            entity.HasOne(c => c.CheatList)
+                  .WithMany(cl => cl.Cheats)
+                  .HasForeignKey(c => c.CheatListId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(c => new { c.CheatListId, c.SortOrder });
         });
     }
 }
