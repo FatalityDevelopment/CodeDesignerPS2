@@ -1,0 +1,32 @@
+dbug: Microsoft.Extensions.Hosting.Internal.Host[1]
+      Hosting starting
+info: MediusHostedService[0]
+      ═══════════════════════════════════════════════════
+info: MediusHostedService[0]
+        CodeDesigner PS2 Medius Server
+info: MediusHostedService[0]
+        Server IP   : 127.0.0.1
+info: MediusHostedService[0]
+        MUIS Port   : 10075
+info: MediusHostedService[0]
+        MAS Port    : 10071
+info: MediusHostedService[0]
+        MLS Port    : 10073
+info: MediusHostedService[0]
+        AppIds      : 10683, 10684
+info: MediusHostedService[0]
+      ═══════════════════════════════════════════════════
+info: CodeDesigner.Ps2.MediusServer.Servers.MuisServer[0]
+      [MUIS] Listening on 0.0.0.0:10075
+info: CodeDesigner.Ps2.MediusServer.Servers.MasServer[0]
+      [MAS] Listening on 0.0.0.0:10071
+info: CodeDesigner.Ps2.MediusServer.Servers.MlsServer[0]
+      [MLS] Listening on 0.0.0.0:10073
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Production
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: C:\Users\tholu\Desktop\CodeDesigner\CodeDesigner.Ps2.MediusServer
+dbug: Microsoft.Extensions.Hosting.Internal.Host[2]
+      Hosting started
