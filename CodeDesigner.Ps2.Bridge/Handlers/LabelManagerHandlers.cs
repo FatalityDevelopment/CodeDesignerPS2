@@ -25,6 +25,7 @@ namespace CodeDesigner.Ps2.Bridge
             Address = e.Address,
             Name    = e.Name,
             Comment = e.Comment,
+            Hidden  = e.Hidden,
             Members = e.Members.Select(m => new LabelMemberPayload { Offset = m.Offset, Name = m.Name }).ToList(),
         };
 
@@ -34,6 +35,7 @@ namespace CodeDesigner.Ps2.Bridge
             Address = w.Address,
             Name    = w.Name,
             Comment = w.Comment,
+            Hidden  = w.Hidden,
             Members = w.Members?.Select(m => new MgrMember { Offset = m.Offset, Name = m.Name }).ToList() ?? [],
         };
 

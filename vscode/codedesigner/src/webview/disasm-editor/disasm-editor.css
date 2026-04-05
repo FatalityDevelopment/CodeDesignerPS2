@@ -3411,13 +3411,30 @@ app-bottom-panel {
     vertical-align: middle;
 }
 #lm-table tr:hover td { background: #2a2d2e; }
-.lm-struct-row > td:first-child { border-left: 2px solid #569cd6; }
+.lm-struct-row .lm-col-addr { border-left: 2px solid #569cd6; }
 
+.lm-col-vis     { width: 36px; text-align: center; padding: 0 2px !important; }
 .lm-col-addr    { width: 110px; }
 .lm-col-name    { width: 200px; }
 .lm-col-comment { width: auto; }
 .lm-col-members { width: 110px; }
 .lm-col-actions { width: 70px; text-align: right; }
+
+/* Hidden row — dim the text to signal the entry is suppressed */
+.lm-hidden-row td { opacity: 0.45; }
+.lm-hidden-row .lm-vis-btn { opacity: 1 !important; }
+
+.lm-vis-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px;
+    opacity: 0.65;
+}
+.lm-vis-btn:hover { opacity: 1; }
+.lm-vis-btn:disabled { cursor: default; opacity: 0.3; }
 
 .lm-mono { font-family: monospace; color: #9cdcfe; }
 .lm-muted { color: #666; }

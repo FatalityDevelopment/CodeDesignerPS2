@@ -26,6 +26,15 @@ namespace CodeDesigner.Ps2.LabelManager.Models
         public string? Comment { get; set; }
 
         /// <summary>
+        /// When <c>true</c> the entry is hidden from the disassembler view and the
+        /// structs panel. It still appears in the Label Manager itself so it can be
+        /// re-enabled at any time.
+        /// </summary>
+        [JsonPropertyName("hidden")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Hidden { get; set; }
+
+        /// <summary>
         /// Struct member fields. Empty list = plain label; non-empty = struct pointer.
         /// </summary>
         [JsonPropertyName("members")]
