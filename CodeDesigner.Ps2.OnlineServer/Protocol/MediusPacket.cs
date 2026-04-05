@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.MediusServer.Protocol;
+namespace CodeDesigner.Ps2.OnlineServer.Protocol;
 
 /// <summary>
 /// Parsed Medius application-layer message extracted from an RT_MSG_CLIENT_APP_TOSERVER payload.

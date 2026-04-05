@@ -1,13 +1,13 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
-using CodeDesigner.Ps2.MediusServer.Config;
-using CodeDesigner.Ps2.MediusServer.Crypto;
-using CodeDesigner.Ps2.MediusServer.Models;
-using CodeDesigner.Ps2.MediusServer.Protocol;
+using CodeDesigner.Ps2.OnlineServer.Config;
+using CodeDesigner.Ps2.OnlineServer.Crypto;
+using CodeDesigner.Ps2.OnlineServer.Models;
+using CodeDesigner.Ps2.OnlineServer.Protocol;
 using Microsoft.Extensions.Logging;
 
-namespace CodeDesigner.Ps2.MediusServer.Servers;
+namespace CodeDesigner.Ps2.OnlineServer.Servers;
 
 /// <summary>
 /// Abstract TCP server that accepts SCERT connections, manages the per-client
@@ -29,14 +29,14 @@ namespace CodeDesigner.Ps2.MediusServer.Servers;
 public abstract class BaseMediusTcpServer
 {
     private readonly ILogger      _log;
-    private readonly MediusConfig _config;
+    private readonly OnlineServerConfig _config;
     private TcpListener?         _listener;
 
     private uint _scertIdCounter = 0;
 
     protected readonly ConcurrentDictionary<string, (MediusClientState State, TcpClient Client)> Clients = new();
 
-    protected BaseMediusTcpServer(ILogger log, MediusConfig config)
+    protected BaseMediusTcpServer(ILogger log, OnlineServerConfig config)
     {
         _log    = log;
         _config = config;

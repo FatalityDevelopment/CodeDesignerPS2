@@ -1,11 +1,11 @@
 using System.Net.Sockets;
-using CodeDesigner.Ps2.MediusServer.Config;
-using CodeDesigner.Ps2.MediusServer.Models;
-using CodeDesigner.Ps2.MediusServer.Protocol;
-using CodeDesigner.Ps2.MediusServer.Storage;
+using CodeDesigner.Ps2.OnlineServer.Config;
+using CodeDesigner.Ps2.OnlineServer.Models;
+using CodeDesigner.Ps2.OnlineServer.Protocol;
+using CodeDesigner.Ps2.OnlineServer.Storage;
 using Microsoft.Extensions.Logging;
 
-namespace CodeDesigner.Ps2.MediusServer.Servers;
+namespace CodeDesigner.Ps2.OnlineServer.Servers;
 
 /// <summary>
 /// MLS — Medius Lobby Server.
@@ -16,11 +16,11 @@ namespace CodeDesigner.Ps2.MediusServer.Servers;
 /// </summary>
 public class MlsServer : BaseMediusTcpServer
 {
-    private readonly MediusConfig       _config;
+    private readonly OnlineServerConfig       _config;
     private readonly InMemoryStorage    _store;
     private readonly ILogger<MlsServer> _log;
 
-    public MlsServer(MediusConfig config, InMemoryStorage store, ILogger<MlsServer> log)
+    public MlsServer(OnlineServerConfig config, InMemoryStorage store, ILogger<MlsServer> log)
         : base(log, config)
     {
         _config    = config;

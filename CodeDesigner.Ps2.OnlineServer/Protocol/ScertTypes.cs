@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.MediusServer.Protocol;
+namespace CodeDesigner.Ps2.OnlineServer.Protocol;
 
 /// <summary>
 /// SCERT (SCE Real-Time) transport layer message type IDs.

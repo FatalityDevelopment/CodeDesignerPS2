@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace CodeDesigner.Ps2.MediusServer.Protocol;
+namespace CodeDesigner.Ps2.OnlineServer.Protocol;
 
 /// <summary>
 /// Reads Medius binary fields from a byte buffer using the endianness that the PS2 sends.

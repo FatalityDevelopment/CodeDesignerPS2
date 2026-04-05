@@ -1,4 +1,4 @@
-namespace CodeDesigner.Ps2.MediusServer.Crypto;
+namespace CodeDesigner.Ps2.OnlineServer.Crypto;
 
 /// <summary>
 /// PS2 Medius custom RC4 stream cipher.

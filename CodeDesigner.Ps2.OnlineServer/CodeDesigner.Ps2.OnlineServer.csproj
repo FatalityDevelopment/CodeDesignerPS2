@@ -5,8 +5,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>CodeDesigner.Ps2.MediusServer</AssemblyName>
-    <RootNamespace>CodeDesigner.Ps2.MediusServer</RootNamespace>
+    <AssemblyName>CodeDesigner.Ps2.OnlineServer</AssemblyName>
+    <RootNamespace>CodeDesigner.Ps2.OnlineServer</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +17,12 @@
   <ItemGroup>
     <Content Include="config.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Data\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Certificates\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
 

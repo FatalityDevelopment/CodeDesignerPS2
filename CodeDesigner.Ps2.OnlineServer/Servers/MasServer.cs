@@ -1,13 +1,13 @@
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
-using CodeDesigner.Ps2.MediusServer.Config;
-using CodeDesigner.Ps2.MediusServer.Models;
-using CodeDesigner.Ps2.MediusServer.Protocol;
-using CodeDesigner.Ps2.MediusServer.Storage;
+using CodeDesigner.Ps2.OnlineServer.Config;
+using CodeDesigner.Ps2.OnlineServer.Models;
+using CodeDesigner.Ps2.OnlineServer.Protocol;
+using CodeDesigner.Ps2.OnlineServer.Storage;
 using Microsoft.Extensions.Logging;
 
-namespace CodeDesigner.Ps2.MediusServer.Servers;
+namespace CodeDesigner.Ps2.OnlineServer.Servers;
 
 /// <summary>
 /// MAS — Medius Authentication Server.
@@ -19,11 +19,11 @@ namespace CodeDesigner.Ps2.MediusServer.Servers;
 /// </summary>
 public class MasServer : BaseMediusTcpServer
 {
-    private readonly MediusConfig  _config;
+    private readonly OnlineServerConfig  _config;
     private readonly InMemoryStorage _store;
     private readonly ILogger<MasServer> _log;
 
-    public MasServer(MediusConfig config, InMemoryStorage store, ILogger<MasServer> log)
+    public MasServer(OnlineServerConfig config, InMemoryStorage store, ILogger<MasServer> log)
         : base(log, config)
     {
         _config    = config;

@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
 
-namespace CodeDesigner.Ps2.MediusServer.Protocol;
+namespace CodeDesigner.Ps2.OnlineServer.Protocol;
 
 /// <summary>
 /// Represents a raw decoded SCERT transport packet.

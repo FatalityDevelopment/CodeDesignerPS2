@@ -1,11 +1,11 @@
 using System.Net;
 using System.Net.Sockets;
-using CodeDesigner.Ps2.MediusServer.Config;
-using CodeDesigner.Ps2.MediusServer.Models;
-using CodeDesigner.Ps2.MediusServer.Protocol;
+using CodeDesigner.Ps2.OnlineServer.Config;
+using CodeDesigner.Ps2.OnlineServer.Models;
+using CodeDesigner.Ps2.OnlineServer.Protocol;
 using Microsoft.Extensions.Logging;
 
-namespace CodeDesigner.Ps2.MediusServer.Servers;
+namespace CodeDesigner.Ps2.OnlineServer.Servers;
 
 /// <summary>
 /// MUIS — Medius Universe Information Server.
@@ -22,10 +22,10 @@ namespace CodeDesigner.Ps2.MediusServer.Servers;
 /// </summary>
 public class MuisServer : BaseMediusTcpServer
 {
-    private readonly MediusConfig       _config;
+    private readonly OnlineServerConfig       _config;
     private readonly ILogger<MuisServer> _log;
 
-    public MuisServer(MediusConfig config, ILogger<MuisServer> log)
+    public MuisServer(OnlineServerConfig config, ILogger<MuisServer> log)
         : base(log, config)
     {
         _config    = config;
