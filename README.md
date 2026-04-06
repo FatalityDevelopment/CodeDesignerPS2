@@ -140,54 +140,36 @@ See [MCP_SERVER.md](MCP_SERVER.md) for setup instructions and a complete tool re
 
 ---
 
-## Projects at a glance
 
-| Project | Purpose |
-|---|---|
-| `CodeDesigner.Ps2.Common` | MIPS R5900 assembler, disassembler, encoder, decoder, per-instruction `Exec` |
-| `CodeDesigner.Ps2.Emulator` | Full PS2 EE + IOP emulator with hardware peripherals |
-| `CodeDesigner.Ps2.Bridge` | JSON socket server (port 8765) + PCSX2 PINE IPC client |
-| `CodeDesigner.Ps2.CdsLanguage` | Code Designer Script (`.cds`) two-pass compiler |
-| `CodeDesigner.Ps2.CheatEngine` | Per-frame GameShark/Action Replay code application engine |
-| `CodeDesigner.Ps2.CheatConverter` | Offline cheat format converter and auto-detector |
-| `CodeDesigner.Ps2.CheatPorter` | Port cheats between game revisions using 4-strategy address translation |
-| `CodeDesigner.Ps2.Recompiler` | Static recompiler: PS2 ELF → C++ source files |
-| `CodeDesigner.Ps2.MemoryCardManager` | Read/write PS2 memory card images (real FAT format) |
-| `CodeDesigner.Ps2.HddManager` | Browse PS2 HDD images (APA partitions, PFS filesystem) |
-| `CodeDesigner.Ps2.McpServer` | Model Context Protocol stdio bridge for GitHub Copilot |
-| `CodeDesigner.Ps2.TestProject` | ~1 100 unit tests covering instructions and emulator behaviour |
+## Dev environment
 
----
+Clone repository and sub-repositories(i.e pcsx2 and CheatCodeArchive)
+```
+git clone --recurse-submodules https://github.com/TylerDev888/CodeDesigner.git
+```
 
-## PS2 EE Architecture Notes
+Download pcsx2 dependencies
+```
+cd CodeDesigner
 
-- **CPU**: MIPS R5900 (64-bit MIPS III + PS2-specific extensions)
-- **GPRs**: 32 × 128-bit registers (lower 64 bits used for integer ops, upper 64 bits for SIMD)
-- **FPU (COP1)**: Single-precision; denormals flushed to zero; no IEEE 754 denormal support
-- **VU0**: 128-bit vector unit accessible in macro mode via COP2 instructions
-- **MMI**: Multimedia extensions (PAND, POR, PXOR, PNOR, PMULT, etc.)
-- **EE RAM**: 32 MB at physical `0x00000000`
-- **BIOS ROM**: 4 MB at physical `0x1FC00000`
-- **Scratchpad**: 16 KB at `0x70000000`
-- **Reset vector**: `0xBFC00000` (KSEG1 mirror of BIOS base)
+Invoke-WebRequest "https://github.com/PCSX2/pcsx2-windows-dependencies/releases/download/latest-windows-dependencies/pcsx2-windows-dependencies.7z" -OutFile deps.7z; New-Item -ItemType Directory -Force pcsx2 | Out-Null; & "C:\Program Files\7-Zip\7z.exe" x deps.7z -o"pcsx2" -y; Remove-Item deps.7z
+```
 
----
+####Build Code Designer
+```
+1. Open CodDesigner folder and open CodeDesigner.sln
+2. Build CodeDesigner.sln
+3. Build CodeDesigner.Ps2.Mcp
+```
 
-## VS Code Extension
+####Build Pcsx2
+```
+1. Open pcsx2 folder and open PCSX2_qt.sln
+2. build pcsx2-qt
+```
 
-The extension (`vscode/codedesigner/`) provides:
-
-- **Disassembler editor** — open any `.bin` file or live EE RAM region
-- **Disassembly panel** — cheats tab, CDS tab, recompile tab, settings
-- **Memory card overlay** — browse, import, export, delete saves
-- **HDD overlay** — browse PS2 HDD images, export files
-- **Value scanner** — scan EE RAM for strings, integers, floats, pointers, functions
-- **Pointer scanner** — find code-referenced pointer chains
-
-Build the extension:
-
-```bash
-cd vscode
-npm install
-npm run build
+Debug Extension
+```
+1. open CodeDesigner\vscode\codedesigner in vs code
+2. press F5 to debug extension
 ```
