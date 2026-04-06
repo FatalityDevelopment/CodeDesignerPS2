@@ -90,6 +90,27 @@ public class BulkCheatParser
         var gameCache = await _db.Games
             .ToDictionaryAsync(g => g.Title, StringComparer.OrdinalIgnoreCase, ct);
 
+        // Pre-load disc caches keyed by (game title + serial) and (game title + region name).
+        var discsBySerial = new Dictionary<string, GameDisc>(StringComparer.OrdinalIgnoreCase);
+        var discsByRegion = new Dictionary<string, GameDisc>(StringComparer.OrdinalIgnoreCase);
+        foreach (var disc in await _db.GameDiscs
+                     .Include(d => d.Game)
+                     .Include(d => d.GameRegion)
+                     .ToListAsync(ct))
+        {
+            if (disc.Serial != null)
+                discsBySerial[$"{disc.Game.Title}||{disc.Serial}"] = disc;
+            discsByRegion[$"{disc.Game.Title}||{disc.GameRegion.Name}"] = disc;
+        }
+
+        // Pre-load cheat list cache (no cheats included — they are bulk-deleted on re-import).
+        var cheatListCache = await _db.CheatLists
+            .ToDictionaryAsync(cl => (cl.GameDiscId, cl.Title), ct);
+
+        // Tracks cheat lists staged but not yet saved in the current folder pass.
+        // Key: "{gameTitle}||{listTitle}" — used to avoid duplicates within a folder.
+        var pendingCheatLists = new Dictionary<string, CheatList>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var folderName in Ps2Folders)
         {
             var folderPath = Path.Combine(dbRoot, folderName);
@@ -98,11 +119,18 @@ public class BulkCheatParser
 
             var source = SourceLabels.TryGetValue(folderName, out var lbl) ? lbl : folderName;
 
+            pendingCheatLists.Clear();
+
             foreach (var filePath in Directory.EnumerateFiles(folderPath, "*.txt"))
             {
                 try
                 {
-                    await ProcessFileAsync(filePath, source, regionCache, gameCache, ct);
+                    await ProcessFileAsync(
+                        filePath, source,
+                        regionCache, gameCache,
+                        discsBySerial, discsByRegion,
+                        cheatListCache, pendingCheatLists,
+                        ct);
                 }
                 catch (Exception ex)
                 {
@@ -113,6 +141,11 @@ public class BulkCheatParser
             }
 
             await _db.SaveChangesAsync(ct);
+
+            // Merge newly persisted cheat lists into the main cache so that
+            // subsequent folders can find them by their now-assigned disc Id.
+            foreach (var cl in pendingCheatLists.Values)
+                cheatListCache[(cl.GameDiscId, cl.Title)] = cl;
         }
     }
 
@@ -123,6 +156,10 @@ public class BulkCheatParser
         string source,
         Dictionary<string, GameRegion> regionCache,
         Dictionary<string, Game> gameCache,
+        Dictionary<string, GameDisc> discsBySerial,
+        Dictionary<string, GameDisc> discsByRegion,
+        Dictionary<(int? discId, string title), CheatList> cheatListCache,
+        Dictionary<string, CheatList> pendingCheatLists,
         CancellationToken ct)
     {
         var parsed = ParseFile(filePath);
@@ -148,38 +185,66 @@ public class BulkCheatParser
             return g;
         });
 
-        // Save so Game.Id and GameRegion.Id are assigned before we need them.
-        await _db.SaveChangesAsync(ct);
-
-        // Resolve disc.
-        var disc = await ResolveDiscAsync(game, region, parsed.Serial, parsed.Hash, ct);
+        // Resolve disc via in-memory cache (no DB hit).
+        var disc = ResolveDisc(game, region, parsed.Serial, parsed.Hash, discsBySerial, discsByRegion);
 
         // CheatList title encodes the source so multiple databases don't collide.
         var listTitle = $"[{source}] {parsed.Name} [{regionName}]";
 
-        var cheatList = await _db.CheatLists
-            .Include(cl => cl.Cheats)
-                .ThenInclude(c => c.CheatLines)
-            .FirstOrDefaultAsync(
-                cl => cl.GameDiscId == disc.Id && cl.Title == listTitle, ct);
+        CheatList cheatList;
 
-        if (cheatList is null)
+        // 1. Check the in-folder pending cache first so two files that resolve to
+        //    the same disc+title within one folder don't create duplicate lists.
+        var pendingKey = $"{game.Title}||{listTitle}";
+        if (pendingCheatLists.TryGetValue(pendingKey, out var pendingList))
+        {
+            cheatList = pendingList;
+            cheatList.UpdatedAt = DateTime.UtcNow;
+            // Detach the previously staged cheats so they are not double-inserted.
+            // ToList() snapshots the collection before we clear it on the next line.
+            foreach (var c in cheatList.Cheats.ToList())
+            {
+                foreach (var line in c.CheatLines)
+                    _db.Entry(line).State = EntityState.Detached;
+                _db.Entry(c).State = EntityState.Detached;
+            }
+            cheatList.Cheats.Clear();
+        }
+        // 2. Check the pre-loaded DB cache (only valid for discs that already have an Id).
+        else if (disc.Id > 0 && cheatListCache.TryGetValue((disc.Id, listTitle), out var existingList))
+        {
+            cheatList = existingList;
+            cheatList.UpdatedAt = DateTime.UtcNow;
+            // Bulk-delete existing cheats without loading them into memory.
+            // CheatLines are deleted first because SQLite does not enforce FK
+            // cascades unless PRAGMA foreign_keys = ON.
+            var cheatIds = await _db.Cheats
+                .Where(c => c.CheatListId == cheatList.Id)
+                .Select(c => c.Id)
+                .ToListAsync(ct);
+            if (cheatIds.Count > 0)
+            {
+                await _db.CheatLines
+                    .Where(cl => cheatIds.Contains(cl.CheatId))
+                    .ExecuteDeleteAsync(ct);
+                await _db.Cheats
+                    .Where(c => c.CheatListId == cheatList.Id)
+                    .ExecuteDeleteAsync(ct);
+            }
+        }
+        // 3. No match anywhere — create a brand-new list.
+        else
         {
             cheatList = new CheatList
             {
                 Title = listTitle,
-                GameId = game.Id,
-                GameDiscId = disc.Id,
+                Game = game,
+                GameDisc = disc,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };
             _db.CheatLists.Add(cheatList);
-        }
-        else
-        {
-            cheatList.UpdatedAt = DateTime.UtcNow;
-            _db.Cheats.RemoveRange(cheatList.Cheats);
-            cheatList.Cheats.Clear();
+            pendingCheatLists[pendingKey] = cheatList;
         }
 
         int sortOrder = 0;
@@ -206,21 +271,20 @@ public class BulkCheatParser
         }
     }
 
-    private async Task<GameDisc> ResolveDiscAsync(
+    private GameDisc ResolveDisc(
         Game game,
         GameRegion region,
         string? serial,
         string? hash,
-        CancellationToken ct)
+        Dictionary<string, GameDisc> discsBySerial,
+        Dictionary<string, GameDisc> discsByRegion)
     {
         GameDisc? disc = null;
 
         if (!string.IsNullOrWhiteSpace(serial))
-            disc = await _db.GameDiscs.FirstOrDefaultAsync(
-                d => d.GameId == game.Id && d.Serial == serial, ct);
+            discsBySerial.TryGetValue($"{game.Title}||{serial}", out disc);
 
-        disc ??= await _db.GameDiscs.FirstOrDefaultAsync(
-            d => d.GameId == game.Id && d.GameRegionId == region.Id, ct);
+        disc ??= discsByRegion.GetValueOrDefault($"{game.Title}||{region.Name}");
 
         if (disc is null)
         {
@@ -232,7 +296,11 @@ public class BulkCheatParser
                 CRC = string.IsNullOrWhiteSpace(hash) ? null : hash.ToUpperInvariant(),
             };
             _db.GameDiscs.Add(disc);
-            await _db.SaveChangesAsync(ct);
+            // Cache the new disc so subsequent files within this import run
+            // for the same game + serial/region resolve to the same object.
+            if (disc.Serial != null)
+                discsBySerial[$"{game.Title}||{disc.Serial}"] = disc;
+            discsByRegion[$"{game.Title}||{region.Name}"] = disc;
         }
         else
         {
@@ -240,7 +308,10 @@ public class BulkCheatParser
             if (disc.CRC is null && !string.IsNullOrWhiteSpace(hash))
                 disc.CRC = hash.ToUpperInvariant();
             if (disc.Serial is null && !string.IsNullOrWhiteSpace(serial))
+            {
                 disc.Serial = serial;
+                discsBySerial[$"{game.Title}||{serial}"] = disc;
+            }
         }
 
         return disc;
