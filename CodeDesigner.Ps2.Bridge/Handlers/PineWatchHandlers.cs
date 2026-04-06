@@ -164,30 +164,30 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
-        // ── PINESAVESNAPSHOT ──────────────────────────────────────────────────
+        // ── PINESAVESCREENSHOT ────────────────────────────────────────────────
 
         /// <summary>
-        /// Handle PINESAVESNAPSHOT — triggers a save-state snapshot in PCSX2 via
-        /// the PINE MsgSaveSnapshot (0x32) opcode.
+        /// Handle PINESAVESCREENSHOT — triggers a screenshot save in PCSX2 via
+        /// the PINE MsgSaveScreenshot (0x32) opcode.
         /// </summary>
-        private string HandlePineSaveSnapshot()
+        private string HandlePineSaveScreenshot()
         {
             if (!IsPineMode)
-                return CreateErrorResponse("PINESAVESNAPSHOT requires PINE mode (connect to PCSX2 first)");
+                return CreateErrorResponse("PINESAVESCREENSHOT requires PINE mode (connect to PCSX2 first)");
 
             try
             {
-                PineClient!.SaveSnapshot();
+                PineClient!.SaveScreenshot();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
-                    Command = "PINESAVESNAPSHOT",
-                    Message = "Snapshot triggered in PCSX2",
+                    Command = "PINESAVESCREENSHOT",
+                    Message = "Screenshot saved in PCSX2",
                 });
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE SaveSnapshot failed: {ex.Message}");
+                return CreateErrorResponse($"PINE SaveScreenshot failed: {ex.Message}");
             }
         }
     }

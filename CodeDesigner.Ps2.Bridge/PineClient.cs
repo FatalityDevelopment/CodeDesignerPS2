@@ -91,7 +91,7 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgRemoveWatch       = 0x2F;
         private const byte MsgListWatches       = 0x30;
         private const byte MsgClearAllWatches   = 0x31;
-        private const byte MsgSaveSnapshot      = 0x32;
+        private const byte MsgSaveScreenshot    = 0x32;
 
         // ── PINE result codes ─────────────────────────────────────────────────
         private const byte IPC_OK   = 0x00;
@@ -1292,12 +1292,12 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// [Extended PINE] Triggers a save-state snapshot in PCSX2.
+        /// [Extended PINE] Triggers a screenshot save in PCSX2.
         /// </summary>
-        public void SaveSnapshot()
+        public void SaveScreenshot()
         {
-            byte[] rep = SendReceive(BuildSingleRequest(MsgSaveSnapshot), expectedReplySize: 5);
-            if (rep[4] != IPC_OK) throw PineFail("MsgSaveSnapshot");
+            byte[] rep = SendReceive(BuildSingleRequest(MsgSaveScreenshot), expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgSaveScreenshot");
         }
 
         // ── Bulk memory helpers ───────────────────────────────────────────────

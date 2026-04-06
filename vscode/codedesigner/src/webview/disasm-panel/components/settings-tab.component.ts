@@ -118,6 +118,11 @@ import { EmuOption, SnapshotEntry } from '../types';
             Take Snapshot (PCSX2)
           </button>
         </div>
+        <div class="row">
+          <button id="saveScreenshotBtn" (click)="saveScreenshotClick.emit()" [disabled]="!isConnected()">
+            Save Screenshot
+          </button>
+        </div>
       }
 
       <div class="snapshot-list">
@@ -161,6 +166,7 @@ export class SettingsTabComponent {
   readonly restartClick = output<void>();
   readonly snapshotClick = output<void>();
   readonly snapshotPcsx2Click = output<void>();
+  readonly saveScreenshotClick = output<void>();
   readonly importBinClick = output<void>();
   readonly emulatorChange = output<string>();
   readonly biosChange = output<string>();

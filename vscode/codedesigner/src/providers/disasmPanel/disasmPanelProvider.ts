@@ -243,6 +243,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'snapshotPcsx2':
                     await this.handleSnapshotPcsx2();
                     break;
+                case 'saveScreenshot':
+                    await this.handleSaveScreenshot();
+                    break;
                 case 'importBin':
                     await this.handleImportBin();
                     break;
@@ -1215,7 +1218,28 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Re-open all .bin files from an earlier snapshot folder. */
+    /**
+     * Take a screenshot of the game's screen in PCSX2 via the PINE socket bridge
+     * (PINESAVESCREENSHOT command → PineClient.SaveScreenshot opcode 0x32).
+     * Only available in PINE mode.
+     */
+    private async handleSaveScreenshot(): Promise<void> {
+        const out = getOutputChannel();
+
+        if (!this.socketClient.isConnected()) {
+            vscode.window.showWarningMessage('Not connected to emulator.');
+            return;
+        }
+
+        try {
+            await this.socketClient.pineSaveScreenshot();
+            out.info('Screenshot saved in PCSX2.');
+            vscode.window.showInformationMessage('Screenshot saved in PCSX2.');
+        } catch (err: any) {
+            out.error(`Save screenshot failed: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`Save screenshot failed: ${err?.message ?? err}`);
+        }
+    }
     private async handleOpenSnapshot(snapshotPath: string): Promise<void> {
         // For PCSX2 .p2s snapshots, open the .bin files from the companion extracted directory.
         const dirPath = snapshotPath.endsWith('.p2s')

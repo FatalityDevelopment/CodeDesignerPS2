@@ -231,6 +231,10 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
     this.bridge.postMessage({ command: 'snapshotPcsx2' });
   }
 
+  saveScreenshot(): void {
+    this.bridge.postMessage({ command: 'saveScreenshot' });
+  }
+
   importBin(): void {
     this.bridge.postMessage({ command: 'importBin' });
   }

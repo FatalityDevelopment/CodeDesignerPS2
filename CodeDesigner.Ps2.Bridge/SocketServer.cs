@@ -1194,9 +1194,9 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PINE_CLEAR_ALL_WATCHES":
                         return HandlePineClearAllWatches();
 
-                    case "PINESAVESNAPSHOT":
-                    case "PINE_SAVE_SNAPSHOT":
-                        return HandlePineSaveSnapshot();
+                    case "PINESAVESCREENSHOT":
+                    case "PINE_SAVE_SCREENSHOT":
+                        return HandlePineSaveScreenshot();
 
                     // ── Database query (read-only) ────────────────────────────
                     case "QUERYDB":
