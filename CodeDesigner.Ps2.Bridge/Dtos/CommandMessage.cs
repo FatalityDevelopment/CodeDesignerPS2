@@ -107,11 +107,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public List<int>? SearchPattern { get; set; }
 
-        // SETWATCHPOINT / CLEARWATCHPOINT fields
-        /// <summary>Watchpoint identifier for CLEARWATCHPOINT.</summary>
-        public string? WatchpointId { get; set; }
-        /// <summary>Watchpoint access type for SETWATCHPOINT: "write", "read", or "readwrite".</summary>
-        public string? WatchpointType { get; set; }
+        // PINEADDWATCH / PINEREMOVEWATCH / PINELISTWATCHES fields
+        /// <summary>
+        /// Condition bitmask for PINEADDWATCH: 0x01 = read, 0x02 = write, 0x03 = read+write.
+        /// </summary>
+        public byte? WatchCond { get; set; }
+
+        // QUERYDB fields
+        /// <summary>Read-only SELECT SQL statement to execute against the CodeDesigner SQLite database.</summary>
+        public string? SqlQuery { get; set; }
 
         // TRACECALLS fields
         /// <summary>Maximum number of EE instructions to trace for TRACECALLS (default 10 000).</summary>

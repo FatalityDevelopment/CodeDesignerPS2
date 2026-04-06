@@ -2474,97 +2474,6 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseS
         }
     }
 
-    [McpServerTool(Name = "set_memory_watchpoint")]
-    [DynamicDescription("set_memory_watchpoint_desc")]
-    public async Task<string> SetMemoryWatchpoint(
-        [Description("EE virtual address to watch (hex or decimal).")] string address,
-        [Description("Number of bytes to watch (1–256, default 4).")] int size = 4,
-        [Description("Access type to monitor: 'write' (default). 'read' and 'readwrite' are reserved for future use.")] string type = "write",
-        CancellationToken cancellationToken = default)
-    {
-        uint? parsedAddress = TryParseAddress(address);
-        if (parsedAddress is null)
-            return $"Error: invalid address '{address}'.";
-
-        var json = await bridge.SendAsync(
-            new { Command = "SETWATCHPOINT", Address = parsedAddress.Value, Length = size, WatchpointType = type },
-            cancellationToken);
-
-        return SimpleMessage(json);
-    }
-
-    [McpServerTool(Name = "clear_memory_watchpoint")]
-    [DynamicDescription("clear_memory_watchpoint_desc")]
-    public async Task<string> ClearMemoryWatchpoint(
-        [Description("Watchpoint ID to remove (e.g. 'wp-0'), as returned by set_memory_watchpoint.")] string watchpointId,
-        CancellationToken cancellationToken = default)
-    {
-        var json = await bridge.SendAsync(
-            new { Command = "CLEARWATCHPOINT", WatchpointId = watchpointId },
-            cancellationToken);
-        return SimpleMessage(json);
-    }
-
-    [McpServerTool(Name = "clear_all_memory_watchpoints")]
-    [DynamicDescription("clear_all_memory_watchpoints_desc")]
-    public async Task<string> ClearAllMemoryWatchpoints(CancellationToken cancellationToken = default)
-    {
-        var json = await bridge.SendAsync(new { Command = "CLEARALLWATCHPOINTS" }, cancellationToken);
-        return SimpleMessage(json);
-    }
-
-    [McpServerTool(Name = "list_memory_watchpoints")]
-    [DynamicDescription("list_memory_watchpoints_desc")]
-    public async Task<string> ListMemoryWatchpoints(CancellationToken cancellationToken = default)
-    {
-        var json = await bridge.SendAsync(new { Command = "LISTWATCHPOINTS" }, cancellationToken);
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
-                return $"Error: {err.GetString()}";
-
-            if (!root.TryGetProperty("Watchpoints", out var wps) ||
-                wps.ValueKind != JsonValueKind.Array)
-                return "No watchpoints registered.";
-
-            int count = wps.GetArrayLength();
-            if (count == 0) return "No watchpoints registered.";
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"Active watchpoints ({count}):");
-            foreach (var wp in wps.EnumerateArray())
-            {
-                string id   = wp.TryGetProperty("Id",      out var idP)   ? idP.GetString()   ?? "?" : "?";
-                string addr = wp.TryGetProperty("Address", out var addrP) ? addrP.GetString() ?? "?" : "?";
-                int    sz   = wp.TryGetProperty("Size",    out var szP)   ? szP.GetInt32()       : 0;
-                string ty   = wp.TryGetProperty("Type",    out var tyP)   ? tyP.GetString()   ?? "?" : "?";
-                sb.AppendLine($"  {id}: 0x{addr} size={sz} type={ty}");
-            }
-            return sb.ToString().TrimEnd();
-        }
-        catch { return json; }
-    }
-
-    [McpServerTool(Name = "get_watchpoint_hit")]
-    [DynamicDescription("get_watchpoint_hit_desc")]
-    public async Task<string> GetWatchpointHit(CancellationToken cancellationToken = default)
-    {
-        var json = await bridge.SendAsync(new { Command = "GETWATCHPOINTHIT" }, cancellationToken);
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
-                return $"Error: {err.GetString()}";
-            if (root.TryGetProperty("Message", out var msg) && msg.ValueKind == JsonValueKind.String)
-                return msg.GetString() ?? json;
-            return json;
-        }
-        catch { return json; }
-    }
-
     [McpServerTool(Name = "trace_calls")]
     [DynamicDescription("trace_calls_desc")]
     public async Task<string> TraceCalls(
@@ -2639,28 +2548,219 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseS
         catch { return json; }
     }
 
-    [McpServerTool(Name = "run_until_watchpoint")]
-    [DynamicDescription("run_until_watchpoint_desc")]
-    public async Task<string> RunUntilWatchpoint(
-        [Description("Timeout in milliseconds before giving up (default 15 000).")] int timeoutMs = 15_000,
+    // ── PINE hardware watchpoints (MsgAddWatch/RemoveWatch/ListWatches/ClearAllWatches) ──
+
+    [McpServerTool(Name = "pine_add_watch")]
+    [Description("Add a hardware memory watchpoint in PCSX2 via the PINE protocol (opcode 0x2E). " +
+                 "Backed by CBreakPoints MemCheck (MEMCHECK_BREAK). JIT-only — no effect under the interpreter or HLE. " +
+                 "PINE mode required (connect to PCSX2 with PINE enabled).")]
+    public async Task<string> PineAddWatch(
+        [Description("Inclusive start address of the memory range to watch (hex or decimal).")] string start,
+        [Description("Exclusive end address of the memory range to watch (hex or decimal).")] string end,
+        [Description("Condition bitmask: 1 = read, 2 = write, 3 = read+write (default 3).")] byte cond = 3,
+        [Description("CPU to watch: 0 = EE (default), 1 = IOP.")] byte cpu = 0,
         CancellationToken cancellationToken = default)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeoutMs + 5_000);
+        uint? parsedStart = TryParseAddress(start);
+        uint? parsedEnd   = TryParseAddress(end);
+        if (parsedStart is null) return $"Error: invalid start address '{start}'.";
+        if (parsedEnd   is null) return $"Error: invalid end address '{end}'.";
+        if (cond == 0 || cond > 3) return "Error: cond must be 1 (read), 2 (write), or 3 (read+write).";
 
         var json = await bridge.SendAsync(
-            new { Command = "RUNUNTILWATCHPOINT", TimeoutMs = timeoutMs },
-            cts.Token);
+            new { Command = "PINEADDWATCH", CpuSel = cpu, Address = parsedStart.Value, EndAddress = parsedEnd.Value, WatchCond = cond },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
 
+    [McpServerTool(Name = "pine_remove_watch")]
+    [Description("Remove a hardware memory watchpoint from PCSX2 via the PINE protocol (opcode 0x2F). " +
+                 "Returns an error if no matching range is found. PINE mode required.")]
+    public async Task<string> PineRemoveWatch(
+        [Description("Inclusive start address of the range to remove (hex or decimal).")] string start,
+        [Description("Exclusive end address of the range to remove (hex or decimal).")] string end,
+        [Description("CPU the watchpoint was registered on: 0 = EE (default), 1 = IOP.")] byte cpu = 0,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedStart = TryParseAddress(start);
+        uint? parsedEnd   = TryParseAddress(end);
+        if (parsedStart is null) return $"Error: invalid start address '{start}'.";
+        if (parsedEnd   is null) return $"Error: invalid end address '{end}'.";
+
+        var json = await bridge.SendAsync(
+            new { Command = "PINEREMOVEWATCH", CpuSel = cpu, Address = parsedStart.Value, EndAddress = parsedEnd.Value },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pine_list_watches")]
+    [Description("List all active hardware memory watchpoints in PCSX2 via the PINE protocol (opcode 0x30). " +
+                 "Each entry shows CPU, start address, end address, and condition. PINE mode required.")]
+    public async Task<string> PineListWatches(
+        [Description("CPU filter: 0 = EE only, 1 = IOP only, 255 = both (default).")] byte cpuSel = 0xFF,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "PINELISTWATCHES", CpuSel = cpuSel },
+            cancellationToken);
         try
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
                 return $"Error: {err.GetString()}";
-            if (root.TryGetProperty("Message", out var msg) && msg.ValueKind == JsonValueKind.String)
-                return msg.GetString() ?? json;
-            return json;
+
+            if (!root.TryGetProperty("PineWatches", out var watches) ||
+                watches.ValueKind != JsonValueKind.Array)
+                return "No hardware watchpoints active.";
+
+            int count = watches.GetArrayLength();
+            if (count == 0) return "No hardware watchpoints active.";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Active PINE hardware watchpoints ({count}):");
+            foreach (var w in watches.EnumerateArray())
+            {
+                string cpu   = w.TryGetProperty("Cpu",   out var cp) ? cp.GetString() ?? "?" : "?";
+                string wStart = w.TryGetProperty("Start", out var st) ? st.GetString() ?? "?" : "?";
+                string wEnd   = w.TryGetProperty("End",   out var en) ? en.GetString() ?? "?" : "?";
+                string wCond  = w.TryGetProperty("Cond",  out var co) ? co.GetString() ?? "?" : "?";
+                sb.AppendLine($"  [{cpu}] {wStart}–{wEnd}  cond={wCond}");
+            }
+            return sb.ToString().TrimEnd();
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "pine_clear_all_watches")]
+    [Description("Clear all active hardware memory watchpoints on all CPUs in PCSX2 via the PINE protocol (opcode 0x31). " +
+                 "PINE mode required.")]
+    public async Task<string> PineClearAllWatches(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "PINECLEARALLWATCHES" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pine_save_snapshot")]
+    [Description("Trigger a save-state snapshot in PCSX2 via the PINE protocol (opcode 0x32). " +
+                 "PINE mode required. This saves the current emulator state to a snapshot slot.")]
+    public async Task<string> PineSaveSnapshot(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "PINESAVESNAPSHOT" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // ── Database query ────────────────────────────────────────────────────────
+
+    private const int QueryDbMaxCellWidth      = 60;
+    private const int QueryDbTruncatedCellWidth = 57; // MaxCellWidth - 3 for the "…" suffix
+
+    [McpServerTool(Name = "query_db")]
+    [Description("""
+        Execute a read-only SELECT query against the CodeDesigner SQLite database and return the results as a formatted table.
+        Only SELECT and CTE (WITH … SELECT) statements are permitted — INSERT/UPDATE/DELETE/DROP/CREATE are blocked.
+
+        Available tables:
+          Settings          (Key, Value, Description, UpdatedAt)
+          LabelSets         (Id, SetName, GameId, IsBuiltIn)
+          Labels            (Id, LabelSetId, Address, Name, Type, Hidden, Comment)
+          LabelMembers      (Id, LabelId, Offset, Name)
+          Games             (Id, Title, Description)
+          GameRegions       (Id, Name)
+          GameDiscs         (Id, GameId, GameRegionId, Serial, CRC, IsoPath)
+          Snapshots         (Id, GameId, Title, Description, SnapshotPath, SnapshotDateTime)
+          CheatLists        (Id, GameId, GameDiscId, Title, Description, CreatedAt, UpdatedAt)
+          Cheats            (Id, CheatListId, Label, Description, Author, IsEnabled, SortOrder)
+          CheatLines        (Id, CheatId, Code, SortOrder)
+          McpConfig         (Id, Key, Value)
+          McpMemory         (Id, Name, Content)
+          McpAgents         (Id, Name)
+          McpAgentTasks     (Id, McpAgentId, Phase, SortOrder)
+
+        Examples:
+          SELECT * FROM Settings WHERE Key LIKE 'theme%'
+          SELECT g.Title, d.Serial, d.IsoPath FROM Games g JOIN GameDiscs d ON d.GameId = g.Id
+          SELECT l.Address, l.Name, l.Type FROM Labels l JOIN LabelSets ls ON ls.Id = l.LabelSetId WHERE ls.SetName = 'MyGame'
+        """)]
+    public async Task<string> QueryDb(
+        [Description("A read-only SQL SELECT statement to execute against the CodeDesigner database.")] string sql,
+        [Description("Maximum number of rows to display in the formatted output (default 200, max 1000). Full data is still returned in JSON.")] int maxDisplayRows = 200,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+            return "Error: sql is required.";
+
+        var json = await bridge.SendAsync(new { Command = "QUERYDB", SqlQuery = sql }, cancellationToken);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("DbRows", out var rows) || rows.ValueKind != JsonValueKind.Array)
+                return SimpleMessage(json);
+
+            int total = root.TryGetProperty("DbRowCount", out var cnt) ? cnt.GetInt32() : rows.GetArrayLength();
+            if (total == 0)
+                return "Query returned 0 rows.";
+
+            // Build column headers from first row.
+            var firstRow = rows[0];
+            var columns  = new List<string>();
+            foreach (var prop in firstRow.EnumerateObject())
+                columns.Add(prop.Name);
+
+            if (columns.Count == 0) return "Query returned rows with no columns.";
+
+            // Calculate column widths (capped at 60 chars).
+            var widths = columns.Select(c => c.Length).ToList();
+            int display = Math.Min(total, Math.Clamp(maxDisplayRows, 1, 1000));
+            int rowIdx  = 0;
+            var cellCache = new List<string[]>(display);
+            foreach (var row in rows.EnumerateArray())
+            {
+                if (rowIdx >= display) break;
+                var cells = new string[columns.Count];
+                for (int c = 0; c < columns.Count; c++)
+                {
+                    string cell = "null";
+                    if (row.TryGetProperty(columns[c], out var v) && v.ValueKind != JsonValueKind.Null)
+                        cell = v.ToString();
+                    if (cell.Length > QueryDbMaxCellWidth) cell = cell[..QueryDbTruncatedCellWidth] + "…";
+                    cells[c] = cell;
+                    if (cell.Length > widths[c]) widths[c] = cell.Length;
+                }
+                cellCache.Add(cells);
+                rowIdx++;
+            }
+
+            // Render ASCII table.
+            var sb = new StringBuilder();
+            string sep = "+" + string.Join("+", widths.Select(w => new string('-', w + 2))) + "+";
+            sb.AppendLine(sep);
+            sb.Append("|");
+            for (int c = 0; c < columns.Count; c++)
+                sb.Append($" {columns[c].PadRight(widths[c])} |");
+            sb.AppendLine();
+            sb.AppendLine(sep);
+            foreach (var cells in cellCache)
+            {
+                sb.Append("|");
+                for (int c = 0; c < cells.Length; c++)
+                    sb.Append($" {cells[c].PadRight(widths[c])} |");
+                sb.AppendLine();
+            }
+            sb.AppendLine(sep);
+
+            if (total > display)
+                sb.AppendLine($"(showing {display} of {total} rows — reduce result set or increase maxDisplayRows)");
+            else
+                sb.AppendLine($"({total} row{(total == 1 ? "" : "s")})");
+
+            return sb.ToString().TrimEnd();
         }
         catch { return json; }
     }

@@ -189,3 +189,16 @@ export interface PorterOverlayState {
   sourcePath: string;
   targetPath: string;
 }
+
+// ── PINE Watchpoints ──────────────────────────────────────────────────────────
+
+export interface PineWatchInfo {
+  /** CPU the watchpoint applies to: 'EE' or 'IOP'. */
+  Cpu:   string;
+  /** Inclusive start address as a hex string (e.g. '0x00200000'). */
+  Start: string;
+  /** Exclusive end address as a hex string (e.g. '0x00200004'). */
+  End:   string;
+  /** Access condition: 'read', 'write', or 'read+write'. */
+  Cond:  string;
+}

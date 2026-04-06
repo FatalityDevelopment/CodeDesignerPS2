@@ -17,6 +17,7 @@ namespace CodeDesigner.Ps2.Bridge
     /// <para>
     /// <b>Existing opcodes (upstream PINE):</b> 0x00–0x0F<br/>
     /// <b>Extended opcodes (debugger extension):</b> 0x10–0x2D<br/>
+    /// <b>Watchpoint / snapshot extension:</b> 0x2E–0x32<br/>
     /// </para>
     /// <para>
     /// <b>Packet format:</b><br/>
@@ -84,6 +85,13 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgGetSymbolByName     = 0x2B;
         private const byte MsgListGlobals         = 0x2C;
         private const byte MsgGetLocals           = 0x2D;
+
+        // ── Watchpoint / snapshot extension opcodes ───────────────────────────
+        private const byte MsgAddWatch          = 0x2E;
+        private const byte MsgRemoveWatch       = 0x2F;
+        private const byte MsgListWatches       = 0x30;
+        private const byte MsgClearAllWatches   = 0x31;
+        private const byte MsgSaveSnapshot      = 0x32;
 
         // ── PINE result codes ─────────────────────────────────────────────────
         private const byte IPC_OK   = 0x00;
@@ -335,6 +343,29 @@ namespace CodeDesigner.Ps2.Bridge
             internal PineLocalEntry(byte storageType, int value, string name)
             {
                 StorageType = storageType; Value = value; Name = name;
+            }
+        }
+
+        /// <summary>
+        /// A memory watchpoint entry returned by <see cref="ListWatches"/>.
+        /// <para>Backed by PCSX2's CBreakPoints MemCheck infrastructure (MEMCHECK_BREAK).</para>
+        /// </summary>
+        public sealed class PineWatchEntry
+        {
+            /// <summary>CPU the watchpoint applies to: 0 = EE, 1 = IOP.</summary>
+            public byte Cpu   { get; }
+            /// <summary>Inclusive start address of the watched range.</summary>
+            public uint Start { get; }
+            /// <summary>Exclusive end address of the watched range.</summary>
+            public uint End   { get; }
+            /// <summary>
+            /// Condition bitmask: 0x01 = read, 0x02 = write, 0x03 = read+write.
+            /// </summary>
+            public byte Cond  { get; }
+
+            internal PineWatchEntry(byte cpu, uint start, uint end, byte cond)
+            {
+                Cpu = cpu; Start = start; End = end; Cond = cond;
             }
         }
 
@@ -1167,6 +1198,106 @@ namespace CodeDesigner.Ps2.Bridge
                 locals.Add(new PineLocalEntry(storageType, value, localName));
             }
             return locals;
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // Watchpoint / snapshot extension (opcodes 0x2E–0x32)
+        // ═════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// [Extended PINE] Adds a memory watchpoint on <paramref name="cpu"/> for the
+        /// address range [<paramref name="start"/>, <paramref name="end"/>) (end is exclusive).
+        /// <para>
+        /// Backed by PCSX2's CBreakPoints MemCheck infrastructure (MEMCHECK_BREAK).
+        /// JIT-only — no effect under the interpreter or HLE.
+        /// </para>
+        /// </summary>
+        /// <param name="cpu">CPU to watch: 0 = EE, 1 = IOP.</param>
+        /// <param name="start">Inclusive start address of the range to watch.</param>
+        /// <param name="end">Exclusive end address of the range to watch.</param>
+        /// <param name="cond">Condition bitmask: 0x01 = read, 0x02 = write, 0x03 = read+write.</param>
+        public void AddWatch(byte cpu, uint start, uint end, byte cond)
+        {
+            // Request: [size(4)][opcode(1)][cpu(1)][start(4)][end(4)][cond(1)]  = 15 bytes
+            var req = new byte[15];
+            WriteU32LE(req, 0, 15u);
+            req[4]  = MsgAddWatch;
+            req[5]  = cpu;
+            WriteU32LE(req, 6, start);
+            WriteU32LE(req, 10, end);
+            req[14] = cond;
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail($"MsgAddWatch cpu={cpu} 0x{start:X8}–0x{end:X8}");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Removes the memory watchpoint on <paramref name="cpu"/> for
+        /// the address range [<paramref name="start"/>, <paramref name="end"/>).
+        /// </summary>
+        /// <param name="cpu">CPU selector: 0 = EE, 1 = IOP.</param>
+        /// <param name="start">Inclusive start address of the range that was registered.</param>
+        /// <param name="end">Exclusive end address of the range that was registered.</param>
+        /// <returns><c>true</c> if the watchpoint was found and removed; <c>false</c> if no matching range exists.</returns>
+        public bool RemoveWatch(byte cpu, uint start, uint end)
+        {
+            // Request: [size(4)][opcode(1)][cpu(1)][start(4)][end(4)]  = 14 bytes
+            var req = new byte[14];
+            WriteU32LE(req, 0, 14u);
+            req[4] = MsgRemoveWatch;
+            req[5] = cpu;
+            WriteU32LE(req, 6, start);
+            WriteU32LE(req, 10, end);
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            return rep[4] == IPC_OK;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Lists all active memory watchpoints.
+        /// </summary>
+        /// <param name="cpuSel">CPU filter: 0 = EE only, 1 = IOP only, 0xFF = both.</param>
+        public List<PineWatchEntry> ListWatches(byte cpuSel = 0xFF)
+        {
+            // Request: [size(4)][opcode(1)][cpuSel(1)]  = 6 bytes
+            var req = new byte[6];
+            WriteU32LE(req, 0, 6u);
+            req[4] = MsgListWatches;
+            req[5] = cpuSel;
+            byte[] rep = SendReceiveVariable(req);
+            if (rep[4] != IPC_OK) throw PineFail("MsgListWatches");
+            if (rep.Length < 9) return new List<PineWatchEntry>();
+
+            uint count = ReadU32LE(rep, 5);
+            var watches = new List<PineWatchEntry>((int)count);
+            int pos = 9;
+            const int WatchEntrySize = 10; // cpu(1)+start(4)+end(4)+cond(1)
+            for (uint i = 0; i < count && pos + WatchEntrySize <= rep.Length; i++)
+            {
+                byte cpu   = rep[pos];
+                uint wStart = ReadU32LE(rep, pos + 1);
+                uint wEnd   = ReadU32LE(rep, pos + 5);
+                byte cond  = rep[pos + 9];
+                watches.Add(new PineWatchEntry(cpu, wStart, wEnd, cond));
+                pos += WatchEntrySize;
+            }
+            return watches;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Clears all active memory watchpoints on all CPUs.
+        /// </summary>
+        public void ClearAllWatches()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgClearAllWatches), expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgClearAllWatches");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Triggers a save-state snapshot in PCSX2.
+        /// </summary>
+        public void SaveSnapshot()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgSaveSnapshot), expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgSaveSnapshot");
         }
 
         // ── Bulk memory helpers ───────────────────────────────────────────────

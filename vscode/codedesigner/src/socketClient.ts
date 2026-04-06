@@ -63,9 +63,11 @@ interface CommandMessage {
     MemberName?: string;
     // READMEMREGION fields
     SearchPattern?: number[];
-    // SETWATCHPOINT / CLEARWATCHPOINT fields
-    WatchpointId?: string;
-    WatchpointType?: string;
+    // PINEADDWATCH / PINEREMOVEWATCH / PINELISTWATCHES fields
+    /** CPU selector: 0 = EE, 1 = IOP, 0xFF = both. */
+    CpuSel?: number;
+    /** Condition bitmask for PINEADDWATCH: 1 = read, 2 = write, 3 = read+write. */
+    WatchCond?: number;
     // TRACECALLS fields
     MaxInstructions?: number;
     // RUNUNTILPC fields
@@ -376,13 +378,8 @@ interface CommandResponse {
     Structs?: StructEntry[];
     // READMEMREGION results
     MatchAddresses?: number[];
-    // SETWATCHPOINT / LISTWATCHPOINTS results
-    WatchpointId?: string;
-    Watchpoints?: WatchpointInfo[];
-    // Watchpoint hit info (GETPC / GETWATCHPOINTHIT)
-    WatchpointHitAddress?: number;
-    WatchpointHitPC?: number;
-    WatchpointHitId?: string;
+    // PINELISTWATCHES result
+    PineWatches?: PineWatchInfo[];
     // TRACECALLS result
     TracedCalls?: CallTraceEntry[];
 }
@@ -432,17 +429,17 @@ export interface HddFileEntryInfo {
 }
 
 /**
- * Summary of a single active memory watchpoint returned by listWatchpoints().
+ * A PINE hardware memory watchpoint returned by listPineWatches().
  */
-export interface WatchpointInfo {
-    /** Unique watchpoint identifier (e.g. "wp-0"). */
-    Id:      string;
-    /** Virtual EE address as an 8-digit hex string (e.g. "01E7EA60"). */
-    Address: string;
-    /** Number of bytes watched. */
-    Size:    number;
-    /** Access type: "write", "read", or "readwrite". */
-    Type:    string;
+export interface PineWatchInfo {
+    /** CPU the watchpoint applies to: "EE" or "IOP". */
+    Cpu:   string;
+    /** Inclusive start address as a hex string (e.g. "0x00200000"). */
+    Start: string;
+    /** Exclusive end address as a hex string (e.g. "0x00200004"). */
+    End:   string;
+    /** Access condition: "read", "write", or "read+write". */
+    Cond:  string;
 }
 
 /**
@@ -1036,83 +1033,77 @@ export class SocketClient {
         };
     }
 
+    // ── PINE hardware watchpoints ──────────────────────────────────────────────
+
     /**
-     * Set a write watchpoint on [address, address+size).
-     * When any EE store instruction writes to the range the emulator pauses.
+     * Add a hardware memory watchpoint in PCSX2 for the range [start, end).
+     * Backed by CBreakPoints MemCheck (MEMCHECK_BREAK). JIT-only.
      *
-     * @param address - Start virtual EE address to watch.
-     * @param size    - Number of bytes to watch (default 4).
-     * @param type    - "write" (default); "read"/"readwrite" reserved for future use.
-     * @returns       - Assigned watchpoint ID (e.g. "wp-0").
+     * @param start - Inclusive start EE virtual address.
+     * @param end   - Exclusive end EE virtual address (start + size).
+     * @param cond  - 1 = read, 2 = write, 3 = read+write (default).
+     * @param cpu   - 0 = EE (default), 1 = IOP.
      */
-    public async setWatchpoint(
-        address: number,
-        size: number = 4,
-        type: string = 'write',
-    ): Promise<string> {
+    public async addPineWatch(
+        start: number,
+        end:   number,
+        cond:  number = 3,
+        cpu:   number = 0,
+    ): Promise<void> {
         const command: CommandMessage = {
-            Command: 'SETWATCHPOINT',
-            Address: address,
-            Length: size,
-            WatchpointType: type,
+            Command:    'PINEADDWATCH',
+            CpuSel:     cpu,
+            Address:    start,
+            EndAddress: end,
+            WatchCond:  cond,
         };
         const response = await this.sendCommand(command);
         if (!response.Success) {
-            throw new Error(response.Error || 'SetWatchpoint failed');
+            throw new Error(response.Error || 'AddPineWatch failed');
         }
-        return response.WatchpointId ?? '';
     }
 
     /**
-     * Remove the watchpoint with the given ID.
-     * @param id - Watchpoint ID returned by setWatchpoint().
+     * Remove a hardware memory watchpoint from PCSX2 for the range [start, end).
+     * Throws if no matching range is found on the specified CPU.
      */
-    public async clearWatchpoint(id: string): Promise<void> {
-        const command: CommandMessage = { Command: 'CLEARWATCHPOINT', WatchpointId: id };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ClearWatchpoint failed');
-        }
-    }
-
-    /** Remove every registered watchpoint. */
-    public async clearAllWatchpoints(): Promise<void> {
-        const command: CommandMessage = { Command: 'CLEARALLWATCHPOINTS' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ClearAllWatchpoints failed');
-        }
-    }
-
-    /** Return all currently active watchpoints. */
-    public async listWatchpoints(): Promise<WatchpointInfo[]> {
-        const command: CommandMessage = { Command: 'LISTWATCHPOINTS' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'ListWatchpoints failed');
-        }
-        return response.Watchpoints ?? [];
-    }
-
-    /**
-     * Return the details of the most recently fired watchpoint.
-     * Throws if no watchpoint has fired since the last resume.
-     */
-    public async getWatchpointHit(): Promise<{
-        watchpointId: string;
-        physAddress: number;
-        hitPC: number;
-    }> {
-        const command: CommandMessage = { Command: 'GETWATCHPOINTHIT' };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'GetWatchpointHit failed');
-        }
-        return {
-            watchpointId: response.WatchpointHitId   ?? '',
-            physAddress:  response.WatchpointHitAddress ?? 0,
-            hitPC:        response.WatchpointHitPC    ?? 0,
+    public async removePineWatch(
+        start: number,
+        end:   number,
+        cpu:   number = 0,
+    ): Promise<void> {
+        const command: CommandMessage = {
+            Command:    'PINEREMOVEWATCH',
+            CpuSel:     cpu,
+            Address:    start,
+            EndAddress: end,
         };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'RemovePineWatch failed');
+        }
+    }
+
+    /** Clear all active hardware memory watchpoints on all CPUs in PCSX2. */
+    public async clearAllPineWatches(): Promise<void> {
+        const command: CommandMessage = { Command: 'PINECLEARALLWATCHES' };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ClearAllPineWatches failed');
+        }
+    }
+
+    /**
+     * Return all currently active PINE hardware watchpoints.
+     * @param cpuSel - 0 = EE, 1 = IOP, 255 = both (default).
+     */
+    public async listPineWatches(cpuSel: number = 0xFF): Promise<PineWatchInfo[]> {
+        const command: CommandMessage = { Command: 'PINELISTWATCHES', CpuSel: cpuSel };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ListPineWatches failed');
+        }
+        return response.PineWatches ?? [];
     }
 
     /**
@@ -1160,36 +1151,6 @@ export class SocketClient {
             throw new Error(response.Error || 'RunUntilPc failed');
         }
         return this.parseRegisterDump(response);
-    }
-
-    /**
-     * Resume PCSX2 and block until any registered memory watchpoint fires
-     * (the watched address value changes), then return hit details.
-     *
-     * Only supported in PINE mode. Uses memory polling (~5 ms interval);
-     * the returned PC is approximate.
-     *
-     * @param timeoutMs - Maximum wait time in milliseconds (default 15 000).
-     * @returns Watchpoint hit info: watchpoint ID, virtual address, and approximate PC.
-     */
-    public async runUntilWatchpoint(timeoutMs: number = 15_000): Promise<{
-        watchpointId: string;
-        hitAddress:   number;
-        hitPC:        number;
-    }> {
-        const command: CommandMessage = {
-            Command: 'RUNUNTILWATCHPOINT',
-            TimeoutMs: timeoutMs,
-        };
-        const response = await this.sendCommand(command, timeoutMs + 5_000);
-        if (!response.Success) {
-            throw new Error(response.Error || 'RunUntilWatchpoint failed');
-        }
-        return {
-            watchpointId: response.WatchpointHitId      ?? '',
-            hitAddress:   response.WatchpointHitAddress ?? 0,
-            hitPC:        response.WatchpointHitPC      ?? 0,
-        };
     }
 
     /**
@@ -1289,16 +1250,11 @@ export class SocketClient {
 
     /**
      * Get the current EE PC and paused/breakpoint state.
-     * When a memory watchpoint fires the response also includes
-     * watchpointHitAddress, watchpointHitPC, and watchpointHitId.
      */
     public async getPC(): Promise<{
         paused: boolean;
         pc: number;
         breakpointHitAddress?: number;
-        watchpointHitAddress?: number;
-        watchpointHitPC?: number;
-        watchpointHitId?: string;
     }> {
         const command: CommandMessage = { Command: 'GETPC' };
         const response = await this.sendCommand(command);
@@ -1309,9 +1265,6 @@ export class SocketClient {
             paused: response.Paused ?? false,
             pc: response.PC ?? 0,
             breakpointHitAddress: response.BreakpointHitAddress ?? undefined,
-            watchpointHitAddress: response.WatchpointHitAddress ?? undefined,
-            watchpointHitPC:      response.WatchpointHitPC      ?? undefined,
-            watchpointHitId:      response.WatchpointHitId      ?? undefined,
         };
     }
 

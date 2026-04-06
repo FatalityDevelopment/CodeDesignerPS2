@@ -126,6 +126,8 @@ namespace CodeDesigner.Ps2.Bridge
         public List<PineSymbolInfo>?      PineSymbols  { get; set; }
         public List<PineDisassemblyLineInfo>? DisassemblyLines { get; set; }
         public List<PineLocalInfo>?       LocalVars    { get; set; }
+        /// <summary>List of PINE hardware watchpoints returned by PINELISTWATCHES.</summary>
+        public List<PineWatchInfo>?       PineWatches  { get; set; }
 
         // GETNAVHISTORY results
         public List<NavHistoryEntry>? NavHistory { get; set; }
@@ -140,22 +142,6 @@ namespace CodeDesigner.Ps2.Bridge
         /// supplied or no matches were found.
         /// </summary>
         public List<uint>? MatchAddresses { get; set; }
-
-        // SETWATCHPOINT result
-        /// <summary>Unique ID assigned to the newly created watchpoint.</summary>
-        public string? WatchpointId { get; set; }
-
-        // LISTWATCHPOINTS result
-        /// <summary>List of currently active memory watchpoints.</summary>
-        public List<WatchpointInfo>? Watchpoints { get; set; }
-
-        // Watchpoint hit info — included in GETPC and GETWATCHPOINTHIT responses
-        /// <summary>Physical EE address that triggered the last watchpoint, or <c>null</c>.</summary>
-        public uint? WatchpointHitAddress { get; set; }
-        /// <summary>EE PC of the instruction that triggered the last watchpoint, or <c>null</c>.</summary>
-        public uint? WatchpointHitPC { get; set; }
-        /// <summary>ID of the watchpoint that last fired, or <c>null</c>.</summary>
-        public string? WatchpointHitId { get; set; }
 
         // TRACECALLS result
         /// <summary>
@@ -177,6 +163,18 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>List of snapshot metadata entries returned by GETSNAPSHOTS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<SnapshotInfo>? Snapshots { get; set; }
+
+        // QUERYDB results
+        /// <summary>
+        /// Rows returned by a QUERYDB SELECT statement.
+        /// Each row is a dictionary of column name → value (string, long, double, or null).
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<Dictionary<string, object?>>? DbRows { get; set; }
+
+        /// <summary>Number of rows returned by the last QUERYDB statement.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? DbRowCount { get; set; }
     }
 
     /// <summary>Snapshot metadata wire payload returned by GETSNAPSHOTS.</summary>

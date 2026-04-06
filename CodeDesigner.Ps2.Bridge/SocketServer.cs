@@ -109,26 +109,6 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private bool IsPineMode => PineClient != null && Scheduler == null;
 
-        // ── PINE software watchpoints ──────────────────────────────────────────
-        // PCSX2's PINE protocol does not expose hardware watchpoints, so we
-        // implement them in software: we snapshot the watched memory when the
-        // watchpoint is set and poll for changes on demand (GETWATCHPOINTHIT) or
-        // in a blocking loop (RUNUNTILWATCHPOINT).
-
-        /// <summary>Tracks software watchpoints active in PINE mode.</summary>
-        private sealed class PineSoftwareWatchpoint
-        {
-            public string Id              { get; init; } = "";
-            public uint   VirtualAddress  { get; init; }
-            public int    Size            { get; init; }
-            /// <summary>Snapshot of the watched memory bytes at the last check.</summary>
-            public byte[] Snapshot        { get; set; }  = Array.Empty<byte>();
-        }
-
-        private readonly List<PineSoftwareWatchpoint> _pineWatchpoints    = new();
-        private readonly object                        _pineWatchpointLock = new();
-        private int                                    _pineWatchpointCounter;
-
         // ── Navigation history ────────────────────────────────────────────────
         // A bounded circular log of recently visited EE addresses, populated
         // automatically from address-bearing socket commands and from explicit
@@ -1180,28 +1160,6 @@ namespace CodeDesigner.Ps2.Bridge
                             command.SearchPattern,
                             command.Region);
 
-                    case "SETWATCHPOINT":
-                    case "SET_WATCHPOINT":
-                        return HandleSetWatchpoint(command.Address, command.Length, command.WatchpointType);
-
-                    case "CLEARWATCHPOINT":
-                    case "CLEAR_WATCHPOINT":
-                        return HandleClearWatchpoint(command.WatchpointId);
-
-                    case "CLEARALLWATCHPOINTS":
-                    case "CLEAR_ALL_WATCHPOINTS":
-                    case "CLEARWATCHPOINTS":
-                        return HandleClearAllWatchpoints();
-
-                    case "LISTWATCHPOINTS":
-                    case "LIST_WATCHPOINTS":
-                        return HandleListWatchpoints();
-
-                    case "GETWATCHPOINTHIT":
-                    case "GET_WATCHPOINT_HIT":
-                    case "WATCHPOINTHIT":
-                        return HandleGetWatchpointHit();
-
                     case "TRACECALLS":
                     case "TRACE_CALLS":
                         return HandleTraceCalls(
@@ -1212,9 +1170,38 @@ namespace CodeDesigner.Ps2.Bridge
                     case "RUN_UNTIL_PC":
                         return HandleRunUntilPc(command.TargetPc, command.TimeoutMs ?? 10_000);
 
-                    case "RUNUNTILWATCHPOINT":
-                    case "RUN_UNTIL_WATCHPOINT":
-                        return HandleRunUntilWatchpoint(command.TimeoutMs ?? 15_000);
+                    // ── PINE hardware watchpoints ─────────────────────────────
+                    case "PINEADDWATCH":
+                    case "PINE_ADD_WATCH":
+                        return HandlePineAddWatch(
+                            command.CpuSel,
+                            command.Address,
+                            command.EndAddress,
+                            command.WatchCond);
+
+                    case "PINEREMOVEWATCH":
+                    case "PINE_REMOVE_WATCH":
+                        return HandlePineRemoveWatch(
+                            command.CpuSel,
+                            command.Address,
+                            command.EndAddress);
+
+                    case "PINELISTWATCHES":
+                    case "PINE_LIST_WATCHES":
+                        return HandlePineListWatches(command.CpuSel);
+
+                    case "PINECLEARALLWATCHES":
+                    case "PINE_CLEAR_ALL_WATCHES":
+                        return HandlePineClearAllWatches();
+
+                    case "PINESAVESNAPSHOT":
+                    case "PINE_SAVE_SNAPSHOT":
+                        return HandlePineSaveSnapshot();
+
+                    // ── Database query (read-only) ────────────────────────────
+                    case "QUERYDB":
+                    case "QUERY_DB":
+                        return HandleQueryDb(command.SqlQuery);
 
                     // ── Navigation history ────────────────────────────────────
                     case "GETNAVHISTORY":

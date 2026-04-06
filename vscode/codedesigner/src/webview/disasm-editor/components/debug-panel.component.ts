@@ -9,6 +9,7 @@ import {
   OnDestroy,
 } from '@angular/core';
 import { RegisterData } from '../disasm-editor.service';
+import { PineWatchInfo } from '../state/types';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Constants for register names
@@ -110,26 +111,28 @@ export type DebugTab = 'registers' | 'cop0' | 'fpr' | 'fcr' | 'vu0f' | 'vu0i' | 
 
           <!-- Watches Section -->
           <div class="inspect-section-header">
-            <span class="inspect-section-title">Watches</span>
+            <span class="inspect-section-title">PINE Watchpoints</span>
             <button class="bp-clear-all-btn" (click)="clearAllWatches.emit()">Clear All</button>
           </div>
           <table class="dbg-table">
             <thead><tr>
-              <th class="dbg-th">Address</th>
-              <th class="dbg-th">Value (u32)</th>
+              <th class="dbg-th">CPU</th>
+              <th class="dbg-th">Range</th>
+              <th class="dbg-th">Condition</th>
               <th class="dbg-th"></th>
             </tr></thead>
             <tbody>
               @if (!sortedWatches().length) {
-                <tr><td colspan="3" class="dbg-td-empty">No watches — right-click an instruction to add one</td></tr>
+                <tr><td colspan="4" class="dbg-td-empty">No watchpoints — right-click an instruction to add one</td></tr>
               }
-              @for (addr of sortedWatches(); track addr) {
-                <tr class="dbg-table-row clickable" (click)="navigateToWatchAddress.emit(addr)">
-                  <td class="dbg-td-addr dbg-bp-addr mono">0x{{ toHex(addr) }}</td>
-                  <td class="dbg-td-type mono">{{ getWatchValue(addr) }}</td>
+              @for (w of sortedWatches(); track w.Start) {
+                <tr class="dbg-table-row clickable" (click)="navigateToWatchAddress.emit(parseWatchStart(w))">
+                  <td class="dbg-td-type mono watch-cpu-badge" [class.watch-cpu-iop]="w.Cpu === 'IOP'">{{ w.Cpu }}</td>
+                  <td class="dbg-td-addr mono">{{ w.Start }}–{{ w.End }}</td>
+                  <td class="dbg-td-type mono watch-cond-badge" [class]="watchCondClass(w.Cond)">{{ w.Cond }}</td>
                   <td class="dbg-td-del">
                     <button class="dbg-bp-del-btn"
-                      (click)="$event.stopPropagation(); removeWatch.emit(addr)">✕</button>
+                      (click)="$event.stopPropagation(); removeWatch.emit(w)">✕</button>
                   </td>
                 </tr>
               }
@@ -181,11 +184,8 @@ export class DebugPanelComponent implements OnDestroy {
   readonly codeStart = input(0);
   readonly codeEnd = input(0x02000000);
 
-  /** Watch addresses to display in the Inspect tab. */
-  readonly watches = input<Set<number>>(new Set());
-
-  /** Current memory values for watched addresses (address -> 32-bit value). */
-  readonly watchValues = input<Map<number, number>>(new Map());
+  /** Active PINE hardware watchpoints to display in the Inspect tab. */
+  readonly watches = input<PineWatchInfo[]>([]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Outputs
@@ -195,7 +195,7 @@ export class DebugPanelComponent implements OnDestroy {
   readonly editRegister = output<{ regType: string; regIdx: number; currentValue: string }>();
 
   /** Emitted when the user clicks the delete button for a watch entry. */
-  readonly removeWatch = output<number>();
+  readonly removeWatch = output<PineWatchInfo>();
 
   /** Emitted when the user clicks "Clear All" in the watches section. */
   readonly clearAllWatches = output<void>();
@@ -212,9 +212,10 @@ export class DebugPanelComponent implements OnDestroy {
   /** Current panel width in pixels, persisted to localStorage */
   readonly panelWidth = signal(this._loadWidth());
 
-  /** Sorted array of watch addresses for @for iteration. */
+  /** Sorted array of PINE watchpoints by start address for @for iteration. */
   readonly sortedWatches = computed(() =>
-    Array.from(this.watches()).sort((a, b) => a - b),
+    [...this.watches()].sort((a, b) =>
+      parseInt(a.Start, 16) - parseInt(b.Start, 16)),
   );
 
   readonly tabs: { id: DebugTab; label: string }[] = [
@@ -542,9 +543,16 @@ export class DebugPanelComponent implements OnDestroy {
     return (n >>> 0).toString(16).toUpperCase().padStart(pad, '0');
   }
 
-  getWatchValue(addr: number): string {
-    const val = this.watchValues().get(addr);
-    return val !== undefined ? `0x${this.toHex(val)}` : '—';
+  /** Parse the start address of a PineWatchInfo as a number (for navigation). */
+  parseWatchStart(w: PineWatchInfo): number {
+    return parseInt(w.Start, 16) || 0;
+  }
+
+  /** CSS class to colour-code the condition badge. */
+  watchCondClass(cond: string): string {
+    if (cond === 'read')       return 'watch-cond-read';
+    if (cond === 'write')      return 'watch-cond-write';
+    return 'watch-cond-rw';
   }
 
   private hex32(n: number): string {
