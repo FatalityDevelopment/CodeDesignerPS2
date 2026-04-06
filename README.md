@@ -179,7 +179,9 @@ Invoke-WebRequest "https://github.com/PCSX2/pcsx2-windows-dependencies/releases/
 1. make sure the copilot extension is installed in vs code
 2. located this folder "C:\Users\tholu\AppData\Roaming\Code\User\mcp.json", you should replace "tholu" with your setup.
 3. add the following, update the "ADD_PATH_HERE" placeholder and save
+```
 
+```json
 {
 	"servers": {
 		"CodeDesigner": {
@@ -196,4 +198,8 @@ Invoke-WebRequest "https://github.com/PCSX2/pcsx2-windows-dependencies/releases/
 	"inputs": []
 }
 
+```
+
+```
+4. Now restart vs code
 ```
