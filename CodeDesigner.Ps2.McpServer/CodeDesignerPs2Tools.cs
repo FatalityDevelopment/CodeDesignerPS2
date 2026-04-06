@@ -2641,12 +2641,12 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseS
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "pine_save_snapshot")]
-    [Description("Trigger a save-state snapshot in PCSX2 via the PINE protocol (opcode 0x32). " +
-                 "PINE mode required. This saves the current emulator state to a snapshot slot.")]
-    public async Task<string> PineSaveSnapshot(CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "pine_save_screenshot")]
+    [Description("Take a screenshot of the game's screen in PCSX2 via the PINE protocol (opcode 0x32). " +
+                 "PINE mode required. PCSX2 saves the screenshot to its configured screenshots directory.")]
+    public async Task<string> PineSaveScreenshot(CancellationToken cancellationToken = default)
     {
-        var json = await bridge.SendAsync(new { Command = "PINESAVESNAPSHOT" }, cancellationToken);
+        var json = await bridge.SendAsync(new { Command = "PINESAVESCREENSHOT" }, cancellationToken);
         return SimpleMessage(json);
     }
 

@@ -1320,6 +1320,17 @@ export class SocketClient {
     }
 
     /**
+     * PCSX2 PINE: take a screenshot of the game's screen.
+     * Uses the PINESAVESCREENSHOT command which delegates to PineClient.SaveScreenshot (opcode 0x32).
+     */
+    public async pineSaveScreenshot(): Promise<void> {
+        const response = await this.sendCommand({ Command: 'PINESAVESCREENSHOT' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'SaveScreenshot failed');
+        }
+    }
+
+    /**
      * Restart the emulator (reset both CPUs to power-on state, then pause)
      */
     public async restart(): Promise<void> {
