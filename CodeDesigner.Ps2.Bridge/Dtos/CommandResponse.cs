@@ -143,22 +143,6 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public List<uint>? MatchAddresses { get; set; }
 
-        // SETWATCHPOINT result
-        /// <summary>Unique ID assigned to the newly created watchpoint.</summary>
-        public string? WatchpointId { get; set; }
-
-        // LISTWATCHPOINTS result
-        /// <summary>List of currently active memory watchpoints.</summary>
-        public List<WatchpointInfo>? Watchpoints { get; set; }
-
-        // Watchpoint hit info — included in GETPC and GETWATCHPOINTHIT responses
-        /// <summary>Physical EE address that triggered the last watchpoint, or <c>null</c>.</summary>
-        public uint? WatchpointHitAddress { get; set; }
-        /// <summary>EE PC of the instruction that triggered the last watchpoint, or <c>null</c>.</summary>
-        public uint? WatchpointHitPC { get; set; }
-        /// <summary>ID of the watchpoint that last fired, or <c>null</c>.</summary>
-        public string? WatchpointHitId { get; set; }
-
         // TRACECALLS result
         /// <summary>
         /// Ordered list of JAL/JALR call sites recorded during a TRACECALLS run.

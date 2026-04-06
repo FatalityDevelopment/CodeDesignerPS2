@@ -1,4 +1,5 @@
 import { Component, AfterViewInit, NgZone, ViewEncapsulation, inject, signal, viewChild, effect, WritableSignal, Injector, runInInjectionContext } from '@angular/core';
+import { PineWatchInfo } from '../../socketClient';
 import { getVsCodeApi } from '../shared/vscode-api';
 import {
   DisasmEditorService,
@@ -115,10 +116,7 @@ export class DisasmEditorComponent implements AfterViewInit {
   protected readonly debugPanelStackBase = signal(0);
 
   /** Watches for debug panel Inspect tab */
-  protected readonly debugPanelWatches = signal<Set<number>>(new Set());
-
-  /** Current memory values for each watch address */
-  protected readonly debugPanelWatchValues = signal<Map<number, number>>(new Map());
+  protected readonly debugPanelWatches = signal<PineWatchInfo[]>([]);
 
   // Debug panel callback (set by initEditorLogic)
   private _debugEditRegisterCallback: ((regType: string, regIdx: number, currentValue: string) => void) | null = null;
@@ -419,7 +417,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     // Determine menu state
     const addr = parseInt(event.row.addr, 16);
     const hasBreakpoint = this.svc.state.breakpoints.has(addr);
-    const hasWatch = this.svc.state.watches.has(addr);
+    const hasWatch = this.svc.state.pineWatches().some(w => (parseInt(w.Start, 16) || 0) === addr);
     const hasTarget = !!(event.row.args.match(/\$([0-9A-F]{8})/i) ||
                           event.row.args.match(/0x([0-9A-F]{8})/i));
 
@@ -470,15 +468,15 @@ export class DisasmEditorComponent implements AfterViewInit {
     this._debugEditRegisterCallback?.(event.regType, event.regIdx, event.currentValue);
   }
 
-  protected onDebugPanelRemoveWatch(addr: number): void {
-    this.svc.state.watches.delete(addr);
-    this.debugPanelWatches.set(new Set(this.svc.state.watches));
+  protected onDebugPanelRemoveWatch(watch: PineWatchInfo): void {
+    const addr = parseInt(watch.Start, 16) || 0;
+    const end  = parseInt(watch.End,   16) || addr + 4;
+    const cpu  = watch.Cpu === 'IOP' ? 1 : 0;
+    this.vscode.postMessage({ type: 'removePineWatch', address: addr, end, cpu });
   }
 
   protected onDebugPanelClearAllWatches(): void {
-    this.svc.state.watches.clear();
-    this.debugPanelWatches.set(new Set());
-    this.debugPanelWatchValues.set(new Map());
+    this.vscode.postMessage({ type: 'clearAllPineWatches' });
   }
 
   protected onDebugPanelNavigateWatch(addr: number): void {
@@ -510,8 +508,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.vscode.postMessage({ type: 'getThreads' });
     } else if (tab === 'modules' && this.svc.state.isLive) {
       this.vscode.postMessage({ type: 'getModules' });
-    } else if (tab === 'watches' && this.svc.state.isLive && this.svc.state.watches.size > 0) {
-      this.vscode.postMessage({ type: 'getWatchValues', addresses: Array.from(this.svc.state.watches) });
+    } else if (tab === 'watches' && this.svc.state.isLive) {
+      this.vscode.postMessage({ type: 'listPineWatches' });
     }
   }
 
@@ -1063,8 +1061,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     debugPanelRegisters: WritableSignal<RegisterData | null>;
     debugPanelStackBytes: WritableSignal<number[]>;
     debugPanelStackBase: WritableSignal<number>;
-    debugPanelWatches: WritableSignal<Set<number>>;
-    debugPanelWatchValues: WritableSignal<Map<number, number>>;
+    debugPanelWatches: WritableSignal<PineWatchInfo[]>;
     bottomPanelCallStack: WritableSignal<CallStackEntry[]>;
     bottomPanelBreakpoints: WritableSignal<Set<number>>;
     setpcStatus: WritableSignal<string>;
@@ -1142,9 +1139,9 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.debugPanelRegisters.set(params.registers);
       params.debugPanelStackBytes.set(params.stackBytes);
       params.debugPanelStackBase.set(params.stackBase);
-      params.debugPanelWatches.set(new Set(params.state.watches));
-      if (params.state.watches.size > 0) {
-        params.vscode.postMessage({ type: 'getWatchValues', addresses: Array.from(params.state.watches) });
+      params.debugPanelWatches.set([...params.state.pineWatches()]);
+      if (params.state.isLive) {
+        params.vscode.postMessage({ type: 'listPineWatches' });
       }
       const typedFrames = params.buildCallStackFrames(params.registers, params.stackBytes, params.stackBase, params.state.symLabels ?? []);
       params.signals.callStack.set(typedFrames);
@@ -1724,8 +1721,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.zone.run(() => this.openStructOverlay());
       return;
     }
-    if (data['type'] === 'watchValues') {
-      this.handleWatchValuesMessage(data);
+    if (data['type'] === 'pineWatches') {
+      this.handlePineWatchesMessage(data);
       return;
     }
     this.handleEditOverlayMessage(data);
@@ -1738,15 +1735,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.handleLabelManagerMessage(data);
   }
 
-  private handleWatchValuesMessage(data: Record<string, unknown>): void {
-    const values = data['values'] as Record<string, number> | undefined;
-    if (!values) { return; }
+  private handlePineWatchesMessage(data: Record<string, unknown>): void {
+    const watches = data['watches'] as PineWatchInfo[] | undefined;
+    if (!watches) { return; }
     this.zone.run(() => {
-      const map = new Map<number, number>();
-      for (const [k, v] of Object.entries(values)) {
-        map.set(parseInt(k, 10), v);
-      }
-      this.debugPanelWatchValues.set(map);
+      this.svc.state.pineWatches.set(watches);
+      this.debugPanelWatches.set([...watches]);
     });
   }
 
@@ -1842,8 +1836,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     debugPanelRegisters: WritableSignal<RegisterData | null>;
     debugPanelStackBytes: WritableSignal<number[]>;
     debugPanelStackBase: WritableSignal<number>;
-    debugPanelWatches: WritableSignal<Set<number>>;
-    debugPanelWatchValues: WritableSignal<Map<number, number>>;
+    debugPanelWatches: WritableSignal<PineWatchInfo[]>;
     bottomPanelCallStack: WritableSignal<CallStackEntry[]>;
     bottomPanelBreakpoints: WritableSignal<Set<number>>;
     buildCallStackFrames: (
@@ -1941,7 +1934,6 @@ export class DisasmEditorComponent implements AfterViewInit {
         debugPanelStackBytes: params.debugPanelStackBytes,
         debugPanelStackBase: params.debugPanelStackBase,
         debugPanelWatches: params.debugPanelWatches,
-        debugPanelWatchValues: params.debugPanelWatchValues,
         bottomPanelCallStack: params.bottomPanelCallStack,
         bottomPanelBreakpoints: params.bottomPanelBreakpoints,
         requestRefresh: params.requestRefresh,
@@ -2046,8 +2038,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     debugPanelRegisters: WritableSignal<RegisterData | null>;
     debugPanelStackBytes: WritableSignal<number[]>;
     debugPanelStackBase: WritableSignal<number>;
-    debugPanelWatches: WritableSignal<Set<number>>;
-    debugPanelWatchValues: WritableSignal<Map<number, number>>;
+    debugPanelWatches: WritableSignal<PineWatchInfo[]>;
     bottomPanelCallStack: WritableSignal<CallStackEntry[]>;
     bottomPanelBreakpoints: WritableSignal<Set<number>>;
     buildCallStackFrames: (
@@ -2133,24 +2124,21 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.contextMenuRuntime.addWatch = () => {
       if (!this._ctxRow || this._ctxGlobalIndex < 0) { return; }
       const addr = parseInt(this._ctxRow.addr, 16);
-      if (!params.state.watches.has(addr)) {
-        params.state.watches.add(addr);
-        params.debugPanelWatches.set(new Set(params.state.watches));
-        if (params.state.isLive) {
-          params.vscode.postMessage({ type: 'getWatchValues', addresses: Array.from(params.state.watches) });
-        }
+      const end  = addr + 4;
+      const alreadyWatched = params.state.pineWatches().some(w => (parseInt(w.Start, 16) || 0) === addr);
+      if (!alreadyWatched) {
+        params.vscode.postMessage({ type: 'addPineWatch', address: addr, end });
       }
     };
 
     this.contextMenuRuntime.removeWatch = () => {
       if (!this._ctxRow || this._ctxGlobalIndex < 0) { return; }
       const addr = parseInt(this._ctxRow.addr, 16);
-      if (params.state.watches.has(addr)) {
-        params.state.watches.delete(addr);
-        params.debugPanelWatches.set(new Set(params.state.watches));
-        const vals = new Map(params.debugPanelWatchValues());
-        vals.delete(addr);
-        params.debugPanelWatchValues.set(vals);
+      const end  = addr + 4;
+      const watch = params.state.pineWatches().find(w => (parseInt(w.Start, 16) || 0) === addr);
+      if (watch) {
+        const cpu = watch.Cpu === 'IOP' ? 1 : 0;
+        params.vscode.postMessage({ type: 'removePineWatch', address: addr, end, cpu });
       }
     };
 
@@ -2200,9 +2188,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       } else if (tab === 'breakpoints') {
         params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
       } else if (tab === 'watches') {
-        if (params.state.watches.size > 0) {
-          params.vscode.postMessage({ type: 'getWatchValues', addresses: Array.from(params.state.watches) });
-        }
+        params.vscode.postMessage({ type: 'listPineWatches' });
       } else if (tab === 'modules') {
         params.vscode.postMessage({ type: 'getModules' });
       }
@@ -2323,7 +2309,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     const debugPanelStackBytes = this.debugPanelStackBytes;
     const debugPanelStackBase = this.debugPanelStackBase;
     const debugPanelWatches = this.debugPanelWatches;
-    const debugPanelWatchValues = this.debugPanelWatchValues;
     const bottomPanelVisible = this.bottomPanelVisible;
     const symbolsPanelVisible = this.symbolsPanelVisible;
     const bottomPanelCallStack = this.bottomPanelCallStack;
@@ -2504,7 +2489,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       debugPanelStackBytes,
       debugPanelStackBase,
       debugPanelWatches,
-      debugPanelWatchValues,
       bottomPanelCallStack,
       bottomPanelBreakpoints,
       buildCallStackFrames,
@@ -2710,7 +2694,6 @@ export class DisasmEditorComponent implements AfterViewInit {
         debugPanelStackBytes,
         debugPanelStackBase,
         debugPanelWatches,
-        debugPanelWatchValues,
         bottomPanelCallStack,
         bottomPanelBreakpoints,
         buildCallStackFrames,

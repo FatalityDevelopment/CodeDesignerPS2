@@ -1057,21 +1057,53 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 } catch (err: any) {
                     console.error(`[LIVE] Failed to clear all breakpoints: ${err?.message ?? err}`);
                 }
-            } else if (message.type === 'getWatchValues') {
+            } else if (message.type === 'addPineWatch') {
                 if (!this._canIssueLiveBackendRequest()) { return; }
-                const addresses: number[] = Array.isArray(message.addresses) ? message.addresses as number[] : [];
-                if (addresses.length === 0) { return; }
-                const values: Record<string, number> = {};
-                for (const addr of addresses) {
-                    try {
-                        const buf = await this.socketClient!.readMemory(addr, 4, 'ee');
-                        values[String(addr)] =
-                            (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24)) >>> 0;
-                    } catch (err: any) {
-                        console.warn(`[LIVE] Watch read failed at 0x${addr.toString(16).toUpperCase()}: ${err?.message ?? err}`);
-                    }
+                const addr: number = typeof message.address === 'number' ? message.address : 0;
+                const end: number  = typeof message.end     === 'number' ? message.end     : addr + 4;
+                try {
+                    await this.socketClient!.addPineWatch(addr, end);
+                } catch (err: any) {
+                    console.warn(`[LIVE] AddPineWatch failed: ${err?.message ?? err}`);
                 }
-                panel.webview.postMessage({ type: 'watchValues', values });
+                try {
+                    const watches = await this.socketClient!.listPineWatches();
+                    panel.webview.postMessage({ type: 'pineWatches', watches });
+                } catch (err: any) {
+                    console.warn(`[LIVE] ListPineWatches failed after add: ${err?.message ?? err}`);
+                }
+            } else if (message.type === 'removePineWatch') {
+                if (!this._canIssueLiveBackendRequest()) { return; }
+                const addr: number = typeof message.address === 'number' ? message.address : 0;
+                const end: number  = typeof message.end     === 'number' ? message.end     : addr + 4;
+                const cpu: number  = typeof message.cpu     === 'number' ? message.cpu     : 0;
+                try {
+                    await this.socketClient!.removePineWatch(addr, end, cpu);
+                } catch (err: any) {
+                    console.warn(`[LIVE] RemovePineWatch failed: ${err?.message ?? err}`);
+                }
+                try {
+                    const watches = await this.socketClient!.listPineWatches();
+                    panel.webview.postMessage({ type: 'pineWatches', watches });
+                } catch (err: any) {
+                    console.warn(`[LIVE] ListPineWatches failed after remove: ${err?.message ?? err}`);
+                }
+            } else if (message.type === 'clearAllPineWatches') {
+                if (!this._canIssueLiveBackendRequest()) { return; }
+                try {
+                    await this.socketClient!.clearAllPineWatches();
+                    panel.webview.postMessage({ type: 'pineWatches', watches: [] });
+                } catch (err: any) {
+                    console.warn(`[LIVE] ClearAllPineWatches failed: ${err?.message ?? err}`);
+                }
+            } else if (message.type === 'listPineWatches') {
+                if (!this._canIssueLiveBackendRequest()) { return; }
+                try {
+                    const watches = await this.socketClient!.listPineWatches();
+                    panel.webview.postMessage({ type: 'pineWatches', watches });
+                } catch (err: any) {
+                    console.warn(`[LIVE] ListPineWatches failed: ${err?.message ?? err}`);
+                }
             } else if (message.type === 'step') {
                 await this.stepAndBroadcast();
             } else if (message.type === 'getStatus') {

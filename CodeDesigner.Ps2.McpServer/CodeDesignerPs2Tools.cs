@@ -2474,97 +2474,6 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseS
         }
     }
 
-    [McpServerTool(Name = "set_memory_watchpoint")]
-    [DynamicDescription("set_memory_watchpoint_desc")]
-    public async Task<string> SetMemoryWatchpoint(
-        [Description("EE virtual address to watch (hex or decimal).")] string address,
-        [Description("Number of bytes to watch (1–256, default 4).")] int size = 4,
-        [Description("Access type to monitor: 'write' (default). 'read' and 'readwrite' are reserved for future use.")] string type = "write",
-        CancellationToken cancellationToken = default)
-    {
-        uint? parsedAddress = TryParseAddress(address);
-        if (parsedAddress is null)
-            return $"Error: invalid address '{address}'.";
-
-        var json = await bridge.SendAsync(
-            new { Command = "SETWATCHPOINT", Address = parsedAddress.Value, Length = size, WatchpointType = type },
-            cancellationToken);
-
-        return SimpleMessage(json);
-    }
-
-    [McpServerTool(Name = "clear_memory_watchpoint")]
-    [DynamicDescription("clear_memory_watchpoint_desc")]
-    public async Task<string> ClearMemoryWatchpoint(
-        [Description("Watchpoint ID to remove (e.g. 'wp-0'), as returned by set_memory_watchpoint.")] string watchpointId,
-        CancellationToken cancellationToken = default)
-    {
-        var json = await bridge.SendAsync(
-            new { Command = "CLEARWATCHPOINT", WatchpointId = watchpointId },
-            cancellationToken);
-        return SimpleMessage(json);
-    }
-
-    [McpServerTool(Name = "clear_all_memory_watchpoints")]
-    [DynamicDescription("clear_all_memory_watchpoints_desc")]
-    public async Task<string> ClearAllMemoryWatchpoints(CancellationToken cancellationToken = default)
-    {
-        var json = await bridge.SendAsync(new { Command = "CLEARALLWATCHPOINTS" }, cancellationToken);
-        return SimpleMessage(json);
-    }
-
-    [McpServerTool(Name = "list_memory_watchpoints")]
-    [DynamicDescription("list_memory_watchpoints_desc")]
-    public async Task<string> ListMemoryWatchpoints(CancellationToken cancellationToken = default)
-    {
-        var json = await bridge.SendAsync(new { Command = "LISTWATCHPOINTS" }, cancellationToken);
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
-                return $"Error: {err.GetString()}";
-
-            if (!root.TryGetProperty("Watchpoints", out var wps) ||
-                wps.ValueKind != JsonValueKind.Array)
-                return "No watchpoints registered.";
-
-            int count = wps.GetArrayLength();
-            if (count == 0) return "No watchpoints registered.";
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"Active watchpoints ({count}):");
-            foreach (var wp in wps.EnumerateArray())
-            {
-                string id   = wp.TryGetProperty("Id",      out var idP)   ? idP.GetString()   ?? "?" : "?";
-                string addr = wp.TryGetProperty("Address", out var addrP) ? addrP.GetString() ?? "?" : "?";
-                int    sz   = wp.TryGetProperty("Size",    out var szP)   ? szP.GetInt32()       : 0;
-                string ty   = wp.TryGetProperty("Type",    out var tyP)   ? tyP.GetString()   ?? "?" : "?";
-                sb.AppendLine($"  {id}: 0x{addr} size={sz} type={ty}");
-            }
-            return sb.ToString().TrimEnd();
-        }
-        catch { return json; }
-    }
-
-    [McpServerTool(Name = "get_watchpoint_hit")]
-    [DynamicDescription("get_watchpoint_hit_desc")]
-    public async Task<string> GetWatchpointHit(CancellationToken cancellationToken = default)
-    {
-        var json = await bridge.SendAsync(new { Command = "GETWATCHPOINTHIT" }, cancellationToken);
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
-                return $"Error: {err.GetString()}";
-            if (root.TryGetProperty("Message", out var msg) && msg.ValueKind == JsonValueKind.String)
-                return msg.GetString() ?? json;
-            return json;
-        }
-        catch { return json; }
-    }
-
     [McpServerTool(Name = "trace_calls")]
     [DynamicDescription("trace_calls_desc")]
     public async Task<string> TraceCalls(
@@ -2635,32 +2544,6 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseS
                 return $"Error: {err.GetString()}";
             // On success HandleRunUntilPc returns HandleGetRegisters() output.
             return FormatRegisters(json);
-        }
-        catch { return json; }
-    }
-
-    [McpServerTool(Name = "run_until_watchpoint")]
-    [DynamicDescription("run_until_watchpoint_desc")]
-    public async Task<string> RunUntilWatchpoint(
-        [Description("Timeout in milliseconds before giving up (default 15 000).")] int timeoutMs = 15_000,
-        CancellationToken cancellationToken = default)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeoutMs + 5_000);
-
-        var json = await bridge.SendAsync(
-            new { Command = "RUNUNTILWATCHPOINT", TimeoutMs = timeoutMs },
-            cts.Token);
-
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
-                return $"Error: {err.GetString()}";
-            if (root.TryGetProperty("Message", out var msg) && msg.ValueKind == JsonValueKind.String)
-                return msg.GetString() ?? json;
-            return json;
         }
         catch { return json; }
     }

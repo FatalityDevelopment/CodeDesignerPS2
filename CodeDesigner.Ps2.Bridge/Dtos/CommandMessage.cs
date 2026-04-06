@@ -107,12 +107,6 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public List<int>? SearchPattern { get; set; }
 
-        // SETWATCHPOINT / CLEARWATCHPOINT fields
-        /// <summary>Watchpoint identifier for CLEARWATCHPOINT.</summary>
-        public string? WatchpointId { get; set; }
-        /// <summary>Watchpoint access type for SETWATCHPOINT: "write", "read", or "readwrite".</summary>
-        public string? WatchpointType { get; set; }
-
         // PINEADDWATCH / PINEREMOVEWATCH / PINELISTWATCHES fields
         /// <summary>
         /// Condition bitmask for PINEADDWATCH: 0x01 = read, 0x02 = write, 0x03 = read+write.

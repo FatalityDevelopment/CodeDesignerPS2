@@ -11,6 +11,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { Injectable, signal, computed } from '@angular/core';
+import { PineWatchInfo } from '../../../socketClient';
 import {
   DisasmRow,
   SearchMatch,
@@ -102,11 +103,8 @@ export class EditorState {
   /** Address of breakpoint that was just hit (for highlight). */
   readonly breakpointHitAddress = signal<number | undefined>(undefined);
 
-  /** Set of watch addresses. */
-  readonly watches = signal(new Set<number>());
-
-  /** Map of watch address -> current 32-bit value read from memory. */
-  readonly watchValues = signal(new Map<number, number>());
+  /** Active PINE hardware watchpoints (from PCSX2 via PINELISTWATCHES). */
+  readonly pineWatches = signal<PineWatchInfo[]>([]);
 
   /** Current register values when paused. */
   readonly registers = signal<RegisterData | null>(null);
