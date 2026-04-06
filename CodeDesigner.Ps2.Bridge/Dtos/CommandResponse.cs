@@ -126,6 +126,8 @@ namespace CodeDesigner.Ps2.Bridge
         public List<PineSymbolInfo>?      PineSymbols  { get; set; }
         public List<PineDisassemblyLineInfo>? DisassemblyLines { get; set; }
         public List<PineLocalInfo>?       LocalVars    { get; set; }
+        /// <summary>List of PINE hardware watchpoints returned by PINELISTWATCHES.</summary>
+        public List<PineWatchInfo>?       PineWatches  { get; set; }
 
         // GETNAVHISTORY results
         public List<NavHistoryEntry>? NavHistory { get; set; }

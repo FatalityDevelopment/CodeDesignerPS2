@@ -1216,6 +1216,34 @@ namespace CodeDesigner.Ps2.Bridge
                     case "RUN_UNTIL_WATCHPOINT":
                         return HandleRunUntilWatchpoint(command.TimeoutMs ?? 15_000);
 
+                    // ── PINE hardware watchpoints ─────────────────────────────
+                    case "PINEADDWATCH":
+                    case "PINE_ADD_WATCH":
+                        return HandlePineAddWatch(
+                            command.CpuSel,
+                            command.Address,
+                            command.EndAddress,
+                            command.WatchCond);
+
+                    case "PINEREMOVEWATCH":
+                    case "PINE_REMOVE_WATCH":
+                        return HandlePineRemoveWatch(
+                            command.CpuSel,
+                            command.Address,
+                            command.EndAddress);
+
+                    case "PINELISTWATCHES":
+                    case "PINE_LIST_WATCHES":
+                        return HandlePineListWatches(command.CpuSel);
+
+                    case "PINECLEARALLWATCHES":
+                    case "PINE_CLEAR_ALL_WATCHES":
+                        return HandlePineClearAllWatches();
+
+                    case "PINESAVESNAPSHOT":
+                    case "PINE_SAVE_SNAPSHOT":
+                        return HandlePineSaveSnapshot();
+
                     // ── Navigation history ────────────────────────────────────
                     case "GETNAVHISTORY":
                     case "GET_NAV_HISTORY":

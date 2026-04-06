@@ -2665,6 +2665,108 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseS
         catch { return json; }
     }
 
+    // ── PINE hardware watchpoints (MsgAddWatch/RemoveWatch/ListWatches/ClearAllWatches) ──
+
+    [McpServerTool(Name = "pine_add_watch")]
+    [Description("Add a hardware memory watchpoint in PCSX2 via the PINE protocol (opcode 0x2E). " +
+                 "Backed by CBreakPoints MemCheck (MEMCHECK_BREAK). JIT-only — no effect under the interpreter or HLE. " +
+                 "PINE mode required (connect to PCSX2 with PINE enabled).")]
+    public async Task<string> PineAddWatch(
+        [Description("Inclusive start address of the memory range to watch (hex or decimal).")] string start,
+        [Description("Exclusive end address of the memory range to watch (hex or decimal).")] string end,
+        [Description("Condition bitmask: 1 = read, 2 = write, 3 = read+write (default 3).")] byte cond = 3,
+        [Description("CPU to watch: 0 = EE (default), 1 = IOP.")] byte cpu = 0,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedStart = TryParseAddress(start);
+        uint? parsedEnd   = TryParseAddress(end);
+        if (parsedStart is null) return $"Error: invalid start address '{start}'.";
+        if (parsedEnd   is null) return $"Error: invalid end address '{end}'.";
+        if (cond == 0 || cond > 3) return "Error: cond must be 1 (read), 2 (write), or 3 (read+write).";
+
+        var json = await bridge.SendAsync(
+            new { Command = "PINEADDWATCH", CpuSel = cpu, Address = parsedStart.Value, EndAddress = parsedEnd.Value, WatchCond = cond },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pine_remove_watch")]
+    [Description("Remove a hardware memory watchpoint from PCSX2 via the PINE protocol (opcode 0x2F). " +
+                 "Returns an error if no matching range is found. PINE mode required.")]
+    public async Task<string> PineRemoveWatch(
+        [Description("Inclusive start address of the range to remove (hex or decimal).")] string start,
+        [Description("Exclusive end address of the range to remove (hex or decimal).")] string end,
+        [Description("CPU the watchpoint was registered on: 0 = EE (default), 1 = IOP.")] byte cpu = 0,
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedStart = TryParseAddress(start);
+        uint? parsedEnd   = TryParseAddress(end);
+        if (parsedStart is null) return $"Error: invalid start address '{start}'.";
+        if (parsedEnd   is null) return $"Error: invalid end address '{end}'.";
+
+        var json = await bridge.SendAsync(
+            new { Command = "PINEREMOVEWATCH", CpuSel = cpu, Address = parsedStart.Value, EndAddress = parsedEnd.Value },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pine_list_watches")]
+    [Description("List all active hardware memory watchpoints in PCSX2 via the PINE protocol (opcode 0x30). " +
+                 "Each entry shows CPU, start address, end address, and condition. PINE mode required.")]
+    public async Task<string> PineListWatches(
+        [Description("CPU filter: 0 = EE only, 1 = IOP only, 255 = both (default).")] byte cpuSel = 0xFF,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "PINELISTWATCHES", CpuSel = cpuSel },
+            cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("PineWatches", out var watches) ||
+                watches.ValueKind != JsonValueKind.Array)
+                return "No hardware watchpoints active.";
+
+            int count = watches.GetArrayLength();
+            if (count == 0) return "No hardware watchpoints active.";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Active PINE hardware watchpoints ({count}):");
+            foreach (var w in watches.EnumerateArray())
+            {
+                string cpu   = w.TryGetProperty("Cpu",   out var cp) ? cp.GetString() ?? "?" : "?";
+                string wStart = w.TryGetProperty("Start", out var st) ? st.GetString() ?? "?" : "?";
+                string wEnd   = w.TryGetProperty("End",   out var en) ? en.GetString() ?? "?" : "?";
+                string wCond  = w.TryGetProperty("Cond",  out var co) ? co.GetString() ?? "?" : "?";
+                sb.AppendLine($"  [{cpu}] {wStart}–{wEnd}  cond={wCond}");
+            }
+            return sb.ToString().TrimEnd();
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "pine_clear_all_watches")]
+    [Description("Clear all active hardware memory watchpoints on all CPUs in PCSX2 via the PINE protocol (opcode 0x31). " +
+                 "PINE mode required.")]
+    public async Task<string> PineClearAllWatches(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "PINECLEARALLWATCHES" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pine_save_snapshot")]
+    [Description("Trigger a save-state snapshot in PCSX2 via the PINE protocol (opcode 0x32). " +
+                 "PINE mode required. This saves the current emulator state to a snapshot slot.")]
+    public async Task<string> PineSaveSnapshot(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "PINESAVESNAPSHOT" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
     // -------------------------------------------------------------------------
     // Private formatting helpers
     // -------------------------------------------------------------------------
