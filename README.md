@@ -173,3 +173,27 @@ Invoke-WebRequest "https://github.com/PCSX2/pcsx2-windows-dependencies/releases/
 1. open CodeDesigner\vscode\codedesigner in vs code
 2. press F5 to debug extension
 ```
+
+#### Connect MCP server to co pilot
+```
+1. make sure the copilot extension is installed in vs code
+2. located this folder "C:\Users\tholu\AppData\Roaming\Code\User\mcp.json", you should replace "tholu" with your setup.
+3. add the following, update the "ADD_PATH_HERE" placeholder and save
+
+{
+	"servers": {
+		"CodeDesigner": {
+			"type": "stdio",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--no-build",
+				"--project",
+				"ADD_PATH_HERE\\CodeDesigner\\CodeDesigner.Ps2.McpServer"
+			]
+		}
+	},
+	"inputs": []
+}
+
+```
