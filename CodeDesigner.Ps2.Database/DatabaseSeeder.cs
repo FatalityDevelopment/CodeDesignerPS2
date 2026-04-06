@@ -34,7 +34,57 @@ public class DatabaseSeeder
         await SeedSettingsAsync(ct);
         await SeedGameDataAsync(ct);
         await SeedLabelSetsAsync(ct);
+        
+        
+        var archiveRoot = "C:\\Users\\tholu\\Desktop\\CodeDesigner\\CheatCodeArchive";
+        var bulkCheatParser = new BulkCheatParser(_db, archiveRoot);
+        await bulkCheatParser.RunAsync(ct);
+
+        await MigrateMemoryFilesToDatabaseAsync(_db, "C:\\Users\\tholu\\Desktop\\CodeDesigner\\CodeDesigner.Ps2.McpServer\\bin\\Debug\\net8.0\\memories");
+
         await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// One-time migration: import any existing flat <c>.md</c> files from
+    /// <paramref name="memoriesPath"/> into the <see cref="McpMemory"/> table so
+    /// progress reports created before the database upgrade are preserved.
+    /// Already-imported files are skipped (idempotent); files are not deleted
+    /// from disk so they remain available as a backup.
+    /// </summary>
+    static async Task MigrateMemoryFilesToDatabaseAsync(
+        CodeDesignerDbContext db,
+        string memoriesPath)
+    {
+        if (!Directory.Exists(memoriesPath))
+            return;
+
+        var files = Directory.GetFiles(memoriesPath, "*.md");
+        if (files.Length == 0)
+            return;
+
+        foreach (var file in files)
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+
+            // Skip if a memory with this name already exists in the database.
+            bool exists = await db.McpMemories.AnyAsync(m => m.Name == name);
+            if (exists)
+                continue;
+
+            var content = await File.ReadAllTextAsync(file);
+            db.McpMemories.Add(new CodeDesigner.Ps2.Database.Entities.McpMemory
+            {
+                Name = name,
+                Content = content,
+                CreatedAt = File.GetCreationTimeUtc(file),
+                UpdatedAt = File.GetLastWriteTimeUtc(file),
+            });
+        }
+
+        await db.SaveChangesAsync();
     }
 
     // ── Tool descriptions ──────────────────────────────────────────────────────
