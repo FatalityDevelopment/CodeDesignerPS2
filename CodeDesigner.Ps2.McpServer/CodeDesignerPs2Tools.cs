@@ -2652,6 +2652,9 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseS
 
     // ── Database query ────────────────────────────────────────────────────────
 
+    private const int QueryDbMaxCellWidth      = 60;
+    private const int QueryDbTruncatedCellWidth = 57; // MaxCellWidth - 3 for the "…" suffix
+
     [McpServerTool(Name = "query_db")]
     [Description("""
         Execute a read-only SELECT query against the CodeDesigner SQLite database and return the results as a formatted table.
@@ -2726,7 +2729,7 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseS
                     string cell = "null";
                     if (row.TryGetProperty(columns[c], out var v) && v.ValueKind != JsonValueKind.Null)
                         cell = v.ToString();
-                    if (cell.Length > 60) cell = cell[..57] + "…";
+                    if (cell.Length > QueryDbMaxCellWidth) cell = cell[..QueryDbTruncatedCellWidth] + "…";
                     cells[c] = cell;
                     if (cell.Length > widths[c]) widths[c] = cell.Length;
                 }

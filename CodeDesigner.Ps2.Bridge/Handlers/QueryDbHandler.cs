@@ -11,11 +11,12 @@ namespace CodeDesigner.Ps2.Bridge
     {
         // ── QUERYDB ───────────────────────────────────────────────────────────
 
-        // Keywords that must never appear in a read-only query.
+        // First-pass blocklist: reject obvious non-SELECT statements early with a
+        // friendly error, before the transaction safety net kicks in.
         private static readonly string[] _queryDbBlocklist =
         [
-            "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
-            "ATTACH", "DETACH", "VACUUM", "PRAGMA WRITEABLE",
+            "INSERT ", "UPDATE ", "DELETE ", "DROP ", "CREATE ", "ALTER ",
+            "ATTACH ", "DETACH ", "VACUUM",
         ];
 
         /// <summary>
@@ -23,7 +24,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// CodeDesigner SQLite database and return the results as JSON rows.
         /// <para>
         /// Only SELECT and WITH … SELECT (CTE) statements are permitted.
-        /// Attempts to modify data are rejected.
+        /// Every query runs inside a transaction that is unconditionally rolled
+        /// back, ensuring no mutations can persist even if the blocklist is
+        /// somehow bypassed.
         /// </para>
         /// <para>Available tables:</para>
         /// <list type="bullet">
@@ -59,13 +62,13 @@ namespace CodeDesigner.Ps2.Bridge
                 return CreateErrorResponse(
                     "QUERYDB only supports read-only SELECT queries (or CTEs starting with WITH … SELECT)");
 
-            // Blocklist: reject any mutating or structural keyword.
+            // Quick blocklist check for obvious mutating statements.
             var upper = sql.ToUpperInvariant();
             foreach (var bad in _queryDbBlocklist)
             {
                 if (upper.Contains(bad, StringComparison.Ordinal))
                     return CreateErrorResponse(
-                        $"QUERYDB does not permit '{bad}' statements — only SELECT is allowed");
+                        $"QUERYDB does not permit '{bad.TrimEnd()}' statements — only SELECT is allowed");
             }
 
             try
@@ -74,32 +77,45 @@ namespace CodeDesigner.Ps2.Bridge
                 if (conn.State != ConnectionState.Open)
                     conn.Open();
 
-                using DbCommand cmd = conn.CreateCommand();
-                cmd.CommandText = sql;
-
-                var rows = new List<Dictionary<string, object?>>();
-                using DbDataReader reader = cmd.ExecuteReader();
-                while (reader.Read())
+                // Run inside a transaction that is always rolled back.
+                // This is the primary safety mechanism: even if a mutating statement
+                // somehow passes the blocklist above, the rollback guarantees that
+                // the database is never modified.
+                using DbTransaction txn = conn.BeginTransaction();
+                try
                 {
-                    var row = new Dictionary<string, object?>(reader.FieldCount);
-                    for (int i = 0; i < reader.FieldCount; i++)
+                    using DbCommand cmd = conn.CreateCommand();
+                    cmd.CommandText  = sql;
+                    cmd.Transaction  = txn;
+
+                    var rows = new List<Dictionary<string, object?>>();
+                    using DbDataReader reader = cmd.ExecuteReader();
+                    while (reader.Read())
                     {
-                        row[reader.GetName(i)] = reader.IsDBNull(i)
-                            ? null
-                            : reader.GetValue(i);
+                        var row = new Dictionary<string, object?>(reader.FieldCount);
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            row[reader.GetName(i)] = reader.IsDBNull(i)
+                                ? null
+                                : reader.GetValue(i);
+                        }
+                        rows.Add(row);
                     }
-                    rows.Add(row);
-                }
 
-                var opts = new JsonSerializerOptions { WriteIndented = false };
-                return JsonSerializer.Serialize(new CommandResponse
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success    = true,
+                        Command    = "QUERYDB",
+                        Message    = $"{rows.Count} row(s) returned",
+                        DbRows     = rows,
+                        DbRowCount = rows.Count,
+                    });
+                }
+                finally
                 {
-                    Success    = true,
-                    Command    = "QUERYDB",
-                    Message    = $"{rows.Count} row(s) returned",
-                    DbRows     = rows,
-                    DbRowCount = rows.Count,
-                }, opts);
+                    // Always roll back — this is the key safety guarantee.
+                    try { txn.Rollback(); } catch { /* connection already closed, ignore */ }
+                }
             }
             catch (Exception ex)
             {

@@ -416,7 +416,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     // Determine menu state
     const addr = parseInt(event.row.addr, 16);
     const hasBreakpoint = this.svc.state.breakpoints.has(addr);
-    const hasWatch = this.svc.state.pineWatches.some((w: any) => (parseInt(w.Start, 16) || 0) === addr);
+    const hasWatch = this.svc.state.pineWatches.some((w: PineWatchInfo) => parseInt(w.Start, 16) === addr);
     const hasTarget = !!(event.row.args.match(/\$([0-9A-F]{8})/i) ||
                           event.row.args.match(/0x([0-9A-F]{8})/i));
 
@@ -2123,7 +2123,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (!this._ctxRow || this._ctxGlobalIndex < 0) { return; }
       const addr = parseInt(this._ctxRow.addr, 16);
       const end  = addr + 4;
-      const alreadyWatched = params.state.pineWatches.some((w: PineWatchInfo) => (parseInt(w.Start, 16) || 0) === addr);
+      const alreadyWatched = params.state.pineWatches.some((w: PineWatchInfo) => parseInt(w.Start, 16) === addr);
       if (!alreadyWatched) {
         params.vscode.postMessage({ type: 'addPineWatch', address: addr, end });
       }
@@ -2133,7 +2133,7 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (!this._ctxRow || this._ctxGlobalIndex < 0) { return; }
       const addr = parseInt(this._ctxRow.addr, 16);
       const end  = addr + 4;
-      const watch = params.state.pineWatches.find((w: PineWatchInfo) => (parseInt(w.Start, 16) || 0) === addr);
+      const watch = params.state.pineWatches.find((w: PineWatchInfo) => parseInt(w.Start, 16) === addr);
       if (watch) {
         const cpu = watch.Cpu === 'IOP' ? 1 : 0;
         params.vscode.postMessage({ type: 'removePineWatch', address: addr, end, cpu });
