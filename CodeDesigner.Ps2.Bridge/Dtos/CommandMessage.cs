@@ -113,6 +113,10 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public byte? WatchCond { get; set; }
 
+        // QUERYDB fields
+        /// <summary>Read-only SELECT SQL statement to execute against the CodeDesigner SQLite database.</summary>
+        public string? SqlQuery { get; set; }
+
         // TRACECALLS fields
         /// <summary>Maximum number of EE instructions to trace for TRACECALLS (default 10 000).</summary>
         public int? MaxInstructions { get; set; }

@@ -2650,6 +2650,118 @@ public sealed class CodeDesignerPs2Tools(SocketBridgeClient bridge, McpDatabaseS
         return SimpleMessage(json);
     }
 
+    // ── Database query ────────────────────────────────────────────────────────
+
+    [McpServerTool(Name = "query_db")]
+    [Description("""
+        Execute a read-only SELECT query against the CodeDesigner SQLite database and return the results as a formatted table.
+        Only SELECT and CTE (WITH … SELECT) statements are permitted — INSERT/UPDATE/DELETE/DROP/CREATE are blocked.
+
+        Available tables:
+          Settings          (Key, Value, Description, UpdatedAt)
+          LabelSets         (Id, SetName, GameId, IsBuiltIn)
+          Labels            (Id, LabelSetId, Address, Name, Type, Hidden, Comment)
+          LabelMembers      (Id, LabelId, Offset, Name)
+          Games             (Id, Title, Description)
+          GameRegions       (Id, Name)
+          GameDiscs         (Id, GameId, GameRegionId, Serial, CRC, IsoPath)
+          Snapshots         (Id, GameId, Title, Description, SnapshotPath, SnapshotDateTime)
+          CheatLists        (Id, GameId, GameDiscId, Title, Description, CreatedAt, UpdatedAt)
+          Cheats            (Id, CheatListId, Label, Description, Author, IsEnabled, SortOrder)
+          CheatLines        (Id, CheatId, Code, SortOrder)
+          McpConfig         (Id, Key, Value)
+          McpMemory         (Id, Name, Content)
+          McpAgents         (Id, Name)
+          McpAgentTasks     (Id, McpAgentId, Phase, SortOrder)
+
+        Examples:
+          SELECT * FROM Settings WHERE Key LIKE 'theme%'
+          SELECT g.Title, d.Serial, d.IsoPath FROM Games g JOIN GameDiscs d ON d.GameId = g.Id
+          SELECT l.Address, l.Name, l.Type FROM Labels l JOIN LabelSets ls ON ls.Id = l.LabelSetId WHERE ls.SetName = 'MyGame'
+        """)]
+    public async Task<string> QueryDb(
+        [Description("A read-only SQL SELECT statement to execute against the CodeDesigner database.")] string sql,
+        [Description("Maximum number of rows to display in the formatted output (default 200, max 1000). Full data is still returned in JSON.")] int maxDisplayRows = 200,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+            return "Error: sql is required.";
+
+        var json = await bridge.SendAsync(new { Command = "QUERYDB", SqlQuery = sql }, cancellationToken);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("DbRows", out var rows) || rows.ValueKind != JsonValueKind.Array)
+                return SimpleMessage(json);
+
+            int total = root.TryGetProperty("DbRowCount", out var cnt) ? cnt.GetInt32() : rows.GetArrayLength();
+            if (total == 0)
+                return "Query returned 0 rows.";
+
+            // Build column headers from first row.
+            var firstRow = rows[0];
+            var columns  = new List<string>();
+            foreach (var prop in firstRow.EnumerateObject())
+                columns.Add(prop.Name);
+
+            if (columns.Count == 0) return "Query returned rows with no columns.";
+
+            // Calculate column widths (capped at 60 chars).
+            var widths = columns.Select(c => c.Length).ToList();
+            int display = Math.Min(total, Math.Clamp(maxDisplayRows, 1, 1000));
+            int rowIdx  = 0;
+            var cellCache = new List<string[]>(display);
+            foreach (var row in rows.EnumerateArray())
+            {
+                if (rowIdx >= display) break;
+                var cells = new string[columns.Count];
+                for (int c = 0; c < columns.Count; c++)
+                {
+                    string cell = "null";
+                    if (row.TryGetProperty(columns[c], out var v) && v.ValueKind != JsonValueKind.Null)
+                        cell = v.ToString();
+                    if (cell.Length > 60) cell = cell[..57] + "…";
+                    cells[c] = cell;
+                    if (cell.Length > widths[c]) widths[c] = cell.Length;
+                }
+                cellCache.Add(cells);
+                rowIdx++;
+            }
+
+            // Render ASCII table.
+            var sb = new StringBuilder();
+            string sep = "+" + string.Join("+", widths.Select(w => new string('-', w + 2))) + "+";
+            sb.AppendLine(sep);
+            sb.Append("|");
+            for (int c = 0; c < columns.Count; c++)
+                sb.Append($" {columns[c].PadRight(widths[c])} |");
+            sb.AppendLine();
+            sb.AppendLine(sep);
+            foreach (var cells in cellCache)
+            {
+                sb.Append("|");
+                for (int c = 0; c < cells.Length; c++)
+                    sb.Append($" {cells[c].PadRight(widths[c])} |");
+                sb.AppendLine();
+            }
+            sb.AppendLine(sep);
+
+            if (total > display)
+                sb.AppendLine($"(showing {display} of {total} rows — reduce result set or increase maxDisplayRows)");
+            else
+                sb.AppendLine($"({total} row{(total == 1 ? "" : "s")})");
+
+            return sb.ToString().TrimEnd();
+        }
+        catch { return json; }
+    }
+
     // -------------------------------------------------------------------------
     // Private formatting helpers
     // -------------------------------------------------------------------------

@@ -9,7 +9,7 @@ import {
   OnDestroy,
 } from '@angular/core';
 import { RegisterData } from '../disasm-editor.service';
-import { PineWatchInfo } from '../../../socketClient';
+import { PineWatchInfo } from '../state/types';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Constants for register names

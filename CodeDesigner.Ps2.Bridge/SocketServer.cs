@@ -1198,6 +1198,11 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PINE_SAVE_SNAPSHOT":
                         return HandlePineSaveSnapshot();
 
+                    // ── Database query (read-only) ────────────────────────────
+                    case "QUERYDB":
+                    case "QUERY_DB":
+                        return HandleQueryDb(command.SqlQuery);
+
                     // ── Navigation history ────────────────────────────────────
                     case "GETNAVHISTORY":
                     case "GET_NAV_HISTORY":

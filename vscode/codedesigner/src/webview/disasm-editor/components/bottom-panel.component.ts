@@ -8,7 +8,7 @@ import {
   computed,
   OnDestroy,
 } from '@angular/core';
-import { CallStackEntry, ModuleEntry, ThreadEntry } from '../state/types';
+import { CallStackEntry, ModuleEntry, ThreadEntry, PineWatchInfo } from '../state/types';
 
 export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'watches';
 
@@ -132,21 +132,23 @@ export type BottomTab = 'callstack' | 'threads' | 'breakpoints' | 'modules' | 'w
           </div>
           <table class="dbg-table">
             <thead><tr>
-              <th class="dbg-th">Address</th>
-              <th class="dbg-th">Value (u32)</th>
+              <th class="dbg-th">CPU</th>
+              <th class="dbg-th">Range</th>
+              <th class="dbg-th">Condition</th>
               <th class="dbg-th"></th>
             </tr></thead>
             <tbody>
               @if (!sortedWatches().length) {
-                <tr><td colspan="3" class="dbg-td-empty">No watches — right-click an instruction to add one</td></tr>
+                <tr><td colspan="4" class="dbg-td-empty">No watchpoints — right-click an instruction to add one</td></tr>
               }
-              @for (addr of sortedWatches(); track addr) {
-                <tr class="dbg-table-row clickable" (click)="navigateToWatchAddress.emit(addr)">
-                  <td class="dbg-td-addr dbg-bp-addr mono">0x{{ toHex(addr) }}</td>
-                  <td class="dbg-td-type mono">{{ getWatchValue(addr) }}</td>
+              @for (w of sortedWatches(); track w.Start) {
+                <tr class="dbg-table-row clickable" (click)="navigateToWatchAddress.emit(parseWatchStart(w))">
+                  <td class="dbg-td-type mono">{{ w.Cpu }}</td>
+                  <td class="dbg-td-addr mono">{{ w.Start }}–{{ w.End }}</td>
+                  <td class="dbg-td-type mono">{{ w.Cond }}</td>
                   <td class="dbg-td-del">
                     <button class="dbg-bp-del-btn"
-                      (click)="$event.stopPropagation(); removeWatch.emit(addr)">✕</button>
+                      (click)="$event.stopPropagation(); removeWatch.emit(w)">✕</button>
                   </td>
                 </tr>
               }
@@ -204,15 +206,14 @@ export class BottomPanelComponent implements OnDestroy {
   readonly threads = input<ThreadEntry[]>([]);
   readonly breakpoints = input<Set<number>>(new Set());
   readonly modules = input<ModuleEntry[]>([]);
-  readonly watches = input<Set<number>>(new Set());
-  readonly watchValues = input<Map<number, number>>(new Map());
+  readonly watches = input<PineWatchInfo[]>([]);
 
   // Outputs
   readonly navigateToAddress = output<number>();
   readonly toggleBreakpoint = output<number>();
   readonly removeBreakpoint = output<number>();
   readonly clearAllBreakpoints = output<void>();
-  readonly removeWatch = output<number>();
+  readonly removeWatch = output<PineWatchInfo>();
   readonly clearAllWatches = output<void>();
   readonly navigateToWatchAddress = output<number>();
   readonly selectThread = output<number>();
@@ -232,7 +233,7 @@ export class BottomPanelComponent implements OnDestroy {
 
   // Sorted watches array for @for iteration
   readonly sortedWatches = computed(() =>
-    Array.from(this.watches()).sort((a, b) => a - b),
+    [...this.watches()].sort((a, b) => parseInt(a.Start, 16) - parseInt(b.Start, 16)),
   );
 
   selectTab(tab: BottomTab): void {
@@ -252,9 +253,8 @@ export class BottomPanelComponent implements OnDestroy {
     return parseInt(s.replace(/^0x/i, ''), 16) || 0;
   }
 
-  getWatchValue(addr: number): string {
-    const val = this.watchValues().get(addr);
-    return val !== undefined ? `0x${val.toString(16).toUpperCase().padStart(8, '0')}` : '—';
+  parseWatchStart(w: PineWatchInfo): number {
+    return parseInt(w.Start, 16) || 0;
   }
 
   /**

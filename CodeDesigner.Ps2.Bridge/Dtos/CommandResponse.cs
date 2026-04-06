@@ -163,6 +163,18 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>List of snapshot metadata entries returned by GETSNAPSHOTS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<SnapshotInfo>? Snapshots { get; set; }
+
+        // QUERYDB results
+        /// <summary>
+        /// Rows returned by a QUERYDB SELECT statement.
+        /// Each row is a dictionary of column name → value (string, long, double, or null).
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<Dictionary<string, object?>>? DbRows { get; set; }
+
+        /// <summary>Number of rows returned by the last QUERYDB statement.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? DbRowCount { get; set; }
     }
 
     /// <summary>Snapshot metadata wire payload returned by GETSNAPSHOTS.</summary>
