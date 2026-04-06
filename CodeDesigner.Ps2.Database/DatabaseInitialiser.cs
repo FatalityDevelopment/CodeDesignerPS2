@@ -53,6 +53,12 @@ public static class DatabaseInitialiser
 
         await using var db = new CodeDesignerDbContext(dbOptions);
 
+        // Load all existing memory names in one query to avoid N+1 round-trips.
+        var existingNames = (await db.McpMemories
+            .Select(m => m.Name)
+            .ToListAsync())
+            .ToHashSet(StringComparer.Ordinal);
+
         foreach (var file in files)
         {
             var name = Path.GetFileNameWithoutExtension(file);
@@ -60,8 +66,7 @@ public static class DatabaseInitialiser
                 continue;
 
             // Skip if a memory with this name already exists in the database.
-            bool exists = await db.McpMemories.AnyAsync(m => m.Name == name);
-            if (exists)
+            if (existingNames.Contains(name))
                 continue;
 
             var content = await File.ReadAllTextAsync(file);
