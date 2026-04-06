@@ -19,10 +19,9 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-// Parse optional --host, --port, --memories-path, and --db-path arguments
+// Parse optional --host, --port, and --db-path arguments
 string? host = null;
 int? port = null;
-string? memoriesPath = null;
 string? dbPath = null;
 
 for (int i = 0; i < args.Length; i++)
@@ -40,11 +39,6 @@ for (int i = 0; i < args.Length; i++)
             i++;
         }
     }
-    else if (args[i] == "--memories-path" && i + 1 < args.Length)
-    {
-        memoriesPath = args[i + 1];
-        i++;
-    }
     else if (args[i] == "--db-path" && i + 1 < args.Length)
     {
         dbPath = args[i + 1];
@@ -52,22 +46,17 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
-// Allow environment-variable overrides
-memoriesPath ??= Environment.GetEnvironmentVariable("CODEDESIGNER_MEMORIES_PATH")
-              ?? Path.Combine(AppContext.BaseDirectory, "memories");
-
+// Allow environment-variable override
 dbPath ??= Environment.GetEnvironmentVariable("CODEDESIGNER_DB_PATH")
         ?? Path.Combine(AppContext.BaseDirectory, "codedesigner.db");
 
-// ── Database: seed initial data and populate ToolDescriptionStore ──────────
-// This runs before builder.Build() so [DynamicDescription] attributes return
-// correct values when the MCP SDK reflects over tool methods during registration.
-var dbOptions = await CodeDesigner.Ps2.Database.DatabaseInitialiser.InitialiseDatabaseAsync(dbPath);
+// ── Connect to the database (already initialised by the Database tool) ─────
+var dbOptions = new DbContextOptionsBuilder<CodeDesignerDbContext>()
+    .UseSqlite($"Data Source={dbPath}")
+    .Options;
 
-// Migrate any existing flat .md memory files into the database on first run.
-await CodeDesigner.Ps2.Database.DatabaseInitialiser.MigrateMemoryFilesToDatabaseAsync(memoriesPath, dbOptions);
-
-// Populate the in-process store so [DynamicDescription] attributes resolve.
+// Populate the in-process store so [DynamicDescription] attributes resolve
+// correctly when the MCP SDK reflects over tool methods during registration.
 await using (var bootstrapDb = new CodeDesignerDbContext(dbOptions))
 {
     var descriptions = await bootstrapDb.McpConfigs
