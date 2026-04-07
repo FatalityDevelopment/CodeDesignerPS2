@@ -219,6 +219,27 @@ namespace CodeDesigner.Ps2.Bridge
             try
             {
                 var set = LabelRepo.CreateSetAsync(gameId, setName).GetAwaiter().GetResult();
+
+                // Persist the empty set to disk immediately so that the server's
+                // in-memory state (LabelMgr.WorkspaceDir, ActiveSetName, _labels/_structs)
+                // is consistent from the moment the set is created.  This mirrors the
+                // logic in HandleSetActiveLabelSet so that GetMergedLabels() can find
+                // the set even before the client explicitly calls SETACTIVELABELSET.
+                LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
+                if (!string.IsNullOrWhiteSpace(workspaceDir))
+                {
+                    LabelMgr.SaveSet(set, workspaceDir, gameId);
+                    LabelMgr.SetActiveSet(workspaceDir, gameId, setName);
+                }
+                else
+                {
+                    var tempDir = Path.Combine(Path.GetTempPath(), "codedesigner_labels");
+                    Directory.CreateDirectory(tempDir);
+                    LabelMgr.SaveSet(set, tempDir, gameId);
+                    LabelMgr.SetActiveSet(tempDir, gameId, setName);
+                }
+                SyncLegacyDictsFromLabelManager();
+
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success  = true,
@@ -273,8 +294,13 @@ namespace CodeDesigner.Ps2.Bridge
                 var set = LabelRepo.AddOrUpdateEntryAsync(gameId, setName, FromWireEntry(entry)).GetAwaiter().GetResult();
 
                 // If this is the active set, keep legacy dicts in sync.
+                // First flush the updated set to disk so that GetMergedLabels() reads fresh
+                // data (it reads from the on-disk JSON, not the DB).
                 if (string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase))
+                {
+                    PersistActiveSetToDisk(set);
                     SyncLegacyDictsFromLabelManager();
+                }
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -305,7 +331,10 @@ namespace CodeDesigner.Ps2.Bridge
                 var set = LabelRepo.DeleteEntryAsync(gameId, setName, addrStr).GetAwaiter().GetResult();
 
                 if (string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase))
+                {
+                    PersistActiveSetToDisk(set);
                     SyncLegacyDictsFromLabelManager();
+                }
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -318,6 +347,32 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 return CreateErrorResponse(ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Writes <paramref name="set"/> to the same on-disk location that
+        /// <see cref="CodeDesigner.Ps2.LabelManager.Ps2LabelManager.GetMergedLabels"/> will read from.
+        /// This keeps the disk file in sync with the DB after any ADDLABELENTRY /
+        /// DELETELABELENTRY operation so that <see cref="SyncLegacyDictsFromLabelManager"/>
+        /// sees fresh data.
+        /// </summary>
+        private void PersistActiveSetToDisk(CodeDesigner.Ps2.LabelManager.Models.LabelSet set)
+        {
+            // LabelMgr.WorkspaceDir reflects the directory that was established by the
+            // most recent SETACTIVELABELSET (or CREATELABELSET) call – it may be a temp
+            // path when no workspace is open.  We must write to exactly that location.
+            var dir    = LabelMgr.WorkspaceDir;
+            var gameId = set.GameId ?? LabelMgr.GameId;
+
+            if (string.IsNullOrWhiteSpace(dir) || string.IsNullOrWhiteSpace(gameId))
+            {
+                // Cannot persist without a valid directory and game ID.  This is a
+                // logic error (SETACTIVELABELSET should have been called first) but
+                // it is not fatal – the next SETACTIVELABELSET call will re-sync.
+                return;
+            }
+
+            LabelMgr.SaveSet(set, dir, gameId);
         }
 
         // ── IMPORTLABELSET ────────────────────────────────────────────────────

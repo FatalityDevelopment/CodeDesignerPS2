@@ -36,11 +36,21 @@ namespace CodeDesigner.Ps2.LabelManager
         /// <summary>Name of the currently active user set, or null when none.</summary>
         public string? ActiveSetName { get; private set; }
 
-        /// <summary>Current workspace root directory sent by the client.</summary>
+        /// <summary>Current workspace root directory sent by the client (may be a temp path).</summary>
         private string? _workspaceDir;
 
         /// <summary>Current game identifier (ISO serial) sent by the client.</summary>
         private string? _gameId;
+
+        /// <summary>
+        /// The directory that <see cref="GetMergedLabels"/> uses to locate user-set JSON files.
+        /// This is the same value that was supplied to the most recent
+        /// <see cref="SetContext"/> or <see cref="SetActiveSet"/> call.
+        /// </summary>
+        public string? WorkspaceDir => _workspaceDir;
+
+        /// <summary>Current game identifier used by <see cref="GetMergedLabels"/>.</summary>
+        public string? GameId => _gameId;
 
         // ── Construction / Built-in loading ──────────────────────────────────
 
