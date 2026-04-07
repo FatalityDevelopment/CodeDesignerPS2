@@ -69,7 +69,6 @@ const ARCHIVE_BRANCH      = 'main';
 export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
     private emulatorTerminal?: vscode.Terminal;
-    private _emulatorProcess?: child_process.ChildProcess;
     private settings: EmuSettings = {};
     private workspaceRoot: string = '';
     private snapshots: SnapshotEntry[] = [];
@@ -146,9 +145,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             vscode.workspace.onDidChangeWorkspaceFolders(() => this.reloadAndRefresh())
         );
 
-        // Detect when the PCSX2 emulator terminal is closed externally.
-        // The CodeDesigner bridge is now tracked via _emulatorProcess (spawned with
-        // child_process.spawn), so its close event is handled inline in launchControlServerAndConnect.
+        // Detect when the emulator terminal is closed externally
         context.subscriptions.push(
             vscode.window.onDidCloseTerminal(t => {
                 if (t === this.emulatorTerminal) {
@@ -606,11 +603,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.selectedGamePath = gamePath;
 
         // Toggle: if connected and/or launched from this panel, disconnect and close process.
-        if (this.socketClient.isConnected() || this._emulatorProcess || this.emulatorTerminal) {
-            if (this._emulatorProcess) {
-                out.info('Stopping emulator process...');
-                this._emulatorProcess.kill();
-            } else if (this.emulatorTerminal) {
+        if (this.socketClient.isConnected() || this.emulatorTerminal) {
+            if (this.emulatorTerminal) {
                 out.info('Stopping emulator process...');
                 this.emulatorTerminal.dispose();
             }
@@ -657,47 +651,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.launchControlServerAndConnect(emulatorPath);
     }
 
-    /**
-     * Wire up stdout/stderr from a spawned bridge process to the output channel and
-     * handle unexpected exits.  Call immediately after `child_process.spawn()`.
-     */
-    private _attachBridgeProcessLogging(proc: child_process.ChildProcess): void {
-        const out = getOutputChannel();
-
-        proc.stdout?.on('data', (data: Buffer) => {
-            for (const line of data.toString().split('\n')) {
-                const trimmed = line.trimEnd();
-                if (trimmed) { out.info(trimmed); }
-            }
-        });
-
-        proc.stderr?.on('data', (data: Buffer) => {
-            for (const line of data.toString().split('\n')) {
-                const trimmed = line.trimEnd();
-                if (trimmed) { out.error(trimmed); }
-            }
-        });
-
-        proc.on('error', (err: Error) => {
-            out.error(`Failed to start CodeDesigner bridge: ${err.message}`);
-            this.cleanupProcess();
-        });
-
-        proc.on('close', (code: number | null) => {
-            if (this._emulatorProcess !== proc) { return; }
-            if (code !== null && code !== 0) {
-                out.error(`CodeDesigner bridge exited with code ${code}. Check the output above for details.`);
-                vscode.window.showErrorMessage(
-                    `CodeDesigner bridge crashed (exit code ${code}). See the CodeDesigner output channel for details.`
-                );
-            } else {
-                out.info('CodeDesigner bridge process exited.');
-            }
-            try { this.socketClient.disconnect(); } catch { /* ignore */ }
-            this.cleanupProcess();
-        });
-    }
-
     /** Launch CodeDesigner control server with no mode args, then connect socket/views. */
     private launchControlServerAndConnect(selectedEmulatorPath: string): void {
         const out = getOutputChannel();
@@ -711,8 +664,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        // If we already launched a process, just retry socket connect.
-        if (this._emulatorProcess) {
+        // If we already launched a terminal process, just retry socket connect.
+        if (this.emulatorTerminal) {
             this.connectSocketAndOpenViews();
             return;
         }
@@ -729,12 +682,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         out.info(`Starting control server: ${resolvedExe}`);
-        out.show(false);
 
-        const proc = child_process.spawn(resolvedExe, [], { stdio: ['ignore', 'pipe', 'pipe'] });
-        this._emulatorProcess = proc;
-        this._attachBridgeProcessLogging(proc);
+        const terminal = vscode.window.createTerminal({
+            name: 'CodeDesigner',
+            shellPath: resolvedExe,
+            shellArgs: [],
+        });
+        terminal.show(true);
 
+        this.emulatorTerminal = terminal;
         this.connectSocketAndOpenViews();
     }
 
@@ -777,7 +733,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private cleanupProcess(): void {
-        this._emulatorProcess = undefined;
         this.emulatorTerminal = undefined;
         this._paused = false;
         this._bridgeMode = false;
@@ -2396,19 +2351,23 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return false;
         }
 
-        // Don't spawn a second process if one is already running
-        if (this._emulatorProcess) {
-            getOutputChannel().info('Auto-start: server process is already running.');
+        // Don't spawn a second terminal if one is already open
+        if (this.emulatorTerminal) {
+            getOutputChannel().info('Auto-start: server terminal is already running.');
             return true;
         }
 
-        const out = getOutputChannel();
-        out.info(`Auto-starting CodeDesigner control server: ${resolvedExe}`);
-        out.show(false);
+        const cliArgs: string[] = [];
 
-        const proc = child_process.spawn(resolvedExe, [], { stdio: ['ignore', 'pipe', 'pipe'] });
-        this._emulatorProcess = proc;
-        this._attachBridgeProcessLogging(proc);
+        getOutputChannel().info(`Auto-starting CodeDesigner control server: ${resolvedExe}`);
+
+        const terminal = vscode.window.createTerminal({
+            name: 'CodeDesigner',
+            shellPath: resolvedExe,
+            shellArgs: cliArgs,
+        });
+        terminal.show(false);   // reveal terminal but keep editor focus
+        this.emulatorTerminal = terminal;
 
         // Poll until the socket server is ready (up to ~10 s), then connect.
         this.connectSocketAndOpenViews();
