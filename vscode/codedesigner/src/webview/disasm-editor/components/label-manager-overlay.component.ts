@@ -622,9 +622,11 @@ export class LabelManagerOverlayComponent {
   });
 
   /** True when the offset mini-form has enough data to save. */
-  readonly canSaveOffset = computed(() =>
-    this.selectedStructAddress() !== '' && this.offsetFormName().trim() !== ''
-  );
+  readonly canSaveOffset = computed(() => {
+    const offsetStr = this.offsetFormOffset().replace(/^0x/i, '');
+    const offsetValid = offsetStr.length > 0 && !isNaN(parseInt(offsetStr, 16));
+    return this.selectedStructAddress() !== '' && this.offsetFormName().trim() !== '' && offsetValid;
+  });
 
   /** Addresses of dynamic entries to poll. */
   private readonly _dynamicAddresses = computed(() =>

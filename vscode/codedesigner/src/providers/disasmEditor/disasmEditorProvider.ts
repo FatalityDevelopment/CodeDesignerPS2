@@ -829,8 +829,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       } else if (message.type === 'openLabelManager') {
         this.openLabelManagerTab(message.address as string | undefined);
       } else if (message.type === 'openLiveView') {
-        const addr = parseInt(((message.address as string) ?? '0').replace(/^0x/i, ''), 16);
-        if (!isNaN(addr) && addr > 0) { this._revealPanelForAddress(addr); }
+        this._handleOpenLiveViewMessage(message.address as string | undefined);
       }
     });
 
@@ -1477,8 +1476,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             } else if (message.type === 'openLabelManager') {
                 this.openLabelManagerTab(message.address as string | undefined);
             } else if (message.type === 'openLiveView') {
-                const addr = parseInt(((message.address as string) ?? '0').replace(/^0x/i, ''), 16);
-                if (!isNaN(addr) && addr > 0) { this._revealPanelForAddress(addr); }
+                this._handleOpenLiveViewMessage(message.address as string | undefined);
             } else if (message.type === 'toggleFollowAi') {
                 this.setFollowAiEnabled(!this._followAiEnabled);
             }
@@ -1545,8 +1543,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 return;
             }
             if (message.type === 'openLiveView') {
-                const addr = parseInt(((message.address as string) ?? '0').replace(/^0x/i, ''), 16);
-                if (!isNaN(addr) && addr > 0) { this._revealPanelForAddress(addr); }
+                this._handleOpenLiveViewMessage(message.address as string | undefined);
                 return;
             }
         });
@@ -1610,6 +1607,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
      * and the uncached-user EE mirror prefix before comparing.
      * Panel base addresses are pre-computed as physBaseAddress at creation time.
      */
+
+    /** Parse an address string from a webview message and reveal the live panel for it. */
+    private _handleOpenLiveViewMessage(addressStr: string | undefined): void {
+        const addr = parseInt(((addressStr ?? '0')).replace(/^0x/i, ''), 16);
+        if (!isNaN(addr) && addr > 0) { this._revealPanelForAddress(addr); }
+    }
+
     private _revealPanelForAddress(addr: number): void {
         const physAddr = DisasmEditorProvider._toPhysAddr(addr);
 
