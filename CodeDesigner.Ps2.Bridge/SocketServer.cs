@@ -236,10 +236,11 @@ namespace CodeDesigner.Ps2.Bridge
         {
             string dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "codedesigner.db");
             var opts = new DbContextOptionsBuilder<CodeDesignerDbContext>()
-                .UseSqlite($"Data Source={dbPath};Journal Mode=WAL;")
+                .UseSqlite($"Data Source={dbPath}")
                 .Options;
             var ctx = new CodeDesignerDbContext(opts);
             ctx.Database.Migrate();
+            ctx.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
             return ctx;
         }
 
