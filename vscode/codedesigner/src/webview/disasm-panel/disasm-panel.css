@@ -235,9 +235,9 @@ app-cheats-tab {
 
 #emu-status-bar {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
     margin: -10px -10px 10px;
     font-family: monospace;
     font-size: 12px;
@@ -296,100 +296,111 @@ app-cheats-tab {
     50% { opacity: 0.35; }
 }
 
-#emu-mode-select {
-    background: rgba(255,255,255,0.08);
+/* ── Status row (dot + text + mode toggle) ─────────────────────────────── */
+
+#emu-status-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+#emu-status-text {
+    flex: 1;
+}
+
+#emu-mode-toggle {
+    display: flex;
+    gap: 0;
+    flex-shrink: 0;
+}
+
+.mode-pill {
+    background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.15);
     color: inherit;
-    padding: 1px 4px;
+    padding: 1px 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.02em;
+    outline: none;
+    opacity: 0.55;
+    transition: opacity 0.1s, background 0.1s;
+}
+
+.mode-pill:first-child {
+    border-radius: 2px 0 0 2px;
+    border-right: none;
+}
+
+.mode-pill:last-child {
+    border-radius: 0 2px 2px 0;
+}
+
+.mode-pill:hover {
+    opacity: 0.85;
+    background: rgba(255,255,255,0.12);
+}
+
+.mode-pill.mode-pill-active {
+    background: rgba(255,255,255,0.18);
+    opacity: 1;
+}
+
+/* ── Debug controls row (pause/resume + step buttons) ──────────────────── */
+
+#emu-debug-row {
+    display: flex;
+    align-items: center;
+    padding: 4px 10px;
+    gap: 4px;
+}
+
+.dbg-btn {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.13);
+    color: inherit;
+    padding: 2px 8px;
     cursor: pointer;
     font-family: monospace;
     font-size: 11px;
+    font-weight: bold;
     outline: none;
     border-radius: 2px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 0.1s;
 }
 
-#emu-mode-select:hover {
-    background: rgba(255,255,255,0.14);
+.dbg-btn:hover:not(:disabled) {
+    background: rgba(255,255,255,0.16);
+}
+
+.dbg-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.dbg-btn-label {
+    font-size: 10px;
+    opacity: 0.8;
 }
 
 #emu-play-pause-btn {
-    margin-left: auto;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.15);
-    color: inherit;
-    padding: 1px 8px;
-    cursor: pointer;
-    font-family: monospace;
-    font-size: 11px;
-    outline: none;
-    border-radius: 2px;
-    display: none;
+    flex: 1;
+    justify-content: center;
 }
 
-#emu-status-bar.status-connected #emu-play-pause-btn,
-#emu-status-bar.status-ai-control #emu-play-pause-btn,
-#emu-status-bar.status-paused #emu-play-pause-btn {
-    display: inline-block;
-}
-
-#emu-play-pause-btn:hover {
-    background: rgba(255,255,255,0.18);
-}
-
-#emu-step-btn {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.15);
-    color: inherit;
-    padding: 1px 8px;
-    cursor: pointer;
-    font-family: monospace;
-    font-size: 11px;
-    outline: none;
-    border-radius: 2px;
-    display: none;
-}
-
-#emu-status-bar.status-paused #emu-step-btn {
-    display: inline-block;
-}
-
-#emu-step-btn:hover:not(:disabled) {
-    background: rgba(255,255,255,0.18);
-}
-
-#emu-step-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-#emu-step-into-btn,
-#emu-step-over-btn {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.15);
-    color: inherit;
-    padding: 1px 8px;
-    cursor: pointer;
-    font-family: monospace;
-    font-size: 11px;
-    outline: none;
-    border-radius: 2px;
-    display: none;
-}
-
-#emu-status-bar.status-paused #emu-step-into-btn,
-#emu-status-bar.status-paused #emu-step-over-btn {
-    display: inline-block;
-}
-
-#emu-step-into-btn:hover:not(:disabled),
-#emu-step-over-btn:hover:not(:disabled) {
-    background: rgba(255,255,255,0.18);
-}
-
-#emu-step-into-btn:disabled,
-#emu-step-over-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+.dbg-separator {
+    width: 1px;
+    height: 16px;
+    background: rgba(255,255,255,0.15);
+    flex-shrink: 0;
+    margin: 0 2px;
 }
 
 .container {
