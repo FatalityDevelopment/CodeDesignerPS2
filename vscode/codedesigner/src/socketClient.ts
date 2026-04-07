@@ -82,6 +82,8 @@ interface CommandMessage {
     GameId?: string;
     SetName?: string;
     LabelEntry?: { address: string; name: string; comment?: string; parentAddress?: string; offset?: number; valueType?: string };
+    /** String address for DELETELABELENTRY (supports synthetic child paths like "0x80010000:+0x0010"). */
+    LabelEntryAddress?: string;
     // Settings (GETSETTING / SETSETTING / GETALLSETTINGS / DELETESETTING)
     SettingKey?: string;
     SettingValue?: string;
@@ -2332,9 +2334,9 @@ export class SocketClient {
         return (response as any).LabelSet as LabelSetPayload;
     }
 
-    /** Delete a label entry by address from the given set. */
-    public async deleteLabelEntry(workspaceDir: string, gameId: string, setName: string, address: number): Promise<LabelSetPayload> {
-        const response = await this.sendCommand({ Command: 'DELETELABELENTRY', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName, Address: address });
+    /** Delete a label entry by address from the given set. Accepts both real addresses ("0x80010000") and synthetic child addresses ("0x80010000:+0x0010"). */
+    public async deleteLabelEntry(workspaceDir: string, gameId: string, setName: string, address: string): Promise<LabelSetPayload> {
+        const response = await this.sendCommand({ Command: 'DELETELABELENTRY', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName, LabelEntryAddress: address });
         if (!response.Success) { throw new Error(response.Error || 'DELETELABELENTRY failed'); }
         return (response as any).LabelSet as LabelSetPayload;
     }

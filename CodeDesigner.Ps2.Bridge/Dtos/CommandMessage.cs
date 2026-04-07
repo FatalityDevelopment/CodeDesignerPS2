@@ -136,6 +136,12 @@ namespace CodeDesigner.Ps2.Bridge
         public string? SetName { get; set; }
         /// <summary>Unified label entry payload for ADDLABELENTRY.</summary>
         public LabelManagerEntry? LabelEntry { get; set; }
+        /// <summary>
+        /// String address for DELETELABELENTRY.
+        /// Supports both real addresses ("0x80010000") and synthetic child addresses
+        /// ("0x80010000:+0x0010").  Takes precedence over the numeric <see cref="Address"/> field.
+        /// </summary>
+        public string? LabelEntryAddress { get; set; }
 
         // Settings (GETSETTING / SETSETTING / GETALLSETTINGS / DELETESETTING) fields
         /// <summary>Setting key for GETSETTING / SETSETTING / DELETESETTING.</summary>

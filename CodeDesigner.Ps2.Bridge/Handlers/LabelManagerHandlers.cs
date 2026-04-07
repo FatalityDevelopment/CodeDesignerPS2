@@ -322,17 +322,25 @@ namespace CodeDesigner.Ps2.Bridge
 
         // ── DELETELABELENTRY ──────────────────────────────────────────────────
 
-        private string HandleDeleteLabelEntry(string? workspaceDir, string? gameId, string? setName, uint? address)
+        private string HandleDeleteLabelEntry(string? workspaceDir, string? gameId, string? setName, string? addressStr, uint? addressUint)
         {
             gameId  = RequireParam(gameId,  "GameId",  out var e2);
             setName = RequireParam(setName, "SetName", out var e3);
             if (gameId is null)  return CreateErrorResponse(e2!);
             if (setName is null) return CreateErrorResponse(e3!);
-            if (address is null) return CreateErrorResponse("Address is required for DELETELABELENTRY");
+
+            // Prefer the string address field (supports synthetic child paths like
+            // "0x80010000:+0x0010").  Fall back to the legacy numeric field.
+            string? addrStr = addressStr?.Trim();
+            if (string.IsNullOrEmpty(addrStr))
+            {
+                if (addressUint is null)
+                    return CreateErrorResponse("Address is required for DELETELABELENTRY");
+                addrStr = $"0x{addressUint.Value:X8}";
+            }
 
             try
             {
-                var addrStr = $"0x{address.Value:X8}";
                 var set = LabelRepo.DeleteEntryAsync(gameId, setName, addrStr).GetAwaiter().GetResult();
 
                 if (string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase))

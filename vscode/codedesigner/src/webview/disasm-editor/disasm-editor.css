@@ -3648,6 +3648,15 @@ app-bottom-panel {
     padding: 2px 5px;
     font-size: 11px;
 }
+.lm-member-comment {
+    flex: 0 0 140px;
+    background: #3c3c3c;
+    color: #888;
+    border: 1px solid #555;
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-size: 11px;
+}
 .lm-member-del {
     background: none;
     border: none;

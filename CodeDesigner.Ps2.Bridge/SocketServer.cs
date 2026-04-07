@@ -988,7 +988,7 @@ namespace CodeDesigner.Ps2.Bridge
                         return HandleAddLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntry);
 
                     case "DELETELABELENTRY":
-                        return HandleDeleteLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.Address);
+                        return HandleDeleteLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntryAddress, command.Address);
 
                     case "IMPORTLABELSET":
                         return HandleImportLabelSet(command.WorkspaceDir, command.GameId, command.SetName, command.Data);
