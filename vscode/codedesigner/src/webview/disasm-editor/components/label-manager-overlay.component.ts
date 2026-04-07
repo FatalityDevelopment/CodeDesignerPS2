@@ -892,6 +892,8 @@ export class LabelManagerOverlayComponent {
   }
 
   onToggleDynamic(entry: LabelManagerEntry): void {
+    // Use undefined (not false) so the field is omitted from the JSON payload when disabled,
+    // matching the WhenWritingDefault serialisation convention on the C# side.
     const updated: LabelManagerEntry = { ...entry, dynamic: entry.dynamic ? undefined : true };
     // Optimistic local update so the toggle feels instant.
     const set = this.currentSet();
@@ -914,6 +916,8 @@ export class LabelManagerOverlayComponent {
       ...parentEntry,
       members: parentEntry.members.map(m =>
         m.offset === row.memberOffset
+          // Use undefined (not false) when disabling so the field is omitted from JSON,
+          // matching the WhenWritingDefault convention on the C# side.
           ? { ...m, dynamic: m.dynamic ? undefined : true }
           : m,
       ),
