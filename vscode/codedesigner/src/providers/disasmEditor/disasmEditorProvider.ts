@@ -2776,7 +2776,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string }> },
+    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; valueType?: string }> },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -2823,10 +2823,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             const nullIdx = buf.indexOf(0);
             values[addrHex] = buf.slice(0, nullIdx !== -1 ? nullIdx : buf.length).toString('latin1');
           } else {
-            const buf = await this.socketClient.readMemory(addr, 4, 'ee');
-            if (buf.length >= 4) {
-              const dataStr = buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
-              values[addrHex] = `0x${dataStr}`;
+            const readSize = liveValueReadSize(entry.valueType);
+            const buf = await this.socketClient.readMemory(addr, readSize, 'ee');
+            if (buf.length >= readSize) {
+              values[addrHex] = formatLiveValue(buf, entry.valueType);
             }
           }
         } catch { /* ignore unreadable addresses */ }
@@ -2852,11 +2852,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const baseAddr = ptrBuf.readUInt32LE(0);
           if (baseAddr === 0) { continue; }
           const resolved = (baseAddr + m.offset) >>> 0;
-          // Read 4 bytes at the resolved address.
-          const dataBuf = await this.socketClient.readMemory(resolved, 4, 'ee');
-          if (dataBuf.length >= 4) {
-            const dataStr = dataBuf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
-            values[m.path] = `0x${dataStr}`;
+          const readSize = liveValueReadSize(m.valueType);
+          const dataBuf = await this.socketClient.readMemory(resolved, readSize, 'ee');
+          if (dataBuf.length >= readSize) {
+            values[m.path] = formatLiveValue(dataBuf, m.valueType);
           }
         } catch { /* ignore unreadable members */ }
       }
@@ -2928,8 +2927,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         }
         case 'deleteEntry': {
           const setName = action.setName!;
-          const addr = parseInt((action.address ?? '0').replace(/^0x/i, ''), 16);
-          const set = await this.socketClient.deleteLabelEntry(workspaceDir, gameId, setName, addr);
+          const set = await this.socketClient.deleteLabelEntry(workspaceDir, gameId, setName, action.address ?? '');
           webview.postMessage({ type: 'labelManagerSet', set });
           this._broadcastLabelSet(set);
           await this.refreshStructLabels();
@@ -2956,5 +2954,62 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       getOutputChannel().error('[LabelManager] ' + errMsg);
       webview.postMessage({ type: 'labelManagerError', message: errMsg });
     }
+  }
+}
+
+// ── Live-value formatting helpers ───────────────────────────────────────────
+
+/**
+ * Returns the number of bytes to read from memory for a given valueType.
+ * 64-bit integer and double types require 8 bytes; all others use 4.
+ */
+function liveValueReadSize(valueType?: string): number {
+  switch (valueType?.toLowerCase()) {
+    case 'u64':
+    case 's64':
+    case 'double': return 8;
+    default:       return 4;
+  }
+}
+
+/**
+ * Formats a raw memory buffer as a human-readable string according to valueType.
+ * Falls back to a 32-bit hex representation when valueType is absent or unrecognised.
+ */
+function formatLiveValue(buf: Buffer, valueType?: string): string {
+  if (!valueType) {
+    return `0x${buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0')}`;
+  }
+  switch (valueType.toLowerCase()) {
+    case 'u8':
+      return buf[0].toString();
+    case 'u16':
+      return buf.readUInt16LE(0).toString();
+    case 'u32':
+      return buf.readUInt32LE(0).toString();
+    case 'u64':
+      return buf.readBigUInt64LE(0).toString();
+    case 's8':
+      return buf.readInt8(0).toString();
+    case 's16':
+      return buf.readInt16LE(0).toString();
+    case 's32':
+      return buf.readInt32LE(0).toString();
+    case 's64':
+      return buf.readBigInt64LE(0).toString();
+    case 'float': {
+      const v = buf.readFloatLE(0);
+      if (!isFinite(v)) { return isNaN(v) ? 'NaN' : (v > 0 ? 'Inf' : '-Inf'); }
+      return v.toPrecision(7);
+    }
+    case 'double': {
+      const v = buf.readDoubleLE(0);
+      if (!isFinite(v)) { return isNaN(v) ? 'NaN' : (v > 0 ? 'Inf' : '-Inf'); }
+      return v.toPrecision(15);
+    }
+    case 'pointer':
+      return `0x${buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0')}`;
+    default:
+      return `0x${buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0')}`;
   }
 }

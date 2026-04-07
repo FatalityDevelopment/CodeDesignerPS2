@@ -80,9 +80,9 @@ export type LabelManagerAction =
   /** Read the pointer at parentAddress, add offset, then navigate (handled by provider). */
   | { type: 'navigateToMember';  parentAddress: string; offset: number }
   /** Poll live values at each address (handled by provider). String entries read as null-terminated strings. */
-  | { type: 'readLiveValues';    entries: { address: string; entryType?: LabelType }[] }
+  | { type: 'readLiveValues';    entries: { address: string; entryType?: LabelType; valueType?: string }[] }
   /** Poll live values at resolved member addresses (handled by provider). */
-  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string }[] };
+  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string; valueType?: string }[] };
 
 const TYPE_BADGE: Record<string, string> = {
   Address:        '[Addr]',
@@ -103,6 +103,43 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
   LinkedList:     'lm-badge-list',
   String:         'lm-badge-str',
 };
+
+/**
+ * Unified list of value/data types shown in ALL type-related dropdowns (type
+ * filter, label type editor, and struct-member value-type picker).
+ * The list merges the semantic LabelType values with the concrete data types
+ * so that any dropdown consistently offers the full set of choices.
+ */
+const UNIFIED_TYPES: { value: string; label: string }[] = [
+  // ── Data / scalar types ───────────────────────────────────────────────────
+  { value: 'u8',             label: 'u8'             },
+  { value: 'u16',            label: 'u16'            },
+  { value: 'u32',            label: 'u32'            },
+  { value: 'u64',            label: 'u64'            },
+  { value: 's8',             label: 's8'             },
+  { value: 's16',            label: 's16'            },
+  { value: 's32',            label: 's32'            },
+  { value: 's64',            label: 's64'            },
+  { value: 'float',          label: 'float'          },
+  { value: 'double',         label: 'double'         },
+  { value: 'pointer',        label: 'pointer'        },
+  // ── Semantic label types ──────────────────────────────────────────────────
+  { value: 'Address',        label: 'Address'        },
+  { value: 'Struct',         label: 'Struct'         },
+  { value: 'Function',       label: 'Function'       },
+  { value: 'Array',          label: 'Array'          },
+  { value: 'ArrayOfPointers', label: 'Array of Pointers' },
+  { value: 'LinkedList',     label: 'Linked List'    },
+  { value: 'String',         label: 'String'         },
+];
+
+/**
+ * The subset of UNIFIED_TYPES that correspond to the semantic LabelType enum.
+ * Derived from UNIFIED_TYPES so the two stay in sync automatically.
+ */
+const SEMANTIC_LABEL_TYPES = new Set(
+  UNIFIED_TYPES.filter(t => /^[A-Z]/.test(t.value)).map(t => t.value),
+);
 
 @Component({
   selector: 'app-label-manager-overlay',
@@ -181,13 +218,9 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
       }
       <select id="lm-type-filter" [value]="typeFilter()" (change)="typeFilter.set(asSelect($event).value)">
         <option value="">All types</option>
-        <option value="Address">Address</option>
-        <option value="Struct">Struct</option>
-        <option value="Function">Function</option>
-        <option value="Array">Array</option>
-        <option value="ArrayOfPointers">Array of Pointers</option>
-        <option value="LinkedList">Linked List</option>
-        <option value="String">String</option>
+        @for (t of unifiedTypes; track t.value) {
+          <option [value]="t.value">{{ t.label }}</option>
+        }
       </select>
       <span id="lm-count">{{ filteredEntries().length }} / {{ currentSet()?.entries?.length ?? 0 }}</span>
     </div>
@@ -449,18 +482,14 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   <select class="lm-member-type" [value]="m.valueType ?? ''"
                           (change)="updateMemberValueType($index, asSelect($event).value)">
                     <option value="">type…</option>
-                    <option value="u8">u8</option>
-                    <option value="u16">u16</option>
-                    <option value="u32">u32</option>
-                    <option value="u64">u64</option>
-                    <option value="s8">s8</option>
-                    <option value="s16">s16</option>
-                    <option value="s32">s32</option>
-                    <option value="s64">s64</option>
-                    <option value="float">float</option>
-                    <option value="double">double</option>
-                    <option value="pointer">pointer</option>
+                    @for (t of unifiedTypes; track t.value) {
+                      <option [value]="t.value">{{ t.label }}</option>
+                    }
                   </select>
+                  <input class="lm-member-comment" type="text" spellcheck="false"
+                         placeholder="comment…"
+                         [value]="m.comment ?? ''"
+                         (input)="updateMemberComment($index, asInput($event).value)" />
                   <button class="lm-member-del" (click)="removeMember($index)">&#xD7;</button>
                 </div>
               }
@@ -586,7 +615,7 @@ export class LabelManagerOverlayComponent {
   readonly editType          = signal<string>('Address');
   readonly editHidden        = signal(false);
   readonly editDynamic       = signal(false);
-  readonly editMembers       = signal<{ offsetStr: string; name: string; valueType?: string; dynamic?: boolean; hidden?: boolean }[]>([]);
+  readonly editMembers       = signal<{ offsetStr: string; name: string; valueType?: string; comment?: string; dynamic?: boolean; hidden?: boolean }[]>([]);
   readonly editArgRegs       = signal('');
   readonly editReturnRegs    = signal('');
   readonly editElementStride = signal('');
@@ -616,6 +645,9 @@ export class LabelManagerOverlayComponent {
   private _pendingPrefillAddress: string | null = null;
 
   // ── Computed ──────────────────────────────────────────────────────────────────
+  /** Expose the unified type list to the template. */
+  readonly unifiedTypes = UNIFIED_TYPES;
+
   readonly activeSetIsBuiltIn = computed(() =>
     this.activeSetName() === 'Built-in' || (this.currentSet()?.isBuiltIn ?? false)
   );
@@ -625,7 +657,15 @@ export class LabelManagerOverlayComponent {
     const f  = this.filterText().trim().toLowerCase();
     const tf = this.typeFilter().trim();
     return entries.filter(e => {
-      if (tf && this.effectiveType(e) !== tf) return false;
+      if (tf) {
+        // LabelType values match on the semantic type field; data-type values match
+        // on the valueType annotation so users can filter by e.g. "float".
+        if (SEMANTIC_LABEL_TYPES.has(tf)) {
+          if (this.effectiveType(e) !== tf) return false;
+        } else {
+          if (e.valueType !== tf) return false;
+        }
+      }
       if (!f) return true;
       return e.address.toLowerCase().includes(f) ||
              e.name.toLowerCase().includes(f) ||
@@ -652,7 +692,7 @@ export class LabelManagerOverlayComponent {
   private readonly _dynamicAddresses = computed(() =>
     this.filteredEntries()
       .filter(e => !e.parentAddress && (e.dynamic || (e.type ?? 'Address') === 'String'))
-      .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType })),
+      .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType })),
   );
 
   /**
@@ -935,6 +975,7 @@ export class LabelManagerOverlayComponent {
       offsetStr: '0x' + (c.offset ?? 0).toString(16).toUpperCase().padStart(2, '0'),
       name: c.name,
       valueType: c.valueType,
+      comment: c.comment,
       dynamic: c.dynamic,
       hidden: c.hidden,
     })));
@@ -1052,6 +1093,7 @@ export class LabelManagerOverlayComponent {
             parentAddress: addr,
             offset,
             name: m.name.trim(),
+            comment: m.comment?.trim() || undefined,
             valueType: m.valueType || undefined,
             dynamic: m.dynamic || undefined,
             hidden: m.hidden || undefined,
@@ -1120,6 +1162,10 @@ export class LabelManagerOverlayComponent {
 
   updateMemberValueType(index: number, value: string): void {
     this.editMembers.update(m => m.map((item, i) => i === index ? { ...item, valueType: value || undefined } : item));
+  }
+
+  updateMemberComment(index: number, value: string): void {
+    this.editMembers.update(m => m.map((item, i) => i === index ? { ...item, comment: value || undefined } : item));
   }
 
   clearForm(): void {
@@ -1251,6 +1297,7 @@ export class LabelManagerOverlayComponent {
             parentAddress: r.entry.parentAddress!,
             offset: r.entry.offset ?? 0,
             path: r.path,
+            valueType: r.entry.valueType,
           })),
         });
       }
