@@ -3321,43 +3321,6 @@ app-bottom-panel {
 }
 #lm-overlay.visible { display: flex; }
 
-/* Tab mode: fill the VS Code webview panel instead of acting as a modal */
-#lm-overlay.lm-tab-mode {
-    position: relative;
-    inset: auto;
-    z-index: auto;
-    background: transparent;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    width: 100%;
-    align-items: stretch;
-    justify-content: flex-start;
-}
-.lm-tab-mode-box {
-    flex: 1;
-    width: 100% !important;
-    max-width: none !important;
-    max-height: none !important;
-    border-radius: 0 !important;
-}
-
-/* Struct offset quick-add form */
-#lm-offset-form {
-    padding: 10px 14px;
-    border-top: 1px solid #3e3e42;
-    background: #1a2a1a;
-    flex-shrink: 0;
-}
-.lm-offset-form-title {
-    display: block;
-    font-size: 12px;
-    color: #98c379;
-    margin-bottom: 8px;
-}
-.lm-liveview-btn { margin-left: 2px; }
-.lm-offset-btn { background: #1a3a1a; }
-
 #lm-box {
     background: #1e1e1e;
     border: 1px solid #454545;
