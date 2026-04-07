@@ -8,7 +8,7 @@ namespace CodeDesigner.Ps2.McpServer;
 /// <summary>
 /// Database-backed service for MCP agent data: persistent memories (progress reports),
 /// agent configuration, and settings.  Replaces the flat Markdown files previously
-/// managed by <see cref="ProgressReportManager"/>.
+/// managed by <see cref="McpMemoryService"/>.
 /// </summary>
 /// <remarks>
 /// Each public method creates its own short-lived <see cref="CodeDesignerDbContext"/>

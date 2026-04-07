@@ -12,11 +12,11 @@ namespace CodeDesigner.Ps2.McpServer;
 /// running executable.  Override with the <c>CODEDESIGNER_MEMORIES_PATH</c>
 /// environment variable or the <c>--memories-path</c> command-line argument.
 /// </remarks>
-public sealed class ProgressReportManager
+public sealed class McpMemoryService
 {
     private readonly string _memoriesPath;
 
-    public ProgressReportManager(string memoriesPath)
+    public McpMemoryService(string memoriesPath)
     {
         _memoriesPath = memoriesPath;
         Directory.CreateDirectory(memoriesPath);
