@@ -508,6 +508,21 @@ export class LabelManagerOverlayComponent {
   });
 
   /**
+   * A name → entry map for Struct-type labels only, recomputed only when the
+   * current set's entries change (not on filter changes).
+   */
+  private readonly _structByName = computed<Map<string, LabelManagerEntry>>(() => {
+    const allEntries = this.currentSet()?.entries ?? [];
+    const map = new Map<string, LabelManagerEntry>();
+    for (const e of allEntries) {
+      if ((e.type ?? 'Address') === 'Struct') {
+        map.set(e.name, e);
+      }
+    }
+    return map;
+  });
+
+  /**
    * A flat list of tree rows derived from `filteredEntries()`.
    * Top-level entries are at depth 0.  When a Struct row is expanded its
    * members appear immediately below it as depth-1 rows.  If a member's
@@ -516,14 +531,7 @@ export class LabelManagerOverlayComponent {
    * cycle detection so circular references don't loop forever).
    */
   readonly treeRows = computed<TreeRow[]>(() => {
-    const allEntries = this.currentSet()?.entries ?? [];
-    // Build a quick name → entry map for struct-type labels only.
-    const structByName = new Map<string, LabelManagerEntry>();
-    for (const e of allEntries) {
-      if ((e.type ?? 'Address') === 'Struct') {
-        structByName.set(e.name, e);
-      }
-    }
+    const structByName = this._structByName();
     const rows: TreeRow[] = [];
     for (const entry of this.filteredEntries()) {
       const path = entry.address;

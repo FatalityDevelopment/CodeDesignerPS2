@@ -361,9 +361,18 @@ namespace CodeDesigner.Ps2.Bridge
             // LabelMgr.WorkspaceDir reflects the directory that was established by the
             // most recent SETACTIVELABELSET (or CREATELABELSET) call – it may be a temp
             // path when no workspace is open.  We must write to exactly that location.
-            var dir = LabelMgr.WorkspaceDir;
-            if (!string.IsNullOrWhiteSpace(dir))
-                LabelMgr.SaveSet(set, dir, set.GameId ?? LabelMgr.GameId ?? string.Empty);
+            var dir    = LabelMgr.WorkspaceDir;
+            var gameId = set.GameId ?? LabelMgr.GameId;
+
+            if (string.IsNullOrWhiteSpace(dir) || string.IsNullOrWhiteSpace(gameId))
+            {
+                // Cannot persist without a valid directory and game ID.  This is a
+                // logic error (SETACTIVELABELSET should have been called first) but
+                // it is not fatal – the next SETACTIVELABELSET call will re-sync.
+                return;
+            }
+
+            LabelMgr.SaveSet(set, dir, gameId);
         }
 
         // ── IMPORTLABELSET ────────────────────────────────────────────────────
