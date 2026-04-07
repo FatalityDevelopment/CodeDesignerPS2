@@ -30,6 +30,14 @@ namespace CodeDesigner.Ps2.LabelManager.Models
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool Hidden { get; set; }
 
+        /// <summary>
+        /// When <c>true</c> the live memory value at this address is polled and shown
+        /// in the label manager table.
+        /// </summary>
+        [JsonPropertyName("dynamic")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Dynamic { get; set; }
+
         /// <summary>Semantic type of this entry. Defaults to <see cref="LabelType.Address"/>.</summary>
         [JsonPropertyName("type")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

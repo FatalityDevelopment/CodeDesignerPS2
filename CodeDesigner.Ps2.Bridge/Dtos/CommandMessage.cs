@@ -168,6 +168,13 @@ namespace CodeDesigner.Ps2.Bridge
         [JsonPropertyName("hidden")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool Hidden { get; set; }
+        /// <summary>
+        /// When true the live memory value at this address is polled and shown in the
+        /// label manager table.
+        /// </summary>
+        [JsonPropertyName("dynamic")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Dynamic { get; set; }
         /// <summary>Semantic label type. Null is backward-compatible (inferred from members).</summary>
         [JsonPropertyName("type")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -207,5 +214,12 @@ namespace CodeDesigner.Ps2.Bridge
         [JsonPropertyName("dynamic")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool Dynamic { get; set; }
+        /// <summary>
+        /// When true the member is hidden from the label manager table and the struct
+        /// member display in the disassembly view.
+        /// </summary>
+        [JsonPropertyName("hidden")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Hidden { get; set; }
     }
 }

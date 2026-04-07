@@ -2745,13 +2745,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     // Also notify the standalone label manager tab if open.
     this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSet', set });
     // Convert to StructEntry[] for backward-compat listeners (STRUCTS panel).
+    // Hidden members are excluded from the struct member display.
     const structs: StructEntry[] = set.entries
       .filter(e => (e.type ?? 'Address') === 'Struct' && e.members.length > 0)
       .map(e => ({
         name:        e.name,
         baseAddress: e.address,
-        members:     e.members.map(m => ({ offset: m.offset, name: m.name })),
-      }));
+        members:     e.members.filter(m => !m.hidden).map(m => ({ offset: m.offset, name: m.name })),
+      }))
+      .filter(s => s.members.length > 0);
     this.onStructsChanged?.(structs);
     // Re-resolve struct member addresses from live memory so the instruction
     // display reflects the new label set.  Intentionally fire-and-forget here
@@ -2766,6 +2768,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
+    if (action.type === 'navigateToLabel') {
+      const addrHex = (action.address ?? '').replace(/^0x/i, '');
+      const addr = parseInt(addrHex, 16);
+      if (!isNaN(addr) && addr > 0) {
+        this.navigateToAddress(addr);
+      }
+      return;
+    }
+
     if (action.type === 'navigateToMember') {
       if (!this.socketClient?.isConnected()) { return; }
       const parentAddr = parseInt((action.parentAddress ?? '0').replace(/^0x/i, ''), 16);
@@ -2775,7 +2786,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         if (buf.length >= 4) {
           const ptrVal = buf.readUInt32LE(0);
           if (ptrVal > 0) {
-            webview.postMessage({ type: 'gotoAddress', address: ptrVal + offset });
+            this.navigateToAddress((ptrVal + offset) >>> 0);
           }
         }
       } catch { /* non-fatal */ }

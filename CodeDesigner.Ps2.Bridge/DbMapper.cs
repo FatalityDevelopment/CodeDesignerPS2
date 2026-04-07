@@ -53,6 +53,7 @@ namespace CodeDesigner.Ps2.Bridge
                 Name           = src.Name,
                 Comment        = src.Comment,
                 Hidden         = src.Hidden,
+                Dynamic        = src.Dynamic,
                 Type           = ToDbLabelType(src.Type),
                 ArgRegsJson    = argJson,
                 ReturnRegsJson = returnJson,
@@ -69,6 +70,7 @@ namespace CodeDesigner.Ps2.Bridge
             Offset  = src.Offset,
             Name    = src.Name,
             Dynamic = src.Dynamic,
+            Hidden  = src.Hidden,
         };
 
         /// <summary>Converts a DB <see cref="DbLabel"/> (with loaded Members) to a <see cref="MgrEntry"/>.</summary>
@@ -95,6 +97,7 @@ namespace CodeDesigner.Ps2.Bridge
                 Name           = src.Name,
                 Comment        = src.Comment,
                 Hidden         = src.Hidden,
+                Dynamic        = src.Dynamic,
                 Type           = ToMgrLabelType(src.Type),
                 ArgRegs        = argRegs,
                 ReturnRegs     = returnRegs,
@@ -111,6 +114,7 @@ namespace CodeDesigner.Ps2.Bridge
             Offset  = src.Offset,
             Name    = src.Name,
             Dynamic = src.Dynamic,
+            Hidden  = src.Hidden,
         };
 
         // ── LabelSet ───────────────────────────────────────────────────────────

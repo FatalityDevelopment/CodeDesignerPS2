@@ -26,4 +26,10 @@ public class LabelMember
     /// member is polled and shown in the label manager table.
     /// </summary>
     public bool Dynamic { get; set; }
+
+    /// <summary>
+    /// When <c>true</c> the member is hidden from the label manager table and the
+    /// struct member display in the disassembly view.
+    /// </summary>
+    public bool Hidden { get; set; }
 }

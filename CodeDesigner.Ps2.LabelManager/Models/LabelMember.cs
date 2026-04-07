@@ -22,5 +22,14 @@ namespace CodeDesigner.Ps2.LabelManager.Models
         [JsonPropertyName("dynamic")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool Dynamic { get; set; }
+
+        /// <summary>
+        /// When <c>true</c> the member is hidden from the label manager table and the
+        /// struct member display in the disassembly view (mirrors
+        /// <see cref="LabelEntry.Hidden"/> for top-level entries).
+        /// </summary>
+        [JsonPropertyName("hidden")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Hidden { get; set; }
     }
 }

@@ -29,6 +29,12 @@ public class Label
     /// <summary>When true the entry is hidden from the disassembler and struct panels.</summary>
     public bool Hidden { get; set; }
 
+    /// <summary>
+    /// When <c>true</c> the live memory value at this address is polled and shown in
+    /// the label manager table.
+    /// </summary>
+    public bool Dynamic { get; set; }
+
     /// <summary>Semantic type controlling how the entry is expanded in the disassembly view.</summary>
     public LabelType Type { get; set; } = LabelType.Address;
 

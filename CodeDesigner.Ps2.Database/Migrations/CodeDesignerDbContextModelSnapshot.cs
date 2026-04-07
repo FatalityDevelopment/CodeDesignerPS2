@@ -212,6 +212,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Property<int?>("ElementStride")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("Dynamic")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("Hidden")
                         .HasColumnType("INTEGER");
 
@@ -249,6 +252,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("Dynamic")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Hidden")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("LabelId")

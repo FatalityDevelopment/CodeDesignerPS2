@@ -172,8 +172,12 @@ export interface StructEntry {
 export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'ArrayOfPointers' | 'LinkedList' | 'String';
 
 export interface LabelMemberEntry {
-    offset: number;
-    name:   string;
+    offset:   number;
+    name:     string;
+    /** When true the live memory value at the resolved address is polled and shown. */
+    dynamic?: boolean;
+    /** When true the member is hidden from the label manager table and disasm view. */
+    hidden?:  boolean;
 }
 
 /**
@@ -186,6 +190,8 @@ export interface LabelManagerEntry {
     comment?: string;
     /** When true, the entry is hidden from the disassembler view and structs panel. */
     hidden?:  boolean;
+    /** When true, the live memory value at this address is polled and shown in the table. */
+    dynamic?: boolean;
     /** Semantic label type. Undefined is backward-compatible (inferred from members). */
     type?:    LabelType;
     members:  LabelMemberEntry[];
