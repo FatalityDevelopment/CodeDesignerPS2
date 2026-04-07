@@ -275,14 +275,14 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                             [title]="row.entry!.dynamic ? 'Pause live polling' : 'Start live polling'"
                             (click)="onToggleDynamic(row.entry!)">
                       @if (row.entry!.dynamic) {
-                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
+                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
                       } @else {
-                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon"><path d="M0 0l8 5-8 5z"/></svg>
+                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
                       }
                     </button>
                     <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">&#x270E;</button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">
-                      <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
+                      <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
                     @if (effectiveType(row.entry!) === 'LinkedList' && row.entry!.nodeNextOffset != null) {
                       <button class="lm-row-btn" title="Walk linked list (PINE)" (click)="onWalkList(row.entry!)">&#x21C0;</button>
@@ -343,16 +343,16 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                             [title]="row.entry.dynamic ? 'Pause live polling' : 'Start live polling'"
                             (click)="onToggleChildDynamic(row.entry)">
                       @if (row.entry.dynamic) {
-                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
+                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
                       } @else {
-                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon"><path d="M0 0l8 5-8 5z"/></svg>
+                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
                       }
                     </button>
                     @if (row.entry.parentAddress != null) {
                       <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">
-                      <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
+                      <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
                   </td>
                 } @else {
