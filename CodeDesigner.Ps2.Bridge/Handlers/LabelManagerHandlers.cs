@@ -3,10 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
-using MgrEntry  = CodeDesigner.Ps2.LabelManager.Models.LabelEntry;
-using MgrMember = CodeDesigner.Ps2.LabelManager.Models.LabelMember;
-using MgrSet    = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
-using MgrType   = CodeDesigner.Ps2.LabelManager.Models.LabelType;
+using MgrEntry = CodeDesigner.Ps2.LabelManager.Models.LabelEntry;
+using MgrSet   = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
+using MgrType  = CodeDesigner.Ps2.LabelManager.Models.LabelType;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -25,12 +24,14 @@ namespace CodeDesigner.Ps2.Bridge
         private static LabelManagerEntry ToWireEntry(MgrEntry e) => new()
         {
             Address        = e.Address,
+            ParentAddress  = e.ParentAddress,
+            Offset         = e.Offset,
             Name           = e.Name,
             Comment        = e.Comment,
+            ValueType      = e.ValueType,
             Hidden         = e.Hidden,
             Dynamic        = e.Dynamic,
-            Type           = e.Type.ToString(),
-            Members        = e.Members.Select(m => new LabelMemberPayload { Offset = m.Offset, Name = m.Name, ValueType = m.ValueType, Dynamic = m.Dynamic, Hidden = m.Hidden }).ToList(),
+            Type           = e.Type == MgrType.Address ? null : e.Type.ToString(),
             ArgRegs        = e.ArgRegs,
             ReturnRegs     = e.ReturnRegs,
             ElementStride  = e.ElementStride,
@@ -42,15 +43,17 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Convert a wire entry to the LabelManager model.</summary>
         private static MgrEntry FromWireEntry(LabelManagerEntry w) => new()
         {
-            Address       = w.Address,
-            Name          = w.Name,
-            Comment       = w.Comment,
-            Hidden        = w.Hidden,
-            Dynamic       = w.Dynamic,
-            Type          = Enum.TryParse<MgrType>(w.Type, ignoreCase: true, out var t) ? t : MgrType.Address,
-            Members       = w.Members?.Select(m => new MgrMember { Offset = m.Offset, Name = m.Name, Dynamic = m.Dynamic, Hidden = m.Hidden }).ToList() ?? [],
-            ArgRegs       = w.ArgRegs,
-            ReturnRegs    = w.ReturnRegs,
+            Address        = w.Address,
+            ParentAddress  = w.ParentAddress,
+            Offset         = w.Offset,
+            Name           = w.Name,
+            Comment        = w.Comment,
+            ValueType      = w.ValueType,
+            Hidden         = w.Hidden,
+            Dynamic        = w.Dynamic,
+            Type           = Enum.TryParse<MgrType>(w.Type, ignoreCase: true, out var t) ? t : MgrType.Address,
+            ArgRegs        = w.ArgRegs,
+            ReturnRegs     = w.ReturnRegs,
             ElementStride  = w.ElementStride,
             ElementCount   = w.ElementCount,
             NodeNextOffset = w.NodeNextOffset,

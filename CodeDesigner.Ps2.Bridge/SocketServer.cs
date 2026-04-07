@@ -312,9 +312,22 @@ namespace CodeDesigner.Ps2.Bridge
             _labels.Clear();
             _structs.Clear();
 
-            foreach (var entry in LabelMgr.GetMergedLabels())
+            var allEntries = LabelMgr.GetMergedLabels().ToList();
+
+            // Build a lookup: parentAddress → list of child entries (not hidden).
+            var childrenByParent = new Dictionary<string, List<CodeDesigner.Ps2.LabelManager.Models.LabelEntry>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in allEntries)
             {
-                // Skip entries that have been hidden by the user.
+                if (e.ParentAddress == null || e.Hidden) continue;
+                if (!childrenByParent.TryGetValue(e.ParentAddress, out var list))
+                    childrenByParent[e.ParentAddress] = list = [];
+                list.Add(e);
+            }
+
+            foreach (var entry in allEntries)
+            {
+                // Skip child entries and hidden entries (children are attached to their parent struct below).
+                if (entry.ParentAddress != null) continue;
                 if (entry.Hidden) continue;
 
                 // Parse address
@@ -334,8 +347,12 @@ namespace CodeDesigner.Ps2.Bridge
                             Name        = entry.Name,
                             BaseAddress = entry.Address,
                         };
-                        foreach (var m in entry.Members)
-                            se.Members.Add(new StructMemberEntry { Offset = m.Offset, Name = m.Name });
+                        // Children of this struct are now full label entries with ParentAddress = entry.Address.
+                        if (childrenByParent.TryGetValue(entry.Address, out var children))
+                        {
+                            foreach (var m in children.OrderBy(c => c.Offset ?? 0))
+                                se.Members.Add(new StructMemberEntry { Offset = m.Offset ?? 0, Name = m.Name });
+                        }
                         _structs[entry.Name] = se;
                         break;
                     }

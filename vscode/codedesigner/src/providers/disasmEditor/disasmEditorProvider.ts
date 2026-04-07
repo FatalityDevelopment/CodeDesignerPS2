@@ -2745,14 +2745,26 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     // Also notify the standalone label manager tab if open.
     this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSet', set });
     // Convert to StructEntry[] for backward-compat listeners (STRUCTS panel).
-    // Hidden members are excluded from the struct member display.
+    // Children of each struct entry are now full label entries with parentAddress = struct's address.
+    // Hidden children are excluded from the struct member display.
+    const childrenByParent = new Map<string, LabelManagerEntry[]>();
+    for (const e of set.entries) {
+      if (e.parentAddress && !e.hidden) {
+        const arr = childrenByParent.get(e.parentAddress) ?? [];
+        arr.push(e);
+        childrenByParent.set(e.parentAddress, arr);
+      }
+    }
     const structs: StructEntry[] = set.entries
-      .filter(e => (e.type ?? 'Address') === 'Struct' && e.members.length > 0)
-      .map(e => ({
-        name:        e.name,
-        baseAddress: e.address,
-        members:     e.members.filter(m => !m.hidden).map(m => ({ offset: m.offset, name: m.name })),
-      }))
+      .filter(e => !e.parentAddress && (e.type ?? 'Address') === 'Struct')
+      .map(e => {
+        const kids = (childrenByParent.get(e.address) ?? []).sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
+        return {
+          name:        e.name,
+          baseAddress: e.address,
+          members:     kids.map(m => ({ offset: m.offset ?? 0, name: m.name })),
+        };
+      })
       .filter(s => s.members.length > 0);
     this.onStructsChanged?.(structs);
     // Re-resolve struct member addresses from live memory so the instruction

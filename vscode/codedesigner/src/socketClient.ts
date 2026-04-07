@@ -81,7 +81,7 @@ interface CommandMessage {
     WorkspaceDir?: string;
     GameId?: string;
     SetName?: string;
-    LabelEntry?: { address: string; name: string; comment?: string; members: { offset: number; name: string }[] };
+    LabelEntry?: { address: string; name: string; comment?: string; parentAddress?: string; offset?: number; valueType?: string };
     // Settings (GETSETTING / SETSETTING / GETALLSETTINGS / DELETESETTING)
     SettingKey?: string;
     SettingValue?: string;
@@ -171,30 +171,29 @@ export interface StructEntry {
 /** One member of a label that acts as a struct pointer. */
 export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'ArrayOfPointers' | 'LinkedList' | 'String';
 
-export interface LabelMemberEntry {
-    offset:   number;
-    name:     string;
-    /** When true the live memory value at the resolved address is polled and shown. */
-    dynamic?: boolean;
-    /** When true the member is hidden from the label manager table and disasm view. */
-    hidden?:  boolean;
-}
-
 /**
  * A unified label entry covering all supported label types.
- * The `type` field controls which extra metadata fields are relevant.
+ * Labels can be recursive: a child label has parentAddress + offset set instead
+ * of a fixed PS2 address.  The tree is reconstructed client-side from the flat
+ * list in LabelSetPayload.entries.
  */
 export interface LabelManagerEntry {
+    /** Real PS2 address for root labels; synthetic path key for child labels. */
     address:  string;
+    /** Address of the parent label within the same set. Undefined for root labels. */
+    parentAddress?: string;
+    /** Byte offset from the dereferenced parent pointer. Only meaningful when parentAddress is set. */
+    offset?: number;
     name:     string;
     comment?: string;
+    /** Optional data-type annotation, e.g. "u32", "float", "pointer". */
+    valueType?: string;
     /** When true, the entry is hidden from the disassembler view and structs panel. */
     hidden?:  boolean;
     /** When true, the live memory value at this address is polled and shown in the table. */
     dynamic?: boolean;
-    /** Semantic label type. Undefined is backward-compatible (inferred from members). */
+    /** Semantic label type. */
     type?:    LabelType;
-    members:  LabelMemberEntry[];
     // Function
     argRegs?:    string[];
     returnRegs?: string[];

@@ -19,6 +19,9 @@ namespace CodeDesigner.Ps2.Bridge
     /// All methods accept and return <c>CodeDesigner.Ps2.LabelManager</c> model types so
     /// that handler code never touches database entity types directly — <see cref="DbMapper"/>
     /// handles all conversions internally.
+    ///
+    /// Labels are recursive: child labels have <see cref="DbLabel.ParentId"/> set and
+    /// a synthetic path address (e.g. "0x80010000:+0x0010").
     /// </summary>
     internal sealed class DbLabelRepository
     {
@@ -28,10 +31,6 @@ namespace CodeDesigner.Ps2.Bridge
 
         // ── Query helpers ──────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Returns the names of all user-defined label sets stored in the DB for <paramref name="gameId"/>.
-        /// Built-in sets are excluded.
-        /// </summary>
         internal async Task<IReadOnlyList<string>> GetSetNamesAsync(string gameId)
         {
             return await _db.LabelSets
@@ -41,14 +40,10 @@ namespace CodeDesigner.Ps2.Bridge
                             .ToListAsync();
         }
 
-        /// <summary>
-        /// Loads a label set by name. Returns <c>null</c> when not found.
-        /// </summary>
         internal async Task<MgrSet?> LoadSetAsync(string gameId, string setName)
         {
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                      .ThenInclude(l => l.Members)
                                   .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == setName);
 
             return entity is null ? null : DbMapper.ToMgrSet(entity);
@@ -56,10 +51,6 @@ namespace CodeDesigner.Ps2.Bridge
 
         // ── Mutating operations ────────────────────────────────────────────────
 
-        /// <summary>
-        /// Creates a new empty label set in the DB.
-        /// Throws <see cref="InvalidOperationException"/> when the set already exists.
-        /// </summary>
         internal async Task<MgrSet> CreateSetAsync(string gameId, string setName)
         {
             bool exists = await _db.LabelSets
@@ -80,10 +71,6 @@ namespace CodeDesigner.Ps2.Bridge
             return DbMapper.ToMgrSet(entity);
         }
 
-        /// <summary>
-        /// Deletes a label set (and all its labels/members via cascade) from the DB.
-        /// No-op when the set does not exist.
-        /// </summary>
         internal async Task DeleteSetAsync(string gameId, string setName)
         {
             var entity = await _db.LabelSets
@@ -95,53 +82,82 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Upserts a full label set: creates the <see cref="DbLabelSet"/> row if missing,
-        /// then replaces all its <see cref="DbLabel"/> rows with the entries supplied in
-        /// <paramref name="set"/>.  Returns the updated set as a <see cref="MgrSet"/>.
+        /// Upserts a full label set: replaces all its <see cref="DbLabel"/> rows with the
+        /// entries supplied in <paramref name="set"/>.
+        /// Entries are inserted in two passes: roots first (to get their IDs), then
+        /// children (to set <see cref="DbLabel.ParentId"/>).
         /// </summary>
         internal async Task<MgrSet> SaveSetAsync(MgrSet set, string gameId)
         {
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                      .ThenInclude(l => l.Members)
                                   .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == set.SetName);
 
             if (entity is null)
             {
                 entity = DbMapper.ToDbLabelSet(set, gameId);
                 _db.LabelSets.Add(entity);
-                await _db.SaveChangesAsync(); // obtain entity.Id
+                await _db.SaveChangesAsync();
             }
 
-            // Replace all labels — remove old, add new in a single transaction.
+            // Remove all existing labels (cascade deletes children automatically).
             _db.Labels.RemoveRange(entity.Labels);
-
-            foreach (var entry in set.Entries)
-            {
-                var dbLabel = DbMapper.ToDbLabel(entry, entity.Id);
-                _db.Labels.Add(dbLabel);
-            }
-
             await _db.SaveChangesAsync();
 
-            // Reload to return a fully hydrated set.
+            // Partition: roots vs children (any depth).
+            var roots    = set.Entries.Where(e => e.ParentAddress == null).ToList();
+            var children = set.Entries.Where(e => e.ParentAddress != null).ToList();
+
+            // Insert roots, collect address → id mapping for parent resolution.
+            var addressToId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var root in roots)
+            {
+                var dbLabel = DbMapper.ToDbLabel(root, entity.Id);
+                _db.Labels.Add(dbLabel);
+                await _db.SaveChangesAsync();
+                addressToId[root.Address] = dbLabel.Id;
+            }
+
+            // Insert children depth-by-depth until all are resolved.
+            // (BFS over multiple rounds handles arbitrary nesting depth.)
+            var remaining = new Queue<MgrEntry>(children);
+            int maxPasses = children.Count + 1;
+            while (remaining.Count > 0 && maxPasses-- > 0)
+            {
+                var deferred = new List<MgrEntry>();
+                while (remaining.Count > 0)
+                {
+                    var child = remaining.Dequeue();
+                    if (child.ParentAddress != null && addressToId.TryGetValue(child.ParentAddress, out int parentId))
+                    {
+                        var dbChild = DbMapper.ToDbLabel(child, entity.Id, parentId);
+                        _db.Labels.Add(dbChild);
+                        await _db.SaveChangesAsync();
+                        addressToId[child.Address] = dbChild.Id;
+                    }
+                    else
+                    {
+                        deferred.Add(child); // parent not yet inserted
+                    }
+                }
+                foreach (var d in deferred) remaining.Enqueue(d);
+            }
+
+            // Reload fully.
             var loaded = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                      .ThenInclude(l => l.Members)
                                   .FirstAsync(ls => ls.Id == entity.Id);
-
             return DbMapper.ToMgrSet(loaded);
         }
 
         /// <summary>
         /// Inserts or updates a single label entry within the named set.
-        /// Creates the set if it does not already exist.
+        /// For child entries, the parent is located by <see cref="MgrEntry.ParentAddress"/>.
         /// </summary>
         internal async Task<MgrSet> AddOrUpdateEntryAsync(string gameId, string setName, MgrEntry entry)
         {
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                      .ThenInclude(l => l.Members)
                                   .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == setName);
 
             if (entity is null)
@@ -151,85 +167,92 @@ namespace CodeDesigner.Ps2.Bridge
                 await _db.SaveChangesAsync();
             }
 
+            // Resolve parent (for child entries).
+            int? parentId = null;
+            if (entry.ParentAddress != null)
+            {
+                var normParent = NormalizeAddress(entry.ParentAddress);
+                var parent = entity.Labels.FirstOrDefault(l =>
+                    NormalizeAddress(l.Address).Equals(normParent, StringComparison.OrdinalIgnoreCase));
+                if (parent is null)
+                    return DbMapper.ToMgrSet(entity); // parent not found – ignore silently
+
+                parentId = parent.Id;
+            }
+
             var norm     = NormalizeAddress(entry.Address);
             var existing = entity.Labels.FirstOrDefault(l =>
-                NormalizeAddress(l.Address)
-                    .Equals(norm, StringComparison.OrdinalIgnoreCase));
+                NormalizeAddress(l.Address).Equals(norm, StringComparison.OrdinalIgnoreCase));
 
             if (existing is not null)
             {
-                // Update in-place to preserve the label's primary-key ID, which keeps
-                // the insertion order stable (no delete + re-insert → no jump to bottom).
+                // Update in-place to preserve insertion order.
                 existing.Name           = entry.Name;
                 existing.Comment        = entry.Comment;
+                existing.ValueType      = entry.ValueType;
                 existing.Hidden         = entry.Hidden;
+                existing.Dynamic        = entry.Dynamic;
                 existing.Type           = DbMapper.ToDbLabelType(entry.Type);
+                existing.ParentId       = parentId;
+                existing.Offset         = entry.Offset;
                 existing.ArgRegsJson    = entry.ArgRegs    is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(entry.ArgRegs)    : null;
                 existing.ReturnRegsJson = entry.ReturnRegs is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(entry.ReturnRegs) : null;
                 existing.ElementStride  = entry.ElementStride;
                 existing.ElementCount   = entry.ElementCount;
                 existing.NodeNextOffset = entry.NodeNextOffset;
                 existing.NodeSize       = entry.NodeSize;
-
-                // Replace child member rows.
-                _db.LabelMembers.RemoveRange(existing.Members);
-                existing.Members = [.. entry.Members.Select(DbMapper.ToDbLabelMember)];
                 await _db.SaveChangesAsync();
             }
             else
             {
-                var newLabel = DbMapper.ToDbLabel(entry, entity.Id);
+                var newLabel = DbMapper.ToDbLabel(entry, entity.Id, parentId);
                 _db.Labels.Add(newLabel);
                 await _db.SaveChangesAsync();
             }
 
             var loaded = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                      .ThenInclude(l => l.Members)
                                   .FirstAsync(ls => ls.Id == entity.Id);
-
             return DbMapper.ToMgrSet(loaded);
         }
 
         /// <summary>
         /// Deletes a single label entry by address from the named set.
-        /// Throws <see cref="InvalidOperationException"/> when the set does not exist.
+        /// Children of the deleted label are removed automatically via cascade.
         /// </summary>
         internal async Task<MgrSet> DeleteEntryAsync(string gameId, string setName, string address)
         {
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                      .ThenInclude(l => l.Members)
                                   .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == setName)
                          ?? throw new InvalidOperationException($"Label set '{setName}' not found for game '{gameId}'.");
 
-            var norm    = NormalizeAddress(address);
+            var norm     = NormalizeAddress(address);
             var toRemove = entity.Labels
                                  .Where(l => NormalizeAddress(l.Address)
                                                  .Equals(norm, StringComparison.OrdinalIgnoreCase))
                                  .ToList();
 
-            foreach (var l in toRemove)
-            {
-                _db.LabelMembers.RemoveRange(l.Members);
-                _db.Labels.Remove(l);
-            }
-
+            _db.Labels.RemoveRange(toRemove);
             await _db.SaveChangesAsync();
 
             var loaded = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                      .ThenInclude(l => l.Members)
                                   .FirstAsync(ls => ls.Id == entity.Id);
-
             return DbMapper.ToMgrSet(loaded);
         }
 
         // ── Private helpers ────────────────────────────────────────────────────
 
-        /// <summary>Normalises an address string to canonical "0xXXXXXXXX" form.</summary>
         private static string NormalizeAddress(string raw)
         {
+            // Synthetic child addresses (e.g. "0x80010000:+0x0010") are returned as-is
+            // after normalising the real-address prefix.
+            if (raw.Contains(':'))
+            {
+                int colon = raw.IndexOf(':');
+                return NormalizeAddress(raw[..colon]) + raw[colon..];
+            }
             if (raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
                 raw = raw[2..];
             if (uint.TryParse(raw, System.Globalization.NumberStyles.HexNumber, null, out uint v))

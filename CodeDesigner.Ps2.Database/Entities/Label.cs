@@ -4,20 +4,46 @@ namespace CodeDesigner.Ps2.Database.Entities;
 
 /// <summary>
 /// A single label entry within a <see cref="LabelSet"/>.
+/// Labels are recursive: a child label has a <see cref="ParentId"/> pointing to its
+/// parent label and an <see cref="Offset"/> (byte distance from the dereferenced parent
+/// pointer value).  Root labels have <see cref="ParentId"/> = null.
+///
 /// Mirrors <c>CodeDesigner.Ps2.LabelManager.Models.LabelEntry</c>.
 /// </summary>
 public class Label
 {
     public int Id { get; set; }
 
-    // ── Foreign key ───────────────────────────────────────────────────────────
+    // ── Foreign key (owning set) ──────────────────────────────────────────────
 
     public int LabelSetId { get; set; }
     public LabelSet LabelSet { get; set; } = null!;
 
+    // ── Parent / child relationship (self-referencing) ────────────────────────
+
+    /// <summary>
+    /// ID of the parent <see cref="Label"/> within the same set.
+    /// <c>null</c> for root (top-level) labels.
+    /// </summary>
+    public int? ParentId { get; set; }
+    public Label? Parent { get; set; }
+
+    /// <summary>Children of this label (populated when Include'd).</summary>
+    public List<Label> Children { get; set; } = [];
+
+    /// <summary>
+    /// Byte offset from the value that the parent pointer holds.
+    /// Only meaningful when <see cref="ParentId"/> is set.
+    /// </summary>
+    public int? Offset { get; set; }
+
     // ── Core fields ───────────────────────────────────────────────────────────
 
-    /// <summary>Virtual address as a normalised hex string, e.g. "0x80010000".</summary>
+    /// <summary>
+    /// Virtual address as a normalised hex string, e.g. "0x80010000".
+    /// Root labels: real PS2 address.
+    /// Child labels: synthetic path key, e.g. "0x80010000:+0x0010".
+    /// </summary>
     public string Address { get; set; } = string.Empty;
 
     /// <summary>Human-readable name used in the disassembly view and CDS source.</summary>
@@ -25,6 +51,11 @@ public class Label
 
     /// <summary>Optional description shown as a tooltip.</summary>
     public string? Comment { get; set; }
+
+    /// <summary>
+    /// Optional data-type annotation for this field, e.g. "u32", "float", "pointer".
+    /// </summary>
+    public string? ValueType { get; set; }
 
     /// <summary>When true the entry is hidden from the disassembler and struct panels.</summary>
     public bool Hidden { get; set; }
@@ -37,11 +68,6 @@ public class Label
 
     /// <summary>Semantic type controlling how the entry is expanded in the disassembly view.</summary>
     public LabelType Type { get; set; } = LabelType.Address;
-
-    // ── Type = Struct ─────────────────────────────────────────────────────────
-
-    /// <summary>Struct member fields (used when <see cref="Type"/> is <see cref="LabelType.Struct"/>).</summary>
-    public List<LabelMember> Members { get; set; } = [];
 
     // ── Type = Function ───────────────────────────────────────────────────────
 

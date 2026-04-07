@@ -156,31 +156,41 @@ namespace CodeDesigner.Ps2.Bridge
     /// </summary>
     public class LabelManagerEntry
     {
+        /// <summary>
+        /// Virtual address as a hex string, e.g. "0x80010000".
+        /// Root entries: real PS2 address.  Child entries: synthetic path key, e.g. "0x80010000:+0x0010".
+        /// </summary>
         [JsonPropertyName("address")]
         public string Address { get; set; } = string.Empty;
+        /// <summary>Address of the parent label in the same set. Null for root entries.</summary>
+        [JsonPropertyName("parentAddress")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ParentAddress { get; set; }
+        /// <summary>Byte offset from the dereferenced parent pointer. Only meaningful when parentAddress is set.</summary>
+        [JsonPropertyName("offset")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? Offset { get; set; }
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
         [JsonPropertyName("comment")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Comment { get; set; }
-        /// <summary>
-        /// When true the entry is suppressed from the disassembler view and structs panel.
-        /// </summary>
+        /// <summary>Optional data-type annotation, e.g. "u32", "float", "pointer".</summary>
+        [JsonPropertyName("valueType")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ValueType { get; set; }
+        /// <summary>When true the entry is suppressed from the disassembler view and structs panel.</summary>
         [JsonPropertyName("hidden")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool Hidden { get; set; }
-        /// <summary>
-        /// When true the live memory value at this address is polled and shown in the
-        /// label manager table.
-        /// </summary>
+        /// <summary>When true the live memory value at this address is polled and shown in the label manager table.</summary>
         [JsonPropertyName("dynamic")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool Dynamic { get; set; }
-        /// <summary>Semantic label type. Null is backward-compatible (inferred from members).</summary>
+        /// <summary>Semantic label type.</summary>
         [JsonPropertyName("type")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Type { get; set; }
-        [JsonPropertyName("members")]
-        public List<LabelMemberPayload> Members { get; set; } = [];
         // ── Function ─────────────────────────────────────────────────────────
         [JsonPropertyName("argRegs")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -202,28 +212,5 @@ namespace CodeDesigner.Ps2.Bridge
         [JsonPropertyName("nodeSize")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public int? NodeSize { get; set; }
-    }
-
-    /// <summary>One struct member inside a <see cref="LabelManagerEntry"/>.</summary>
-    public class LabelMemberPayload
-    {
-        [JsonPropertyName("offset")]
-        public int Offset { get; set; }
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
-        /// <summary>Optional data-type annotation, e.g. "u32", "float", "pointer".</summary>
-        [JsonPropertyName("valueType")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? ValueType { get; set; }
-        [JsonPropertyName("dynamic")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public bool Dynamic { get; set; }
-        /// <summary>
-        /// When true the member is hidden from the label manager table and the struct
-        /// member display in the disassembly view.
-        /// </summary>
-        [JsonPropertyName("hidden")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public bool Hidden { get; set; }
     }
 }
