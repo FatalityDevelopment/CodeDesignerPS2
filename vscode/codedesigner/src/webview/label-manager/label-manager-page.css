@@ -4,10 +4,10 @@
  * The overlay component was designed as a centered modal dialog.  When it runs
  * inside its own standalone VS Code tab we override those modal styles so it
  * fills the entire viewport instead.
+ *
+ * The base .lm-* rule definitions are imported via the TypeScript side-effect
+ * import in label-manager-page.component.ts (disasm-editor.css).
  */
-
-/* Import the shared disasm-editor CSS that owns all .lm-* rule definitions. */
-@import '../disasm-editor/disasm-editor.css';
 
 /* Override the fixed-position modal backdrop */
 #lm-overlay {

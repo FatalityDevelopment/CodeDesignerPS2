@@ -12,6 +12,7 @@ import {
   LabelManagerAction,
   LabelSetPayload,
 } from '../disasm-editor/components/label-manager-overlay.component';
+import '../disasm-editor/disasm-editor.css';
 import './label-manager-page.css';
 
 /**
@@ -40,8 +41,8 @@ export class LabelManagerPageComponent implements AfterViewInit {
     const lm = this.lmRef();
     // Force the overlay into full-page visible mode immediately.
     lm.visible.set(true);
-    // Start live-value polling.
-    (lm as any)._startPolling?.();
+    // Start live-value polling via the public API.
+    lm.startPolling();
 
     // Listen for messages from the extension host.
     window.addEventListener('message', (event: MessageEvent) => {

@@ -1041,6 +1041,11 @@ export class LabelManagerOverlayComponent {
     return this.liveValues().get(entry.address) ?? '…';
   }
 
+  /** Start live-value polling. Called by the overlay itself and by the page-mode host. */
+  startPolling(): void {
+    this._startPolling();
+  }
+
   private _startPolling(): void {
     this._stopPolling();
     this._pollTimer = setInterval(() => {
