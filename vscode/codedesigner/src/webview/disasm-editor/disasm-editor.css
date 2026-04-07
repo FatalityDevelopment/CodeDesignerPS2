@@ -3448,6 +3448,7 @@ app-bottom-panel {
 .lm-col-expand  { width: 24px; text-align: center; padding: 0 2px !important; }
 .lm-col-type    { width: 60px; }
 .lm-col-addr    { width: 110px; }
+.lm-col-addr.lm-mono { color: #c586c0; }
 .lm-col-name    { width: 200px; }
 .lm-col-comment { width: auto; }
 .lm-col-members { width: 110px; }
@@ -3577,6 +3578,7 @@ app-bottom-panel {
 
 /* Live value display */
 .lm-live-value { font-family: monospace; color: #9cdcfe; font-size: 11px; }
+.lm-live-string { font-family: monospace; color: #4ec9b0; font-size: 11px; }
 .lm-live-value-dim { color: #555; font-size: 11px; font-style: italic; }
 
 /* Dynamic toggle in form */
