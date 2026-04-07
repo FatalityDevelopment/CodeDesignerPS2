@@ -23,8 +23,6 @@ namespace CodeDesigner.Ps2.Bridge
                 Console.Error.WriteLine("=== FATAL ERROR ===");
                 Console.Error.WriteLine(ex.ToString());
                 Console.Error.WriteLine("===================");
-                Console.Error.WriteLine("Press any key to close...");
-                Console.ReadKey(intercept: true);
                 Environment.Exit(1);
             }
         }
