@@ -204,5 +204,8 @@ namespace CodeDesigner.Ps2.Bridge
         public int Offset { get; set; }
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("dynamic")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Dynamic { get; set; }
     }
 }

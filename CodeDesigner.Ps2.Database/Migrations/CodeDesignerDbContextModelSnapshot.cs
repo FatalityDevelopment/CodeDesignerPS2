@@ -248,6 +248,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("Dynamic")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("LabelId")
                         .HasColumnType("INTEGER");
 

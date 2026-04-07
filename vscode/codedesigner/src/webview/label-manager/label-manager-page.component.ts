@@ -58,6 +58,9 @@ export class LabelManagerPageComponent implements AfterViewInit {
           case 'labelManagerLiveValues':
             lm.setLiveValues((data['values'] as Record<string, string>) ?? {});
             break;
+          case 'labelManagerMemberLiveValues':
+            lm.setMemberLiveValues((data['values'] as Record<string, string>) ?? {});
+            break;
           case 'labelManagerStatus':
             lm.showStatus((data['message'] as string) ?? '');
             break;

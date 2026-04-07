@@ -158,14 +158,30 @@ namespace CodeDesigner.Ps2.Bridge
 
             if (existing is not null)
             {
+                // Update in-place to preserve the label's primary-key ID, which keeps
+                // the insertion order stable (no delete + re-insert → no jump to bottom).
+                existing.Name           = entry.Name;
+                existing.Comment        = entry.Comment;
+                existing.Hidden         = entry.Hidden;
+                existing.Type           = DbMapper.ToDbLabelType(entry.Type);
+                existing.ArgRegsJson    = entry.ArgRegs    is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(entry.ArgRegs)    : null;
+                existing.ReturnRegsJson = entry.ReturnRegs is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(entry.ReturnRegs) : null;
+                existing.ElementStride  = entry.ElementStride;
+                existing.ElementCount   = entry.ElementCount;
+                existing.NodeNextOffset = entry.NodeNextOffset;
+                existing.NodeSize       = entry.NodeSize;
+
+                // Replace child member rows.
                 _db.LabelMembers.RemoveRange(existing.Members);
-                _db.Labels.Remove(existing);
+                existing.Members = [.. entry.Members.Select(DbMapper.ToDbLabelMember)];
                 await _db.SaveChangesAsync();
             }
-
-            var newLabel = DbMapper.ToDbLabel(entry, entity.Id);
-            _db.Labels.Add(newLabel);
-            await _db.SaveChangesAsync();
+            else
+            {
+                var newLabel = DbMapper.ToDbLabel(entry, entity.Id);
+                _db.Labels.Add(newLabel);
+                await _db.SaveChangesAsync();
+            }
 
             var loaded = await _db.LabelSets
                                   .Include(ls => ls.Labels)

@@ -20,4 +20,10 @@ public class LabelMember
 
     /// <summary>Human-readable name for this struct field.</summary>
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When <c>true</c> the live memory value at the resolved address for this
+    /// member is polled and shown in the label manager table.
+    /// </summary>
+    public bool Dynamic { get; set; }
 }
