@@ -211,6 +211,10 @@ namespace CodeDesigner.Ps2.Bridge
         public int Offset { get; set; }
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
+        /// <summary>Optional data-type annotation, e.g. "u32", "float", "pointer".</summary>
+        [JsonPropertyName("valueType")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ValueType { get; set; }
         [JsonPropertyName("dynamic")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public bool Dynamic { get; set; }

@@ -30,7 +30,7 @@ namespace CodeDesigner.Ps2.Bridge
             Hidden         = e.Hidden,
             Dynamic        = e.Dynamic,
             Type           = e.Type.ToString(),
-            Members        = e.Members.Select(m => new LabelMemberPayload { Offset = m.Offset, Name = m.Name, Dynamic = m.Dynamic, Hidden = m.Hidden }).ToList(),
+            Members        = e.Members.Select(m => new LabelMemberPayload { Offset = m.Offset, Name = m.Name, ValueType = m.ValueType, Dynamic = m.Dynamic, Hidden = m.Hidden }).ToList(),
             ArgRegs        = e.ArgRegs,
             ReturnRegs     = e.ReturnRegs,
             ElementStride  = e.ElementStride,

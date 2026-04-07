@@ -15,6 +15,14 @@ namespace CodeDesigner.Ps2.LabelManager.Models
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
+        /// Optional data-type annotation for this field, e.g. "u32", "float", "pointer".
+        /// Stored as a free-form string so new types can be added without schema changes.
+        /// </summary>
+        [JsonPropertyName("valueType")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ValueType { get; set; }
+
+        /// <summary>
         /// When <c>true</c> the live memory value at the resolved address for this
         /// member is polled and shown in the label manager table (mirrors
         /// <see cref="LabelEntry.Dynamic"/> for top-level entries).

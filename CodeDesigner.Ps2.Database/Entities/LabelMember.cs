@@ -22,6 +22,12 @@ public class LabelMember
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
+    /// Optional data-type annotation, e.g. "u32", "float", "pointer".
+    /// Null means no annotation.
+    /// </summary>
+    public string? ValueType { get; set; }
+
+    /// <summary>
     /// When <c>true</c> the live memory value at the resolved address for this
     /// member is polled and shown in the label manager table.
     /// </summary>
