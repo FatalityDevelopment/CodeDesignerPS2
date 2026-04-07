@@ -8,10 +8,80 @@ namespace CodeDesigner.Ps2.McpServer.Tools;
 public sealed partial class CodeDesignerPs2Tools
 {
     // -------------------------------------------------------------------------
+    // Label set management
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "label_list_sets")]
+    [Description("Return the names of all label sets available for a game, including the built-in set. Call this to discover existing sets before creating a new one.")]
+    public async Task<string> ListLabelSets(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETLABELSETS", GameId = gameId }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("LabelSets", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Label sets for game '{gameId}':");
+            foreach (var item in arr.EnumerateArray())
+                sb.AppendLine($"  • {item.GetString()}");
+
+            return WithRules(sb.ToString().TrimEnd());
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "label_create_set")]
+    [Description("Create a new, empty label set for a game. The AI should use a dedicated label set (e.g. named after the analysis task) to keep its annotations separate from built-in labels.")]
+    public async Task<string> CreateLabelSet(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
+        [Description("Name for the new label set (e.g. 'ai-analysis' or 'functions-pass1').")] string setName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "CREATELABELSET", GameId = gameId, SetName = setName },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "label_set_active")]
+    [Description("Make the named label set the active one. All subsequent label lookups and disassembly annotations will merge the built-in set with this user set.")]
+    public async Task<string> SetActiveLabelSet(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
+        [Description("Name of the label set to activate (use 'Built-in' to clear any active user set).")] string setName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "SETACTIVELABELSET", GameId = gameId, SetName = setName },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "label_delete_set")]
+    [Description("Permanently remove a label set and all its entries for a game. The built-in set cannot be deleted.")]
+    public async Task<string> DeleteLabelSet(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
+        [Description("Name of the label set to delete.")] string setName,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "DELETELABELSET", GameId = gameId, SetName = setName },
+            cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
     // Symbol labels
     // -------------------------------------------------------------------------
 
-    [McpServerTool(Name = "get_labels")]
+    [McpServerTool(Name = "label_list")]
     [Description("Return all symbol labels (with type badges) from the active label set. Useful for reviewing previously annotated addresses before continuing analysis.")]
     public async Task<string> GetLabels(CancellationToken cancellationToken)
     {
@@ -19,7 +89,7 @@ public sealed partial class CodeDesignerPs2Tools
         return FormatLabels(json);
     }
 
-    [McpServerTool(Name = "get_function_labels")]
+    [McpServerTool(Name = "label_list_functions")]
     [Description("Return only Function-typed labels from the active label set, including named argument and return register annotations for each function.")]
     public async Task<string> GetFunctionLabels(CancellationToken cancellationToken)
     {
@@ -56,9 +126,11 @@ public sealed partial class CodeDesignerPs2Tools
         catch { return json; }
     }
 
-    [McpServerTool(Name = "add_label")]
-    [Description("Insert or update a label entry in the active label set. Supports all label types: Address, Function, Struct, Array, ArrayOfPointers, LinkedList, String.")]
+    [McpServerTool(Name = "label_add")]
+    [Description("Insert or update a label entry in the specified label set. Supports all label types: Address, Function, Struct, Array, ArrayOfPointers, LinkedList, String. Always use a dedicated label set (create one with label_create_set if needed) rather than polluting the built-in set.")]
     public async Task<string> AddLabel(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
+        [Description("Label set to add the entry to (e.g. 'ai-analysis'). Use label_list_sets to see available sets, or label_create_set to make a new one.")] string labelSet,
         [Description("Virtual address to label (hex or decimal).")] string address,
         [Description("Label name (e.g. 'scePadRead').")] string label,
         [Description("Optional comment to attach to the label.")] string? comment = null,
@@ -78,26 +150,33 @@ public sealed partial class CodeDesignerPs2Tools
         var json = await bridge.SendAsync(
             new
             {
-                Command = "ADDLABEL",
-                Address = parsedAddress.Value,
-                Label   = label,
-                Comment = comment,
-                LabelType = type,
-                ArgRegs      = argRegs?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                ReturnRegs   = returnRegs?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                ElementStride = elementStride,
-                ElementCount  = elementCount,
-                NodeNextOffset = nodeNextOffset,
-                NodeSize      = nodeSize,
+                Command  = "ADDLABELENTRY",
+                GameId   = gameId,
+                SetName  = labelSet,
+                LabelEntry = new
+                {
+                    address        = $"0x{parsedAddress.Value:X8}",
+                    name           = label,
+                    comment,
+                    type,
+                    argRegs        = argRegs?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                    returnRegs     = returnRegs?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                    elementStride,
+                    elementCount,
+                    nodeNextOffset,
+                    nodeSize,
+                },
             },
             cancellationToken);
 
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "delete_label")]
-    [Description("Remove a symbol label from the active label set. Changes are persisted to disk immediately.")]
+    [McpServerTool(Name = "label_delete")]
+    [Description("Remove a symbol label from the specified label set. Changes are persisted to disk immediately.")]
     public async Task<string> DeleteLabel(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
+        [Description("Label set to remove the entry from (e.g. 'ai-analysis').")] string labelSet,
         [Description("Virtual address of the label to remove (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
     {
@@ -106,13 +185,13 @@ public sealed partial class CodeDesignerPs2Tools
             return $"Error: invalid address '{address}'.";
 
         var json = await bridge.SendAsync(
-            new { Command = "DELETELABEL", Address = parsedAddress.Value },
+            new { Command = "DELETELABELENTRY", GameId = gameId, SetName = labelSet, Address = parsedAddress.Value },
             cancellationToken);
 
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "resolve_strings")]
+    [McpServerTool(Name = "label_resolve_strings")]
     [Description("Read each String-typed label's memory content from live PCSX2 (PINE mode) and update the label value with the null-terminated ASCII string found at that address.")]
     public async Task<string> ResolveStrings(CancellationToken cancellationToken)
     {
@@ -120,7 +199,7 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "resolve_linked_list")]
+    [McpServerTool(Name = "label_resolve_linked_list")]
     [Description("Walk a linked list in live PCSX2 memory starting from the given address, using node size and next-pointer offset from the corresponding LinkedList label.")]
     public async Task<string> ResolveLinkedList(
         [Description("Virtual address of the first node (hex or decimal).")] string address,
@@ -158,7 +237,7 @@ public sealed partial class CodeDesignerPs2Tools
     // Struct / memory-map viewer
     // -------------------------------------------------------------------------
 
-    [McpServerTool(Name = "get_structs")]
+    [McpServerTool(Name = "label_get_structs")]
     [Description("Return all user-defined PS2 memory struct definitions stored on the server. Each struct has a name, base address, and a list of typed member fields.")]
     public async Task<string> GetStructs(CancellationToken cancellationToken)
     {
@@ -193,8 +272,8 @@ public sealed partial class CodeDesignerPs2Tools
         catch { return json; }
     }
 
-    [McpServerTool(Name = "add_struct")]
-    [Description("Create or update a named PS2 memory struct definition with a base address. Use add_struct_member to add fields after creating the struct.")]
+    [McpServerTool(Name = "label_add_struct")]
+    [Description("Create or update a named PS2 memory struct definition with a base address. Use label_add_struct_member to add fields after creating the struct.")]
     public async Task<string> AddStruct(
         [Description("Unique name for this struct (e.g. 'PlayerState').")] string structName,
         [Description("Base address of the struct in EE memory (hex or decimal, e.g. '0x80200000').")] string baseAddress,
@@ -206,7 +285,7 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "delete_struct")]
+    [McpServerTool(Name = "label_delete_struct")]
     [Description("Remove a named PS2 memory struct definition. Works in both internal emulator and PINE/PCSX2 modes.")]
     public async Task<string> DeleteStruct(
         [Description("Name of the struct to delete.")] string structName,
@@ -218,7 +297,7 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "add_struct_member")]
+    [McpServerTool(Name = "label_add_struct_member")]
     [Description("Add or update a named member field in an existing PS2 memory struct definition. Members have an offset, a data type, and an optional count for array fields.")]
     public async Task<string> AddStructMember(
         [Description("Name of the struct to add the member to.")] string structName,
