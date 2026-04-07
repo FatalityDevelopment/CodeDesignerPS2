@@ -3554,6 +3554,27 @@ app-bottom-panel {
 .lm-dyn-toggle-btn.lm-is-dynamic { background: #0d3a6e; border-color: #0e639c; color: #9cdcfe; }
 .lm-dyn-toggle-btn.lm-is-dynamic:hover { background: #0e4a8a; }
 
+/* Play/pause live-polling toggle button — styled after the disasm panel debug controls */
+.lm-live-toggle-btn {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.13);
+    color: #777;
+    padding: 2px 5px;
+    border-radius: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+}
+.lm-live-toggle-btn:hover { background: rgba(255,255,255,0.15); color: #ccc; }
+.lm-live-toggle-btn.lm-is-dynamic { background: #0d3a6e; border-color: #0e639c; color: #9cdcfe; }
+.lm-live-toggle-btn.lm-is-dynamic:hover { background: #0e4a8a; }
+
+/* SVG icon sizes used inside the play/pause and trash buttons */
+.lm-play-icon  { width: 8px; height: 10px; pointer-events: none; display: block; }
+.lm-trash-icon { width: 10px; height: 12px; pointer-events: none; display: block; vertical-align: middle; }
+
 /* Live value display */
 .lm-live-value { font-family: monospace; color: #9cdcfe; font-size: 11px; }
 .lm-live-value-dim { color: #555; font-size: 11px; font-style: italic; }
