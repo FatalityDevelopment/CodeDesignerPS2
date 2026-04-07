@@ -23,4 +23,21 @@
     </PackageReference>
   </ItemGroup>
 
+  <!--
+    After every build, run the Database tool to apply pending EF Core migrations
+    and seed the database.  Set the CheatArchiveRoot MSBuild property (or the
+    CODEDESIGNER_ARCHIVE_ROOT environment variable) to also run the bulk cheat
+    importer, e.g.:
+        dotnet build -p:CheatArchiveRoot=/path/to/CheatCodeArchive
+  -->
+  <Target Name="InitialiseDatabase" AfterTargets="Build">
+    <PropertyGroup>
+      <_ArchiveArg Condition="'$(CheatArchiveRoot)' != ''">--archive-root &quot;$(CheatArchiveRoot)&quot;</_ArchiveArg>
+      <_ArchiveArg Condition="'$(CheatArchiveRoot)' == ''"></_ArchiveArg>
+    </PropertyGroup>
+    <Exec Command="dotnet &quot;$(TargetPath)&quot; $(_ArchiveArg)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          ContinueOnError="WarnAndContinue" />
+  </Target>
+
 </Project>

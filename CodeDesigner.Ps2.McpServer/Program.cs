@@ -47,8 +47,7 @@ for (int i = 0; i < args.Length; i++)
 }
 
 // Allow environment-variable override
-dbPath ??= Environment.GetEnvironmentVariable("CODEDESIGNER_DB_PATH")
-        ?? Path.Combine(AppContext.BaseDirectory, "codedesigner.db");
+dbPath ??= DatabasePaths.GetDefaultDbPath();
 
 // ── Connect to the database (already initialised by the Database tool) ─────
 var dbOptions = new DbContextOptionsBuilder<CodeDesignerDbContext>()

@@ -1,4 +1,3 @@
-using CodeDesigner.Ps2.Database.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace CodeDesigner.Ps2.Database;
@@ -15,7 +14,14 @@ public static class DatabaseInitialiser
     /// file path, applies any pending EF Core migrations, and seeds initial
     /// data via <see cref="DatabaseSeeder"/>.
     /// </summary>
-    public static async Task<DbContextOptions<CodeDesignerDbContext>> InitialiseDatabaseAsync(string path)
+    /// <param name="path">Absolute path to the SQLite database file.</param>
+    /// <param name="archiveRoot">
+    /// Optional path to the root of the CheatCodeArchive checkout.
+    /// When supplied, the bulk cheat importer runs as part of seeding.
+    /// </param>
+    public static async Task<DbContextOptions<CodeDesignerDbContext>> InitialiseDatabaseAsync(
+        string path,
+        string? archiveRoot = null)
     {
         // WAL mode allows multiple readers and one writer concurrently, preventing
         // "database is locked" errors when the MCP server and the main app share the file.
@@ -41,7 +47,7 @@ public static class DatabaseInitialiser
 
                 // Seed initial data (idempotent — only inserts missing rows).
                 var seeder = new DatabaseSeeder(db);
-                await seeder.SeedAsync();
+                await seeder.SeedAsync(archiveRoot);
                 break;
             }
             catch (Microsoft.Data.Sqlite.SqliteException ex)
@@ -52,54 +58,5 @@ public static class DatabaseInitialiser
         }
 
         return options;
-    }
-
-    /// <summary>
-    /// One-time migration: import any existing flat <c>.md</c> files from
-    /// <paramref name="memoriesPath"/> into the <see cref="McpMemory"/> table
-    /// so progress reports created before the database upgrade are preserved.
-    /// Already-imported files are skipped (idempotent); files are not deleted
-    /// from disk so they remain available as a backup.
-    /// </summary>
-    public static async Task MigrateMemoryFilesToDatabaseAsync(
-        string memoriesPath,
-        DbContextOptions<CodeDesignerDbContext> dbOptions)
-    {
-        if (!Directory.Exists(memoriesPath))
-            return;
-
-        var files = Directory.GetFiles(memoriesPath, "*.md");
-        if (files.Length == 0)
-            return;
-
-        await using var db = new CodeDesignerDbContext(dbOptions);
-
-        // Load all existing memory names in one query to avoid N+1 round-trips.
-        var existingNames = (await db.McpMemories
-            .Select(m => m.Name)
-            .ToListAsync())
-            .ToHashSet(StringComparer.Ordinal);
-
-        foreach (var file in files)
-        {
-            var name = Path.GetFileNameWithoutExtension(file);
-            if (string.IsNullOrWhiteSpace(name))
-                continue;
-
-            // Skip if a memory with this name already exists in the database.
-            if (existingNames.Contains(name))
-                continue;
-
-            var content = await File.ReadAllTextAsync(file);
-            db.McpMemories.Add(new McpMemory
-            {
-                Name      = name,
-                Content   = content,
-                CreatedAt = File.GetCreationTimeUtc(file),
-                UpdatedAt = File.GetLastWriteTimeUtc(file),
-            });
-        }
-
-        await db.SaveChangesAsync();
     }
 }
