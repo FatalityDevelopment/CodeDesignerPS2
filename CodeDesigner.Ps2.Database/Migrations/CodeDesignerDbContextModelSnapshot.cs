@@ -197,7 +197,16 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
                     b.Property<string>("Address")
                         .IsRequired()
-                        .HasMaxLength(32)
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Offset")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ParentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ValueType")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ArgRegsJson")
@@ -210,6 +219,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("ElementStride")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Dynamic")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("Hidden")
@@ -239,34 +251,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
                     b.HasIndex("LabelSetId", "Address");
 
+                    b.HasIndex("ParentId");
+
                     b.ToTable("Labels");
-                });
-
-            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelMember", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("Dynamic")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("LabelId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Offset")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LabelId");
-
-                    b.ToTable("LabelMembers");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelSet", b =>
@@ -527,24 +514,22 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Label", b =>
                 {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.Label", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("CodeDesigner.Ps2.Database.Entities.LabelSet", "LabelSet")
                         .WithMany("Labels")
                         .HasForeignKey("LabelSetId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.Navigation("Children");
+
                     b.Navigation("LabelSet");
-                });
 
-            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelMember", b =>
-                {
-                    b.HasOne("CodeDesigner.Ps2.Database.Entities.Label", "Label")
-                        .WithMany("Members")
-                        .HasForeignKey("LabelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Label");
+                    b.Navigation("Parent");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpAgentTask", b =>
@@ -595,11 +580,6 @@ namespace CodeDesigner.Ps2.Database.Migrations
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.GameRegion", b =>
                 {
                     b.Navigation("Discs");
-                });
-
-            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Label", b =>
-                {
-                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.LabelSet", b =>

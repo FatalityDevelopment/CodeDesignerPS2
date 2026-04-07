@@ -295,11 +295,16 @@ public class DatabaseSeeder
 
                     if (string.IsNullOrWhiteSpace(memberName)) continue;
 
-                    _db.LabelMembers.Add(new LabelMember
+                    // Members are now stored as child Label entries with ParentId pointing to the struct label.
+                    var syntheticAddr = baseAddress + ":+0x" + offset.ToString("X4").ToUpperInvariant();
+                    _db.Labels.Add(new Label
                     {
-                        LabelId = structLabel.Id,
-                        Offset  = offset,
-                        Name    = memberName,
+                        LabelSetId = labelSet.Id,
+                        ParentId   = structLabel.Id,
+                        Offset     = offset,
+                        Address    = syntheticAddr,
+                        Name       = memberName,
+                        Type       = LabelType.Address,
                     });
                 }
             }

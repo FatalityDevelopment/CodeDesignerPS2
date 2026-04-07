@@ -11,18 +11,27 @@ import {
 
 export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'ArrayOfPointers' | 'LinkedList' | 'String';
 
-export interface LabelMemberEntry { offset: number; name: string; dynamic?: boolean; }
+/**
+ * A unified label entry. Labels are recursive: child entries have parentAddress + offset set
+ * and their address is a synthetic path key (e.g. "0x80010000:+0x0010").
+ */
 export interface LabelManagerEntry {
+  /** Real PS2 address for root entries; synthetic path key for child entries. */
   address:  string;
+  /** Address of the parent label within the same set. Undefined for root entries. */
+  parentAddress?: string;
+  /** Byte offset from the dereferenced parent pointer. Only set when parentAddress is defined. */
+  offset?: number;
   name:     string;
   comment?: string;
+  /** Optional data-type annotation, e.g. "u32", "float", "pointer". */
+  valueType?: string;
   /** When true, the entry is hidden from the disassembler view and structs panel. */
   hidden?:  boolean;
   /** When true, the live memory value at this address is polled and shown in the table. */
   dynamic?: boolean;
-  /** Semantic label type. Undefined is backward-compatible (inferred from members). */
+  /** Semantic label type. */
   type?:    LabelType;
-  members:  LabelMemberEntry[];
   // Function
   argRegs?:    string[];
   returnRegs?: string[];
@@ -37,28 +46,22 @@ export interface LabelSetPayload {
   setName:   string;
   gameId?:   string;
   isBuiltIn: boolean;
+  /** Flat list of ALL labels (roots + children at all depths). */
   entries:   LabelManagerEntry[];
 }
 
 /** One row in the recursive label-manager tree view. */
 export interface TreeRow {
-  /** 'entry' = top-level label row; 'member' = struct member sub-row. */
+  /** 'entry' = top-level label row; 'member' = child label sub-row. */
   kind: 'entry' | 'member';
-  /** Nesting depth (0 = top-level, 1 = first member level, etc.). */
+  /** Nesting depth (0 = top-level, 1 = first child level, etc.). */
   depth: number;
-  /** Unique path string used as the expansion state key. */
+  /** Unique path string used as the expansion state key (= entry.address). */
   path: string;
-  /** Populated for 'entry' rows. */
-  entry?: LabelManagerEntry;
-  /** Populated for 'member' rows. */
-  memberName?: string;
-  memberOffset?: number;
-  /** The label in the current set that this member's name resolves to (if any). */
-  resolvedEntry?: LabelManagerEntry;
-  /** True when this row can be expanded to reveal sub-members. */
+  /** The full label entry for this row (always set). */
+  entry: LabelManagerEntry;
+  /** True when this row can be expanded to reveal child entries. */
   expandable: boolean;
-  /** For member rows at depth=1: the address of the parent struct-pointer entry. */
-  parentEntryAddress?: string;
 }
 
 export type LabelManagerAction =
@@ -254,6 +257,7 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   <span class="lm-type-badge" [class]="typeBadgeClass(row.entry!)">{{ typeBadge(row.entry!) }}</span>
                 </td>
                 <td class="lm-col-addr lm-mono">
+                  <button class="lm-row-btn lm-goto-btn" title="Go to address" (click)="onGotoLabel(row.entry!)">&#x2192;</button>
                   {{ row.entry!.address }}
                 </td>
                 <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
@@ -281,9 +285,23 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                 }
               </tr>
             } @else {
-              <!-- Struct member sub-row (supports recursive depth via padding) -->
-              <tr class="lm-member-sub-row">
-                <td class="lm-col-vis"></td>
+              <!-- Child label sub-row (recursive; entry = the child LabelManagerEntry) -->
+              <tr class="lm-member-sub-row" [class.lm-hidden-row]="row.entry.hidden">
+                <td class="lm-col-vis">
+                  <button class="lm-vis-btn"
+                          [class.lm-is-hidden]="row.entry.hidden"
+                          [title]="row.entry.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
+                          [disabled]="activeSetIsBuiltIn()"
+                          (click)="onToggleChildVisibility(row.entry)">
+                    <svg class="lm-eye-icon" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                      <path d="M1 7C3.5 3 6.5 1 10 1s6.5 2 9 6c-2.5 4-5.5 6-9 6S3.5 11 1 7z"/>
+                      <circle cx="10" cy="7" r="2.5"/>
+                      @if (row.entry.hidden) {
+                        <line x1="3" y1="1" x2="17" y2="13"/>
+                      }
+                    </svg>
+                  </button>
+                </td>
                 <td class="lm-col-expand lm-member-tree-indent" [style.padding-left.px]="row.depth * 16">
                   @if (row.expandable) {
                     <button class="lm-expand-btn" [title]="isExpanded(row.path) ? 'Collapse' : 'Expand'" (click)="toggleExpand(row.path)">
@@ -294,35 +312,41 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   }
                 </td>
                 <td class="lm-col-type lm-mono lm-member-offset-cell">
-                  +0x{{ row.memberOffset!.toString(16).toUpperCase().padStart(4, '0') }}
+                  +0x{{ (row.entry.offset ?? 0).toString(16).toUpperCase().padStart(4, '0') }}
+                  @if (row.entry.valueType) { <span class="lm-muted">&nbsp;{{ row.entry.valueType }}</span> }
                 </td>
                 <td class="lm-col-addr">
                 </td>
                 <td class="lm-col-name lm-member-sub-name">
-                  {{ row.memberName }}
-                  @if (row.resolvedEntry) {
-                    <span class="lm-member-type-hint lm-muted">&nbsp;{{ typeBadge(row.resolvedEntry) }}</span>
+                  {{ row.entry.name }}
+                  @if ((row.entry.type ?? 'Address') !== 'Address') {
+                    <span class="lm-member-type-hint lm-muted">&nbsp;{{ typeBadge(row.entry) }}</span>
                   }
                 </td>
-                <td class="lm-col-comment lm-muted">{{ row.resolvedEntry?.comment ?? '' }}</td>
-                <td class="lm-col-members">
-                  @if (row.resolvedEntry) { {{ entryDetails(row.resolvedEntry) }} }
-                </td>
+                <td class="lm-col-comment lm-muted">{{ row.entry.comment ?? '' }}</td>
+                <td class="lm-col-members">{{ entryDetails(row.entry) }}</td>
                 <td class="lm-col-live">
-                  @if (memberIsDynamic(row)) {
+                  @if (row.entry.dynamic) {
                     <span class="lm-live-value">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
                   }
                 </td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions">
                     <button class="lm-row-btn lm-dyn-toggle-btn"
-                            [class.lm-is-dynamic]="memberIsDynamic(row)"
-                            [title]="memberIsDynamic(row) ? 'Dynamic — click to set static' : 'Static — click to enable live value'"
-                            (click)="onToggleMemberDynamic(row)">
-                      {{ memberIsDynamic(row) ? 'Dyn' : 'Sta' }}
+                            [class.lm-is-dynamic]="row.entry.dynamic"
+                            [title]="row.entry.dynamic ? 'Dynamic — click to set static' : 'Static — click to enable live value'"
+                            (click)="onToggleChildDynamic(row.entry)">
+                      {{ row.entry.dynamic ? 'Dyn' : 'Sta' }}
                     </button>
-                    @if (row.parentEntryAddress != null) {
-                      <button class="lm-row-btn" title="Navigate to resolved address" (click)="onGotoMember(row.parentEntryAddress!, row.memberOffset!)">&#x2192;</button>
+                    @if (row.entry.parentAddress != null) {
+                      <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
+                    }
+                    <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">&#x1F5D1;</button>
+                  </td>
+                } @else {
+                  <td class="lm-col-actions">
+                    @if (row.entry.parentAddress != null) {
+                      <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
                   </td>
                 }
@@ -393,10 +417,10 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
           </label>
         </div>
 
-        <!-- Struct members editor -->
+        <!-- Child entries editor (for Struct/any parent type) -->
         @if (editType() === 'Struct') {
           <div class="lm-form-row lm-members-row">
-            <label class="lm-form-label">Members</label>
+            <label class="lm-form-label">Children</label>
             <div class="lm-members-list">
               @for (m of editMembers(); track $index) {
                 <div class="lm-member-item">
@@ -405,13 +429,28 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                          [value]="m.offsetStr"
                          (input)="updateMemberOffset($index, asInput($event).value)" />
                   <input class="lm-member-name" type="text" spellcheck="false"
-                         placeholder="field name"
+                         placeholder="field name (or another label name for nesting)"
                          [value]="m.name"
                          (input)="updateMemberName($index, asInput($event).value)" />
+                  <select class="lm-member-type" [value]="m.valueType ?? ''"
+                          (change)="updateMemberValueType($index, asSelect($event).value)">
+                    <option value="">type…</option>
+                    <option value="u8">u8</option>
+                    <option value="u16">u16</option>
+                    <option value="u32">u32</option>
+                    <option value="u64">u64</option>
+                    <option value="s8">s8</option>
+                    <option value="s16">s16</option>
+                    <option value="s32">s32</option>
+                    <option value="s64">s64</option>
+                    <option value="float">float</option>
+                    <option value="double">double</option>
+                    <option value="pointer">pointer</option>
+                  </select>
                   <button class="lm-member-del" (click)="removeMember($index)">&#xD7;</button>
                 </div>
               }
-              <button class="lm-tool-btn" (click)="addMember()">&#43; Member</button>
+              <button class="lm-tool-btn" (click)="addMember()">&#43; Child</button>
             </div>
           </div>
         }
@@ -533,7 +572,7 @@ export class LabelManagerOverlayComponent {
   readonly editType          = signal<string>('Address');
   readonly editHidden        = signal(false);
   readonly editDynamic       = signal(false);
-  readonly editMembers       = signal<{ offsetStr: string; name: string; dynamic?: boolean }[]>([]);
+  readonly editMembers       = signal<{ offsetStr: string; name: string; valueType?: string; dynamic?: boolean; hidden?: boolean }[]>([]);
   readonly editArgRegs       = signal('');
   readonly editReturnRegs    = signal('');
   readonly editElementStride = signal('');
@@ -542,6 +581,9 @@ export class LabelManagerOverlayComponent {
   readonly editNodeSize       = signal('');
   /** When editing an existing entry, this holds its original address. */
   readonly editingAddress = signal('');
+
+  /** Addresses of original children tracked when the edit form is opened, for deletion on save. */
+  private _editingOriginalChildAddresses: string[] = [];
 
   /** Map of address → live hex value string for dynamic entries. */
   readonly liveValues = signal<Map<string, string>>(new Map());
@@ -592,36 +634,20 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().some(e => e.dynamic),
   );
 
-  /** Addresses of dynamic entries to poll. */
+  /** Addresses of dynamic root entries to poll. */
   private readonly _dynamicAddresses = computed(() =>
-    this.filteredEntries().filter(e => e.dynamic).map(e => e.address),
+    this.filteredEntries().filter(e => !e.parentAddress && e.dynamic).map(e => e.address),
   );
 
   /**
-   * Dynamic member rows to poll: only depth-1 rows whose member has dynamic=true
-   * and whose parent address is known (needed to dereference the pointer).
+   * Dynamic child rows to poll (depth >= 1, dynamic=true, with parentAddress set at depth 1).
+   * Only depth-1 children are live-polled (dereference parent pointer + offset).
    */
   private readonly _dynamicMemberRows = computed(() =>
     this.treeRows().filter(
-      r => r.kind === 'member' && r.depth === 1 && r.parentEntryAddress != null &&
-           this._memberDynamic(r),
+      r => r.kind === 'member' && r.depth === 1 && r.entry.dynamic && r.entry.parentAddress != null,
     ),
   );
-
-  /** Returns true when the member represented by a tree row has dynamic=true. */
-  private _memberDynamic(row: TreeRow): boolean {
-    if (row.entry) { return false; }
-    const parentEntry = this.filteredEntries().find(
-      e => e.address === row.parentEntryAddress,
-    );
-    const m = parentEntry?.members.find(m => m.offset === row.memberOffset);
-    return m?.dynamic ?? false;
-  }
-
-  /** Public helper used in the template to drive the dynamic-toggle button label. */
-  memberIsDynamic(row: TreeRow): boolean {
-    return this._memberDynamic(row);
-  }
 
   /** Colspan for the "no entries" empty row. Live Value column is always shown. */
   readonly emptyColspan = computed(() =>
@@ -644,32 +670,39 @@ export class LabelManagerOverlayComponent {
   });
 
   /**
+   * Look up children of the given parent address from the current set's flat entry list.
+   */
+  private _childrenOf(parentAddress: string): LabelManagerEntry[] {
+    const all = this.currentSet()?.entries ?? [];
+    return all.filter(e => e.parentAddress === parentAddress && !e.hidden);
+  }
+
+  /**
    * A flat list of tree rows derived from `filteredEntries()`.
-   * Top-level entries are at depth 0.  When a Struct row is expanded its
-   * members appear immediately below it as depth-1 rows.  If a member's
-   * name resolves to another Struct label in the current set that Struct can
-   * itself be expanded, producing depth-2 rows – and so on recursively (with
-   * cycle detection so circular references don't loop forever).
+   * Root entries (no parentAddress) are at depth 0.  When expanded, their
+   * child entries appear immediately below.  Children can themselves be expanded
+   * if they have children — fully recursive with cycle detection.
    */
   readonly treeRows = computed<TreeRow[]>(() => {
-    const structByName = this._structByName();
     const rows: TreeRow[] = [];
     for (const entry of this.filteredEntries()) {
+      if (entry.parentAddress) { continue; } // skip children — they appear under their parent
       const path = entry.address;
-      const isStruct = (entry.type ?? 'Address') === 'Struct';
+      const children = this._childrenOf(path);
       rows.push({
         kind: 'entry',
         depth: 0,
         path,
         entry,
-        expandable: isStruct && entry.members.length > 0,
+        expandable: children.length > 0,
       });
-      if (this.expandedPaths().has(path) && isStruct) {
-        this._addMemberRows(rows, entry.members, structByName, path, 1, new Set([path]), entry.address);
+      if (this.expandedPaths().has(path)) {
+        this._addChildRows(rows, children, 1, new Set([path]));
       }
     }
     return rows;
   });
+
 
   // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -821,36 +854,31 @@ export class LabelManagerOverlayComponent {
   }
 
   /** Recursively appends member rows to `rows`, with cycle detection via `visited`. */
-  private _addMemberRows(
+  /**
+   * Recursively adds child label rows to the tree, with cycle detection.
+   */
+  private _addChildRows(
     rows: TreeRow[],
-    members: LabelMemberEntry[],
-    structByName: Map<string, LabelManagerEntry>,
-    parentPath: string,
+    children: LabelManagerEntry[],
     depth: number,
     visited: Set<string>,
-    parentEntryAddress?: string,
   ): void {
-    for (const m of members) {
-      const path = `${parentPath}:${m.offset}`;
-      const resolved = structByName.get(m.name);
-      const canExpand = resolved != null
-        && resolved.members.length > 0
-        && !visited.has(resolved.address);
+    const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
+    for (const child of sorted) {
+      if (visited.has(child.address)) { continue; } // cycle guard
+      const grandchildren = this._childrenOf(child.address);
+      const canExpand = grandchildren.length > 0;
       rows.push({
         kind: 'member',
         depth,
-        path,
-        memberName: m.name,
-        memberOffset: m.offset,
-        resolvedEntry: resolved,
+        path: child.address,
+        entry: child,
         expandable: canExpand,
-        parentEntryAddress,
       });
-      if (canExpand && this.expandedPaths().has(path)) {
+      if (canExpand && this.expandedPaths().has(child.address)) {
         const nextVisited = new Set(visited);
-        nextVisited.add(resolved!.address);
-        // Deeper levels don't pass parentEntryAddress (goto only supported at depth=1).
-        this._addMemberRows(rows, resolved!.members, structByName, path, depth + 1, nextVisited);
+        nextVisited.add(child.address);
+        this._addChildRows(rows, grandchildren, depth + 1, nextVisited);
       }
     }
   }
@@ -868,10 +896,21 @@ export class LabelManagerOverlayComponent {
     this.editAddress.set(entry.address);
     this.editName.set(entry.name);
     this.editComment.set(entry.comment ?? '');
-    this.editType.set(entry.type ?? (entry.members.length > 0 ? 'Struct' : 'Address'));
+    // Determine effective type: if the entry has children in the set, it's a Struct.
+    const existingChildren = this._childrenOf(entry.address);
+    this.editType.set(entry.type ?? (existingChildren.length > 0 ? 'Struct' : 'Address'));
     this.editHidden.set(entry.hidden ?? false);
     this.editDynamic.set(entry.dynamic ?? false);
-    this.editMembers.set(entry.members.map(m => ({ offsetStr: '0x' + m.offset.toString(16).toUpperCase().padStart(2, '0'), name: m.name, dynamic: m.dynamic })));
+    // Populate editMembers from existing child entries in the set.
+    const children = this._childrenOf(entry.address).sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
+    this._editingOriginalChildAddresses = children.map(c => c.address);
+    this.editMembers.set(children.map(c => ({
+      offsetStr: '0x' + (c.offset ?? 0).toString(16).toUpperCase().padStart(2, '0'),
+      name: c.name,
+      valueType: c.valueType,
+      dynamic: c.dynamic,
+      hidden: c.hidden,
+    })));
     this.editArgRegs.set((entry.argRegs ?? []).join('\n'));
     this.editReturnRegs.set((entry.returnRegs ?? []).join('\n'));
     this.editElementStride.set(entry.elementStride != null ? String(entry.elementStride) : '');
@@ -906,29 +945,37 @@ export class LabelManagerOverlayComponent {
     this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
   }
 
-  onToggleMemberDynamic(row: TreeRow): void {
-    if (row.parentEntryAddress == null || row.memberOffset == null) { return; }
+  /** Toggle dynamic flag on a child entry directly. */
+  onToggleChildDynamic(child: LabelManagerEntry): void {
+    const updated: LabelManagerEntry = { ...child, dynamic: child.dynamic ? undefined : true };
     const set = this.currentSet();
-    const parentEntry = set?.entries.find(e => e.address === row.parentEntryAddress);
-    if (!parentEntry || !set) { return; }
+    if (set) {
+      this.currentSet.set({
+        ...set,
+        entries: set.entries.map(e => e.address === child.address ? updated : e),
+      });
+    }
+    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
+  }
 
-    const updatedEntry: LabelManagerEntry = {
-      ...parentEntry,
-      members: parentEntry.members.map(m =>
-        m.offset === row.memberOffset
-          // Use undefined (not false) when disabling so the field is omitted from JSON,
-          // matching the WhenWritingDefault convention on the C# side.
-          ? { ...m, dynamic: m.dynamic ? undefined : true }
-          : m,
-      ),
-    };
+  /** Toggle hidden flag on a child entry directly. */
+  onToggleChildVisibility(child: LabelManagerEntry): void {
+    const updated: LabelManagerEntry = { ...child, hidden: child.hidden ? undefined : true };
+    const set = this.currentSet();
+    if (set) {
+      this.currentSet.set({
+        ...set,
+        entries: set.entries.map(e => e.address === child.address ? updated : e),
+      });
+    }
+    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
+  }
 
-    // Optimistic local update.
-    this.currentSet.set({
-      ...set,
-      entries: set.entries.map(e => e.address === row.parentEntryAddress ? updatedEntry : e),
-    });
-    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updatedEntry });
+  /** Navigate to the resolved address of a child entry (dereferences parent pointer + offset). */
+  onGotoChild(child: LabelManagerEntry): void {
+    if (child.parentAddress != null && child.offset != null) {
+      this.action$.emit({ type: 'navigateToMember', parentAddress: child.parentAddress, offset: child.offset });
+    }
   }
 
   onSave(): void {
@@ -937,12 +984,7 @@ export class LabelManagerOverlayComponent {
     if (!addr || !name) { return; }
 
     const type = this.editType() as LabelType;
-
-    const members = (type === 'Struct')
-      ? this.editMembers()
-          .filter(m => m.name.trim())
-          .map(m => ({ offset: parseInt(m.offsetStr.replace(/^0x/i, ''), 16) || 0, name: m.name.trim(), dynamic: m.dynamic || undefined }))
-      : [];
+    const setName = this.activeSetName();
 
     const argRegs    = (type === 'Function') ? splitLines(this.editArgRegs())    : undefined;
     const returnRegs = (type === 'Function') ? splitLines(this.editReturnRegs()) : undefined;
@@ -960,10 +1002,8 @@ export class LabelManagerOverlayComponent {
       name,
       comment: this.editComment().trim() || undefined,
       type,
-      // Preserve hidden state when editing; default to false (visible) for new entries.
       hidden: this.editingAddress() ? this.editHidden() : false,
       dynamic: this.editDynamic() ? true : undefined,
-      members,
       argRegs:       argRegs?.length      ? argRegs      : undefined,
       returnRegs:    returnRegs?.length    ? returnRegs   : undefined,
       elementStride,
@@ -971,7 +1011,40 @@ export class LabelManagerOverlayComponent {
       nodeNextOffset,
       nodeSize,
     };
-    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry });
+    this.action$.emit({ type: 'addEntry', setName, entry });
+
+    // For Struct type: save children as separate label entries with parentAddress = addr.
+    if (type === 'Struct') {
+      const newChildren = this.editMembers()
+        .filter(m => m.name.trim())
+        .map(m => {
+          const offset = parseInt(m.offsetStr.replace(/^0x/i, ''), 16) || 0;
+          const syntheticAddr = addr + ':+0x' + offset.toString(16).toUpperCase().padStart(4, '0');
+          const child: LabelManagerEntry = {
+            address: syntheticAddr,
+            parentAddress: addr,
+            offset,
+            name: m.name.trim(),
+            valueType: m.valueType || undefined,
+            dynamic: m.dynamic || undefined,
+            hidden: m.hidden || undefined,
+          };
+          return child;
+        });
+
+      // Delete children that were removed (existed before but not in newChildren).
+      const newChildAddresses = new Set(newChildren.map(c => c.address));
+      for (const oldAddr of this._editingOriginalChildAddresses) {
+        if (!newChildAddresses.has(oldAddr)) {
+          this.action$.emit({ type: 'deleteEntry', setName, address: oldAddr });
+        }
+      }
+      // Upsert all new/updated children.
+      for (const child of newChildren) {
+        this.action$.emit({ type: 'addEntry', setName, entry: child });
+      }
+    }
+
     this.clearForm();
   }
 
@@ -1018,6 +1091,10 @@ export class LabelManagerOverlayComponent {
     this.editMembers.update(m => m.map((item, i) => i === index ? { ...item, name: value } : item));
   }
 
+  updateMemberValueType(index: number, value: string): void {
+    this.editMembers.update(m => m.map((item, i) => i === index ? { ...item, valueType: value || undefined } : item));
+  }
+
   clearForm(): void {
     this.editAddress.set('');
     this.editName.set('');
@@ -1026,6 +1103,7 @@ export class LabelManagerOverlayComponent {
     this.editHidden.set(false);
     this.editDynamic.set(false);
     this.editMembers.set([]);
+    this._editingOriginalChildAddresses = [];
     this.editArgRegs.set('');
     this.editReturnRegs.set('');
     this.editElementStride.set('');
@@ -1055,10 +1133,10 @@ export class LabelManagerOverlayComponent {
 
   entryDetails(entry: LabelManagerEntry): string {
     switch (this.effectiveType(entry)) {
-      case 'Struct':
-        return entry.members.length > 0
-          ? `${entry.members.length} member${entry.members.length !== 1 ? 's' : ''}`
-          : '—';
+      case 'Struct': {
+        const n = this._childrenOf(entry.address).length;
+        return n > 0 ? `${n} child${n !== 1 ? 'ren' : ''}` : '—';
+      }
       case 'Function': {
         const parts: string[] = [];
         if (entry.argRegs?.length)    parts.push(`args: ${entry.argRegs.join(', ')}`);
@@ -1083,7 +1161,10 @@ export class LabelManagerOverlayComponent {
   }
 
   memberSummary(entry: LabelManagerEntry): string {
-    return entry.members.map(m => `+0x${m.offset.toString(16).toUpperCase().padStart(2, '0')}: ${m.name}`).join('\n');
+    return this._childrenOf(entry.address)
+      .sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0))
+      .map(c => `+0x${(c.offset ?? 0).toString(16).toUpperCase().padStart(2, '0')}: ${c.name}`)
+      .join('\n');
   }
 
   asInput(event: Event): HTMLInputElement { return event.target as HTMLInputElement; }
@@ -1135,8 +1216,8 @@ export class LabelManagerOverlayComponent {
         this.action$.emit({
           type: 'readMemberLiveValues',
           members: dynMembers.map(r => ({
-            parentAddress: r.parentEntryAddress!,
-            offset: r.memberOffset!,
+            parentAddress: r.entry.parentAddress!,
+            offset: r.entry.offset ?? 0,
             path: r.path,
           })),
         });

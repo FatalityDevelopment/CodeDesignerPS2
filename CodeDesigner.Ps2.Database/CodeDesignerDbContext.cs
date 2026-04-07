@@ -17,11 +17,8 @@ public class CodeDesignerDbContext : DbContext
     /// <summary>Label sets grouping labels by game and set name.</summary>
     public DbSet<LabelSet> LabelSets { get; set; } = null!;
 
-    /// <summary>Individual label entries within a label set.</summary>
+    /// <summary>Individual label entries within a label set (recursive: children have ParentId set).</summary>
     public DbSet<Label> Labels { get; set; } = null!;
-
-    /// <summary>Struct member definitions belonging to a label.</summary>
-    public DbSet<LabelMember> LabelMembers { get; set; } = null!;
 
     /// <summary>MCP configuration key/value pairs.</summary>
     public DbSet<McpConfig> McpConfigs { get; set; } = null!;
@@ -89,28 +86,27 @@ public class CodeDesignerDbContext : DbContext
         modelBuilder.Entity<Label>(entity =>
         {
             entity.HasKey(l => l.Id);
-            entity.Property(l => l.Address).HasMaxLength(32).IsRequired();
+            entity.Property(l => l.Address).HasMaxLength(64).IsRequired();
             entity.Property(l => l.Name).HasMaxLength(512).IsRequired();
 
+            // Owning label set.
             entity.HasOne(l => l.LabelSet)
                   .WithMany(ls => ls.Labels)
                   .HasForeignKey(l => l.LabelSetId)
                   .OnDelete(DeleteBehavior.Cascade);
 
+            // Self-referencing parent / child relationship.
+            entity.HasOne(l => l.Parent)
+                  .WithMany(l => l.Children)
+                  .HasForeignKey(l => l.ParentId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
             entity.HasIndex(l => new { l.LabelSetId, l.Address });
         });
 
-        // ── LabelMember ────────────────────────────────────────────────────────
-        modelBuilder.Entity<LabelMember>(entity =>
-        {
-            entity.HasKey(m => m.Id);
-            entity.Property(m => m.Name).HasMaxLength(256).IsRequired();
-
-            entity.HasOne(m => m.Label)
-                  .WithMany(l => l.Members)
-                  .HasForeignKey(m => m.LabelId)
-                  .OnDelete(DeleteBehavior.Cascade);
-        });
+        // ── LabelMember (legacy table kept only for migration; DO NOT USE) ─────
+        // The LabelMember table was replaced by the self-referencing Label.ParentId
+        // relationship in migration AddRecursiveLabels.
 
         // ── McpConfig ──────────────────────────────────────────────────────────
         modelBuilder.Entity<McpConfig>(entity =>

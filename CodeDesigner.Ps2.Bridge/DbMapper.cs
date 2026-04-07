@@ -3,15 +3,13 @@ using System.Text.Json;
 
 using CodeDesigner.Ps2.Database.Entities;
 
-using MgrEntry  = CodeDesigner.Ps2.LabelManager.Models.LabelEntry;
-using MgrMember = CodeDesigner.Ps2.LabelManager.Models.LabelMember;
-using MgrSet    = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
-using MgrType   = CodeDesigner.Ps2.LabelManager.Models.LabelType;
+using MgrEntry = CodeDesigner.Ps2.LabelManager.Models.LabelEntry;
+using MgrSet   = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
+using MgrType  = CodeDesigner.Ps2.LabelManager.Models.LabelType;
 
-using DbLabel       = CodeDesigner.Ps2.Database.Entities.Label;
-using DbLabelMember = CodeDesigner.Ps2.Database.Entities.LabelMember;
-using DbLabelSet    = CodeDesigner.Ps2.Database.Entities.LabelSet;
-using DbLabelType   = CodeDesigner.Ps2.Database.Entities.LabelType;
+using DbLabel    = CodeDesigner.Ps2.Database.Entities.Label;
+using DbLabelSet = CodeDesigner.Ps2.Database.Entities.LabelSet;
+using DbLabelType = CodeDesigner.Ps2.Database.Entities.LabelType;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -19,9 +17,8 @@ namespace CodeDesigner.Ps2.Bridge
     /// Maps between <c>CodeDesigner.Ps2.LabelManager</c> in-memory models and
     /// <c>CodeDesigner.Ps2.Database</c> entity types.
     ///
-    /// Socket-wire DTOs (<see cref="LabelEntry"/>, <see cref="StructEntry"/>,
-    /// <see cref="SnapshotRegion"/> …) are kept completely separate and are
-    /// handled by <c>LabelManagerHandlers.cs</c> alone.
+    /// Labels are recursive: child labels have <see cref="DbLabel.ParentId"/> set and their
+    /// address is a synthetic path key, e.g. "0x80010000:+0x0010".
     /// </summary>
     internal static class DbMapper
     {
@@ -39,9 +36,10 @@ namespace CodeDesigner.Ps2.Bridge
 
         /// <summary>
         /// Converts a <see cref="MgrEntry"/> to a new <see cref="DbLabel"/>.
-        /// The <paramref name="labelSetId"/> must be the persisted ID of the owning <see cref="DbLabelSet"/>.
+        /// <paramref name="labelSetId"/> must be the persisted ID of the owning set.
+        /// <paramref name="parentId"/> is set when this entry is a child of another label.
         /// </summary>
-        internal static DbLabel ToDbLabel(MgrEntry src, int labelSetId)
+        internal static DbLabel ToDbLabel(MgrEntry src, int labelSetId, int? parentId = null)
         {
             string? argJson    = src.ArgRegs    is { Count: > 0 } ? JsonSerializer.Serialize(src.ArgRegs,    _jsonOpts) : null;
             string? returnJson = src.ReturnRegs is { Count: > 0 } ? JsonSerializer.Serialize(src.ReturnRegs, _jsonOpts) : null;
@@ -49,10 +47,14 @@ namespace CodeDesigner.Ps2.Bridge
             return new DbLabel
             {
                 LabelSetId     = labelSetId,
+                ParentId       = parentId,
+                Offset         = src.Offset,
                 Address        = src.Address,
                 Name           = src.Name,
                 Comment        = src.Comment,
+                ValueType      = src.ValueType,
                 Hidden         = src.Hidden,
+                Dynamic        = src.Dynamic,
                 Type           = ToDbLabelType(src.Type),
                 ArgRegsJson    = argJson,
                 ReturnRegsJson = returnJson,
@@ -60,19 +62,15 @@ namespace CodeDesigner.Ps2.Bridge
                 ElementCount   = src.ElementCount,
                 NodeNextOffset = src.NodeNextOffset,
                 NodeSize       = src.NodeSize,
-                Members        = [.. src.Members.Select(ToDbLabelMember)],
             };
         }
 
-        internal static DbLabelMember ToDbLabelMember(MgrMember src) => new()
-        {
-            Offset  = src.Offset,
-            Name    = src.Name,
-            Dynamic = src.Dynamic,
-        };
-
-        /// <summary>Converts a DB <see cref="DbLabel"/> (with loaded Members) to a <see cref="MgrEntry"/>.</summary>
-        internal static MgrEntry ToMgrEntry(DbLabel src)
+        /// <summary>
+        /// Converts a DB <see cref="DbLabel"/> to a <see cref="MgrEntry"/>.
+        /// The <paramref name="parentAddress"/> is the parent label's address string,
+        /// used to populate <see cref="MgrEntry.ParentAddress"/> for child entries.
+        /// </summary>
+        internal static MgrEntry ToMgrEntry(DbLabel src, string? parentAddress = null)
         {
             List<string>? argRegs    = null;
             List<string>? returnRegs = null;
@@ -92,9 +90,13 @@ namespace CodeDesigner.Ps2.Bridge
             return new MgrEntry
             {
                 Address        = src.Address,
+                ParentAddress  = parentAddress,
+                Offset         = src.Offset,
                 Name           = src.Name,
                 Comment        = src.Comment,
+                ValueType      = src.ValueType,
                 Hidden         = src.Hidden,
+                Dynamic        = src.Dynamic,
                 Type           = ToMgrLabelType(src.Type),
                 ArgRegs        = argRegs,
                 ReturnRegs     = returnRegs,
@@ -102,24 +104,11 @@ namespace CodeDesigner.Ps2.Bridge
                 ElementCount   = src.ElementCount,
                 NodeNextOffset = src.NodeNextOffset,
                 NodeSize       = src.NodeSize,
-                Members        = [.. src.Members.Select(ToMgrMember)],
             };
         }
 
-        internal static MgrMember ToMgrMember(DbLabelMember src) => new()
-        {
-            Offset  = src.Offset,
-            Name    = src.Name,
-            Dynamic = src.Dynamic,
-        };
-
         // ── LabelSet ───────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Converts a <see cref="MgrSet"/> to a new <see cref="DbLabelSet"/>.
-        /// The returned entity has no persisted <c>Id</c>; the caller is responsible
-        /// for inserting it into the database.
-        /// </summary>
         internal static DbLabelSet ToDbLabelSet(MgrSet src, string gameId) => new()
         {
             SetName   = src.SetName,
@@ -128,14 +117,32 @@ namespace CodeDesigner.Ps2.Bridge
         };
 
         /// <summary>
-        /// Converts a <see cref="DbLabelSet"/> (with loaded Labels and their Members) to a <see cref="MgrSet"/>.
+        /// Converts a <see cref="DbLabelSet"/> (with fully loaded Labels including their
+        /// Children) to a <see cref="MgrSet"/>.  The returned set contains a flat list of
+        /// all entries (roots + children at all depths), each with <see cref="MgrEntry.ParentAddress"/>
+        /// set for non-root entries.
         /// </summary>
-        internal static MgrSet ToMgrSet(DbLabelSet src) => new()
+        internal static MgrSet ToMgrSet(DbLabelSet src)
         {
-            SetName   = src.SetName,
-            GameId    = src.GameId,
-            IsBuiltIn = src.IsBuiltIn,
-            Entries   = [.. src.Labels.Select(ToMgrEntry)],
-        };
+            var entries = new List<MgrEntry>();
+            // Build address lookup so children can reference their parent's address.
+            var addressById = new Dictionary<int, string>();
+            foreach (var lbl in src.Labels)
+                addressById[lbl.Id] = lbl.Address;
+
+            foreach (var lbl in src.Labels)
+            {
+                string? parentAddress = lbl.ParentId.HasValue && addressById.TryGetValue(lbl.ParentId.Value, out var pa) ? pa : null;
+                entries.Add(ToMgrEntry(lbl, parentAddress));
+            }
+
+            return new MgrSet
+            {
+                SetName   = src.SetName,
+                GameId    = src.GameId,
+                IsBuiltIn = src.IsBuiltIn,
+                Entries   = entries,
+            };
+        }
     }
 }
