@@ -272,6 +272,9 @@ export class DisasmEditorComponent implements AfterViewInit {
   // Label Manager Overlay State
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /** When true, the label manager is displayed in standalone-tab mode (no modal overlay). */
+  readonly isLabelManagerTab = signal(false);
+
   /** Reference to label manager overlay component */
   private readonly labelManagerRef = viewChild<LabelManagerOverlayComponent>('labelManagerComp');
 
@@ -734,8 +737,7 @@ export class DisasmEditorComponent implements AfterViewInit {
   // ═══════════════════════════════════════════════════════════════════════════
 
   private openLabelManager(): void {
-    this.signals.panels.labelManager.set(true);
-    this.labelManagerRef()?.open();
+    this.vscode.postMessage({ type: 'openLabelManager' });
   }
 
   protected onLabelManagerClose(): void {
@@ -749,6 +751,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (!isNaN(addr)) {
         this.vscode.postMessage({ type: 'gotoRegion', address: addr });
       }
+      return;
+    }
+    // 'openLiveView' is forwarded to the provider to reveal the live disasm panel.
+    if (action.type === 'openLiveView') {
+      this.vscode.postMessage({ type: 'openLiveView', address: (action as { address: string }).address });
       return;
     }
     this.vscode.postMessage({ type: 'labelManagerAction', action });
@@ -1803,9 +1810,20 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   private handleLabelManagerMessage(data: Record<string, unknown>): void {
     const type = data['type'] as string | undefined;
-    if (!type?.startsWith('labelManager')) { return; }
+    const isLabelManagerMessage = type?.startsWith('labelManager') || type === 'initLabelManager' || type === 'prefillAddress';
+    if (!isLabelManagerMessage) { return; }
     this.zone.run(() => {
       const lm = this.labelManagerRef();
+      if (type === 'initLabelManager') {
+        this.isLabelManagerTab.set(true);
+        this.signals.panels.labelManager.set(true);
+        lm?.startTabMode();
+        return;
+      }
+      if (type === 'prefillAddress') {
+        lm?.openWithAddress((data['address'] as string) ?? '');
+        return;
+      }
       if (!lm) { return; }
       if (type === 'labelManagerSets') {
         lm.setSets((data['sets'] as string[]) ?? []);
@@ -2158,10 +2176,7 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     this.contextMenuRuntime.addToLabelManager = () => {
       if (!this._ctxRow) { return; }
-      this.zone.run(() => {
-        this.signals.panels.labelManager.set(true);
-        this.labelManagerRef()?.openWithAddress(this._ctxRow!.addr);
-      });
+      this.vscode.postMessage({ type: 'openLabelManager', address: this._ctxRow.addr });
     };
 
     this._debugEditRegisterCallback = (regType: string, regIdx: number, currentValue: string) => {

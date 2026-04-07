@@ -79,6 +79,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _liveReadFailureActive = false;
   private _liveReadFailureMessage = '';
 
+  /** The standalone label manager tab panel. */
+  private _labelManagerPanel: vscode.WebviewPanel | undefined;
+  /** Active label manager set — used to filter hidden labels from the disasm display. */
+  private _activeLabelManagerSet: LabelSetPayload | null = null;
+
   /**
    * When true, the editor automatically navigates to the address the AI (MCP
    * server) is currently working with.  Toggled by the "Follow AI" toolbar
@@ -309,6 +314,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (this._pointerLabels.length > 0) { merged = this._mergeLabels(merged, this._pointerLabels); }
       if (this._structLabels.length > 0) { merged = this._mergeLabels(merged, this._structLabels); }
       if (this._archiveLabels.length > 0) { merged = this._mergeLabels(merged, this._archiveLabels); }
+      // Filter out labels explicitly hidden in the active label manager set.
+      const hiddenAddrs = new Set(
+        (this._activeLabelManagerSet?.entries ?? [])
+          .filter(e => e.hidden)
+          .map(e => e.address.toLowerCase())
+      );
+      if (hiddenAddrs.size > 0) {
+        merged = merged.filter(l => !hiddenAddrs.has(l.address.toLowerCase()));
+      }
       for (const p of this._livePanels) {
         p.webview.postMessage({ type: 'labelsUpdated', labels: merged });
       }
@@ -812,6 +826,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this._handleReadPointerAt(webviewPanel.webview, message.address as string);
       } else if (message.type === 'labelManagerAction') {
         await this._handleLabelManagerAction(webviewPanel.webview, message.action as any);
+      } else if (message.type === 'openLabelManager') {
+        this.openLabelManagerTab(message.address as string | undefined);
+      } else if (message.type === 'openLiveView') {
+        const addr = parseInt(((message.address as string) ?? '0').replace(/^0x/i, ''), 16);
+        if (!isNaN(addr) && addr > 0) { this._revealPanelForAddress(addr); }
       }
     });
 
@@ -1455,6 +1474,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleReadPointerAt(panel.webview, message.address as string);
             } else if (message.type === 'labelManagerAction') {
                 await this._handleLabelManagerAction(panel.webview, message.action as any);
+            } else if (message.type === 'openLabelManager') {
+                this.openLabelManagerTab(message.address as string | undefined);
+            } else if (message.type === 'openLiveView') {
+                const addr = parseInt(((message.address as string) ?? '0').replace(/^0x/i, ''), 16);
+                if (!isNaN(addr) && addr > 0) { this._revealPanelForAddress(addr); }
             } else if (message.type === 'toggleFollowAi') {
                 this.setFollowAiEnabled(!this._followAiEnabled);
             }
@@ -1472,6 +1496,61 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         for (const p of this._livePanels) {
             p.webview.postMessage({ type: 'reset' });
         }
+    }
+
+    /**
+     * Open or reveal the standalone Label Manager WebviewPanel tab.
+     * Only one label manager tab exists at a time.  If already open, it is
+     * revealed and (optionally) pre-filled with an address.
+     */
+    public openLabelManagerTab(prefillAddress?: string): void {
+        if (this._labelManagerPanel) {
+            this._labelManagerPanel.reveal(vscode.ViewColumn.One, false);
+            if (prefillAddress) {
+                this._labelManagerPanel.webview.postMessage({ type: 'prefillAddress', address: prefillAddress });
+            }
+            return;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+            'disasm.labelManager',
+            '🏷 Label Manager',
+            vscode.ViewColumn.One,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [this._extensionUri],
+            }
+        );
+        this._labelManagerPanel = panel;
+        panel.onDidDispose(() => { this._labelManagerPanel = undefined; });
+
+        // Register message handler BEFORE setting html so 'ready' is never missed.
+        panel.webview.onDidReceiveMessage(async (message) => {
+            if (message.type === 'ready') {
+                panel.webview.postMessage({ type: 'initLabelManager' });
+                if (prefillAddress) {
+                    panel.webview.postMessage({ type: 'prefillAddress', address: prefillAddress });
+                }
+                return;
+            }
+            if (message.type === 'bootstrapError') {
+                getOutputChannel().appendLine(
+                    `[ERROR] Label Manager tab Angular bootstrap failed: ${message.error ?? '(no details)'}`
+                );
+                return;
+            }
+            if (message.type === 'labelManagerAction') {
+                await this._handleLabelManagerAction(panel.webview, message.action as any);
+                return;
+            }
+            if (message.type === 'openLiveView') {
+                const addr = parseInt(((message.address as string) ?? '0').replace(/^0x/i, ''), 16);
+                if (!isNaN(addr) && addr > 0) { this._revealPanelForAddress(addr); }
+                return;
+            }
+        });
+        panel.webview.html = this.getHtml(panel.webview);
     }
 
     /**
@@ -2665,8 +2744,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
   /** Broadcast the label set to all open panels and optionally notify struct listeners. */
   private _broadcastLabelSet(set: LabelSetPayload): void {
+    this._activeLabelManagerSet = set;
     for (const p of this._livePanels) {
       p.webview.postMessage({ type: 'labelManagerSet', set });
+    }
+    if (this._labelManagerPanel) {
+      this._labelManagerPanel.webview.postMessage({ type: 'labelManagerSet', set });
     }
     // Convert to StructEntry[] for backward-compat listeners (STRUCTS panel).
     const structs: StructEntry[] = set.entries
@@ -2681,6 +2764,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     // display reflects the new label set.  Intentionally fire-and-forget here
     // (errors are non-fatal) so _broadcastLabelSet stays synchronous.
     this.refreshStructLabels().catch(() => { /* non-fatal */ });
+    // Re-broadcast merged labels so hidden-entry filtering is applied immediately.
+    this._broadcastMergedLabels();
   }
 
   /** Dispatch a LabelManagerAction received from the webview. */
