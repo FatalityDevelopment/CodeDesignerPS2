@@ -215,10 +215,10 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
             <th class="lm-col-expand"></th>
             <th class="lm-col-type">Type</th>
             <th class="lm-col-addr">Address</th>
+            <th class="lm-col-live">Live Value</th>
             <th class="lm-col-name">Name</th>
             <th class="lm-col-comment">Comment</th>
             <th class="lm-col-members">Details</th>
-            <th class="lm-col-live">Live Value</th>
             @if (!activeSetIsBuiltIn()) {
               <th class="lm-col-actions"></th>
             }
@@ -260,24 +260,30 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   <button class="lm-row-btn lm-goto-btn" title="Go to address" (click)="onGotoLabel(row.entry!)">&#x2192;</button>
                   {{ row.entry!.address }}
                 </td>
-                <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
-                <td class="lm-col-comment lm-muted">{{ entryComment(row.entry!) }}</td>
-                <td class="lm-col-members">{{ entryDetails(row.entry!) }}</td>
                 <td class="lm-col-live">
                   @if (row.entry!.dynamic) {
                     <span class="lm-live-value">{{ liveValue(row.entry!) }}</span>
                   }
                 </td>
+                <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
+                <td class="lm-col-comment lm-muted">{{ entryComment(row.entry!) }}</td>
+                <td class="lm-col-members">{{ entryDetails(row.entry!) }}</td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions">
-                    <button class="lm-row-btn lm-dyn-toggle-btn"
+                    <button class="lm-row-btn lm-live-toggle-btn"
                             [class.lm-is-dynamic]="row.entry!.dynamic"
-                            [title]="row.entry!.dynamic ? 'Dynamic — click to set static' : 'Static — click to enable live value'"
+                            [title]="row.entry!.dynamic ? 'Pause live polling' : 'Start live polling'"
                             (click)="onToggleDynamic(row.entry!)">
-                      {{ row.entry!.dynamic ? 'Dyn' : 'Sta' }}
+                      @if (row.entry!.dynamic) {
+                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
+                      } @else {
+                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
+                      }
                     </button>
                     <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">&#x270E;</button>
-                    <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">&#x1F5D1;</button>
+                    <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">
+                      <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
+                    </button>
                     @if (effectiveType(row.entry!) === 'LinkedList' && row.entry!.nodeNextOffset != null) {
                       <button class="lm-row-btn" title="Walk linked list (PINE)" (click)="onWalkList(row.entry!)">&#x21C0;</button>
                     }
@@ -317,6 +323,11 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                 </td>
                 <td class="lm-col-addr">
                 </td>
+                <td class="lm-col-live">
+                  @if (row.entry.dynamic) {
+                    <span class="lm-live-value">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
+                  }
+                </td>
                 <td class="lm-col-name lm-member-sub-name">
                   {{ row.entry.name }}
                   @if ((row.entry.type ?? 'Address') !== 'Address') {
@@ -325,23 +336,24 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                 </td>
                 <td class="lm-col-comment lm-muted">{{ row.entry.comment ?? '' }}</td>
                 <td class="lm-col-members">{{ entryDetails(row.entry) }}</td>
-                <td class="lm-col-live">
-                  @if (row.entry.dynamic) {
-                    <span class="lm-live-value">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
-                  }
-                </td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions">
-                    <button class="lm-row-btn lm-dyn-toggle-btn"
+                    <button class="lm-row-btn lm-live-toggle-btn"
                             [class.lm-is-dynamic]="row.entry.dynamic"
-                            [title]="row.entry.dynamic ? 'Dynamic — click to set static' : 'Static — click to enable live value'"
+                            [title]="row.entry.dynamic ? 'Pause live polling' : 'Start live polling'"
                             (click)="onToggleChildDynamic(row.entry)">
-                      {{ row.entry.dynamic ? 'Dyn' : 'Sta' }}
+                      @if (row.entry.dynamic) {
+                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
+                      } @else {
+                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
+                      }
                     </button>
                     @if (row.entry.parentAddress != null) {
                       <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
-                    <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">&#x1F5D1;</button>
+                    <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">
+                      <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
+                    </button>
                   </td>
                 } @else {
                   <td class="lm-col-actions">
@@ -829,7 +841,7 @@ export class LabelManagerOverlayComponent {
   }
 
   onToggleVisibility(entry: LabelManagerEntry): void {
-    const updated: LabelManagerEntry = { ...entry, hidden: !entry.hidden };
+    const updated: LabelManagerEntry = { ...entry, hidden: entry.hidden ? undefined : true };
     // Optimistic update so the icon flips immediately without waiting for the server round-trip.
     const set = this.currentSet();
     if (set) {
@@ -888,8 +900,19 @@ export class LabelManagerOverlayComponent {
   onToggleAllVisibility(): void {
     const makeHidden = this.allVisible();
     const setName = this.activeSetName();
-    for (const entry of this.filteredEntries()) {
-      const updated: LabelManagerEntry = { ...entry, hidden: makeHidden };
+    const entries = this.filteredEntries();
+    // Optimistic local update — flip all entries at once so the UI responds immediately
+    // without waiting for each individual server round-trip.
+    const set = this.currentSet();
+    if (set) {
+      const updates = new Map(entries.map(e => [e.address, { ...e, hidden: makeHidden ? true : undefined }]));
+      this.currentSet.set({
+        ...set,
+        entries: set.entries.map(e => updates.get(e.address) ?? e),
+      });
+    }
+    for (const entry of entries) {
+      const updated: LabelManagerEntry = { ...entry, hidden: makeHidden ? true : undefined };
       this.action$.emit({ type: 'addEntry', setName, entry: updated });
     }
   }
