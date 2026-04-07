@@ -17,18 +17,35 @@ public static class DatabaseInitialiser
     /// </summary>
     public static async Task<DbContextOptions<CodeDesignerDbContext>> InitialiseDatabaseAsync(string path)
     {
+        // WAL mode allows multiple readers and one writer concurrently, preventing
+        // "database is locked" errors when the MCP server and the main app share the file.
+        var connectionString = $"Data Source={path};Journal Mode=WAL;";
+
         var options = new DbContextOptionsBuilder<CodeDesignerDbContext>()
-            .UseSqlite($"Data Source={path}")
+            .UseSqlite(connectionString)
             .Options;
 
-        await using var db = new CodeDesignerDbContext(options);
+        // Retry MigrateAsync to handle the brief window where the main app holds a
+        // write lock while changing the journal mode on first open.
+        const int maxAttempts = 5;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await using var db = new CodeDesignerDbContext(options);
+                await db.Database.MigrateAsync();
 
-        // Apply any pending migrations (creates the schema on first run).
-        await db.Database.MigrateAsync();
-
-        // Seed initial data (idempotent — only inserts missing rows).
-        var seeder = new DatabaseSeeder(db);
-        await seeder.SeedAsync();
+                // Seed initial data (idempotent — only inserts missing rows).
+                var seeder = new DatabaseSeeder(db);
+                await seeder.SeedAsync();
+                break;
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException ex)
+                when (ex.SqliteErrorCode == 5 && attempt < maxAttempts) // SQLITE_LOCKED
+            {
+                await Task.Delay(200 * attempt);
+            }
+        }
 
         return options;
     }

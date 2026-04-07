@@ -236,7 +236,7 @@ namespace CodeDesigner.Ps2.Bridge
         {
             string dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "codedesigner.db");
             var opts = new DbContextOptionsBuilder<CodeDesignerDbContext>()
-                .UseSqlite($"Data Source={dbPath}")
+                .UseSqlite($"Data Source={dbPath};Journal Mode=WAL;")
                 .Options;
             var ctx = new CodeDesignerDbContext(opts);
             ctx.Database.Migrate();

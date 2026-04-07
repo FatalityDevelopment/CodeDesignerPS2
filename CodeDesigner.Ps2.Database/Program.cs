@@ -32,9 +32,9 @@ Console.WriteLine($"Memories path : {memoriesPath}");
 Console.WriteLine();
 
 Console.WriteLine("Applying migrations and seeding database…");
-var dbOptions = await DatabaseInitialiser.InitialiseDatabaseAsync(dbPath);
+//var dbOptions = await DatabaseInitialiser.InitialiseDatabaseAsync(dbPath);
 Console.WriteLine("Done.");
 
 Console.WriteLine("Migrating flat memory files into database…");
-await DatabaseInitialiser.MigrateMemoryFilesToDatabaseAsync(memoriesPath, dbOptions);
+//await DatabaseInitialiser.MigrateMemoryFilesToDatabaseAsync(memoriesPath, dbOptions);
 Console.WriteLine("Done.");
