@@ -36,6 +36,25 @@ export interface LabelSetPayload {
   entries:   LabelManagerEntry[];
 }
 
+/** One row in the recursive label-manager tree view. */
+export interface TreeRow {
+  /** 'entry' = top-level label row; 'member' = struct member sub-row. */
+  kind: 'entry' | 'member';
+  /** Nesting depth (0 = top-level, 1 = first member level, etc.). */
+  depth: number;
+  /** Unique path string used as the expansion state key. */
+  path: string;
+  /** Populated for 'entry' rows. */
+  entry?: LabelManagerEntry;
+  /** Populated for 'member' rows. */
+  memberName?: string;
+  memberOffset?: number;
+  /** The label in the current set that this member's name resolves to (if any). */
+  resolvedEntry?: LabelManagerEntry;
+  /** True when this row can be expanded to reveal sub-members. */
+  expandable: boolean;
+}
+
 export type LabelManagerAction =
   | { type: 'setActive';     setName: string }
   | { type: 'createSet';     setName: string }
@@ -181,60 +200,75 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
           </tr>
         </thead>
         <tbody>
-          @for (entry of filteredEntries(); track entry.address) {
-            <tr [class.lm-struct-row]="effectiveType(entry) === 'Struct'"
-                [class.lm-fnc-row]="effectiveType(entry) === 'Function'"
-                [class.lm-hidden-row]="entry.hidden">
-              <td class="lm-col-vis">
-                <button class="lm-vis-btn"
-                        [title]="entry.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
-                        [disabled]="activeSetIsBuiltIn()"
-                        (click)="onToggleVisibility(entry)">
-                  {{ entry.hidden ? '🙈' : '👁' }}
-                </button>
-              </td>
-              <td class="lm-col-expand">
-                @if (effectiveType(entry) === 'Struct' && entry.members.length > 0) {
-                  <button class="lm-expand-btn" [title]="isExpanded(entry) ? 'Collapse' : 'Expand members'" (click)="toggleExpand(entry)">
-                    {{ isExpanded(entry) ? '▼' : '▶' }}
+          @for (row of treeRows(); track row.path) {
+            @if (row.kind === 'entry') {
+              <!-- Top-level label entry row -->
+              <tr [class.lm-struct-row]="effectiveType(row.entry!) === 'Struct'"
+                  [class.lm-fnc-row]="effectiveType(row.entry!) === 'Function'"
+                  [class.lm-hidden-row]="row.entry!.hidden">
+                <td class="lm-col-vis">
+                  <button class="lm-vis-btn"
+                          [title]="row.entry!.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
+                          [disabled]="activeSetIsBuiltIn()"
+                          (click)="onToggleVisibility(row.entry!)">
+                    {{ row.entry!.hidden ? '🙈' : '👁' }}
                   </button>
-                }
-              </td>
-              <td class="lm-col-type">
-                <span class="lm-type-badge" [class]="typeBadgeClass(entry)">{{ typeBadge(entry) }}</span>
-              </td>
-              <td class="lm-col-addr lm-mono">{{ entry.address }}</td>
-              <td class="lm-col-name">{{ displayName(entry) }}</td>
-              <td class="lm-col-comment lm-muted">{{ entry.comment ?? '' }}</td>
-              <td class="lm-col-members">{{ entryDetails(entry) }}</td>
-              @if (!activeSetIsBuiltIn()) {
-                <td class="lm-col-actions">
-                  <button class="lm-row-btn" title="Edit" (click)="onEdit(entry)">&#x270E;</button>
-                  <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(entry)">&#x1F5D1;</button>
-                  @if (effectiveType(entry) === 'LinkedList' && entry.nodeNextOffset != null) {
-                    <button class="lm-row-btn" title="Walk linked list (PINE)" (click)="onWalkList(entry)">&#x21C0;</button>
+                </td>
+                <td class="lm-col-expand">
+                  @if (row.expandable) {
+                    <button class="lm-expand-btn" [title]="isExpanded(row.path) ? 'Collapse' : 'Expand members'" (click)="toggleExpand(row.path)">
+                      {{ isExpanded(row.path) ? '▼' : '▶' }}
+                    </button>
                   }
                 </td>
-              }
-            </tr>
-            <!-- Struct members tree rows -->
-            @if (isExpanded(entry) && effectiveType(entry) === 'Struct') {
-              @for (member of entry.members; track member.offset) {
-                <tr class="lm-member-sub-row" [class.lm-hidden-row]="entry.hidden">
-                  <td class="lm-col-vis"></td>
-                  <td class="lm-col-expand lm-member-tree-indent">└</td>
-                  <td class="lm-col-type lm-mono lm-member-offset-cell">
-                    +0x{{ member.offset.toString(16).toUpperCase().padStart(4, '0') }}
+                <td class="lm-col-type">
+                  <span class="lm-type-badge" [class]="typeBadgeClass(row.entry!)">{{ typeBadge(row.entry!) }}</span>
+                </td>
+                <td class="lm-col-addr lm-mono">{{ row.entry!.address }}</td>
+                <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
+                <td class="lm-col-comment lm-muted">{{ row.entry!.comment ?? '' }}</td>
+                <td class="lm-col-members">{{ entryDetails(row.entry!) }}</td>
+                @if (!activeSetIsBuiltIn()) {
+                  <td class="lm-col-actions">
+                    <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">&#x270E;</button>
+                    <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">&#x1F5D1;</button>
+                    @if (effectiveType(row.entry!) === 'LinkedList' && row.entry!.nodeNextOffset != null) {
+                      <button class="lm-row-btn" title="Walk linked list (PINE)" (click)="onWalkList(row.entry!)">&#x21C0;</button>
+                    }
                   </td>
-                  <td class="lm-col-addr"></td>
-                  <td class="lm-col-name lm-member-sub-name">{{ member.name }}</td>
-                  <td class="lm-col-comment"></td>
-                  <td class="lm-col-members"></td>
-                  @if (!activeSetIsBuiltIn()) {
-                    <td class="lm-col-actions"></td>
+                }
+              </tr>
+            } @else {
+              <!-- Struct member sub-row (supports recursive depth via padding) -->
+              <tr class="lm-member-sub-row">
+                <td class="lm-col-vis"></td>
+                <td class="lm-col-expand lm-member-tree-indent" [style.padding-left.px]="row.depth * 16">
+                  @if (row.expandable) {
+                    <button class="lm-expand-btn" [title]="isExpanded(row.path) ? 'Collapse' : 'Expand'" (click)="toggleExpand(row.path)">
+                      {{ isExpanded(row.path) ? '▼' : '▶' }}
+                    </button>
+                  } @else {
+                    <span class="lm-tree-leaf">└</span>
                   }
-                </tr>
-              }
+                </td>
+                <td class="lm-col-type lm-mono lm-member-offset-cell">
+                  +0x{{ row.memberOffset!.toString(16).toUpperCase().padStart(4, '0') }}
+                </td>
+                <td class="lm-col-addr"></td>
+                <td class="lm-col-name lm-member-sub-name">
+                  {{ row.memberName }}
+                  @if (row.resolvedEntry) {
+                    <span class="lm-member-type-hint lm-muted">&nbsp;{{ typeBadge(row.resolvedEntry) }}</span>
+                  }
+                </td>
+                <td class="lm-col-comment lm-muted">{{ row.resolvedEntry?.comment ?? '' }}</td>
+                <td class="lm-col-members">
+                  @if (row.resolvedEntry) { {{ entryDetails(row.resolvedEntry) }} }
+                </td>
+                @if (!activeSetIsBuiltIn()) {
+                  <td class="lm-col-actions"></td>
+                }
+              </tr>
             }
           }
           @if (filteredEntries().length === 0) {
@@ -415,8 +449,8 @@ export class LabelManagerOverlayComponent {
   readonly statusMsg     = signal('');
   readonly statusIsError = signal(false);
 
-  // Tree view — track which struct entries are expanded
-  readonly expandedStructs = signal<Set<string>>(new Set());
+  // Tree view — track expanded paths by their unique path string
+  readonly expandedPaths = signal<Set<string>>(new Set());
 
   // Inline new-set creation (replaces window.prompt)
   readonly showNewSetInput = signal(false);
@@ -471,6 +505,41 @@ export class LabelManagerOverlayComponent {
   readonly allVisible = computed(() => {
     const entries = this.filteredEntries();
     return entries.length > 0 && entries.every(e => !e.hidden);
+  });
+
+  /**
+   * A flat list of tree rows derived from `filteredEntries()`.
+   * Top-level entries are at depth 0.  When a Struct row is expanded its
+   * members appear immediately below it as depth-1 rows.  If a member's
+   * name resolves to another Struct label in the current set that Struct can
+   * itself be expanded, producing depth-2 rows – and so on recursively (with
+   * cycle detection so circular references don't loop forever).
+   */
+  readonly treeRows = computed<TreeRow[]>(() => {
+    const allEntries = this.currentSet()?.entries ?? [];
+    // Build a quick name → entry map for struct-type labels only.
+    const structByName = new Map<string, LabelManagerEntry>();
+    for (const e of allEntries) {
+      if ((e.type ?? 'Address') === 'Struct') {
+        structByName.set(e.name, e);
+      }
+    }
+    const rows: TreeRow[] = [];
+    for (const entry of this.filteredEntries()) {
+      const path = entry.address;
+      const isStruct = (entry.type ?? 'Address') === 'Struct';
+      rows.push({
+        kind: 'entry',
+        depth: 0,
+        path,
+        entry,
+        expandable: isStruct && entry.members.length > 0,
+      });
+      if (this.expandedPaths().has(path) && isStruct) {
+        this._addMemberRows(rows, entry.members, structByName, path, 1, new Set([path]));
+      }
+    }
+    return rows;
   });
 
   // ── Public API ────────────────────────────────────────────────────────────────
@@ -599,16 +668,48 @@ export class LabelManagerOverlayComponent {
 
   // ── Tree view ─────────────────────────────────────────────────────────────────
 
-  toggleExpand(entry: LabelManagerEntry): void {
-    this.expandedStructs.update(set => {
+  toggleExpand(path: string): void {
+    this.expandedPaths.update(set => {
       const next = new Set(set);
-      if (next.has(entry.address)) { next.delete(entry.address); } else { next.add(entry.address); }
+      if (next.has(path)) { next.delete(path); } else { next.add(path); }
       return next;
     });
   }
 
-  isExpanded(entry: LabelManagerEntry): boolean {
-    return this.expandedStructs().has(entry.address);
+  isExpanded(path: string): boolean {
+    return this.expandedPaths().has(path);
+  }
+
+  /** Recursively appends member rows to `rows`, with cycle detection via `visited`. */
+  private _addMemberRows(
+    rows: TreeRow[],
+    members: LabelMemberEntry[],
+    structByName: Map<string, LabelManagerEntry>,
+    parentPath: string,
+    depth: number,
+    visited: Set<string>,
+  ): void {
+    for (const m of members) {
+      const path = `${parentPath}:${m.offset}`;
+      const resolved = structByName.get(m.name);
+      const canExpand = resolved != null
+        && resolved.members.length > 0
+        && !visited.has(resolved.address);
+      rows.push({
+        kind: 'member',
+        depth,
+        path,
+        memberName: m.name,
+        memberOffset: m.offset,
+        resolvedEntry: resolved,
+        expandable: canExpand,
+      });
+      if (canExpand && this.expandedPaths().has(path)) {
+        const nextVisited = new Set(visited);
+        nextVisited.add(resolved!.address);
+        this._addMemberRows(rows, resolved!.members, structByName, path, depth + 1, nextVisited);
+      }
+    }
   }
 
   onToggleAllVisibility(): void {

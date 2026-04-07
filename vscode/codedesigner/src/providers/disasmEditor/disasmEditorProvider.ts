@@ -2670,7 +2670,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
     // Convert to StructEntry[] for backward-compat listeners (STRUCTS panel).
     const structs: StructEntry[] = set.entries
-      .filter(e => e.members.length > 0)
+      .filter(e => (e.type ?? 'Address') === 'Struct' && e.members.length > 0)
       .map(e => ({
         name:        e.name,
         baseAddress: e.address,
@@ -2721,6 +2721,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         }
         case 'createSet': {
           const set = await this.socketClient.createLabelSet(workspaceDir, gameId, action.setName!);
+          // Activate the new set on the server side so the server's LabelMgr state
+          // reflects the new set from the moment it is created.  Without this the
+          // server would only activate the set the first time ADDLABELENTRY is called.
+          await this.socketClient.setActiveLabelSet(workspaceDir, gameId, action.setName!);
           const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           webview.postMessage({ type: 'labelManagerSet', set });
