@@ -10,7 +10,7 @@ import {
 
 /**
  * PanelStatusBarComponent - Displays emulator connection/pause status and
- * provides Pause/Resume and Step buttons. Also provides a mode selector
+ * provides Pause/Resume and Step buttons. Also provides a mode toggle
  * to switch between "Live" and "AI Control" modes.
  *
  * Accepts `isConnected` and `isPaused` signal inputs and emits `togglePause`
@@ -27,30 +27,52 @@ import {
          [class.status-disconnected]="!isConnected() && !isPaused()"
          [class.status-paused]="isPaused()"
          [class.status-ai-control]="isConnected() && !isPaused() && controlMode() === 'ai-control'">
-      <span id="emu-status-dot">{{controlMode() === 'ai-control' && isConnected() && !isPaused() ? '🤖' : '●'}}</span>
-      <span id="emu-status-text">{{statusText()}}</span>
-      <select id="emu-mode-select"
-              [style.display]="isConnected() ? 'inline-block' : 'none'"
-              (change)="onModeChange($event)"
-              title="Control mode">
-        <option value="live" [selected]="controlMode() === 'live'">Live</option>
-        <option value="ai-control" [selected]="controlMode() === 'ai-control'">AI Control</option>
-      </select>
-       <button id="emu-play-pause-btn" (click)="togglePause.emit()" title="Pause/Resume emulator">
-         {{isPaused() ? '▶ Resume' : '⏸ Pause'}}
-       </button>
-       <button id="emu-step-btn" (click)="step.emit()" [disabled]="!isConnected() || !isPaused()"
-               title="Single step one EE instruction (only while paused)">
-         ▷| Step
-       </button>
-       <button id="emu-step-into-btn" (click)="stepInto.emit()" [disabled]="!isConnected() || !isPaused()"
-               title="Step into (PCSX2 PINE)">
-         ▷▷ Step In
-       </button>
-       <button id="emu-step-over-btn" (click)="stepOver.emit()" [disabled]="!isConnected() || !isPaused()"
-               title="Step over (PCSX2 PINE)">
-         ▷▷| Step Over
-       </button>
+
+      <!-- Row 1: status indicator + mode toggle -->
+      <div id="emu-status-row">
+        <span id="emu-status-dot">{{controlMode() === 'ai-control' && isConnected() && !isPaused() ? '🤖' : '●'}}</span>
+        <span id="emu-status-text">{{statusText()}}</span>
+        @if (isConnected()) {
+          <span id="emu-mode-toggle">
+            <button class="mode-pill"
+                    [class.mode-pill-active]="controlMode() === 'live'"
+                    (click)="controlMode.set('live')"
+                    title="Live mode: monitor emulator in real time">Live</button>
+            <button class="mode-pill"
+                    [class.mode-pill-active]="controlMode() === 'ai-control'"
+                    (click)="controlMode.set('ai-control')"
+                    title="AI Control mode: MCP agent drives the emulator">AI</button>
+          </span>
+        }
+      </div>
+
+      <!-- Row 2: debug controls (only when connected) -->
+      @if (isConnected()) {
+        <div id="emu-debug-row">
+          <button class="dbg-btn" id="emu-play-pause-btn"
+                  (click)="togglePause.emit()"
+                  title="{{isPaused() ? 'Resume emulator' : 'Pause emulator'}}">
+            {{isPaused() ? '▶' : '⏸'}}
+            <span class="dbg-btn-label">{{isPaused() ? 'Resume' : 'Pause'}}</span>
+          </button>
+          <div class="dbg-separator"></div>
+          <button class="dbg-btn" id="emu-step-btn"
+                  (click)="step.emit()" [disabled]="!isPaused()"
+                  title="Step — execute one EE instruction">
+            ▷<span class="dbg-btn-label">Step</span>
+          </button>
+          <button class="dbg-btn" id="emu-step-into-btn"
+                  (click)="stepInto.emit()" [disabled]="!isPaused()"
+                  title="Step Into — follow calls (PCSX2 PINE)">
+            ↓<span class="dbg-btn-label">Into</span>
+          </button>
+          <button class="dbg-btn" id="emu-step-over-btn"
+                  (click)="stepOver.emit()" [disabled]="!isPaused()"
+                  title="Step Over — skip calls (PCSX2 PINE)">
+            ↷<span class="dbg-btn-label">Over</span>
+          </button>
+        </div>
+      }
     </div>
   `,
 })
@@ -73,8 +95,4 @@ export class PanelStatusBarComponent {
     return 'STOPPED';
   });
 
-  onModeChange(event: Event): void {
-    const select = event.target as HTMLSelectElement;
-    this.controlMode.set(select.value as 'live' | 'ai-control');
-  }
 }
