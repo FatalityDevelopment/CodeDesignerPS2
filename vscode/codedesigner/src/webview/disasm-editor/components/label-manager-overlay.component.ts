@@ -79,8 +79,8 @@ export type LabelManagerAction =
   | { type: 'navigateToLabel';   address: string }
   /** Read the pointer at parentAddress, add offset, then navigate (handled by provider). */
   | { type: 'navigateToMember';  parentAddress: string; offset: number }
-  /** Poll live 4-byte values at each address (handled by provider). */
-  | { type: 'readLiveValues';    addresses: string[] }
+  /** Poll live values at each address (handled by provider). String entries read as null-terminated strings. */
+  | { type: 'readLiveValues';    entries: { address: string; entryType?: LabelType }[] }
   /** Poll live values at resolved member addresses (handled by provider). */
   | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string }[] };
 
@@ -266,7 +266,7 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   }
                 </td>
                 <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
-                <td class="lm-col-comment lm-muted">{{ row.entry!.comment ?? '' }}</td>
+                <td class="lm-col-comment lm-muted">{{ entryComment(row.entry!) }}</td>
                 <td class="lm-col-members">{{ entryDetails(row.entry!) }}</td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions">
@@ -646,9 +646,11 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().some(e => e.dynamic),
   );
 
-  /** Addresses of dynamic root entries to poll. */
+  /** Root entries to poll: dynamic entries (all types) plus String-type entries (always auto-polled). */
   private readonly _dynamicAddresses = computed(() =>
-    this.filteredEntries().filter(e => !e.parentAddress && e.dynamic).map(e => e.address),
+    this.filteredEntries()
+      .filter(e => !e.parentAddress && (e.dynamic || (e.type ?? 'Address') === 'String'))
+      .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType })),
   );
 
   /**
@@ -1154,6 +1156,18 @@ export class LabelManagerOverlayComponent {
     return this.effectiveType(entry) === 'Function' ? 'FNC_' + entry.name : entry.name;
   }
 
+  /** Returns the comment text for an entry, prefixing the live memory string for String-type entries. */
+  entryComment(entry: LabelManagerEntry): string {
+    const base = entry.comment ?? '';
+    if (this.effectiveType(entry) === 'String') {
+      const live = this.liveValues().get(entry.address);
+      if (live != null && live !== '') {
+        return base ? `"${live}" ${base}` : `"${live}"`;
+      }
+    }
+    return base;
+  }
+
   entryDetails(entry: LabelManagerEntry): string {
     switch (this.effectiveType(entry)) {
       case 'Struct': {
@@ -1230,9 +1244,9 @@ export class LabelManagerOverlayComponent {
   private _startPolling(): void {
     this._stopPolling();
     this._pollTimer = setInterval(() => {
-      const addresses = this._dynamicAddresses();
-      if (addresses.length > 0) {
-        this.action$.emit({ type: 'readLiveValues', addresses });
+      const entries = this._dynamicAddresses();
+      if (entries.length > 0) {
+        this.action$.emit({ type: 'readLiveValues', entries });
       }
       const dynMembers = this._dynamicMemberRows();
       if (dynMembers.length > 0) {
