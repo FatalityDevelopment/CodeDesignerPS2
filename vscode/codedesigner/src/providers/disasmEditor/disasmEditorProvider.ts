@@ -2776,7 +2776,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; members?: Array<{ parentAddress: string; offset: number; path: string }> },
+    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string }> },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -2810,17 +2810,25 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         webview.postMessage({ type: 'labelManagerLiveValues', values: {} });
         return;
       }
-      const addresses = action.addresses ?? [];
+      const entries = action.entries ?? [];
       const values: Record<string, string> = {};
-      for (const addrHex of addresses) {
+      for (const entry of entries) {
+        const addrHex = entry.address;
         const addr = parseInt(addrHex.replace(/^0x/i, ''), 16);
         if (isNaN(addr)) { continue; }
         try {
-          const buf = await this.socketClient.readMemory(addr, 4, 'ee');
-          if (buf.length >= 4) {
-            const addrStr = addr.toString(16).toUpperCase().padStart(8, '0');
-            const dataStr = buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
-            values[addrHex] = `0x${addrStr} 0x${dataStr}`;
+          if (entry.entryType === 'String') {
+            // Read up to 256 bytes and decode as a null-terminated Latin-1 string.
+            const buf = await this.socketClient.readMemory(addr, 256, 'ee');
+            const nullIdx = buf.indexOf(0);
+            values[addrHex] = buf.slice(0, nullIdx !== -1 ? nullIdx : buf.length).toString('latin1');
+          } else {
+            const buf = await this.socketClient.readMemory(addr, 4, 'ee');
+            if (buf.length >= 4) {
+              const addrStr = addr.toString(16).toUpperCase().padStart(8, '0');
+              const dataStr = buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
+              values[addrHex] = `0x${addrStr} 0x${dataStr}`;
+            }
           }
         } catch { /* ignore unreadable addresses */ }
       }
