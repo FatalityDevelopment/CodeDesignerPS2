@@ -133,6 +133,14 @@ const UNIFIED_TYPES: { value: string; label: string }[] = [
   { value: 'String',         label: 'String'         },
 ];
 
+/**
+ * The subset of UNIFIED_TYPES that correspond to the semantic LabelType enum.
+ * Derived from UNIFIED_TYPES so the two stay in sync automatically.
+ */
+const SEMANTIC_LABEL_TYPES = new Set(
+  UNIFIED_TYPES.filter(t => /^[A-Z]/.test(t.value)).map(t => t.value),
+);
+
 @Component({
   selector: 'app-label-manager-overlay',
   standalone: true,
@@ -652,8 +660,7 @@ export class LabelManagerOverlayComponent {
       if (tf) {
         // LabelType values match on the semantic type field; data-type values match
         // on the valueType annotation so users can filter by e.g. "float".
-        const isLabelType = ['Address', 'Struct', 'Function', 'Array', 'ArrayOfPointers', 'LinkedList', 'String'].includes(tf);
-        if (isLabelType) {
+        if (SEMANTIC_LABEL_TYPES.has(tf)) {
           if (this.effectiveType(e) !== tf) return false;
         } else {
           if (e.valueType !== tf) return false;

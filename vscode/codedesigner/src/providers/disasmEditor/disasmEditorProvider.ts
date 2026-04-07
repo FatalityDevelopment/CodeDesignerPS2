@@ -2990,7 +2990,7 @@ function formatLiveValue(buf: Buffer, valueType?: string): string {
     case 'u64':
       return buf.readBigUInt64LE(0).toString();
     case 's8':
-      return ((buf[0] << 24) >> 24).toString();
+      return buf.readInt8(0).toString();
     case 's16':
       return buf.readInt16LE(0).toString();
     case 's32':
