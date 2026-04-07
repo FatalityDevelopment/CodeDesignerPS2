@@ -2762,7 +2762,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[] },
+    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; members?: Array<{ parentAddress: string; offset: number; path: string }> },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -2795,11 +2795,43 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         try {
           const buf = await this.socketClient.readMemory(addr, 4, 'ee');
           if (buf.length >= 4) {
-            values[addrHex] = '0x' + buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
+            const addrStr = addr.toString(16).toUpperCase().padStart(8, '0');
+            const dataStr = buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
+            values[addrHex] = `0x${addrStr} 0x${dataStr}`;
           }
         } catch { /* ignore unreadable addresses */ }
       }
       webview.postMessage({ type: 'labelManagerLiveValues', values });
+      return;
+    }
+
+    if (action.type === 'readMemberLiveValues') {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'labelManagerMemberLiveValues', values: {} });
+        return;
+      }
+      const members = action.members ?? [];
+      const values: Record<string, string> = {};
+      for (const m of members) {
+        const parentAddr = parseInt(m.parentAddress.replace(/^0x/i, ''), 16);
+        if (isNaN(parentAddr)) { continue; }
+        try {
+          // Dereference the parent pointer.
+          const ptrBuf = await this.socketClient.readMemory(parentAddr, 4, 'ee');
+          if (ptrBuf.length < 4) { continue; }
+          const baseAddr = ptrBuf.readUInt32LE(0);
+          if (baseAddr === 0) { continue; }
+          const resolved = (baseAddr + m.offset) >>> 0;
+          // Read 4 bytes at the resolved address.
+          const dataBuf = await this.socketClient.readMemory(resolved, 4, 'ee');
+          if (dataBuf.length >= 4) {
+            const addrStr = resolved.toString(16).toUpperCase().padStart(8, '0');
+            const dataStr = dataBuf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
+            values[m.path] = `0x${addrStr} 0x${dataStr}`;
+          }
+        } catch { /* ignore unreadable members */ }
+      }
+      webview.postMessage({ type: 'labelManagerMemberLiveValues', values });
       return;
     }
 

@@ -66,8 +66,9 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal static DbLabelMember ToDbLabelMember(MgrMember src) => new()
         {
-            Offset = src.Offset,
-            Name   = src.Name,
+            Offset  = src.Offset,
+            Name    = src.Name,
+            Dynamic = src.Dynamic,
         };
 
         /// <summary>Converts a DB <see cref="DbLabel"/> (with loaded Members) to a <see cref="MgrEntry"/>.</summary>
@@ -107,8 +108,9 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal static MgrMember ToMgrMember(DbLabelMember src) => new()
         {
-            Offset = src.Offset,
-            Name   = src.Name,
+            Offset  = src.Offset,
+            Name    = src.Name,
+            Dynamic = src.Dynamic,
         };
 
         // ── LabelSet ───────────────────────────────────────────────────────────

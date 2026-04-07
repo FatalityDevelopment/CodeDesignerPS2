@@ -13,5 +13,14 @@ namespace CodeDesigner.Ps2.LabelManager.Models
 
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
+
+        /// <summary>
+        /// When <c>true</c> the live memory value at the resolved address for this
+        /// member is polled and shown in the label manager table (mirrors
+        /// <see cref="LabelEntry.Dynamic"/> for top-level entries).
+        /// </summary>
+        [JsonPropertyName("dynamic")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Dynamic { get; set; }
     }
 }

@@ -11,7 +11,7 @@ import {
 
 export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'ArrayOfPointers' | 'LinkedList' | 'String';
 
-export interface LabelMemberEntry { offset: number; name: string; }
+export interface LabelMemberEntry { offset: number; name: string; dynamic?: boolean; }
 export interface LabelManagerEntry {
   address:  string;
   name:     string;
@@ -77,7 +77,9 @@ export type LabelManagerAction =
   /** Read the pointer at parentAddress, add offset, then navigate (handled by provider). */
   | { type: 'navigateToMember';  parentAddress: string; offset: number }
   /** Poll live 4-byte values at each address (handled by provider). */
-  | { type: 'readLiveValues';    addresses: string[] };
+  | { type: 'readLiveValues';    addresses: string[] }
+  /** Poll live values at resolved member addresses (handled by provider). */
+  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string }[] };
 
 const TYPE_BADGE: Record<string, string> = {
   Address:        '[Addr]',
@@ -306,9 +308,23 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                 <td class="lm-col-members">
                   @if (row.resolvedEntry) { {{ entryDetails(row.resolvedEntry) }} }
                 </td>
-                <td class="lm-col-live"></td>
+                <td class="lm-col-live">
+                  @if (memberIsDynamic(row)) {
+                    <span class="lm-live-value">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
+                  }
+                </td>
                 @if (!activeSetIsBuiltIn()) {
-                  <td class="lm-col-actions"></td>
+                  <td class="lm-col-actions">
+                    <button class="lm-row-btn lm-dyn-toggle-btn"
+                            [class.lm-is-dynamic]="memberIsDynamic(row)"
+                            [title]="memberIsDynamic(row) ? 'Dynamic — click to set static' : 'Static — click to enable live value'"
+                            (click)="onToggleMemberDynamic(row)">
+                      {{ memberIsDynamic(row) ? 'Dyn' : 'Sta' }}
+                    </button>
+                    @if (row.parentEntryAddress != null) {
+                      <button class="lm-row-btn" title="Navigate to resolved address" (click)="onGotoMember(row.parentEntryAddress!, row.memberOffset!)">&#x2192;</button>
+                    }
+                  </td>
                 }
               </tr>
             }
@@ -517,7 +533,7 @@ export class LabelManagerOverlayComponent {
   readonly editType          = signal<string>('Address');
   readonly editHidden        = signal(false);
   readonly editDynamic       = signal(false);
-  readonly editMembers       = signal<{ offsetStr: string; name: string }[]>([]);
+  readonly editMembers       = signal<{ offsetStr: string; name: string; dynamic?: boolean }[]>([]);
   readonly editArgRegs       = signal('');
   readonly editReturnRegs    = signal('');
   readonly editElementStride = signal('');
@@ -529,6 +545,9 @@ export class LabelManagerOverlayComponent {
 
   /** Map of address → live hex value string for dynamic entries. */
   readonly liveValues = signal<Map<string, string>>(new Map());
+
+  /** Map of tree-row path → live value string for dynamic member sub-rows. */
+  readonly memberLiveValues = signal<Map<string, string>>(new Map());
 
   /** Polling timer handle (setInterval id). */
   private _pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -577,6 +596,32 @@ export class LabelManagerOverlayComponent {
   private readonly _dynamicAddresses = computed(() =>
     this.filteredEntries().filter(e => e.dynamic).map(e => e.address),
   );
+
+  /**
+   * Dynamic member rows to poll: only depth-1 rows whose member has dynamic=true
+   * and whose parent address is known (needed to dereference the pointer).
+   */
+  private readonly _dynamicMemberRows = computed(() =>
+    this.treeRows().filter(
+      r => r.kind === 'member' && r.depth === 1 && r.parentEntryAddress != null &&
+           this._memberDynamic(r),
+    ),
+  );
+
+  /** Returns true when the member represented by a tree row has dynamic=true. */
+  private _memberDynamic(row: TreeRow): boolean {
+    if (row.entry) { return false; }
+    const parentEntry = this.filteredEntries().find(
+      e => e.address === row.parentEntryAddress,
+    );
+    const m = parentEntry?.members.find(m => m.offset === row.memberOffset);
+    return m?.dynamic ?? false;
+  }
+
+  /** Public helper used in the template to drive the dynamic-toggle button label. */
+  memberIsDynamic(row: TreeRow): boolean {
+    return this._memberDynamic(row);
+  }
 
   /** Colspan for the "no entries" empty row. Live Value column is always shown. */
   readonly emptyColspan = computed(() =>
@@ -826,7 +871,7 @@ export class LabelManagerOverlayComponent {
     this.editType.set(entry.type ?? (entry.members.length > 0 ? 'Struct' : 'Address'));
     this.editHidden.set(entry.hidden ?? false);
     this.editDynamic.set(entry.dynamic ?? false);
-    this.editMembers.set(entry.members.map(m => ({ offsetStr: '0x' + m.offset.toString(16).toUpperCase().padStart(2, '0'), name: m.name })));
+    this.editMembers.set(entry.members.map(m => ({ offsetStr: '0x' + m.offset.toString(16).toUpperCase().padStart(2, '0'), name: m.name, dynamic: m.dynamic })));
     this.editArgRegs.set((entry.argRegs ?? []).join('\n'));
     this.editReturnRegs.set((entry.returnRegs ?? []).join('\n'));
     this.editElementStride.set(entry.elementStride != null ? String(entry.elementStride) : '');
@@ -859,6 +904,29 @@ export class LabelManagerOverlayComponent {
     this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
   }
 
+  onToggleMemberDynamic(row: TreeRow): void {
+    if (row.parentEntryAddress == null || row.memberOffset == null) { return; }
+    const set = this.currentSet();
+    const parentEntry = set?.entries.find(e => e.address === row.parentEntryAddress);
+    if (!parentEntry || !set) { return; }
+
+    const updatedEntry: LabelManagerEntry = {
+      ...parentEntry,
+      members: parentEntry.members.map(m =>
+        m.offset === row.memberOffset
+          ? { ...m, dynamic: m.dynamic ? undefined : true }
+          : m,
+      ),
+    };
+
+    // Optimistic local update.
+    this.currentSet.set({
+      ...set,
+      entries: set.entries.map(e => e.address === row.parentEntryAddress ? updatedEntry : e),
+    });
+    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updatedEntry });
+  }
+
   onSave(): void {
     const addr = this.editAddress().trim();
     const name = this.editName().trim();
@@ -869,7 +937,7 @@ export class LabelManagerOverlayComponent {
     const members = (type === 'Struct')
       ? this.editMembers()
           .filter(m => m.name.trim())
-          .map(m => ({ offset: parseInt(m.offsetStr.replace(/^0x/i, ''), 16) || 0, name: m.name.trim() }))
+          .map(m => ({ offset: parseInt(m.offsetStr.replace(/^0x/i, ''), 16) || 0, name: m.name.trim(), dynamic: m.dynamic || undefined }))
       : [];
 
     const argRegs    = (type === 'Function') ? splitLines(this.editArgRegs())    : undefined;
@@ -1037,6 +1105,11 @@ export class LabelManagerOverlayComponent {
     this.liveValues.set(map);
   }
 
+  /** Update the member live value map from a provider response. */
+  setMemberLiveValues(values: Record<string, string>): void {
+    this.memberLiveValues.set(new Map<string, string>(Object.entries(values)));
+  }
+
   liveValue(entry: LabelManagerEntry): string {
     return this.liveValues().get(entry.address) ?? '…';
   }
@@ -1052,6 +1125,17 @@ export class LabelManagerOverlayComponent {
       const addresses = this._dynamicAddresses();
       if (addresses.length > 0) {
         this.action$.emit({ type: 'readLiveValues', addresses });
+      }
+      const dynMembers = this._dynamicMemberRows();
+      if (dynMembers.length > 0) {
+        this.action$.emit({
+          type: 'readMemberLiveValues',
+          members: dynMembers.map(r => ({
+            parentAddress: r.parentEntryAddress!,
+            offset: r.memberOffset!,
+            path: r.path,
+          })),
+        });
       }
     }, 500);
   }
