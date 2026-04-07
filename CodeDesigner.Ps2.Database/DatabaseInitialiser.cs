@@ -19,7 +19,7 @@ public static class DatabaseInitialiser
     {
         // WAL mode allows multiple readers and one writer concurrently, preventing
         // "database is locked" errors when the MCP server and the main app share the file.
-        var connectionString = $"Data Source={path};Journal Mode=WAL;";
+        var connectionString = $"Data Source={path}";
 
         var options = new DbContextOptionsBuilder<CodeDesignerDbContext>()
             .UseSqlite(connectionString)
@@ -34,6 +34,10 @@ public static class DatabaseInitialiser
             {
                 await using var db = new CodeDesignerDbContext(options);
                 await db.Database.MigrateAsync();
+
+                // Enable WAL mode via PRAGMA (not supported as a connection string keyword
+                // in Microsoft.Data.Sqlite; must be set after the connection is open).
+                await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
 
                 // Seed initial data (idempotent — only inserts missing rows).
                 var seeder = new DatabaseSeeder(db);
