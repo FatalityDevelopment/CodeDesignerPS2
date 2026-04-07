@@ -5,7 +5,6 @@ import {
   signal,
   computed,
   output,
-  input,
 } from '@angular/core';
 
 export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'ArrayOfPointers' | 'LinkedList' | 'String';
@@ -76,9 +75,7 @@ export type LabelManagerAction =
   /** Read the pointer at parentAddress, add offset, then navigate (handled by provider). */
   | { type: 'navigateToMember';  parentAddress: string; offset: number }
   /** Poll live 4-byte values at each address (handled by provider). */
-  | { type: 'readLiveValues';    addresses: string[] }
-  /** Open the live disasm viewer at the given address. */
-  | { type: 'openLiveView';      address: string };
+  | { type: 'readLiveValues';    addresses: string[] };
 
 const TYPE_BADGE: Record<string, string> = {
   Address:        '[Addr]',
@@ -107,11 +104,10 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
   encapsulation: ViewEncapsulation.None,
   template: `
 <div id="lm-overlay"
-     [class.visible]="visible() || tabMode()"
-     [class.lm-tab-mode]="tabMode()"
+     [class.visible]="visible()"
      (click)="onBackdropClick($event)"
      (keydown.escape)="close()">
-  <div id="lm-box" [class.lm-tab-mode-box]="tabMode()">
+  <div id="lm-box">
 
     <!-- Header -->
     <div id="lm-header">
@@ -233,7 +229,7 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                 <td class="lm-col-vis">
                   <button class="lm-vis-btn"
                           [class.lm-is-hidden]="row.entry!.hidden"
-                          [title]="row.entry!.hidden ? 'Dimmed (hidden from disassembler) — click to show' : 'Visible in disassembler — click to hide'"
+                          [title]="row.entry!.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
                           [disabled]="activeSetIsBuiltIn()"
                           (click)="onToggleVisibility(row.entry!)">
                     <svg class="lm-eye-icon" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
@@ -258,7 +254,6 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                 <td class="lm-col-addr lm-mono">
                   {{ row.entry!.address }}
                   <button class="lm-row-btn lm-goto-btn" title="Go to address" (click)="onGotoLabel(row.entry!)">&#x2192;</button>
-                  <button class="lm-row-btn lm-liveview-btn" title="Open in live disasm viewer" aria-label="Open in live disasm viewer" (click)="onOpenLiveView(row.entry!)">&#x1F4E1;</button>
                 </td>
                 <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
                 <td class="lm-col-comment lm-muted">{{ row.entry!.comment ?? '' }}</td>
@@ -274,9 +269,6 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   <td class="lm-col-actions">
                     <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">&#x270E;</button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">&#x1F5D1;</button>
-                    @if (effectiveType(row.entry!) === 'Struct') {
-                      <button class="lm-row-btn lm-offset-btn" title="Add struct member offset" (click)="onOpenOffsetForm(row.entry!)">+Offset</button>
-                    }
                     @if (effectiveType(row.entry!) === 'LinkedList' && row.entry!.nodeNextOffset != null) {
                       <button class="lm-row-btn" title="Walk linked list (PINE)" (click)="onWalkList(row.entry!)">&#x21C0;</button>
                     }
@@ -339,31 +331,6 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
         </tbody>
       </table>
     </div>
-
-    <!-- +Offset quick-add form (for Struct labels) -->
-    @if (selectedStructAddress() && !activeSetIsBuiltIn()) {
-      <div id="lm-offset-form">
-        <span class="lm-offset-form-title">+ Add Struct Member to <strong>{{ selectedStructLabel() }}</strong></span>
-        <div class="lm-form-row">
-          <label class="lm-form-label">Offset</label>
-          <input class="lm-form-input lm-mono" type="text" spellcheck="false"
-                 placeholder="0x00"
-                 [value]="offsetFormOffset()"
-                 (input)="offsetFormOffset.set(asInput($event).value)" />
-        </div>
-        <div class="lm-form-row">
-          <label class="lm-form-label">Name</label>
-          <input class="lm-form-input" type="text" spellcheck="false"
-                 placeholder="field name"
-                 [value]="offsetFormName()"
-                 (input)="offsetFormName.set(asInput($event).value)" />
-        </div>
-        <div class="lm-form-row lm-form-actions">
-          <button class="lm-tool-btn" [disabled]="!canSaveOffset()" (click)="onSaveOffset()">Add Member</button>
-          <button class="lm-tool-btn" (click)="onCancelOffset()">Cancel</button>
-        </div>
-      </div>
-    }
 
     <!-- Add/Edit form -->
     @if (!activeSetIsBuiltIn()) {
@@ -521,10 +488,6 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
 })
 export class LabelManagerOverlayComponent {
 
-  // ── Inputs ───────────────────────────────────────────────────────────────────
-  /** When true, the component fills a standalone VS Code WebviewPanel tab. */
-  readonly tabMode = input(false);
-
   // ── Outputs ──────────────────────────────────────────────────────────────────
   readonly close$  = output<void>();
   readonly action$ = output<LabelManagerAction>();
@@ -562,11 +525,6 @@ export class LabelManagerOverlayComponent {
   readonly editNodeSize       = signal('');
   /** When editing an existing entry, this holds its original address. */
   readonly editingAddress = signal('');
-
-  // Offset quick-add form state
-  readonly selectedStructAddress = signal('');
-  readonly offsetFormOffset      = signal('');
-  readonly offsetFormName        = signal('');
 
   /** Map of address → live hex value string for dynamic entries. */
   readonly liveValues = signal<Map<string, string>>(new Map());
@@ -613,20 +571,6 @@ export class LabelManagerOverlayComponent {
   readonly hasDynamicEntries = computed(() =>
     this.filteredEntries().some(e => e.dynamic),
   );
-
-  /** Display name of the struct selected for the quick offset-add form. */
-  readonly selectedStructLabel = computed(() => {
-    const addr = this.selectedStructAddress();
-    const entry = this.currentSet()?.entries.find(e => e.address === addr);
-    return entry?.name ?? addr;
-  });
-
-  /** True when the offset mini-form has enough data to save. */
-  readonly canSaveOffset = computed(() => {
-    const offsetStr = this.offsetFormOffset().replace(/^0x/i, '');
-    const offsetValid = offsetStr.length > 0 && !isNaN(parseInt(offsetStr, 16));
-    return this.selectedStructAddress() !== '' && this.offsetFormName().trim() !== '' && offsetValid;
-  });
 
   /** Addresses of dynamic entries to poll. */
   private readonly _dynamicAddresses = computed(() =>
@@ -691,13 +635,6 @@ export class LabelManagerOverlayComponent {
     this._startPolling();
   }
 
-  /** Activate the component in standalone tab mode. */
-  startTabMode(): void {
-    this.visible.set(true);
-    this._startPolling();
-    this.action$.emit({ type: 'refresh' });
-  }
-
   /**
    * Opens the overlay pre-filled with the given address.
    * If the refreshed set already contains an entry for this address, all form
@@ -714,7 +651,6 @@ export class LabelManagerOverlayComponent {
   }
 
   close(): void {
-    if (this.tabMode()) { return; } // In tab mode the panel itself is closed by VS Code
     if (this.visible()) {
       this.visible.set(false);
       this._stopPolling();
@@ -911,39 +847,6 @@ export class LabelManagerOverlayComponent {
     this.action$.emit({ type: 'resolveLinkedList', address: entry.address, nextOffset: entry.nodeNextOffset });
   }
 
-  onOpenLiveView(entry: LabelManagerEntry): void {
-    this.action$.emit({ type: 'openLiveView', address: entry.address });
-  }
-
-  onOpenOffsetForm(entry: LabelManagerEntry): void {
-    this.selectedStructAddress.set(entry.address);
-    this.offsetFormOffset.set('0x00');
-    this.offsetFormName.set('');
-  }
-
-  onSaveOffset(): void {
-    const structAddr = this.selectedStructAddress();
-    const name = this.offsetFormName().trim();
-    if (!structAddr || !name) { return; }
-    const offset = parseInt(this.offsetFormOffset().replace(/^0x/i, ''), 16) || 0;
-    const existing = this.currentSet()?.entries.find(e => e.address === structAddr);
-    if (!existing) { return; }
-    const updatedEntry: LabelManagerEntry = {
-      ...existing,
-      members: [...existing.members, { offset, name }],
-    };
-    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updatedEntry });
-    this.selectedStructAddress.set('');
-    this.offsetFormOffset.set('');
-    this.offsetFormName.set('');
-  }
-
-  onCancelOffset(): void {
-    this.selectedStructAddress.set('');
-    this.offsetFormOffset.set('');
-    this.offsetFormName.set('');
-  }
-
   onSave(): void {
     const addr = this.editAddress().trim();
     const name = this.editName().trim();
@@ -1011,7 +914,6 @@ export class LabelManagerOverlayComponent {
   }
 
   onBackdropClick(event: MouseEvent): void {
-    if (this.tabMode()) { return; }
     if ((event.target as HTMLElement).id === 'lm-overlay') { this.close(); }
   }
 
