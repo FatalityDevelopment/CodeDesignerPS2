@@ -261,7 +261,9 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   {{ row.entry!.address }}
                 </td>
                 <td class="lm-col-live">
-                  @if (row.entry!.dynamic) {
+                  @if (effectiveType(row.entry!) === 'String') {
+                    <span class="lm-live-string">{{ liveValue(row.entry!) }}</span>
+                  } @else if (row.entry!.dynamic) {
                     <span class="lm-live-value">{{ liveValue(row.entry!) }}</span>
                   }
                 </td>
@@ -1156,16 +1158,9 @@ export class LabelManagerOverlayComponent {
     return this.effectiveType(entry) === 'Function' ? 'FNC_' + entry.name : entry.name;
   }
 
-  /** Returns the comment text for an entry, prefixing the live memory string for String-type entries. */
+  /** Returns the comment text for an entry. */
   entryComment(entry: LabelManagerEntry): string {
-    const base = entry.comment ?? '';
-    if (this.effectiveType(entry) === 'String') {
-      const live = this.liveValues().get(entry.address);
-      if (live != null && live !== '') {
-        return base ? `"${live}" ${base}` : `"${live}"`;
-      }
-    }
-    return base;
+    return entry.comment ?? '';
   }
 
   entryDetails(entry: LabelManagerEntry): string {

@@ -2825,9 +2825,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           } else {
             const buf = await this.socketClient.readMemory(addr, 4, 'ee');
             if (buf.length >= 4) {
-              const addrStr = addr.toString(16).toUpperCase().padStart(8, '0');
               const dataStr = buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
-              values[addrHex] = `0x${addrStr} 0x${dataStr}`;
+              values[addrHex] = `0x${dataStr}`;
             }
           }
         } catch { /* ignore unreadable addresses */ }
@@ -2856,9 +2855,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           // Read 4 bytes at the resolved address.
           const dataBuf = await this.socketClient.readMemory(resolved, 4, 'ee');
           if (dataBuf.length >= 4) {
-            const addrStr = resolved.toString(16).toUpperCase().padStart(8, '0');
             const dataStr = dataBuf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
-            values[m.path] = `0x${addrStr} 0x${dataStr}`;
+            values[m.path] = `0x${dataStr}`;
           }
         } catch { /* ignore unreadable members */ }
       }
