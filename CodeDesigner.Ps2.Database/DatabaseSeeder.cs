@@ -28,63 +28,35 @@ public class DatabaseSeeder
     /// Seeds all tool descriptions into <see cref="McpConfig"/> if they are not
     /// already present.  Call after ensuring the schema is up to date.
     /// </summary>
-    public async Task SeedAsync(CancellationToken ct = default)
+    /// <param name="archiveRoot">
+    /// Optional path to the root of the CheatCodeArchive checkout.
+    /// When supplied and the <c>Database/</c> sub-folder exists, the bulk cheat
+    /// importer runs to pull in the latest cheat data.  When omitted or when the
+    /// directory does not exist the step is silently skipped.
+    /// </param>
+    public async Task SeedAsync(string? archiveRoot = null, CancellationToken ct = default)
     {
         await SeedToolDescriptionsAsync(ct);
         await SeedSettingsAsync(ct);
         await SeedGameDataAsync(ct);
         await SeedLabelSetsAsync(ct);
-        
-        
-        var archiveRoot = "C:\\Users\\tholu\\Desktop\\CodeDesigner\\CheatCodeArchive";
-        var bulkCheatParser = new BulkCheatParser(_db, archiveRoot);
-        await bulkCheatParser.RunAsync(ct);
 
-        await MigrateMemoryFilesToDatabaseAsync(_db, "C:\\Users\\tholu\\Desktop\\CodeDesigner\\CodeDesigner.Ps2.McpServer\\bin\\Debug\\net8.0\\memories");
-
-        await _db.SaveChangesAsync(ct);
-    }
-
-    /// <summary>
-    /// One-time migration: import any existing flat <c>.md</c> files from
-    /// <paramref name="memoriesPath"/> into the <see cref="McpMemory"/> table so
-    /// progress reports created before the database upgrade are preserved.
-    /// Already-imported files are skipped (idempotent); files are not deleted
-    /// from disk so they remain available as a backup.
-    /// </summary>
-    static async Task MigrateMemoryFilesToDatabaseAsync(
-        CodeDesignerDbContext db,
-        string memoriesPath)
-    {
-        if (!Directory.Exists(memoriesPath))
-            return;
-
-        var files = Directory.GetFiles(memoriesPath, "*.md");
-        if (files.Length == 0)
-            return;
-
-        foreach (var file in files)
+        if (!string.IsNullOrWhiteSpace(archiveRoot))
         {
-            var name = Path.GetFileNameWithoutExtension(file);
-            if (string.IsNullOrWhiteSpace(name))
-                continue;
-
-            // Skip if a memory with this name already exists in the database.
-            bool exists = await db.McpMemories.AnyAsync(m => m.Name == name);
-            if (exists)
-                continue;
-
-            var content = await File.ReadAllTextAsync(file);
-            db.McpMemories.Add(new CodeDesigner.Ps2.Database.Entities.McpMemory
+            var dbFolder = Path.Combine(archiveRoot, "Database");
+            if (Directory.Exists(dbFolder))
             {
-                Name = name,
-                Content = content,
-                CreatedAt = File.GetCreationTimeUtc(file),
-                UpdatedAt = File.GetLastWriteTimeUtc(file),
-            });
+                Console.WriteLine($"Importing cheats from CheatCodeArchive at: {archiveRoot}");
+                var bulkCheatParser = new BulkCheatParser(_db, archiveRoot);
+                await bulkCheatParser.RunAsync(ct);
+            }
+            else
+            {
+                Console.WriteLine($"[BulkCheatParser] Archive Database folder not found, skipping: {dbFolder}");
+            }
         }
 
-        await db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
     }
 
     // ── Tool descriptions ──────────────────────────────────────────────────────

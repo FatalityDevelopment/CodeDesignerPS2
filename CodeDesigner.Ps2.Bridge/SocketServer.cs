@@ -229,12 +229,13 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Creates a SQLite <see cref="CodeDesignerDbContext"/> stored next to the
-        /// executable (used when the caller does not supply a context).
+        /// Creates a SQLite <see cref="CodeDesignerDbContext"/> pointing at the
+        /// canonical application-data database path (used when the caller does not
+        /// supply a context).
         /// </summary>
         private static CodeDesignerDbContext CreateLocalDbContext()
         {
-            string dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "codedesigner.db");
+            string dbPath = DatabasePaths.GetDefaultDbPath();
             var opts = new DbContextOptionsBuilder<CodeDesignerDbContext>()
                 .UseSqlite($"Data Source={dbPath}")
                 .Options;
