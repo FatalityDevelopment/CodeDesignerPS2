@@ -1,10 +1,6 @@
-using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.McpServer;
-using CodeDesigner.Ps2.McpServer.Prompts;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -16,7 +12,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "scan_strings")]
-    [DynamicDescription("scan_strings_desc")]
+    [Description("Scan a region of live PS2 emulator memory for null-terminated ASCII strings. Returns strings that meet the minimum length threshold, with their addresses.")]
     public async Task<string> ScanStrings(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -35,7 +31,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "scan_functions")]
-    [DynamicDescription("scan_functions_desc")]
+    [Description("Scan a region of live PS2 emulator memory and detect likely MIPS function entry points. Looks for ADDIU $sp, $sp, -N prologues and other calling-convention patterns.")]
     public async Task<string> ScanFunctions(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -54,7 +50,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "scan_pointers")]
-    [DynamicDescription("scan_pointers_desc")]
+    [Description("Scan a region of live PS2 emulator memory for 4-byte aligned values that are confirmed EE RAM pointers (in the range 0x00000000–0x01FFFFFF or 0x20000000–0x21FFFFFF).")]
     public async Task<string> ScanPointers(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -73,7 +69,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "scan_floats")]
-    [DynamicDescription("scan_floats_desc")]
+    [Description("Scan a region of live PS2 emulator memory for plausible IEEE-754 single-precision floats. Returns addresses and float values that fall within a reasonable numeric range.")]
     public async Task<string> ScanFloats(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -92,7 +88,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "scan_integers")]
-    [DynamicDescription("scan_integers_desc")]
+    [Description("Scan a region of live PS2 emulator memory for non-zero 4-byte aligned 32-bit integers. Useful for locating counters, health values, and game state variables.")]
     public async Task<string> ScanIntegers(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of bytes to scan.")] int length,
@@ -115,7 +111,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_strings")]
-    [DynamicDescription("get_strings_desc")]
+    [Description("Scan base64-encoded binary data for null-terminated printable ASCII strings of at least the specified minimum length. Returns strings and their byte offsets.")]
     public async Task<string> GetStrings(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -133,7 +129,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_functions")]
-    [DynamicDescription("get_functions_desc")]
+    [Description("Scan base64-encoded binary data for MIPS function entry points. Detects ADDIU $sp, $sp, -N prologues and classic PS2 function patterns.")]
     public async Task<string> GetFunctions(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -151,7 +147,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_pointers")]
-    [DynamicDescription("get_pointers_desc")]
+    [Description("Scan base64-encoded binary data for 4-byte aligned values that are confirmed EE memory pointers. Returns offsets and pointer values.")]
     public async Task<string> GetPointers(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -169,7 +165,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_floats")]
-    [DynamicDescription("get_floats_desc")]
+    [Description("Scan base64-encoded binary data for plausible IEEE-754 single-precision floats. Filters out NaN, Inf, subnormals, and values outside a configurable range.")]
     public async Task<string> GetFloats(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -187,7 +183,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_integers")]
-    [DynamicDescription("get_integers_desc")]
+    [Description("Scan base64-encoded binary data for non-zero 4-byte aligned 32-bit integers. Applies an optional value range filter.")]
     public async Task<string> GetIntegers(
         [Description("Virtual start address of the data (hex or decimal), used to compute result addresses.")] string address,
         [Description("Base64-encoded binary data to scan (from a READMEM response's Data field).")] string base64Data,
@@ -209,7 +205,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "search")]
-    [DynamicDescription("search_desc")]
+    [Description("Search live PS2 emulator memory or a disassembly listing for a text, regex, bytes, or string pattern. Returns all matching addresses and surrounding context.")]
     public async Task<string> Search(
         [Description("Text, regex, or hex byte pattern to search for.")] string query,
         [Description("Virtual start address (hex or decimal).")] string address,
@@ -246,7 +242,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "scan_value")]
-    [DynamicDescription("scan_value_desc")]
+    [Description("Scan EE main RAM (or a custom address range) for a specific value of a given data type (u8, u16, u32, u64, f32). Returns all addresses where the value matches.")]
     public async Task<string> ScanValue(
         [Description("Value to scan for (decimal or 0x-prefixed hex string, e.g. '100' or '0x64' for uint32).")] string scanValue,
         [Description("Data type to interpret memory as (e.g. 'uint32', 'float32').")] string dataType,

@@ -1,10 +1,10 @@
-using System.Buffers.Binary;
+
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.McpServer;
-using CodeDesigner.Ps2.McpServer.Prompts;
+
+
+
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -16,7 +16,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_disc_elfs")]
-    [DynamicDescription("list_disc_elfs_desc")]
+    [Description("Open a PS2 disc image (ISO/BIN or ZIP containing one) and list all ELF and IRX files found on the disc. Returns file names and sizes.")]
     public async Task<string> ListDiscElfs(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip archive containing an ISO/BIN).")] string isoPath,
         CancellationToken cancellationToken = default)
@@ -29,7 +29,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "recompile_elf")]
-    [DynamicDescription("recompile_elf_desc")]
+    [Description("Extract a named ELF from a PS2 disc image and statically recompile it to C++ source code. Translates MIPS64 EE instructions to equivalent C++ statements.")]
     public async Task<string> RecompileElf(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
         [Description("Name of the ELF to recompile (e.g. 'SCUS_971.98'). Leave empty to use BOOT2.")] string? elfName = null,
@@ -48,7 +48,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "mc_list")]
-    [DynamicDescription("mc_list_desc")]
+    [Description("List all save-game directories on a PS2 memory card image file. Returns save name, product code, description, and size for each entry.")]
     public async Task<string> McList(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         CancellationToken cancellationToken = default)
@@ -80,7 +80,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_export")]
-    [DynamicDescription("mc_export_desc")]
+    [Description("Export a single save-game directory from a PS2 memory card image to a folder on disk. Creates one file per memory card file within the save directory.")]
     public async Task<string> McExport(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         [Description("Name of the save to export (as listed by mc_list, e.g. 'BASCUS-97133BUILTIN').")] string saveName,
@@ -94,7 +94,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_import")]
-    [DynamicDescription("mc_import_desc")]
+    [Description("Import a save-game directory into a PS2 memory card image. The save directory must have been exported with mc_export.")]
     public async Task<string> McImport(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         [Description("Absolute path to the save directory to import.")] string importDir,
@@ -108,7 +108,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_delete")]
-    [DynamicDescription("mc_delete_desc")]
+    [Description("Delete a single save-game directory from a PS2 memory card image. This operation cannot be undone.")]
     public async Task<string> McDelete(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         [Description("Name of the save to delete (as listed by mc_list).")] string saveName,
@@ -121,7 +121,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_format")]
-    [DynamicDescription("mc_format_desc")]
+    [Description("Create a new blank PS2 memory card image file (8 MB). If a file already exists at the path it is overwritten.")]
     public async Task<string> McFormat(
         [Description("Absolute path where the new memory card image should be created.")] string mcPath,
         CancellationToken cancellationToken = default)
@@ -131,7 +131,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_read_file")]
-    [DynamicDescription("mc_read_file_desc")]
+    [Description("Read the raw bytes of a specific file inside a PS2 memory card save directory. Returns the file contents as a base64-encoded string.")]
     public async Task<string> McReadFile(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
         [Description("Name of the save directory (as listed by mc_list, e.g. 'BASCUS-97133BUILTIN').")] string saveName,
@@ -159,7 +159,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "hdd_list")]
-    [DynamicDescription("hdd_list_desc")]
+    [Description("Open a PS2 HDD image file and list all APA partitions on it. Returns partition ID, name, type, and size for each partition.")]
     public async Task<string> HddList(
         [Description("Absolute path to the PS2 HDD image file (e.g. 'hdd.raw').")] string hddPath,
         CancellationToken cancellationToken = default)
@@ -192,7 +192,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_list_files")]
-    [DynamicDescription("hdd_list_files_desc")]
+    [Description("List all files in a specific partition on a PS2 HDD image. Returns file name, size, and inode information.")]
     public async Task<string> HddListFiles(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID to list files from (as shown by hdd_list, e.g. '__common' or 'BASLUS-12345').")] string partitionId,
@@ -227,7 +227,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_export")]
-    [DynamicDescription("hdd_export_desc")]
+    [Description("Export a single file from a PS2 HDD partition to a directory on disk. Does not require the emulator to be running.")]
     public async Task<string> HddExport(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID containing the file (as shown by hdd_list).")] string partitionId,
@@ -242,7 +242,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_import")]
-    [DynamicDescription("hdd_import_desc")]
+    [Description("Import a file into a specific partition on a PS2 HDD image. Does not require the emulator to be running.")]
     public async Task<string> HddImport(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID to import the file into (as shown by hdd_list).")] string partitionId,
@@ -257,7 +257,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_delete")]
-    [DynamicDescription("hdd_delete_desc")]
+    [Description("Delete a partition from a PS2 HDD image. This operation cannot be undone.")]
     public async Task<string> HddDelete(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID to delete (as shown by hdd_list).")] string partitionId,
@@ -270,7 +270,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_create")]
-    [DynamicDescription("hdd_create_desc")]
+    [Description("Create a new blank PS2 HDD image file with an initialised APA partition table. If the file already exists it is overwritten.")]
     public async Task<string> HddCreate(
         [Description("Absolute path where the new HDD image should be created.")] string hddPath,
         [Description("Image size in gigabytes (default 40 GB).")] int sizeGb = 40,
@@ -287,7 +287,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "iso_list_files")]
-    [DynamicDescription("iso_list_files_desc")]
+    [Description("Open a PS2 disc image (ISO/BIN or ZIP containing one) and list all files and directories on the disc in ISO-9660 format.")]
     public async Task<string> IsoListFiles(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip archive containing an ISO/BIN).")] string isoPath,
         CancellationToken cancellationToken = default)
@@ -322,7 +322,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "iso_read_file")]
-    [DynamicDescription("iso_read_file_desc")]
+    [Description("Extract a file from a PS2 disc image to disk or return its contents as base64. Use the path returned by iso_list_files to identify the target file.")]
     public async Task<string> IsoReadFile(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
         [Description("Disc path to the file to extract (e.g. 'SYSTEM.CNF' or '/SCUS_123.45;1').")] string filePath,
@@ -336,7 +336,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "iso_get_info")]
-    [DynamicDescription("iso_get_info_desc")]
+    [Description("Get metadata about a PS2 disc image: format (cooked/raw), sector count, size, and the primary volume descriptor title.")]
     public async Task<string> IsoGetInfo(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
         CancellationToken cancellationToken = default)
