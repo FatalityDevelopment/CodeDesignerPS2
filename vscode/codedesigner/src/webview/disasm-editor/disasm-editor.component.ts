@@ -743,6 +743,14 @@ export class DisasmEditorComponent implements AfterViewInit {
   }
 
   protected onLabelManagerAction(action: LabelManagerAction): void {
+    // 'navigateToLabel' is handled entirely in the webview — no provider round-trip needed.
+    if (action.type === 'navigateToLabel') {
+      const addr = parseInt((action as { address: string }).address.replace(/^0x/i, ''), 16);
+      if (!isNaN(addr)) {
+        this.vscode.postMessage({ type: 'gotoRegion', address: addr });
+      }
+      return;
+    }
     this.vscode.postMessage({ type: 'labelManagerAction', action });
   }
 
@@ -1818,6 +1826,8 @@ export class DisasmEditorComponent implements AfterViewInit {
         lm.showStatus((data['message'] as string) ?? 'Error', true);
       } else if (type === 'labelManagerStatus') {
         lm.showStatus((data['message'] as string) ?? '');
+      } else if (type === 'labelManagerLiveValues') {
+        lm.setLiveValues((data['values'] as Record<string, string>) ?? {});
       }
     });
   }

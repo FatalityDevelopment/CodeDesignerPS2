@@ -2686,8 +2686,47 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string },
+    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[] },
   ): Promise<void> {
+    // Handle memory-read actions before connectivity/context checks — they fail
+    // silently rather than surfacing an error banner.
+    if (action.type === 'navigateToMember') {
+      if (!this.socketClient?.isConnected()) { return; }
+      const parentAddr = parseInt((action.parentAddress ?? '0').replace(/^0x/i, ''), 16);
+      const offset = action.offset ?? 0;
+      try {
+        const buf = await this.socketClient.readMemory(parentAddr, 4, 'ee');
+        if (buf.length >= 4) {
+          const ptrVal = buf.readUInt32LE(0);
+          if (ptrVal > 0) {
+            webview.postMessage({ type: 'gotoAddress', address: ptrVal + offset });
+          }
+        }
+      } catch { /* non-fatal */ }
+      return;
+    }
+
+    if (action.type === 'readLiveValues') {
+      if (!this.socketClient?.isConnected()) {
+        webview.postMessage({ type: 'labelManagerLiveValues', values: {} });
+        return;
+      }
+      const addresses = action.addresses ?? [];
+      const values: Record<string, string> = {};
+      for (const addrHex of addresses) {
+        const addr = parseInt(addrHex.replace(/^0x/i, ''), 16);
+        if (isNaN(addr)) { continue; }
+        try {
+          const buf = await this.socketClient.readMemory(addr, 4, 'ee');
+          if (buf.length >= 4) {
+            values[addrHex] = '0x' + buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
+          }
+        } catch { /* ignore unreadable addresses */ }
+      }
+      webview.postMessage({ type: 'labelManagerLiveValues', values });
+      return;
+    }
+
     if (!this.socketClient?.isConnected()) {
       webview.postMessage({ type: 'labelManagerError', message: 'Not connected to CodeDesigner server.' });
       return;
