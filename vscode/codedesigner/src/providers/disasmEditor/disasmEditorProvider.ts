@@ -2697,7 +2697,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       try {
         const buf = await this.socketClient.readMemory(parentAddr, 4, 'ee');
         if (buf.length >= 4) {
-          const ptrVal = buf.readUInt32LE(0) >>> 0;
+          const ptrVal = buf.readUInt32LE(0);
           if (ptrVal > 0) {
             webview.postMessage({ type: 'gotoAddress', address: ptrVal + offset });
           }
@@ -2719,7 +2719,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         try {
           const buf = await this.socketClient.readMemory(addr, 4, 'ee');
           if (buf.length >= 4) {
-            values[addrHex] = '0x' + (buf.readUInt32LE(0) >>> 0).toString(16).toUpperCase().padStart(8, '0');
+            values[addrHex] = '0x' + buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0');
           }
         } catch { /* ignore unreadable addresses */ }
       }

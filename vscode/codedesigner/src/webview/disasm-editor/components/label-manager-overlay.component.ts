@@ -878,7 +878,7 @@ export class LabelManagerOverlayComponent {
       type,
       // Preserve hidden state when editing; default to false (visible) for new entries.
       hidden: this.editingAddress() ? this.editHidden() : false,
-      dynamic: this.editDynamic() || undefined,
+      dynamic: this.editDynamic() ? true : undefined,
       members,
       argRegs:       argRegs?.length      ? argRegs      : undefined,
       returnRegs:    returnRegs?.length    ? returnRegs   : undefined,
