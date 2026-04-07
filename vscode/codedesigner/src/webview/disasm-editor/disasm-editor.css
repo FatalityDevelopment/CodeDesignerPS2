@@ -3452,7 +3452,7 @@ app-bottom-panel {
 .lm-col-comment { width: auto; }
 .lm-col-members { width: 110px; }
 .lm-col-live    { width: 100px; font-family: monospace; font-size: 11px; color: #9cdcfe; }
-.lm-col-actions { width: 90px; text-align: right; }
+.lm-col-actions { width: 110px; text-align: right; }
 
 /* Hidden row — dim the text to signal the entry is suppressed */
 .lm-hidden-row td { opacity: 0.45; }
@@ -3537,6 +3537,22 @@ app-bottom-panel {
 .lm-row-btn:hover { color: #ccc; }
 .lm-goto-btn { color: #569cd6; }
 .lm-goto-btn:hover { color: #9cdcfe !important; }
+
+/* Dynamic toggle button on each label row */
+.lm-dyn-toggle-btn {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: #2a2a2a;
+    border: 1px solid #555;
+    color: #777;
+    cursor: pointer;
+    letter-spacing: 0.4px;
+}
+.lm-dyn-toggle-btn:hover { background: #3c3c3c; color: #ccc; }
+.lm-dyn-toggle-btn.lm-is-dynamic { background: #0d3a6e; border-color: #0e639c; color: #9cdcfe; }
+.lm-dyn-toggle-btn.lm-is-dynamic:hover { background: #0e4a8a; }
 
 /* Live value display */
 .lm-live-value { font-family: monospace; color: #9cdcfe; font-size: 11px; }

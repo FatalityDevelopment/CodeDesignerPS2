@@ -174,7 +174,3 @@
     (saveStruct$)="onSaveStruct($event)"
     (addMember$)="onAddStructMember($event)"
     (readPointer$)="onReadStructPointer($event)" />
-<app-label-manager-overlay #labelManagerComp
-    (close$)="onLabelManagerClose()"
-    (action$)="onLabelManagerAction($event)" />
-<input id="lm-file-input" type="file" accept=".json" style="display:none" (change)="onLabelImportFile($event)" />

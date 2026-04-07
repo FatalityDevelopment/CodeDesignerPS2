@@ -47,6 +47,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }> = [];
   /** The single open intro/splash panel. Undefined when the user closes it. */
   private _introPanel: vscode.WebviewPanel | undefined;
+  /** The single open Label Manager tab panel. Undefined when the user closes it. */
+  private _labelManagerPanel: vscode.WebviewPanel | undefined;
 
   /**
    * Per-panel cache of the most recent scanner results (strings, functions, pointers,
@@ -812,6 +814,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this._handleReadPointerAt(webviewPanel.webview, message.address as string);
       } else if (message.type === 'labelManagerAction') {
         await this._handleLabelManagerAction(webviewPanel.webview, message.action as any);
+      } else if (message.type === 'openLabelManagerTab') {
+        this.openLabelManagerTab(message.address as string | undefined);
       }
     });
 
@@ -880,6 +884,74 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 </head>
 <body>
 <img src="${imgUri}" alt="CodeDesigner">
+</body>
+</html>`;
+    }
+
+    /**
+     * Open (or focus) the standalone Label Manager tab.
+     * If a tab is already open, it is simply revealed and optionally pre-filled.
+     * @param prefillAddress Optional hex address to pre-fill in the Add Label form.
+     */
+    public openLabelManagerTab(prefillAddress?: string): void {
+        if (this._labelManagerPanel) {
+            this._labelManagerPanel.reveal(undefined, false);
+            if (prefillAddress) {
+                this._labelManagerPanel.webview.postMessage({ type: 'prefillAddress', address: prefillAddress });
+            }
+            return;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+            'disasm.labelManager',
+            '🏷 Label Manager',
+            vscode.ViewColumn.One,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [this._extensionUri],
+            }
+        );
+        this._labelManagerPanel = panel;
+        panel.onDidDispose(() => { this._labelManagerPanel = undefined; });
+
+        panel.webview.onDidReceiveMessage(async (message) => {
+            if (message.type === 'ready') {
+                // Send initial data as soon as the webview bootstraps.
+                await this._handleLabelManagerAction(panel.webview, { type: 'refresh' });
+                if (prefillAddress) {
+                    panel.webview.postMessage({ type: 'prefillAddress', address: prefillAddress });
+                    prefillAddress = undefined;
+                }
+            } else if (message.type === 'labelManagerAction') {
+                await this._handleLabelManagerAction(panel.webview, message.action as any);
+            } else if (message.type === 'bootstrapError') {
+                getOutputChannel().error('[LabelManager] Bootstrap error: ' + message.error);
+            }
+        });
+
+        panel.webview.html = this._getLabelManagerHtml(panel.webview);
+    }
+
+    /** Build the HTML page for the Label Manager standalone webview tab. */
+    private _getLabelManagerHtml(webview: vscode.Webview): string {
+        const scriptUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'label-manager.js')
+        );
+        const nonce = getNonce();
+        return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'unsafe-inline';
+               script-src ${webview.cspSource} 'nonce-${nonce}';">
+<script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
+</head>
+<body>
+<app-label-manager-page><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading Label Manager…</p></app-label-manager-page>
+<script src="${scriptUri}"></script>
 </body>
 </html>`;
     }
@@ -1455,6 +1527,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleReadPointerAt(panel.webview, message.address as string);
             } else if (message.type === 'labelManagerAction') {
                 await this._handleLabelManagerAction(panel.webview, message.action as any);
+            } else if (message.type === 'openLabelManagerTab') {
+                this.openLabelManagerTab(message.address as string | undefined);
             } else if (message.type === 'toggleFollowAi') {
                 this.setFollowAiEnabled(!this._followAiEnabled);
             }
@@ -2668,6 +2742,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     for (const p of this._livePanels) {
       p.webview.postMessage({ type: 'labelManagerSet', set });
     }
+    // Also notify the standalone label manager tab if open.
+    this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSet', set });
     // Convert to StructEntry[] for backward-compat listeners (STRUCTS panel).
     const structs: StructEntry[] = set.entries
       .filter(e => (e.type ?? 'Address') === 'Struct' && e.members.length > 0)

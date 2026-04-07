@@ -5,6 +5,8 @@ import {
   signal,
   computed,
   output,
+  viewChild,
+  ElementRef,
 } from '@angular/core';
 
 export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'ArrayOfPointers' | 'LinkedList' | 'String';
@@ -211,9 +213,7 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
             <th class="lm-col-name">Name</th>
             <th class="lm-col-comment">Comment</th>
             <th class="lm-col-members">Details</th>
-            @if (hasDynamicEntries()) {
-              <th class="lm-col-live">Live Value</th>
-            }
+            <th class="lm-col-live">Live Value</th>
             @if (!activeSetIsBuiltIn()) {
               <th class="lm-col-actions"></th>
             }
@@ -253,20 +253,23 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                 </td>
                 <td class="lm-col-addr lm-mono">
                   {{ row.entry!.address }}
-                  <button class="lm-row-btn lm-goto-btn" title="Go to address" (click)="onGotoLabel(row.entry!)">&#x2192;</button>
                 </td>
                 <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
                 <td class="lm-col-comment lm-muted">{{ row.entry!.comment ?? '' }}</td>
                 <td class="lm-col-members">{{ entryDetails(row.entry!) }}</td>
-                @if (hasDynamicEntries()) {
-                  <td class="lm-col-live">
-                    @if (row.entry!.dynamic) {
-                      <span class="lm-live-value">{{ liveValue(row.entry!) }}</span>
-                    }
-                  </td>
-                }
+                <td class="lm-col-live">
+                  @if (row.entry!.dynamic) {
+                    <span class="lm-live-value">{{ liveValue(row.entry!) }}</span>
+                  }
+                </td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions">
+                    <button class="lm-row-btn lm-dyn-toggle-btn"
+                            [class.lm-is-dynamic]="row.entry!.dynamic"
+                            [title]="row.entry!.dynamic ? 'Dynamic — click to set static' : 'Static — click to enable live value'"
+                            (click)="onToggleDynamic(row.entry!)">
+                      {{ row.entry!.dynamic ? 'Dyn' : 'Sta' }}
+                    </button>
                     <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">&#x270E;</button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">&#x1F5D1;</button>
                     @if (effectiveType(row.entry!) === 'LinkedList' && row.entry!.nodeNextOffset != null) {
@@ -292,9 +295,6 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                   +0x{{ row.memberOffset!.toString(16).toUpperCase().padStart(4, '0') }}
                 </td>
                 <td class="lm-col-addr">
-                  @if (row.depth === 1 && row.parentEntryAddress) {
-                    <button class="lm-row-btn lm-goto-btn" title="Read pointer and go to member address" (click)="onGotoMember(row.parentEntryAddress!, row.memberOffset!)">&#x2192;</button>
-                  }
                 </td>
                 <td class="lm-col-name lm-member-sub-name">
                   {{ row.memberName }}
@@ -306,9 +306,7 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
                 <td class="lm-col-members">
                   @if (row.resolvedEntry) { {{ entryDetails(row.resolvedEntry) }} }
                 </td>
-                @if (hasDynamicEntries()) {
-                  <td class="lm-col-live"></td>
-                }
+                <td class="lm-col-live"></td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions"></td>
                 }
@@ -492,6 +490,9 @@ export class LabelManagerOverlayComponent {
   readonly close$  = output<void>();
   readonly action$ = output<LabelManagerAction>();
 
+  // ── DOM references ────────────────────────────────────────────────────────────
+  private readonly _fileInputRef = viewChild<ElementRef<HTMLInputElement>>('fileInput');
+
   // ── State ────────────────────────────────────────────────────────────────────
   readonly visible       = signal(false);
   readonly setNames      = signal<string[]>(['Built-in']);
@@ -577,12 +578,10 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().filter(e => e.dynamic).map(e => e.address),
   );
 
-  /** Colspan for the "no entries" empty row. */
-  readonly emptyColspan = computed(() => {
-    let base = this.activeSetIsBuiltIn() ? 7 : 8;
-    if (this.hasDynamicEntries()) { base += 1; }
-    return base;
-  });
+  /** Colspan for the "no entries" empty row. Live Value column is always shown. */
+  readonly emptyColspan = computed(() =>
+    this.activeSetIsBuiltIn() ? 7 : 8
+  );
 
   /**
    * A name → entry map for Struct-type labels only, recomputed only when the
@@ -847,6 +846,19 @@ export class LabelManagerOverlayComponent {
     this.action$.emit({ type: 'resolveLinkedList', address: entry.address, nextOffset: entry.nodeNextOffset });
   }
 
+  onToggleDynamic(entry: LabelManagerEntry): void {
+    const updated: LabelManagerEntry = { ...entry, dynamic: entry.dynamic ? undefined : true };
+    // Optimistic local update so the toggle feels instant.
+    const set = this.currentSet();
+    if (set) {
+      this.currentSet.set({
+        ...set,
+        entries: set.entries.map(e => e.address === entry.address ? updated : e),
+      });
+    }
+    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
+  }
+
   onSave(): void {
     const addr = this.editAddress().trim();
     const name = this.editName().trim();
@@ -896,8 +908,7 @@ export class LabelManagerOverlayComponent {
   }
 
   triggerImport(): void {
-    const inp = document.getElementById('lm-file-input') as HTMLInputElement | null;
-    inp?.click();
+    this._fileInputRef()?.nativeElement?.click();
   }
 
   onFileSelected(event: Event): void {

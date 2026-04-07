@@ -1,0 +1,47 @@
+/*
+ * Label Manager full-page (tab) layout overrides.
+ *
+ * The overlay component was designed as a centered modal dialog.  When it runs
+ * inside its own standalone VS Code tab we override those modal styles so it
+ * fills the entire viewport instead.
+ */
+
+/* Import the shared disasm-editor CSS that owns all .lm-* rule definitions. */
+@import '../disasm-editor/disasm-editor.css';
+
+/* Override the fixed-position modal backdrop */
+#lm-overlay {
+    display: flex !important;   /* always visible */
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* Make the box fill the full page */
+#lm-box {
+    width: 100% !important;
+    max-height: 100vh !important;
+    height: 100vh;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-top: none !important;
+}
+
+/* Hide the close (×) button — VS Code's tab provides the close action */
+.lm-close-btn { display: none !important; }
+
+/* Ensure html/body fill the full viewport with no scrollbar */
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #1e1e1e;
+}
