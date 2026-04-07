@@ -3451,24 +3451,32 @@ app-bottom-panel {
 .lm-col-name    { width: 200px; }
 .lm-col-comment { width: auto; }
 .lm-col-members { width: 110px; }
-.lm-col-actions { width: 70px; text-align: right; }
+.lm-col-live    { width: 100px; font-family: monospace; font-size: 11px; color: #9cdcfe; }
+.lm-col-actions { width: 90px; text-align: right; }
 
 /* Hidden row — dim the text to signal the entry is suppressed */
 .lm-hidden-row td { opacity: 0.45; }
 .lm-hidden-row .lm-vis-btn { opacity: 1 !important; }
 
+/* Eye SVG icon inside visibility buttons */
+.lm-eye-icon { width: 14px; height: 11px; vertical-align: middle; pointer-events: none; display: inline-block; }
+
 .lm-vis-btn {
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 13px;
     line-height: 1;
-    padding: 2px;
-    opacity: 0.65;
+    padding: 2px 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #e0e0e0;
+    transition: color 0.1s;
 }
-.lm-vis-btn:hover { opacity: 1; }
-.lm-vis-btn:disabled { cursor: default; opacity: 0.3; }
-.lm-vis-all-btn { font-size: 12px; }
+/* Hidden state — dark icon */
+.lm-vis-btn.lm-is-hidden { color: #555; }
+.lm-vis-btn:hover { color: #fff !important; }
+.lm-vis-btn:disabled { cursor: default; color: #3a3a3a !important; }
 
 /* Tree expand/collapse button */
 .lm-expand-btn {
@@ -3527,6 +3535,15 @@ app-bottom-panel {
     font-size: 12px;
 }
 .lm-row-btn:hover { color: #ccc; }
+.lm-goto-btn { color: #569cd6; }
+.lm-goto-btn:hover { color: #9cdcfe !important; }
+
+/* Live value display */
+.lm-live-value { font-family: monospace; color: #9cdcfe; font-size: 11px; }
+.lm-live-value-dim { color: #555; font-size: 11px; font-style: italic; }
+
+/* Dynamic toggle in form */
+.lm-form-check { display: flex; align-items: center; gap: 6px; accent-color: #569cd6; cursor: pointer; }
 
 /* Add / Edit form */
 #lm-edit-form {
