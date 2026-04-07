@@ -13,6 +13,22 @@ namespace CodeDesigner.Ps2.Bridge
 
         static async Task Main(string[] args)
         {
+            try
+            {
+                await RunAsync(args);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("=== FATAL ERROR ===");
+                Console.Error.WriteLine(ex.ToString());
+                Console.Error.WriteLine("===================");
+                Environment.Exit(1);
+            }
+        }
+
+        private static async Task RunAsync(string[] args)
+        {
             Console.WriteLine(@"  ___         _     ___         _                   
  / __|___  __| |___|   \ ___ __(_)__ _ _ _  ___ _ _ 
 | (__/ _ \/ _` / -_) |) / -_|_-< / _` | ' \/ -_) '_|
