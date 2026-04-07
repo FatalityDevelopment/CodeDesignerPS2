@@ -1,10 +1,6 @@
-using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.McpServer;
-using CodeDesigner.Ps2.McpServer.Prompts;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -15,9 +11,9 @@ public sealed partial class CodeDesignerPs2Tools
     // Symbol / debug info (PINE mode)
     // -------------------------------------------------------------------------
 
-    [McpServerTool(Name = "get_symbol")]
-    [DynamicDescription("get_symbol_desc")]
-    public async Task<string> GetSymbol(
+    [McpServerTool(Name = "pcsx2_get_symbol")]
+    [Description("Look up the EE function symbol name for a given virtual address via PINE. Only available when PCSX2 has a symbol database loaded.")]
+    public async Task<string> Pcsx2GetSymbol(
         [Description("Virtual EE address to look up (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
     {
@@ -40,9 +36,9 @@ public sealed partial class CodeDesignerPs2Tools
         catch { return json; }
     }
 
-    [McpServerTool(Name = "get_symbol_by_name")]
-    [DynamicDescription("get_symbol_by_name_desc")]
-    public async Task<string> GetSymbolByName(
+    [McpServerTool(Name = "pcsx2_get_symbol_by_name")]
+    [Description("Look up an EE symbol address and size by its demangled name via PINE. Only available when PCSX2 has a symbol database loaded.")]
+    public async Task<string> Pcsx2GetSymbolByName(
         [Description("Demangled symbol name to look up.")] string symbolName,
         CancellationToken cancellationToken = default)
     {
@@ -61,9 +57,9 @@ public sealed partial class CodeDesignerPs2Tools
         catch { return json; }
     }
 
-    [McpServerTool(Name = "get_call_stack")]
-    [DynamicDescription("get_call_stack_desc")]
-    public async Task<string> GetCallStack(CancellationToken cancellationToken)
+    [McpServerTool(Name = "pcsx2_get_call_stack")]
+    [Description("Walk the EE call stack and return each frame's entry point, current PC, stack pointer, and resolved symbol name (if available).")]
+    public async Task<string> Pcsx2GetCallStack(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETSTACK" }, cancellationToken);
         try
@@ -96,9 +92,9 @@ public sealed partial class CodeDesignerPs2Tools
     // IOP threads and modules (PINE mode)
     // -------------------------------------------------------------------------
 
-    [McpServerTool(Name = "get_iop_threads")]
-    [DynamicDescription("get_iop_threads_desc")]
-    public async Task<string> GetIopThreads(CancellationToken cancellationToken)
+    [McpServerTool(Name = "pcsx2_get_iop_threads")]
+    [Description("List all IOP (I/O Processor) OS threads via the PINE socket. Returns thread ID, status, priority, and entry point for each thread.")]
+    public async Task<string> Pcsx2GetIopThreads(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETIOPTHREADS" }, cancellationToken);
         try
@@ -127,9 +123,9 @@ public sealed partial class CodeDesignerPs2Tools
         catch { return json; }
     }
 
-    [McpServerTool(Name = "get_modules")]
-    [DynamicDescription("get_modules_desc")]
-    public async Task<string> GetModules(CancellationToken cancellationToken)
+    [McpServerTool(Name = "pcsx2_get_modules")]
+    [Description("List all loaded IOP modules (IRX files) via the PINE socket. Returns name, version, start address, and size for each module.")]
+    public async Task<string> Pcsx2GetModules(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETMODULES" }, cancellationToken);
         try
@@ -161,9 +157,9 @@ public sealed partial class CodeDesignerPs2Tools
     // Fine-grained register access (PINE mode)
     // -------------------------------------------------------------------------
 
-    [McpServerTool(Name = "pine_get_register")]
-    [DynamicDescription("pine_get_register_desc")]
-    public async Task<string> PineGetRegister(
+    [McpServerTool(Name = "pcsx2_get_register")]
+    [Description("Read any EE or IOP CPU register by category and index via the PINE socket. Returns the 64-bit or 128-bit value depending on register type.")]
+    public async Task<string> Pcsx2GetRegister(
         [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
         [Description("Register category (see tool description).")] byte registerCategory,
         [Description("Register index within the category.")] int registerIndex,
@@ -185,11 +181,11 @@ public sealed partial class CodeDesignerPs2Tools
         catch { return json; }
     }
 
-    [McpServerTool(Name = "pine_set_register")]
-    [DynamicDescription("pine_set_register_desc")]
-    public async Task<string> PineSetRegister(
+    [McpServerTool(Name = "pcsx2_set_register")]
+    [Description("Write any EE or IOP CPU register by category and index via the PINE socket. The value is supplied as a 64-bit unsigned integer.")]
+    public async Task<string> Pcsx2SetRegister(
         [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
-        [Description("Register category (see pine_get_register description).")] byte registerCategory,
+        [Description("Register category (see pcsx2_get_register description).")] byte registerCategory,
         [Description("Register index within the category.")] int registerIndex,
         [Description("New value as a hex string (up to 32 hex chars = 128 bits, little-endian).")] string registerValue,
         CancellationToken cancellationToken = default)
@@ -204,9 +200,9 @@ public sealed partial class CodeDesignerPs2Tools
     // PCSX2 symbol database (PINE mode)
     // -------------------------------------------------------------------------
 
-    [McpServerTool(Name = "list_functions")]
-    [DynamicDescription("list_functions_desc")]
-    public async Task<string> ListFunctions(
+    [McpServerTool(Name = "pcsx2_list_functions")]
+    [Description("Retrieve a paginated list of EE function symbols from the PCSX2 symbol database via PINE. Returns function name, address, and size.")]
+    public async Task<string> Pcsx2ListFunctions(
         [Description("Pagination offset (0-based index of the first result to return).")] uint offset = 0,
         [Description("Maximum number of results to return (1–65535, default 256).")] ushort maxCount = 256,
         CancellationToken cancellationToken = default)
@@ -217,9 +213,9 @@ public sealed partial class CodeDesignerPs2Tools
         return FormatPineSymbols(json, "Functions", "PineSymbols");
     }
 
-    [McpServerTool(Name = "list_globals")]
-    [DynamicDescription("list_globals_desc")]
-    public async Task<string> ListGlobals(
+    [McpServerTool(Name = "pcsx2_list_globals")]
+    [Description("Retrieve a paginated list of EE global variable symbols from the PCSX2 symbol database via PINE. Returns variable name, address, and size.")]
+    public async Task<string> Pcsx2ListGlobals(
         [Description("Pagination offset (0-based index of the first result to return).")] uint offset = 0,
         [Description("Maximum number of results to return (1–65535, default 256).")] ushort maxCount = 256,
         CancellationToken cancellationToken = default)
@@ -230,9 +226,9 @@ public sealed partial class CodeDesignerPs2Tools
         return FormatPineSymbols(json, "Globals", "PineSymbols");
     }
 
-    [McpServerTool(Name = "get_locals")]
-    [DynamicDescription("get_locals_desc")]
-    public async Task<string> GetLocals(
+    [McpServerTool(Name = "pcsx2_get_locals")]
+    [Description("List the parameters and local variables for the EE function that contains a given virtual address. Uses DWARF debug information loaded by PCSX2.")]
+    public async Task<string> Pcsx2GetLocals(
         [Description("Virtual EE address inside the function whose locals should be retrieved (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
     {
@@ -268,9 +264,9 @@ public sealed partial class CodeDesignerPs2Tools
     // PINE live disassembly
     // -------------------------------------------------------------------------
 
-    [McpServerTool(Name = "pine_disassemble")]
-    [DynamicDescription("pine_disassemble_desc")]
-    public async Task<string> PineDisassemble(
+    [McpServerTool(Name = "pcsx2_disassemble")]
+    [Description("Disassemble instructions at a given address on EE or IOP via the PINE live-memory interface. Returns a block of disassembled instructions.")]
+    public async Task<string> Pcsx2Disassemble(
         [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of instructions to disassemble (1–1000, default 32).")] ushort count = 32,
@@ -308,17 +304,17 @@ public sealed partial class CodeDesignerPs2Tools
     // Direct PINE protocol commands (PINE mode)
     // -------------------------------------------------------------------------
 
-    [McpServerTool(Name = "pine_version")]
-    [DynamicDescription("pine_version_desc")]
-    public async Task<string> PineVersion(CancellationToken cancellationToken)
+    [McpServerTool(Name = "pcsx2_version")]
+    [Description("Query the PINE IPC protocol version string from PCSX2. Useful for checking that the connected PCSX2 build supports required features.")]
+    public async Task<string> Pcsx2Version(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "PINEVERSION" }, cancellationToken);
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "pine_save_state_slot")]
-    [DynamicDescription("pine_save_state_slot_desc")]
-    public async Task<string> PineSaveStateSlot(
+    [McpServerTool(Name = "pcsx2_save_state_slot")]
+    [Description("Save the current PCSX2 emulator state to a numbered save-state slot (0–9) via PINE. Slots are persistent across PCSX2 sessions.")]
+    public async Task<string> Pcsx2SaveStateSlot(
         [Description("Save-state slot index (0–9).")] byte slot,
         CancellationToken cancellationToken = default)
     {
@@ -326,9 +322,9 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "pine_load_state_slot")]
-    [DynamicDescription("pine_load_state_slot_desc")]
-    public async Task<string> PineLoadStateSlot(
+    [McpServerTool(Name = "pcsx2_load_state_slot")]
+    [Description("Load a PCSX2 save-state from a numbered slot (0–9) via PINE. Unlike pcsx2_load_state_file, slot-based saves are managed entirely by PCSX2.")]
+    public async Task<string> Pcsx2LoadStateSlot(
         [Description("Save-state slot index (0–9).")] byte slot,
         CancellationToken cancellationToken = default)
     {
@@ -336,13 +332,13 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
-    // ── PINE hardware watchpoints (MsgAddWatch/RemoveWatch/ListWatches/ClearAllWatches) ──
+    // ── PINE hardware watchpoints ──────────────────────────────────────────────
 
-    [McpServerTool(Name = "pine_add_watch")]
+    [McpServerTool(Name = "pcsx2_add_watch")]
     [Description("Add a hardware memory watchpoint in PCSX2 via the PINE protocol (opcode 0x2E). " +
                  "Backed by CBreakPoints MemCheck (MEMCHECK_BREAK). JIT-only — no effect under the interpreter or HLE. " +
                  "PINE mode required (connect to PCSX2 with PINE enabled).")]
-    public async Task<string> PineAddWatch(
+    public async Task<string> Pcsx2AddWatch(
         [Description("Inclusive start address of the memory range to watch (hex or decimal).")] string start,
         [Description("Exclusive end address of the memory range to watch (hex or decimal).")] string end,
         [Description("Condition bitmask: 1 = read, 2 = write, 3 = read+write (default 3).")] byte cond = 3,
@@ -361,10 +357,10 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "pine_remove_watch")]
+    [McpServerTool(Name = "pcsx2_remove_watch")]
     [Description("Remove a hardware memory watchpoint from PCSX2 via the PINE protocol (opcode 0x2F). " +
                  "Returns an error if no matching range is found. PINE mode required.")]
-    public async Task<string> PineRemoveWatch(
+    public async Task<string> Pcsx2RemoveWatch(
         [Description("Inclusive start address of the range to remove (hex or decimal).")] string start,
         [Description("Exclusive end address of the range to remove (hex or decimal).")] string end,
         [Description("CPU the watchpoint was registered on: 0 = EE (default), 1 = IOP.")] byte cpu = 0,
@@ -381,10 +377,10 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "pine_list_watches")]
+    [McpServerTool(Name = "pcsx2_list_watches")]
     [Description("List all active hardware memory watchpoints in PCSX2 via the PINE protocol (opcode 0x30). " +
                  "Each entry shows CPU, start address, end address, and condition. PINE mode required.")]
-    public async Task<string> PineListWatches(
+    public async Task<string> Pcsx2ListWatches(
         [Description("CPU filter: 0 = EE only, 1 = IOP only, 255 = both (default).")] byte cpuSel = 0xFF,
         CancellationToken cancellationToken = default)
     {
@@ -420,21 +416,167 @@ public sealed partial class CodeDesignerPs2Tools
         catch { return json; }
     }
 
-    [McpServerTool(Name = "pine_clear_all_watches")]
+    [McpServerTool(Name = "pcsx2_clear_all_watches")]
     [Description("Clear all active hardware memory watchpoints on all CPUs in PCSX2 via the PINE protocol (opcode 0x31). " +
                  "PINE mode required.")]
-    public async Task<string> PineClearAllWatches(CancellationToken cancellationToken = default)
+    public async Task<string> Pcsx2ClearAllWatches(CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(new { Command = "PINECLEARALLWATCHES" }, cancellationToken);
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "pine_save_screenshot")]
+    [McpServerTool(Name = "pcsx2_save_screenshot")]
     [Description("Take a screenshot of the game's screen in PCSX2 via the PINE protocol (opcode 0x32). " +
                  "PINE mode required. PCSX2 saves the screenshot to its configured screenshots directory.")]
-    public async Task<string> PineSaveScreenshot(CancellationToken cancellationToken = default)
+    public async Task<string> Pcsx2SaveScreenshot(CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(new { Command = "PINESAVESCREENSHOT" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Emulator reset (moved from EmulatorState.cs)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "pcsx2_reset")]
+    [Description("Send a CPU reset signal to the PS2 emulator (PINE) or reset the internal scheduler. Restarts game execution without reloading the BIOS ROM.")]
+    public async Task<string> Pcsx2Reset(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "RESET" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Framerate / limiter / frame advance (PINE mode, moved from EmulatorState.cs)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "pcsx2_get_fps")]
+    [Description("Read the current emulated framerate from PCSX2 via the PINE socket. Only available in PINE mode with a game running.")]
+    public async Task<string> Pcsx2GetFps(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETFPS" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (root.TryGetProperty("FPS", out var fps))
+                return $"FPS: {fps.GetSingle():F2}";
+            return SimpleMessage(json);
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "pcsx2_set_limiter_mode")]
+    [Description("Set the PCSX2 speed limiter mode via the PINE socket. mode: 0=Nominal (default 60 fps), 1=Limit, 2=Turbo, 3=Slow-motion.")]
+    public async Task<string> Pcsx2SetLimiterMode(
+        [Description("Limiter mode: 0=Nominal, 1=Turbo, 2=Slomo, 3=Unlimited.")] byte mode,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "SETLIMITER", LimiterMode = mode }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pcsx2_frame_advance")]
+    [Description("Advance the PCSX2 emulator by a fixed number of video frames then pause. Useful for frame-by-frame analysis of game animations or timing-sensitive behaviour.")]
+    public async Task<string> Pcsx2FrameAdvance(
+        [Description("Number of frames to advance (1–255).")] byte frameCount,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "FRAMEADVANCE", FrameCount = frameCount }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    // -------------------------------------------------------------------------
+    // Step variants and breakpoint listing (moved from Execution.cs)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "pcsx2_step_into")]
+    [Description("Step into the next PS2 EE instruction (follows calls into subroutines). In PINE/PCSX2 mode this issues a CPU step via the PINE debug interface.")]
+    public async Task<string> Pcsx2StepInto(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "STEPINTO" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pcsx2_step_over")]
+    [Description("Step over the next PS2 EE instruction (skips into subroutines, executing them fully). Sets a temporary breakpoint at PC+8 (after the delay slot) and resumes.")]
+    public async Task<string> Pcsx2StepOver(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "STEPOVER" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pcsx2_step_out")]
+    [Description("Step out of the current PS2 EE subroutine, running until the next return instruction (JR $ra) or equivalent.")]
+    public async Task<string> Pcsx2StepOut(CancellationToken cancellationToken)
+    {
+        var json = await bridge.SendAsync(new { Command = "STEPOUT" }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pcsx2_list_breakpoints")]
+    [Description("List all active PC breakpoints set in PCSX2 via the PINE socket. cpuSel: 0=EE only (default), 1=IOP only, 2=both.")]
+    public async Task<string> Pcsx2ListBreakpoints(
+        [Description("CPU selector: 0=EE, 1=IOP, 255=both (default).")] byte cpuSel = 0xFF,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "LISTBP", CpuSel = cpuSel }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("Breakpoints", out var arr))
+                return SimpleMessage(json);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== Active Breakpoints ===");
+            foreach (var item in arr.EnumerateArray())
+            {
+                string addr    = item.TryGetProperty("address", out var a) ? (a.GetString() ?? "?") : "?";
+                bool   enabled = item.TryGetProperty("enabled", out var e) && e.GetBoolean();
+                string cpu     = item.TryGetProperty("cpu",     out var c) ? (c.GetString() ?? "?") : "?";
+                sb.AppendLine($"  {addr}  [{cpu}]  {(enabled ? "enabled" : "disabled")}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no breakpoints)";
+        }
+        catch { return json; }
+    }
+
+    // -------------------------------------------------------------------------
+    // Save-state file management (moved from Snapshots.cs)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "pcsx2_save_state_file")]
+    [Description("Save the current PCSX2 emulator state to a named file path via the PINE socket. The resulting .p2s file can be loaded with pcsx2_load_state_file.")]
+    public async Task<string> Pcsx2SaveStateFile(
+        [Description("Absolute file path where the save state should be written (e.g. '/saves/slot1.p2s').")] string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "SAVESTATETOFILE", FilePath = filePath }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pcsx2_load_state_file")]
+    [Description("Load a PCSX2 save-state file (.p2s) into the running emulator via the PINE socket. Restores CPU registers, memory, and hardware state.")]
+    public async Task<string> Pcsx2LoadStateFile(
+        [Description("Absolute path to the .p2s save-state file to load.")] string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "LOADSTATEFROMFILE", FilePath = filePath }, cancellationToken);
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "pcsx2_extract_p2s")]
+    [Description("Extract the memory dump files (EEmem.bin, IOPmem.bin) from a PCSX2 .p2s save-state archive to a directory for offline analysis.")]
+    public async Task<string> Pcsx2ExtractP2s(
+        [Description("Absolute path to the .p2s PCSX2 save-state file to extract.")] string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "EXTRACTP2S", FilePath = filePath }, cancellationToken);
         return SimpleMessage(json);
     }
 }

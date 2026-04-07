@@ -1,10 +1,6 @@
-using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.McpServer;
-using CodeDesigner.Ps2.McpServer.Prompts;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -16,7 +12,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_labels")]
-    [DynamicDescription("get_labels_desc")]
+    [Description("Return all symbol labels (with type badges) from the active label set. Useful for reviewing previously annotated addresses before continuing analysis.")]
     public async Task<string> GetLabels(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETLABELS" }, cancellationToken);
@@ -24,7 +20,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_function_labels")]
-    [DynamicDescription("get_function_labels_desc")]
+    [Description("Return only Function-typed labels from the active label set, including named argument and return register annotations for each function.")]
     public async Task<string> GetFunctionLabels(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETLABELS" }, cancellationToken);
@@ -61,7 +57,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "add_label")]
-    [DynamicDescription("add_label_desc")]
+    [Description("Insert or update a label entry in the active label set. Supports all label types: Address, Function, Struct, Array, ArrayOfPointers, LinkedList, String.")]
     public async Task<string> AddLabel(
         [Description("Virtual address to label (hex or decimal).")] string address,
         [Description("Label name (e.g. 'scePadRead').")] string label,
@@ -100,7 +96,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "delete_label")]
-    [DynamicDescription("delete_label_desc")]
+    [Description("Remove a symbol label from the active label set. Changes are persisted to disk immediately.")]
     public async Task<string> DeleteLabel(
         [Description("Virtual address of the label to remove (hex or decimal).")] string address,
         CancellationToken cancellationToken = default)
@@ -117,7 +113,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "resolve_strings")]
-    [DynamicDescription("resolve_strings_desc")]
+    [Description("Read each String-typed label's memory content from live PCSX2 (PINE mode) and update the label value with the null-terminated ASCII string found at that address.")]
     public async Task<string> ResolveStrings(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "RESOLVESTRINGS" }, cancellationToken);
@@ -125,7 +121,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "resolve_linked_list")]
-    [DynamicDescription("resolve_linked_list_desc")]
+    [Description("Walk a linked list in live PCSX2 memory starting from the given address, using node size and next-pointer offset from the corresponding LinkedList label.")]
     public async Task<string> ResolveLinkedList(
         [Description("Virtual address of the first node (hex or decimal).")] string address,
         [Description("Byte offset within each node of the next-node pointer (e.g. 0 or 4).")] int nextOffset,
@@ -163,7 +159,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_structs")]
-    [DynamicDescription("get_structs_desc")]
+    [Description("Return all user-defined PS2 memory struct definitions stored on the server. Each struct has a name, base address, and a list of typed member fields.")]
     public async Task<string> GetStructs(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETSTRUCTS" }, cancellationToken);
@@ -198,7 +194,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "add_struct")]
-    [DynamicDescription("add_struct_desc")]
+    [Description("Create or update a named PS2 memory struct definition with a base address. Use add_struct_member to add fields after creating the struct.")]
     public async Task<string> AddStruct(
         [Description("Unique name for this struct (e.g. 'PlayerState').")] string structName,
         [Description("Base address of the struct in EE memory (hex or decimal, e.g. '0x80200000').")] string baseAddress,
@@ -211,7 +207,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "delete_struct")]
-    [DynamicDescription("delete_struct_desc")]
+    [Description("Remove a named PS2 memory struct definition. Works in both internal emulator and PINE/PCSX2 modes.")]
     public async Task<string> DeleteStruct(
         [Description("Name of the struct to delete.")] string structName,
         CancellationToken cancellationToken = default)
@@ -223,7 +219,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "add_struct_member")]
-    [DynamicDescription("add_struct_member_desc")]
+    [Description("Add or update a named member field in an existing PS2 memory struct definition. Members have an offset, a data type, and an optional count for array fields.")]
     public async Task<string> AddStructMember(
         [Description("Name of the struct to add the member to.")] string structName,
         [Description("Byte offset of the member within the struct (e.g. 0 for the first field).")] int memberOffset,

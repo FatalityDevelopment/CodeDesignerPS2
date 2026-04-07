@@ -2,9 +2,9 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.McpServer;
-using CodeDesigner.Ps2.McpServer.Prompts;
+
+
+
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -16,7 +16,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "read_memory")]
-    [DynamicDescription("read_memory_desc")]
+    [Description("Read raw bytes from the live PS2 emulator memory and return them as hex. Requires the emulator to be running with the socket server enabled. Address may be supplied in hex (0x prefix) or decimal.")]
     public async Task<string> ReadMemory(
         [Description("Virtual address to read from (hex or decimal).")] string address,
         [Description("Number of bytes to read (1–65536, default 256).")] int length = 256,
@@ -35,7 +35,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "write_memory")]
-    [DynamicDescription("write_memory_desc")]
+    [Description("Write arbitrary bytes to live PS2 emulator memory. Bytes are supplied as a hex string (e.g. '27BDFFD0'). Requires the emulator to be running with the socket server enabled.")]
     public async Task<string> WriteMemory(
         [Description("Virtual address to write to (hex or decimal).")] string address,
         [Description("Hex-encoded bytes to write, e.g. '27BD FFD0 AFBF 001C' or '0x27,0xBD,0xFF,0xD0'.")] string hexData,
@@ -54,7 +54,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "load_bin")]
-    [DynamicDescription("load_bin_desc")]
+    [Description("Load a binary file from disk directly into live emulator memory at a specified address. Useful for injecting custom code or data patches into a running game.")]
     public async Task<string> LoadBin(
         [Description("Absolute path to the binary file to load.")] string filePath,
         [Description("Virtual address to load the binary data to (hex or decimal).")] string address,
@@ -73,7 +73,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "disassemble_memory")]
-    [DynamicDescription("disassemble_memory_desc")]
+    [Description("Read bytes from the live PS2 emulator and disassemble them to MIPS64 EE assembly text. Combines read_memory and disassemble in a single call.")]
     public async Task<string> DisassembleMemory(
         [Description("Virtual start address (hex or decimal).")] string address,
         [Description("Number of instructions to disassemble (default 32).")] int count = 32,
@@ -130,7 +130,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "read_memory_region")]
-    [DynamicDescription("read_memory_region_desc")]
+    [Description("Read a contiguous region of EE RAM in one call and optionally search for a byte pattern within it. Returns the region as base64 and any pattern match offsets.")]
     public async Task<string> ReadMemoryRegion(
         [Description("Inclusive start virtual EE address (hex or decimal).")] string startAddress,
         [Description("Exclusive end virtual EE address (hex or decimal). Must be greater than startAddress.")] string endAddress,
@@ -217,7 +217,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "scan_pattern")]
-    [DynamicDescription("scan_pattern_desc")]
+    [Description("Scan live EE RAM (or IOP RAM) for a byte pattern and return all matching addresses. Supports wildcards in the pattern for flexible signature scanning.")]
     public async Task<string> ScanPattern(
         [Description("Byte pattern to search for — comma-separated values (decimal or 0x-hex), e.g. '0x4D,0x57,0x6F,0x33'.")] string searchPattern,
         [Description("Inclusive start address (hex or decimal). Omit or use '0' to start from the beginning of the region.")] string startAddress = "0",

@@ -1,10 +1,6 @@
-using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.McpServer;
-using CodeDesigner.Ps2.McpServer.Prompts;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -16,7 +12,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_progress_reports")]
-    [DynamicDescription("list_progress_reports_desc")]
+    [Description("List all progress reports stored in the database. Call this at the start of a session to check for reports from previous sessions.")]
     public async Task<string> ListProgressReports(CancellationToken cancellationToken = default)
     {
         var names = await db.ListMemoriesAsync(cancellationToken);
@@ -31,7 +27,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_progress_report")]
-    [DynamicDescription("get_progress_report_desc")]
+    [Description("Read a previously saved progress report from the database. Load this at the start of a session to resume work from where it was left off.")]
     public async Task<string> GetProgressReport(
         [Description(
             "The report name as returned by list_progress_reports " +
@@ -52,7 +48,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "save_progress_report")]
-    [DynamicDescription("save_progress_report_desc")]
+    [Description("Create or overwrite a progress report in the database. The name should be a short identifier for the current task (e.g. 'god-of-war-health').")]
     public async Task<string> SaveProgressReport(
         [Description(
             "Short unique name for this report. Use hyphens as separators. " +
@@ -76,7 +72,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "delete_progress_report")]
-    [DynamicDescription("delete_progress_report_desc")]
+    [Description("Delete a progress report from the database. Use only when a task is fully complete and the report is no longer needed.")]
     public async Task<string> DeleteProgressReport(
         [Description("The report name to delete (as returned by list_progress_reports).")] string name,
         CancellationToken cancellationToken = default)
@@ -99,7 +95,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_setting")]
-    [DynamicDescription("get_setting_desc")]
+    [Description("Read a single application setting from the database by key. Well-known keys include 'BiosPath', 'DiscPath', and 'ui.selectedGame'.")]
     public async Task<string> GetSetting(
         [Description("Setting key to retrieve (e.g. 'BiosPath', 'DiscPath', 'ui.selectedGame').")] string key,
         CancellationToken cancellationToken = default)
@@ -109,7 +105,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "set_setting")]
-    [DynamicDescription("set_setting_desc")]
+    [Description("Insert or update an application setting in the database. Pass an empty string as value to clear the setting without deleting its key.")]
     public async Task<string> SetSetting(
         [Description("Setting key to insert or update (e.g. 'BiosPath', 'ui.selectedGame').")] string key,
         [Description("Value to store. Pass an empty string to clear the value.")] string value,
@@ -122,7 +118,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_all_settings")]
-    [DynamicDescription("get_all_settings_desc")]
+    [Description("Return all application settings from the database as a key=value list. Optionally supply a prefix (e.g. 'ui.') to filter to a specific category.")]
     public async Task<string> GetAllSettings(
         [Description("Optional key prefix to filter results (e.g. 'ui.' returns only UI settings). Leave blank for all settings.")] string? prefix = null,
         CancellationToken cancellationToken = default)
@@ -159,7 +155,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "delete_setting")]
-    [DynamicDescription("delete_setting_desc")]
+    [Description("Remove an application setting from the database by key.")]
     public async Task<string> DeleteSetting(
         [Description("Setting key to remove (e.g. 'ui.selectedGame').")] string key,
         CancellationToken cancellationToken = default)
@@ -175,7 +171,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_nav_history")]
-    [DynamicDescription("get_nav_history_desc")]
+    [Description("Return the server-side navigation history: the list of EE addresses recently visited by navigate_to calls during the current session.")]
     public async Task<string> GetNavHistory(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETNAVHISTORY" }, cancellationToken);
@@ -208,7 +204,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "clear_nav_history")]
-    [DynamicDescription("clear_nav_history_desc")]
+    [Description("Clear the server-side navigation history. Works in both internal emulator and PINE/PCSX2 modes.")]
     public async Task<string> ClearNavHistory(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "CLEARNAVHISTORY" }, cancellationToken);
@@ -216,7 +212,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "navigate_to")]
-    [DynamicDescription("navigate_to_desc")]
+    [Description("Tell the VS Code disasm editor to jump to a specific EE virtual address. When the editor is open, the view scrolls to and highlights the given address.")]
     public async Task<string> NavigateTo(
         [Description("EE virtual address to navigate to (hex or decimal, e.g. '0x8054ABCD').")] string address,
         CancellationToken cancellationToken = default)
@@ -235,7 +231,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_address_snapshot_history")]
-    [DynamicDescription("get_address_snapshot_history_desc")]
+    [Description("Read the historical 4-byte value at a specific EE virtual address across every memory snapshot saved to the snapshot directory. Useful for tracking value changes over time.")]
     public async Task<string> GetAddressSnapshotHistory(
         [Description("EE virtual address to look up (hex or decimal, e.g. '0x80200000').")] string address,
         [Description("Root directory to scan for snapshots (e.g. '/workspace/snapshots/SOCOM2/').")] string snapshotDir,

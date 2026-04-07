@@ -55,18 +55,6 @@ var dbOptions = new DbContextOptionsBuilder<CodeDesignerDbContext>()
     .UseSqlite($"Data Source={dbPath}")
     .Options;
 
-// Populate the in-process store so [DynamicDescription] attributes resolve
-// correctly when the MCP SDK reflects over tool methods during registration.
-await using (var bootstrapDb = new CodeDesignerDbContext(dbOptions))
-{
-    var descriptions = await bootstrapDb.McpConfigs
-        .Where(c => c.Key.EndsWith("_desc"))
-        .Select(c => new KeyValuePair<string, string>(c.Key, c.Value ?? c.Key))
-        .ToListAsync();
-
-    ToolDescriptionStore.Load(descriptions);
-}
-
 // Register the socket bridge client as a singleton so all tools share it.
 // Construct the instance via factory so the DI container does not attempt to
 // resolve primitive constructor parameters (string, int) which would fail.

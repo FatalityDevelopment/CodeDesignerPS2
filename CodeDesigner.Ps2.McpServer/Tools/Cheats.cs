@@ -1,10 +1,5 @@
-using System.Buffers.Binary;
 using System.ComponentModel;
-using System.Text;
-using System.Text.Json;
 using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.McpServer;
-using CodeDesigner.Ps2.McpServer.Prompts;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -16,7 +11,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "apply_cheats")]
-    [DynamicDescription("apply_cheats_desc")]
+    [Description("Apply PS2 GameShark/Action Replay cheat codes to the live emulator memory. Parse and execute a block of cheat codes against the running game.")]
     public async Task<string> ApplyCheats(
         [Description("Multi-line GameShark/Action Replay cheat codes in raw format (e.g. '20123456 000003E8').")] string cheatCodes,
         CancellationToken cancellationToken = default)
@@ -29,7 +24,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "port_cheats")]
-    [DynamicDescription("port_cheats_desc")]
+    [Description("Port PS2 GameShark cheat codes from one game revision to another by scanning two memory dumps for matching byte patterns and recalculating addresses.")]
     public async Task<string> PortCheats(
         [Description("Multi-line GameShark cheat codes to port (raw format).")] string cheatCodes,
         [Description("Absolute path to the source EE RAM dump (.bin file, typically EEmem.bin from a snapshot).")] string sourceDumpPath,
@@ -48,7 +43,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "detect_cheat_format")]
-    [DynamicDescription("detect_cheat_format_desc")]
+    [Description("Heuristically detect the encryption format of a block of PS2 cheat codes. Returns the most likely format (Raw, CodeBreaker, GameShark, etc.).")]
     public Task<string> DetectCheatFormat(
         [Description("Multi-line block of PS2 cheat codes whose format should be identified.")] string codes)
     {
@@ -67,7 +62,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "convert_cheat")]
-    [DynamicDescription("convert_cheat_desc")]
+    [Description("Convert PS2 cheat codes between the unencrypted raw format and a device-specific encrypted format (CodeBreaker, GameShark, Action Replay).")]
     public Task<string> ConvertCheat(
         [Description("Multi-line block of PS2 cheat codes to convert.")] string codes,
         [Description("Conversion direction: 'toRaw' (decrypt to raw hex) or 'toEngine' (encrypt to device format).")] string direction,
