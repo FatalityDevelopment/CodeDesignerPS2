@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { getOutputChannel } from '../../extension';
-import { SocketClient, McpAgentInfo, McpMemoryInfo } from '../../socketClient';
+import { SocketClient, McpAgentInfo, McpMemoryInfo, McpOrchestrationInfo } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { McpMemoryEditorProvider } from '../mcpMemoryEditor/mcpMemoryEditorProvider';
 
@@ -56,8 +56,9 @@ export class AiConfigProvider {
 
         switch (type) {
             case 'ready':
-                // Initial load — send agent list
+                // Initial load — send agent list and orchestration list
                 await this._sendAgentList(webview);
+                await this._sendOrchestrationList(webview);
                 break;
 
             // ── Agent CRUD ────────────────────────────────────────────────────
@@ -85,6 +86,34 @@ export class AiConfigProvider {
                 const id   = msg['id']   as number;
                 const name = msg['name'] as string;
                 await this._handleAgentExport(id, name, webview);
+                break;
+            }
+
+            // ── Orchestration CRUD ────────────────────────────────────────────
+            case 'orchestrationList':
+                await this._sendOrchestrationList(webview);
+                break;
+
+            case 'orchestrationAdd':
+                await this._handleOrchestrationAdd(msg, webview);
+                break;
+
+            case 'orchestrationUpdate':
+                await this._handleOrchestrationUpdate(msg, webview);
+                break;
+
+            case 'orchestrationDelete':
+                await this._handleOrchestrationDelete(msg['id'] as number, webview);
+                break;
+
+            case 'orchestrationImport':
+                await this._handleOrchestrationImport(webview);
+                break;
+
+            case 'orchestrationExport': {
+                const id   = msg['id']   as number;
+                const name = msg['name'] as string;
+                await this._handleOrchestrationExport(id, name, webview);
                 break;
             }
 
@@ -284,6 +313,95 @@ export class AiConfigProvider {
             webview.postMessage({ type: 'memoryActionResult', message: 'Deleted.' });
         } catch (err: any) {
             webview.postMessage({ type: 'memoryActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    // ── Orchestration handlers ────────────────────────────────────────────────
+
+    private async _sendOrchestrationList(webview: vscode.Webview): Promise<void> {
+        try {
+            const profiles = await this.socketClient.mcpOrchestrationList();
+            webview.postMessage({ type: 'orchestrationListResult', profiles });
+        } catch (err: any) {
+            webview.postMessage({ type: 'orchestrationListResult', profiles: [], error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleOrchestrationAdd(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        try {
+            const profile = await this.socketClient.mcpOrchestrationAdd({
+                name:        msg['name']        as string,
+                description: msg['description'] as string | undefined,
+                strategy:    msg['strategy']    as string | undefined,
+                roles:       msg['roles']       as string | undefined,
+                workflow:    msg['workflow']     as string | undefined,
+                rules:       msg['rules']       as string | undefined,
+                notes:       msg['notes']       as string | undefined,
+            });
+            webview.postMessage({ type: 'orchestrationActionResult', profile, message: `Created '${profile.name}'` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'orchestrationActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleOrchestrationUpdate(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        try {
+            const id      = msg['id'] as number;
+            const profile = await this.socketClient.mcpOrchestrationUpdate(id, {
+                name:        msg['name']        as string | undefined,
+                description: msg['description'] as string | undefined,
+                strategy:    msg['strategy']    as string | undefined,
+                roles:       msg['roles']       as string | undefined,
+                workflow:    msg['workflow']     as string | undefined,
+                rules:       msg['rules']       as string | undefined,
+                notes:       msg['notes']       as string | undefined,
+            });
+            webview.postMessage({ type: 'orchestrationActionResult', profile, message: `Saved '${profile.name}'` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'orchestrationActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleOrchestrationDelete(id: number, webview: vscode.Webview): Promise<void> {
+        try {
+            await this.socketClient.mcpOrchestrationDelete(id);
+            webview.postMessage({ type: 'orchestrationDeleteResult', message: 'Deleted.' });
+        } catch (err: any) {
+            webview.postMessage({ type: 'orchestrationDeleteResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleOrchestrationImport(webview: vscode.Webview): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:     true,
+            canSelectFolders:   false,
+            canSelectMany:      false,
+            filters:            { 'Markdown': ['md'] },
+            title:              'Import Orchestration Profile',
+        });
+        if (!uris || uris.length === 0) { return; }
+        try {
+            const profile = await this.socketClient.mcpOrchestrationImport(uris[0].fsPath);
+            webview.postMessage({ type: 'orchestrationActionResult', profile, message: `Imported '${profile.name}'` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'orchestrationActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleOrchestrationExport(id: number, name: string, webview: vscode.Webview): Promise<void> {
+        const safeName = name.replace(/[<>:"/\\|?*]/g, '_');
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(`${safeName}.md`),
+            filters:    { 'Markdown': ['md'] },
+            title:      `Export Orchestration Profile: ${name}`,
+        });
+        if (!uri) { return; }
+        try {
+            await this.socketClient.mcpOrchestrationExport(id, uri.fsPath);
+            webview.postMessage({ type: 'orchestrationActionResult', message: `Exported to '${path.basename(uri.fsPath)}'` });
+            vscode.window.showInformationMessage(`Orchestration profile '${name}' exported.`);
+        } catch (err: any) {
+            webview.postMessage({ type: 'orchestrationActionResult', error: err?.message ?? String(err) });
         }
     }
 
