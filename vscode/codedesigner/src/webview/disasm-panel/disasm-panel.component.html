@@ -1,10 +1,12 @@
 <app-panel-status-bar
   [isConnected]="isConnected"
   [isPaused]="isPaused"
+  [followAiEnabled]="followAiEnabled"
   (togglePause)="togglePause()"
   (step)="step()"
   (stepInto)="stepInto()"
   (stepOver)="stepOver()"
+  (controlModeChange)="onControlModeChange($event)"
 />
 
 <div id="panel-tabs">

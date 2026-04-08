@@ -357,6 +357,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'openAiConfig':
                     this._aiConfigProvider.open();
                     break;
+                // ── Follow-AI mode toggle ─────────────────────────────────
+                case 'toggleFollowAi': {
+                    const enabled = !!msg.enabled;
+                    this.editorProvider.setFollowAiEnabled(enabled);
+                    // Echo the new state back to the panel webview so the
+                    // status bar can sync its local controlMode signal.
+                    this.webview?.postMessage({ command: 'followAiState', enabled });
+                    break;
+                }
             }
         });
     }
@@ -567,6 +576,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             selectedBios: this.selectedBiosPath,
             selectedGame: this.selectedGamePath,
         });
+        // Restore Follow-AI button state (the editor provider owns the flag).
+        this.webview.postMessage({ command: 'followAiState', enabled: this.editorProvider.followAiEnabled });
     }
 
     private getHtml(webview: vscode.Webview): string {

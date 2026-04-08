@@ -6,6 +6,7 @@ import {
   output,
   computed,
   signal,
+  effect,
 } from '@angular/core';
 
 /**
@@ -36,11 +37,11 @@ import {
           <span id="emu-mode-toggle">
             <button class="mode-pill"
                     [class.mode-pill-active]="controlMode() === 'live'"
-                    (click)="controlMode.set('live')"
+                    (click)="setControlMode('live')"
                     title="Live mode: monitor emulator in real time">Live</button>
             <button class="mode-pill"
                     [class.mode-pill-active]="controlMode() === 'ai-control'"
-                    (click)="controlMode.set('ai-control')"
+                    (click)="setControlMode('ai-control')"
                     title="AI Control mode: MCP agent drives the emulator">AI</button>
           </span>
         }
@@ -79,13 +80,29 @@ import {
 export class PanelStatusBarComponent {
   readonly isConnected = input(false);
   readonly isPaused = input(false);
+  /** External follow-AI enabled state; syncs the local controlMode signal. */
+  readonly followAiEnabled = input(false);
 
   readonly togglePause = output<void>();
   readonly step = output<void>();
   readonly stepInto = output<void>();
   readonly stepOver = output<void>();
+  /** Emitted when the user clicks Live or AI mode buttons. */
+  readonly controlModeChange = output<'live' | 'ai-control'>();
 
   readonly controlMode = signal<'live' | 'ai-control'>('live');
+
+  constructor() {
+    // Keep local controlMode in sync with the external followAiEnabled input.
+    effect(() => {
+      this.controlMode.set(this.followAiEnabled() ? 'ai-control' : 'live');
+    });
+  }
+
+  setControlMode(mode: 'live' | 'ai-control'): void {
+    this.controlMode.set(mode);
+    this.controlModeChange.emit(mode);
+  }
 
   readonly statusText = computed(() => {
     if (this.isPaused()) { return '⏸ PAUSED'; }
