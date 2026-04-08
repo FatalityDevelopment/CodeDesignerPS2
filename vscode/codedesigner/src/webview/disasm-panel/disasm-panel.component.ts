@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ViewChild, ViewEncapsulation } from '@angular/core';
+import { Component, OnInit, AfterViewInit, OnDestroy, ViewChild, ViewEncapsulation } from '@angular/core';
 import { VsCodeBridgeService } from '../shared/vscode-bridge.service';
 import { Subscription } from 'rxjs';
 import {
@@ -89,7 +89,7 @@ interface Pcsx2ModeChangedMsg {
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-panel.component.html',
 })
-export class DisasmPanelComponent implements OnInit, OnDestroy {
+export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   isConnected = false;
   isPaused = false;
   isPcsx2 = false;
@@ -100,7 +100,7 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   selectedEmulator = '';
   selectedBios = '';
   selectedGame = '';
-  activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' | 'mcpMemory' = 'settings';
+  activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' = 'settings';
   /** Cheat text owned here so the CDS "Add Cheat" action can inject codes. */
   cheatText = '';
   currentGameName = '';
@@ -174,6 +174,11 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
     this.bridge.postMessage({ command: 'ready' });
   }
 
+  ngAfterViewInit(): void {
+    // Load memories list after the view (and child components) are fully initialized
+    this.mcpMemoryOverlay?.load();
+  }
+
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());
   }
@@ -198,12 +203,8 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   // ── Tab navigation ───────────────────────────────────────────────────────
 
-  setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile' | 'mcpMemory'): void {
+  setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile'): void {
     this.activeTab = tab;
-    if (tab === 'mcpMemory') {
-      // Trigger initial load when switching to the tab
-      setTimeout(() => this.mcpMemoryOverlay?.load(), 0);
-    }
   }
 
   // ── Settings tab handlers ────────────────────────────────────────────────
