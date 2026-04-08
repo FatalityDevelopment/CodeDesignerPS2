@@ -101,31 +101,91 @@ public sealed partial class CodeDesignerPs2Tools
             }
         }
 
-        // ── Orchestration plan ────────────────────────────────────────────────
+        // ── Orchestration plans ───────────────────────────────────────────────
+        var orchestrations = await db.GetAllOrchestrationsAsync(cancellationToken);
+
         sb.AppendLine();
-        sb.AppendLine("## Orchestration Plan");
+        sb.AppendLine("## Orchestration Plans");
         sb.AppendLine();
 
-        var lead    = allAgents.FirstOrDefault(a => a.IsAgentLead);
-        var subList = allAgents.Where(a => !a.IsAgentLead).ToList();
-
-        if (lead is not null)
+        if (orchestrations.Count == 0)
         {
-            sb.AppendLine($"**Lead agent:** {lead.Name} (ID {lead.Id})  ");
-            sb.AppendLine("The lead agent coordinates all sub-agents, assigns tasks, reviews results, and produces the final deliverable.");
-        }
+            // Fall back to deriving a basic plan from the agent roster.
+            var lead    = allAgents.FirstOrDefault(a => a.IsAgentLead);
+            var subList = allAgents.Where(a => !a.IsAgentLead).ToList();
 
-        if (subList.Count > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine("**Sub-agents** (support roles, each operating within their own specialisation):");
-            foreach (var sub in subList)
+            if (lead is not null)
             {
-                string status = !string.IsNullOrWhiteSpace(sub.Status) ? $" `[{sub.Status}]`" : string.Empty;
-                sb.AppendLine($"  - **{sub.Name}** (ID {sub.Id}){status}");
+                sb.AppendLine($"**Lead agent:** {lead.Name} (ID {lead.Id})  ");
+                sb.AppendLine("The lead agent coordinates all sub-agents, assigns tasks, reviews results, and produces the final deliverable.");
+            }
+
+            if (subList.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("**Sub-agents** (support roles, each operating within their own specialisation):");
+                foreach (var sub in subList)
+                {
+                    string status = !string.IsNullOrWhiteSpace(sub.Status) ? $" `[{sub.Status}]`" : string.Empty;
+                    sb.AppendLine($"  - **{sub.Name}** (ID {sub.Id}){status}");
+                }
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("No orchestration plans are configured. Use `create_orchestration_plan` to add one.");
+        }
+        else
+        {
+            foreach (var orch in orchestrations)
+            {
+                sb.AppendLine($"### {orch.Name} (ID {orch.Id})");
+
+                if (!string.IsNullOrWhiteSpace(orch.Description))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine(orch.Description);
+                }
+
+                if (!string.IsNullOrWhiteSpace(orch.Strategy))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("**Strategy:**");
+                    sb.AppendLine(orch.Strategy);
+                }
+
+                if (!string.IsNullOrWhiteSpace(orch.Roles))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("**Roles:**");
+                    sb.AppendLine(orch.Roles);
+                }
+
+                if (!string.IsNullOrWhiteSpace(orch.Workflow))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("**Workflow:**");
+                    sb.AppendLine(orch.Workflow);
+                }
+
+                if (!string.IsNullOrWhiteSpace(orch.Rules))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("**Rules:**");
+                    sb.AppendLine(orch.Rules);
+                }
+
+                if (!string.IsNullOrWhiteSpace(orch.Notes))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("**Notes:**");
+                    sb.AppendLine(orch.Notes);
+                }
+
+                sb.AppendLine();
             }
         }
 
+        // ── Sub-agent startup instructions ────────────────────────────────────
         sb.AppendLine();
         sb.AppendLine("### Sub-agent startup instructions");
         sb.AppendLine();

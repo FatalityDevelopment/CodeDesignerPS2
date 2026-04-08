@@ -121,6 +121,19 @@ public sealed class McpDatabaseService
             .ToListAsync(ct);
     }
 
+    // ── McpOrchestration ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns all <see cref="Database.Entities.McpOrchestration"/> records ordered by name.
+    /// </summary>
+    public async Task<IReadOnlyList<Database.Entities.McpOrchestration>> GetAllOrchestrationsAsync(CancellationToken ct = default)
+    {
+        await using var db = new CodeDesignerDbContext(_dbOptions);
+        return await db.McpOrchestrations
+            .OrderBy(o => o.Name)
+            .ToListAsync(ct);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
