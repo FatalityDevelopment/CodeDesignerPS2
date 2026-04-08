@@ -151,6 +151,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public List<CallTraceEntry>? TracedCalls { get; set; }
 
+        // Memory Manager results (MCPMEMORY_LIST / MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE)
+        /// <summary>List of MCP memory entries returned by MCPMEMORY_LIST.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<McpMemoryInfo>? McpMemories { get; set; }
+        /// <summary>Single MCP memory entry returned by MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE / MCPMEMORY_IMPORT.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public McpMemoryInfo? McpMemory { get; set; }
+
         // Label Manager results
         /// <summary>List of label set names for GETLABELSETS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]

@@ -77,8 +77,7 @@ interface CommandMessage {
     NavSource?: string;
     // GETADDRESSHISTORY fields
     SnapshotDir?: string;
-    // Label Manager fields
-    WorkspaceDir?: string;
+    // Label Manager fields    WorkspaceDir?: string;
     GameId?: string;
     SetName?: string;
     LabelEntry?: { address: string; name: string; comment?: string; parentAddress?: string; offset?: number; valueType?: string };
@@ -90,6 +89,10 @@ interface CommandMessage {
     SettingPrefix?: string;
     // GETSNAPSHOTS
     IsoName?: string;
+    // Memory Manager (MCPMEMORY_LIST / MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE / MCPMEMORY_DELETE / MCPMEMORY_IMPORT / MCPMEMORY_EXPORT)
+    McpMemoryId?: number;
+    McpMemoryName?: string;
+    McpMemoryContent?: string;
 }
 
 /**
@@ -389,6 +392,9 @@ interface CommandResponse {
     PineWatches?: PineWatchInfo[];
     // TRACECALLS result
     TracedCalls?: CallTraceEntry[];
+    // MEMORY_LIST / MEMORY_ADD / MEMORY_GET / MEMORY_UPDATE results
+    McpMemories?: McpMemoryInfo[];
+    McpMemory?: McpMemoryInfo;
 }
 
 /**
@@ -457,6 +463,18 @@ export interface PineWatchInfo {
 export interface CallTraceEntry {
     From: string;
     To:   string;
+}
+
+/**
+ * A MCP Memory Manager entry stored in the database as Markdown.
+ */
+export interface McpMemoryInfo {
+    id:         number;
+    name:       string;
+    content:    string;
+    gameId?:    string;
+    createdAt:  string;
+    updatedAt:  string;
 }
 
 /**
@@ -2430,6 +2448,72 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'GETSNAPSHOTS', IsoName: isoName });
         if (!response.Success) { throw new Error(response.Error || 'GETSNAPSHOTS failed'); }
         return (response as any).Snapshots ?? [];
+    }
+
+    // ── MCP Memory Manager ────────────────────────────────────────────────────
+
+    /**
+     * MCPMEMORY_LIST — returns all MCP memory entries, optionally filtered by gameId.
+     */
+    public async mcpMemoryList(gameId?: string): Promise<McpMemoryInfo[]> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_LIST', GameId: gameId });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_LIST failed'); }
+        return response.McpMemories ?? [];
+    }
+
+    /**
+     * MCPMEMORY_GET — returns a single MCP memory entry by id.
+     */
+    public async mcpMemoryGet(id: number): Promise<McpMemoryInfo> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_GET', McpMemoryId: id });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_GET failed'); }
+        return response.McpMemory!;
+    }
+
+    /**
+     * MCPMEMORY_ADD — creates a new MCP memory entry.
+     */
+    public async mcpMemoryAdd(name: string, content: string, gameId?: string): Promise<McpMemoryInfo> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_ADD', McpMemoryName: name, McpMemoryContent: content, GameId: gameId });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_ADD failed'); }
+        return response.McpMemory!;
+    }
+
+    /**
+     * MCPMEMORY_UPDATE — updates name and/or content of an existing MCP memory entry.
+     * Pass undefined to leave a field unchanged.
+     */
+    public async mcpMemoryUpdate(id: number, name?: string, content?: string, gameId?: string): Promise<McpMemoryInfo> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_UPDATE', McpMemoryId: id, McpMemoryName: name, McpMemoryContent: content, GameId: gameId });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_UPDATE failed'); }
+        return response.McpMemory!;
+    }
+
+    /**
+     * MCPMEMORY_DELETE — deletes a MCP memory entry by id.
+     */
+    public async mcpMemoryDelete(id: number): Promise<void> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_DELETE', McpMemoryId: id });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_DELETE failed'); }
+    }
+
+    /**
+     * MCPMEMORY_IMPORT — imports a Markdown file from disk into the MCP memory database.
+     * The filename (without extension) becomes the entry name unless the file
+     * contains a YAML front-matter `name:` key.
+     */
+    public async mcpMemoryImport(filePath: string): Promise<McpMemoryInfo> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_IMPORT', FilePath: filePath });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_IMPORT failed'); }
+        return response.McpMemory!;
+    }
+
+    /**
+     * MCPMEMORY_EXPORT — exports a MCP memory entry to a Markdown file.
+     */
+    public async mcpMemoryExport(id: number, outputPath: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_EXPORT', McpMemoryId: id, OutputPath: outputPath });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_EXPORT failed'); }
     }
 }
 

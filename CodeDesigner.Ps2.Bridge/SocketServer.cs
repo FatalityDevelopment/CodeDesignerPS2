@@ -81,6 +81,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Persistence layer for application settings backed by the database.</summary>
         internal DbSettingsRepository SettingsRepo { get; }
 
+        /// <summary>Persistence layer for MCP Memory Manager entries backed by the database.</summary>
+        internal DbMcpMemoryRepository? McpMemoryRepo { get; }
+
         /// <summary>
         /// When set, the READMEM command reads live memory from this scheduler.
         /// </summary>
@@ -211,6 +214,7 @@ namespace CodeDesigner.Ps2.Bridge
             Db          = db;
             LabelRepo   = new DbLabelRepository(db);
             SettingsRepo = new DbSettingsRepository(db);
+            McpMemoryRepo = new DbMcpMemoryRepository(db);
 
             // Migrate legacy flat-file data into the DB on first run (idempotent).
             MigrateLegacySettingsToDb();
@@ -1266,6 +1270,35 @@ namespace CodeDesigner.Ps2.Bridge
                     case "GETSNAPSHOTS":
                     case "GET_SNAPSHOTS":
                         return HandleGetSnapshots(command.IsoName);
+
+                    // ── MCP Memory Manager (DB-backed) ───────────────────────
+                    case "MCPMEMORY_LIST":
+                    case "MCPMEMORYLIST":
+                        return HandleMcpMemoryList(command.GameId);
+
+                    case "MCPMEMORY_GET":
+                    case "MCPMEMORYGET":
+                        return HandleMcpMemoryGet(command.McpMemoryId);
+
+                    case "MCPMEMORY_ADD":
+                    case "MCPMEMORYADD":
+                        return HandleMcpMemoryAdd(command.McpMemoryName, command.McpMemoryContent, command.GameId);
+
+                    case "MCPMEMORY_UPDATE":
+                    case "MCPMEMORYUPDATE":
+                        return HandleMcpMemoryUpdate(command.McpMemoryId, command.McpMemoryName, command.McpMemoryContent, command.GameId);
+
+                    case "MCPMEMORY_DELETE":
+                    case "MCPMEMORYDELETE":
+                        return HandleMcpMemoryDelete(command.McpMemoryId);
+
+                    case "MCPMEMORY_IMPORT":
+                    case "MCPMEMORYIMPORT":
+                        return HandleMcpMemoryImport(command.FilePath);
+
+                    case "MCPMEMORY_EXPORT":
+                    case "MCPMEMORYEXPORT":
+                        return HandleMcpMemoryExport(command.McpMemoryId, command.OutputPath);
 
                     default:
                         // Echo for unknown commands

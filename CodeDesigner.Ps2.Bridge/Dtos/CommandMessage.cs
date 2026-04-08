@@ -154,6 +154,14 @@ namespace CodeDesigner.Ps2.Bridge
         // GETSNAPSHOTS fields
         /// <summary>ISO / game name for GETSNAPSHOTS.</summary>
         public string? IsoName { get; set; }
+
+        // Memory Manager fields (MCPMEMORY_LIST / MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE / MCPMEMORY_DELETE / MCPMEMORY_IMPORT / MCPMEMORY_EXPORT)
+        /// <summary>Database row ID of the MCP memory entry to operate on.</summary>
+        public int? McpMemoryId { get; set; }
+        /// <summary>Name / title for the MCP memory entry (MCPMEMORY_ADD / MCPMEMORY_UPDATE).</summary>
+        public string? McpMemoryName { get; set; }
+        /// <summary>Markdown content of the MCP memory entry (MCPMEMORY_ADD / MCPMEMORY_UPDATE).</summary>
+        public string? McpMemoryContent { get; set; }
     }
 
     /// <summary>

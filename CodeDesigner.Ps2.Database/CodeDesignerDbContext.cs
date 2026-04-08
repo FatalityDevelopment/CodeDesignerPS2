@@ -122,6 +122,7 @@ public class CodeDesignerDbContext : DbContext
             entity.HasKey(m => m.Id);
             entity.HasIndex(m => m.Name).IsUnique();
             entity.Property(m => m.Name).HasMaxLength(512).IsRequired();
+            entity.Property(m => m.GameId).HasMaxLength(64);
         });
 
         // ── McpAgent ───────────────────────────────────────────────────────────

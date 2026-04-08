@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ViewEncapsulation } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, ViewEncapsulation } from '@angular/core';
 import { VsCodeBridgeService } from '../shared/vscode-bridge.service';
 import { Subscription } from 'rxjs';
 import {
@@ -7,7 +7,9 @@ import {
   CheatsTabComponent,
   CdsTabComponent,
   RecompileTabComponent,
+  McpMemoryOverlayComponent,
 } from './components';
+import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './components';
 import { EmuOption, SnapshotEntry } from './types';
 import './disasm-panel.css';
 
@@ -82,6 +84,7 @@ interface Pcsx2ModeChangedMsg {
     CheatsTabComponent,
     CdsTabComponent,
     RecompileTabComponent,
+    McpMemoryOverlayComponent,
   ],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-panel.component.html',
@@ -97,11 +100,13 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   selectedEmulator = '';
   selectedBios = '';
   selectedGame = '';
-  activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' = 'settings';
+  activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' | 'mcpMemory' = 'settings';
   /** Cheat text owned here so the CDS "Add Cheat" action can inject codes. */
   cheatText = '';
   currentGameName = '';
   private subs: Subscription[] = [];
+
+  @ViewChild(McpMemoryOverlayComponent) private mcpMemoryOverlay?: McpMemoryOverlayComponent;
 
   constructor(private bridge: VsCodeBridgeService) {}
 
@@ -158,6 +163,13 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
           this.onSelectedEmulatorChange(msg.filePath);
         }
       }),
+      // MCP Memory Manager messages from the provider
+      this.bridge.on<{ command: 'mcpMemoryListResult'; entries?: McpMemoryEntry[]; error?: string }>('mcpMemoryListResult').subscribe(msg => {
+        this.mcpMemoryOverlay?.setListResult({ entries: msg.entries, error: msg.error });
+      }),
+      this.bridge.on<{ command: 'mcpMemoryActionResult'; entry?: McpMemoryEntry; error?: string; message?: string }>('mcpMemoryActionResult').subscribe(msg => {
+        this.mcpMemoryOverlay?.setActionResult({ entry: msg.entry, error: msg.error, message: msg.message });
+      }),
     );
     this.bridge.postMessage({ command: 'ready' });
   }
@@ -186,8 +198,12 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   // ── Tab navigation ───────────────────────────────────────────────────────
 
-  setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile'): void {
+  setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile' | 'mcpMemory'): void {
     this.activeTab = tab;
+    if (tab === 'mcpMemory') {
+      // Trigger initial load when switching to the tab
+      setTimeout(() => this.mcpMemoryOverlay?.load(), 0);
+    }
   }
 
   // ── Settings tab handlers ────────────────────────────────────────────────
@@ -282,5 +298,31 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       ? this.cheatText.trimEnd() + '\n' + codes
       : codes;
     this.activeTab = 'cheats';
+  }
+
+  // ── MCP Memory Manager handlers ──────────────────────────────────────────
+
+  onMcpMemoryList(): void {
+    this.bridge.postMessage({ command: 'mcpMemoryList' });
+  }
+
+  onMcpMemoryAdd(name: string): void {
+    this.bridge.postMessage({ command: 'mcpMemoryAdd', name });
+  }
+
+  onMcpMemoryEdit(entry: McpMemoryEntry): void {
+    this.bridge.postMessage({ command: 'mcpMemoryEdit', id: entry.id, name: entry.name, content: entry.content });
+  }
+
+  onMcpMemoryExport(entry: McpMemoryEntry): void {
+    this.bridge.postMessage({ command: 'mcpMemoryExport', id: entry.id, name: entry.name });
+  }
+
+  onMcpMemoryImport(): void {
+    this.bridge.postMessage({ command: 'mcpMemoryImport' });
+  }
+
+  onMcpMemoryDelete(id: number): void {
+    this.bridge.postMessage({ command: 'mcpMemoryDelete', id });
   }
 }

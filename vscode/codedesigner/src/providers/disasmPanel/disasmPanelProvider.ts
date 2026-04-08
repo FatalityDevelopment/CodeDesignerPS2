@@ -6,6 +6,7 @@ import { getOutputChannel, getDebugChannel } from '../../extension';
 import { SocketClient, LabelEntry, DiscElfEntry } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
+import { McpMemoryEditorProvider } from '../mcpMemoryEditor/mcpMemoryEditorProvider';
 import { ArchiveCheat } from '../../webview/disasm-panel/types';
 
 interface EmuSettings {
@@ -110,7 +111,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         private readonly socketClient: SocketClient,
         private readonly editorProvider: DisasmEditorProvider,
         private readonly _extensionUri: vscode.Uri
-    ) {}
+    ) {
+        this._mcpMemoryEditorProvider = new McpMemoryEditorProvider(socketClient);
+    }
+
+    private readonly _mcpMemoryEditorProvider: McpMemoryEditorProvider;
 
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
@@ -325,6 +330,25 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'browseEmulator':
                     await this.handleBrowseEmulator();
+                    break;
+                // ── MCP Memory Manager ────────────────────────────────────
+                case 'mcpMemoryList':
+                    await this.handleMcpMemoryList();
+                    break;
+                case 'mcpMemoryAdd':
+                    await this.handleMcpMemoryAdd(msg.name ?? '');
+                    break;
+                case 'mcpMemoryEdit':
+                    this._mcpMemoryEditorProvider.open(msg.id as number, msg.name ?? '', msg.content ?? '');
+                    break;
+                case 'mcpMemoryExport':
+                    await this.handleMcpMemoryExport(msg.id as number, msg.name ?? '');
+                    break;
+                case 'mcpMemoryImport':
+                    await this.handleMcpMemoryImport();
+                    break;
+                case 'mcpMemoryDelete':
+                    await this.handleMcpMemoryDelete(msg.id as number);
                     break;
             }
         });
@@ -2373,5 +2397,64 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.connectSocketAndOpenViews();
 
         return true;
+    }
+
+    // ── MCP Memory Manager ────────────────────────────────────────────────────
+
+    private async handleMcpMemoryList(): Promise<void> {
+        try {
+            const entries = await this.socketClient.mcpMemoryList();
+            this.webview?.postMessage({ command: 'mcpMemoryListResult', entries });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'mcpMemoryListResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async handleMcpMemoryAdd(name: string): Promise<void> {
+        try {
+            const entry = await this.socketClient.mcpMemoryAdd(name, '');
+            this.webview?.postMessage({ command: 'mcpMemoryActionResult', entry, message: `Created '${entry.name}'` });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'mcpMemoryActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async handleMcpMemoryDelete(id: number): Promise<void> {
+        try {
+            await this.socketClient.mcpMemoryDelete(id);
+            this.webview?.postMessage({ command: 'mcpMemoryActionResult', message: 'Deleted.' });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'mcpMemoryActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async handleMcpMemoryImport(): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            filters: { 'Markdown': ['md'] },
+            title: 'Import MCP Memory Entry',
+        });
+        if (!uris?.length) { return; }
+        try {
+            const entry = await this.socketClient.mcpMemoryImport(uris[0].fsPath);
+            this.webview?.postMessage({ command: 'mcpMemoryActionResult', entry, message: `Imported '${entry.name}'` });
+        } catch (err: any) {
+            this.webview?.postMessage({ command: 'mcpMemoryActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async handleMcpMemoryExport(id: number, name: string): Promise<void> {
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(`${name}.md`),
+            filters: { 'Markdown': ['md'] },
+            title: 'Export MCP Memory Entry',
+        });
+        if (!uri) { return; }
+        try {
+            await this.socketClient.mcpMemoryExport(id, uri.fsPath);
+            vscode.window.showInformationMessage(`MCP Memory '${name}' exported to ${uri.fsPath}`);
+        } catch (err: any) {
+            vscode.window.showErrorMessage(`MCP Memory export failed: ${err?.message ?? err}`);
+        }
     }
 }
