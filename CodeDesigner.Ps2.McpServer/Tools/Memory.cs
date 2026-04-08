@@ -130,12 +130,12 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "read_memory_region")]
-    [Description("Read a contiguous region of EE RAM in one call and optionally search for a byte pattern within it. Returns the region as base64 and any pattern match offsets.")]
+    [Description("Read a contiguous region of EE or IOP RAM in one call and optionally search for a byte pattern within it. Returns the region as base64 and any pattern match offsets.")]
     public async Task<string> ReadMemoryRegion(
-        [Description("Inclusive start virtual EE address (hex or decimal).")] string startAddress,
-        [Description("Exclusive end virtual EE address (hex or decimal). Must be greater than startAddress.")] string endAddress,
+        [Description("Inclusive start virtual address (hex or decimal). For IOP use physical offset (0–4 MB) or EE IOP mirror (0x1C000000+).")] string startAddress,
+        [Description("Exclusive end virtual address (hex or decimal). Must be greater than startAddress. For IOP automatically clamped to IOP RAM size (4 MB).")] string endAddress,
         [Description("Optional byte pattern to search for — comma-separated byte values (decimal or 0x-hex), " +
-                     "e.g. '0x4D,0x57,0x6F,0x33'. Omit to skip the search.")] string? searchPattern = null,
+                     "e.g. '0x4D,0x57,0x6F,0x33'. Use '?' as a wildcard to match any byte. Omit to skip the search.")] string? searchPattern = null,
         [Description("Memory region: 'ee' for EE RAM (default) or 'iop' for IOP RAM.")] string region = "ee",
         CancellationToken cancellationToken = default)
     {
@@ -152,6 +152,12 @@ public sealed partial class CodeDesignerPs2Tools
             foreach (var part in searchPattern.Split(','))
             {
                 var trimmed = part.Trim();
+                // '?' is a wildcard — matches any byte.
+                if (trimmed == "?")
+                {
+                    pattern.Add(-1);
+                    continue;
+                }
                 int value;
                 if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
                 {
@@ -217,11 +223,11 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "scan_pattern")]
-    [Description("Scan live EE RAM (or IOP RAM) for a byte pattern and return all matching addresses. Supports wildcards in the pattern for flexible signature scanning.")]
+    [Description("Scan live EE RAM (or IOP RAM) for a byte pattern and return all matching addresses. Supports wildcards ('?') in the pattern for flexible signature scanning.")]
     public async Task<string> ScanPattern(
-        [Description("Byte pattern to search for — comma-separated values (decimal or 0x-hex), e.g. '0x4D,0x57,0x6F,0x33'.")] string searchPattern,
+        [Description("Byte pattern to search for — comma-separated values (decimal or 0x-hex), e.g. '0x4D,0x57,0x6F,0x33'. Use '?' as a wildcard to match any byte, e.g. '0x4D,?,0x33'.")] string searchPattern,
         [Description("Inclusive start address (hex or decimal). Omit or use '0' to start from the beginning of the region.")] string startAddress = "0",
-        [Description("Exclusive end address (hex or decimal). Omit or use '0' to scan to the end of the region (32 MB for EE, 2 MB for IOP).")] string endAddress = "0",
+        [Description("Exclusive end address (hex or decimal). Omit or use '0' to scan to the end of the region (32 MB for EE, 4 MB for IOP).")] string endAddress = "0",
         [Description("Memory region: 'ee' for EE main RAM (default) or 'iop' for IOP RAM.")] string region = "ee",
         CancellationToken cancellationToken = default)
     {
@@ -237,6 +243,12 @@ public sealed partial class CodeDesignerPs2Tools
         foreach (var part in searchPattern.Split(','))
         {
             var trimmed = part.Trim();
+            // '?' is a wildcard — matches any byte. Sent as -1 to the bridge.
+            if (trimmed == "?")
+            {
+                pattern.Add(-1);
+                continue;
+            }
             int value;
             if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
             {
