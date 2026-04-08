@@ -391,7 +391,7 @@ const SEMANTIC_LABEL_TYPES = new Set(
                     @if (row.entry.parentAddress != null) {
                       <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
-                    <button class="lm-row-btn" title="Edit sub-label (add children, change type, etc.)" (click)="onEdit(row.entry)">&#x270E;</button>
+                    <button class="lm-row-btn" title="Edit sub-label (add children, change type, etc.)" aria-label="Edit sub-label" (click)="onEdit(row.entry)">&#x270E;</button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">
                       <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
@@ -1082,7 +1082,7 @@ export class LabelManagerOverlayComponent {
 
     const entry: LabelManagerEntry = {
       address: addr,
-      parentAddress: this.editParentAddress() || undefined,
+      parentAddress: this.editParentAddress(),
       offset: this.editParentOffset(),
       name,
       comment: this.editComment().trim() || undefined,
