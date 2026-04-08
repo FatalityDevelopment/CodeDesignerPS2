@@ -8,6 +8,9 @@ namespace CodeDesigner.Ps2.Bridge
         [JsonPropertyName("id")]
         public int Id { get; set; }
 
+        [JsonPropertyName("isActive")]
+        public bool IsActive { get; set; }
+
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
 

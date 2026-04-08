@@ -1365,6 +1365,9 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MCPORCHESTRATIONEXPORT":
                         return HandleMcpOrchestrationExport(command.McpOrchestrationId, command.OutputPath);
 
+                    case "MCPORCHESTRATION_SETACTIVE":
+                        return HandleMcpOrchestrationSetActive(command.McpOrchestrationId);
+
                     default:
                         // Echo for unknown commands
                         return $"Echo: {message}";

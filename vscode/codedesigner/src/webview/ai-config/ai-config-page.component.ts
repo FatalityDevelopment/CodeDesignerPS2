@@ -30,6 +30,7 @@ export interface AgentProfile {
 
 export interface OrchestrationProfile {
   id:           number;
+  isActive?:    boolean;
   name:         string;
   description?: string;
   strategy?:    string;
@@ -116,6 +117,7 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
         <div class="aic-sidebar-actions">
           <button class="aic-small-btn aic-primary-btn" (click)="onNewOrchestration()">+ New</button>
           <button class="aic-small-btn" title="Import from .md file" (click)="onImportOrchestration()">&#x2B06; Import</button>
+          <button class="aic-small-btn" title="Export full orchestration plan (all profiles + all agents) as the AI sees it" (click)="onExportAll()">&#x2B07; Export All</button>
         </div>
 
         @if (orchStatusMessage()) {
@@ -131,7 +133,10 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
             <li class="aic-agent-item"
                 [class.selected]="orchSelectedId() === orch.id"
                 (click)="selectOrchestration(orch)">
-              <span class="aic-agent-name" [title]="orch.name">{{ orch.name }}</span>
+              <span class="aic-agent-name" [title]="orch.name">
+                @if (orch.isActive) { <span class="aic-active-badge" title="Active orchestration">●</span> }
+                {{ orch.name }}
+              </span>
             </li>
           }
           @if (orchestrations().length === 0) {
@@ -155,6 +160,11 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
             </h2>
             <div class="aic-form-header-actions">
               @if (!orchShowNewForm() && orchSelectedId() !== null) {
+                @if (!currentOrchestration()?.isActive) {
+                  <button class="aic-small-btn aic-primary-btn" title="Make this the active orchestration plan" (click)="onSetActiveOrchestration()">&#x25CF; Set Active</button>
+                } @else {
+                  <span class="aic-active-indicator" title="This is the active orchestration plan">&#x25CF; Active</span>
+                }
                 <button class="aic-small-btn" (click)="onExportOrchestration()">&#x2B07; Export</button>
                 <button class="aic-small-btn aic-danger-btn" (click)="onDeleteOrchestration()">&#x2715; Delete</button>
               }
@@ -566,6 +576,18 @@ export class AiConfigPageComponent implements AfterViewInit {
     this.vscode.postMessage({ type: 'orchestrationExport', id, name });
   }
 
+  onSetActiveOrchestration(): void {
+    const id = this.orchSelectedId();
+    if (id === null) { return; }
+    this.setOrchStatus('Setting active…', false);
+    this.vscode.postMessage({ type: 'orchestrationSetActive', id });
+  }
+
+  onExportAll(): void {
+    this.setOrchStatus('Exporting…', false);
+    this.vscode.postMessage({ type: 'exportAll' });
+  }
+
   // ── Orchestration form field helpers ─────────────────────────────────────
 
   getOrchFieldValue(key: keyof OrchestrationProfile): string {
@@ -880,6 +902,12 @@ export class AiConfigPageComponent implements AfterViewInit {
           this._clearOrchForm();
           this.loadOrchestrations();
         }
+        break;
+      }
+      case 'exportAllResult': {
+        const error = data['error'] as string | undefined;
+        const msg   = data['message'] as string | undefined;
+        this.setOrchStatus(error ? 'Error: ' + error : (msg ?? 'Exported.'), !!error);
         break;
       }
       // ── Agent list responses ─────────────────────────────────────────────

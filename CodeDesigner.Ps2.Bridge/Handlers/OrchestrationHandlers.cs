@@ -177,11 +177,34 @@ namespace CodeDesigner.Ps2.Bridge
             catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_EXPORT error: {ex.Message}"); }
         }
 
+        // ── MCPORCHESTRATION_SETACTIVE ───────────────────────────────────────
+
+        private string HandleMcpOrchestrationSetActive(int? id)
+        {
+            if (McpOrchestrationRepo is null)
+                return CreateErrorResponse("MCP Orchestration repository is not available");
+            if (id is null)
+                return CreateErrorResponse("McpOrchestrationId is required for MCPORCHESTRATION_SETACTIVE");
+            try
+            {
+                var profile = McpOrchestrationRepo.SetActiveAsync(id.Value).GetAwaiter().GetResult();
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success             = true,
+                    Command             = "MCPORCHESTRATION_SETACTIVE",
+                    Message             = $"Orchestration profile '{profile.Name}' is now active.",
+                    McpOrchestration    = ToMcpOrchestrationDto(profile),
+                });
+            }
+            catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_SETACTIVE error: {ex.Message}"); }
+        }
+
         // ── DTO mapper ────────────────────────────────────────────────────────
 
         private static McpOrchestrationInfo ToMcpOrchestrationDto(Database.Entities.McpOrchestration o) => new McpOrchestrationInfo
         {
             Id          = o.Id,
+            IsActive    = o.IsActive,
             Name        = o.Name,
             Description = o.Description,
             Strategy    = o.Strategy,
