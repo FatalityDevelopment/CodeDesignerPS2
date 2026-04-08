@@ -77,7 +77,8 @@ interface CommandMessage {
     NavSource?: string;
     // GETADDRESSHISTORY fields
     SnapshotDir?: string;
-    // Label Manager fields    WorkspaceDir?: string;
+    // Label Manager fields
+    WorkspaceDir?: string;
     GameId?: string;
     SetName?: string;
     LabelEntry?: { address: string; name: string; comment?: string; parentAddress?: string; offset?: number; valueType?: string };
@@ -392,7 +393,7 @@ interface CommandResponse {
     PineWatches?: PineWatchInfo[];
     // TRACECALLS result
     TracedCalls?: CallTraceEntry[];
-    // MEMORY_LIST / MEMORY_ADD / MEMORY_GET / MEMORY_UPDATE results
+    // MCPMEMORY_LIST / MCPMEMORY_ADD / MCPMEMORY_GET / MCPMEMORY_UPDATE results
     McpMemories?: McpMemoryInfo[];
     McpMemory?: McpMemoryInfo;
 }
