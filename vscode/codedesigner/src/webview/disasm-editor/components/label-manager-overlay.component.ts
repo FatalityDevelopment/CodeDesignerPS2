@@ -9,7 +9,7 @@ import {
   ElementRef,
 } from '@angular/core';
 
-export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'ArrayOfPointers' | 'LinkedList' | 'String';
+export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'LinkedList' | 'String';
 
 /**
  * A unified label entry. Labels are recursive: child entries have parentAddress + offset set
@@ -85,52 +85,48 @@ export type LabelManagerAction =
   | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string; valueType?: string }[] };
 
 const TYPE_BADGE: Record<string, string> = {
-  Address:        '[Addr]',
-  Struct:         '[Struct]',
-  Function:       '[FNC]',
-  Array:          '[Array]',
-  ArrayOfPointers:'[Ptrs]',
-  LinkedList:     '[List]',
-  String:         '[Str]',
+  Address:    '[Addr]',
+  Struct:     '[Struct]',
+  Function:   '[FNC]',
+  Array:      '[Array]',
+  LinkedList: '[List]',
+  String:     '[Str]',
 };
 
 const TYPE_BADGE_CLASS: Record<string, string> = {
-  Address:        'lm-badge-addr',
-  Struct:         'lm-badge-struct',
-  Function:       'lm-badge-fnc',
-  Array:          'lm-badge-array',
-  ArrayOfPointers:'lm-badge-ptrs',
-  LinkedList:     'lm-badge-list',
-  String:         'lm-badge-str',
+  Address:    'lm-badge-addr',
+  Struct:     'lm-badge-struct',
+  Function:   'lm-badge-fnc',
+  Array:      'lm-badge-array',
+  LinkedList: 'lm-badge-list',
+  String:     'lm-badge-str',
 };
 
 /**
  * Unified list of value/data types shown in ALL type-related dropdowns (type
  * filter, label type editor, and struct-member value-type picker).
- * The list merges the semantic LabelType values with the concrete data types
- * so that any dropdown consistently offers the full set of choices.
+ * All three dropdowns share this single source of truth.
  */
 const UNIFIED_TYPES: { value: string; label: string }[] = [
   // ── Data / scalar types ───────────────────────────────────────────────────
-  { value: 'u8',             label: 'u8'             },
-  { value: 'u16',            label: 'u16'            },
-  { value: 'u32',            label: 'u32'            },
-  { value: 'u64',            label: 'u64'            },
-  { value: 's8',             label: 's8'             },
-  { value: 's16',            label: 's16'            },
-  { value: 's32',            label: 's32'            },
-  { value: 's64',            label: 's64'            },
-  { value: 'float',          label: 'float'          },
-  { value: 'double',         label: 'double'         },
-  { value: 'pointer',        label: 'pointer'        },
+  { value: 'u8',         label: 'u8'         },
+  { value: 'u16',        label: 'u16'        },
+  { value: 'u32',        label: 'u32'        },
+  { value: 'u64',        label: 'u64'        },
+  { value: 's8',         label: 's8'         },
+  { value: 's16',        label: 's16'        },
+  { value: 's32',        label: 's32'        },
+  { value: 's64',        label: 's64'        },
+  { value: 'float',      label: 'float'      },
+  { value: 'double',     label: 'double'     },
+  { value: 'pointer',    label: 'pointer'    },
   // ── Semantic label types ──────────────────────────────────────────────────
-  { value: 'Address',        label: 'Address'        },
-  { value: 'Struct',         label: 'Struct'         },
-  { value: 'Function',       label: 'Function'       },
-  { value: 'Array',          label: 'Array'          },
-  { value: 'ArrayOfPointers', label: 'Array of Pointers' },
-  { value: 'LinkedList',     label: 'Linked List'    },
-  { value: 'String',         label: 'String'         },
+  { value: 'Address',    label: 'Address'    },
+  { value: 'Struct',     label: 'Struct'     },
+  { value: 'Function',   label: 'Function'   },
+  { value: 'Array',      label: 'Array'      },
+  { value: 'LinkedList', label: 'Linked List' },
+  { value: 'String',     label: 'String'     },
 ];
 
 /**
@@ -429,13 +425,9 @@ const SEMANTIC_LABEL_TYPES = new Set(
         <div class="lm-form-row">
           <label class="lm-form-label">Type</label>
           <select class="lm-form-input" [value]="editType()" (change)="editType.set(asSelect($event).value)">
-            <option value="Address">Address</option>
-            <option value="Struct">Struct</option>
-            <option value="Function">Function</option>
-            <option value="Array">Array</option>
-            <option value="ArrayOfPointers">Array of Pointers</option>
-            <option value="LinkedList">Linked List</option>
-            <option value="String">String</option>
+            @for (t of unifiedTypes; track t.value) {
+              <option [value]="t.value">{{ t.label }}</option>
+            }
           </select>
         </div>
         <div class="lm-form-row">
@@ -663,12 +655,13 @@ export class LabelManagerOverlayComponent {
     const tf = this.typeFilter().trim();
     return entries.filter(e => {
       if (tf) {
-        // LabelType values match on the semantic type field; data-type values match
-        // on the valueType annotation so users can filter by e.g. "float".
+        // Semantic LabelType values filter on the semantic type field; data-type
+        // values match on the valueType annotation (or the type field for backward
+        // compat) so users can filter by e.g. "float" or "pointer".
         if (SEMANTIC_LABEL_TYPES.has(tf)) {
           if (this.effectiveType(e) !== tf) return false;
         } else {
-          if (e.valueType !== tf) return false;
+          if (e.valueType !== tf && (e.type as string) !== tf) return false;
         }
       }
       if (!f) return true;
@@ -970,9 +963,10 @@ export class LabelManagerOverlayComponent {
     this.editAddress.set(entry.address);
     this.editName.set(entry.name);
     this.editComment.set(entry.comment ?? '');
-    // Determine effective type: if the entry has children in the set, it's a Struct.
+    // Determine editType: prefer valueType for non-semantic (data type) root labels.
     const existingChildren = this._childrenOf(entry.address);
-    this.editType.set(entry.type ?? (existingChildren.length > 0 ? 'Struct' : 'Address'));
+    const semanticType = entry.type ?? (existingChildren.length > 0 ? 'Struct' : 'Address');
+    this.editType.set(semanticType === 'Address' && entry.valueType ? entry.valueType : semanticType);
     this.editHidden.set(entry.hidden ?? false);
     this.editDynamic.set(entry.dynamic ?? false);
     // Populate editMembers from existing child entries in the set.
@@ -1058,7 +1052,12 @@ export class LabelManagerOverlayComponent {
     const name = this.editName().trim();
     if (!addr || !name) { return; }
 
-    const type = this.editType() as LabelType;
+    // Determine whether the selected value is a semantic label type or a data type.
+    // Data types (e.g. u32, pointer) are stored in valueType; semantic types set the type field.
+    const rawType = this.editType();
+    const isSemantic = SEMANTIC_LABEL_TYPES.has(rawType);
+    const type: LabelType = isSemantic ? rawType as LabelType : 'Address';
+    const rootValueType: string | undefined = !isSemantic ? rawType : undefined;
     const setName = this.activeSetName();
 
     const argRegs    = (type === 'Function') ? splitLines(this.editArgRegs())    : undefined;
@@ -1077,6 +1076,7 @@ export class LabelManagerOverlayComponent {
       name,
       comment: this.editComment().trim() || undefined,
       type,
+      valueType: rootValueType,
       hidden: this.editingAddress() ? this.editHidden() : false,
       dynamic: this.editDynamic() ? true : undefined,
       argRegs:       argRegs?.length      ? argRegs      : undefined,
@@ -1200,11 +1200,15 @@ export class LabelManagerOverlayComponent {
   }
 
   typeBadge(entry: LabelManagerEntry): string {
-    return TYPE_BADGE[this.effectiveType(entry)] ?? '[?]';
+    const etype = this.effectiveType(entry);
+    if (etype === 'Address' && entry.valueType) return entry.valueType;
+    return TYPE_BADGE[etype] ?? '[?]';
   }
 
   typeBadgeClass(entry: LabelManagerEntry): string {
-    return 'lm-type-badge ' + (TYPE_BADGE_CLASS[this.effectiveType(entry)] ?? '');
+    const etype = this.effectiveType(entry);
+    const cls = (etype === 'Address' && entry.valueType) ? 'lm-badge-data' : (TYPE_BADGE_CLASS[etype] ?? '');
+    return 'lm-type-badge ' + cls;
   }
 
   displayName(entry: LabelManagerEntry): string {
@@ -1233,8 +1237,6 @@ export class LabelManagerOverlayComponent {
           entry.elementStride != null ? `stride: ${entry.elementStride}` : null,
           entry.elementCount  != null ? `count: ${entry.elementCount}`   : null,
         ].filter(Boolean).join(', ') || '—';
-      case 'ArrayOfPointers':
-        return entry.elementCount != null ? `count: ${entry.elementCount}` : '—';
       case 'LinkedList':
         return [
           entry.nodeNextOffset != null ? `next@+0x${entry.nodeNextOffset.toString(16).toUpperCase().padStart(2, '0')}` : null,
