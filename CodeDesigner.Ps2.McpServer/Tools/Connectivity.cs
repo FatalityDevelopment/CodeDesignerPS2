@@ -16,15 +16,26 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "session_start")]
-    [Description("CALL THIS FIRST at the beginning of every session. Returns the full Code Designer operational guidelines so the agent is properly configured before taking any other action. Also lists all existing progress reports so previous session work can be resumed. This tool is the primary way to load guidelines — do not rely on prompts/get.")]
+    [Description(
+        "CALL THIS FIRST at the beginning of every session. " +
+        "Returns the full Code Designer operational guidelines, the complete agent team roster (including who is the lead), " +
+        "and the orchestration plan so every agent is properly configured before taking any other action. " +
+        "Sub-agents MUST also call session_start at the start of their own session and then call get_agent_profile " +
+        "with their own agent profile ID (shown in the team roster) to load their specific rules, guidelines, objectives, " +
+        "and session tasks. " +
+        "Also lists all existing progress reports so previous session work can be resumed. " +
+        "This tool is the primary way to load guidelines — do not rely on prompts/get.")]
     public async Task<string> SessionStart(CancellationToken cancellationToken = default)
     {
         var sb = new StringBuilder();
 
+        // Load all agent definitions so we can build a team roster and identify the lead.
+        var allAgents = await db.GetAllAgentsAsync(cancellationToken);
+
         // Load the lead agent definition from the database (if available) to allow
         // the agent's rules and guidelines to be configured at runtime without
         // recompiling.  Fall back to the compiled-in prompt when no DB record exists.
-        var agent = await db.GetLeadAgentAsync(cancellationToken);
+        var agent = allAgents.FirstOrDefault(a => a.IsAgentLead);
 
         if (agent is not null)
         {
@@ -65,6 +76,67 @@ public sealed partial class CodeDesignerPs2Tools
             sb.AppendLine(CodeDesignerPs2Prompts.CheatMasterSystemPrompt);
         }
 
+        // ── Team roster ───────────────────────────────────────────────────────
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine();
+        sb.AppendLine("## Agent Team");
+        sb.AppendLine();
+
+        if (allAgents.Count == 0)
+        {
+            sb.AppendLine("No agent profiles are configured. Use `create_agent_profile` to add team members.");
+        }
+        else
+        {
+            foreach (var a in allAgents)
+            {
+                string leadBadge = a.IsAgentLead ? " ★ **[LEAD]**" : string.Empty;
+                string status    = !string.IsNullOrWhiteSpace(a.Status) ? $" `[{a.Status}]`" : string.Empty;
+                sb.AppendLine($"- **ID {a.Id}** — {a.Name}{leadBadge}{status}");
+                if (!string.IsNullOrWhiteSpace(a.Objective))
+                    sb.AppendLine($"  - *Objective:* {a.Objective.Split('\n', 2)[0].Trim()}");
+                else if (!string.IsNullOrWhiteSpace(a.Description))
+                    sb.AppendLine($"  - {a.Description.Split('\n', 2)[0].Trim()}");
+            }
+        }
+
+        // ── Orchestration plan ────────────────────────────────────────────────
+        sb.AppendLine();
+        sb.AppendLine("## Orchestration Plan");
+        sb.AppendLine();
+
+        var lead    = allAgents.FirstOrDefault(a => a.IsAgentLead);
+        var subList = allAgents.Where(a => !a.IsAgentLead).ToList();
+
+        if (lead is not null)
+        {
+            sb.AppendLine($"**Lead agent:** {lead.Name} (ID {lead.Id})  ");
+            sb.AppendLine("The lead agent coordinates all sub-agents, assigns tasks, reviews results, and produces the final deliverable.");
+        }
+
+        if (subList.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("**Sub-agents** (support roles, each operating within their own specialisation):");
+            foreach (var sub in subList)
+            {
+                string status = !string.IsNullOrWhiteSpace(sub.Status) ? $" `[{sub.Status}]`" : string.Empty;
+                sb.AppendLine($"  - **{sub.Name}** (ID {sub.Id}){status}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("### Sub-agent startup instructions");
+        sb.AppendLine();
+        sb.AppendLine("Every sub-agent **must** follow these steps at the start of their session:");
+        sb.AppendLine();
+        sb.AppendLine("1. Call `session_start` — loads team context and operational guidelines.");
+        sb.AppendLine("2. Identify your own entry in the **Agent Team** roster above.");
+        sb.AppendLine("3. Call `get_agent_profile` with your agent ID to load your specific rules, guidelines, objectives, and session tasks.");
+        sb.AppendLine("4. Execute your `Session Begin` tasks as defined in your profile before starting any delegated work.");
+
+        // ── Progress reports ──────────────────────────────────────────────────
         sb.AppendLine();
         sb.AppendLine("---");
         sb.AppendLine();

@@ -106,6 +106,21 @@ public sealed class McpDatabaseService
             .FirstOrDefaultAsync(a => a.IsAgentLead, ct);
     }
 
+    /// <summary>
+    /// Returns all <see cref="McpAgent"/> records ordered with the lead first, then
+    /// alphabetically by name.  Tasks are <em>not</em> eagerly loaded (no
+    /// <c>Include</c> call); use <see cref="GetLeadAgentAsync"/> when you need the
+    /// full lead profile with its task collection.
+    /// </summary>
+    public async Task<IReadOnlyList<McpAgent>> GetAllAgentsAsync(CancellationToken ct = default)
+    {
+        await using var db = new CodeDesignerDbContext(_dbOptions);
+        return await db.McpAgents
+            .OrderByDescending(a => a.IsAgentLead)
+            .ThenBy(a => a.Name)
+            .ToListAsync(ct);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
