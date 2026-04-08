@@ -93,6 +93,8 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   isConnected = false;
   isPaused = false;
   isPcsx2 = false;
+  /** Mirrors the provider-side followAiEnabled state for the status bar. */
+  followAiEnabled = false;
   emulators: EmuOption[] = [];
   biosOptions: EmuOption[] = [];
   gameOptions: EmuOption[] = [];
@@ -172,6 +174,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       this.bridge.on<{ command: 'mcpMemoryActionResult'; entry?: McpMemoryEntry; error?: string; message?: string }>('mcpMemoryActionResult').subscribe(msg => {
         this.mcpMemoryOverlay?.setActionResult({ entry: msg.entry, error: msg.error, message: msg.message });
       }),
+      // Follow-AI state sync from the extension host
+      this.bridge.on<{ enabled: boolean }>('followAiState').subscribe(msg => {
+        this.followAiEnabled = !!msg.enabled;
+      }),
     );
     this.bridge.postMessage({ command: 'ready' });
   }
@@ -201,6 +207,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   stepOver(): void {
     this.bridge.postMessage({ command: 'stepOver' });
+  }
+
+  onControlModeChange(mode: 'live' | 'ai-control'): void {
+    this.bridge.postMessage({ command: 'toggleFollowAi', enabled: mode === 'ai-control' });
   }
 
   // ── Tab navigation ───────────────────────────────────────────────────────
