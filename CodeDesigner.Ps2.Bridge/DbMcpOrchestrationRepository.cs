@@ -87,7 +87,7 @@ namespace CodeDesigner.Ps2.Bridge
             if (description is not null) profile.Description = description;
             if (strategy    is not null) profile.Strategy    = strategy;
             if (roles       is not null) profile.Roles       = roles;
-            if (workflow    is not null) profile.Workflow     = workflow;
+            if (workflow    is not null) profile.Workflow    = workflow;
             if (rules       is not null) profile.Rules       = rules;
             if (notes       is not null) profile.Notes       = notes;
 
