@@ -28,6 +28,9 @@ public class McpOrchestration
     /// <summary>Additional notes or references for this orchestration profile (Markdown).</summary>
     public string? Notes { get; set; }
 
+    /// <summary>Whether this is the currently active orchestration plan. Only one plan may be active at a time.</summary>
+    public bool IsActive { get; set; }
+
     /// <summary>UTC timestamp when the orchestration profile was created.</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

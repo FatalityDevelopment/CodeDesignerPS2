@@ -105,6 +105,26 @@ namespace CodeDesigner.Ps2.Bridge
             await _db.SaveChangesAsync();
         }
 
+        /// <summary>
+        /// Sets the orchestration with the given <paramref name="id"/> as active.
+        /// Clears the <c>IsActive</c> flag on all other profiles first, ensuring only one is ever active.
+        /// </summary>
+        internal async Task<McpOrchestration> SetActiveAsync(int id)
+        {
+            var profile = await _db.McpOrchestrations.FindAsync(id)
+                ?? throw new KeyNotFoundException($"Orchestration profile {id} not found.");
+
+            // Clear all first, then activate the requested one.
+            await _db.McpOrchestrations
+                .Where(o => o.IsActive)
+                .ExecuteUpdateAsync(s => s.SetProperty(o => o.IsActive, false));
+
+            profile.IsActive  = true;
+            profile.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+            return profile;
+        }
+
         // ── Import / export ────────────────────────────────────────────────────
 
         /// <summary>

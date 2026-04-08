@@ -12,7 +12,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_orchestration_plans")]
-    [Description("List all orchestration plans stored in the CodeDesigner database. Returns id, name, createdAt, and updatedAt for each plan.")]
+    [Description("List all orchestration plans stored in the CodeDesigner database. Only the active plan is shown in full detail; inactive plans are listed by name only. Returns id, name, isActive, createdAt, and updatedAt for each plan.")]
     public async Task<string> ListOrchestrationPlans(CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(new { Command = "MCPORCHESTRATION_LIST" }, cancellationToken);
@@ -35,22 +35,23 @@ public sealed partial class CodeDesignerPs2Tools
             sb.AppendLine($"Orchestration plans ({items.Count}):");
             foreach (var o in items)
             {
-                int    id   = o.TryGetProperty("id",   out var idP)   ? idP.GetInt32()    : 0;
-                string name = o.TryGetProperty("name", out var nameP) ? nameP.GetString() ?? "" : "?";
-                sb.AppendLine($"  {id,4}  {name}");
+                int    id       = o.TryGetProperty("id",       out var idP)       ? idP.GetInt32()     : 0;
+                string name     = o.TryGetProperty("name",     out var nameP)     ? nameP.GetString() ?? "" : "?";
+                bool   isActive = o.TryGetProperty("isActive", out var activeP)   && activeP.GetBoolean();
+                sb.AppendLine($"  {id,4}  {(isActive ? "● " : "○ ")}{name}{(isActive ? "  [ACTIVE]" : "")}");
             }
+            sb.AppendLine();
+            sb.AppendLine("Use get_active_orchestration_plan to read the full content of the active plan.");
             return sb.ToString().TrimEnd();
         }
         catch { return json; }
     }
 
-    [McpServerTool(Name = "get_orchestration_plan")]
-    [Description("Get the full details of an orchestration plan by its database ID, including all Markdown fields (description, strategy, roles, workflow, rules, notes).")]
-    public async Task<string> GetOrchestrationPlan(
-        [Description("The integer ID of the orchestration plan (from list_orchestration_plans).")] int id,
-        CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "get_active_orchestration_plan")]
+    [Description("Get the full details of the currently active orchestration plan, including all Markdown fields (description, strategy, roles, workflow, rules, notes). Returns an error if no plan is active.")]
+    public async Task<string> GetActiveOrchestrationPlan(CancellationToken cancellationToken = default)
     {
-        var json = await bridge.SendAsync(new { Command = "MCPORCHESTRATION_GET", McpOrchestrationId = id }, cancellationToken);
+        var json = await bridge.SendAsync(new { Command = "MCPORCHESTRATION_LIST" }, cancellationToken);
         try
         {
             using var doc = JsonDocument.Parse(json);
@@ -59,39 +60,51 @@ public sealed partial class CodeDesignerPs2Tools
             if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
                 return $"Error: {err.GetString()}";
 
-            if (!root.TryGetProperty("McpOrchestration", out var orch) || orch.ValueKind != JsonValueKind.Object)
+            if (!root.TryGetProperty("McpOrchestrations", out var arr) || arr.ValueKind != JsonValueKind.Array)
                 return SimpleMessage(json);
 
-            var sb = new StringBuilder();
+            var active = arr.EnumerateArray()
+                .FirstOrDefault(o => o.TryGetProperty("isActive", out var v) && v.GetBoolean());
 
-            void AppendField(string label, string propName)
-            {
-                if (orch.TryGetProperty(propName, out var v) && v.ValueKind == JsonValueKind.String)
-                {
-                    var text = v.GetString();
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        sb.AppendLine($"### {label}");
-                        sb.AppendLine(text);
-                        sb.AppendLine();
-                    }
-                }
-            }
+            if (active.ValueKind == JsonValueKind.Undefined)
+                return "No active orchestration plan is set. Use set_active_orchestration_plan to activate one.";
 
-            string name = orch.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "?";
-            sb.AppendLine($"# {name}");
-            sb.AppendLine();
-
-            AppendField("Description", "description");
-            AppendField("Strategy",    "strategy");
-            AppendField("Roles",       "roles");
-            AppendField("Workflow",    "workflow");
-            AppendField("Rules",       "rules");
-            AppendField("Notes",       "notes");
-
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(Orchestration plan has no content yet)";
+            return FormatOrchestrationPlan(active);
         }
         catch { return json; }
+    }
+
+    /// <summary>Formats a JsonElement representing an orchestration plan the same way the AI sees it.</summary>
+    private static string FormatOrchestrationPlan(JsonElement orch)
+    {
+        var sb = new StringBuilder();
+
+        void AppendField(string label, string propName)
+        {
+            if (orch.TryGetProperty(propName, out var v) && v.ValueKind == JsonValueKind.String)
+            {
+                var text = v.GetString();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    sb.AppendLine($"### {label}");
+                    sb.AppendLine(text);
+                    sb.AppendLine();
+                }
+            }
+        }
+
+        string name = orch.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "?";
+        sb.AppendLine($"# {name}");
+        sb.AppendLine();
+
+        AppendField("Description", "description");
+        AppendField("Strategy",    "strategy");
+        AppendField("Roles",       "roles");
+        AppendField("Workflow",    "workflow");
+        AppendField("Rules",       "rules");
+        AppendField("Notes",       "notes");
+
+        return sb.Length > 0 ? sb.ToString().TrimEnd() : "(Orchestration plan has no content yet)";
     }
 
     [McpServerTool(Name = "create_orchestration_plan")]
@@ -150,6 +163,39 @@ public sealed partial class CodeDesignerPs2Tools
             McpOrchestrationNotes          = notes,
         }, cancellationToken);
 
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "get_orchestration_plan")]
+    [Description("Get the full details of a specific orchestration plan by its database ID, including all Markdown fields. Use get_active_orchestration_plan to read the active plan without knowing its ID.")]
+    public async Task<string> GetOrchestrationPlan(
+        [Description("The integer ID of the orchestration plan (from list_orchestration_plans).")] int id,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "MCPORCHESTRATION_GET", McpOrchestrationId = id }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var err) && err.ValueKind == JsonValueKind.String)
+                return $"Error: {err.GetString()}";
+
+            if (!root.TryGetProperty("McpOrchestration", out var orch) || orch.ValueKind != JsonValueKind.Object)
+                return SimpleMessage(json);
+
+            return FormatOrchestrationPlan(orch);
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "set_active_orchestration_plan")]
+    [Description("Mark an orchestration plan as the active plan. Only one plan can be active at a time; the previously active plan is automatically deactivated.")]
+    public async Task<string> SetActiveOrchestrationPlan(
+        [Description("The integer ID of the orchestration plan to activate (from list_orchestration_plans).")] int id,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "MCPORCHESTRATION_SETACTIVE", McpOrchestrationId = id }, cancellationToken);
         return SimpleMessage(json);
     }
 

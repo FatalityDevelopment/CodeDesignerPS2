@@ -117,6 +117,16 @@ export class AiConfigProvider {
                 break;
             }
 
+            case 'orchestrationSetActive': {
+                const id = msg['id'] as number;
+                await this._handleOrchestrationSetActive(id, webview);
+                break;
+            }
+
+            case 'exportAll':
+                await this._handleExportAll(webview);
+                break;
+
             // ── Memory operations ─────────────────────────────────────────────
             case 'memoryList':
                 await this._sendMemoryList(webview);
@@ -402,6 +412,87 @@ export class AiConfigProvider {
             vscode.window.showInformationMessage(`Orchestration profile '${name}' exported.`);
         } catch (err: any) {
             webview.postMessage({ type: 'orchestrationActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleOrchestrationSetActive(id: number, webview: vscode.Webview): Promise<void> {
+        try {
+            const profile = await this.socketClient.mcpOrchestrationSetActive(id);
+            webview.postMessage({ type: 'orchestrationActionResult', profile, message: `'${profile.name}' is now the active plan.` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'orchestrationActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleExportAll(webview: vscode.Webview): Promise<void> {
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file('orchestration-plan.md'),
+            filters:    { 'Markdown': ['md'] },
+            title:      'Export All — Full Orchestration Plan (as the AI sees it)',
+        });
+        if (!uri) { return; }
+        try {
+            const [orchestrations, agents] = await Promise.all([
+                this.socketClient.mcpOrchestrationList(),
+                this.socketClient.mcpAgentList(),
+            ]);
+
+            const lines: string[] = [];
+
+            const appendField = (label: string, value: string | undefined) => {
+                if (value && value.trim()) {
+                    lines.push(`### ${label}`);
+                    lines.push(value);
+                    lines.push('');
+                }
+            };
+
+            if (orchestrations.length > 0) {
+                lines.push('# Orchestration Plans');
+                lines.push('');
+                for (const orch of orchestrations) {
+                    lines.push('---');
+                    lines.push('');
+                    lines.push(`# ${orch.isActive ? '● ' : ''}${orch.name}${orch.isActive ? '  [ACTIVE]' : ''}`);
+                    lines.push('');
+                    appendField('Description', orch.description);
+                    appendField('Strategy',    orch.strategy);
+                    appendField('Roles',       orch.roles);
+                    appendField('Workflow',    orch.workflow);
+                    appendField('Rules',       orch.rules);
+                    appendField('Notes',       orch.notes);
+                }
+            }
+
+            if (agents.length > 0) {
+                if (lines.length > 0) { lines.push(''); lines.push('---'); lines.push(''); }
+                lines.push('# Agent Profiles');
+                lines.push('');
+                for (const agent of agents) {
+                    lines.push('---');
+                    lines.push('');
+                    const lead   = agent.isAgentLead ? '★ ' : '';
+                    const status = agent.status ? ` [${agent.status}]` : '';
+                    lines.push(`# ${lead}${agent.name}${status}`);
+                    lines.push('');
+                    appendField('Description',         agent.description);
+                    appendField('Objective',            agent.objective);
+                    appendField('Rules',                agent.rules);
+                    appendField('Guidelines',           agent.guidelines);
+                    appendField('Session Begin',        agent.sessionBegin);
+                    appendField('Concurrent Tasks',     agent.concurrentTasks);
+                    appendField('Session End',          agent.sessionEnd);
+                    appendField('Recommended Workflow', agent.recommendedWorkflow);
+                    appendField('Research',             agent.research);
+                }
+            }
+
+            const content = lines.join('\n');
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+            webview.postMessage({ type: 'exportAllResult', message: `Exported to '${path.basename(uri.fsPath)}'` });
+            vscode.window.showInformationMessage('Full orchestration plan exported.');
+        } catch (err: any) {
+            webview.postMessage({ type: 'exportAllResult', error: err?.message ?? String(err) });
         }
     }
 

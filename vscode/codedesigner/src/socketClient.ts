@@ -533,6 +533,7 @@ export interface McpAgentInfo {
  */
 export interface McpOrchestrationInfo {
     id:           number;
+    isActive?:    boolean;
     name:         string;
     description?: string;
     strategy?:    string;
@@ -2738,6 +2739,15 @@ export class SocketClient {
     public async mcpOrchestrationDelete(id: number): Promise<void> {
         const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_DELETE', McpOrchestrationId: id });
         if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_DELETE failed'); }
+    }
+
+    /**
+     * MCPORCHESTRATION_SETACTIVE — sets the active orchestration profile.
+     */
+    public async mcpOrchestrationSetActive(id: number): Promise<McpOrchestrationInfo> {
+        const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_SETACTIVE', McpOrchestrationId: id });
+        if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_SETACTIVE failed'); }
+        return response.McpOrchestration!;
     }
 
     /**
