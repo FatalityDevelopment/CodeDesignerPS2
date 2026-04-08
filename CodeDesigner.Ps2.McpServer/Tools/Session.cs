@@ -301,6 +301,7 @@ public sealed partial class CodeDesignerPs2Tools
           McpMemory         (Id, Name, Content)
           McpAgents         (Id, Name, Status, IsAgentLead, Objective, Rules, Guidelines, SessionBegin, ConcurrentTasks, SessionEnd, Research, RecommendedWorkflow, CreatedAt, UpdatedAt)
           McpAgentTasks     (Id, McpAgentId, Phase, SortOrder, Description)
+          McpOrchestrations (Id, Name, Description, Strategy, Roles, Workflow, Rules, Notes, CreatedAt, UpdatedAt)
 
         Examples:
           SELECT * FROM Settings WHERE Key LIKE 'theme%'
