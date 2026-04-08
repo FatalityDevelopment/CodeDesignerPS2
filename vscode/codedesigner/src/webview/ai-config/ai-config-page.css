@@ -502,3 +502,63 @@ body, html {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.4)); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100,100,100,0.7)); }
+
+/* ── Tab bar ─────────────────────────────────────────────────────────────────── */
+.aic-tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, #404040);
+  background: var(--vscode-editor-background);
+  flex-shrink: 0;
+}
+
+.aic-tab {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: var(--vscode-foreground);
+  opacity: 0.65;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: var(--vscode-font-family, sans-serif);
+  transition: opacity 0.1s, border-color 0.1s;
+  white-space: nowrap;
+}
+
+.aic-tab:hover {
+  opacity: 0.9;
+  background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.06));
+}
+
+.aic-tab.active {
+  opacity: 1;
+  border-bottom-color: var(--vscode-focusBorder, #0078d4);
+  color: var(--vscode-focusBorder, #0078d4);
+}
+
+/* ── Outer shell wrapping the tab bar + content ─────────────────────────────── */
+.aic-outer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.aic-tab-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+}
+
+.aic-tab-panel {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.aic-tab-panel.hidden {
+  display: none;
+}

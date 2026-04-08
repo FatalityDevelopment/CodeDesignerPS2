@@ -108,6 +108,15 @@ interface CommandMessage {
     McpAgentConcurrentTasks?: string;
     McpAgentSessionEnd?: string;
     McpAgentResearch?: string;
+    // Orchestration Profile (MCPORCHESTRATION_LIST / MCPORCHESTRATION_GET / MCPORCHESTRATION_ADD / MCPORCHESTRATION_UPDATE / MCPORCHESTRATION_DELETE / MCPORCHESTRATION_IMPORT / MCPORCHESTRATION_EXPORT)
+    McpOrchestrationId?: number;
+    McpOrchestrationName?: string;
+    McpOrchestrationDescription?: string;
+    McpOrchestrationStrategy?: string;
+    McpOrchestrationRoles?: string;
+    McpOrchestrationWorkflow?: string;
+    McpOrchestrationRules?: string;
+    McpOrchestrationNotes?: string;
 }
 
 /**
@@ -413,6 +422,9 @@ interface CommandResponse {
     // MCPAGENT_LIST / MCPAGENT_ADD / MCPAGENT_GET / MCPAGENT_UPDATE results
     McpAgents?: McpAgentInfo[];
     McpAgent?: McpAgentInfo;
+    // MCPORCHESTRATION_LIST / MCPORCHESTRATION_ADD / MCPORCHESTRATION_GET / MCPORCHESTRATION_UPDATE results
+    McpOrchestrations?: McpOrchestrationInfo[];
+    McpOrchestration?: McpOrchestrationInfo;
 }
 
 /**
@@ -514,6 +526,22 @@ export interface McpAgentInfo {
     research?:           string;
     createdAt:           string;
     updatedAt:           string;
+}
+
+/**
+ * A MCP Orchestration profile stored in the database.
+ */
+export interface McpOrchestrationInfo {
+    id:           number;
+    name:         string;
+    description?: string;
+    strategy?:    string;
+    roles?:       string;
+    workflow?:    string;
+    rules?:       string;
+    notes?:       string;
+    createdAt:    string;
+    updatedAt:    string;
 }
 
 /**
@@ -2645,6 +2673,88 @@ export class SocketClient {
     public async mcpAgentExport(id: number, outputPath: string): Promise<void> {
         const response = await this.sendCommand({ Command: 'MCPAGENT_EXPORT', McpAgentId: id, OutputPath: outputPath });
         if (!response.Success) { throw new Error(response.Error || 'MCPAGENT_EXPORT failed'); }
+    }
+
+    // ── Orchestration Profile ────────────────────────────────────────────────
+
+    /**
+     * MCPORCHESTRATION_LIST — returns all orchestration profiles.
+     */
+    public async mcpOrchestrationList(): Promise<McpOrchestrationInfo[]> {
+        const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_LIST' });
+        if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_LIST failed'); }
+        return response.McpOrchestrations ?? [];
+    }
+
+    /**
+     * MCPORCHESTRATION_GET — returns a single orchestration profile by id.
+     */
+    public async mcpOrchestrationGet(id: number): Promise<McpOrchestrationInfo> {
+        const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_GET', McpOrchestrationId: id });
+        if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_GET failed'); }
+        return response.McpOrchestration!;
+    }
+
+    /**
+     * MCPORCHESTRATION_ADD — creates a new orchestration profile.
+     */
+    public async mcpOrchestrationAdd(profile: Omit<McpOrchestrationInfo, 'id' | 'createdAt' | 'updatedAt'>): Promise<McpOrchestrationInfo> {
+        const response = await this.sendCommand({
+            Command:                      'MCPORCHESTRATION_ADD',
+            McpOrchestrationName:         profile.name,
+            McpOrchestrationDescription:  profile.description,
+            McpOrchestrationStrategy:     profile.strategy,
+            McpOrchestrationRoles:        profile.roles,
+            McpOrchestrationWorkflow:     profile.workflow,
+            McpOrchestrationRules:        profile.rules,
+            McpOrchestrationNotes:        profile.notes,
+        });
+        if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_ADD failed'); }
+        return response.McpOrchestration!;
+    }
+
+    /**
+     * MCPORCHESTRATION_UPDATE — updates an existing orchestration profile.
+     */
+    public async mcpOrchestrationUpdate(id: number, fields: Partial<Omit<McpOrchestrationInfo, 'id' | 'createdAt' | 'updatedAt'>>): Promise<McpOrchestrationInfo> {
+        const response = await this.sendCommand({
+            Command:                      'MCPORCHESTRATION_UPDATE',
+            McpOrchestrationId:           id,
+            McpOrchestrationName:         fields.name,
+            McpOrchestrationDescription:  fields.description,
+            McpOrchestrationStrategy:     fields.strategy,
+            McpOrchestrationRoles:        fields.roles,
+            McpOrchestrationWorkflow:     fields.workflow,
+            McpOrchestrationRules:        fields.rules,
+            McpOrchestrationNotes:        fields.notes,
+        });
+        if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_UPDATE failed'); }
+        return response.McpOrchestration!;
+    }
+
+    /**
+     * MCPORCHESTRATION_DELETE — deletes an orchestration profile by id.
+     */
+    public async mcpOrchestrationDelete(id: number): Promise<void> {
+        const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_DELETE', McpOrchestrationId: id });
+        if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_DELETE failed'); }
+    }
+
+    /**
+     * MCPORCHESTRATION_IMPORT — imports an orchestration profile from a Markdown file.
+     */
+    public async mcpOrchestrationImport(filePath: string): Promise<McpOrchestrationInfo> {
+        const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_IMPORT', FilePath: filePath });
+        if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_IMPORT failed'); }
+        return response.McpOrchestration!;
+    }
+
+    /**
+     * MCPORCHESTRATION_EXPORT — exports an orchestration profile to a Markdown file.
+     */
+    public async mcpOrchestrationExport(id: number, outputPath: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_EXPORT', McpOrchestrationId: id, OutputPath: outputPath });
+        if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_EXPORT failed'); }
     }
 }
 

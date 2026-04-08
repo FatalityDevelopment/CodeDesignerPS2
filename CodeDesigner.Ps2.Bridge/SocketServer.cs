@@ -87,6 +87,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Persistence layer for MCP Agent profiles backed by the database.</summary>
         internal DbMcpAgentRepository? McpAgentRepo { get; }
 
+        /// <summary>Persistence layer for MCP Orchestration profiles backed by the database.</summary>
+        internal DbMcpOrchestrationRepository? McpOrchestrationRepo { get; }
+
         /// <summary>
         /// When set, the READMEM command reads live memory from this scheduler.
         /// </summary>
@@ -219,6 +222,7 @@ namespace CodeDesigner.Ps2.Bridge
             SettingsRepo = new DbSettingsRepository(db);
             McpMemoryRepo = new DbMcpMemoryRepository(db);
             McpAgentRepo  = new DbMcpAgentRepository(db);
+            McpOrchestrationRepo = new DbMcpOrchestrationRepository(db);
 
             // Migrate legacy flat-file data into the DB on first run (idempotent).
             MigrateLegacySettingsToDb();
@@ -1332,6 +1336,34 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MCPAGENT_EXPORT":
                     case "MCPAGENTEXPORT":
                         return HandleMcpAgentExport(command.McpAgentId, command.OutputPath);
+
+                    case "MCPORCHESTRATION_LIST":
+                    case "MCPORCHESTRATIONLIST":
+                        return HandleMcpOrchestrationList();
+
+                    case "MCPORCHESTRATION_GET":
+                    case "MCPORCHESTRATIONGET":
+                        return HandleMcpOrchestrationGet(command.McpOrchestrationId);
+
+                    case "MCPORCHESTRATION_ADD":
+                    case "MCPORCHESTRATIONADD":
+                        return HandleMcpOrchestrationAdd(command);
+
+                    case "MCPORCHESTRATION_UPDATE":
+                    case "MCPORCHESTRATIONUPDATE":
+                        return HandleMcpOrchestrationUpdate(command);
+
+                    case "MCPORCHESTRATION_DELETE":
+                    case "MCPORCHESTRATIONDELETE":
+                        return HandleMcpOrchestrationDelete(command.McpOrchestrationId);
+
+                    case "MCPORCHESTRATION_IMPORT":
+                    case "MCPORCHESTRATIONIMPORT":
+                        return HandleMcpOrchestrationImport(command.FilePath);
+
+                    case "MCPORCHESTRATION_EXPORT":
+                    case "MCPORCHESTRATIONEXPORT":
+                        return HandleMcpOrchestrationExport(command.McpOrchestrationId, command.OutputPath);
 
                     default:
                         // Echo for unknown commands

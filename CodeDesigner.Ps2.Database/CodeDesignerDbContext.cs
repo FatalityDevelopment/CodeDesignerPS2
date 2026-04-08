@@ -32,6 +32,9 @@ public class CodeDesignerDbContext : DbContext
     /// <summary>Session-lifecycle tasks belonging to an MCP agent.</summary>
     public DbSet<McpAgentTask> McpAgentTasks { get; set; } = null!;
 
+    /// <summary>MCP orchestration profiles that define how multiple agents are coordinated.</summary>
+    public DbSet<McpOrchestration> McpOrchestrations { get; set; } = null!;
+
     /// <summary>Game metadata (title, description, cover art).</summary>
     public DbSet<Game> Games { get; set; } = null!;
 
@@ -143,6 +146,13 @@ public class CodeDesignerDbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(t => new { t.McpAgentId, t.Phase, t.SortOrder });
+        });
+
+        // ── McpOrchestration ───────────────────────────────────────────────────
+        modelBuilder.Entity<McpOrchestration>(entity =>
+        {
+            entity.HasKey(o => o.Id);
+            entity.Property(o => o.Name).HasMaxLength(256).IsRequired();
         });
 
         // ── GameRegion ─────────────────────────────────────────────────────────

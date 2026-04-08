@@ -28,6 +28,19 @@ export interface AgentProfile {
   updatedAt:           string;
 }
 
+export interface OrchestrationProfile {
+  id:           number;
+  name:         string;
+  description?: string;
+  strategy?:    string;
+  roles?:       string;
+  workflow?:    string;
+  rules?:       string;
+  notes?:       string;
+  createdAt:    string;
+  updatedAt:    string;
+}
+
 export interface McpMemoryEntry {
   id:        number;
   name:      string;
@@ -37,17 +50,17 @@ export interface McpMemoryEntry {
   updatedAt: string;
 }
 
-// ── Markdown field descriptor ────────────────────────────────────────────────
+// ── Markdown field descriptors ────────────────────────────────────────────────
 
-interface MarkdownField {
-  key:         keyof AgentProfile;
+interface MarkdownField<T> {
+  key:         keyof T;
   label:       string;
   description: string;
   isMarkdown:  boolean;
   rows:        number;
 }
 
-const AGENT_FIELDS: MarkdownField[] = [
+const AGENT_FIELDS: MarkdownField<AgentProfile>[] = [
   { key: 'name',               label: 'Name',                description: 'Display name for this agent profile.',                     isMarkdown: false, rows: 1  },
   { key: 'status',             label: 'Status',              description: 'Current status, e.g. "active", "inactive", "experimental".', isMarkdown: false, rows: 1  },
   { key: 'description',        label: 'Description',         description: 'High-level description of the agent\'s purpose and role.', isMarkdown: true,  rows: 4  },
@@ -61,200 +74,332 @@ const AGENT_FIELDS: MarkdownField[] = [
   { key: 'research',           label: 'Research',            description: 'Knowledge bases or sources the agent should consult (Markdown).', isMarkdown: true, rows: 4 },
 ];
 
+const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
+  { key: 'name',        label: 'Name',        description: 'Display name for this orchestration profile.',                  isMarkdown: false, rows: 1 },
+  { key: 'description', label: 'Description', description: 'High-level description of this orchestration profile.',         isMarkdown: true,  rows: 4 },
+  { key: 'strategy',    label: 'Strategy',    description: 'The overall coordination strategy for agents (Markdown).',      isMarkdown: true,  rows: 6 },
+  { key: 'roles',       label: 'Roles',       description: 'Role assignments for agents within this orchestration (Markdown).', isMarkdown: true, rows: 6 },
+  { key: 'workflow',    label: 'Workflow',     description: 'The coordination workflow / process for this profile (Markdown).', isMarkdown: true, rows: 6 },
+  { key: 'rules',       label: 'Rules',       description: 'Coordination rules that agents must follow (Markdown).',        isMarkdown: true,  rows: 6 },
+  { key: 'notes',       label: 'Notes',       description: 'Additional notes or references for this profile (Markdown).',   isMarkdown: true,  rows: 4 },
+];
+
 @Component({
   selector:      'app-ai-config-page',
   standalone:    true,
   encapsulation: ViewEncapsulation.None,
   template: `
-<div class="aic-shell">
+<div class="aic-outer">
 
-  <!-- ── Left sidebar: agent list ──────────────────────────────────────── -->
-  <aside class="aic-sidebar">
-    <div class="aic-sidebar-header">
-      <span class="aic-sidebar-title">Agent Profiles</span>
-      <button class="aic-icon-btn" title="Refresh" (click)="loadAgents()">&#x21BB;</button>
-    </div>
+  <!-- ── Top tab bar ─────────────────────────────────────────────────────── -->
+  <div class="aic-tab-bar">
+    <button class="aic-tab" [class.active]="activeTab() === 'orchestration'" (click)="activeTab.set('orchestration')">
+      Orchestration
+    </button>
+    <button class="aic-tab" [class.active]="activeTab() === 'agents'" (click)="activeTab.set('agents')">
+      Agents
+    </button>
+  </div>
 
-    <div class="aic-sidebar-actions">
-      <button class="aic-small-btn aic-primary-btn" (click)="onNewAgent()">+ New</button>
-      <button class="aic-small-btn" title="Import from .md file" (click)="onImportAgent()">&#x2B06; Import</button>
-    </div>
+  <div class="aic-tab-content">
 
-    @if (statusMessage()) {
-      <div class="aic-status"
-           [class.aic-status-ok]="statusOk()"
-           [class.aic-status-error]="statusError()">
-        {{ statusMessage() }}
-      </div>
-    }
+    <!-- ═══════════════════════════ ORCHESTRATION TAB ══════════════════════ -->
+    <div class="aic-tab-panel" [class.hidden]="activeTab() !== 'orchestration'">
 
-    <ul class="aic-agent-list">
-      @for (agent of agents(); track agent.id) {
-        <li class="aic-agent-item"
-            [class.selected]="selectedId() === agent.id"
-            (click)="selectAgent(agent)">
-          <span class="aic-agent-name" [title]="agent.name">
-            @if (agent.isAgentLead) { <span class="aic-lead-badge" title="Lead agent">&#x2605;</span> }
-            {{ agent.name }}
-          </span>
-          @if (agent.status) {
-            <span class="aic-agent-status">{{ agent.status }}</span>
-          }
-        </li>
-      }
-      @if (agents().length === 0) {
-        <li class="aic-empty">No agents yet. Click "+ New" to create one.</li>
-      }
-    </ul>
-  </aside>
-
-  <!-- ── Right panel: form ─────────────────────────────────────────────── -->
-  <main class="aic-main">
-    @if (!selectedId() && !showNewForm()) {
-      <div class="aic-empty-state">
-        <p>Select an agent from the left panel, or click <strong>+ New</strong> to create one.</p>
-      </div>
-    }
-
-    @if (showNewForm() || selectedId() !== null) {
-      <div class="aic-form-header">
-        <h2 class="aic-form-title">
-          {{ showNewForm() ? 'New Agent Profile' : currentAgent()?.name ?? 'Edit Agent' }}
-        </h2>
-        <div class="aic-form-header-actions">
-          @if (!showNewForm() && selectedId() !== null) {
-            <button class="aic-small-btn" (click)="onExportAgent()">&#x2B07; Export</button>
-            <button class="aic-small-btn aic-danger-btn" (click)="onDeleteAgent()">&#x2715; Delete</button>
-          }
+      <!-- Left sidebar -->
+      <aside class="aic-sidebar">
+        <div class="aic-sidebar-header">
+          <span class="aic-sidebar-title">Orchestration Profiles</span>
+          <button class="aic-icon-btn" title="Refresh" (click)="loadOrchestrations()">&#x21BB;</button>
         </div>
-      </div>
 
-      <!-- Lead agent toggle -->
-      <div class="aic-setting-row">
-        <div class="aic-setting-label">
-          <label class="aic-lead-label">
-            <input type="checkbox"
-                   [checked]="formIsLead()"
-                   (change)="formIsLead.set($any($event.target).checked)" />
-            &nbsp;Lead Agent
-          </label>
-          <span class="aic-setting-desc">Mark this as the primary / lead agent in a multi-agent setup.</span>
+        <div class="aic-sidebar-actions">
+          <button class="aic-small-btn aic-primary-btn" (click)="onNewOrchestration()">+ New</button>
+          <button class="aic-small-btn" title="Import from .md file" (click)="onImportOrchestration()">&#x2B06; Import</button>
         </div>
-      </div>
 
-      <!-- All markdown/text fields -->
-      @for (field of fields; track field.key) {
-        <div class="aic-setting-row">
-          <div class="aic-setting-label">
-            <span class="aic-setting-name">{{ field.label }}</span>
-            <span class="aic-setting-desc">{{ field.description }}</span>
+        @if (orchStatusMessage()) {
+          <div class="aic-status"
+               [class.aic-status-ok]="orchStatusOk()"
+               [class.aic-status-error]="orchStatusError()">
+            {{ orchStatusMessage() }}
           </div>
-          <div class="aic-setting-control">
-            @if (!field.isMarkdown || !previewModes()[field.key]) {
-              <textarea
-                class="aic-textarea"
-                [class.aic-textarea-single]="!field.isMarkdown"
-                [rows]="field.rows"
-                spellcheck="false"
-                [value]="getFieldValue(field.key)"
-                (input)="setFieldValue(field.key, $any($event.target).value)"></textarea>
-            }
-            @if (field.isMarkdown && previewModes()[field.key]) {
-              <div class="aic-md-preview" [innerHTML]="renderMarkdown(getFieldValue(field.key))"></div>
-            }
-            @if (field.isMarkdown) {
-              <div class="aic-md-toolbar">
-                <button class="aic-md-toggle"
-                        [class.active]="!previewModes()[field.key]"
-                        (click)="setPreviewMode(field.key, false)">Edit</button>
-                <button class="aic-md-toggle"
-                        [class.active]="previewModes()[field.key]"
-                        (click)="setPreviewMode(field.key, true)">Preview</button>
-              </div>
-            }
-          </div>
-        </div>
-      }
-
-      <!-- Save / Cancel -->
-      <div class="aic-form-actions">
-        @if (showNewForm()) {
-          <button class="aic-btn aic-primary-btn" [disabled]="!formName().trim()" (click)="onCreateAgent()">Create Agent</button>
-          <button class="aic-btn" (click)="cancelNew()">Cancel</button>
-        } @else {
-          <button class="aic-btn aic-primary-btn" (click)="onSaveAgent()">Save</button>
-          <button class="aic-btn" (click)="revertForm()">Revert</button>
         }
-      </div>
 
-      <!-- Memories section (shown when editing) -->
-      @if (!showNewForm() && selectedId() !== null) {
-        <div class="aic-memories-section">
-          <div class="aic-memories-header">
-            <h3 class="aic-memories-title">Agent Memories</h3>
-            <div class="aic-memories-actions">
-              <button class="aic-icon-btn" title="Refresh memories" (click)="loadMemories()">&#x21BB;</button>
-              <button class="aic-small-btn" title="Import memory from .md file" (click)="onImportMemory()">&#x2B06; Import</button>
-              <button class="aic-small-btn aic-primary-btn" (click)="onAddMemory()">+ New Memory</button>
+        <ul class="aic-agent-list">
+          @for (orch of orchestrations(); track orch.id) {
+            <li class="aic-agent-item"
+                [class.selected]="orchSelectedId() === orch.id"
+                (click)="selectOrchestration(orch)">
+              <span class="aic-agent-name" [title]="orch.name">{{ orch.name }}</span>
+            </li>
+          }
+          @if (orchestrations().length === 0) {
+            <li class="aic-empty">No profiles yet. Click "+ New" to create one.</li>
+          }
+        </ul>
+      </aside>
+
+      <!-- Right panel -->
+      <main class="aic-main">
+        @if (!orchSelectedId() && !orchShowNewForm()) {
+          <div class="aic-empty-state">
+            <p>Select an orchestration profile from the left panel, or click <strong>+ New</strong> to create one.</p>
+          </div>
+        }
+
+        @if (orchShowNewForm() || orchSelectedId() !== null) {
+          <div class="aic-form-header">
+            <h2 class="aic-form-title">
+              {{ orchShowNewForm() ? 'New Orchestration Profile' : currentOrchestration()?.name ?? 'Edit Profile' }}
+            </h2>
+            <div class="aic-form-header-actions">
+              @if (!orchShowNewForm() && orchSelectedId() !== null) {
+                <button class="aic-small-btn" (click)="onExportOrchestration()">&#x2B07; Export</button>
+                <button class="aic-small-btn aic-danger-btn" (click)="onDeleteOrchestration()">&#x2715; Delete</button>
+              }
             </div>
           </div>
 
-          @if (memStatusMessage()) {
-            <div class="aic-status"
-                 [class.aic-status-ok]="memStatusOk()"
-                 [class.aic-status-error]="memStatusError()">
-              {{ memStatusMessage() }}
-            </div>
-          }
-
-          @if (showMemAddForm()) {
-            <div class="aic-mem-add-form">
-              <input class="aic-mem-name-input"
-                     type="text"
-                     placeholder="Memory name…"
-                     autocomplete="off"
-                     spellcheck="false"
-                     [value]="newMemName()"
-                     (input)="newMemName.set($any($event.target).value)"
-                     (keydown.enter)="doAddMemory()"
-                     (keydown.escape)="showMemAddForm.set(false)" />
-              <div class="aic-mem-add-row">
-                <button class="aic-small-btn aic-primary-btn"
-                        [disabled]="!newMemName().trim()"
-                        (click)="doAddMemory()">Create</button>
-                <button class="aic-small-btn" (click)="showMemAddForm.set(false)">Cancel</button>
+          @for (field of orchFields; track field.key) {
+            <div class="aic-setting-row">
+              <div class="aic-setting-label">
+                <span class="aic-setting-name">{{ field.label }}</span>
+                <span class="aic-setting-desc">{{ field.description }}</span>
+              </div>
+              <div class="aic-setting-control">
+                @if (!field.isMarkdown || !orchPreviewModes()[field.key]) {
+                  <textarea
+                    class="aic-textarea"
+                    [class.aic-textarea-single]="!field.isMarkdown"
+                    [rows]="field.rows"
+                    spellcheck="false"
+                    [value]="getOrchFieldValue(field.key)"
+                    (input)="setOrchFieldValue(field.key, $any($event.target).value)"></textarea>
+                }
+                @if (field.isMarkdown && orchPreviewModes()[field.key]) {
+                  <div class="aic-md-preview" [innerHTML]="renderMarkdown(getOrchFieldValue(field.key))"></div>
+                }
+                @if (field.isMarkdown) {
+                  <div class="aic-md-toolbar">
+                    <button class="aic-md-toggle"
+                            [class.active]="!orchPreviewModes()[field.key]"
+                            (click)="setOrchPreviewMode(field.key, false)">Edit</button>
+                    <button class="aic-md-toggle"
+                            [class.active]="orchPreviewModes()[field.key]"
+                            (click)="setOrchPreviewMode(field.key, true)">Preview</button>
+                  </div>
+                }
               </div>
             </div>
           }
 
-          <div class="aic-mem-list">
-            @if (memories().length === 0) {
-              <div class="aic-empty">No memories yet for this agent.</div>
-            }
-            @for (mem of memories(); track mem.id) {
-              <div class="aic-mem-item">
-                <div class="aic-mem-item-info">
-                  <span class="aic-mem-name" [title]="mem.name">{{ mem.name }}</span>
-                  <span class="aic-mem-date">{{ formatDate(mem.updatedAt) }}</span>
-                </div>
-                <div class="aic-mem-item-actions">
-                  @if (pendingMemDelete() === mem.id) {
-                    <span class="aic-confirm-text">Delete?</span>
-                    <button class="aic-item-btn aic-danger-btn" (click)="doDeleteMemory(mem.id)">Yes</button>
-                    <button class="aic-item-btn" (click)="pendingMemDelete.set(null)">No</button>
-                  } @else {
-                    <button class="aic-item-btn" title="Edit in editor" (click)="onEditMemory(mem)">Edit</button>
-                    <button class="aic-item-btn" title="Export to .md" (click)="onExportMemory(mem)">&#x2B07;</button>
-                    <button class="aic-item-btn aic-danger-btn" title="Delete" (click)="pendingMemDelete.set(mem.id)">&#x2715;</button>
-                  }
-                </div>
-              </div>
+          <div class="aic-form-actions">
+            @if (orchShowNewForm()) {
+              <button class="aic-btn aic-primary-btn" [disabled]="!orchFormName().trim()" (click)="onCreateOrchestration()">Create Profile</button>
+              <button class="aic-btn" (click)="orchCancelNew()">Cancel</button>
+            } @else {
+              <button class="aic-btn aic-primary-btn" (click)="onSaveOrchestration()">Save</button>
+              <button class="aic-btn" (click)="orchRevertForm()">Revert</button>
             }
           </div>
+        }
+      </main>
+    </div>
+
+    <!-- ═══════════════════════════════ AGENTS TAB ═════════════════════════ -->
+    <div class="aic-tab-panel" [class.hidden]="activeTab() !== 'agents'">
+
+      <!-- Left sidebar: agent list -->
+      <aside class="aic-sidebar">
+        <div class="aic-sidebar-header">
+          <span class="aic-sidebar-title">Agent Profiles</span>
+          <button class="aic-icon-btn" title="Refresh" (click)="loadAgents()">&#x21BB;</button>
         </div>
-      }
-    }
-  </main>
+
+        <div class="aic-sidebar-actions">
+          <button class="aic-small-btn aic-primary-btn" (click)="onNewAgent()">+ New</button>
+          <button class="aic-small-btn" title="Import from .md file" (click)="onImportAgent()">&#x2B06; Import</button>
+        </div>
+
+        @if (statusMessage()) {
+          <div class="aic-status"
+               [class.aic-status-ok]="statusOk()"
+               [class.aic-status-error]="statusError()">
+            {{ statusMessage() }}
+          </div>
+        }
+
+        <ul class="aic-agent-list">
+          @for (agent of agents(); track agent.id) {
+            <li class="aic-agent-item"
+                [class.selected]="selectedId() === agent.id"
+                (click)="selectAgent(agent)">
+              <span class="aic-agent-name" [title]="agent.name">
+                @if (agent.isAgentLead) { <span class="aic-lead-badge" title="Lead agent">&#x2605;</span> }
+                {{ agent.name }}
+              </span>
+              @if (agent.status) {
+                <span class="aic-agent-status">{{ agent.status }}</span>
+              }
+            </li>
+          }
+          @if (agents().length === 0) {
+            <li class="aic-empty">No agents yet. Click "+ New" to create one.</li>
+          }
+        </ul>
+      </aside>
+
+      <!-- Right panel: form -->
+      <main class="aic-main">
+        @if (!selectedId() && !showNewForm()) {
+          <div class="aic-empty-state">
+            <p>Select an agent from the left panel, or click <strong>+ New</strong> to create one.</p>
+          </div>
+        }
+
+        @if (showNewForm() || selectedId() !== null) {
+          <div class="aic-form-header">
+            <h2 class="aic-form-title">
+              {{ showNewForm() ? 'New Agent Profile' : currentAgent()?.name ?? 'Edit Agent' }}
+            </h2>
+            <div class="aic-form-header-actions">
+              @if (!showNewForm() && selectedId() !== null) {
+                <button class="aic-small-btn" (click)="onExportAgent()">&#x2B07; Export</button>
+                <button class="aic-small-btn aic-danger-btn" (click)="onDeleteAgent()">&#x2715; Delete</button>
+              }
+            </div>
+          </div>
+
+          <!-- Lead agent toggle -->
+          <div class="aic-setting-row">
+            <div class="aic-setting-label">
+              <label class="aic-lead-label">
+                <input type="checkbox"
+                       [checked]="formIsLead()"
+                       (change)="formIsLead.set($any($event.target).checked)" />
+                &nbsp;Lead Agent
+              </label>
+              <span class="aic-setting-desc">Mark this as the primary / lead agent in a multi-agent setup.</span>
+            </div>
+          </div>
+
+          <!-- All markdown/text fields -->
+          @for (field of fields; track field.key) {
+            <div class="aic-setting-row">
+              <div class="aic-setting-label">
+                <span class="aic-setting-name">{{ field.label }}</span>
+                <span class="aic-setting-desc">{{ field.description }}</span>
+              </div>
+              <div class="aic-setting-control">
+                @if (!field.isMarkdown || !previewModes()[field.key]) {
+                  <textarea
+                    class="aic-textarea"
+                    [class.aic-textarea-single]="!field.isMarkdown"
+                    [rows]="field.rows"
+                    spellcheck="false"
+                    [value]="getFieldValue(field.key)"
+                    (input)="setFieldValue(field.key, $any($event.target).value)"></textarea>
+                }
+                @if (field.isMarkdown && previewModes()[field.key]) {
+                  <div class="aic-md-preview" [innerHTML]="renderMarkdown(getFieldValue(field.key))"></div>
+                }
+                @if (field.isMarkdown) {
+                  <div class="aic-md-toolbar">
+                    <button class="aic-md-toggle"
+                            [class.active]="!previewModes()[field.key]"
+                            (click)="setPreviewMode(field.key, false)">Edit</button>
+                    <button class="aic-md-toggle"
+                            [class.active]="previewModes()[field.key]"
+                            (click)="setPreviewMode(field.key, true)">Preview</button>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+
+          <!-- Save / Cancel -->
+          <div class="aic-form-actions">
+            @if (showNewForm()) {
+              <button class="aic-btn aic-primary-btn" [disabled]="!formName().trim()" (click)="onCreateAgent()">Create Agent</button>
+              <button class="aic-btn" (click)="cancelNew()">Cancel</button>
+            } @else {
+              <button class="aic-btn aic-primary-btn" (click)="onSaveAgent()">Save</button>
+              <button class="aic-btn" (click)="revertForm()">Revert</button>
+            }
+          </div>
+
+          <!-- Memories section (shown when editing) -->
+          @if (!showNewForm() && selectedId() !== null) {
+            <div class="aic-memories-section">
+              <div class="aic-memories-header">
+                <h3 class="aic-memories-title">Agent Memories</h3>
+                <div class="aic-memories-actions">
+                  <button class="aic-icon-btn" title="Refresh memories" (click)="loadMemories()">&#x21BB;</button>
+                  <button class="aic-small-btn" title="Import memory from .md file" (click)="onImportMemory()">&#x2B06; Import</button>
+                  <button class="aic-small-btn aic-primary-btn" (click)="onAddMemory()">+ New Memory</button>
+                </div>
+              </div>
+
+              @if (memStatusMessage()) {
+                <div class="aic-status"
+                     [class.aic-status-ok]="memStatusOk()"
+                     [class.aic-status-error]="memStatusError()">
+                  {{ memStatusMessage() }}
+                </div>
+              }
+
+              @if (showMemAddForm()) {
+                <div class="aic-mem-add-form">
+                  <input class="aic-mem-name-input"
+                         type="text"
+                         placeholder="Memory name…"
+                         autocomplete="off"
+                         spellcheck="false"
+                         [value]="newMemName()"
+                         (input)="newMemName.set($any($event.target).value)"
+                         (keydown.enter)="doAddMemory()"
+                         (keydown.escape)="showMemAddForm.set(false)" />
+                  <div class="aic-mem-add-row">
+                    <button class="aic-small-btn aic-primary-btn"
+                            [disabled]="!newMemName().trim()"
+                            (click)="doAddMemory()">Create</button>
+                    <button class="aic-small-btn" (click)="showMemAddForm.set(false)">Cancel</button>
+                  </div>
+                </div>
+              }
+
+              <div class="aic-mem-list">
+                @if (memories().length === 0) {
+                  <div class="aic-empty">No memories yet for this agent.</div>
+                }
+                @for (mem of memories(); track mem.id) {
+                  <div class="aic-mem-item">
+                    <div class="aic-mem-item-info">
+                      <span class="aic-mem-name" [title]="mem.name">{{ mem.name }}</span>
+                      <span class="aic-mem-date">{{ formatDate(mem.updatedAt) }}</span>
+                    </div>
+                    <div class="aic-mem-item-actions">
+                      @if (pendingMemDelete() === mem.id) {
+                        <span class="aic-confirm-text">Delete?</span>
+                        <button class="aic-item-btn aic-danger-btn" (click)="doDeleteMemory(mem.id)">Yes</button>
+                        <button class="aic-item-btn" (click)="pendingMemDelete.set(null)">No</button>
+                      } @else {
+                        <button class="aic-item-btn" title="Edit in editor" (click)="onEditMemory(mem)">Edit</button>
+                        <button class="aic-item-btn" title="Export to .md" (click)="onExportMemory(mem)">&#x2B07;</button>
+                        <button class="aic-item-btn aic-danger-btn" title="Delete" (click)="pendingMemDelete.set(mem.id)">&#x2715;</button>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+        }
+      </main>
+    </div>
+
+  </div>
 </div>
   `,
 })
@@ -262,18 +407,42 @@ export class AiConfigPageComponent implements AfterViewInit {
   private readonly vscode = getVsCodeApi();
   private readonly zone   = inject(NgZone);
 
-  readonly fields = AGENT_FIELDS;
+  readonly fields     = AGENT_FIELDS;
+  readonly orchFields = ORCHESTRATION_FIELDS;
 
-  // ── Agent list state ─────────────────────────────────────────────────────
-  readonly agents       = signal<AgentProfile[]>([]);
-  readonly selectedId   = signal<number | null>(null);
-  readonly currentAgent = computed(() => this.agents().find(a => a.id === this.selectedId()) ?? null);
-  readonly showNewForm  = signal(false);
+  // ── Tab state ──────────────────────────────────────────────────────────────
+  readonly activeTab = signal<'orchestration' | 'agents'>('orchestration');
+
+  // ── Orchestration list state ──────────────────────────────────────────────
+  readonly orchestrations     = signal<OrchestrationProfile[]>([]);
+  readonly orchSelectedId     = signal<number | null>(null);
+  readonly currentOrchestration = computed(() => this.orchestrations().find(o => o.id === this.orchSelectedId()) ?? null);
+  readonly orchShowNewForm    = signal(false);
+  readonly orchStatusMessage  = signal('');
+  readonly orchStatusOk       = signal(false);
+  readonly orchStatusError    = signal(false);
+
+  // ── Orchestration form fields ─────────────────────────────────────────────
+  readonly orchFormName        = signal('');
+  readonly orchFormDescription = signal('');
+  readonly orchFormStrategy    = signal('');
+  readonly orchFormRoles       = signal('');
+  readonly orchFormWorkflow    = signal('');
+  readonly orchFormRules       = signal('');
+  readonly orchFormNotes       = signal('');
+  readonly orchPreviewModes    = signal<Record<string, boolean>>({});
+  private _pendingOrchDelete   = false;
+
+  // ── Agent list state ───────────────────────────────────────────────────────
+  readonly agents        = signal<AgentProfile[]>([]);
+  readonly selectedId    = signal<number | null>(null);
+  readonly currentAgent  = computed(() => this.agents().find(a => a.id === this.selectedId()) ?? null);
+  readonly showNewForm   = signal(false);
   readonly statusMessage = signal('');
   readonly statusOk      = signal(false);
   readonly statusError   = signal(false);
 
-  // ── Form fields state ────────────────────────────────────────────────────
+  // ── Agent form fields ─────────────────────────────────────────────────────
   readonly formName               = signal('');
   readonly formStatus             = signal('');
   readonly formDescription        = signal('');
@@ -286,9 +455,7 @@ export class AiConfigPageComponent implements AfterViewInit {
   readonly formSessionEnd         = signal('');
   readonly formResearch           = signal('');
   readonly formIsLead             = signal(false);
-
-  // Map of field keys → preview mode (true = preview, false = edit)
-  readonly previewModes = signal<Record<string, boolean>>({});
+  readonly previewModes           = signal<Record<string, boolean>>({});
 
   // ── Memory state ──────────────────────────────────────────────────────────
   readonly memories         = signal<McpMemoryEntry[]>([]);
@@ -299,10 +466,9 @@ export class AiConfigPageComponent implements AfterViewInit {
   readonly newMemName       = signal('');
   readonly pendingMemDelete = signal<number | null>(null);
 
-  // ── Pending delete state for agents ──────────────────────────────────────
   private _pendingAgentDelete = false;
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   ngAfterViewInit(): void {
     window.addEventListener('message', (event: MessageEvent) => {
@@ -310,7 +476,133 @@ export class AiConfigPageComponent implements AfterViewInit {
       this.zone.run(() => this._handleMessage(data));
     });
     this.vscode.postMessage({ type: 'ready' });
+    this.loadOrchestrations();
     this.loadAgents();
+  }
+
+  // ── Orchestration list actions ────────────────────────────────────────────
+
+  loadOrchestrations(): void {
+    this.setOrchStatus('Loading…', false);
+    this.vscode.postMessage({ type: 'orchestrationList' });
+  }
+
+  selectOrchestration(orch: OrchestrationProfile): void {
+    this.orchSelectedId.set(orch.id);
+    this.orchShowNewForm.set(false);
+    this._populateOrchForm(orch);
+  }
+
+  onNewOrchestration(): void {
+    this.orchSelectedId.set(null);
+    this.orchShowNewForm.set(true);
+    this._clearOrchForm();
+  }
+
+  orchCancelNew(): void {
+    this.orchShowNewForm.set(false);
+    this._clearOrchForm();
+  }
+
+  onCreateOrchestration(): void {
+    const name = this.orchFormName().trim();
+    if (!name) { return; }
+    this.setOrchStatus('Creating…', false);
+    this.vscode.postMessage({
+      type:        'orchestrationAdd',
+      name,
+      description: this.orchFormDescription(),
+      strategy:    this.orchFormStrategy(),
+      roles:       this.orchFormRoles(),
+      workflow:    this.orchFormWorkflow(),
+      rules:       this.orchFormRules(),
+      notes:       this.orchFormNotes(),
+    });
+  }
+
+  onSaveOrchestration(): void {
+    const id = this.orchSelectedId();
+    if (id === null) { return; }
+    this.setOrchStatus('Saving…', false);
+    this.vscode.postMessage({
+      type:        'orchestrationUpdate',
+      id,
+      name:        this.orchFormName(),
+      description: this.orchFormDescription(),
+      strategy:    this.orchFormStrategy(),
+      roles:       this.orchFormRoles(),
+      workflow:    this.orchFormWorkflow(),
+      rules:       this.orchFormRules(),
+      notes:       this.orchFormNotes(),
+    });
+  }
+
+  orchRevertForm(): void {
+    const orch = this.currentOrchestration();
+    if (orch) { this._populateOrchForm(orch); }
+  }
+
+  onDeleteOrchestration(): void {
+    const id = this.orchSelectedId();
+    if (id === null) { return; }
+    if (!this._pendingOrchDelete) {
+      this._pendingOrchDelete = true;
+      this.setOrchStatus('Click Delete again to confirm.', false);
+      return;
+    }
+    this._pendingOrchDelete = false;
+    this.setOrchStatus('Deleting…', false);
+    this.vscode.postMessage({ type: 'orchestrationDelete', id });
+  }
+
+  onImportOrchestration(): void {
+    this.vscode.postMessage({ type: 'orchestrationImport' });
+  }
+
+  onExportOrchestration(): void {
+    const id = this.orchSelectedId();
+    if (id === null) { return; }
+    const name = this.currentOrchestration()?.name ?? String(id);
+    this.vscode.postMessage({ type: 'orchestrationExport', id, name });
+  }
+
+  // ── Orchestration form field helpers ─────────────────────────────────────
+
+  getOrchFieldValue(key: keyof OrchestrationProfile): string {
+    switch (key) {
+      case 'name':        return this.orchFormName();
+      case 'description': return this.orchFormDescription();
+      case 'strategy':    return this.orchFormStrategy();
+      case 'roles':       return this.orchFormRoles();
+      case 'workflow':    return this.orchFormWorkflow();
+      case 'rules':       return this.orchFormRules();
+      case 'notes':       return this.orchFormNotes();
+      default:            return '';
+    }
+  }
+
+  setOrchFieldValue(key: keyof OrchestrationProfile, value: string): void {
+    switch (key) {
+      case 'name':        this.orchFormName.set(value); break;
+      case 'description': this.orchFormDescription.set(value); break;
+      case 'strategy':    this.orchFormStrategy.set(value); break;
+      case 'roles':       this.orchFormRoles.set(value); break;
+      case 'workflow':    this.orchFormWorkflow.set(value); break;
+      case 'rules':       this.orchFormRules.set(value); break;
+      case 'notes':       this.orchFormNotes.set(value); break;
+    }
+  }
+
+  setOrchPreviewMode(key: string, preview: boolean): void {
+    this.orchPreviewModes.update(m => ({ ...m, [key]: preview }));
+  }
+
+  // ── Orchestration status helper ───────────────────────────────────────────
+
+  setOrchStatus(msg: string, isError: boolean): void {
+    this.orchStatusMessage.set(msg);
+    this.orchStatusOk.set(!isError && msg !== '');
+    this.orchStatusError.set(isError);
   }
 
   // ── Agent list actions ────────────────────────────────────────────────────
@@ -412,7 +704,7 @@ export class AiConfigPageComponent implements AfterViewInit {
     this.vscode.postMessage({ type: 'agentExport', id, name });
   }
 
-  // ── Form field helpers ────────────────────────────────────────────────────
+  // ── Agent form field helpers ──────────────────────────────────────────────
 
   getFieldValue(key: keyof AgentProfile): string {
     switch (key) {
@@ -542,6 +834,54 @@ export class AiConfigPageComponent implements AfterViewInit {
 
   private _handleMessage(data: Record<string, unknown>): void {
     switch (data['type']) {
+      // ── Orchestration responses ──────────────────────────────────────────
+      case 'orchestrationListResult': {
+        const profiles = (data['profiles'] as OrchestrationProfile[] | undefined) ?? [];
+        const error    = data['error'] as string | undefined;
+        if (error) {
+          this.setOrchStatus('Error: ' + error, true);
+        } else {
+          this.orchestrations.set(profiles);
+          this.setOrchStatus(profiles.length === 0 ? '' : `${profiles.length} profile${profiles.length === 1 ? '' : 's'}`, false);
+          const sel = this.orchSelectedId();
+          if (sel !== null && !profiles.find(o => o.id === sel)) {
+            this.orchSelectedId.set(null);
+          } else if (sel !== null) {
+            const updated = profiles.find(o => o.id === sel);
+            if (updated) { this._populateOrchForm(updated); }
+          }
+        }
+        break;
+      }
+      case 'orchestrationActionResult': {
+        const profile = data['profile'] as OrchestrationProfile | undefined;
+        const error   = data['error']   as string | undefined;
+        const msg     = data['message'] as string | undefined;
+        if (error) {
+          this.setOrchStatus('Error: ' + error, true);
+        } else {
+          this.setOrchStatus(msg ?? 'Saved.', false);
+          if (profile) {
+            this.orchShowNewForm.set(false);
+            this.orchSelectedId.set(profile.id);
+          }
+          this.loadOrchestrations();
+        }
+        break;
+      }
+      case 'orchestrationDeleteResult': {
+        const error = data['error'] as string | undefined;
+        if (error) {
+          this.setOrchStatus('Error: ' + error, true);
+        } else {
+          this.setOrchStatus('Deleted.', false);
+          this.orchSelectedId.set(null);
+          this.orchShowNewForm.set(false);
+          this._clearOrchForm();
+          this.loadOrchestrations();
+        }
+        break;
+      }
       // ── Agent list responses ─────────────────────────────────────────────
       case 'agentListResult': {
         const agents = (data['agents'] as AgentProfile[] | undefined) ?? [];
@@ -551,7 +891,6 @@ export class AiConfigPageComponent implements AfterViewInit {
         } else {
           this.agents.set(agents);
           this.setStatus(agents.length === 0 ? '' : `${agents.length} profile${agents.length === 1 ? '' : 's'}`, false);
-          // Re-select if we had a selection
           const sel = this.selectedId();
           if (sel !== null && !agents.find(a => a.id === sel)) {
             this.selectedId.set(null);
@@ -617,7 +956,32 @@ export class AiConfigPageComponent implements AfterViewInit {
     }
   }
 
-  // ── Form helpers ──────────────────────────────────────────────────────────
+  // ── Orchestration form helpers ────────────────────────────────────────────
+
+  private _populateOrchForm(orch: OrchestrationProfile): void {
+    this.orchFormName.set(orch.name);
+    this.orchFormDescription.set(orch.description ?? '');
+    this.orchFormStrategy.set(orch.strategy ?? '');
+    this.orchFormRoles.set(orch.roles ?? '');
+    this.orchFormWorkflow.set(orch.workflow ?? '');
+    this.orchFormRules.set(orch.rules ?? '');
+    this.orchFormNotes.set(orch.notes ?? '');
+    this._pendingOrchDelete = false;
+  }
+
+  private _clearOrchForm(): void {
+    this.orchFormName.set('');
+    this.orchFormDescription.set('');
+    this.orchFormStrategy.set('');
+    this.orchFormRoles.set('');
+    this.orchFormWorkflow.set('');
+    this.orchFormRules.set('');
+    this.orchFormNotes.set('');
+    this._pendingOrchDelete = false;
+    this.orchPreviewModes.set({});
+  }
+
+  // ── Agent form helpers ────────────────────────────────────────────────────
 
   private _populateForm(agent: AgentProfile): void {
     this.formName.set(agent.name);

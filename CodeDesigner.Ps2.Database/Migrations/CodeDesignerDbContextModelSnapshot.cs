@@ -394,6 +394,46 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.ToTable("McpConfigs");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpOrchestration", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Roles")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Rules")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Strategy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Workflow")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("McpOrchestrations");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpMemory", b =>
                 {
                     b.Property<int>("Id")

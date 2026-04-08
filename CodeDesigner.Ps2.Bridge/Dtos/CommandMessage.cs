@@ -190,6 +190,24 @@ namespace CodeDesigner.Ps2.Bridge
         public string? McpAgentSessionEnd { get; set; }
         /// <summary>Research sources (Markdown) the agent should consult (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
         public string? McpAgentResearch { get; set; }
+
+        // Orchestration Profile fields (MCPORCHESTRATION_LIST / MCPORCHESTRATION_GET / MCPORCHESTRATION_ADD / MCPORCHESTRATION_UPDATE / MCPORCHESTRATION_DELETE / MCPORCHESTRATION_IMPORT / MCPORCHESTRATION_EXPORT)
+        /// <summary>Database row ID of the MCP orchestration profile to operate on.</summary>
+        public int? McpOrchestrationId { get; set; }
+        /// <summary>Display name for the orchestration profile (MCPORCHESTRATION_ADD / MCPORCHESTRATION_UPDATE).</summary>
+        public string? McpOrchestrationName { get; set; }
+        /// <summary>High-level description of the orchestration profile (MCPORCHESTRATION_ADD / MCPORCHESTRATION_UPDATE).</summary>
+        public string? McpOrchestrationDescription { get; set; }
+        /// <summary>Overall coordination strategy (Markdown) for the orchestration profile (MCPORCHESTRATION_ADD / MCPORCHESTRATION_UPDATE).</summary>
+        public string? McpOrchestrationStrategy { get; set; }
+        /// <summary>Role assignments (Markdown) for agents within this orchestration (MCPORCHESTRATION_ADD / MCPORCHESTRATION_UPDATE).</summary>
+        public string? McpOrchestrationRoles { get; set; }
+        /// <summary>Coordination workflow (Markdown) for this orchestration profile (MCPORCHESTRATION_ADD / MCPORCHESTRATION_UPDATE).</summary>
+        public string? McpOrchestrationWorkflow { get; set; }
+        /// <summary>Coordination rules (Markdown) agents must follow (MCPORCHESTRATION_ADD / MCPORCHESTRATION_UPDATE).</summary>
+        public string? McpOrchestrationRules { get; set; }
+        /// <summary>Additional notes (Markdown) for this orchestration profile (MCPORCHESTRATION_ADD / MCPORCHESTRATION_UPDATE).</summary>
+        public string? McpOrchestrationNotes { get; set; }
         /// <summary>Human-readable title for SNAPSHOT (stored in DB metadata).</summary>
         public string? Title { get; set; }
         /// <summary>Optional free-text description for SNAPSHOT (stored in DB metadata).</summary>
