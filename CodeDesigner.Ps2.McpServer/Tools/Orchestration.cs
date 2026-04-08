@@ -38,7 +38,9 @@ public sealed partial class CodeDesignerPs2Tools
                 int    id       = o.TryGetProperty("id",       out var idP)       ? idP.GetInt32()     : 0;
                 string name     = o.TryGetProperty("name",     out var nameP)     ? nameP.GetString() ?? "" : "?";
                 bool   isActive = o.TryGetProperty("isActive", out var activeP)   && activeP.GetBoolean();
-                sb.AppendLine($"  {id,4}  {(isActive ? "● " : "○ ")}{name}{(isActive ? "  [ACTIVE]" : "")}");
+                string prefix   = isActive ? "● " : "○ ";
+                string suffix   = isActive ? "  [ACTIVE]" : "";
+                sb.AppendLine($"  {id,4}  {prefix}{name}{suffix}");
             }
             sb.AppendLine();
             sb.AppendLine("Use get_active_orchestration_plan to read the full content of the active plan.");

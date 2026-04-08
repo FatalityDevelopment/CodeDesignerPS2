@@ -451,9 +451,11 @@ export class AiConfigProvider {
                 lines.push('# Orchestration Plans');
                 lines.push('');
                 for (const orch of orchestrations) {
+                    const activePrefix = orch.isActive ? '● ' : '';
+                    const activeSuffix = orch.isActive ? '  [ACTIVE]' : '';
                     lines.push('---');
                     lines.push('');
-                    lines.push(`# ${orch.isActive ? '● ' : ''}${orch.name}${orch.isActive ? '  [ACTIVE]' : ''}`);
+                    lines.push(`# ${activePrefix}${orch.name}${activeSuffix}`);
                     lines.push('');
                     appendField('Description', orch.description);
                     appendField('Strategy',    orch.strategy);
