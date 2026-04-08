@@ -12,6 +12,7 @@
   <button class="panel-tab" [class.active]="activeTab === 'cheats'" (click)="setTab('cheats')">Cheats</button>
   <button class="panel-tab" [class.active]="activeTab === 'cds'" (click)="setTab('cds')">CDS</button>
   <button class="panel-tab" [class.active]="activeTab === 'recompile'" (click)="setTab('recompile')">Recompile</button>
+  <button class="panel-tab" [class.active]="activeTab === 'mcpMemory'" (click)="setTab('mcpMemory')">MCP Memory</button>
 </div>
 
 <div id="tab-settings" class="tab-content" [style.display]="activeTab === 'settings' ? 'block' : 'none'">
@@ -63,5 +64,16 @@
   <app-recompile-tab
     [isConnected]="isConnected"
     [selectedGame]="selectedGame"
+  />
+</div>
+
+<div id="tab-mcp-memory" class="tab-content" [style.display]="activeTab === 'mcpMemory' ? 'flex' : 'none'">
+  <app-mcp-memory-overlay
+    (listEntries)="onMcpMemoryList()"
+    (addEntry)="onMcpMemoryAdd($event)"
+    (editEntry)="onMcpMemoryEdit($event)"
+    (exportEntry)="onMcpMemoryExport($event)"
+    (importEntry)="onMcpMemoryImport()"
+    (deleteEntry)="onMcpMemoryDelete($event)"
   />
 </div>

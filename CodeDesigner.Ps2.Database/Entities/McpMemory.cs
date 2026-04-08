@@ -1,8 +1,8 @@
 namespace CodeDesigner.Ps2.Database.Entities;
 
 /// <summary>
-/// A persistent memory entry for the MCP agent, replacing the flat Markdown files
-/// previously stored in the <c>memories/</c> folder.
+/// A persistent memory entry for the MCP agent and the Memory Manager UI,
+/// replacing the flat Markdown files previously stored in the <c>memories/</c> folder.
 /// </summary>
 public class McpMemory
 {
@@ -13,6 +13,12 @@ public class McpMemory
 
     /// <summary>Full Markdown content of the memory / progress report.</summary>
     public string Content { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional game identifier (ISO serial / game name) to scope the entry to a specific game.
+    /// Null means the entry is global / not game-specific.
+    /// </summary>
+    public string? GameId { get; set; }
 
     /// <summary>UTC timestamp when the memory was first created.</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
