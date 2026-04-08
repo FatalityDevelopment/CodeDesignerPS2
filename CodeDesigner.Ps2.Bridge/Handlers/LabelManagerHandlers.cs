@@ -309,6 +309,11 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     EnsureWorkspaceDirectory(workspaceDir, gameId, setName);
                     PersistActiveSetToDisk(set);
+                    // EnsureWorkspaceDirectory calls SetActiveSet before the file exists
+                    // (noActiveSet case), so ActiveSetName may still be null.  Retry now
+                    // that the file has been written to disk.
+                    if (string.IsNullOrEmpty(LabelMgr.ActiveSetName) && !string.IsNullOrWhiteSpace(LabelMgr.WorkspaceDir))
+                        LabelMgr.SetActiveSet(LabelMgr.WorkspaceDir, gameId, setName);
                     SyncLegacyDictsFromLabelManager();
                 }
 
@@ -355,6 +360,11 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     EnsureWorkspaceDirectory(workspaceDir, gameId, setName);
                     PersistActiveSetToDisk(set);
+                    // EnsureWorkspaceDirectory calls SetActiveSet before the file exists
+                    // (noActiveSet case), so ActiveSetName may still be null.  Retry now
+                    // that the file has been written to disk.
+                    if (string.IsNullOrEmpty(LabelMgr.ActiveSetName) && !string.IsNullOrWhiteSpace(LabelMgr.WorkspaceDir))
+                        LabelMgr.SetActiveSet(LabelMgr.WorkspaceDir, gameId, setName);
                     SyncLegacyDictsFromLabelManager();
                 }
 
