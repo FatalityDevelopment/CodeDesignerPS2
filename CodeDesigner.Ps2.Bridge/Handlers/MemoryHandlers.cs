@@ -104,7 +104,7 @@ namespace CodeDesigner.Ps2.Bridge
                             : address - EeIopMirrorBase;
                         uint iopLimit  = (uint)IopMemoryBus.RamSize;
                         if (iopOffset >= iopLimit)
-                            return CreateErrorResponse($"IOP address 0x{address:X8} is beyond IOP RAM (2 MB)");
+                            return CreateErrorResponse($"IOP address 0x{address:X8} is beyond IOP RAM ({IopMemoryBus.RamSize / (1024 * 1024)} MB)");
                         int safeLen = (int)Math.Min((uint)length, iopLimit - iopOffset);
                         uint pineAddr = 0xBC000000u + iopOffset;
                         bytes = PineClient!.ReadBytes(pineAddr, safeLen);
@@ -423,6 +423,28 @@ namespace CodeDesigner.Ps2.Bridge
 
             bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
 
+            // Clamp IOP reads to IOP RAM size so we never send PINE requests beyond
+            // the valid IOP mirror range (which would crash PCSX2).
+            if (useIop)
+            {
+                // Normalise IOP addresses: strip EE IOP mirror base so start/end are
+                // IOP-physical offsets, then clamp to IOP RAM size.
+                if (start >= EeIopMirrorBase && start < EeIopMirrorEnd)
+                    start -= EeIopMirrorBase;
+                if (end >= EeIopMirrorBase && end < EeIopMirrorEnd)
+                    end -= EeIopMirrorBase;
+
+                uint iopLimit = (uint)IopMemoryBus.RamSize;
+                if (start >= iopLimit)
+                    return CreateErrorResponse($"IOP start address 0x{start:X8} is beyond IOP RAM ({iopLimit / (1024 * 1024)} MB)");
+                if (end > iopLimit)
+                    end = iopLimit;
+
+                regionSize = end - start;
+                if (regionSize <= 0)
+                    return CreateErrorResponse("EndAddress must be greater than Address after IOP clamping");
+            }
+
             try
             {
                 byte[] bytes = ReadLiveBytesChunked(start, (int)regionSize, useIop);
@@ -439,7 +461,8 @@ namespace CodeDesigner.Ps2.Bridge
                         bool found = true;
                         for (int j = 0; j < patLen; j++)
                         {
-                            if (bytes[i + j] != (byte)searchPattern[j]) { found = false; break; }
+                            // -1 is a wildcard — matches any byte.
+                            if (searchPattern[j] != -1 && bytes[i + j] != (byte)searchPattern[j]) { found = false; break; }
                         }
                         if (found)
                             matchAddresses.Add(start + (uint)i);
@@ -511,8 +534,9 @@ namespace CodeDesigner.Ps2.Bridge
             try
             {
                 var matchAddresses = new List<uint>();
-                int patLen   = pattern.Count;
-                var patBytes = pattern.Select(b => (byte)b).ToArray();
+                int patLen = pattern.Count;
+                // Keep the pattern as int[] so -1 wildcard entries are preserved.
+                var patInts = pattern.ToArray();
 
                 // Ensure chunk size is always larger than the pattern so the advance
                 // step is always positive (no infinite-loop risk for very long patterns).
@@ -533,7 +557,8 @@ namespace CodeDesigner.Ps2.Bridge
                         bool found = true;
                         for (int j = 0; j < patLen; j++)
                         {
-                            if (chunk[i + j] != patBytes[j]) { found = false; break; }
+                            // -1 is a wildcard — matches any byte.
+                            if (patInts[j] != -1 && chunk[i + j] != (byte)patInts[j]) { found = false; break; }
                         }
                         if (found)
                             matchAddresses.Add(scanPos + (uint)i);

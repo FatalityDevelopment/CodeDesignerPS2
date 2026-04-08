@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using CodeDesigner.Ps2.MCManager;
@@ -215,6 +216,71 @@ namespace CodeDesigner.Ps2.TestProject
 
                 byte[] exported = File.ReadAllBytes(Path.Combine(outDir, "save.bin"));
                 CollectionAssert.AreEqual(payload, exported, "Exported file must match original");
+            }
+            finally { Directory.Delete(tmp, true); }
+        }
+
+        // ── ReadFile ─────────────────────────────────────────────────────────────
+
+        [TestMethod]
+        public void MemoryCardManager_ReadFile_ReturnsCorrectBytes()
+        {
+            string tmp = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            try
+            {
+                string mcPath  = Path.Combine(tmp, "card.ps2");
+                byte[] payload = new byte[512];
+                new Random(99).NextBytes(payload);
+                string saveDir = CreateSaveDir(tmp, "READFILE-01", ("icon.sys", 964));
+                File.WriteAllBytes(Path.Combine(saveDir, "data.bin"), payload);
+
+                Ps2MemoryCard.Create(mcPath);
+                using (var mc = Ps2MemoryCard.Open(mcPath))
+                    mc.ImportSave(saveDir);
+
+                byte[] read;
+                using (var mc = Ps2MemoryCard.Open(mcPath))
+                    read = mc.ReadFile("READFILE-01", "data.bin");
+
+                CollectionAssert.AreEqual(payload, read, "ReadFile must return the exact bytes that were imported");
+            }
+            finally { Directory.Delete(tmp, true); }
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(KeyNotFoundException))]
+        public void MemoryCardManager_ReadFile_ThrowsForMissingSave()
+        {
+            string tmp = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            try
+            {
+                string mcPath = Path.Combine(tmp, "card.ps2");
+                Ps2MemoryCard.Create(mcPath);
+                using var mc = Ps2MemoryCard.Open(mcPath);
+                mc.ReadFile("NO-SUCH-SAVE", "data.bin");
+            }
+            finally { Directory.Delete(tmp, true); }
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(KeyNotFoundException))]
+        public void MemoryCardManager_ReadFile_ThrowsForMissingFile()
+        {
+            string tmp = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            try
+            {
+                string mcPath  = Path.Combine(tmp, "card.ps2");
+                string saveDir = CreateSaveDir(tmp, "READFILE-02", ("icon.sys", 964));
+
+                Ps2MemoryCard.Create(mcPath);
+                using (var mc = Ps2MemoryCard.Open(mcPath))
+                    mc.ImportSave(saveDir);
+
+                using var mc2 = Ps2MemoryCard.Open(mcPath);
+                mc2.ReadFile("READFILE-02", "missing.bin");
             }
             finally { Directory.Delete(tmp, true); }
         }
