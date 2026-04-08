@@ -833,7 +833,7 @@ namespace CodeDesigner.Ps2.Bridge
                         return HandleReadMem(command.Address ?? 0, command.Length ?? 256, command.Region);
 
                     case "SNAPSHOT":
-                        return HandleSnapshot(command.OutputPath);
+                        return HandleSnapshot(command.OutputPath, command.IsoName, command.Title, command.Description);
 
                     case "LOADSNAPSHOT":
                         return HandleLoadSnapshot(command.InputPath);

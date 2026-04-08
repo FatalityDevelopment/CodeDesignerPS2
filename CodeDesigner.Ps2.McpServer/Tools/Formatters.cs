@@ -517,7 +517,8 @@ public sealed partial class CodeDesignerPs2Tools
                 return SimpleMessage(json);
 
             var sb = new StringBuilder();
-            sb.AppendLine("Snapshot written:");
+            string savedPath = root.TryGetProperty("Message", out var msgProp) ? (msgProp.GetString() ?? "") : "";
+            sb.AppendLine("Snapshot written" + (string.IsNullOrEmpty(savedPath) ? ":" : $" to: {savedPath}"));
             foreach (var item in arr.EnumerateArray())
             {
                 string label = item.TryGetProperty("Label", out var lProp) ? (lProp.GetString() ?? "?") : "?";
