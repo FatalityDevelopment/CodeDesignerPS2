@@ -162,6 +162,10 @@ namespace CodeDesigner.Ps2.Bridge
         public string? McpMemoryName { get; set; }
         /// <summary>Markdown content of the MCP memory entry (MCPMEMORY_ADD / MCPMEMORY_UPDATE).</summary>
         public string? McpMemoryContent { get; set; }
+
+        // Agent fields (MCPAGENT_LIST / MCPAGENT_GET)
+        /// <summary>Database row ID of the MCP agent entry to operate on (MCPAGENT_GET).</summary>
+        public int? McpAgentId { get; set; }
         /// <summary>Human-readable title for SNAPSHOT (stored in DB metadata).</summary>
         public string? Title { get; set; }
         /// <summary>Optional free-text description for SNAPSHOT (stored in DB metadata).</summary>

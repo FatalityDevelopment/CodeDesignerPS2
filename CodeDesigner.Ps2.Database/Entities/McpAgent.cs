@@ -34,6 +34,12 @@ public class McpAgent
     /// <summary>UTC timestamp of the last update.</summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    /// <summary>
+    /// Maximum number of tasks the agent may run concurrently.
+    /// Defaults to 1 (sequential execution).
+    /// </summary>
+    public int ConcurrentTasks { get; set; } = 1;
+
     /// <summary>Session-lifecycle tasks for this agent.</summary>
     public List<McpAgentTask> Tasks { get; set; } = [];
 }

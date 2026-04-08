@@ -1300,6 +1300,15 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MCPMEMORYEXPORT":
                         return HandleMcpMemoryExport(command.McpMemoryId, command.OutputPath);
 
+                    // ── MCP Agent (DB-backed) ────────────────────────────────────
+                    case "MCPAGENT_LIST":
+                    case "MCPAGENTLIST":
+                        return HandleMcpAgentList();
+
+                    case "MCPAGENT_GET":
+                    case "MCPAGENTGET":
+                        return HandleMcpAgentGet(command.McpAgentId);
+
                     default:
                         // Echo for unknown commands
                         return $"Echo: {message}";

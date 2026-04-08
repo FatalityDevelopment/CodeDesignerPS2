@@ -159,6 +159,14 @@ namespace CodeDesigner.Ps2.Bridge
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public McpMemoryInfo? McpMemory { get; set; }
 
+        // Agent results (MCPAGENT_LIST / MCPAGENT_GET)
+        /// <summary>List of MCP agent entries returned by MCPAGENT_LIST.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<McpAgentInfo>? McpAgents { get; set; }
+        /// <summary>Single MCP agent entry returned by MCPAGENT_GET.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public McpAgentInfo? McpAgent { get; set; }
+
         // Label Manager results
         /// <summary>List of label set names for GETLABELSETS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
