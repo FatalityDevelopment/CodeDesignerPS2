@@ -116,6 +116,7 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
         <div class="aic-sidebar-actions">
           <button class="aic-small-btn aic-primary-btn" (click)="onNewOrchestration()">+ New</button>
           <button class="aic-small-btn" title="Import from .md file" (click)="onImportOrchestration()">&#x2B06; Import</button>
+          <button class="aic-small-btn" title="Export full orchestration plan (all profiles + all agents) as the AI sees it" (click)="onExportAll()">&#x2B07; Export All</button>
         </div>
 
         @if (orchStatusMessage()) {
