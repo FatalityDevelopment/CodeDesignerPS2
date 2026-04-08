@@ -13,6 +13,10 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleGetLabels()
         {
+            // Sync the legacy dict from LabelMgr so callers always see up-to-date data
+            // (labels added via ADDLABELENTRY may have been written to disk since the last sync).
+            SyncLegacyDictsFromLabelManager();
+
             var labels = _labels
                 .OrderBy(kv => kv.Key)
                 .Select(kv => new LabelEntry

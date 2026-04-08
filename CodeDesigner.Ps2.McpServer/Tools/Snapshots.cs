@@ -12,13 +12,16 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "snapshot")]
-    [Description("Save a full memory snapshot of the running PS2 emulator to a directory on disk. Snapshots can be compared later to detect memory changes across game states.")]
+    [Description("Save a full memory snapshot of the running PS2 emulator to a directory on disk. Snapshots can be compared later to detect memory changes across game states. Provide isoName to link the snapshot to a game so get_snapshots can retrieve it; if omitted the snapshot is saved but not associated with any game.")]
     public async Task<string> Snapshot(
-        [Description("Absolute path to the output directory where snapshot files will be written.")] string outputPath,
+        [Description("ISO filename or game serial used to associate this snapshot with a game (e.g. 'GoW.iso' or 'SCUS-97130'). Omitting this creates an orphaned snapshot that get_snapshots cannot find.")] string? isoName = null,
+        [Description("Short human-readable title for the snapshot (e.g. 'before-boss-fight'). Auto-generated from the timestamp when omitted.")] string? title = null,
+        [Description("Optional free-text note describing what state was captured.")] string? description = null,
+        [Description("Absolute path to the output directory where snapshot files will be written. Auto-generated inside the system temp folder when omitted.")] string? outputPath = null,
         CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(
-            new { Command = "SNAPSHOT", OutputPath = outputPath },
+            new { Command = "SNAPSHOT", OutputPath = outputPath, IsoName = isoName, Title = title, Description = description },
             cancellationToken);
 
         return FormatSnapshot(json);

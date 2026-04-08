@@ -151,8 +151,8 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Optional key prefix filter for GETALLSETTINGS (e.g. "emu." or "ui.").</summary>
         public string? SettingPrefix { get; set; }
 
-        // GETSNAPSHOTS fields
-        /// <summary>ISO / game name for GETSNAPSHOTS.</summary>
+        // GETSNAPSHOTS / SNAPSHOT fields
+        /// <summary>ISO / game name for GETSNAPSHOTS and SNAPSHOT (used to link the snapshot to a game in the DB).</summary>
         public string? IsoName { get; set; }
 
         // Memory Manager fields (MCPMEMORY_LIST / MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE / MCPMEMORY_DELETE / MCPMEMORY_IMPORT / MCPMEMORY_EXPORT)
@@ -162,6 +162,10 @@ namespace CodeDesigner.Ps2.Bridge
         public string? McpMemoryName { get; set; }
         /// <summary>Markdown content of the MCP memory entry (MCPMEMORY_ADD / MCPMEMORY_UPDATE).</summary>
         public string? McpMemoryContent { get; set; }
+        /// <summary>Human-readable title for SNAPSHOT (stored in DB metadata).</summary>
+        public string? Title { get; set; }
+        /// <summary>Optional free-text description for SNAPSHOT (stored in DB metadata).</summary>
+        public string? Description { get; set; }
     }
 
     /// <summary>

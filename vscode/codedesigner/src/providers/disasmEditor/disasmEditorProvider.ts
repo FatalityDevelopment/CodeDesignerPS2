@@ -2776,7 +2776,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; valueType?: string }> },
+    action: { type: string; setName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; valueType?: string }> },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -2852,10 +2852,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const baseAddr = ptrBuf.readUInt32LE(0);
           if (baseAddr === 0) { continue; }
           const resolved = (baseAddr + m.offset) >>> 0;
-          const readSize = liveValueReadSize(m.valueType);
-          const dataBuf = await this.socketClient.readMemory(resolved, readSize, 'ee');
-          if (dataBuf.length >= readSize) {
-            values[m.path] = formatLiveValue(dataBuf, m.valueType);
+          if (m.valueType?.toLowerCase() === 'string') {
+            // Read up to 256 bytes and decode as a null-terminated Latin-1 string.
+            const dataBuf = await this.socketClient.readMemory(resolved, 256, 'ee');
+            const nullIdx = dataBuf.indexOf(0);
+            values[m.path] = dataBuf.slice(0, nullIdx !== -1 ? nullIdx : dataBuf.length).toString('latin1');
+          } else {
+            const readSize = liveValueReadSize(m.valueType);
+            const dataBuf = await this.socketClient.readMemory(resolved, readSize, 'ee');
+            if (dataBuf.length >= readSize) {
+              values[m.path] = formatLiveValue(dataBuf, m.valueType);
+            }
           }
         } catch { /* ignore unreadable members */ }
       }
@@ -2880,8 +2887,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         case 'refresh': {
           const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
           webview.postMessage({ type: 'labelManagerSets', sets });
-          // Also send the currently active set (first user set or Built-in).
-          const activeName = sets.find(s => s !== 'Built-in') ?? 'Built-in';
+          // Use the set the client was already viewing if it still exists, otherwise
+          // fall back to the first user set or Built-in.
+          const requestedName = action.activeSetName;
+          const activeName = (requestedName && sets.includes(requestedName))
+            ? requestedName
+            : (sets.find(s => s !== 'Built-in') ?? 'Built-in');
           const set = await this.socketClient.getLabelSet(workspaceDir, gameId, activeName);
           webview.postMessage({ type: 'labelManagerSet', set });
           break;

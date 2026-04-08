@@ -298,11 +298,16 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 var set = LabelRepo.AddOrUpdateEntryAsync(gameId, setName, FromWireEntry(entry)).GetAwaiter().GetResult();
 
-                // If this is the active set, keep legacy dicts in sync.
-                // First flush the updated set to disk so that GetMergedLabels() reads fresh
-                // data (it reads from the on-disk JSON, not the DB).
-                if (string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase))
+                // Keep legacy dicts in sync.  If no active set is configured yet, or
+                // the active set matches the one being written, auto-configure the
+                // LabelMgr context so that GetMergedLabels() (and therefore GETLABELS)
+                // immediately reflects the change.
+                bool isActiveSet = string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
+                bool noActiveSet = string.IsNullOrEmpty(LabelMgr.ActiveSetName);
+
+                if (isActiveSet || noActiveSet)
                 {
+                    EnsureWorkspaceDirectory(workspaceDir, gameId, setName);
                     PersistActiveSetToDisk(set);
                     SyncLegacyDictsFromLabelManager();
                 }
@@ -343,8 +348,12 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 var set = LabelRepo.DeleteEntryAsync(gameId, setName, addrStr).GetAwaiter().GetResult();
 
-                if (string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase))
+                bool isActiveSet = string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
+                bool noActiveSet = string.IsNullOrEmpty(LabelMgr.ActiveSetName);
+
+                if (isActiveSet || noActiveSet)
                 {
+                    EnsureWorkspaceDirectory(workspaceDir, gameId, setName);
                     PersistActiveSetToDisk(set);
                     SyncLegacyDictsFromLabelManager();
                 }
@@ -360,6 +369,24 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 return CreateErrorResponse(ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Ensures <see cref="LabelMgr"/> has a valid workspace directory and active-set
+        /// name so that <see cref="PersistActiveSetToDisk"/> and
+        /// <see cref="SyncLegacyDictsFromLabelManager"/> can function.
+        /// Uses <paramref name="workspaceDir"/> when supplied, otherwise falls back to a
+        /// temp directory.  A no-op when the workspace is already configured.
+        /// </summary>
+        private void EnsureWorkspaceDirectory(string? workspaceDir, string gameId, string setName)
+        {
+            if (!string.IsNullOrWhiteSpace(LabelMgr.WorkspaceDir)) return;
+
+            var dir = !string.IsNullOrWhiteSpace(workspaceDir)
+                ? workspaceDir
+                : Path.Combine(Path.GetTempPath(), "codedesigner_labels");
+            Directory.CreateDirectory(dir);
+            LabelMgr.SetActiveSet(dir, gameId, setName);
         }
 
         /// <summary>

@@ -94,11 +94,22 @@ namespace CodeDesigner.Ps2.Bridge
 
         /// <summary>
         /// Handle SNAPSHOT command — dumps all memory regions to .bin files.
+        /// <paramref name="outputPath"/> is optional; when omitted an auto-generated
+        /// timestamped directory inside the system temp folder is used.
         /// </summary>
-        private string HandleSnapshot(string? outputPath)
+        private string HandleSnapshot(string? outputPath, string? isoName = null, string? title = null, string? description = null)
         {
+            // Auto-generate an output path when the caller does not supply one.
             if (string.IsNullOrWhiteSpace(outputPath))
-                return CreateErrorResponse("OutputPath is required for SNAPSHOT");
+            {
+                string stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+                string safeName = string.IsNullOrWhiteSpace(isoName)
+                    ? string.Empty
+                    : "_" + SanitisePathSegment(Path.GetFileNameWithoutExtension(isoName));
+                string folder = $"snapshot_{stamp}{safeName}";
+                outputPath = Path.Combine(Path.GetTempPath(), "codedesigner_snapshots", folder);
+            }
+
             if (IsPineMode)
             {
                 try
@@ -119,8 +130,8 @@ namespace CodeDesigner.Ps2.Bridge
                         File.WriteAllBytes(Path.Combine(outputPath, file), bytes);
                         written.Add(new SnapshotRegion { Label = label, File = file, BaseAddress = baseAddr, Size = bytes.Length });
                     }
-                    WriteSnapshotInfo(outputPath, written);
-                    return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "SNAPSHOT", Regions = written });
+                    WriteSnapshotInfo(outputPath, written, isoName, title, description);
+                    return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "SNAPSHOT", Regions = written, Message = outputPath });
                 }
                 catch (Exception ex)
                 {
@@ -145,8 +156,8 @@ namespace CodeDesigner.Ps2.Bridge
                     File.WriteAllBytes(Path.Combine(outputPath, file), bytes);
                     written.Add(new SnapshotRegion { Label = label, File = file, BaseAddress = baseAddr, Size = bytes.Length });
                 }
-                WriteSnapshotInfo(outputPath, written);
-                return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "SNAPSHOT", Regions = written });
+                WriteSnapshotInfo(outputPath, written, isoName, title, description);
+                return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "SNAPSHOT", Regions = written, Message = outputPath });
             }
             catch (Exception ex)
             {
@@ -161,17 +172,19 @@ namespace CodeDesigner.Ps2.Bridge
         /// snapshots taken by the MCP agent are visible in the disasm History tab
         /// and can be read by <c>GETADDRESSHISTORY</c>.
         /// </summary>
-        private void WriteSnapshotInfo(string outputPath, List<SnapshotRegion> regions, string? isoName = null)
+        private void WriteSnapshotInfo(string outputPath, List<SnapshotRegion> regions, string? isoName = null, string? title = null, string? description = null)
         {
             try
             {
-                string name = Path.GetFileName(outputPath.TrimEnd(Path.DirectorySeparatorChar,
-                                                                  Path.AltDirectorySeparatorChar));
+                string name = title
+                    ?? Path.GetFileName(outputPath.TrimEnd(Path.DirectorySeparatorChar,
+                                                           Path.AltDirectorySeparatorChar));
                 var info = new
                 {
                     name,
                     timestamp = DateTime.UtcNow.ToString("o"),
                     isoName   = isoName ?? string.Empty,
+                    description = description ?? string.Empty,
                     regions   = regions.Select(r => new
                     {
                         r.Label,
@@ -189,11 +202,12 @@ namespace CodeDesigner.Ps2.Bridge
             // Persist metadata to the database so GETSNAPSHOTS can list it efficiently.
             try
             {
-                string snapshotTitle = Path.GetFileName(outputPath.TrimEnd(
-                    Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                string snapshotTitle = title
+                    ?? Path.GetFileName(outputPath.TrimEnd(
+                        Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
                 var snapshotRepo = new DbSnapshotRepository(Db);
-                snapshotRepo.AddSnapshotAsync(outputPath, snapshotTitle, null, isoName)
+                snapshotRepo.AddSnapshotAsync(outputPath, snapshotTitle, description, isoName)
                             .GetAwaiter().GetResult();
             }
             catch (Exception ex)
@@ -502,6 +516,23 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 return CreateErrorResponse($"RECOMPILE failed: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Returns a filesystem-safe version of <paramref name="segment"/> by replacing
+        /// any invalid path characters and path-traversal sequences with underscores.
+        /// </summary>
+        private static string SanitisePathSegment(string segment)
+        {
+            if (string.IsNullOrEmpty(segment)) return segment;
+
+            // Replace path separator chars and other invalid filename characters.
+            char[] invalid = Path.GetInvalidFileNameChars();
+            var sb = new System.Text.StringBuilder(segment.Length);
+            foreach (char c in segment)
+                sb.Append(Array.IndexOf(invalid, c) >= 0 || c == '.' ? '_' : c);
+
+            return sb.ToString().Trim('_');
         }
     }
 }
