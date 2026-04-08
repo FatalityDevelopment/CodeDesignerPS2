@@ -655,12 +655,14 @@ export class LabelManagerOverlayComponent {
     const tf = this.typeFilter().trim();
     return entries.filter(e => {
       if (tf) {
-        // Semantic LabelType values filter on the semantic type field; data-type
-        // values match on the valueType annotation (or the type field for backward
-        // compat) so users can filter by e.g. "float" or "pointer".
+        // Semantic LabelType values (Struct, Function, …) filter on the type field.
+        // Data-type values (u32, pointer, …) filter on the valueType annotation.
+        // The type field is also checked as a string to handle any older entries that
+        // stored a data-type string directly in type before the unified type system.
         if (SEMANTIC_LABEL_TYPES.has(tf)) {
           if (this.effectiveType(e) !== tf) return false;
         } else {
+          // e.type is cast to string because legacy entries may carry non-enum values.
           if (e.valueType !== tf && (e.type as string) !== tf) return false;
         }
       }
@@ -963,7 +965,10 @@ export class LabelManagerOverlayComponent {
     this.editAddress.set(entry.address);
     this.editName.set(entry.name);
     this.editComment.set(entry.comment ?? '');
-    // Determine editType: prefer valueType for non-semantic (data type) root labels.
+    // Determine editType: use valueType when this is a plain Address label with a
+    // data-type annotation (e.g. valueType='u32'), so the picker shows the data type
+    // rather than the generic 'Address'. Semantic types (Struct, Function, …) are
+    // always shown as-is.
     const existingChildren = this._childrenOf(entry.address);
     const semanticType = entry.type ?? (existingChildren.length > 0 ? 'Struct' : 'Address');
     this.editType.set(semanticType === 'Address' && entry.valueType ? entry.valueType : semanticType);
