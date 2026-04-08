@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ViewChild, ViewEncapsulation } from '@angular/core';
+import { Component, OnInit, AfterViewInit, OnDestroy, ViewChild, ViewEncapsulation } from '@angular/core';
 import { VsCodeBridgeService } from '../shared/vscode-bridge.service';
 import { Subscription } from 'rxjs';
 import {
@@ -89,7 +89,7 @@ interface Pcsx2ModeChangedMsg {
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-panel.component.html',
 })
-export class DisasmPanelComponent implements OnInit, OnDestroy {
+export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   isConnected = false;
   isPaused = false;
   isPcsx2 = false;
@@ -172,8 +172,11 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       }),
     );
     this.bridge.postMessage({ command: 'ready' });
-    // Load memories list on startup so it's ready when the user views the settings tab
-    setTimeout(() => this.mcpMemoryOverlay?.load(), 0);
+  }
+
+  ngAfterViewInit(): void {
+    // Load memories list after the view (and child components) are fully initialized
+    this.mcpMemoryOverlay?.load();
   }
 
   ngOnDestroy(): void {
