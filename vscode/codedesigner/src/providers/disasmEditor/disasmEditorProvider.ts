@@ -2219,11 +2219,22 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     comment: string | undefined
   ): Promise<void> {
     try {
-      if (this._gameLabelsPath()) {
-        // Per-game storage: save directly to snapshots/<isoName>/labels.json.
+      const ctx = this._labelManagerCtx();
+      if (ctx && this.socketClient?.isConnected()) {
+        // Primary path: route through the DB-backed label manager so that
+        // inline label edits and the Label Manager tab share the same database.
+        const { workspaceDir, gameId } = ctx;
+        const addrHex = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
+        await this.socketClient.addLabelEntry(workspaceDir, gameId, gameId, {
+          address: addrHex,
+          name: labelName,
+          comment: comment,
+        });
+      } else if (this._gameLabelsPath()) {
+        // Offline fallback: socket not connected — save to per-game labels.json.
         this._saveGameLabel(address, labelName, comment);
       } else if (this.socketClient?.isConnected()) {
-        // Fallback: global server database (no game selected or no workspace).
+        // No game context: use legacy global command.
         await this.socketClient.addLabel(address, labelName, comment);
       } else {
         return;
@@ -2250,11 +2261,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     address: number
   ): Promise<void> {
     try {
-      if (this._gameLabelsPath()) {
-        // Per-game storage: remove from snapshots/<isoName>/labels.json.
+      const ctx = this._labelManagerCtx();
+      if (ctx && this.socketClient?.isConnected()) {
+        // Primary path: route through the DB-backed label manager so that
+        // inline label deletes and the Label Manager tab share the same database.
+        const { workspaceDir, gameId } = ctx;
+        const addrHex = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
+        await this.socketClient.deleteLabelEntry(workspaceDir, gameId, gameId, addrHex);
+      } else if (this._gameLabelsPath()) {
+        // Offline fallback: socket not connected — remove from per-game labels.json.
         this._deleteGameLabel(address);
       } else if (this.socketClient?.isConnected()) {
-        // Fallback: global server database.
+        // No game context: use legacy global command.
         await this.socketClient.deleteLabel(address);
       } else {
         return;
