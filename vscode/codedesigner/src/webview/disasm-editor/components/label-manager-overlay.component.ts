@@ -62,6 +62,18 @@ export interface TreeRow {
   entry: LabelManagerEntry;
   /** True when this row can be expanded to reveal child entries. */
   expandable: boolean;
+  /**
+   * True when this is the last child among its siblings.
+   * Used to pick `└─` vs `├─` tree connector characters.
+   * Always `true` for root (kind='entry') rows.
+   */
+  isLastChild: boolean;
+  /**
+   * For each ancestor depth level (index 0 = immediate parent's level),
+   * `true` means that ancestor still has siblings below it — draw a `│` guide line.
+   * Empty for root entries and depth-1 children.
+   */
+  ancestorLines: boolean[];
 }
 
 export type LabelManagerAction =
@@ -340,13 +352,17 @@ const SEMANTIC_LABEL_TYPES = new Set(
                     </svg>
                   </button>
                 </td>
-                <td class="lm-col-expand lm-member-tree-indent" [style.padding-left.px]="row.depth * 16">
+                <td class="lm-col-expand lm-member-tree-indent">
+                  @for (hasLine of row.ancestorLines; track $index) {
+                    <span class="lm-tree-vert">{{ hasLine ? '│' : '\xa0' }}</span>
+                  }
                   @if (row.expandable) {
+                    <span class="lm-tree-connector">{{ row.isLastChild ? '└' : '├' }}</span>
                     <button class="lm-expand-btn" [title]="isExpanded(row.path) ? 'Collapse' : 'Expand'" (click)="toggleExpand(row.path)">
                       {{ isExpanded(row.path) ? '▼' : '▶' }}
                     </button>
                   } @else {
-                    <span class="lm-tree-leaf">└</span>
+                    <span class="lm-tree-leaf">{{ row.isLastChild ? '└─' : '├─' }}</span>
                   }
                 </td>
                 <td class="lm-col-type lm-mono lm-member-offset-cell">
@@ -384,6 +400,7 @@ const SEMANTIC_LABEL_TYPES = new Set(
                     @if (row.entry.parentAddress != null) {
                       <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
+                    <button class="lm-row-btn" title="Edit sub-label (add children, change type, etc.)" aria-label="Edit sub-label" (click)="onEdit(row.entry)">&#x270E;</button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">
                       <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
@@ -618,6 +635,10 @@ export class LabelManagerOverlayComponent {
   readonly editNodeSize       = signal('');
   /** When editing an existing entry, this holds its original address. */
   readonly editingAddress = signal('');
+  /** When editing a child entry, this preserves its parent address so the relationship is not lost on save. */
+  readonly editParentAddress = signal<string | undefined>(undefined);
+  /** When editing a child entry, this preserves its byte offset from the parent pointer. */
+  readonly editParentOffset  = signal<number | undefined>(undefined);
 
   /** Addresses of original children tracked when the edit form is opened, for deletion on save. */
   private _editingOriginalChildAddresses: string[] = [];
@@ -750,9 +771,11 @@ export class LabelManagerOverlayComponent {
         path,
         entry,
         expandable: children.length > 0,
+        isLastChild: true,
+        ancestorLines: [],
       });
       if (this.expandedPaths().has(path)) {
-        this._addChildRows(rows, children, 1, new Set([path]));
+        this._addChildRows(rows, children, 1, new Set([path]), []);
       }
     }
     return rows;
@@ -911,15 +934,20 @@ export class LabelManagerOverlayComponent {
   /** Recursively appends member rows to `rows`, with cycle detection via `visited`. */
   /**
    * Recursively adds child label rows to the tree, with cycle detection.
+   * `ancestorLines[i]` is true when the ancestor at depth `i+1` has more siblings
+   * below it, meaning we should draw a │ connector guide at that horizontal position.
    */
   private _addChildRows(
     rows: TreeRow[],
     children: LabelManagerEntry[],
     depth: number,
     visited: Set<string>,
+    ancestorLines: boolean[],
   ): void {
     const sorted = [...children].sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
-    for (const child of sorted) {
+    for (let idx = 0; idx < sorted.length; idx++) {
+      const child = sorted[idx];
+      const isLastChild = idx === sorted.length - 1;
       if (visited.has(child.address)) { continue; } // cycle guard
       const grandchildren = this._childrenOf(child.address);
       const canExpand = grandchildren.length > 0;
@@ -929,11 +957,14 @@ export class LabelManagerOverlayComponent {
         path: child.address,
         entry: child,
         expandable: canExpand,
+        isLastChild,
+        ancestorLines: [...ancestorLines],
       });
       if (canExpand && this.expandedPaths().has(child.address)) {
         const nextVisited = new Set(visited);
         nextVisited.add(child.address);
-        this._addChildRows(rows, grandchildren, depth + 1, nextVisited);
+        // If this child is NOT the last, its descendants need a │ guide at this level.
+        this._addChildRows(rows, grandchildren, depth + 1, nextVisited, [...ancestorLines, !isLastChild]);
       }
     }
   }
@@ -989,6 +1020,9 @@ export class LabelManagerOverlayComponent {
     this.editNodeNextOffset.set(entry.nodeNextOffset != null ? '0x' + entry.nodeNextOffset.toString(16).toUpperCase().padStart(2, '0') : '');
     this.editNodeSize.set(entry.nodeSize != null ? String(entry.nodeSize) : '');
     this.editingAddress.set(entry.address);
+    // Preserve the parent relationship so it is not lost on save.
+    this.editParentAddress.set(entry.parentAddress);
+    this.editParentOffset.set(entry.offset);
   }
 
   onDeleteEntry(entry: LabelManagerEntry): void {
@@ -1075,6 +1109,8 @@ export class LabelManagerOverlayComponent {
 
     const entry: LabelManagerEntry = {
       address: addr,
+      parentAddress: this.editParentAddress(),
+      offset: this.editParentOffset(),
       name,
       comment: this.editComment().trim() || undefined,
       type,
@@ -1193,6 +1229,8 @@ export class LabelManagerOverlayComponent {
     this.editNodeNextOffset.set('');
     this.editNodeSize.set('');
     this.editingAddress.set('');
+    this.editParentAddress.set(undefined);
+    this.editParentOffset.set(undefined);
   }
 
   // ── Display helpers ───────────────────────────────────────────────────────────
@@ -1223,11 +1261,13 @@ export class LabelManagerOverlayComponent {
   }
 
   entryDetails(entry: LabelManagerEntry): string {
+    // Always surface child count when there are children, regardless of the entry's declared type.
+    const childCount = this._childrenOf(entry.address).length;
+    if (childCount > 0) {
+      return `${childCount} child${childCount !== 1 ? 'ren' : ''}`;
+    }
     switch (this.effectiveType(entry)) {
-      case 'Struct': {
-        const n = this._childrenOf(entry.address).length;
-        return n > 0 ? `${n} child${n !== 1 ? 'ren' : ''}` : '—';
-      }
+      case 'Struct': return '—';
       case 'Function': {
         const parts: string[] = [];
         if (entry.argRegs?.length)    parts.push(`args: ${entry.argRegs.join(', ')}`);
