@@ -175,7 +175,7 @@ export interface StructEntry {
 // ── Label Manager (unified label/struct) ──────────────────────────────────────
 
 /** One member of a label that acts as a struct pointer. */
-export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'ArrayOfPointers' | 'LinkedList' | 'String';
+export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'LinkedList' | 'String';
 
 /**
  * A unified label entry covering all supported label types.

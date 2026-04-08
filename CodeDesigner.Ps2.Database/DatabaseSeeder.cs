@@ -395,7 +395,8 @@ public class DatabaseSeeder
 
         ("add_label_desc",
             "Insert or update a label entry in the active label set. " +
-            "Supports all label types: Address, Function, Struct, Array, ArrayOfPointers, LinkedList, String."),
+            "Supports all label types: Address, Function, Struct, Array, LinkedList, String. " +
+            "Data-type annotations (u8, u16, u32, u64, s8, s16, s32, s64, float, double, pointer) can be set via the valueType field."),
 
         ("delete_label_desc",
             "Remove a symbol label from the active label set. " +

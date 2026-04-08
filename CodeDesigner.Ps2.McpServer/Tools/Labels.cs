@@ -127,14 +127,14 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "label_add")]
-    [Description("Insert or update a label entry in the specified label set. Supports all label types: Address, Function, Struct, Array, ArrayOfPointers, LinkedList, String. Always use a dedicated label set (create one with label_create_set if needed) rather than polluting the built-in set.")]
+    [Description("Insert or update a label entry in the specified label set. Supports all label types: Address, Function, Struct, Array, LinkedList, String. Data-type annotations (u8, u16, u32, u64, s8, s16, s32, s64, float, double, pointer) can be applied via the valueType parameter. Always use a dedicated label set (create one with label_create_set if needed) rather than polluting the built-in set.")]
     public async Task<string> AddLabel(
         [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
         [Description("Label set to add the entry to (e.g. 'ai-analysis'). Use label_list_sets to see available sets, or label_create_set to make a new one.")] string labelSet,
         [Description("Virtual address to label (hex or decimal).")] string address,
         [Description("Label name (e.g. 'scePadRead').")] string label,
         [Description("Optional comment to attach to the label.")] string? comment = null,
-        [Description("Label type: Address (default), Struct, Function, Array, ArrayOfPointers, LinkedList, String.")] string? type = null,
+        [Description("Label type: Address (default), Struct, Function, Array, LinkedList, String. Use valueType for data-type annotations such as pointer.")] string? type = null,
         [Description("For Function: comma-separated argument registers, e.g. 'a0=playerPtr,a1=flags'.")] string? argRegs = null,
         [Description("For Function: comma-separated return registers, e.g. 'v0=result'.")] string? returnRegs = null,
         [Description("For Array: byte stride between elements, e.g. 4.")] int? elementStride = null,
