@@ -87,6 +87,7 @@ const webviewConfig = {
     'disasm-panel':    './src/webview/disasm-panel/main.ts',
     'disasm-editor':   './src/webview/disasm-editor/main.ts',
     'label-manager':   './src/webview/label-manager/main.ts',
+    'ai-config':       './src/webview/ai-config/main.ts',
   },
   output: {
     path: path.resolve(__dirname, 'dist/webview'),

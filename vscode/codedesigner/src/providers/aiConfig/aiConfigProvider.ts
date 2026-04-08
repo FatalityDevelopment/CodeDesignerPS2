@@ -1,0 +1,313 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
+import { getOutputChannel } from '../../extension';
+import { SocketClient, McpAgentInfo, McpMemoryInfo } from '../../socketClient';
+import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+import { McpMemoryEditorProvider } from '../mcpMemoryEditor/mcpMemoryEditorProvider';
+
+/**
+ * Provider for the AI Configuration standalone webview tab.
+ * Manages agent profiles (add / edit / delete / import / export)
+ * and shows the agent's associated MCP memories.
+ */
+export class AiConfigProvider {
+    private _panel: vscode.WebviewPanel | undefined;
+    private readonly _mcpMemoryEditor: McpMemoryEditorProvider;
+
+    constructor(
+        private readonly extensionUri: vscode.Uri,
+        private readonly socketClient: SocketClient,
+    ) {
+        this._mcpMemoryEditor = new McpMemoryEditorProvider(socketClient);
+    }
+
+    /** Open (or reveal) the AI Configuration panel. */
+    public open(): void {
+        if (this._panel) {
+            this._panel.reveal(vscode.ViewColumn.One);
+            return;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+            'codedesigner.aiConfig',
+            '🤖 AI Configuration',
+            vscode.ViewColumn.One,
+            {
+                enableScripts:           true,
+                retainContextWhenHidden: true,
+                localResourceRoots:      [this.extensionUri],
+            }
+        );
+        this._panel = panel;
+
+        panel.onDidDispose(() => { this._panel = undefined; });
+
+        panel.webview.onDidReceiveMessage(async (msg: Record<string, unknown>) => {
+            await this._handleMessage(msg, panel.webview);
+        });
+
+        panel.webview.html = this._buildHtml(panel.webview);
+    }
+
+    // ── Message dispatch ──────────────────────────────────────────────────────
+
+    private async _handleMessage(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        const type = msg['type'] as string | undefined;
+
+        switch (type) {
+            case 'ready':
+                // Initial load — send agent list
+                await this._sendAgentList(webview);
+                break;
+
+            // ── Agent CRUD ────────────────────────────────────────────────────
+            case 'agentList':
+                await this._sendAgentList(webview);
+                break;
+
+            case 'agentAdd':
+                await this._handleAgentAdd(msg, webview);
+                break;
+
+            case 'agentUpdate':
+                await this._handleAgentUpdate(msg, webview);
+                break;
+
+            case 'agentDelete':
+                await this._handleAgentDelete(msg['id'] as number, webview);
+                break;
+
+            case 'agentImport':
+                await this._handleAgentImport(webview);
+                break;
+
+            case 'agentExport': {
+                const id   = msg['id']   as number;
+                const name = msg['name'] as string;
+                await this._handleAgentExport(id, name, webview);
+                break;
+            }
+
+            // ── Memory operations ─────────────────────────────────────────────
+            case 'memoryList':
+                await this._sendMemoryList(webview);
+                break;
+
+            case 'memoryAdd':
+                await this._handleMemoryAdd(msg['name'] as string, webview);
+                break;
+
+            case 'memoryEdit':
+                this._mcpMemoryEditor.open(
+                    msg['id']      as number,
+                    msg['name']    as string,
+                    msg['content'] as string,
+                );
+                break;
+
+            case 'memoryExport': {
+                const id   = msg['id']   as number;
+                const name = msg['name'] as string;
+                await this._handleMemoryExport(id, name, webview);
+                break;
+            }
+
+            case 'memoryImport':
+                await this._handleMemoryImport(webview);
+                break;
+
+            case 'memoryDelete':
+                await this._handleMemoryDelete(msg['id'] as number, webview);
+                break;
+
+            default:
+                getOutputChannel().warn(`[AiConfig] Unknown message type: ${type}`);
+                break;
+        }
+    }
+
+    // ── Agent handlers ────────────────────────────────────────────────────────
+
+    private async _sendAgentList(webview: vscode.Webview): Promise<void> {
+        try {
+            const agents = await this.socketClient.mcpAgentList();
+            webview.postMessage({ type: 'agentListResult', agents });
+        } catch (err: any) {
+            webview.postMessage({ type: 'agentListResult', agents: [], error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleAgentAdd(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        try {
+            const agent = await this.socketClient.mcpAgentAdd({
+                name:                msg['name']                as string,
+                description:         msg['description']         as string | undefined,
+                isAgentLead:         (msg['isAgentLead']        as boolean) ?? false,
+                status:              msg['status']              as string | undefined,
+                objective:           msg['objective']           as string | undefined,
+                rules:               msg['rules']               as string | undefined,
+                guidelines:          msg['guidelines']          as string | undefined,
+                recommendedWorkflow: msg['recommendedWorkflow'] as string | undefined,
+                sessionBegin:        msg['sessionBegin']        as string | undefined,
+                concurrentTasks:     msg['concurrentTasks']     as string | undefined,
+                sessionEnd:          msg['sessionEnd']          as string | undefined,
+                research:            msg['research']            as string | undefined,
+            });
+            webview.postMessage({ type: 'agentActionResult', agent, message: `Created '${agent.name}'` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'agentActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleAgentUpdate(msg: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+        try {
+            const id    = msg['id'] as number;
+            const agent = await this.socketClient.mcpAgentUpdate(id, {
+                name:                msg['name']                as string | undefined,
+                description:         msg['description']         as string | undefined,
+                isAgentLead:         msg['isAgentLead']         as boolean | undefined,
+                status:              msg['status']              as string | undefined,
+                objective:           msg['objective']           as string | undefined,
+                rules:               msg['rules']               as string | undefined,
+                guidelines:          msg['guidelines']          as string | undefined,
+                recommendedWorkflow: msg['recommendedWorkflow'] as string | undefined,
+                sessionBegin:        msg['sessionBegin']        as string | undefined,
+                concurrentTasks:     msg['concurrentTasks']     as string | undefined,
+                sessionEnd:          msg['sessionEnd']          as string | undefined,
+                research:            msg['research']            as string | undefined,
+            });
+            webview.postMessage({ type: 'agentActionResult', agent, message: `Saved '${agent.name}'` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'agentActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleAgentDelete(id: number, webview: vscode.Webview): Promise<void> {
+        try {
+            await this.socketClient.mcpAgentDelete(id);
+            webview.postMessage({ type: 'agentDeleteResult', message: 'Deleted.' });
+        } catch (err: any) {
+            webview.postMessage({ type: 'agentDeleteResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleAgentImport(webview: vscode.Webview): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:     true,
+            canSelectFolders:   false,
+            canSelectMany:      false,
+            filters:            { 'Markdown': ['md'] },
+            title:              'Import Agent Profile',
+        });
+        if (!uris || uris.length === 0) { return; }
+        try {
+            const agent = await this.socketClient.mcpAgentImport(uris[0].fsPath);
+            webview.postMessage({ type: 'agentActionResult', agent, message: `Imported '${agent.name}'` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'agentActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleAgentExport(id: number, name: string, webview: vscode.Webview): Promise<void> {
+        const safeName = name.replace(/[<>:"/\\|?*]/g, '_');
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(`${safeName}.md`),
+            filters:    { 'Markdown': ['md'] },
+            title:      `Export Agent Profile: ${name}`,
+        });
+        if (!uri) { return; }
+        try {
+            await this.socketClient.mcpAgentExport(id, uri.fsPath);
+            webview.postMessage({ type: 'agentActionResult', message: `Exported to '${path.basename(uri.fsPath)}'` });
+            vscode.window.showInformationMessage(`Agent profile '${name}' exported.`);
+        } catch (err: any) {
+            webview.postMessage({ type: 'agentActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    // ── Memory handlers ───────────────────────────────────────────────────────
+
+    private async _sendMemoryList(webview: vscode.Webview): Promise<void> {
+        try {
+            const entries = await this.socketClient.mcpMemoryList();
+            webview.postMessage({ type: 'memoryListResult', entries });
+        } catch (err: any) {
+            webview.postMessage({ type: 'memoryListResult', entries: [], error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleMemoryAdd(name: string, webview: vscode.Webview): Promise<void> {
+        try {
+            const entry = await this.socketClient.mcpMemoryAdd(name, '');
+            webview.postMessage({ type: 'memoryActionResult', entry, message: `Created '${entry.name}'` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'memoryActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleMemoryExport(id: number, name: string, webview: vscode.Webview): Promise<void> {
+        const safeName = name.replace(/[<>:"/\\|?*]/g, '_');
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(`${safeName}.md`),
+            filters:    { 'Markdown': ['md'] },
+            title:      `Export Memory: ${name}`,
+        });
+        if (!uri) { return; }
+        try {
+            await this.socketClient.mcpMemoryExport(id, uri.fsPath);
+            webview.postMessage({ type: 'memoryActionResult', message: `Exported '${name}'` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'memoryActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleMemoryImport(webview: vscode.Webview): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles:   true,
+            canSelectFolders: false,
+            canSelectMany:    false,
+            filters:          { 'Markdown': ['md'] },
+            title:            'Import Memory',
+        });
+        if (!uris || uris.length === 0) { return; }
+        try {
+            const entry = await this.socketClient.mcpMemoryImport(uris[0].fsPath);
+            webview.postMessage({ type: 'memoryActionResult', entry, message: `Imported '${entry.name}'` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'memoryActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleMemoryDelete(id: number, webview: vscode.Webview): Promise<void> {
+        try {
+            await this.socketClient.mcpMemoryDelete(id);
+            webview.postMessage({ type: 'memoryActionResult', message: 'Deleted.' });
+        } catch (err: any) {
+            webview.postMessage({ type: 'memoryActionResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    // ── HTML builder ──────────────────────────────────────────────────────────
+
+    private _buildHtml(webview: vscode.Webview): string {
+        const scriptUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'ai-config.js')
+        );
+        const nonce = getNonce();
+        return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'unsafe-inline';
+               script-src ${webview.cspSource} 'nonce-${nonce}';">
+<script nonce="${nonce}">${getWebviewErrorHandlerScript()}</script>
+</head>
+<body>
+<app-ai-config-page><p style="color:#888;font-family:sans-serif;padding:16px;font-size:13px;">Loading AI Configuration…</p></app-ai-config-page>
+<script src="${scriptUri}"></script>
+</body>
+</html>`;
+    }
+}

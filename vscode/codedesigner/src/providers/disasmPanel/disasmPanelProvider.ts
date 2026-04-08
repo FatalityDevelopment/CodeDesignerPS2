@@ -6,6 +6,7 @@ import { getOutputChannel, getDebugChannel } from '../../extension';
 import { SocketClient, LabelEntry, DiscElfEntry } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
+import { AiConfigProvider } from '../aiConfig/aiConfigProvider';
 import { McpMemoryEditorProvider } from '../mcpMemoryEditor/mcpMemoryEditorProvider';
 import { ArchiveCheat } from '../../webview/disasm-panel/types';
 
@@ -113,9 +114,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         private readonly _extensionUri: vscode.Uri
     ) {
         this._mcpMemoryEditorProvider = new McpMemoryEditorProvider(socketClient);
+        this._aiConfigProvider        = new AiConfigProvider(_extensionUri, socketClient);
     }
 
     private readonly _mcpMemoryEditorProvider: McpMemoryEditorProvider;
+    private readonly _aiConfigProvider: AiConfigProvider;
 
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
@@ -349,6 +352,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'mcpMemoryDelete':
                     await this.handleMcpMemoryDelete(msg.id as number);
+                    break;
+                // ── AI Configuration ──────────────────────────────────────
+                case 'openAiConfig':
+                    this._aiConfigProvider.open();
                     break;
             }
         });
