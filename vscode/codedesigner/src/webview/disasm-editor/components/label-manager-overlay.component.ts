@@ -1063,7 +1063,7 @@ export class LabelManagerOverlayComponent {
     const rawType = this.editType();
     // Map legacy Struct → Pointer; all entries in UNIFIED_TYPES are semantic.
     const mappedType = rawType === 'Struct' ? 'Pointer' : rawType;
-    const isSemantic = SEMANTIC_LABEL_TYPES.has(mappedType) || mappedType === 'Pointer';
+    const isSemantic = SEMANTIC_LABEL_TYPES.has(mappedType);
     const type: LabelType = isSemantic ? mappedType as LabelType : 'Address';
     const rootValueType: string | undefined = undefined; // data types are gone from the type picker
     const setName = this.activeSetName();

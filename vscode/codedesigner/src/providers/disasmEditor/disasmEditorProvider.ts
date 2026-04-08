@@ -2794,7 +2794,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; valueType?: string }> },
+    action: { type: string; setName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }> },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -2885,7 +2885,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const baseAddr = ptrBuf.readUInt32LE(0);
           if (baseAddr === 0) { continue; }
           const resolved = (baseAddr + m.offset) >>> 0;
-          const entryType: string | undefined = (m as any).entryType;
+          const entryType: string | undefined = m.entryType;
           if (entryType === 'String' || m.valueType?.toLowerCase() === 'string') {
             const dataBuf = await this.socketClient.readMemory(resolved, 256, 'ee');
             const firstByte = dataBuf.length > 0 ? dataBuf[0] : 0;
@@ -3072,18 +3072,19 @@ function formatLiveValue(buf: Buffer, valueType?: string): string {
 /**
  * Formats a raw 4-byte memory buffer using the semantic label entry type first,
  * falling back to the legacy valueType annotation.
+ * Entry type values are PascalCase strings matching the LabelType enum.
  */
 function formatLiveValueByEntryType(buf: Buffer, entryType?: string, valueType?: string): string {
-  switch (entryType?.toLowerCase()) {
-    case 'pointer':
-    case 'address':
+  switch (entryType) {
+    case 'Pointer':
+    case 'Address':
       return `0x${buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0')}`;
-    case 'float': {
+    case 'Float': {
       const v = buf.readFloatLE(0);
       if (!isFinite(v)) { return isNaN(v) ? 'NaN' : (v > 0 ? 'Inf' : '-Inf'); }
       return v.toPrecision(7);
     }
-    case 'value':
+    case 'Value':
       return buf.readUInt32LE(0).toString();
     default:
       return formatLiveValue(buf, valueType);
