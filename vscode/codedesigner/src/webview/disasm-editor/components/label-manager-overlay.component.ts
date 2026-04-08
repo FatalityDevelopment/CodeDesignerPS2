@@ -254,7 +254,6 @@ const SEMANTIC_LABEL_TYPES = new Set(
             <th class="lm-col-live">Live Value</th>
             <th class="lm-col-name">Name</th>
             <th class="lm-col-comment">Comment</th>
-            <th class="lm-col-members">Details</th>
             @if (!activeSetIsBuiltIn()) {
               <th class="lm-col-actions"></th>
             }
@@ -294,7 +293,7 @@ const SEMANTIC_LABEL_TYPES = new Set(
                 </td>
                 <td class="lm-col-addr lm-mono">
                   <button class="lm-row-btn lm-goto-btn" title="Go to address" (click)="onGotoLabel(row.entry!)">&#x2192;</button>
-                  {{ row.entry!.address }}
+                  {{ row.entry!.address }}@if (entryDetails(row.entry!) !== '—') { <span class="lm-addr-details lm-muted">({{ entryDetails(row.entry!) }})</span> }
                 </td>
                 <td class="lm-col-live">
                   @if (effectiveType(row.entry!) === 'String') {
@@ -305,7 +304,6 @@ const SEMANTIC_LABEL_TYPES = new Set(
                 </td>
                 <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
                 <td class="lm-col-comment lm-muted">{{ entryComment(row.entry!) }}</td>
-                <td class="lm-col-members">{{ entryDetails(row.entry!) }}</td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions">
                     <button class="lm-row-btn lm-live-toggle-btn"
@@ -375,7 +373,6 @@ const SEMANTIC_LABEL_TYPES = new Set(
                   }
                 </td>
                 <td class="lm-col-comment lm-muted">{{ row.entry.comment ?? '' }}</td>
-                <td class="lm-col-members">{{ entryDetails(row.entry) }}</td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions">
                     <button class="lm-row-btn lm-live-toggle-btn"
@@ -714,7 +711,7 @@ export class LabelManagerOverlayComponent {
 
   /** Colspan for the "no entries" empty row. Live Value column is always shown. */
   readonly emptyColspan = computed(() =>
-    this.activeSetIsBuiltIn() ? 7 : 8
+    this.activeSetIsBuiltIn() ? 6 : 7
   );
 
   /**

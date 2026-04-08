@@ -3447,13 +3447,13 @@ app-bottom-panel {
 .lm-col-vis     { width: 36px; text-align: center; padding: 0 2px !important; }
 .lm-col-expand  { width: 24px; text-align: center; padding: 0 2px !important; }
 .lm-col-type    { width: 60px; }
-.lm-col-addr    { width: 110px; }
+.lm-col-addr    { width: 200px; }
 .lm-col-addr.lm-mono { color: #c586c0; }
 .lm-col-name    { width: 200px; }
 .lm-col-comment { width: auto; }
-.lm-col-members { width: 110px; }
 .lm-col-live    { width: 100px; font-family: monospace; font-size: 11px; color: #9cdcfe; }
 .lm-col-actions { width: 110px; text-align: right; }
+.lm-addr-details { font-size: 11px; margin-left: 4px; }
 
 /* Hidden row — dim the text to signal the entry is suppressed */
 .lm-hidden-row td { opacity: 0.45; }
