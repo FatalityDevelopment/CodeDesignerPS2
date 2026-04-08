@@ -58,5 +58,25 @@ namespace CodeDesigner.Ps2.LabelManager.Models
         /// alongside the label name (PINE / PCSX2 only).
         /// </summary>
         String = 6,
+
+        /// <summary>
+        /// A 32-bit pointer. The label address holds a pointer whose dereferenced
+        /// value is a base address. Child entries hang off that base address and
+        /// use <see cref="LabelEntry.Offset"/> to compute their runtime addresses.
+        /// Live display shows the dereferenced pointer value.
+        /// </summary>
+        Pointer = 7,
+
+        /// <summary>
+        /// A 32-bit (single-precision) floating-point value. Live display
+        /// renders the memory content as a decimal float.
+        /// </summary>
+        Float = 8,
+
+        /// <summary>
+        /// A generic integer value. Live display renders the 32-bit memory
+        /// content as an unsigned decimal number.
+        /// </summary>
+        Value = 9,
     }
 }

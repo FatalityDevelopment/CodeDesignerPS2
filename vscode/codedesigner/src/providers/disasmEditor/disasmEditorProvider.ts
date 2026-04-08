@@ -2794,7 +2794,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; valueType?: string }> },
+    action: { type: string; setName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }> },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -2836,15 +2836,30 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         if (isNaN(addr)) { continue; }
         try {
           if (entry.entryType === 'String') {
-            // Read up to 256 bytes and decode as a null-terminated Latin-1 string.
+            // Read up to 256 bytes. If the first byte isn't printable ASCII, try pointer dereference.
             const buf = await this.socketClient.readMemory(addr, 256, 'ee');
-            const nullIdx = buf.indexOf(0);
-            values[addrHex] = buf.slice(0, nullIdx !== -1 ? nullIdx : buf.length).toString('latin1');
+            const firstByte = buf.length > 0 ? buf[0] : 0;
+            if (firstByte >= 0x20 && firstByte < 0x7F) {
+              const nullIdx = buf.indexOf(0);
+              values[addrHex] = buf.slice(0, nullIdx !== -1 ? nullIdx : buf.length).toString('latin1');
+            } else if (buf.length >= 4) {
+              // Try reading the value as a pointer and then reading the string from that address.
+              const ptrAddr = buf.readUInt32LE(0);
+              if (ptrAddr > 0) {
+                try {
+                  const strBuf = await this.socketClient.readMemory(ptrAddr, 256, 'ee');
+                  const nullIdx = strBuf.indexOf(0);
+                  values[addrHex] = strBuf.slice(0, nullIdx !== -1 ? nullIdx : strBuf.length).toString('latin1');
+                } catch { /* ignore */ }
+              }
+            }
+          } else if (entry.entryType === 'Function') {
+            // Function labels show static arg/ret info from the frontend — skip live memory read.
           } else {
-            const readSize = liveValueReadSize(entry.valueType);
-            const buf = await this.socketClient.readMemory(addr, readSize, 'ee');
-            if (buf.length >= readSize) {
-              values[addrHex] = formatLiveValue(buf, entry.valueType);
+            // Pointer, Address, Float, Value — read 4 bytes and format by type.
+            const buf = await this.socketClient.readMemory(addr, 4, 'ee');
+            if (buf.length >= 4) {
+              values[addrHex] = formatLiveValueByEntryType(buf, entry.entryType, entry.valueType);
             }
           }
         } catch { /* ignore unreadable addresses */ }
@@ -2864,22 +2879,33 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const parentAddr = parseInt(m.parentAddress.replace(/^0x/i, ''), 16);
         if (isNaN(parentAddr)) { continue; }
         try {
-          // Dereference the parent pointer.
+          // Dereference the parent pointer to get the base address.
           const ptrBuf = await this.socketClient.readMemory(parentAddr, 4, 'ee');
           if (ptrBuf.length < 4) { continue; }
           const baseAddr = ptrBuf.readUInt32LE(0);
           if (baseAddr === 0) { continue; }
           const resolved = (baseAddr + m.offset) >>> 0;
-          if (m.valueType?.toLowerCase() === 'string') {
-            // Read up to 256 bytes and decode as a null-terminated Latin-1 string.
+          const entryType: string | undefined = m.entryType;
+          if (entryType === 'String' || m.valueType?.toLowerCase() === 'string') {
             const dataBuf = await this.socketClient.readMemory(resolved, 256, 'ee');
-            const nullIdx = dataBuf.indexOf(0);
-            values[m.path] = dataBuf.slice(0, nullIdx !== -1 ? nullIdx : dataBuf.length).toString('latin1');
+            const firstByte = dataBuf.length > 0 ? dataBuf[0] : 0;
+            if (firstByte >= 0x20 && firstByte < 0x7F) {
+              const nullIdx = dataBuf.indexOf(0);
+              values[m.path] = dataBuf.slice(0, nullIdx !== -1 ? nullIdx : dataBuf.length).toString('latin1');
+            } else if (dataBuf.length >= 4) {
+              const strPtr = dataBuf.readUInt32LE(0);
+              if (strPtr > 0) {
+                try {
+                  const strBuf = await this.socketClient.readMemory(strPtr, 256, 'ee');
+                  const nullIdx = strBuf.indexOf(0);
+                  values[m.path] = strBuf.slice(0, nullIdx !== -1 ? nullIdx : strBuf.length).toString('latin1');
+                } catch { /* ignore */ }
+              }
+            }
           } else {
-            const readSize = liveValueReadSize(m.valueType);
-            const dataBuf = await this.socketClient.readMemory(resolved, readSize, 'ee');
-            if (dataBuf.length >= readSize) {
-              values[m.path] = formatLiveValue(dataBuf, m.valueType);
+            const dataBuf = await this.socketClient.readMemory(resolved, 4, 'ee');
+            if (dataBuf.length >= 4) {
+              values[m.path] = formatLiveValueByEntryType(dataBuf, entryType, m.valueType);
             }
           }
         } catch { /* ignore unreadable members */ }
@@ -3040,5 +3066,27 @@ function formatLiveValue(buf: Buffer, valueType?: string): string {
       return `0x${buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0')}`;
     default:
       return `0x${buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0')}`;
+  }
+}
+
+/**
+ * Formats a raw 4-byte memory buffer using the semantic label entry type first,
+ * falling back to the legacy valueType annotation.
+ * Entry type values are PascalCase strings matching the LabelType enum.
+ */
+function formatLiveValueByEntryType(buf: Buffer, entryType?: string, valueType?: string): string {
+  switch (entryType) {
+    case 'Pointer':
+    case 'Address':
+      return `0x${buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0')}`;
+    case 'Float': {
+      const v = buf.readFloatLE(0);
+      if (!isFinite(v)) { return isNaN(v) ? 'NaN' : (v > 0 ? 'Inf' : '-Inf'); }
+      return v.toPrecision(7);
+    }
+    case 'Value':
+      return buf.readUInt32LE(0).toString();
+    default:
+      return formatLiveValue(buf, valueType);
   }
 }
