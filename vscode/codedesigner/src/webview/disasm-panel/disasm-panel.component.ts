@@ -100,7 +100,7 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
   selectedEmulator = '';
   selectedBios = '';
   selectedGame = '';
-  activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' | 'mcpMemory' = 'settings';
+  activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' = 'settings';
   /** Cheat text owned here so the CDS "Add Cheat" action can inject codes. */
   cheatText = '';
   currentGameName = '';
@@ -172,6 +172,8 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
       }),
     );
     this.bridge.postMessage({ command: 'ready' });
+    // Load memories list on startup so it's ready when the user views the settings tab
+    setTimeout(() => this.mcpMemoryOverlay?.load(), 0);
   }
 
   ngOnDestroy(): void {
@@ -198,12 +200,8 @@ export class DisasmPanelComponent implements OnInit, OnDestroy {
 
   // ── Tab navigation ───────────────────────────────────────────────────────
 
-  setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile' | 'mcpMemory'): void {
+  setTab(tab: 'settings' | 'cheats' | 'cds' | 'recompile'): void {
     this.activeTab = tab;
-    if (tab === 'mcpMemory') {
-      // Trigger initial load when switching to the tab
-      setTimeout(() => this.mcpMemoryOverlay?.load(), 0);
-    }
   }
 
   // ── Settings tab handlers ────────────────────────────────────────────────
