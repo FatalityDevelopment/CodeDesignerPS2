@@ -74,7 +74,7 @@ export type LabelManagerAction =
   | { type: 'exportSet';         setName: string }
   | { type: 'resolveStrings' }
   | { type: 'resolveLinkedList'; address: string; nextOffset: number }
-  | { type: 'refresh' }
+  | { type: 'refresh';           activeSetName?: string }
   /** Navigate to the given absolute address (handled locally by the host component). */
   | { type: 'navigateToLabel';   address: string }
   /** Read the pointer at parentAddress, add offset, then navigate (handled by provider). */
@@ -186,7 +186,10 @@ const SEMANTIC_LABEL_TYPES = new Set(
       <button class="lm-tool-btn lm-danger-btn"
               title="Delete this label set"
               [disabled]="activeSetIsBuiltIn()"
-              (click)="onDeleteSet()">&#x1F5D1; Delete Set</button>
+              (click)="onDeleteSet()">
+        <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
+        Delete Set
+      </button>
 
       @if (!activeSetIsBuiltIn()) {
         <button class="lm-tool-btn lm-add-btn" title="Add a new label entry" (click)="onAddLabel()">&#43; Add Label</button>
@@ -202,7 +205,7 @@ const SEMANTIC_LABEL_TYPES = new Set(
       <button class="lm-tool-btn" title="Export this set as JSON" [disabled]="activeSetIsBuiltIn()" (click)="onExport()">&#x2B07; Export</button>
       <input #fileInput type="file" accept=".json" style="display:none" (change)="onFileSelected($event)" />
 
-      <button class="lm-tool-btn lm-refresh-btn" title="Refresh" (click)="action$.emit({ type: 'refresh' })">&#x21BB;</button>
+      <button class="lm-tool-btn lm-refresh-btn" title="Refresh" (click)="action$.emit({ type: 'refresh', activeSetName: activeSetName() })">&#x21BB;</button>
     </div>
 
     <!-- Filter / type-filter row -->
@@ -354,12 +357,14 @@ const SEMANTIC_LABEL_TYPES = new Set(
                 </td>
                 <td class="lm-col-type lm-mono lm-member-offset-cell">
                   +0x{{ (row.entry.offset ?? 0).toString(16).toUpperCase().padStart(4, '0') }}
-                  @if (row.entry.valueType) { <span class="lm-muted">&nbsp;{{ row.entry.valueType }}</span> }
+                  @if (row.entry.valueType) { <span class="lm-type-badge lm-badge-data">{{ row.entry.valueType }}</span> }
                 </td>
                 <td class="lm-col-addr">
                 </td>
                 <td class="lm-col-live">
-                  @if (row.entry.dynamic) {
+                  @if (row.entry.valueType?.toLowerCase() === 'string') {
+                    <span class="lm-live-string">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
+                  } @else if (row.entry.dynamic) {
                     <span class="lm-live-value">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
                   }
                 </td>
@@ -696,12 +701,14 @@ export class LabelManagerOverlayComponent {
   );
 
   /**
-   * Dynamic child rows to poll (depth >= 1, dynamic=true, with parentAddress set at depth 1).
+   * Dynamic child rows to poll (depth >= 1, dynamic=true or String valueType, with parentAddress set at depth 1).
    * Only depth-1 children are live-polled (dereference parent pointer + offset).
    */
   private readonly _dynamicMemberRows = computed(() =>
     this.treeRows().filter(
-      r => r.kind === 'member' && r.depth === 1 && r.entry.dynamic && r.entry.parentAddress != null,
+      r => r.kind === 'member' && r.depth === 1 &&
+           (r.entry.dynamic || r.entry.valueType?.toLowerCase() === 'string') &&
+           r.entry.parentAddress != null,
     ),
   );
 

@@ -3511,6 +3511,29 @@ app-bottom-panel {
 
 .lm-mono { font-family: monospace; color: #9cdcfe; }
 .lm-muted { color: #666; }
+
+/* Type badge shown in the Type column for label entries and member offset rows */
+.lm-type-badge {
+    display: inline-block;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-family: monospace;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    cursor: default;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+.lm-badge-addr  { background: #0d2d4d; color: #569cd6; border: 1px solid #1a4a7a; }
+.lm-badge-struct { background: #3a200a; color: #ce9178; border: 1px solid #5a3010; }
+.lm-badge-fnc   { background: #2a1a3a; color: #c586c0; border: 1px solid #4a2a5a; }
+.lm-badge-array { background: #0a2a2a; color: #4ec9b0; border: 1px solid #0a4040; }
+.lm-badge-ptrs  { background: #2a2a0a; color: #b5cea8; border: 1px solid #4a4a1a; }
+.lm-badge-list  { background: #0a2a0a; color: #73c991; border: 1px solid #1a4a1a; }
+.lm-badge-str   { background: #2a2000; color: #d7ba7d; border: 1px solid #4a3800; }
+.lm-badge-data  { background: #1a1a2a; color: #9090c0; border: 1px solid #30305a; }
+
 .lm-member-badge {
     background: #0e639c33;
     color: #9cdcfe;
