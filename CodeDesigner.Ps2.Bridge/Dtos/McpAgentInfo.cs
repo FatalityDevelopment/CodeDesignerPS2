@@ -3,24 +3,29 @@ using System.Text.Json.Serialization;
 
 namespace CodeDesigner.Ps2.Bridge
 {
-    /// <summary>Wire payload for a single MCP Agent entry returned by MCPAGENT_* commands.</summary>
+    /// <summary>Wire payload for a single MCP Agent profile returned by MCPAGENT_* commands.</summary>
     public class McpAgentInfo
     {
         [JsonPropertyName("id")]
         public int Id { get; set; }
 
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
-
         [JsonPropertyName("isAgentLead")]
         public bool IsAgentLead { get; set; }
 
-        [JsonPropertyName("concurrentTasks")]
-        public int ConcurrentTasks { get; set; }
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
 
         [JsonPropertyName("description")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Description { get; set; }
+
+        [JsonPropertyName("status")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Status { get; set; }
+
+        [JsonPropertyName("objective")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Objective { get; set; }
 
         [JsonPropertyName("rules")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -34,30 +39,26 @@ namespace CodeDesigner.Ps2.Bridge
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? RecommendedWorkflow { get; set; }
 
+        [JsonPropertyName("sessionBegin")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SessionBegin { get; set; }
+
+        [JsonPropertyName("concurrentTasks")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ConcurrentTasks { get; set; }
+
+        [JsonPropertyName("sessionEnd")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SessionEnd { get; set; }
+
+        [JsonPropertyName("research")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Research { get; set; }
+
         [JsonPropertyName("createdAt")]
         public string CreatedAt { get; set; } = string.Empty;
 
         [JsonPropertyName("updatedAt")]
         public string UpdatedAt { get; set; } = string.Empty;
-
-        [JsonPropertyName("tasks")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public List<McpAgentTaskInfo>? Tasks { get; set; }
-    }
-
-    /// <summary>Wire payload for a single session-lifecycle task belonging to an MCP Agent.</summary>
-    public class McpAgentTaskInfo
-    {
-        [JsonPropertyName("id")]
-        public int Id { get; set; }
-
-        [JsonPropertyName("phase")]
-        public string Phase { get; set; } = string.Empty;
-
-        [JsonPropertyName("sortOrder")]
-        public int SortOrder { get; set; }
-
-        [JsonPropertyName("description")]
-        public string Description { get; set; } = string.Empty;
     }
 }

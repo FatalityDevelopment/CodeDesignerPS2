@@ -94,6 +94,20 @@ interface CommandMessage {
     McpMemoryId?: number;
     McpMemoryName?: string;
     McpMemoryContent?: string;
+    // Agent Profile (MCPAGENT_LIST / MCPAGENT_GET / MCPAGENT_ADD / MCPAGENT_UPDATE / MCPAGENT_DELETE / MCPAGENT_IMPORT / MCPAGENT_EXPORT)
+    McpAgentId?: number;
+    McpAgentName?: string;
+    McpAgentDescription?: string;
+    McpAgentIsLead?: boolean;
+    McpAgentStatus?: string;
+    McpAgentObjective?: string;
+    McpAgentRules?: string;
+    McpAgentGuidelines?: string;
+    McpAgentRecommendedWorkflow?: string;
+    McpAgentSessionBegin?: string;
+    McpAgentConcurrentTasks?: string;
+    McpAgentSessionEnd?: string;
+    McpAgentResearch?: string;
 }
 
 /**
@@ -396,6 +410,9 @@ interface CommandResponse {
     // MCPMEMORY_LIST / MCPMEMORY_ADD / MCPMEMORY_GET / MCPMEMORY_UPDATE results
     McpMemories?: McpMemoryInfo[];
     McpMemory?: McpMemoryInfo;
+    // MCPAGENT_LIST / MCPAGENT_ADD / MCPAGENT_GET / MCPAGENT_UPDATE results
+    McpAgents?: McpAgentInfo[];
+    McpAgent?: McpAgentInfo;
 }
 
 /**
@@ -476,6 +493,27 @@ export interface McpMemoryInfo {
     gameId?:    string;
     createdAt:  string;
     updatedAt:  string;
+}
+
+/**
+ * A MCP Agent profile stored in the database.
+ */
+export interface McpAgentInfo {
+    id:                  number;
+    isAgentLead:         boolean;
+    name:                string;
+    description?:        string;
+    status?:             string;
+    objective?:          string;
+    rules?:              string;
+    guidelines?:         string;
+    recommendedWorkflow?: string;
+    sessionBegin?:       string;
+    concurrentTasks?:    string;
+    sessionEnd?:         string;
+    research?:           string;
+    createdAt:           string;
+    updatedAt:           string;
 }
 
 /**
@@ -2515,6 +2553,98 @@ export class SocketClient {
     public async mcpMemoryExport(id: number, outputPath: string): Promise<void> {
         const response = await this.sendCommand({ Command: 'MCPMEMORY_EXPORT', McpMemoryId: id, OutputPath: outputPath });
         if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_EXPORT failed'); }
+    }
+
+    // ── Agent Profile ────────────────────────────────────────────────────────
+
+    /**
+     * MCPAGENT_LIST — returns all agent profiles.
+     */
+    public async mcpAgentList(): Promise<McpAgentInfo[]> {
+        const response = await this.sendCommand({ Command: 'MCPAGENT_LIST' });
+        if (!response.Success) { throw new Error(response.Error || 'MCPAGENT_LIST failed'); }
+        return response.McpAgents ?? [];
+    }
+
+    /**
+     * MCPAGENT_GET — returns a single agent profile by id.
+     */
+    public async mcpAgentGet(id: number): Promise<McpAgentInfo> {
+        const response = await this.sendCommand({ Command: 'MCPAGENT_GET', McpAgentId: id });
+        if (!response.Success) { throw new Error(response.Error || 'MCPAGENT_GET failed'); }
+        return response.McpAgent!;
+    }
+
+    /**
+     * MCPAGENT_ADD — creates a new agent profile.
+     */
+    public async mcpAgentAdd(agent: Omit<McpAgentInfo, 'id' | 'createdAt' | 'updatedAt'>): Promise<McpAgentInfo> {
+        const response = await this.sendCommand({
+            Command: 'MCPAGENT_ADD',
+            McpAgentName:                agent.name,
+            McpAgentDescription:         agent.description,
+            McpAgentIsLead:              agent.isAgentLead,
+            McpAgentStatus:              agent.status,
+            McpAgentObjective:           agent.objective,
+            McpAgentRules:               agent.rules,
+            McpAgentGuidelines:          agent.guidelines,
+            McpAgentRecommendedWorkflow: agent.recommendedWorkflow,
+            McpAgentSessionBegin:        agent.sessionBegin,
+            McpAgentConcurrentTasks:     agent.concurrentTasks,
+            McpAgentSessionEnd:          agent.sessionEnd,
+            McpAgentResearch:            agent.research,
+        });
+        if (!response.Success) { throw new Error(response.Error || 'MCPAGENT_ADD failed'); }
+        return response.McpAgent!;
+    }
+
+    /**
+     * MCPAGENT_UPDATE — updates an existing agent profile.
+     */
+    public async mcpAgentUpdate(id: number, fields: Partial<Omit<McpAgentInfo, 'id' | 'createdAt' | 'updatedAt'>>): Promise<McpAgentInfo> {
+        const response = await this.sendCommand({
+            Command: 'MCPAGENT_UPDATE',
+            McpAgentId:                  id,
+            McpAgentName:                fields.name,
+            McpAgentDescription:         fields.description,
+            McpAgentIsLead:              fields.isAgentLead,
+            McpAgentStatus:              fields.status,
+            McpAgentObjective:           fields.objective,
+            McpAgentRules:               fields.rules,
+            McpAgentGuidelines:          fields.guidelines,
+            McpAgentRecommendedWorkflow: fields.recommendedWorkflow,
+            McpAgentSessionBegin:        fields.sessionBegin,
+            McpAgentConcurrentTasks:     fields.concurrentTasks,
+            McpAgentSessionEnd:          fields.sessionEnd,
+            McpAgentResearch:            fields.research,
+        });
+        if (!response.Success) { throw new Error(response.Error || 'MCPAGENT_UPDATE failed'); }
+        return response.McpAgent!;
+    }
+
+    /**
+     * MCPAGENT_DELETE — deletes an agent profile by id.
+     */
+    public async mcpAgentDelete(id: number): Promise<void> {
+        const response = await this.sendCommand({ Command: 'MCPAGENT_DELETE', McpAgentId: id });
+        if (!response.Success) { throw new Error(response.Error || 'MCPAGENT_DELETE failed'); }
+    }
+
+    /**
+     * MCPAGENT_IMPORT — imports an agent profile from a Markdown file.
+     */
+    public async mcpAgentImport(filePath: string): Promise<McpAgentInfo> {
+        const response = await this.sendCommand({ Command: 'MCPAGENT_IMPORT', FilePath: filePath });
+        if (!response.Success) { throw new Error(response.Error || 'MCPAGENT_IMPORT failed'); }
+        return response.McpAgent!;
+    }
+
+    /**
+     * MCPAGENT_EXPORT — exports an agent profile to a Markdown file.
+     */
+    public async mcpAgentExport(id: number, outputPath: string): Promise<void> {
+        const response = await this.sendCommand({ Command: 'MCPAGENT_EXPORT', McpAgentId: id, OutputPath: outputPath });
+        if (!response.Success) { throw new Error(response.Error || 'MCPAGENT_EXPORT failed'); }
     }
 }
 

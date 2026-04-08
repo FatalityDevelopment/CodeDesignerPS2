@@ -1,0 +1,504 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   AI Configuration – VS Code settings-style layout
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body, html {
+  height: 100%;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  overflow: hidden;
+}
+
+/* ── Shell layout ──────────────────────────────────────────────────────────── */
+.aic-shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Left sidebar ──────────────────────────────────────────────────────────── */
+.aic-sidebar {
+  width: 220px;
+  min-width: 180px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--vscode-sideBar-border, var(--vscode-editorGroup-border, #404040));
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.aic-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  border-bottom: 1px solid var(--vscode-sideBar-border, transparent);
+}
+
+.aic-sidebar-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground));
+  opacity: 0.8;
+}
+
+.aic-sidebar-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px 6px;
+  border-bottom: 1px solid var(--vscode-sideBar-border, transparent);
+}
+
+.aic-agent-list {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  padding: 4px 0;
+}
+
+.aic-agent-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.08s;
+}
+
+.aic-agent-item:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.07));
+}
+
+.aic-agent-item.selected {
+  background: var(--vscode-list-activeSelectionBackground, var(--vscode-focusBorder, #0078d4));
+  color: var(--vscode-list-activeSelectionForeground, #fff);
+  border-left-color: var(--vscode-focusBorder, #0078d4);
+}
+
+.aic-agent-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aic-lead-badge {
+  color: #f0b429;
+  font-size: 11px;
+  margin-right: 3px;
+}
+
+.aic-agent-status {
+  font-size: 11px;
+  opacity: 0.65;
+  text-transform: lowercase;
+}
+
+.aic-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+/* ── Status bar ─────────────────────────────────────────────────────────────── */
+.aic-status {
+  font-size: 12px;
+  padding: 4px 10px;
+  opacity: 0.85;
+  border-bottom: 1px solid transparent;
+}
+
+.aic-status-ok    { color: var(--vscode-terminal-ansiGreen, #4ec9b0); }
+.aic-status-error { color: var(--vscode-errorForeground, #f44); }
+
+/* ── Main content area ──────────────────────────────────────────────────────── */
+.aic-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0 40px;
+}
+
+.aic-empty-state {
+  padding: 40px 32px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ── Form header ─────────────────────────────────────────────────────────────── */
+.aic-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px 10px;
+  border-bottom: 1px solid var(--vscode-settings-headerBorder, var(--vscode-editorGroup-border, #404040));
+  position: sticky;
+  top: 0;
+  background: var(--vscode-editor-background);
+  z-index: 5;
+}
+
+.aic-form-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--vscode-settings-headerForeground, var(--vscode-foreground));
+}
+
+.aic-form-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── Settings row (VS Code settings-style) ──────────────────────────────────── */
+.aic-setting-row {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 0;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--vscode-settings-rowHoverBackground, rgba(255,255,255,0.04));
+  align-items: start;
+}
+
+.aic-setting-row:hover {
+  background: var(--vscode-settings-rowHoverBackground, rgba(255,255,255,0.03));
+}
+
+.aic-setting-label {
+  padding-right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.aic-setting-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--vscode-settings-headerForeground, var(--vscode-foreground));
+}
+
+.aic-setting-desc {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.4;
+}
+
+.aic-setting-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Lead label */
+.aic-lead-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* ── Textarea ────────────────────────────────────────────────────────────────── */
+.aic-textarea {
+  width: 100%;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--vscode-focusBorder, #555));
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+  min-height: 28px;
+}
+
+.aic-textarea-single {
+  resize: none;
+  min-height: 28px;
+  max-height: 28px;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 13px;
+}
+
+.aic-textarea:focus {
+  border-color: var(--vscode-focusBorder, #0078d4);
+}
+
+/* ── Markdown preview ────────────────────────────────────────────────────────── */
+.aic-md-preview {
+  min-height: 80px;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-input-border, #555);
+  border-radius: 3px;
+  background: var(--vscode-textBlockQuote-background, var(--vscode-editor-background));
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--vscode-foreground);
+  overflow-y: auto;
+  max-height: 320px;
+}
+
+.aic-md-preview h1 { font-size: 18px; margin: 8px 0 4px; }
+.aic-md-preview h2 { font-size: 15px; margin: 8px 0 4px; }
+.aic-md-preview h3 { font-size: 13px; margin: 6px 0 3px; }
+.aic-md-preview p  { margin: 4px 0; }
+.aic-md-preview ul, .aic-md-preview ol { margin: 4px 0 4px 18px; }
+.aic-md-preview li { margin: 2px 0; }
+.aic-md-preview code { background: var(--vscode-textCodeBlock-background, rgba(255,255,255,0.08)); padding: 1px 4px; border-radius: 2px; font-size: 12px; }
+.aic-md-preview pre { background: var(--vscode-textCodeBlock-background, rgba(255,255,255,0.08)); padding: 8px; border-radius: 3px; overflow-x: auto; margin: 4px 0; }
+.aic-md-preview pre code { background: none; padding: 0; }
+.aic-md-preview strong { font-weight: 700; }
+.aic-md-preview em { font-style: italic; }
+
+/* ── Markdown toolbar ────────────────────────────────────────────────────────── */
+.aic-md-toolbar {
+  display: flex;
+  gap: 2px;
+}
+
+.aic-md-toggle {
+  background: none;
+  border: 1px solid var(--vscode-button-border, transparent);
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  padding: 2px 10px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.1s;
+}
+
+.aic-md-toggle.active {
+  background: var(--vscode-button-secondaryBackground, rgba(255,255,255,0.1));
+  color: var(--vscode-foreground);
+  border-color: var(--vscode-focusBorder, #0078d4);
+}
+
+.aic-md-toggle:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(255,255,255,0.15));
+}
+
+/* ── Form actions ────────────────────────────────────────────────────────────── */
+.aic-form-actions {
+  display: flex;
+  gap: 10px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--vscode-editorGroup-border, #404040);
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────── */
+.aic-btn, .aic-small-btn {
+  background: var(--vscode-button-secondaryBackground, rgba(255,255,255,0.08));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--vscode-font-family, sans-serif);
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+
+.aic-btn {
+  padding: 5px 16px;
+}
+
+.aic-small-btn {
+  padding: 3px 10px;
+}
+
+.aic-btn:hover, .aic-small-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(255,255,255,0.15));
+}
+
+.aic-btn:disabled, .aic-small-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.aic-primary-btn {
+  background: var(--vscode-button-background, #0078d4) !important;
+  color: var(--vscode-button-foreground, #fff) !important;
+  border-color: transparent !important;
+}
+
+.aic-primary-btn:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #006cbd) !important;
+}
+
+.aic-danger-btn {
+  background: none !important;
+  color: var(--vscode-errorForeground, #f44336) !important;
+  border-color: var(--vscode-errorForeground, #f44336) !important;
+}
+
+.aic-danger-btn:hover {
+  background: rgba(244,67,54,0.12) !important;
+}
+
+.aic-icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground));
+  font-size: 14px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  opacity: 0.7;
+  transition: opacity 0.1s, background 0.1s;
+}
+
+.aic-icon-btn:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.08));
+}
+
+/* ── Memories section ────────────────────────────────────────────────────────── */
+.aic-memories-section {
+  margin: 0 24px 24px;
+  border: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border, #404040));
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.aic-memories-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--vscode-sideBar-background, rgba(255,255,255,0.04));
+  border-bottom: 1px solid var(--vscode-panel-border, #404040);
+}
+
+.aic-memories-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.aic-memories-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── Memory add form ──────────────────────────────────────────────────────────── */
+.aic-mem-add-form {
+  padding: 10px 14px;
+  background: var(--vscode-editor-background);
+  border-bottom: 1px solid var(--vscode-panel-border, #404040);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.aic-mem-name-input {
+  width: 100%;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, #555);
+  border-radius: 3px;
+  padding: 5px 8px;
+  font-size: 13px;
+  outline: none;
+}
+
+.aic-mem-name-input:focus {
+  border-color: var(--vscode-focusBorder, #0078d4);
+}
+
+.aic-mem-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Memory list ──────────────────────────────────────────────────────────────── */
+.aic-mem-list {
+  overflow-y: auto;
+  max-height: 280px;
+}
+
+.aic-mem-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--vscode-list-inactiveFocusOutline, rgba(255,255,255,0.05));
+  gap: 8px;
+}
+
+.aic-mem-item:last-child {
+  border-bottom: none;
+}
+
+.aic-mem-item:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.05));
+}
+
+.aic-mem-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.aic-mem-name {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aic-mem-date {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.aic-mem-item-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.aic-item-btn {
+  background: none;
+  border: 1px solid var(--vscode-button-border, transparent);
+  color: var(--vscode-foreground);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-family: var(--vscode-font-family, sans-serif);
+}
+
+.aic-item-btn:hover {
+  background: var(--vscode-button-secondaryBackground, rgba(255,255,255,0.1));
+}
+
+.aic-confirm-text {
+  font-size: 12px;
+  color: var(--vscode-errorForeground, #f44);
+}
+
+/* ── Scrollbar styling ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.4)); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100,100,100,0.7)); }

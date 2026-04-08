@@ -146,6 +146,13 @@ import { EmuOption, SnapshotEntry } from '../types';
         </div>
       </div>
 
+      <div class="row" style="margin-top:12px; border-top:1px solid var(--vscode-panel-border,#404040); padding-top:12px;">
+        <button (click)="openAiConfigClick.emit()"
+                title="Open the AI Configuration panel to manage agent profiles">
+          🤖 AI Configuration
+        </button>
+      </div>
+
     </div>
   `,
 })
@@ -176,6 +183,7 @@ export class SettingsTabComponent {
   readonly browseGameClick = output<void>();
   readonly openSnapshotClick = output<SnapshotEntry>();
   readonly reloadSnapshotClick = output<SnapshotEntry>();
+  readonly openAiConfigClick = output<void>();
 
   readonly isPcsx2Selected = computed(() =>
     (this.selectedEmulator() ?? '').toLowerCase().includes('pcsx2')

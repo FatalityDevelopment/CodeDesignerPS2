@@ -84,6 +84,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Persistence layer for MCP Memory Manager entries backed by the database.</summary>
         internal DbMcpMemoryRepository? McpMemoryRepo { get; }
 
+        /// <summary>Persistence layer for MCP Agent profiles backed by the database.</summary>
+        internal DbMcpAgentRepository? McpAgentRepo { get; }
+
         /// <summary>
         /// When set, the READMEM command reads live memory from this scheduler.
         /// </summary>
@@ -215,6 +218,7 @@ namespace CodeDesigner.Ps2.Bridge
             LabelRepo   = new DbLabelRepository(db);
             SettingsRepo = new DbSettingsRepository(db);
             McpMemoryRepo = new DbMcpMemoryRepository(db);
+            McpAgentRepo  = new DbMcpAgentRepository(db);
 
             // Migrate legacy flat-file data into the DB on first run (idempotent).
             MigrateLegacySettingsToDb();
@@ -1300,7 +1304,7 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MCPMEMORYEXPORT":
                         return HandleMcpMemoryExport(command.McpMemoryId, command.OutputPath);
 
-                    // ── MCP Agent (DB-backed) ────────────────────────────────────
+                    // ── MCP Agent Profiles (DB-backed) ───────────────────────
                     case "MCPAGENT_LIST":
                     case "MCPAGENTLIST":
                         return HandleMcpAgentList();
@@ -1308,6 +1312,26 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MCPAGENT_GET":
                     case "MCPAGENTGET":
                         return HandleMcpAgentGet(command.McpAgentId);
+
+                    case "MCPAGENT_ADD":
+                    case "MCPAGENTADD":
+                        return HandleMcpAgentAdd(command);
+
+                    case "MCPAGENT_UPDATE":
+                    case "MCPAGENTUPDATE":
+                        return HandleMcpAgentUpdate(command);
+
+                    case "MCPAGENT_DELETE":
+                    case "MCPAGENTDELETE":
+                        return HandleMcpAgentDelete(command.McpAgentId);
+
+                    case "MCPAGENT_IMPORT":
+                    case "MCPAGENTIMPORT":
+                        return HandleMcpAgentImport(command.FilePath);
+
+                    case "MCPAGENT_EXPORT":
+                    case "MCPAGENTEXPORT":
+                        return HandleMcpAgentExport(command.McpAgentId, command.OutputPath);
 
                     default:
                         // Echo for unknown commands

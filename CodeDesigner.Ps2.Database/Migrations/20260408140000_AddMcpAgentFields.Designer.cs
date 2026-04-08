@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CodeDesigner.Ps2.Database.Migrations
 {
     [DbContext(typeof(CodeDesignerDbContext))]
-    [Migration("20260408140000_AddMcpAgentConcurrentTasks")]
-    partial class AddMcpAgentConcurrentTasks
+    [Migration("20260408140000_AddMcpAgentFields")]
+    partial class AddMcpAgentFields
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -291,9 +291,6 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("ConcurrentTasks")
-                        .HasColumnType("INTEGER");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -314,7 +311,25 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Property<string>("RecommendedWorkflow")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Research")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Rules")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionBegin")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionEnd")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrentTasks")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Objective")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")
