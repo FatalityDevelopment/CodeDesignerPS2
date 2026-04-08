@@ -3445,7 +3445,7 @@ app-bottom-panel {
 .lm-struct-row .lm-col-addr { border-left: 2px solid #569cd6; }
 
 .lm-col-vis     { width: 36px; text-align: center; padding: 0 2px !important; }
-.lm-col-expand  { width: 24px; text-align: center; padding: 0 2px !important; }
+.lm-col-expand  { width: 24px; text-align: center; padding: 0 2px !important; white-space: nowrap; }
 .lm-col-type    { width: 60px; }
 .lm-col-addr    { width: 110px; }
 .lm-col-addr.lm-mono { color: #c586c0; }
@@ -3494,7 +3494,11 @@ app-bottom-panel {
 /* Member sub-rows (struct tree view) */
 .lm-member-sub-row td { background: #1a1a1a; border-bottom: 1px solid #222; padding: 2px 8px; }
 .lm-member-sub-row:hover td { background: #212121; }
-.lm-member-tree-indent { color: #555; font-size: 11px; text-align: center; }
+.lm-member-tree-indent { color: #555; font-size: 11px; text-align: left; }
+/* Tree connector characters for recursive depth display */
+.lm-tree-vert      { display: inline-block; width: 12px; text-align: center; vertical-align: middle; color: #333; font-size: 11px; font-family: monospace; }
+.lm-tree-connector { vertical-align: middle; color: #555; font-size: 11px; font-family: monospace; margin-right: 1px; }
+.lm-tree-leaf      { vertical-align: middle; color: #555; font-size: 11px; font-family: monospace; }
 .lm-member-offset-cell { font-size: 11px; color: #7bafd4; }
 .lm-member-sub-name { font-size: 11px; color: #b0b0b0; }
 
