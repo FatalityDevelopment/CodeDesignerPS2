@@ -308,7 +308,25 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.Property<string>("RecommendedWorkflow")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Research")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Rules")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionBegin")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionEnd")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConcurrentTasks")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Objective")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")

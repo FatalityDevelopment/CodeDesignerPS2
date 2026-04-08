@@ -116,6 +116,8 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
         this.isConnected = msg.connected;
         this.isPaused = false;
         if (!msg.connected) { this.isPcsx2 = false; }
+        // Reload memories when the socket connects (in case the first load failed while disconnected)
+        if (msg.connected) { this.mcpMemoryOverlay?.load(); }
       }),
       this.bridge.on<Pcsx2ModeChangedMsg>('pcsx2ModeChanged').subscribe(msg => {
         this.isPcsx2 = msg.isPcsx2;
@@ -325,5 +327,9 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onMcpMemoryDelete(id: number): void {
     this.bridge.postMessage({ command: 'mcpMemoryDelete', id });
+  }
+
+  onOpenAiConfig(): void {
+    this.bridge.postMessage({ command: 'openAiConfig' });
   }
 }

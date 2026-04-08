@@ -28,6 +28,24 @@ public class McpAgent
     /// <summary>The recommended workflow the agent should follow when working (Markdown).</summary>
     public string? RecommendedWorkflow { get; set; }
 
+    /// <summary>Current status label for the agent, e.g. "active", "inactive", "experimental".</summary>
+    public string? Status { get; set; }
+
+    /// <summary>High-level objective describing what this agent is trying to achieve (Markdown).</summary>
+    public string? Objective { get; set; }
+
+    /// <summary>Tasks the agent should perform at the beginning of each session (Markdown).</summary>
+    public string? SessionBegin { get; set; }
+
+    /// <summary>Tasks the agent should perform continuously / concurrently throughout a session (Markdown).</summary>
+    public string? ConcurrentTasks { get; set; }
+
+    /// <summary>Tasks the agent should perform at the end of each session (Markdown).</summary>
+    public string? SessionEnd { get; set; }
+
+    /// <summary>Research sources or knowledge bases the agent should consult (Markdown).</summary>
+    public string? Research { get; set; }
+
     /// <summary>UTC timestamp when the agent definition was created.</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

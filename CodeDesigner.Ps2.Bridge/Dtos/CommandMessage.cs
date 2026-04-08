@@ -162,6 +162,34 @@ namespace CodeDesigner.Ps2.Bridge
         public string? McpMemoryName { get; set; }
         /// <summary>Markdown content of the MCP memory entry (MCPMEMORY_ADD / MCPMEMORY_UPDATE).</summary>
         public string? McpMemoryContent { get; set; }
+
+        // Agent Profile fields (MCPAGENT_LIST / MCPAGENT_GET / MCPAGENT_ADD / MCPAGENT_UPDATE / MCPAGENT_DELETE / MCPAGENT_IMPORT / MCPAGENT_EXPORT)
+        /// <summary>Database row ID of the MCP agent to operate on.</summary>
+        public int? McpAgentId { get; set; }
+        /// <summary>Display name for the agent (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentName { get; set; }
+        /// <summary>High-level description of the agent's purpose (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentDescription { get; set; }
+        /// <summary>Whether this agent is the lead/primary agent (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public bool? McpAgentIsLead { get; set; }
+        /// <summary>Current status label (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentStatus { get; set; }
+        /// <summary>High-level objective (Markdown) for the agent (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentObjective { get; set; }
+        /// <summary>Hard rules (Markdown) the agent must always follow (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentRules { get; set; }
+        /// <summary>Recommended best-practice guidelines (Markdown) for the agent (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentGuidelines { get; set; }
+        /// <summary>Recommended workflow (Markdown) for the agent (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentRecommendedWorkflow { get; set; }
+        /// <summary>Session-begin tasks (Markdown) for the agent (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentSessionBegin { get; set; }
+        /// <summary>Concurrent / ongoing tasks (Markdown) for the agent (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentConcurrentTasks { get; set; }
+        /// <summary>Session-end tasks (Markdown) for the agent (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentSessionEnd { get; set; }
+        /// <summary>Research sources (Markdown) the agent should consult (MCPAGENT_ADD / MCPAGENT_UPDATE).</summary>
+        public string? McpAgentResearch { get; set; }
         /// <summary>Human-readable title for SNAPSHOT (stored in DB metadata).</summary>
         public string? Title { get; set; }
         /// <summary>Optional free-text description for SNAPSHOT (stored in DB metadata).</summary>
