@@ -9,7 +9,10 @@ import {
   ElementRef,
 } from '@angular/core';
 
-export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'LinkedList' | 'String';
+export type LabelType =
+  | 'Address' | 'Function' | 'String' | 'Pointer' | 'Float' | 'Value'
+  /** Legacy — mapped to Pointer at display time. */
+  | 'Struct' | 'Array' | 'ArrayOfPointers' | 'LinkedList';
 
 /**
  * A unified label entry. Labels are recursive: child entries have parentAddress + offset set
@@ -35,10 +38,12 @@ export interface LabelManagerEntry {
   // Function
   argRegs?:    string[];
   returnRegs?: string[];
-  // Array
+  // Pointer (parent — children hang off dereferenced base)
+  // (no extra fields needed)
+  // Array (legacy)
   elementStride?: number;
   elementCount?:  number;
-  // LinkedList
+  // LinkedList (legacy)
   nodeNextOffset?: number;
   nodeSize?:       number;
 }
@@ -94,60 +99,53 @@ export type LabelManagerAction =
   /** Poll live values at each address (handled by provider). String entries read as null-terminated strings. */
   | { type: 'readLiveValues';    entries: { address: string; entryType?: LabelType; valueType?: string }[] }
   /** Poll live values at resolved member addresses (handled by provider). */
-  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string; valueType?: string }[] };
+  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string; entryType?: LabelType; valueType?: string }[] };
 
 const TYPE_BADGE: Record<string, string> = {
-  Address:    '[Addr]',
-  Struct:     '[Struct]',
-  Function:   '[FNC]',
-  Array:      '[Array]',
-  LinkedList: '[List]',
-  String:     '[Str]',
+  Address:  '[Addr]',
+  Pointer:  '[Ptr]',
+  Function: '[FNC]',
+  Float:    '[Float]',
+  Value:    '[Value]',
+  String:   '[Str]',
+  // legacy back-compat
+  Struct:         '[Ptr]',
+  Array:          '[Array]',
+  ArrayOfPointers:'[AoP]',
+  LinkedList:     '[List]',
 };
 
 const TYPE_BADGE_CLASS: Record<string, string> = {
-  Address:    'lm-badge-addr',
-  Struct:     'lm-badge-struct',
-  Function:   'lm-badge-fnc',
-  Array:      'lm-badge-array',
-  LinkedList: 'lm-badge-list',
-  String:     'lm-badge-str',
+  Address:  'lm-badge-addr',
+  Pointer:  'lm-badge-ptr',
+  Function: 'lm-badge-fnc',
+  Float:    'lm-badge-float',
+  Value:    'lm-badge-value',
+  String:   'lm-badge-str',
+  // legacy
+  Struct:         'lm-badge-ptr',
+  Array:          'lm-badge-array',
+  ArrayOfPointers:'lm-badge-ptrs',
+  LinkedList:     'lm-badge-list',
 };
 
 /**
- * Unified list of value/data types shown in ALL type-related dropdowns (type
- * filter, label type editor, and struct-member value-type picker).
- * All three dropdowns share this single source of truth.
+ * The six types shown in all label-type dropdowns.
  */
 const UNIFIED_TYPES: { value: string; label: string }[] = [
-  // ── Data / scalar types ───────────────────────────────────────────────────
-  { value: 'u8',         label: 'u8'         },
-  { value: 'u16',        label: 'u16'        },
-  { value: 'u32',        label: 'u32'        },
-  { value: 'u64',        label: 'u64'        },
-  { value: 's8',         label: 's8'         },
-  { value: 's16',        label: 's16'        },
-  { value: 's32',        label: 's32'        },
-  { value: 's64',        label: 's64'        },
-  { value: 'float',      label: 'float'      },
-  { value: 'double',     label: 'double'     },
-  { value: 'pointer',    label: 'pointer'    },
-  // ── Semantic label types ──────────────────────────────────────────────────
-  { value: 'Address',    label: 'Address'    },
-  { value: 'Struct',     label: 'Struct'     },
-  { value: 'Function',   label: 'Function'   },
-  { value: 'Array',      label: 'Array'      },
-  { value: 'LinkedList', label: 'Linked List' },
-  { value: 'String',     label: 'String'     },
+  { value: 'Address',  label: 'Address'  },
+  { value: 'Pointer',  label: 'Pointer'  },
+  { value: 'Float',    label: 'Float'    },
+  { value: 'Value',    label: 'Value'    },
+  { value: 'Function', label: 'FNC'      },
+  { value: 'String',   label: 'String'   },
 ];
 
 /**
- * The subset of UNIFIED_TYPES that correspond to the semantic LabelType enum.
+ * All semantic LabelType values (controls which filter column is used).
  * Derived from UNIFIED_TYPES so the two stay in sync automatically.
  */
-const SEMANTIC_LABEL_TYPES = new Set(
-  UNIFIED_TYPES.filter(t => /^[A-Z]/.test(t.value)).map(t => t.value),
-);
+const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
 
 @Component({
   selector: 'app-label-manager-overlay',
@@ -271,7 +269,7 @@ const SEMANTIC_LABEL_TYPES = new Set(
           @for (row of treeRows(); track row.path) {
             @if (row.kind === 'entry') {
               <!-- Top-level label entry row -->
-              <tr [class.lm-struct-row]="effectiveType(row.entry!) === 'Struct'"
+              <tr [class.lm-struct-row]="effectiveType(row.entry!) === 'Pointer' || effectiveType(row.entry!) === 'Struct'"
                   [class.lm-fnc-row]="effectiveType(row.entry!) === 'Function'"
                   [class.lm-hidden-row]="row.entry!.hidden">
                 <td class="lm-col-vis">
@@ -304,33 +302,34 @@ const SEMANTIC_LABEL_TYPES = new Set(
                   {{ row.entry!.address }}@if (entryDetails(row.entry!) !== '—') { <span class="lm-addr-details lm-muted">({{ entryDetails(row.entry!) }})</span> }
                 </td>
                 <td class="lm-col-live">
-                  @if (effectiveType(row.entry!) === 'String') {
+                  @if (effectiveType(row.entry!) === 'Function') {
+                    <span class="lm-live-fnc">{{ fncLiveDisplay(row.entry!) }}</span>
+                  } @else if (effectiveType(row.entry!) === 'String') {
                     <span class="lm-live-string">{{ liveValue(row.entry!) }}</span>
-                  } @else if (row.entry!.dynamic) {
-                    <span class="lm-live-value">{{ liveValue(row.entry!) }}</span>
+                  } @else if (shouldShowLive(row.entry!)) {
+                    <span [class]="liveValueClass(row.entry!)">{{ liveValue(row.entry!) }}</span>
                   }
                 </td>
                 <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
                 <td class="lm-col-comment lm-muted">{{ entryComment(row.entry!) }}</td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions">
-                    <button class="lm-row-btn lm-live-toggle-btn"
-                            [class.lm-is-dynamic]="row.entry!.dynamic"
-                            [title]="row.entry!.dynamic ? 'Pause live polling' : 'Start live polling'"
-                            (click)="onToggleDynamic(row.entry!)">
-                      @if (row.entry!.dynamic) {
-                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
-                      } @else {
-                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
-                      }
-                    </button>
+                    @if (effectiveType(row.entry!) !== 'String' && effectiveType(row.entry!) !== 'Function' && effectiveType(row.entry!) !== 'Pointer') {
+                      <button class="lm-row-btn lm-live-toggle-btn"
+                              [class.lm-is-dynamic]="row.entry!.dynamic"
+                              [title]="row.entry!.dynamic ? 'Pause live polling' : 'Start live polling'"
+                              (click)="onToggleDynamic(row.entry!)">
+                        @if (row.entry!.dynamic) {
+                          <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
+                        } @else {
+                          <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
+                        }
+                      </button>
+                    }
                     <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">&#x270E;</button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">
                       <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
-                    @if (effectiveType(row.entry!) === 'LinkedList' && row.entry!.nodeNextOffset != null) {
-                      <button class="lm-row-btn" title="Walk linked list (PINE)" (click)="onWalkList(row.entry!)">&#x21C0;</button>
-                    }
                   </td>
                 }
               </tr>
@@ -365,42 +364,32 @@ const SEMANTIC_LABEL_TYPES = new Set(
                     <span class="lm-tree-leaf">{{ row.isLastChild ? '└─' : '├─' }}</span>
                   }
                 </td>
-                <td class="lm-col-type lm-mono lm-member-offset-cell">
+                <!-- Type column: badge based on child type -->
+                <td class="lm-col-type">
+                  <span class="lm-type-badge" [class]="typeBadgeClass(row.entry)">{{ typeBadge(row.entry) }}</span>
+                </td>
+                <!-- Address column: byte offset from parent base -->
+                <td class="lm-col-addr lm-mono lm-child-offset">
                   +0x{{ (row.entry.offset ?? 0).toString(16).toUpperCase().padStart(4, '0') }}
-                  @if (row.entry.valueType) { <span class="lm-type-badge lm-badge-data">{{ row.entry.valueType }}</span> }
                 </td>
-                <td class="lm-col-addr">
-                </td>
+                <!-- Live value column: formatted by child type -->
                 <td class="lm-col-live">
-                  @if (row.entry.valueType?.toLowerCase() === 'string') {
+                  @if (childEffectiveType(row.entry) === 'String') {
                     <span class="lm-live-string">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
-                  } @else if (row.entry.dynamic) {
-                    <span class="lm-live-value">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
+                  } @else if (memberLiveValues().has(row.path)) {
+                    <span [class]="childLiveClass(row.entry)">{{ memberLiveValues().get(row.path) }}</span>
+                  } @else if (hasLiveChild(row.entry)) {
+                    <span class="lm-live-placeholder">…</span>
                   }
                 </td>
-                <td class="lm-col-name lm-member-sub-name">
-                  {{ row.entry.name }}
-                  @if ((row.entry.type ?? 'Address') !== 'Address') {
-                    <span class="lm-member-type-hint lm-muted">&nbsp;{{ typeBadge(row.entry) }}</span>
-                  }
-                </td>
+                <td class="lm-col-name lm-member-sub-name">{{ row.entry.name }}</td>
                 <td class="lm-col-comment lm-muted">{{ row.entry.comment ?? '' }}</td>
                 @if (!activeSetIsBuiltIn()) {
                   <td class="lm-col-actions">
-                    <button class="lm-row-btn lm-live-toggle-btn"
-                            [class.lm-is-dynamic]="row.entry.dynamic"
-                            [title]="row.entry.dynamic ? 'Pause live polling' : 'Start live polling'"
-                            (click)="onToggleChildDynamic(row.entry)">
-                      @if (row.entry.dynamic) {
-                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
-                      } @else {
-                        <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
-                      }
-                    </button>
                     @if (row.entry.parentAddress != null) {
                       <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
-                    <button class="lm-row-btn" title="Edit sub-label (add children, change type, etc.)" aria-label="Edit sub-label" (click)="onEdit(row.entry)">&#x270E;</button>
+                    <button class="lm-row-btn" title="Edit" aria-label="Edit sub-label" (click)="onEdit(row.entry)">&#x270E;</button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">
                       <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
@@ -475,8 +464,8 @@ const SEMANTIC_LABEL_TYPES = new Set(
           </label>
         </div>
 
-        <!-- Child entries editor (for Struct/any parent type) -->
-        @if (editType() === 'Struct') {
+        <!-- Child entries editor (for Pointer type — children hang off dereferenced base) -->
+        @if (editType() === 'Pointer' || editType() === 'Struct') {
           <div class="lm-form-row lm-members-row">
             <label class="lm-form-label">Children</label>
             <div class="lm-members-list">
@@ -487,11 +476,11 @@ const SEMANTIC_LABEL_TYPES = new Set(
                          [value]="m.offsetStr"
                          (input)="updateMemberOffset($index, asInput($event).value)" />
                   <input class="lm-member-name" type="text" spellcheck="false"
-                         placeholder="field name (or another label name for nesting)"
+                         placeholder="field name"
                          [value]="m.name"
                          (input)="updateMemberName($index, asInput($event).value)" />
-                  <select class="lm-member-type" [value]="m.valueType ?? ''"
-                          (change)="updateMemberValueType($index, asSelect($event).value)">
+                  <select class="lm-member-type" [value]="m.type ?? ''"
+                          (change)="updateMemberType($index, asSelect($event).value)">
                     <option value="">type…</option>
                     @for (t of unifiedTypes; track t.value) {
                       <option [value]="t.value">{{ t.label }}</option>
@@ -527,39 +516,31 @@ const SEMANTIC_LABEL_TYPES = new Set(
           </div>
         }
 
-        <!-- Array: stride + count -->
-        @if (editType() === 'Array') {
+        <!-- Pointer: informational note -->
+        @if (editType() === 'Pointer') {
           <div class="lm-form-row">
-            <label class="lm-form-label">Element Stride</label>
-            <input class="lm-form-input lm-mono" type="number" min="1"
-                   placeholder="bytes per element, e.g. 4"
-                   [value]="editElementStride()"
-                   (input)="editElementStride.set(asInput($event).value)" />
-          </div>
-          <div class="lm-form-row">
-            <label class="lm-form-label">Element Count</label>
-            <input class="lm-form-input lm-mono" type="number" min="1"
-                   placeholder="leave blank if unknown"
-                   [value]="editElementCount()"
-                   (input)="editElementCount.set(asInput($event).value)" />
+            <span class="lm-muted lm-form-note">
+              The address holds a 32-bit pointer. Live view shows the dereferenced value.
+              Add children above — their offsets are relative to that dereferenced base address.
+            </span>
           </div>
         }
 
-        <!-- LinkedList: next-pointer offset + node size -->
-        @if (editType() === 'LinkedList') {
+        <!-- Float: informational note -->
+        @if (editType() === 'Float') {
           <div class="lm-form-row">
-            <label class="lm-form-label">Next-ptr Offset</label>
-            <input class="lm-form-input lm-mono" type="text" spellcheck="false"
-                   placeholder="0x00 — byte offset of next-node pointer"
-                   [value]="editNodeNextOffset()"
-                   (input)="editNodeNextOffset.set(asInput($event).value)" />
+            <span class="lm-muted lm-form-note">
+              The address holds a 32-bit IEEE-754 single-precision float. Live view shows the decoded value.
+            </span>
           </div>
+        }
+
+        <!-- Value: informational note -->
+        @if (editType() === 'Value') {
           <div class="lm-form-row">
-            <label class="lm-form-label">Node Size</label>
-            <input class="lm-form-input lm-mono" type="number" min="1"
-                   placeholder="total node size in bytes (optional)"
-                   [value]="editNodeSize()"
-                   (input)="editNodeSize.set(asInput($event).value)" />
+            <span class="lm-muted lm-form-note">
+              The address holds an integer value. Live view shows the raw number.
+            </span>
           </div>
         }
 
@@ -567,8 +548,8 @@ const SEMANTIC_LABEL_TYPES = new Set(
         @if (editType() === 'String') {
           <div class="lm-form-row">
             <span class="lm-muted lm-form-note">
-              The address points to a null-terminated ASCII string.
-              Click <strong>🔍 Strings</strong> in the toolbar to resolve content from live PCSX2 memory.
+              The address points to (or is) a null-terminated ASCII string. Live view reads up to 256 bytes;
+              if the first byte is not printable it tries to dereference the address as a pointer first.
             </span>
           </div>
         }
@@ -626,7 +607,7 @@ export class LabelManagerOverlayComponent {
   readonly editType          = signal<string>('Address');
   readonly editHidden        = signal(false);
   readonly editDynamic       = signal(false);
-  readonly editMembers       = signal<{ offsetStr: string; name: string; valueType?: string; comment?: string; dynamic?: boolean; hidden?: boolean }[]>([]);
+  readonly editMembers       = signal<{ offsetStr: string; name: string; type?: string; comment?: string; dynamic?: boolean; hidden?: boolean }[]>([]);
   readonly editArgRegs       = signal('');
   readonly editReturnRegs    = signal('');
   readonly editElementStride = signal('');
@@ -672,18 +653,7 @@ export class LabelManagerOverlayComponent {
     const f  = this.filterText().trim().toLowerCase();
     const tf = this.typeFilter().trim();
     return entries.filter(e => {
-      if (tf) {
-        // Semantic LabelType values (Struct, Function, …) filter on the type field.
-        // Data-type values (u32, pointer, …) filter on the valueType annotation.
-        // The type field is also checked as a string to handle any older entries that
-        // stored a data-type string directly in type before the unified type system.
-        if (SEMANTIC_LABEL_TYPES.has(tf)) {
-          if (this.effectiveType(e) !== tf) return false;
-        } else {
-          // e.type is cast to string because legacy entries may carry non-enum values.
-          if (e.valueType !== tf && (e.type as string) !== tf) return false;
-        }
-      }
+      if (tf && this.effectiveType(e) !== tf) return false;
       if (!f) return true;
       return e.address.toLowerCase().includes(f) ||
              e.name.toLowerCase().includes(f) ||
@@ -706,22 +676,26 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().some(e => e.dynamic),
   );
 
-  /** Root entries to poll: dynamic entries (all types) plus String-type entries (always auto-polled). */
+  /** Root entries to poll: auto-polled types (Pointer/Float/Value/String) plus Address when dynamic=true. */
   private readonly _dynamicAddresses = computed(() =>
     this.filteredEntries()
-      .filter(e => !e.parentAddress && (e.dynamic || (e.type ?? 'Address') === 'String'))
+      .filter(e => !e.parentAddress)
+      .filter(e => {
+        const t = this.effectiveType(e);
+        if (t === 'Function') return false; // FNC shows static info only
+        if (t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
+        return e.dynamic; // Address: only when explicitly toggled
+      })
       .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType })),
   );
 
   /**
-   * Dynamic child rows to poll (depth >= 1, dynamic=true or String valueType, with parentAddress set at depth 1).
-   * Only depth-1 children are live-polled (dereference parent pointer + offset).
+   * Visible child rows to poll (depth >= 1, with parentAddress set at depth 1).
+   * All visible children are always polled — their type drives the format.
    */
   private readonly _dynamicMemberRows = computed(() =>
     this.treeRows().filter(
-      r => r.kind === 'member' && r.depth === 1 &&
-           (r.entry.dynamic || r.entry.valueType?.toLowerCase() === 'string') &&
-           r.entry.parentAddress != null,
+      r => r.kind === 'member' && r.depth === 1 && r.entry.parentAddress != null,
     ),
   );
 
@@ -738,7 +712,8 @@ export class LabelManagerOverlayComponent {
     const allEntries = this.currentSet()?.entries ?? [];
     const map = new Map<string, LabelManagerEntry>();
     for (const e of allEntries) {
-      if ((e.type ?? 'Address') === 'Struct') {
+      const t = e.type ?? 'Address';
+      if (t === 'Struct' || t === 'Pointer') {
         map.set(e.name, e);
       }
     }
@@ -993,22 +968,20 @@ export class LabelManagerOverlayComponent {
     this.editAddress.set(entry.address);
     this.editName.set(entry.name);
     this.editComment.set(entry.comment ?? '');
-    // Determine editType: use valueType when this is a plain Address label with a
-    // data-type annotation (e.g. valueType='u32'), so the picker shows the data type
-    // rather than the generic 'Address'. Semantic types (Struct, Function, …) are
-    // always shown as-is.
     const existingChildren = this._childrenOf(entry.address);
-    const semanticType = entry.type ?? (existingChildren.length > 0 ? 'Struct' : 'Address');
-    this.editType.set(semanticType === 'Address' && entry.valueType ? entry.valueType : semanticType);
+    // Map legacy Struct to Pointer; detect type from entry or fall back by children presence.
+    const raw = entry.type ?? (existingChildren.length > 0 ? 'Pointer' : 'Address');
+    const mapped = raw === 'Struct' ? 'Pointer' : raw;
+    this.editType.set(mapped);
     this.editHidden.set(entry.hidden ?? false);
     this.editDynamic.set(entry.dynamic ?? false);
-    // Populate editMembers from existing child entries in the set.
+    // Populate editMembers from child entries, mapping legacy valueType → type.
     const children = this._childrenOf(entry.address).sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0));
     this._editingOriginalChildAddresses = children.map(c => c.address);
     this.editMembers.set(children.map(c => ({
       offsetStr: '0x' + (c.offset ?? 0).toString(16).toUpperCase().padStart(2, '0'),
       name: c.name,
-      valueType: c.valueType,
+      type: c.type ?? legacyValueTypeToType(c.valueType) ?? undefined,
       comment: c.comment,
       dynamic: c.dynamic,
       hidden: c.hidden,
@@ -1020,7 +993,6 @@ export class LabelManagerOverlayComponent {
     this.editNodeNextOffset.set(entry.nodeNextOffset != null ? '0x' + entry.nodeNextOffset.toString(16).toUpperCase().padStart(2, '0') : '');
     this.editNodeSize.set(entry.nodeSize != null ? String(entry.nodeSize) : '');
     this.editingAddress.set(entry.address);
-    // Preserve the parent relationship so it is not lost on save.
     this.editParentAddress.set(entry.parentAddress);
     this.editParentOffset.set(entry.offset);
   }
@@ -1088,12 +1060,12 @@ export class LabelManagerOverlayComponent {
     const name = this.editName().trim();
     if (!addr || !name) { return; }
 
-    // Determine whether the selected value is a semantic label type or a data type.
-    // Data types (e.g. u32, pointer) are stored in valueType; semantic types set the type field.
     const rawType = this.editType();
-    const isSemantic = SEMANTIC_LABEL_TYPES.has(rawType);
-    const type: LabelType = isSemantic ? rawType as LabelType : 'Address';
-    const rootValueType: string | undefined = !isSemantic ? rawType : undefined;
+    // Map legacy Struct → Pointer; all entries in UNIFIED_TYPES are semantic.
+    const mappedType = rawType === 'Struct' ? 'Pointer' : rawType;
+    const isSemantic = SEMANTIC_LABEL_TYPES.has(mappedType) || mappedType === 'Pointer';
+    const type: LabelType = isSemantic ? mappedType as LabelType : 'Address';
+    const rootValueType: string | undefined = undefined; // data types are gone from the type picker
     const setName = this.activeSetName();
 
     const argRegs    = (type === 'Function') ? splitLines(this.editArgRegs())    : undefined;
@@ -1126,8 +1098,8 @@ export class LabelManagerOverlayComponent {
     };
     this.action$.emit({ type: 'addEntry', setName, entry });
 
-    // For Struct type: save children as separate label entries with parentAddress = addr.
-    if (type === 'Struct') {
+    // For Pointer type (and legacy Struct): save children as separate label entries.
+    if (type === 'Pointer' || type === 'Struct' as LabelType) {
       const newChildren = this.editMembers()
         .filter(m => m.name.trim())
         .map(m => {
@@ -1139,7 +1111,7 @@ export class LabelManagerOverlayComponent {
             offset,
             name: m.name.trim(),
             comment: m.comment?.trim() || undefined,
-            valueType: m.valueType || undefined,
+            type: (m.type || 'Address') as LabelType,
             dynamic: m.dynamic || undefined,
             hidden: m.hidden || undefined,
           };
@@ -1205,8 +1177,8 @@ export class LabelManagerOverlayComponent {
     this.editMembers.update(m => m.map((item, i) => i === index ? { ...item, name: value } : item));
   }
 
-  updateMemberValueType(index: number, value: string): void {
-    this.editMembers.update(m => m.map((item, i) => i === index ? { ...item, valueType: value || undefined } : item));
+  updateMemberType(index: number, value: string): void {
+    this.editMembers.update(m => m.map((item, i) => i === index ? { ...item, type: value || undefined } : item));
   }
 
   updateMemberComment(index: number, value: string): void {
@@ -1236,18 +1208,81 @@ export class LabelManagerOverlayComponent {
   // ── Display helpers ───────────────────────────────────────────────────────────
 
   effectiveType(entry: LabelManagerEntry): LabelType {
-    return entry.type ?? 'Address';
+    const t = entry.type;
+    if (!t || t === 'Address') return 'Address';
+    // Map legacy types to the new system.
+    if (t === 'Struct') return 'Pointer';
+    if (t === 'Array' || t === 'ArrayOfPointers' || t === 'LinkedList') return 'Value';
+    return t as LabelType;
+  }
+
+  /**
+   * Resolves the effective type for a child entry.
+   * Children store their type in `type`; legacy entries may have used `valueType`.
+   */
+  childEffectiveType(entry: LabelManagerEntry): LabelType {
+    const t = entry.type;
+    if (t && t !== 'Address') return this.effectiveType(entry);
+    // Legacy: map old valueType strings to the new type system.
+    if (entry.valueType) {
+      return legacyValueTypeToType(entry.valueType) as LabelType ?? 'Address';
+    }
+    return 'Address';
+  }
+
+  /** True when this entry's live value should be shown (non-Address auto-poll; Address only when dynamic). */
+  shouldShowLive(entry: LabelManagerEntry): boolean {
+    const t = this.effectiveType(entry);
+    if (t === 'Function') return false;
+    if (t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
+    return entry.dynamic ?? false;
+  }
+
+  /** True when this child entry always shows a live value. */
+  hasLiveChild(entry: LabelManagerEntry): boolean {
+    const t = this.childEffectiveType(entry);
+    return t !== 'Address' && t !== 'Function';
+  }
+
+  liveValueClass(entry: LabelManagerEntry): string {
+    switch (this.effectiveType(entry)) {
+      case 'Float':   return 'lm-live-float';
+      case 'Value':   return 'lm-live-number';
+      case 'Pointer': return 'lm-live-ptr';
+      default:        return 'lm-live-value';
+    }
+  }
+
+  childLiveClass(entry: LabelManagerEntry): string {
+    switch (this.childEffectiveType(entry)) {
+      case 'Float':   return 'lm-live-float';
+      case 'Value':   return 'lm-live-number';
+      case 'Pointer': return 'lm-live-ptr';
+      case 'String':  return 'lm-live-string';
+      default:        return 'lm-live-value';
+    }
+  }
+
+  /** Build the static FNC label: "args[a0,a1] rets[v0]" or empty string. */
+  fncLiveDisplay(entry: LabelManagerEntry): string {
+    const parts: string[] = [];
+    if (entry.argRegs?.length) {
+      parts.push(`args[${entry.argRegs.map(r => r.split('=')[0].trim()).join(',')}]`);
+    }
+    if (entry.returnRegs?.length) {
+      parts.push(`rets[${entry.returnRegs.map(r => r.split('=')[0].trim()).join(',')}]`);
+    }
+    return parts.join(' ');
   }
 
   typeBadge(entry: LabelManagerEntry): string {
     const etype = this.effectiveType(entry);
-    if (etype === 'Address' && entry.valueType) return entry.valueType;
-    return TYPE_BADGE[etype] ?? '[?]';
+    return TYPE_BADGE[etype] ?? TYPE_BADGE[entry.type ?? 'Address'] ?? '[?]';
   }
 
   typeBadgeClass(entry: LabelManagerEntry): string {
     const etype = this.effectiveType(entry);
-    const cls = (etype === 'Address' && entry.valueType) ? 'lm-badge-data' : (TYPE_BADGE_CLASS[etype] ?? '');
+    const cls = TYPE_BADGE_CLASS[etype] ?? TYPE_BADGE_CLASS[entry.type ?? 'Address'] ?? '';
     return 'lm-type-badge ' + cls;
   }
 
@@ -1261,29 +1296,18 @@ export class LabelManagerOverlayComponent {
   }
 
   entryDetails(entry: LabelManagerEntry): string {
-    // Always surface child count when there are children, regardless of the entry's declared type.
     const childCount = this._childrenOf(entry.address).length;
     if (childCount > 0) {
       return `${childCount} child${childCount !== 1 ? 'ren' : ''}`;
     }
     switch (this.effectiveType(entry)) {
-      case 'Struct': return '—';
+      case 'Pointer': return '—';
       case 'Function': {
         const parts: string[] = [];
         if (entry.argRegs?.length)    parts.push(`args: ${entry.argRegs.join(', ')}`);
         if (entry.returnRegs?.length) parts.push(`ret: ${entry.returnRegs.join(', ')}`);
         return parts.join(' | ') || '—';
       }
-      case 'Array':
-        return [
-          entry.elementStride != null ? `stride: ${entry.elementStride}` : null,
-          entry.elementCount  != null ? `count: ${entry.elementCount}`   : null,
-        ].filter(Boolean).join(', ') || '—';
-      case 'LinkedList':
-        return [
-          entry.nodeNextOffset != null ? `next@+0x${entry.nodeNextOffset.toString(16).toUpperCase().padStart(2, '0')}` : null,
-          entry.nodeSize       != null ? `size: ${entry.nodeSize}` : null,
-        ].filter(Boolean).join(', ') || '—';
       default:
         return '—';
     }
@@ -1348,6 +1372,7 @@ export class LabelManagerOverlayComponent {
             parentAddress: r.entry.parentAddress!,
             offset: r.entry.offset ?? 0,
             path: r.path,
+            entryType: this.childEffectiveType(r.entry) as LabelType,
             valueType: r.entry.valueType,
           })),
         });
@@ -1365,4 +1390,21 @@ export class LabelManagerOverlayComponent {
 
 function splitLines(text: string): string[] {
   return text.split('\n').map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * Maps a legacy `valueType` string (old data-type annotation) to the nearest
+ * new semantic LabelType string.  Returns `null` when no mapping is applicable.
+ */
+function legacyValueTypeToType(valueType: string | undefined): string | null {
+  if (!valueType) return null;
+  switch (valueType.toLowerCase()) {
+    case 'string':  return 'String';
+    case 'float':
+    case 'double':  return 'Float';
+    case 'pointer': return 'Pointer';
+    case 'u8': case 'u16': case 'u32': case 'u64':
+    case 's8': case 's16': case 's32': case 's64': return 'Value';
+    default:        return null;
+  }
 }

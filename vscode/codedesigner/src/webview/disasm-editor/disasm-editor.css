@@ -3442,7 +3442,7 @@ app-bottom-panel {
     vertical-align: middle;
 }
 #lm-table tr:hover td { background: #2a2d2e; }
-.lm-struct-row .lm-col-addr { border-left: 2px solid #569cd6; }
+.lm-struct-row .lm-col-addr { border-left: 2px solid #2a4a6a; }
 
 .lm-col-vis     { width: 36px; text-align: center; padding: 0 2px !important; }
 .lm-col-expand  { width: 24px; text-align: center; padding: 0 2px !important; white-space: nowrap; }
@@ -3491,16 +3491,19 @@ app-bottom-panel {
 }
 .lm-expand-btn:hover { color: #ccc; }
 
-/* Member sub-rows (struct tree view) */
-.lm-member-sub-row td { background: #1a1a1a; border-bottom: 1px solid #222; padding: 2px 8px; }
-.lm-member-sub-row:hover td { background: #212121; }
-.lm-member-tree-indent { color: #555; font-size: 11px; text-align: left; }
+/* Member sub-rows (pointer child tree view) */
+.lm-member-sub-row td { background: #181818; border-bottom: 1px solid #202020; padding: 2px 8px; }
+.lm-member-sub-row:hover td { background: #1f1f1f; }
+/* Subtle left accent on the first non-indent cell to visually group children */
+.lm-member-sub-row td:nth-child(3) { border-left: 2px solid #2a3a4a; }
+.lm-member-tree-indent { color: #555; font-size: 11px; text-align: left; white-space: nowrap; }
 /* Tree connector characters for recursive depth display */
-.lm-tree-vert      { display: inline-block; width: 12px; text-align: center; vertical-align: middle; color: #333; font-size: 11px; font-family: monospace; }
-.lm-tree-connector { vertical-align: middle; color: #555; font-size: 11px; font-family: monospace; margin-right: 1px; }
-.lm-tree-leaf      { vertical-align: middle; color: #555; font-size: 11px; font-family: monospace; }
-.lm-member-offset-cell { font-size: 11px; color: #7bafd4; }
-.lm-member-sub-name { font-size: 11px; color: #b0b0b0; }
+.lm-tree-vert      { display: inline-block; width: 12px; text-align: center; vertical-align: middle; color: #3a3a3a; font-size: 11px; font-family: monospace; }
+.lm-tree-connector { vertical-align: middle; color: #4a4a4a; font-size: 11px; font-family: monospace; margin-right: 1px; }
+.lm-tree-leaf      { vertical-align: middle; color: #4a4a4a; font-size: 11px; font-family: monospace; }
+/* Offset column in child rows */
+.lm-child-offset { font-size: 11px; color: #7bafd4; }
+.lm-member-sub-name { font-size: 11px; color: #c0c0c0; }
 
 /* Inline new-set input in toolbar */
 .lm-new-set-input {
@@ -3530,8 +3533,11 @@ app-bottom-panel {
     vertical-align: middle;
 }
 .lm-badge-addr  { background: #0d2d4d; color: #569cd6; border: 1px solid #1a4a7a; }
-.lm-badge-struct { background: #3a200a; color: #ce9178; border: 1px solid #5a3010; }
+.lm-badge-ptr   { background: #1a2a3a; color: #9cdcfe; border: 1px solid #2a4a6a; }
+.lm-badge-struct { background: #1a2a3a; color: #9cdcfe; border: 1px solid #2a4a6a; } /* legacy alias */
 .lm-badge-fnc   { background: #2a1a3a; color: #c586c0; border: 1px solid #4a2a5a; }
+.lm-badge-float { background: #2a2200; color: #dcdcaa; border: 1px solid #4a3c00; }
+.lm-badge-value { background: #0a2a10; color: #73c991; border: 1px solid #0a4020; }
 .lm-badge-array { background: #0a2a2a; color: #4ec9b0; border: 1px solid #0a4040; }
 .lm-badge-ptrs  { background: #2a2a0a; color: #b5cea8; border: 1px solid #4a4a1a; }
 .lm-badge-list  { background: #0a2a0a; color: #73c991; border: 1px solid #1a4a1a; }
@@ -3604,8 +3610,13 @@ app-bottom-panel {
 .lm-trash-icon { width: 10px; height: 12px; pointer-events: none; display: block; vertical-align: middle; }
 
 /* Live value display */
-.lm-live-value { font-family: monospace; color: #9cdcfe; font-size: 11px; }
-.lm-live-string { font-family: monospace; color: #4ec9b0; font-size: 11px; }
+.lm-live-value   { font-family: monospace; color: #9cdcfe; font-size: 11px; }
+.lm-live-ptr     { font-family: monospace; color: #9cdcfe; font-size: 11px; }
+.lm-live-string  { font-family: monospace; color: #4ec9b0; font-size: 11px; }
+.lm-live-float   { font-family: monospace; color: #dcdcaa; font-size: 11px; }
+.lm-live-number  { font-family: monospace; color: #73c991; font-size: 11px; }
+.lm-live-fnc     { font-family: monospace; color: #c586c0; font-size: 11px; font-style: italic; }
+.lm-live-placeholder { color: #444; font-size: 11px; font-family: monospace; }
 .lm-live-value-dim { color: #555; font-size: 11px; font-style: italic; }
 
 /* Dynamic toggle in form */
