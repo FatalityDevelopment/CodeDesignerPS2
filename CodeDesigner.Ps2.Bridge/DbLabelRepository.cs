@@ -56,7 +56,7 @@ namespace CodeDesigner.Ps2.Bridge
             var discBySerial = await _db.GameDiscs
                                         .FirstOrDefaultAsync(d =>
                                             d.Serial != null &&
-                                            d.Serial.Replace("_", "-").ToUpperInvariant() == normalized);
+                                            d.Serial.Replace("_", "-").ToUpper() == normalized);
             if (discBySerial is not null) return discBySerial.Id;
 
             // 3. IsoPath suffix (covers bare name, name + ".iso", or full path).
