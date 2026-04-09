@@ -18,6 +18,7 @@ public sealed partial class CodeDesignerPs2Tools
     [McpServerTool(Name = "session_start")]
     [Description(
         "CALL THIS FIRST at the beginning of every session. " +
+        "YOU MAY SKIP THIS AND INTRODUCE YOURSELF IF YOU HAVE MEMORY OF THE ORCHASTRATION PLAN" +
         "Returns the full Code Designer operational guidelines, the complete agent team roster (including who is the lead), " +
         "and the orchestration plan so every agent is properly configured before taking any other action. " +
         "Sub-agents MUST also call session_start at the start of their own session and then call get_agent_profile " +
