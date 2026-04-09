@@ -75,7 +75,7 @@ public sealed partial class CodeDesignerPs2Tools
                 uint   files   = item.TryGetProperty("FileCount",  out var fc) ? fc.GetUInt32()           : 0u;
                 string created = item.TryGetProperty("Created",    out var cr) ? (cr.GetString() ?? "?") : "?";
                 string modif   = item.TryGetProperty("Modified",   out var mo) ? (mo.GetString() ?? "?") : "?";
-                uint   bytes   = item.TryGetProperty("TotalBytes", out var tb) ? tb.GetUInt32()           : 0u;
+                long   bytes   = item.TryGetProperty("TotalBytes", out var tb) ? tb.GetInt64()            : 0L;
                 sb.AppendLine($"  {name,-32}  {files} file(s)  {bytes / 1024} KB  created={created}  modified={modif}");
             }
             return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no saves found)";
@@ -191,7 +191,7 @@ public sealed partial class CodeDesignerPs2Tools
                 string id       = item.TryGetProperty("Id",         out var idProp)  ? (idProp.GetString()      ?? "?") : "?";
                 string name     = item.TryGetProperty("Name",       out var n)       ? (n.GetString()           ?? "?") : "?";
                 string type     = item.TryGetProperty("TypeName",   out var t)       ? (t.GetString()           ?? "?") : "?";
-                ulong  bytes    = item.TryGetProperty("TotalBytes", out var tb)      ? tb.GetUInt64()                    : 0ul;
+                long   bytes    = item.TryGetProperty("TotalBytes", out var tb)      ? tb.GetInt64()                     : 0L;
                 string created  = item.TryGetProperty("Created",    out var cr)      ? (cr.GetString()          ?? "?") : "?";
                 uint   files    = item.TryGetProperty("FileCount",  out var fc)      ? fc.GetUInt32()                    : 0u;
                 sb.AppendLine($"  {id,-20}  {name,-30}  [{type}]  {bytes / (1024 * 1024)} MB  {files} file(s)  created={created}");
@@ -226,7 +226,7 @@ public sealed partial class CodeDesignerPs2Tools
             foreach (var item in arr.EnumerateArray())
             {
                 string name   = item.TryGetProperty("Name",        out var n)  ? (n.GetString()  ?? "?") : "?";
-                ulong  size   = item.TryGetProperty("Size",        out var s)  ? s.GetUInt64()            : 0ul;
+                long   size   = item.TryGetProperty("Size",        out var s)  ? s.GetInt64()             : 0L;
                 bool   isDir  = item.TryGetProperty("IsDirectory", out var d)  && d.GetBoolean();
                 string modif  = item.TryGetProperty("Modified",    out var mo) ? (mo.GetString() ?? "?") : "?";
                 string tag    = isDir ? "[DIR]" : "     ";
@@ -255,7 +255,7 @@ public sealed partial class CodeDesignerPs2Tools
 
     [McpServerTool(Name = "hdd_import")]
     [DynamicDescription("hdd_import_desc")]
-    [Description("Import a file into a specific partition on a PS2 HDD image. Does not require the emulator to be running.")]
+    [Description("Import a file into a specific partition on a PS2 HDD image. NOTE: Direct PFS write support is not yet implemented — this operation will return an error. Use PCSX2's built-in HDD tools or the pfsshell utility instead.")]
     public async Task<string> HddImport(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID to import the file into (as shown by hdd_list).")] string partitionId,
@@ -349,7 +349,23 @@ public sealed partial class CodeDesignerPs2Tools
         var json = await bridge.SendAsync(
             new { Command = "ISO_READ_FILE", IsoPath = isoPath, FilePath = filePath, OutputPath = outputPath },
             cancellationToken);
-        return SimpleMessage(json);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            string message = root.TryGetProperty("Message", out var msg) ? (msg.GetString() ?? "") : "";
+            // When outputPath is specified the Message already contains the destination path.
+            // When outputPath is omitted the file data is returned as base64 in the Data field.
+            if (string.IsNullOrEmpty(outputPath))
+            {
+                string data = root.TryGetProperty("Data", out var dat) ? (dat.GetString() ?? "") : "";
+                return WithRules($"{message}\nbase64: {data}");
+            }
+            return WithRules(message);
+        }
+        catch { return json; }
     }
 
     [McpServerTool(Name = "iso_get_info")]
