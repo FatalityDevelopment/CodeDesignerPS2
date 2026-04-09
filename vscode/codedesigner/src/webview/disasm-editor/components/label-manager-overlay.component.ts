@@ -192,7 +192,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       }
       <!-- Inline rename-set input -->
       @if (showRenameSetInput()) {
-        <input class="lm-new-set-input" type="text" spellcheck="false"
+        <input class="lm-rename-set-input" type="text" spellcheck="false"
                placeholder="New name…"
                [value]="renameSetInput()"
                (input)="renameSetInput.set(asInput($event).value)"
@@ -953,7 +953,7 @@ export class LabelManagerOverlayComponent {
     this.renameSetInput.set(this.activeSetName());
     this.showRenameSetInput.set(true);
     requestAnimationFrame(() => {
-      const input = document.querySelector('.lm-new-set-input') as HTMLInputElement | null;
+      const input = document.querySelector('.lm-rename-set-input') as HTMLInputElement | null;
       input?.focus();
       input?.select();
     });

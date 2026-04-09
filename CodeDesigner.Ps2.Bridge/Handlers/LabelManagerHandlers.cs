@@ -323,7 +323,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
-
+        // ── ADDLABELENTRY ─────────────────────────────────────────────────────
 
         private string HandleAddLabelEntry(string? workspaceDir, string? gameId, string? setName, LabelManagerEntry? entry)
         {
