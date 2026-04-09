@@ -80,7 +80,7 @@ public static class DatabaseInitialiser
                     // create a fresh database on the next iteration.
                     recoveryAttempted = true;
                     BackupAndDeleteCorruptedDatabase(path);
-                    // Reset attempt counter so the fresh DB gets a full retry window.
+                    // Reset to 0 so attempt++ makes it 1, restarting with predictable delays.
                     attempt = 0;
                 }
                 else
@@ -217,7 +217,8 @@ public static class DatabaseInitialiser
         Console.Error.WriteLine(
             $"[DatabaseInitialiser] WARNING: The database at '{dbPath}' is corrupted and " +
             $"cannot be recovered. It will be renamed to '{dbPath}.bak' and a new database " +
-            $"will be created. Any existing data in the corrupted database is lost.");
+            $"will be created. The application will start with an empty database; the corrupted " +
+            $"file is preserved as '{dbPath}.bak' for offline inspection.");
 
         // Rename WAL/SHM sidecars first so SQLite cannot re-attach them.
         foreach (var suffix in new[] { "-wal", "-shm" })
