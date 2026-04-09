@@ -429,12 +429,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Tries to locate a PCSX2 executable at standard installation paths.
+     * Tries to locate a PCSX2 executable.
+     * Resolution order:
+     * 1. `pcsx2` subfolder inside the CodeDesigner install directory
+     *    (e.g. `%LOCALAPPDATA%\CodeDesigner\pcsx2\pcsx2-qt.exe`).
+     * 2. Standard OS-specific installation paths.
      * Returns the first path found, or null if PCSX2 is not detected.
      */
     private static detectPcsx2Exe(): string | null {
+        const installDir = DisasmPanelProvider.getInstallDirectory();
         const candidates: string[] = [];
+
         if (process.platform === 'win32') {
+            // 1. pcsx2 subfolder inside the install directory (preferred)
+            candidates.push(path.join(installDir, 'pcsx2', 'pcsx2-qt.exe'));
+            // 2. Standard Windows installation paths
             const pf    = process.env.PROGRAMFILES         ?? 'C:\\Program Files';
             const pf86  = process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)';
             const local = process.env.LOCALAPPDATA         ?? '';
@@ -444,17 +453,28 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 ...(local ? [path.join(local, 'Programs', 'PCSX2', 'pcsx2-qt.exe')] : []),
             );
         } else if (process.platform === 'darwin') {
-            candidates.push('/Applications/PCSX2.app/Contents/MacOS/PCSX2');
+            candidates.push(
+                path.join(installDir, 'pcsx2', 'PCSX2'),
+                '/Applications/PCSX2.app/Contents/MacOS/PCSX2',
+            );
         } else {
-            candidates.push('/usr/bin/pcsx2', '/usr/local/bin/pcsx2', '/snap/bin/pcsx2');
+            candidates.push(
+                path.join(installDir, 'pcsx2', 'pcsx2'),
+                '/usr/bin/pcsx2',
+                '/usr/local/bin/pcsx2',
+                '/snap/bin/pcsx2',
+            );
         }
         return candidates.find(c => c && fs.existsSync(c)) ?? null;
     }
 
     private loadEmuSettings(): void {
+        let settingsFound = false;
+
         // 1. Try every open workspace folder
         for (const folder of vscode.workspace.workspaceFolders ?? []) {
             if (this.tryLoadSettingsFrom(path.join(folder.uri.fsPath, 'emu-settings.json'))) {
+                settingsFound = true;
                 break;
             }
         }
@@ -462,7 +482,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // 2. Walk up from the extension install directory (handles the case where
         //    the developer opens vscode/codedesigner directly and the repo root is
         //    a few levels above).
-        if (!Object.keys(this.settings).length && this.extensionPath) {
+        if (!settingsFound && this.extensionPath) {
             let dir = this.extensionPath;
             for (let i = 0; i < DisasmPanelProvider.MAX_PARENT_SEARCH_DEPTH; i++) {
                 if (this.tryLoadSettingsFrom(path.join(dir, 'emu-settings.json'))) {
@@ -474,23 +494,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // 3. Merge auto-detected BIOS files from the install directory into the
-        //    BIOS list so users never need to configure the BIOS path manually.
-        const autoBios = DisasmPanelProvider.detectBiosFiles();
-        if (autoBios.length > 0) {
-            const existing = this.settings.bios ?? [];
-            const merged = [...autoBios];
-            for (const b of existing) {
-                if (!merged.some(m => m.path === b.path)) {
-                    merged.push(b);
-                }
-            }
-            this.settings.bios = merged;
-        }
-
-        // 4. Auto-detect the PCSX2 executable and add it to the emulators list
-        //    (only PCSX2 entries appear in the selector; the Bridge is always
-        //    resolved from the install directory, never from this list).
+        // 3. Auto-detect the PCSX2 executable and add it to the emulators list.
+        //    Only PCSX2 entries appear in the selector; the Bridge is always
+        //    resolved from the install directory, never from this list.
+        //    BIOS files must be provided and configured by the user.
         const pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe();
         if (pcsx2Exe) {
             const existing = (this.settings.emulators ?? []).filter(e => this.isPcsx2Entry(e));
@@ -695,14 +702,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (!this.webview) { return; }
         // Only PCSX2 entries appear in the emulator selector; Bridge is auto-detected.
         const emulators = (this.settings.emulators ?? []).map(e => ({ label: e.type, value: e.path }));
-        // BIOS options come from settings (which already include auto-detected ones from loadEmuSettings).
+        // BIOS options come from user configuration only (BIOS files must be provided by the user).
         const biosOptions = (this.settings.bios ?? []).map(b => ({ label: b.name, value: b.path }));
         const gameOptions = (this.settings.games ?? []).map(g => ({ label: g.name, value: g.path }));
-        // Auto-select first BIOS if the stored selection is no longer in the list.
-        const biosPath = biosOptions.length > 0 && !biosOptions.some(b => b.value === this.selectedBiosPath)
-            ? biosOptions[0].value
-            : this.selectedBiosPath;
-        if (biosPath !== this.selectedBiosPath) { this.selectedBiosPath = biosPath; }
         this.webview.postMessage({
             command: 'init',
             emulators,
@@ -788,7 +790,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         // Save current selections for use by Restart
         this.selectedEmulatorPath = emulatorPath;
-        this.selectedBiosPath = biosPath || (this.settings.bios?.[0]?.path ?? '');
+        this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
 
         // Toggle: if connected and/or launched from this panel, disconnect and close process.
@@ -813,7 +815,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const out = getOutputChannel();
 
         this.selectedEmulatorPath = emulatorPath;
-        this.selectedBiosPath = biosPath || (this.settings.bios?.[0]?.path ?? '');
+        this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
 
         out.show(true);
@@ -821,7 +823,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         // If already connected, switch runtime mode immediately over socket.
         if (this.socketClient.isConnected()) {
-            this.startRuntimeMode(runMode, this.selectedBiosPath, gamePath);
+            this.startRuntimeMode(runMode, biosPath, gamePath);
             return;
         }
 
@@ -959,13 +961,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
      * Launch the external PCSX2 application using CLI arguments from panel selections.
      * This does not connect sockets by itself; Connect/Run still control CodeDesigner.
-     * PCSX2 is located via auto-detection or the emulators list; no manual path config needed.
+     * PCSX2 is located from the emulators list, then auto-detected from the install
+     * directory's `pcsx2` subfolder, then standard OS paths — no manual path config needed.
      */
     private handleStartPcsx2(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
 
         this.selectedEmulatorPath = emulatorPath;
-        this.selectedBiosPath = biosPath || (this.settings.bios?.[0]?.path ?? '');
+        this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
 
         // Resolve PCSX2 path: prefer the passed value (from emulator selector if PCSX2 entry),
@@ -979,9 +982,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         if (!pcsx2Exe || !fs.existsSync(pcsx2Exe)) {
-            out.error('PCSX2 executable not found. Install PCSX2 to a standard location or add it via the emulator selector.');
+            out.error('PCSX2 executable not found. Place PCSX2 in the pcsx2 subfolder of the install directory, install it to a standard location, or add it via the emulator selector.');
             vscode.window.showErrorMessage(
-                'PCSX2 not found. Install PCSX2 to a standard location (e.g. Program Files\\PCSX2) or add it via the emulator selector.'
+                'PCSX2 not found. Place PCSX2 in the pcsx2 subfolder of the CodeDesigner install directory, or add it via the emulator selector.'
             );
             return;
         }
