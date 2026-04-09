@@ -14,6 +14,7 @@ var builder = Host.CreateApplicationBuilder(args);
 // only valid JSON-RPC.  Redirect every log message to stderr so that the
 // .NET hosting framework's startup/info messages do not corrupt the stream.
 builder.Logging.ClearProviders();
+builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddConsole(options =>
 {
     options.LogToStandardErrorThreshold = LogLevel.Trace;
