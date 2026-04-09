@@ -120,13 +120,22 @@ public static class DatabaseInitialiser
 
         // Manually add the five columns that AddMcpAgentFields would have created
         // (ConcurrentTasks already exists from the old migration; skip it).
+        // Column names are compile-time constants — validate that they are safe identifiers.
         foreach (var col in new[] { "Status", "Objective", "SessionBegin", "SessionEnd", "Research" })
         {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(col, @"^[A-Za-z_]\w*$"))
+                throw new InvalidOperationException($"Unsafe column name in fixup: {col}");
+
             using var addCol = conn.CreateCommand();
             addCol.CommandText = $"ALTER TABLE McpAgents ADD COLUMN \"{col}\" TEXT;";
             try { addCol.ExecuteNonQuery(); }
             catch (SqliteException) { /* already exists — safe to ignore */ }
         }
+
+        // Resolve the EF Core version at runtime so the history row stays accurate
+        // if the package is later upgraded.
+        var efVersion = typeof(Microsoft.EntityFrameworkCore.DbContext).Assembly
+                            .GetName().Version?.ToString(3) ?? "8.0.0";
 
         // Remap the history entry so EF Core sees AddMcpAgentFields as already applied.
         using var tx = conn.BeginTransaction();
@@ -141,8 +150,9 @@ public static class DatabaseInitialiser
         {
             ins.Transaction = tx;
             ins.CommandText =
-                "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES (@id, '8.0.13');";
+                "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES (@id, @ver);";
             ins.Parameters.AddWithValue("@id", newId);
+            ins.Parameters.AddWithValue("@ver", efVersion);
             ins.ExecuteNonQuery();
         }
         tx.Commit();
