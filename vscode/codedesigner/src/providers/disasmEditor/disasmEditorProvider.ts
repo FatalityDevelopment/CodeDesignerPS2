@@ -3136,7 +3136,10 @@ function analyzeFunctionPrologEpilog(instructions: { Assembly?: string }[]): str
 
   /**
    * Return all register-name-sized alphanumeric tokens from the instruction text.
-   * Includes the destination — the caller decides whether to treat it as source or dest.
+   * Assumes `asm` has already been lowercased — the pattern intentionally uses
+   * only `[a-z0-9]` so that it matches the canonical lowercase register names
+   * (a0, v0, ra, sp, …) produced by the EE disassembler.
+   * Includes the destination token — the caller decides whether to treat it as source or dest.
    */
   function allTokens(asm: string): string[] {
     return asm.split(/[^a-z0-9]+/).filter(Boolean);

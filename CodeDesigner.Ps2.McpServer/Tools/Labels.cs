@@ -275,12 +275,12 @@ public sealed partial class CodeDesignerPs2Tools
     [McpServerTool(Name = "label_add_pointer")]
     [Description("Create or update a named PS2 memory pointer definition with a base address. The address holds a 32-bit pointer; its dereferenced value is the data base. Use label_add_pointer_member to add child fields after creating the pointer entry.")]
     public async Task<string> AddPointer(
-        [Description("Unique name for this pointer entry (e.g. 'PlayerState').")] string structName,
+        [Description("Unique name for this pointer entry (e.g. 'PlayerState').")] string pointerName,
         [Description("Base address of the pointer variable in EE memory (hex or decimal, e.g. '0x80200000').")] string baseAddress,
         CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(
-            new { Command = "ADDSTRUCT", StructName = structName, StructBaseAddress = baseAddress },
+            new { Command = "ADDSTRUCT", StructName = pointerName, StructBaseAddress = baseAddress },
             cancellationToken);
         return SimpleMessage(json);
     }
@@ -288,11 +288,11 @@ public sealed partial class CodeDesignerPs2Tools
     [McpServerTool(Name = "label_delete_pointer")]
     [Description("Remove a named PS2 memory pointer definition. Works in both internal emulator and PINE/PCSX2 modes.")]
     public async Task<string> DeletePointer(
-        [Description("Name of the pointer entry to delete.")] string structName,
+        [Description("Name of the pointer entry to delete.")] string pointerName,
         CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(
-            new { Command = "DELETESTRUCT", StructName = structName },
+            new { Command = "DELETESTRUCT", StructName = pointerName },
             cancellationToken);
         return SimpleMessage(json);
     }
@@ -300,13 +300,13 @@ public sealed partial class CodeDesignerPs2Tools
     [McpServerTool(Name = "label_add_pointer_member")]
     [Description("Add or update a named child field in an existing PS2 memory pointer definition. Fields have a byte offset from the dereferenced base address.")]
     public async Task<string> AddPointerMember(
-        [Description("Name of the pointer entry to add the field to.")] string structName,
+        [Description("Name of the pointer entry to add the field to.")] string pointerName,
         [Description("Byte offset of the field from the dereferenced base address (e.g. 0 for the first field).")] int memberOffset,
         [Description("Display name for the field (e.g. 'health' or 'posX').")] string memberName,
         CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(
-            new { Command = "ADDSTRUCTMEMBER", StructName = structName, MemberOffset = memberOffset, MemberName = memberName },
+            new { Command = "ADDSTRUCTMEMBER", StructName = pointerName, MemberOffset = memberOffset, MemberName = memberName },
             cancellationToken);
         return SimpleMessage(json);
     }
