@@ -252,6 +252,8 @@ namespace CodeDesigner.Ps2.Bridge
                 .UseSqlite($"Data Source={dbPath}")
                 .Options;
             var ctx = new CodeDesignerDbContext(opts);
+            // Apply one-time compatibility fixups before EF Core migrations run.
+            DatabaseInitialiser.ApplyCompatibilityFixups(dbPath);
             ctx.Database.Migrate();
             ctx.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
             return ctx;
