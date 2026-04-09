@@ -35,8 +35,10 @@ public static class DatabaseInitialiser
         // Apply one-time compatibility fixups before EF Core migrations run.
         ApplyCompatibilityFixups(path);
 
-        // Retry MigrateAsync to handle the brief window where the main app holds a
-        // write lock while changing the journal mode on first open.
+        // Retry MigrateAsync to handle transient locking and corruption errors.
+        // SQLITE_LOCKED (5): another process holds a write lock — wait and retry.
+        // SQLITE_CORRUPT (11): stale WAL/SHM files from a previous crash can make
+        //   the database appear malformed; delete them so SQLite can rebuild cleanly.
         const int maxAttempts = 5;
         for (int attempt = 1; ; attempt++)
         {
@@ -57,6 +59,15 @@ public static class DatabaseInitialiser
             catch (SqliteException ex)
                 when (ex.SqliteErrorCode == 5 && attempt < maxAttempts) // SQLITE_LOCKED
             {
+                await Task.Delay(200 * attempt);
+            }
+            catch (SqliteException ex)
+                when (ex.SqliteErrorCode == 11 && attempt < maxAttempts) // SQLITE_CORRUPT
+            {
+                // Stale WAL/SHM files from a previous crash can cause a false
+                // "database disk image is malformed" report.  Remove them so SQLite
+                // can start fresh on the next attempt.
+                TryDeleteWalFiles(path);
                 await Task.Delay(200 * attempt);
             }
         }
@@ -156,5 +167,24 @@ public static class DatabaseInitialiser
             ins.ExecuteNonQuery();
         }
         tx.Commit();
+    }
+
+    /// <summary>
+    /// Attempts to delete the SQLite WAL (<c>-wal</c>) and shared-memory (<c>-shm</c>)
+    /// sidecar files for the given database path.  These files are rebuilt automatically
+    /// by SQLite on the next open.  Stale copies left behind by a crashed process can
+    /// cause SQLite to report SQLITE_CORRUPT (error 11) even when the main database file
+    /// is intact.  Failures are silently ignored — the caller will retry and surface any
+    /// real corruption on the next attempt.
+    /// </summary>
+    private static void TryDeleteWalFiles(string dbPath)
+    {
+        foreach (var suffix in new[] { "-wal", "-shm" })
+        {
+            var file = dbPath + suffix;
+            try { File.Delete(file); }
+            catch (IOException) { /* file in use or already gone */ }
+            catch (UnauthorizedAccessException) { /* permission issue */ }
+        }
     }
 }
