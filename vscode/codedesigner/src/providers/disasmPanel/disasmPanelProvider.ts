@@ -454,20 +454,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Save the current emu-settings.json back to the workspace root directory. */
+    /**
+     * Persist the current emulator settings (bios/games/emulators lists).
+     *
+     * Strategy:
+     *  - Connected  → write to the DB only (DB is the authoritative store).
+     *    The JSON file is NOT touched so a partial in-memory state cannot
+     *    overwrite good data that the user saved while connected last session.
+     *  - Disconnected → write to emu-settings.json as a local fallback so the
+     *    settings survive between sessions without needing a server connection.
+     */
     private async saveEmuSettings(): Promise<void> {
-        if (!this.workspaceRoot) { return; }
-        const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
-        try {
-            await fs.promises.writeFile(settingsPath, JSON.stringify(this.settings, null, 2), 'utf-8');
-        } catch (err: any) {
-            getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
-        }
-
-        // Also persist to the DB so the server can serve them via GETALLSETTINGS.
-        // These are written here and read back in loadUserPreferencesFromDb() so the
-        // in-memory state stays consistent with the DB on subsequent connections.
         if (this.socketClient.isConnected()) {
+            // DB is authoritative — persist there only.
             try {
                 await this.socketClient.setSetting('emu.bios',      JSON.stringify(this.settings.bios      ?? []));
                 await this.socketClient.setSetting('emu.games',     JSON.stringify(this.settings.games     ?? []));
@@ -479,26 +478,34 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             } catch (err: any) {
                 getOutputChannel().debug(`Could not persist emu-settings to DB: ${err?.message ?? err}`);
             }
+        } else {
+            // Offline fallback — write to the JSON file only.
+            if (!this.workspaceRoot) { return; }
+            const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
+            try {
+                await fs.promises.writeFile(settingsPath, JSON.stringify(this.settings, null, 2), 'utf-8');
+            } catch (err: any) {
+                getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
+            }
         }
     }
 
-    /** Save current dropdown selections to codedesigner-settings.json in the workspace root. */
+    /**
+     * Persist the currently selected emulator / bios / game paths.
+     *
+     * Strategy (mirrors saveEmuSettings):
+     *  - Connected  → write to DB only.
+     *  - Disconnected → write to codedesigner-settings.json as a local fallback.
+     */
     private async saveUserPreferences(): Promise<void> {
-        const settingsPath = this.settingsJsonPath;
-        if (!settingsPath) { return; }
         const prefs: UserPreferences = {
             selectedEmulator: this.selectedEmulatorPath,
             selectedBios:     this.selectedBiosPath,
             selectedGame:     this.selectedGamePath,
         };
-        try {
-            await fs.promises.writeFile(settingsPath, JSON.stringify(prefs, null, 2), 'utf-8');
-        } catch (err: any) {
-            getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
-        }
 
-        // Also persist to the DB so the server can recall them on next startup.
         if (this.socketClient.isConnected()) {
+            // DB is authoritative — persist there only.
             try {
                 await this.socketClient.setSetting('ui.selectedEmulator', this.selectedEmulatorPath);
                 await this.socketClient.setSetting('ui.selectedBios',     this.selectedBiosPath);
@@ -506,13 +513,23 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             } catch (err: any) {
                 getOutputChannel().debug(`Could not persist preferences to DB: ${err?.message ?? err}`);
             }
+        } else {
+            // Offline fallback — write to the JSON file only.
+            const settingsPath = this.settingsJsonPath;
+            if (!settingsPath) { return; }
+            try {
+                await fs.promises.writeFile(settingsPath, JSON.stringify(prefs, null, 2), 'utf-8');
+            } catch (err: any) {
+                getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
+            }
         }
     }
 
     /**
-     * Pull user preferences and emulator settings from the server-side DB after connect
-     * and merge them into the local state.  DB values take priority over the JSON file
-     * values because they represent the most recently saved state.
+     * Pull user preferences and emulator settings from the server-side DB after connect.
+     * DB values take priority over any local JSON file values because they represent the
+     * most recently saved state.  After loading, the local JSON files are updated so
+     * they remain consistent for offline sessions.
      */
     private async loadUserPreferencesFromDb(): Promise<void> {
         try {
@@ -551,6 +568,35 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
             if (changed) {
                 this.postInitMessage();
+
+                // Write the authoritative DB data back to the local JSON files so
+                // they stay in sync and offline sessions load the correct settings.
+                if (this.workspaceRoot) {
+                    const emuSettingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
+                    try {
+                        await fs.promises.writeFile(
+                            emuSettingsPath,
+                            JSON.stringify(this.settings, null, 2),
+                            'utf-8'
+                        );
+                    } catch (err: any) {
+                        getOutputChannel().debug(`Could not sync emu-settings.json from DB: ${err?.message ?? err}`);
+                    }
+                }
+
+                const prefsPath = this.settingsJsonPath;
+                if (prefsPath) {
+                    const prefs: UserPreferences = {
+                        selectedEmulator: this.selectedEmulatorPath,
+                        selectedBios:     this.selectedBiosPath,
+                        selectedGame:     this.selectedGamePath,
+                    };
+                    try {
+                        await fs.promises.writeFile(prefsPath, JSON.stringify(prefs, null, 2), 'utf-8');
+                    } catch (err: any) {
+                        getOutputChannel().debug(`Could not sync codedesigner-settings.json from DB: ${err?.message ?? err}`);
+                    }
+                }
             }
         } catch (err: any) {
             getOutputChannel().debug(`Could not load preferences from DB: ${err?.message ?? err}`);
@@ -698,9 +744,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const out = getOutputChannel();
         const resolvedExe = this.getControlServerExecutablePath(selectedEmulatorPath);
         if (!resolvedExe) {
-            out.error('Connect requires CodeDesigner.MipsR9500.exe in emu-settings.json.');
+            out.error('Connect requires CodeDesigner.MipsR9500.exe. Add it via the emulator selector and try again.');
             vscode.window.showErrorMessage(
-                'Connect requires CodeDesigner.MipsR9500.exe in emu-settings.json. Add it and try again.'
+                'Connect requires CodeDesigner.MipsR9500.exe. Browse for it using the … button next to the emulator selector.'
             );
             this.cleanupProcess();
             return;
@@ -2382,7 +2428,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         );
 
         if (!emu) {
-            getOutputChannel().warn('Auto-start: no CodeDesigner emulator found in emu-settings.json (only PCSX2 entries). Use the Run button to start manually.');
+            getOutputChannel().warn('Auto-start: no CodeDesigner emulator found in the emulator list (only PCSX2 entries). Use the Run button to start manually.');
             return false;
         }
 
