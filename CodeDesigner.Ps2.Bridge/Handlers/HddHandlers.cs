@@ -104,19 +104,9 @@ namespace CodeDesigner.Ps2.Bridge
             if (string.IsNullOrWhiteSpace(hddPath))    return CreateErrorResponse("HddPath is required");
             if (string.IsNullOrWhiteSpace(partitionId)) return CreateErrorResponse("PartitionId is required");
             if (string.IsNullOrWhiteSpace(importDir))   return CreateErrorResponse("ImportDir is required");
-            if (!File.Exists(hddPath)) return CreateErrorResponse($"HDD image file not found: {hddPath}");
-            try
-            {
-                using var hdd = Ps2HddImage.Open(hddPath);
-                hdd.ImportFile(partitionId, importDir, overwrite);
-                string fileName = Path.GetFileName(importDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success = true, Command = "HDD_IMPORT",
-                    Message = $"Imported '{fileName}' into partition '{partitionId}'",
-                });
-            }
-            catch (Exception ex) { return CreateErrorResponse($"HDD_IMPORT error: {ex.Message}"); }
+            return CreateErrorResponse(
+                "HDD_IMPORT is not yet supported. Direct PFS write support (inode creation, allocation bitmap management, " +
+                "directory entry creation) is pending. Use PCSX2's built-in HDD tools or the pfsshell utility for write operations.");
         }
 
         private string HandleHddDelete(string? hddPath, string? partitionId)
