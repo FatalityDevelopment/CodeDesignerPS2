@@ -566,7 +566,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Persist the current emulator settings (games list and PCSX2 connection settings).
+     * Persist the current emulator settings (games list, BIOS list, emulators list,
+     * and PCSX2 connection settings).
      *
      * Strategy:
      *  - Connected  → write to the DB only (DB is the authoritative store).
@@ -576,7 +577,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (this.socketClient.isConnected()) {
             // DB is authoritative — persist there only.
             try {
-                await this.socketClient.setSetting('emu.games', JSON.stringify(this.settings.games ?? []));
+                await this.socketClient.setSetting('emu.games',     JSON.stringify(this.settings.games     ?? []));
+                await this.socketClient.setSetting('emu.bios',      JSON.stringify(this.settings.bios      ?? []));
+                await this.socketClient.setSetting('emu.emulators', JSON.stringify(this.settings.emulators ?? []));
                 if (this.settings.pcsx2?.host != null)
                     await this.socketClient.setSetting('emu.pcsx2.host', String(this.settings.pcsx2.host));
                 if (this.settings.pcsx2?.slot != null)
@@ -588,7 +591,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             // Offline fallback — write to the JSON file only.
             if (!this.workspaceRoot) { return; }
             const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
-            const toSave = { games: this.settings.games, pcsx2: this.settings.pcsx2 };
+            const toSave = {
+                bios:      this.settings.bios,
+                games:     this.settings.games,
+                emulators: this.settings.emulators,
+                pcsx2:     this.settings.pcsx2,
+            };
             try {
                 await fs.promises.writeFile(settingsPath, JSON.stringify(toSave, null, 2), 'utf-8');
             } catch (err: any) {
@@ -669,6 +677,32 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 try { this.settings.games = JSON.parse(rawGames); changed = true; } catch { /* ignore */ }
             }
 
+            // Merge BIOS list from DB if present.
+            const rawBios = settings['emu.bios'];
+            if (rawBios) {
+                try { this.settings.bios = JSON.parse(rawBios); changed = true; } catch { /* ignore */ }
+            }
+
+            // Merge emulator list from DB if present, adding any DB entries not
+            // already in the auto-detected list.
+            const rawEmulators = settings['emu.emulators'];
+            if (rawEmulators) {
+                try {
+                    const dbEmulators: Array<{ type: string; path: string }> = JSON.parse(rawEmulators);
+                    const existing = this.settings.emulators ?? [];
+                    const merged = [...existing];
+                    for (const e of dbEmulators) {
+                        if (!merged.some(x => x.path === e.path)) {
+                            merged.push(e);
+                        }
+                    }
+                    if (merged.length !== existing.length) {
+                        this.settings.emulators = merged;
+                        changed = true;
+                    }
+                } catch { /* ignore */ }
+            }
+
             if (changed) {
                 this.postInitMessage();
 
@@ -676,7 +710,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // it stays in sync and offline sessions load the correct settings.
                 if (this.workspaceRoot) {
                     const emuSettingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
-                    const toSave = { games: this.settings.games, pcsx2: this.settings.pcsx2 };
+                    const toSave = {
+                        bios:      this.settings.bios,
+                        games:     this.settings.games,
+                        emulators: this.settings.emulators,
+                        pcsx2:     this.settings.pcsx2,
+                    };
                     try {
                         await fs.promises.writeFile(
                             emuSettingsPath,
