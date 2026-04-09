@@ -51,20 +51,37 @@ internal static class McpToolLoader
 
         if (missing.Count > 0)
         {
-            using var db = new CodeDesignerDbContext(dbOptions);
-            foreach (var (method, dyn) in missing)
+            // Acquire a named system-wide mutex before writing McpConfig rows.
+            // This prevents a race between multiple MCP server processes that all
+            // start simultaneously and try to seed missing description keys at once.
+            // busy_timeout=30000 (set by SqlitePragmaInterceptor) backs this up at
+            // the SQLite layer, but the mutex avoids unnecessary contention entirely.
+            using var mutex = new Mutex(false, @"Global\CodeDesignerSQLiteWriter");
+            bool acquired = false;
+            try
             {
-                var fallback = method.GetCustomAttribute<DescriptionAttribute>()?.Description ?? string.Empty;
-                db.McpConfigs.Add(new Database.Entities.McpConfig
+                try { acquired = mutex.WaitOne(TimeSpan.FromSeconds(30)); }
+                catch (AbandonedMutexException) { acquired = true; } // previous holder crashed; we inherit the lock
+
+                using var db = new CodeDesignerDbContext(dbOptions);
+                foreach (var (method, dyn) in missing)
                 {
-                    Key         = dyn!.Key,
-                    Value       = fallback,
-                    Description = "MCP tool description",
-                    UpdatedAt   = DateTime.UtcNow,
-                });
-                dbDescriptions[dyn.Key] = fallback;
+                    var fallback = method.GetCustomAttribute<DescriptionAttribute>()?.Description ?? string.Empty;
+                    db.McpConfigs.Add(new Database.Entities.McpConfig
+                    {
+                        Key         = dyn!.Key,
+                        Value       = fallback,
+                        Description = "MCP tool description",
+                        UpdatedAt   = DateTime.UtcNow,
+                    });
+                    dbDescriptions[dyn.Key] = fallback;
+                }
+                db.SaveChanges();
             }
-            db.SaveChanges();
+            finally
+            {
+                if (acquired) mutex.ReleaseMutex();
+            }
         }
 
         foreach (var method in methods)

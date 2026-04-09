@@ -39,6 +39,42 @@ namespace CodeDesigner.Ps2.Bridge
         internal async Task<McpMemory?> GetAsync(int id)
             => await _db.McpMemories.FindAsync(id);
 
+        /// <summary>Returns the entry with the given slug <paramref name="name"/>, or <c>null</c> if not found.</summary>
+        internal async Task<McpMemory?> FindByNameAsync(string name)
+            => await _db.McpMemories.FirstOrDefaultAsync(m => m.Name == name);
+
+        /// <summary>
+        /// Creates or overwrites a memory entry by slug name.
+        /// This is an atomic upsert used by the Bridge socket's MCPMEMORY_UPSERT command
+        /// so all MCP agent writes are serialized through the Bridge's shared
+        /// <see cref="CodeDesignerDbContext"/>.
+        /// </summary>
+        internal async Task<McpMemory> UpsertAsync(string name, string content, string? gameId = null)
+        {
+            var existing = await _db.McpMemories.FirstOrDefaultAsync(m => m.Name == name);
+            if (existing is null)
+            {
+                var entry = new McpMemory
+                {
+                    Name      = name,
+                    Content   = content,
+                    GameId    = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim(),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                };
+                _db.McpMemories.Add(entry);
+                await _db.SaveChangesAsync();
+                return entry;
+            }
+
+            existing.Content   = content;
+            existing.UpdatedAt = DateTime.UtcNow;
+            if (gameId is not null)
+                existing.GameId = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim();
+            await _db.SaveChangesAsync();
+            return existing;
+        }
+
         /// <summary>
         /// Creates a new memory entry.
         /// Throws <see cref="InvalidOperationException"/> when a entry with the same
