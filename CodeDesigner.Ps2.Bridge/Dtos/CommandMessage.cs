@@ -134,6 +134,8 @@ namespace CodeDesigner.Ps2.Bridge
         public string? GameId { get; set; }
         /// <summary>Label set name for GETLABELSET / SETACTIVELABELSET / CREATELABELSET etc.</summary>
         public string? SetName { get; set; }
+        /// <summary>New label set name for RENAMELABELSET.</summary>
+        public string? NewSetName { get; set; }
         /// <summary>Unified label entry payload for ADDLABELENTRY.</summary>
         public LabelManagerEntry? LabelEntry { get; set; }
         /// <summary>
@@ -212,6 +214,12 @@ namespace CodeDesigner.Ps2.Bridge
         public string? Title { get; set; }
         /// <summary>Optional free-text description for SNAPSHOT (stored in DB metadata).</summary>
         public string? Description { get; set; }
+
+        // MCP Config fields (MCPCONFIG_LIST / MCPCONFIG_UPDATE)
+        /// <summary>Configuration key for MCPCONFIG_UPDATE.</summary>
+        public string? McpConfigKey { get; set; }
+        /// <summary>New value (tool description) for MCPCONFIG_UPDATE.</summary>
+        public string? McpConfigValue { get; set; }
     }
 
     /// <summary>

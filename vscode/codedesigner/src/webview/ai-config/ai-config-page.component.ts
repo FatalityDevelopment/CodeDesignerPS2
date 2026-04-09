@@ -51,6 +51,14 @@ export interface McpMemoryEntry {
   updatedAt: string;
 }
 
+export interface McpConfigEntry {
+  id:           number;
+  key:          string;
+  value?:       string;
+  description?: string;
+  updatedAt:    string;
+}
+
 // ── Markdown field descriptors ────────────────────────────────────────────────
 
 interface MarkdownField<T> {
@@ -99,6 +107,9 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
     </button>
     <button class="aic-tab" [class.active]="activeTab() === 'agents'" (click)="activeTab.set('agents')">
       Agents
+    </button>
+    <button class="aic-tab" [class.active]="activeTab() === 'tools'" (click)="onOpenToolsTab()">
+      Tools
     </button>
   </div>
 
@@ -409,6 +420,66 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
       </main>
     </div>
 
+    <!-- ══════════════════════════════ TOOLS TAB ══════════════════════════ -->
+    <div class="aic-tab-panel aic-tools-panel" [class.hidden]="activeTab() !== 'tools'">
+      <div class="aic-tools-header">
+        <h2 class="aic-tools-title">&#x1F6E0; MCP Tool Descriptions</h2>
+        <div class="aic-tools-actions">
+          <button class="aic-icon-btn" title="Refresh tool list" (click)="loadTools()">&#x21BB;</button>
+        </div>
+      </div>
+      @if (toolStatusMessage()) {
+        <div class="aic-status"
+             [class.aic-status-ok]="toolStatusOk()"
+             [class.aic-status-error]="toolStatusError()">
+          {{ toolStatusMessage() }}
+        </div>
+      }
+      <p class="aic-tools-hint">Edit the description for each MCP tool below. Descriptions are used by AI agents to understand tool purpose and usage.</p>
+      <div class="aic-tools-table-wrap">
+        <table class="aic-tools-table">
+          <thead>
+            <tr>
+              <th class="aic-tools-col-key">Tool Key</th>
+              <th class="aic-tools-col-desc">Description</th>
+              <th class="aic-tools-col-actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (tool of tools(); track tool.key) {
+              <tr class="aic-tools-row" [class.aic-tools-editing]="editingToolKey() === tool.key">
+                <td class="aic-tools-col-key aic-tools-key-cell">{{ tool.key }}</td>
+                <td class="aic-tools-col-desc">
+                  @if (editingToolKey() === tool.key) {
+                    <textarea class="aic-tools-textarea"
+                              rows="4"
+                              spellcheck="false"
+                              [value]="editingToolValue()"
+                              (input)="editingToolValue.set($any($event.target).value)"></textarea>
+                  } @else {
+                    <span class="aic-tools-desc-text">{{ tool.value || '—' }}</span>
+                  }
+                </td>
+                <td class="aic-tools-col-actions">
+                  @if (editingToolKey() === tool.key) {
+                    <button class="aic-item-btn aic-primary-btn" (click)="onSaveTool(tool.key)" title="Save">&#x2713; Save</button>
+                    <button class="aic-item-btn" (click)="onCancelEditTool()" title="Cancel">&#xD7;</button>
+                  } @else {
+                    <button class="aic-item-btn" (click)="onEditTool(tool)" title="Edit description">&#x270F; Edit</button>
+                  }
+                </td>
+              </tr>
+            }
+            @if (tools().length === 0) {
+              <tr>
+                <td colspan="3" class="aic-empty">No tool descriptions found. Make sure the server is running.</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   </div>
 </div>
   `,
@@ -421,7 +492,7 @@ export class AiConfigPageComponent implements AfterViewInit {
   readonly orchFields = ORCHESTRATION_FIELDS;
 
   // ── Tab state ──────────────────────────────────────────────────────────────
-  readonly activeTab = signal<'orchestration' | 'agents'>('orchestration');
+  readonly activeTab = signal<'orchestration' | 'agents' | 'tools'>('orchestration');
 
   // ── Orchestration list state ──────────────────────────────────────────────
   readonly orchestrations     = signal<OrchestrationProfile[]>([]);
@@ -475,6 +546,14 @@ export class AiConfigPageComponent implements AfterViewInit {
   readonly showMemAddForm   = signal(false);
   readonly newMemName       = signal('');
   readonly pendingMemDelete = signal<number | null>(null);
+
+  // ── Tools state ───────────────────────────────────────────────────────────
+  readonly tools            = signal<McpConfigEntry[]>([]);
+  readonly toolStatusMessage = signal('');
+  readonly toolStatusOk     = signal(false);
+  readonly toolStatusError  = signal(false);
+  readonly editingToolKey   = signal<string | null>(null);
+  readonly editingToolValue = signal('');
 
   private _pendingAgentDelete = false;
 
@@ -852,7 +931,45 @@ export class AiConfigPageComponent implements AfterViewInit {
     this.memStatusError.set(isError);
   }
 
-  // ── Message handler ───────────────────────────────────────────────────────
+  // ── Tools actions ─────────────────────────────────────────────────────────
+
+  onOpenToolsTab(): void {
+    this.activeTab.set('tools');
+    if (this.tools().length === 0) {
+      this.loadTools();
+    }
+  }
+
+  loadTools(): void {
+    this.setToolStatus('Loading…', false);
+    this.vscode.postMessage({ type: 'toolList' });
+  }
+
+  onEditTool(tool: McpConfigEntry): void {
+    this.editingToolKey.set(tool.key);
+    this.editingToolValue.set(tool.value ?? '');
+  }
+
+  onCancelEditTool(): void {
+    this.editingToolKey.set(null);
+    this.editingToolValue.set('');
+  }
+
+  onSaveTool(key: string): void {
+    const value = this.editingToolValue();
+    this.editingToolKey.set(null);
+    this.editingToolValue.set('');
+    this.setToolStatus('Saving…', false);
+    this.vscode.postMessage({ type: 'toolUpdate', key, value });
+  }
+
+  private setToolStatus(msg: string, isError: boolean): void {
+    this.toolStatusMessage.set(msg);
+    this.toolStatusOk.set(!isError && msg !== '');
+    this.toolStatusError.set(isError);
+  }
+
+
 
   private _handleMessage(data: Record<string, unknown>): void {
     switch (data['type']) {
@@ -978,6 +1095,29 @@ export class AiConfigPageComponent implements AfterViewInit {
         } else {
           this.setMemStatus(msg ?? 'Done.', false);
           this.loadMemories();
+        }
+        break;
+      }
+
+      case 'toolListResult': {
+        const error = data['error'] as string | undefined;
+        if (error) {
+          this.setToolStatus('Error: ' + error, true);
+        } else {
+          this.tools.set((data['tools'] as McpConfigEntry[]) ?? []);
+          this.setToolStatus('', false);
+        }
+        break;
+      }
+
+      case 'toolUpdateResult': {
+        const error = data['error'] as string | undefined;
+        const msg   = data['message'] as string | undefined;
+        if (error) {
+          this.setToolStatus('Error: ' + error, true);
+        } else {
+          this.setToolStatus(msg ?? 'Saved.', false);
+          this.loadTools();
         }
         break;
       }

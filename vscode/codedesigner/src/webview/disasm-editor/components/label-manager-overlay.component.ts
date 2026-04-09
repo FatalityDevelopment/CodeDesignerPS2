@@ -85,6 +85,7 @@ export type LabelManagerAction =
   | { type: 'setActive';         setName: string }
   | { type: 'createSet';         setName: string }
   | { type: 'deleteSet';         setName: string }
+  | { type: 'renameSet';         setName: string; newSetName: string }
   | { type: 'addEntry';          setName: string; entry: LabelManagerEntry }
   | { type: 'deleteEntry';       setName: string; address: string }
   | { type: 'importSet';         setName: string; json: string }
@@ -175,7 +176,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       </select>
 
       <!-- Set management buttons -->
-      @if (!showNewSetInput()) {
+      @if (!showNewSetInput() && !showRenameSetInput()) {
         <button class="lm-tool-btn" title="Create a new label set (JSON file) for the current game" (click)="onNewSet()">&#43; New</button>
       }
       <!-- Inline new-set input (replaces prompt()) -->
@@ -188,6 +189,25 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                (keydown.escape)="onCancelNewSet()" />
         <button class="lm-tool-btn" [disabled]="!newSetNameInput().trim()" (click)="onConfirmNewSet()" title="Create set">&#x2713;</button>
         <button class="lm-tool-btn" (click)="onCancelNewSet()" title="Cancel">&#xD7;</button>
+      }
+      <!-- Inline rename-set input -->
+      @if (showRenameSetInput()) {
+        <input class="lm-new-set-input" type="text" spellcheck="false"
+               placeholder="New name…"
+               [value]="renameSetInput()"
+               (input)="renameSetInput.set(asInput($event).value)"
+               (keydown.enter)="onConfirmRenameSet()"
+               (keydown.escape)="onCancelRenameSet()" />
+        <button class="lm-tool-btn" [disabled]="!renameSetInput().trim()" (click)="onConfirmRenameSet()" title="Rename set">&#x2713;</button>
+        <button class="lm-tool-btn" (click)="onCancelRenameSet()" title="Cancel">&#xD7;</button>
+      }
+      @if (!showNewSetInput() && !showRenameSetInput()) {
+        <button class="lm-tool-btn"
+                title="Rename this label set"
+                [disabled]="activeSetIsBuiltIn()"
+                (click)="onRenameSet()">
+          &#x270F; Rename
+        </button>
       }
       <button class="lm-tool-btn lm-danger-btn"
               title="Delete this label set"
@@ -660,6 +680,10 @@ export class LabelManagerOverlayComponent {
   readonly showNewSetInput = signal(false);
   readonly newSetNameInput = signal('');
 
+  // Inline rename-set
+  readonly showRenameSetInput = signal(false);
+  readonly renameSetInput     = signal('');
+
   // Edit form state
   readonly editAddress       = signal('');
   readonly editName          = signal('');
@@ -923,6 +947,30 @@ export class LabelManagerOverlayComponent {
   onCancelNewSet(): void {
     this.showNewSetInput.set(false);
     this.newSetNameInput.set('');
+  }
+
+  onRenameSet(): void {
+    this.renameSetInput.set(this.activeSetName());
+    this.showRenameSetInput.set(true);
+    requestAnimationFrame(() => {
+      const input = document.querySelector('.lm-new-set-input') as HTMLInputElement | null;
+      input?.focus();
+      input?.select();
+    });
+  }
+
+  onConfirmRenameSet(): void {
+    const newName = this.renameSetInput().trim();
+    if (!newName) { return; }
+    const oldName = this.activeSetName();
+    this.showRenameSetInput.set(false);
+    this.renameSetInput.set('');
+    this.action$.emit({ type: 'renameSet', setName: oldName, newSetName: newName });
+  }
+
+  onCancelRenameSet(): void {
+    this.showRenameSetInput.set(false);
+    this.renameSetInput.set('');
   }
 
   onDeleteSet(): void {

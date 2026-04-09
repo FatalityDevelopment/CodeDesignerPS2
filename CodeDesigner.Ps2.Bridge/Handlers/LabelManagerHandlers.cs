@@ -279,7 +279,51 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
-        // ── ADDLABELENTRY ─────────────────────────────────────────────────────
+        // ── RENAMELABELSET ────────────────────────────────────────────────────
+
+        private string HandleRenameLabelSet(string? workspaceDir, string? gameId, string? setName, string? newSetName)
+        {
+            gameId     = RequireParam(gameId,     "GameId",     out var e2);
+            setName    = RequireParam(setName,    "SetName",    out var e3);
+            newSetName = RequireParam(newSetName, "NewSetName", out var e4);
+            if (gameId is null)     return CreateErrorResponse(e2!);
+            if (setName is null)    return CreateErrorResponse(e3!);
+            if (newSetName is null) return CreateErrorResponse(e4!);
+
+            try
+            {
+                var set = LabelRepo.RenameSetAsync(gameId, setName, newSetName).GetAwaiter().GetResult();
+
+                // Keep the LabelMgr in-memory state in sync with the new name.
+                LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
+                if (!string.IsNullOrWhiteSpace(workspaceDir))
+                {
+                    LabelMgr.SaveSet(set, workspaceDir, gameId);
+                    LabelMgr.SetActiveSet(workspaceDir, gameId, newSetName);
+                }
+                else
+                {
+                    var tempDir = Path.Combine(Path.GetTempPath(), "codedesigner_labels");
+                    Directory.CreateDirectory(tempDir);
+                    LabelMgr.SaveSet(set, tempDir, gameId);
+                    LabelMgr.SetActiveSet(tempDir, gameId, newSetName);
+                }
+                SyncLegacyDictsFromLabelManager();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "RENAMELABELSET",
+                    LabelSet = ToWireSet(set),
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"RENAMELABELSET failed: {ex.Message}");
+            }
+        }
+
+
 
         private string HandleAddLabelEntry(string? workspaceDir, string? gameId, string? setName, LabelManagerEntry? entry)
         {
