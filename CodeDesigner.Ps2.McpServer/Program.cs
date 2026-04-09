@@ -51,9 +51,10 @@ for (int i = 0; i < args.Length; i++)
 dbPath ??= DatabasePaths.GetDefaultDbPath();
 
 // ── Connect to the database (already initialised by the Database tool) ─────
-var dbOptions = new DbContextOptionsBuilder<CodeDesignerDbContext>()
-    .UseSqlite($"Data Source={dbPath}")
-    .Options;
+// BuildDbOptions registers SqlitePragmaInterceptor: sets journal_mode=WAL and
+// busy_timeout=30000 on every connection open, preventing SQLITE_BUSY errors when
+// the Bridge and multiple MCP agent processes write concurrently.
+var dbOptions = DatabaseInitialiser.BuildDbOptions(dbPath);
 
 // Register the socket bridge client as a singleton so all tools share it.
 // Construct the instance via factory so the DI container does not attempt to
@@ -65,12 +66,16 @@ builder.Services.AddSingleton(sp => new SocketBridgeClient(host, port));
 builder.Services.AddSingleton(dbOptions);
 
 // Register the database service for agent memories and configuration.
-builder.Services.AddSingleton<McpDatabaseService>();
+// Inject SocketBridgeClient so write operations are routed through the Bridge
+// socket server rather than directly to SQLite, ensuring single-writer semantics
+// across all parallel MCP agent processes.
+builder.Services.AddSingleton<McpDatabaseService>(sp =>
+    new McpDatabaseService(dbOptions, sp.GetRequiredService<SocketBridgeClient>()));
 
 // Build tool instances with descriptions loaded from the database so that
 // descriptions can be edited at runtime without recompiling the server.
 var bridgeForLoader  = new SocketBridgeClient(host, port);
-var dbSvcForLoader   = new McpDatabaseService(dbOptions);
+var dbSvcForLoader   = new McpDatabaseService(dbOptions, bridgeForLoader);
 var toolsInstance    = new CodeDesignerPs2Tools(bridgeForLoader, dbSvcForLoader);
 var dynamicTools     = McpToolLoader.Build(toolsInstance, dbOptions).ToList();
 

@@ -168,6 +168,68 @@ namespace CodeDesigner.Ps2.Bridge
             catch (Exception ex) { return CreateErrorResponse($"MCPMEMORY_EXPORT error: {ex.Message}"); }
         }
 
+        // ── MCPMEMORY_DELETE_BY_NAME ──────────────────────────────────────────
+
+        private string HandleMcpMemoryDeleteByName(string? name)
+        {
+            if (McpMemoryRepo is null)
+                return CreateErrorResponse("MCP Memory repository is not available");
+            if (string.IsNullOrWhiteSpace(name))
+                return CreateErrorResponse("McpMemoryName is required for MCPMEMORY_DELETE_BY_NAME");
+            try
+            {
+                var entry = McpMemoryRepo.FindByNameAsync(name!).GetAwaiter().GetResult();
+                if (entry is null)
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = true,
+                        Command = "MCPMEMORY_DELETE_BY_NAME",
+                        Message = $"No MCP Memory entry named '{name}' found.",
+                        Data    = "false",
+                    });
+                }
+
+                McpMemoryRepo.DeleteAsync(entry.Id).GetAwaiter().GetResult();
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "MCPMEMORY_DELETE_BY_NAME",
+                    Message = $"Deleted MCP Memory entry '{name}'",
+                    Data    = "true",
+                });
+            }
+            catch (Exception ex) { return CreateErrorResponse($"MCPMEMORY_DELETE_BY_NAME error: {ex.Message}"); }
+        }
+
+        // ── MCPMEMORY_UPSERT ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// MCPMEMORY_UPSERT — creates or overwrites a memory entry by slug name.
+        /// This is the write path used by MCP agent processes so all writes are
+        /// serialized through the Bridge's single <see cref="CodeDesignerDbContext"/>,
+        /// eliminating cross-process SQLite write conflicts.
+        /// </summary>
+        private string HandleMcpMemoryUpsert(string? name, string? content)
+        {
+            if (McpMemoryRepo is null)
+                return CreateErrorResponse("MCP Memory repository is not available");
+            if (string.IsNullOrWhiteSpace(name))
+                return CreateErrorResponse("McpMemoryName is required for MCPMEMORY_UPSERT");
+            try
+            {
+                var entry = McpMemoryRepo.UpsertAsync(name!, content ?? string.Empty).GetAwaiter().GetResult();
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success   = true,
+                    Command   = "MCPMEMORY_UPSERT",
+                    Message   = $"Upserted MCP Memory entry '{entry.Name}'",
+                    McpMemory = ToMcpMemoryDto(entry),
+                });
+            }
+            catch (Exception ex) { return CreateErrorResponse($"MCPMEMORY_UPSERT error: {ex.Message}"); }
+        }
+
         // ── Helper ────────────────────────────────────────────────────────────
 
         private static McpMemoryInfo ToMcpMemoryDto(CodeDesigner.Ps2.Database.Entities.McpMemory e) => new()

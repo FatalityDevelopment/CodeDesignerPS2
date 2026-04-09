@@ -11,6 +11,23 @@ namespace CodeDesigner.Ps2.Database;
 public static class DatabaseInitialiser
 {
     /// <summary>
+    /// Creates <see cref="DbContextOptions{TContext}"/> for the given SQLite file path,
+    /// with the <see cref="SqlitePragmaInterceptor"/> pre-registered so that
+    /// <c>PRAGMA journal_mode=WAL</c> and <c>PRAGMA busy_timeout=30000</c> are applied
+    /// automatically on every connection open.
+    ///
+    /// Use this factory at every call site that needs a <see cref="CodeDesignerDbContext"/>
+    /// to ensure consistent SQLite configuration across the Bridge, the MCP server, and the
+    /// Database CLI tool.
+    /// </summary>
+    /// <param name="path">Absolute path to the SQLite database file.</param>
+    public static DbContextOptions<CodeDesignerDbContext> BuildDbOptions(string path)
+        => new DbContextOptionsBuilder<CodeDesignerDbContext>()
+            .UseSqlite($"Data Source={path}")
+            .AddInterceptors(new SqlitePragmaInterceptor())
+            .Options;
+
+    /// <summary>
     /// Builds <see cref="DbContextOptions{TContext}"/> for the given SQLite
     /// file path, applies any pending EF Core migrations, and seeds initial
     /// data via <see cref="DatabaseSeeder"/>.
@@ -24,13 +41,9 @@ public static class DatabaseInitialiser
         string path,
         string? archiveRoot = null)
     {
-        // WAL mode allows multiple readers and one writer concurrently, preventing
-        // "database is locked" errors when the MCP server and the main app share the file.
-        var connectionString = $"Data Source={path}";
-
-        var options = new DbContextOptionsBuilder<CodeDesignerDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
+        // BuildDbOptions registers SqlitePragmaInterceptor which sets journal_mode=WAL
+        // and busy_timeout=30000 automatically on every connection open.
+        var options = BuildDbOptions(path);
 
         // Apply one-time compatibility fixups before EF Core migrations run.
         ApplyCompatibilityFixups(path);
@@ -48,9 +61,8 @@ public static class DatabaseInitialiser
                 await using var db = new CodeDesignerDbContext(options);
                 await db.Database.MigrateAsync();
 
-                // Enable WAL mode via PRAGMA (not supported as a connection string keyword
-                // in Microsoft.Data.Sqlite; must be set after the connection is open).
-                await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+                // PRAGMAs (journal_mode=WAL, busy_timeout=30000) are applied automatically
+                // by SqlitePragmaInterceptor on every connection open — no manual call needed.
 
                 // Seed initial data (idempotent — only inserts missing rows).
                 var seeder = new DatabaseSeeder(db);

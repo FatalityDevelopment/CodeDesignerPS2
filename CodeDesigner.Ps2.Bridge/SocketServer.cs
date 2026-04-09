@@ -250,12 +250,11 @@ namespace CodeDesigner.Ps2.Bridge
             string dbPath = DatabasePaths.GetDefaultDbPath();
             // Apply one-time compatibility fixups before EF Core migrations run.
             DatabaseInitialiser.ApplyCompatibilityFixups(dbPath);
-            var opts = new DbContextOptionsBuilder<CodeDesignerDbContext>()
-                .UseSqlite($"Data Source={dbPath}")
-                .Options;
+            // BuildDbOptions registers SqlitePragmaInterceptor: sets journal_mode=WAL
+            // and busy_timeout=30000 automatically on every connection open.
+            var opts = DatabaseInitialiser.BuildDbOptions(dbPath);
             var ctx = new CodeDesignerDbContext(opts);
             ctx.Database.Migrate();
-            ctx.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
             return ctx;
         }
 
@@ -1317,6 +1316,14 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MCPMEMORY_EXPORT":
                     case "MCPMEMORYEXPORT":
                         return HandleMcpMemoryExport(command.McpMemoryId, command.OutputPath);
+
+                    case "MCPMEMORY_UPSERT":
+                    case "MCPMEMORYUPSERT":
+                        return HandleMcpMemoryUpsert(command.McpMemoryName, command.McpMemoryContent);
+
+                    case "MCPMEMORY_DELETE_BY_NAME":
+                    case "MCPMEMORYDELETEBYNAME":
+                        return HandleMcpMemoryDeleteByName(command.McpMemoryName);
 
                     // ── MCP Agent Profiles (DB-backed) ───────────────────────
                     case "MCPAGENT_LIST":
