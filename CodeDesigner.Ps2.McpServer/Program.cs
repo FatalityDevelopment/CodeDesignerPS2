@@ -66,11 +66,18 @@ builder.Services.AddSingleton(dbOptions);
 // Register the database service for agent memories and configuration.
 builder.Services.AddSingleton<McpDatabaseService>();
 
-// Register the MCP server with stdio transport and auto-discover tool types
+// Build tool instances with descriptions loaded from the database so that
+// descriptions can be edited at runtime without recompiling the server.
+var bridgeForLoader  = new SocketBridgeClient(host, port);
+var dbSvcForLoader   = new McpDatabaseService(dbOptions);
+var toolsInstance    = new CodeDesignerPs2Tools(bridgeForLoader, dbSvcForLoader);
+var dynamicTools     = McpToolLoader.Build(toolsInstance, dbOptions).ToList();
+
+// Register the MCP server with stdio transport and pre-built dynamic tools.
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithTools<CodeDesignerPs2Tools>()
+    .WithTools(dynamicTools)
     .WithPrompts<CodeDesignerPs2Prompts>();
 
 await builder.Build().RunAsync();

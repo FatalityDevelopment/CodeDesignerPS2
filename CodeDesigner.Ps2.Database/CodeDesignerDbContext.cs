@@ -81,8 +81,16 @@ public class CodeDesignerDbContext : DbContext
         {
             entity.HasKey(ls => ls.Id);
             entity.Property(ls => ls.SetName).HasMaxLength(256).IsRequired();
-            entity.Property(ls => ls.GameId).HasMaxLength(64);
-            entity.HasIndex(ls => new { ls.GameId, ls.SetName }).IsUnique();
+            entity.Property(ls => ls.GameId).HasMaxLength(64);   // legacy, kept for compat
+
+            // New FK: each label set belongs to a specific disc release.
+            entity.HasOne(ls => ls.GameDisc)
+                  .WithMany(d => d.LabelSets)
+                  .HasForeignKey(ls => ls.GameDiscId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // Unique per disc + name.
+            entity.HasIndex(ls => new { ls.GameDiscId, ls.SetName }).IsUnique();
         });
 
         // ── Label ──────────────────────────────────────────────────────────────
