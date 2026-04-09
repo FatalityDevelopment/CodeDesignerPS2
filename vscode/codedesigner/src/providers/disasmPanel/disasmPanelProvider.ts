@@ -1493,6 +1493,27 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         this.loadSnapshotsForGame(this.selectedGameName);
         this.loadGameLabels(this.selectedGameName);
+
+        // Persist the ISO path in the database so label sets can be resolved
+        // by GameDisc. Try to get the serial from a running PINE session first;
+        // if unavailable just update the path with an empty serial placeholder.
+        if (gamePath && this._bridgeMode) {
+            try {
+                const info = await this.socketClient.getPcsx2GameInfo();
+                const serial = (info.ID ?? '').replace(/\0/g, '').trim();
+                if (serial) {
+                    // Update both IsoPath and serial — also propagate serial to editor.
+                    await this.socketClient.updateGameDisc(serial, gamePath);
+                    this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, serial);
+                } else {
+                    // Serial unavailable — just store IsoPath; use filename for DB fallback.
+                    this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, gamePath);
+                }
+            } catch {
+                // Not in PINE mode or PCSX2 not running — fall back to ISO path.
+                this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, gamePath);
+            }
+        }
     }
 
     /**

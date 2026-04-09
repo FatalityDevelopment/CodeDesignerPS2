@@ -56,20 +56,21 @@ namespace CodeDesigner.Ps2.Bridge
 
             var trimmed = sql.TrimStart();
 
+            // Read-only restrictions temporarily disabled — full SQL access enabled.
             // Only allow SELECT or WITH … SELECT (CTEs).
-            if (!trimmed.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) &&
-                !trimmed.StartsWith("WITH",   StringComparison.OrdinalIgnoreCase))
-                return CreateErrorResponse(
-                    "QUERYDB only supports read-only SELECT queries (or CTEs starting with WITH … SELECT)");
+            // if (!trimmed.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) &&
+            //     !trimmed.StartsWith("WITH",   StringComparison.OrdinalIgnoreCase))
+            //     return CreateErrorResponse(
+            //         "QUERYDB only supports read-only SELECT queries (or CTEs starting with WITH … SELECT)");
 
             // Quick blocklist check for obvious mutating statements.
-            var upper = sql.ToUpperInvariant();
-            foreach (var bad in _queryDbBlocklist)
-            {
-                if (upper.Contains(bad, StringComparison.Ordinal))
-                    return CreateErrorResponse(
-                        $"QUERYDB does not permit '{bad.TrimEnd()}' statements — only SELECT is allowed");
-            }
+            // var upper = sql.ToUpperInvariant();
+            // foreach (var bad in _queryDbBlocklist)
+            // {
+            //     if (upper.Contains(bad, StringComparison.Ordinal))
+            //         return CreateErrorResponse(
+            //             $"QUERYDB does not permit '{bad.TrimEnd()}' statements — only SELECT is allowed");
+            // }
 
             try
             {

@@ -117,6 +117,9 @@ interface CommandMessage {
     McpOrchestrationWorkflow?: string;
     McpOrchestrationRules?: string;
     McpOrchestrationNotes?: string;
+    // Game Disc (UPDATEGAMEDISC)
+    GameSerial?: string;
+    GameCrc?: string;
 }
 
 /**
@@ -2439,6 +2442,20 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'EXPORTLABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName });
         if (!response.Success) { throw new Error(response.Error || 'EXPORTLABELSET failed'); }
         return (response as any).Data ?? '';
+    }
+
+    /**
+     * UPDATEGAMEDISC — update the IsoPath and/or CRC for a GameDisc row
+     * identified by its serial (e.g. "SCUS-97275").
+     * Both isoPath and crc are optional; only non-null values are updated.
+     */
+    public async updateGameDisc(serial: string, isoPath?: string, crc?: string): Promise<void> {
+        await this.sendCommand({
+            Command:    'UPDATEGAMEDISC',
+            GameSerial: serial,
+            IsoPath:    isoPath,
+            GameCrc:    crc,
+        });
     }
 
     /**

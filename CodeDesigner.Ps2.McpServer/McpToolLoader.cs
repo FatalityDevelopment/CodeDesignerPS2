@@ -20,6 +20,9 @@ internal static class McpToolLoader
     /// <summary>
     /// Builds all tools for <paramref name="instance"/>, overriding each
     /// tool-level description from the database where available.
+    /// Any tool key that is not yet in the database is automatically seeded
+    /// with its compiled <c>[Description]</c> fallback so it can be edited
+    /// from the VS Code description editor.
     /// </summary>
     internal static IEnumerable<McpServerTool> Build(
         Tools.CodeDesignerPs2Tools instance,
@@ -34,13 +37,38 @@ internal static class McpToolLoader
                                .ToDictionary(c => c.Key, c => c.Value ?? string.Empty);
         }
 
+        // Collect methods first so we can batch-seed missing keys.
         var toolType = typeof(Tools.CodeDesignerPs2Tools);
-        foreach (var method in toolType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-        {
-            var mcpAttr = method.GetCustomAttribute<McpServerToolAttribute>();
-            if (mcpAttr is null) continue;
+        var methods  = toolType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                               .Where(m => m.GetCustomAttribute<McpServerToolAttribute>() is not null)
+                               .ToList();
 
-            // Resolve description: DB → [Description] fallback.
+        // Batch-insert any keys that are not yet in the database.
+        var missing = methods
+            .Select(m => (Method: m, Dyn: m.GetCustomAttribute<DynamicDescriptionAttribute>()))
+            .Where(x => x.Dyn is not null && !dbDescriptions.ContainsKey(x.Dyn.Key))
+            .ToList();
+
+        if (missing.Count > 0)
+        {
+            using var db = new CodeDesignerDbContext(dbOptions);
+            foreach (var (method, dyn) in missing)
+            {
+                var fallback = method.GetCustomAttribute<DescriptionAttribute>()?.Description ?? string.Empty;
+                db.McpConfigs.Add(new Database.Entities.McpConfig
+                {
+                    Key         = dyn!.Key,
+                    Value       = fallback,
+                    Description = "MCP tool description",
+                    UpdatedAt   = DateTime.UtcNow,
+                });
+                dbDescriptions[dyn.Key] = fallback;
+            }
+            db.SaveChanges();
+        }
+
+        foreach (var method in methods)
+        {
             string description = ResolveDescription(method, dbDescriptions);
 
             yield return McpServerTool.Create(
