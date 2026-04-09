@@ -127,14 +127,14 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "label_add")]
-    [Description("Insert or update a label entry in the specified label set. Supports all label types: Address, Function, Struct, Array, LinkedList, String. Data-type annotations (u8, u16, u32, u64, s8, s16, s32, s64, float, double, pointer) can be applied via the valueType parameter. Always use a dedicated label set (create one with label_create_set if needed) rather than polluting the built-in set.")]
+    [Description("Insert or update a label entry in the specified label set. Supports all label types: Address, Pointer, Function, Float, Value, String. For Pointer type, child entries can be added to describe fields at offsets from the dereferenced base address. Data-type annotations (u8, u16, u32, u64, s8, s16, s32, s64, float, double, pointer) can be applied via the valueType parameter. Always use a dedicated label set (create one with label_create_set if needed) rather than polluting the built-in set.")]
     public async Task<string> AddLabel(
         [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
         [Description("Label set to add the entry to (e.g. 'ai-analysis'). Use label_list_sets to see available sets, or label_create_set to make a new one.")] string labelSet,
         [Description("Virtual address to label (hex or decimal).")] string address,
         [Description("Label name (e.g. 'scePadRead').")] string label,
         [Description("Optional comment to attach to the label.")] string? comment = null,
-        [Description("Label type: Address (default), Struct, Function, Array, LinkedList, String. Use valueType for data-type annotations such as pointer.")] string? type = null,
+        [Description("Label type: Address (default), Pointer, Function, Float, Value, String. Use Pointer when the address holds a 32-bit pointer whose dereferenced value is the data base; use valueType for data-type annotations such as pointer.")] string? type = null,
         [Description("For Function: comma-separated argument registers, e.g. 'a0=playerPtr,a1=flags'.")] string? argRegs = null,
         [Description("For Function: comma-separated return registers, e.g. 'v0=result'.")] string? returnRegs = null,
         [Description("For Array: byte stride between elements, e.g. 4.")] int? elementStride = null,
@@ -234,12 +234,12 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     // -------------------------------------------------------------------------
-    // Struct / memory-map viewer
+    // Pointer / memory-map viewer
     // -------------------------------------------------------------------------
 
-    [McpServerTool(Name = "label_get_structs")]
-    [Description("Return all user-defined PS2 memory struct definitions stored on the server. Each struct has a name, base address, and a list of typed member fields.")]
-    public async Task<string> GetStructs(CancellationToken cancellationToken)
+    [McpServerTool(Name = "label_get_pointers")]
+    [Description("Return all user-defined PS2 memory pointer definitions stored on the server. Each pointer entry has a name, base address, and a list of typed child fields at offsets from the dereferenced base.")]
+    public async Task<string> GetPointers(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "GETSTRUCTS" }, cancellationToken);
         try
@@ -256,7 +256,7 @@ public sealed partial class CodeDesignerPs2Tools
             {
                 string name = item.TryGetProperty("name",        out var n)  ? (n.GetString()  ?? "?") : "?";
                 string addr = item.TryGetProperty("baseAddress", out var a)  ? (a.GetString()  ?? "?") : "?";
-                sb.AppendLine($"struct {name}  @ {addr}");
+                sb.AppendLine($"pointer {name}  @ {addr}");
                 if (item.TryGetProperty("members", out var members))
                 {
                     foreach (var m in members.EnumerateArray())
@@ -267,16 +267,16 @@ public sealed partial class CodeDesignerPs2Tools
                     }
                 }
             }
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no structs defined)";
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no pointer entries defined)";
         }
         catch { return json; }
     }
 
-    [McpServerTool(Name = "label_add_struct")]
-    [Description("Create or update a named PS2 memory struct definition with a base address. Use label_add_struct_member to add fields after creating the struct.")]
-    public async Task<string> AddStruct(
-        [Description("Unique name for this struct (e.g. 'PlayerState').")] string structName,
-        [Description("Base address of the struct in EE memory (hex or decimal, e.g. '0x80200000').")] string baseAddress,
+    [McpServerTool(Name = "label_add_pointer")]
+    [Description("Create or update a named PS2 memory pointer definition with a base address. The address holds a 32-bit pointer; its dereferenced value is the data base. Use label_add_pointer_member to add child fields after creating the pointer entry.")]
+    public async Task<string> AddPointer(
+        [Description("Unique name for this pointer entry (e.g. 'PlayerState').")] string structName,
+        [Description("Base address of the pointer variable in EE memory (hex or decimal, e.g. '0x80200000').")] string baseAddress,
         CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(
@@ -285,10 +285,10 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "label_delete_struct")]
-    [Description("Remove a named PS2 memory struct definition. Works in both internal emulator and PINE/PCSX2 modes.")]
-    public async Task<string> DeleteStruct(
-        [Description("Name of the struct to delete.")] string structName,
+    [McpServerTool(Name = "label_delete_pointer")]
+    [Description("Remove a named PS2 memory pointer definition. Works in both internal emulator and PINE/PCSX2 modes.")]
+    public async Task<string> DeletePointer(
+        [Description("Name of the pointer entry to delete.")] string structName,
         CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(
@@ -297,12 +297,12 @@ public sealed partial class CodeDesignerPs2Tools
         return SimpleMessage(json);
     }
 
-    [McpServerTool(Name = "label_add_struct_member")]
-    [Description("Add or update a named member field in an existing PS2 memory struct definition. Members have an offset, a data type, and an optional count for array fields.")]
-    public async Task<string> AddStructMember(
-        [Description("Name of the struct to add the member to.")] string structName,
-        [Description("Byte offset of the member within the struct (e.g. 0 for the first field).")] int memberOffset,
-        [Description("Display name for the member field (e.g. 'health' or 'posX').")] string memberName,
+    [McpServerTool(Name = "label_add_pointer_member")]
+    [Description("Add or update a named child field in an existing PS2 memory pointer definition. Fields have a byte offset from the dereferenced base address.")]
+    public async Task<string> AddPointerMember(
+        [Description("Name of the pointer entry to add the field to.")] string structName,
+        [Description("Byte offset of the field from the dereferenced base address (e.g. 0 for the first field).")] int memberOffset,
+        [Description("Display name for the field (e.g. 'health' or 'posX').")] string memberName,
         CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(

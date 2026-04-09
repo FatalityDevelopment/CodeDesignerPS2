@@ -465,7 +465,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
         </div>
 
         <!-- Child entries editor (for Pointer type — children hang off dereferenced base) -->
-        @if (editType() === 'Pointer' || editType() === 'Struct') {
+        @if (editType() === 'Pointer') {
           <div class="lm-form-row lm-members-row">
             <label class="lm-form-label">Children</label>
             <div class="lm-members-list">
@@ -676,14 +676,13 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().some(e => e.dynamic),
   );
 
-  /** Root entries to poll: auto-polled types (Pointer/Float/Value/String) plus Address when dynamic=true. */
+  /** Root entries to poll: auto-polled types (Function/Pointer/Float/Value/String) plus Address when dynamic=true. */
   private readonly _dynamicAddresses = computed(() =>
     this.filteredEntries()
       .filter(e => !e.parentAddress)
       .filter(e => {
         const t = this.effectiveType(e);
-        if (t === 'Function') return false; // FNC shows static info only
-        if (t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
+        if (t === 'Function' || t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
         return e.dynamic; // Address: only when explicitly toggled
       })
       .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType })),
@@ -1098,8 +1097,8 @@ export class LabelManagerOverlayComponent {
     };
     this.action$.emit({ type: 'addEntry', setName, entry });
 
-    // For Pointer type (and legacy Struct): save children as separate label entries.
-    if (type === 'Pointer' || type === 'Struct' as LabelType) {
+    // For Pointer type: save children as separate label entries.
+    if (type === 'Pointer') {
       const newChildren = this.editMembers()
         .filter(m => m.name.trim())
         .map(m => {
@@ -1263,8 +1262,14 @@ export class LabelManagerOverlayComponent {
     }
   }
 
-  /** Build the static FNC label: "args[a0,a1] rets[v0]" or empty string. */
+  /** Build the FNC live display: live-scanned prolog/epilog result when connected, else saved arg/ret annotations. */
   fncLiveDisplay(entry: LabelManagerEntry): string {
+    // Prefer live-scanned value from provider (prolog/epilog analysis) if available.
+    const live = this.liveValues().get(entry.address);
+    if (live !== undefined && live !== '…') {
+      return live;
+    }
+    // Fall back to saved static arg/ret register annotations.
     const parts: string[] = [];
     if (entry.argRegs?.length) {
       parts.push(`args[${entry.argRegs.map(r => r.split('=')[0].trim()).join(',')}]`);
