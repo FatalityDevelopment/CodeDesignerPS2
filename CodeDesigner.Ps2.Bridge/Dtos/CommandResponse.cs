@@ -183,6 +183,14 @@ namespace CodeDesigner.Ps2.Bridge
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public LabelSetPayload? LabelSet { get; set; }
 
+        // MCP Config results (MCPCONFIG_LIST / MCPCONFIG_UPDATE)
+        /// <summary>List of MCP config entries returned by MCPCONFIG_LIST.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<McpConfigInfo>? McpConfigs { get; set; }
+        /// <summary>Single MCP config entry returned by MCPCONFIG_UPDATE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public McpConfigInfo? McpConfig { get; set; }
+
         // GETSNAPSHOTS results
         /// <summary>List of snapshot metadata entries returned by GETSNAPSHOTS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -227,5 +235,20 @@ namespace CodeDesigner.Ps2.Bridge
         public bool IsBuiltIn { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("entries")]
         public List<LabelManagerEntry> Entries { get; set; } = [];
+    }
+
+    /// <summary>Wire payload for a single MCP config entry returned by MCPCONFIG_LIST / MCPCONFIG_UPDATE.</summary>
+    public class McpConfigInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public int Id { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("key")]
+        public string Key { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public string? Value { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("description")]
+        public string? Description { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("updatedAt")]
+        public string UpdatedAt { get; set; } = string.Empty;
     }
 }

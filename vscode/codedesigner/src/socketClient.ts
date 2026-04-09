@@ -81,6 +81,7 @@ interface CommandMessage {
     WorkspaceDir?: string;
     GameId?: string;
     SetName?: string;
+    NewSetName?: string;
     LabelEntry?: { address: string; name: string; comment?: string; parentAddress?: string; offset?: number; valueType?: string };
     /** String address for DELETELABELENTRY (supports synthetic child paths like "0x80010000:+0x0010"). */
     LabelEntryAddress?: string;
@@ -117,6 +118,9 @@ interface CommandMessage {
     McpOrchestrationWorkflow?: string;
     McpOrchestrationRules?: string;
     McpOrchestrationNotes?: string;
+    // MCP Config (MCPCONFIG_LIST / MCPCONFIG_UPDATE)
+    McpConfigKey?: string;
+    McpConfigValue?: string;
     // Game Disc (UPDATEGAMEDISC)
     GameSerial?: string;
     GameCrc?: string;
@@ -545,6 +549,14 @@ export interface McpOrchestrationInfo {
     rules?:       string;
     notes?:       string;
     createdAt:    string;
+    updatedAt:    string;
+}
+
+export interface McpConfigEntry {
+    id:           number;
+    key:          string;
+    value?:       string;
+    description?: string;
     updatedAt:    string;
 }
 
@@ -2442,6 +2454,29 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'EXPORTLABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: setName });
         if (!response.Success) { throw new Error(response.Error || 'EXPORTLABELSET failed'); }
         return (response as any).Data ?? '';
+    }
+
+    /** Rename a label set. Returns the updated set payload with the new name. */
+    public async renameLabelSet(workspaceDir: string, gameId: string, oldName: string, newName: string): Promise<LabelSetPayload> {
+        const response = await this.sendCommand({ Command: 'RENAMELABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: oldName, NewSetName: newName });
+        if (!response.Success) { throw new Error(response.Error || 'RENAMELABELSET failed'); }
+        return (response as any).LabelSet as LabelSetPayload;
+    }
+
+    // ── MCP Config (tool descriptions) ───────────────────────────────────────
+
+    /** Return all MCP config entries (tool descriptions). */
+    public async mcpConfigList(): Promise<McpConfigEntry[]> {
+        const response = await this.sendCommand({ Command: 'MCPCONFIG_LIST' });
+        if (!response.Success) { throw new Error(response.Error || 'MCPCONFIG_LIST failed'); }
+        return (response as any).McpConfigs ?? [];
+    }
+
+    /** Update the value (tool description) for the given config key. */
+    public async mcpConfigUpdate(key: string, value: string): Promise<McpConfigEntry> {
+        const response = await this.sendCommand({ Command: 'MCPCONFIG_UPDATE', McpConfigKey: key, McpConfigValue: value });
+        if (!response.Success) { throw new Error(response.Error || 'MCPCONFIG_UPDATE failed'); }
+        return (response as any).McpConfig as McpConfigEntry;
     }
 
     /**

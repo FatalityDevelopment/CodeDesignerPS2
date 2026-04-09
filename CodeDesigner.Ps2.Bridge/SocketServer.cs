@@ -996,6 +996,9 @@ namespace CodeDesigner.Ps2.Bridge
                     case "DELETELABELSET":
                         return HandleDeleteLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
 
+                    case "RENAMELABELSET":
+                        return HandleRenameLabelSet(command.WorkspaceDir, command.GameId, command.SetName, command.NewSetName);
+
                     case "ADDLABELENTRY":
                         return HandleAddLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntry);
 
@@ -1372,6 +1375,13 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "MCPORCHESTRATION_SETACTIVE":
                         return HandleMcpOrchestrationSetActive(command.McpOrchestrationId);
+
+                    // ── MCP Config commands ───────────────────────────────────────────
+                    case "MCPCONFIG_LIST":
+                        return HandleMcpConfigList();
+
+                    case "MCPCONFIG_UPDATE":
+                        return HandleMcpConfigUpdate(command.McpConfigKey, command.McpConfigValue);
 
                     default:
                         // Echo for unknown commands

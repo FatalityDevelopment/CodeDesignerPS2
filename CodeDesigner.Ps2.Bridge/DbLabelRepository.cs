@@ -149,6 +149,26 @@ namespace CodeDesigner.Ps2.Bridge
             await _db.SaveChangesAsync();
         }
 
+        internal async Task<MgrSet> RenameSetAsync(string gameId, string oldName, string newName)
+        {
+            bool nameExists = await _db.LabelSets
+                                       .AnyAsync(ls => ls.GameId == gameId && ls.SetName == newName);
+            if (nameExists)
+                throw new InvalidOperationException($"Label set '{newName}' already exists for game '{gameId}'.");
+
+            var entity = await _db.LabelSets
+                                  .Include(ls => ls.Labels)
+                                  .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == oldName)
+                         ?? throw new InvalidOperationException($"Label set '{oldName}' not found for game '{gameId}'.");
+
+            if (entity.IsBuiltIn)
+                throw new InvalidOperationException("The built-in label set cannot be renamed.");
+
+            entity.SetName = newName;
+            await _db.SaveChangesAsync();
+            return DbMapper.ToMgrSet(entity);
+        }
+
         /// <summary>
         /// Upserts a full label set: replaces all its Label rows with the entries supplied.
         /// Two-pass insertion: roots first (to capture their IDs), then children.

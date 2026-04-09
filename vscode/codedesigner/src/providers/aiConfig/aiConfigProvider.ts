@@ -159,6 +159,15 @@ export class AiConfigProvider {
                 await this._handleMemoryDelete(msg['id'] as number, webview);
                 break;
 
+            // ── Tool description handlers ─────────────────────────────────────
+            case 'toolList':
+                await this._sendToolList(webview);
+                break;
+
+            case 'toolUpdate':
+                await this._handleToolUpdate(msg['key'] as string, msg['value'] as string, webview);
+                break;
+
             default:
                 getOutputChannel().warn(`[AiConfig] Unknown message type: ${type}`);
                 break;
@@ -495,6 +504,26 @@ export class AiConfigProvider {
             vscode.window.showInformationMessage('Full orchestration plan exported.');
         } catch (err: any) {
             webview.postMessage({ type: 'exportAllResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    // ── Tool description handlers ─────────────────────────────────────────────
+
+    private async _sendToolList(webview: vscode.Webview): Promise<void> {
+        try {
+            const tools = await this.socketClient.mcpConfigList();
+            webview.postMessage({ type: 'toolListResult', tools });
+        } catch (err: any) {
+            webview.postMessage({ type: 'toolListResult', tools: [], error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleToolUpdate(key: string, value: string, webview: vscode.Webview): Promise<void> {
+        try {
+            await this.socketClient.mcpConfigUpdate(key, value);
+            webview.postMessage({ type: 'toolUpdateResult', message: `Updated description for '${key}'.` });
+        } catch (err: any) {
+            webview.postMessage({ type: 'toolUpdateResult', error: err?.message ?? String(err) });
         }
     }
 

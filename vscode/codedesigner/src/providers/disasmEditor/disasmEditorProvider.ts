@@ -2801,7 +2801,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }> },
+    action: { type: string; setName?: string; newSetName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }> },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -2988,6 +2988,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const builtIn = await this.socketClient.getLabelSet(workspaceDir, gameId, 'Built-in');
           webview.postMessage({ type: 'labelManagerSet', set: builtIn });
           webview.postMessage({ type: 'labelManagerStatus', message: `Deleted label set "${action.setName}".` });
+          break;
+        }
+        case 'renameSet': {
+          const set = await this.socketClient.renameLabelSet(workspaceDir, gameId, action.setName!, action.newSetName!);
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          webview.postMessage({ type: 'labelManagerSets', sets });
+          webview.postMessage({ type: 'labelManagerSet', set });
+          webview.postMessage({ type: 'labelManagerStatus', message: `Renamed label set to "${set.setName}".` });
           break;
         }
         case 'addEntry': {
