@@ -3331,6 +3331,7 @@ app-bottom-panel {
     max-height: 85vh;
     box-shadow: 0 8px 32px rgba(0,0,0,.6);
     overflow: hidden;
+    position: relative;
 }
 
 #lm-header {
@@ -3607,7 +3608,7 @@ app-bottom-panel {
 
 /* SVG icon sizes used inside the play/pause and trash buttons */
 .lm-play-icon  { width: 8px; height: 10px; pointer-events: none; display: block; }
-.lm-trash-icon { width: 10px; height: 12px; pointer-events: none; display: block; vertical-align: middle; }
+.lm-trash-icon { width: 10px; height: 12px; pointer-events: none; display: inline-block; vertical-align: middle; }
 
 /* Live value display */
 .lm-live-value   { font-family: monospace; color: #9cdcfe; font-size: 11px; }
@@ -3713,3 +3714,56 @@ app-bottom-panel {
     flex-shrink: 0;
 }
 #lm-status.lm-status-error { color: #f48771; }
+
+/* Inline confirmation dialog (replaces window.confirm in webviews) */
+.lm-confirm-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    border-radius: 6px;
+}
+.lm-confirm-dialog {
+    background: #2d2d30;
+    border: 1px solid #7d3c2a;
+    border-radius: 6px;
+    padding: 16px 20px;
+    min-width: 280px;
+    max-width: 420px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.6);
+}
+.lm-confirm-title {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #f48771;
+}
+.lm-confirm-body {
+    margin: 0 0 4px;
+    font-size: 12px;
+    color: #cccccc;
+    word-break: break-all;
+}
+.lm-confirm-note {
+    margin: 0 0 14px;
+    font-size: 11px;
+}
+.lm-confirm-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Read-only address display in child-entry edit form */
+.lm-readonly-addr {
+    display: inline-block;
+    background: #1e1e1e;
+    color: #888;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 3px 6px;
+    font-size: 12px;
+    user-select: all;
+}

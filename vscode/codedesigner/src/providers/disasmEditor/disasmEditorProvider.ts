@@ -2889,19 +2889,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       }
       const members = action.members ?? [];
       const values: Record<string, string> = {};
+      const sc = this.socketClient;
       for (const m of members) {
-        const parentAddr = parseInt(m.parentAddress.replace(/^0x/i, ''), 16);
-        if (isNaN(parentAddr)) { continue; }
         try {
-          // Dereference the parent pointer to get the base address.
-          const ptrBuf = await this.socketClient.readMemory(parentAddr, 4, 'ee');
-          if (ptrBuf.length < 4) { continue; }
-          const baseAddr = ptrBuf.readUInt32LE(0);
-          if (baseAddr === 0) { continue; }
-          const resolved = (baseAddr + m.offset) >>> 0;
+          // Resolve the member address by walking the synthetic path chain.
+          // Path format: "0xROOT:+0xOFF1:+0xOFF2" — each segment means
+          // "dereference current address as uint32, then add the offset".
+          const resolved = await resolveMemberPath(m.path, sc);
+          if (resolved === null) { continue; }
           const entryType: string | undefined = m.entryType;
           if (entryType === 'String' || m.valueType?.toLowerCase() === 'string') {
-            const dataBuf = await this.socketClient.readMemory(resolved, 256, 'ee');
+            const dataBuf = await sc.readMemory(resolved, 256, 'ee');
             const firstByte = dataBuf.length > 0 ? dataBuf[0] : 0;
             if (firstByte >= 0x20 && firstByte < 0x7F) {
               const nullIdx = dataBuf.indexOf(0);
@@ -2910,14 +2908,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
               const strPtr = dataBuf.readUInt32LE(0);
               if (strPtr > 0) {
                 try {
-                  const strBuf = await this.socketClient.readMemory(strPtr, 256, 'ee');
+                  const strBuf = await sc.readMemory(strPtr, 256, 'ee');
                   const nullIdx = strBuf.indexOf(0);
                   values[m.path] = strBuf.slice(0, nullIdx !== -1 ? nullIdx : strBuf.length).toString('latin1');
                 } catch { /* ignore */ }
               }
             }
           } else {
-            const dataBuf = await this.socketClient.readMemory(resolved, 4, 'ee');
+            const dataBuf = await sc.readMemory(resolved, 4, 'ee');
             if (dataBuf.length >= 4) {
               values[m.path] = formatLiveValueByEntryType(dataBuf, entryType, m.valueType);
             }
@@ -3081,6 +3079,39 @@ function formatLiveValue(buf: Buffer, valueType?: string): string {
     default:
       return `0x${buf.readUInt32LE(0).toString(16).toUpperCase().padStart(8, '0')}`;
   }
+}
+
+/**
+ * Resolves a synthetic member path to a physical memory address by walking the
+ * pointer chain encoded in the path string.
+ *
+ * Path format: `"0xROOT:+0xOFF1:+0xOFF2"` where:
+ *   - The root segment (`0xROOT`) is a real PS2 address.
+ *   - Each subsequent segment (`:+0xOFF`) means: dereference the current
+ *     address as a 32-bit LE pointer, then add the offset to get the next address.
+ *
+ * Returns `null` when the path cannot be parsed or a null pointer is encountered.
+ */
+async function resolveMemberPath(
+  path: string,
+  socketClient: { readMemory(addr: number, length: number, region: string): Promise<Buffer> },
+): Promise<number | null> {
+  const parts = path.split(':');
+  let addr = parseInt(parts[0].replace(/^0x/i, ''), 16);
+  if (isNaN(addr)) { return null; }
+
+  for (let i = 1; i < parts.length; i++) {
+    const ptrBuf = await socketClient.readMemory(addr, 4, 'ee');
+    if (ptrBuf.length < 4) { return null; }
+    const base = ptrBuf.readUInt32LE(0);
+    if (base === 0) { return null; }
+    const offsetStr = parts[i].replace(/^\+0x/i, '').replace(/^\+/, '');
+    const offset = parseInt(offsetStr, 16);
+    if (isNaN(offset)) { return null; }
+    addr = (base + offset) >>> 0;
+  }
+
+  return addr;
 }
 
 /**
