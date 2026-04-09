@@ -40,6 +40,7 @@ public static class DatabaseInitialiser
         // SQLITE_CORRUPT (11): stale WAL/SHM files from a previous crash can make
         //   the database appear malformed; delete them so SQLite can rebuild cleanly.
         const int maxAttempts = 5;
+        bool recoveryAttempted = false; // guard: only back-up-and-recreate once
         for (int attempt = 1; ; attempt++)
         {
             try
@@ -62,13 +63,31 @@ public static class DatabaseInitialiser
                 await Task.Delay(200 * attempt);
             }
             catch (SqliteException ex)
-                when (ex.SqliteErrorCode == 11 && attempt < maxAttempts) // SQLITE_CORRUPT
+                when (ex.SqliteErrorCode == 11) // SQLITE_CORRUPT
             {
-                // Stale WAL/SHM files from a previous crash can cause a false
-                // "database disk image is malformed" report.  Remove them so SQLite
-                // can start fresh on the next attempt.
-                TryDeleteWalFiles(path);
-                await Task.Delay(200 * attempt);
+                if (attempt < maxAttempts)
+                {
+                    // Stale WAL/SHM files from a previous crash can cause a false
+                    // "database disk image is malformed" report.  Remove them so SQLite
+                    // can start fresh on the next attempt.
+                    TryDeleteWalFiles(path);
+                    await Task.Delay(200 * attempt);
+                }
+                else if (!recoveryAttempted)
+                {
+                    // The main database file itself is genuinely corrupted and cannot
+                    // be recovered by retrying.  Back it up (rename) and let EF Core
+                    // create a fresh database on the next iteration.
+                    recoveryAttempted = true;
+                    BackupAndDeleteCorruptedDatabase(path);
+                    // Reset attempt counter so the fresh DB gets a full retry window.
+                    attempt = 0;
+                }
+                else
+                {
+                    // Recovery was already attempted; surface the exception.
+                    throw;
+                }
             }
         }
 
@@ -185,6 +204,52 @@ public static class DatabaseInitialiser
             try { File.Delete(file); }
             catch (IOException) { /* file in use or already gone */ }
             catch (UnauthorizedAccessException) { /* permission issue */ }
+        }
+    }
+
+    /// <summary>
+    /// Renames a genuinely corrupted SQLite database (and its WAL/SHM sidecars) to
+    /// <c>.bak</c> variants so the application can recover by creating a fresh database.
+    /// The backup preserves the corrupted file for offline inspection.
+    /// </summary>
+    private static void BackupAndDeleteCorruptedDatabase(string dbPath)
+    {
+        Console.Error.WriteLine(
+            $"[DatabaseInitialiser] WARNING: The database at '{dbPath}' is corrupted and " +
+            $"cannot be recovered. It will be renamed to '{dbPath}.bak' and a new database " +
+            $"will be created. Any existing data in the corrupted database is lost.");
+
+        // Rename WAL/SHM sidecars first so SQLite cannot re-attach them.
+        foreach (var suffix in new[] { "-wal", "-shm" })
+        {
+            var file = dbPath + suffix;
+            var backup = file + ".bak";
+            try
+            {
+                if (File.Exists(file))
+                    File.Move(file, backup, overwrite: true);
+            }
+            catch (IOException) { /* ignore — sidecars are best-effort */ }
+            catch (UnauthorizedAccessException) { /* ignore */ }
+        }
+
+        // Rename the main database file.
+        try
+        {
+            if (File.Exists(dbPath))
+                File.Move(dbPath, dbPath + ".bak", overwrite: true);
+        }
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException(
+                $"Could not back up the corrupted database '{dbPath}'. " +
+                $"Please delete or move it manually and restart the application.", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new InvalidOperationException(
+                $"Could not back up the corrupted database '{dbPath}' due to a permissions " +
+                $"error. Please delete or move it manually and restart the application.", ex);
         }
     }
 }
