@@ -26,7 +26,7 @@ namespace CodeDesigner.Ps2.Bridge
             var disc = Db.GameDiscs
                          .FirstOrDefault(d =>
                              d.Serial != null &&
-                             d.Serial.Replace("_", "-").ToUpperInvariant() == normalized);
+                             d.Serial.Replace("_", "-").ToUpper() == normalized);
 
             if (disc is null)
                 return CreateErrorResponse($"No GameDisc found for serial '{normalized}'.");
