@@ -260,9 +260,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
             <th class="lm-col-live">Live Value</th>
             <th class="lm-col-name">Name</th>
             <th class="lm-col-comment">Comment</th>
-            @if (!activeSetIsBuiltIn()) {
-              <th class="lm-col-actions"></th>
-            }
+            <th class="lm-col-actions"></th>
           </tr>
         </thead>
         <tbody>
@@ -302,36 +300,36 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   {{ row.entry!.address }}@if (entryDetails(row.entry!) !== '—') { <span class="lm-addr-details lm-muted">({{ entryDetails(row.entry!) }})</span> }
                 </td>
                 <td class="lm-col-live">
-                  @if (effectiveType(row.entry!) === 'Function') {
-                    <span class="lm-live-fnc">{{ fncLiveDisplay(row.entry!) }}</span>
-                  } @else if (effectiveType(row.entry!) === 'String') {
-                    <span class="lm-live-string">{{ liveValue(row.entry!) }}</span>
-                  } @else if (shouldShowLive(row.entry!)) {
-                    <span [class]="liveValueClass(row.entry!)">{{ liveValue(row.entry!) }}</span>
+                  @if (shouldShowLive(row.entry!)) {
+                    @if (effectiveType(row.entry!) === 'Function') {
+                      <span class="lm-live-fnc">{{ fncLiveDisplay(row.entry!) }}</span>
+                    } @else if (effectiveType(row.entry!) === 'String') {
+                      <span class="lm-live-string">{{ liveValue(row.entry!) }}</span>
+                    } @else {
+                      <span [class]="liveValueClass(row.entry!)">{{ liveValue(row.entry!) }}</span>
+                    }
                   }
                 </td>
                 <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
                 <td class="lm-col-comment lm-muted">{{ entryComment(row.entry!) }}</td>
-                @if (!activeSetIsBuiltIn()) {
-                  <td class="lm-col-actions">
-                    @if (effectiveType(row.entry!) !== 'String' && effectiveType(row.entry!) !== 'Function' && effectiveType(row.entry!) !== 'Pointer') {
-                      <button class="lm-row-btn lm-live-toggle-btn"
-                              [class.lm-is-dynamic]="row.entry!.dynamic"
-                              [title]="row.entry!.dynamic ? 'Pause live polling' : 'Start live polling'"
-                              (click)="onToggleDynamic(row.entry!)">
-                        @if (row.entry!.dynamic) {
-                          <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
-                        } @else {
-                          <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
-                        }
-                      </button>
+                <td class="lm-col-actions">
+                  <button class="lm-row-btn lm-live-toggle-btn"
+                          [class.lm-is-dynamic]="row.entry!.dynamic"
+                          [title]="row.entry!.dynamic ? 'Pause live polling' : 'Start live polling'"
+                          (click)="onToggleDynamic(row.entry!)">
+                    @if (row.entry!.dynamic) {
+                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
+                    } @else {
+                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
                     }
+                  </button>
+                  @if (!activeSetIsBuiltIn()) {
                     <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">&#x270E;</button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">
                       <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
-                  </td>
-                }
+                  }
+                </td>
               </tr>
             } @else {
               <!-- Child label sub-row (recursive; entry = the child LabelManagerEntry) -->
@@ -372,20 +370,32 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                 <td class="lm-col-addr lm-mono lm-child-offset">
                   +0x{{ (row.entry.offset ?? 0).toString(16).toUpperCase().padStart(4, '0') }}
                 </td>
-                <!-- Live value column: formatted by child type -->
+                <!-- Live value column: formatted by child type, only when dynamic -->
                 <td class="lm-col-live">
-                  @if (childEffectiveType(row.entry) === 'String') {
-                    <span class="lm-live-string">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
-                  } @else if (memberLiveValues().has(row.path)) {
-                    <span [class]="childLiveClass(row.entry)">{{ memberLiveValues().get(row.path) }}</span>
-                  } @else if (hasLiveChild(row.entry)) {
-                    <span class="lm-live-placeholder">…</span>
+                  @if (row.entry.dynamic) {
+                    @if (childEffectiveType(row.entry) === 'String') {
+                      <span class="lm-live-string">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
+                    } @else if (memberLiveValues().has(row.path)) {
+                      <span [class]="childLiveClass(row.entry)">{{ memberLiveValues().get(row.path) }}</span>
+                    } @else {
+                      <span class="lm-live-placeholder">…</span>
+                    }
                   }
                 </td>
                 <td class="lm-col-name lm-member-sub-name">{{ row.entry.name }}</td>
                 <td class="lm-col-comment lm-muted">{{ row.entry.comment ?? '' }}</td>
-                @if (!activeSetIsBuiltIn()) {
-                  <td class="lm-col-actions">
+                <td class="lm-col-actions">
+                  <button class="lm-row-btn lm-live-toggle-btn"
+                          [class.lm-is-dynamic]="row.entry.dynamic"
+                          [title]="row.entry.dynamic ? 'Pause live polling' : 'Start live polling'"
+                          (click)="onToggleChildDynamic(row.entry)">
+                    @if (row.entry.dynamic) {
+                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
+                    } @else {
+                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
+                    }
+                  </button>
+                  @if (!activeSetIsBuiltIn()) {
                     @if (row.entry.parentAddress != null) {
                       <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
@@ -393,14 +403,12 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">
                       <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
-                  </td>
-                } @else {
-                  <td class="lm-col-actions">
+                  } @else {
                     @if (row.entry.parentAddress != null) {
                       <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
-                  </td>
-                }
+                  }
+                </td>
               </tr>
             }
           }
@@ -738,33 +746,25 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().some(e => e.dynamic),
   );
 
-  /** Root entries to poll: auto-polled types (Function/Pointer/Float/Value/String) plus Address when dynamic=true. */
+  /** Root entries to poll: only entries from the active set with dynamic===true. */
   private readonly _dynamicAddresses = computed(() =>
-    this.filteredEntries()
-      .filter(e => !e.parentAddress)
-      .filter(e => {
-        const t = this.effectiveType(e);
-        if (t === 'Function' || t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
-        return e.dynamic; // Address: only when explicitly toggled
-      })
+    (this.currentSet()?.entries ?? [])
+      .filter(e => !e.parentAddress && e.dynamic === true)
       .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType })),
   );
 
   /**
-   * Visible child rows to poll at all nesting depths.
-   * All visible member rows are polled — their type drives the format.
+   * Visible child rows to poll: only expanded member rows with dynamic===true.
    * The `path` (synthetic address) encodes the full resolution chain.
    */
   private readonly _dynamicMemberRows = computed(() =>
     this.treeRows().filter(
-      r => r.kind === 'member' && r.entry.parentAddress != null,
+      r => r.kind === 'member' && r.entry.parentAddress != null && r.entry.dynamic === true,
     ),
   );
 
-  /** Colspan for the "no entries" empty row. Live Value column is always shown. */
-  readonly emptyColspan = computed(() =>
-    this.activeSetIsBuiltIn() ? 6 : 7
-  );
+  /** Colspan for the "no entries" empty row. Actions column is always present. */
+  readonly emptyColspan = computed(() => 7);
 
   /**
    * A name → entry map for Struct-type labels only, recomputed only when the
@@ -1103,7 +1103,10 @@ export class LabelManagerOverlayComponent {
         entries: set.entries.map(e => e.address === entry.address ? updated : e),
       });
     }
-    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
+    // Persist only for user (non-built-in) sets.
+    if (!this.activeSetIsBuiltIn()) {
+      this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
+    }
   }
 
   /** Toggle dynamic flag on a child entry directly. */
@@ -1116,7 +1119,10 @@ export class LabelManagerOverlayComponent {
         entries: set.entries.map(e => e.address === child.address ? updated : e),
       });
     }
-    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
+    // Persist only for user (non-built-in) sets.
+    if (!this.activeSetIsBuiltIn()) {
+      this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
+    }
   }
 
   /** Toggle hidden flag on a child entry directly. */
@@ -1326,18 +1332,14 @@ export class LabelManagerOverlayComponent {
     return 'Address';
   }
 
-  /** True when this entry's live value should be shown (non-Address auto-poll; Address only when dynamic). */
+  /** True when this entry's live value should be shown (requires dynamic===true). */
   shouldShowLive(entry: LabelManagerEntry): boolean {
-    const t = this.effectiveType(entry);
-    if (t === 'Function') return false;
-    if (t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
-    return entry.dynamic ?? false;
+    return entry.dynamic === true;
   }
 
-  /** True when this child entry always shows a live value. */
+  /** True when this child entry should show a live value (requires dynamic===true). */
   hasLiveChild(entry: LabelManagerEntry): boolean {
-    const t = this.childEffectiveType(entry);
-    return t !== 'Address' && t !== 'Function';
+    return entry.dynamic === true;
   }
 
   liveValueClass(entry: LabelManagerEntry): string {
