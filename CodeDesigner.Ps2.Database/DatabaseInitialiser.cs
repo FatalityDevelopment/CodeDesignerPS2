@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace CodeDesigner.Ps2.Database;
@@ -31,6 +32,9 @@ public static class DatabaseInitialiser
             .UseSqlite(connectionString)
             .Options;
 
+        // Apply one-time compatibility fixups before EF Core migrations run.
+        ApplyCompatibilityFixups(path);
+
         // Retry MigrateAsync to handle the brief window where the main app holds a
         // write lock while changing the journal mode on first open.
         const int maxAttempts = 5;
@@ -50,7 +54,7 @@ public static class DatabaseInitialiser
                 await seeder.SeedAsync(archiveRoot);
                 break;
             }
-            catch (Microsoft.Data.Sqlite.SqliteException ex)
+            catch (SqliteException ex)
                 when (ex.SqliteErrorCode == 5 && attempt < maxAttempts) // SQLITE_LOCKED
             {
                 await Task.Delay(200 * attempt);
@@ -58,5 +62,99 @@ public static class DatabaseInitialiser
         }
 
         return options;
+    }
+
+    /// <summary>
+    /// Applies one-time, code-level database compatibility fixups before EF Core
+    /// migrations run.  Uses a direct <see cref="SqliteConnection"/> so it can
+    /// operate even when the EF Core model does not yet match the on-disk schema.
+    /// </summary>
+    /// <remarks>
+    /// <b>Fixup: AddMcpAgentConcurrentTasks → AddMcpAgentFields</b><br/>
+    /// An earlier agent session committed <c>20260408140000_AddMcpAgentConcurrentTasks</c>
+    /// (adding <c>ConcurrentTasks</c> as INTEGER).  A later merge replaced that migration
+    /// with <c>20260408140000_AddMcpAgentFields</c> (same timestamp, different name) which
+    /// adds <c>ConcurrentTasks</c> as TEXT plus five additional columns.  When a database
+    /// that had the old migration applied tries to run the new one, SQLite throws
+    /// "table McpAgents already has a column named ConcurrentTasks", crashing the bridge.
+    /// <br/><br/>
+    /// Fix: if the old migration ID is present in <c>__EFMigrationsHistory</c> (and the
+    /// new one is not), manually add the five missing columns and remap the history entry
+    /// so EF Core skips <c>AddMcpAgentFields</c> without re-running it.
+    /// </remarks>
+    public static void ApplyCompatibilityFixups(string dbPath)
+    {
+        if (!File.Exists(dbPath)) return;
+
+        using var conn = new SqliteConnection($"Data Source={dbPath}");
+        conn.Open();
+
+        // Ensure __EFMigrationsHistory exists (it won't on a brand-new database).
+        using (var check = conn.CreateCommand())
+        {
+            check.CommandText =
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='__EFMigrationsHistory';";
+            if ((long)check.ExecuteScalar()! == 0) return;
+        }
+
+        const string oldId = "20260408140000_AddMcpAgentConcurrentTasks";
+        const string newId = "20260408140000_AddMcpAgentFields";
+
+        // Skip if old migration is not present.
+        using (var hasOld = conn.CreateCommand())
+        {
+            hasOld.CommandText =
+                "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = @id;";
+            hasOld.Parameters.AddWithValue("@id", oldId);
+            if ((long)hasOld.ExecuteScalar()! == 0) return;
+        }
+
+        // Skip if the new migration is already recorded (fixup already ran).
+        using (var hasNew = conn.CreateCommand())
+        {
+            hasNew.CommandText =
+                "SELECT COUNT(*) FROM __EFMigrationsHistory WHERE MigrationId = @id;";
+            hasNew.Parameters.AddWithValue("@id", newId);
+            if ((long)hasNew.ExecuteScalar()! > 0) return;
+        }
+
+        // Manually add the five columns that AddMcpAgentFields would have created
+        // (ConcurrentTasks already exists from the old migration; skip it).
+        // Column names are compile-time constants — validate that they are safe identifiers.
+        foreach (var col in new[] { "Status", "Objective", "SessionBegin", "SessionEnd", "Research" })
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(col, @"^[A-Za-z_]\w*$"))
+                throw new InvalidOperationException($"Unsafe column name in fixup: {col}");
+
+            using var addCol = conn.CreateCommand();
+            addCol.CommandText = $"ALTER TABLE McpAgents ADD COLUMN \"{col}\" TEXT;";
+            try { addCol.ExecuteNonQuery(); }
+            catch (SqliteException) { /* already exists — safe to ignore */ }
+        }
+
+        // Resolve the EF Core version at runtime so the history row stays accurate
+        // if the package is later upgraded.
+        var efVersion = typeof(Microsoft.EntityFrameworkCore.DbContext).Assembly
+                            .GetName().Version?.ToString(3) ?? "8.0.0";
+
+        // Remap the history entry so EF Core sees AddMcpAgentFields as already applied.
+        using var tx = conn.BeginTransaction();
+        using (var del = conn.CreateCommand())
+        {
+            del.Transaction = tx;
+            del.CommandText = "DELETE FROM __EFMigrationsHistory WHERE MigrationId = @id;";
+            del.Parameters.AddWithValue("@id", oldId);
+            del.ExecuteNonQuery();
+        }
+        using (var ins = conn.CreateCommand())
+        {
+            ins.Transaction = tx;
+            ins.CommandText =
+                "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES (@id, @ver);";
+            ins.Parameters.AddWithValue("@id", newId);
+            ins.Parameters.AddWithValue("@ver", efVersion);
+            ins.ExecuteNonQuery();
+        }
+        tx.Commit();
     }
 }

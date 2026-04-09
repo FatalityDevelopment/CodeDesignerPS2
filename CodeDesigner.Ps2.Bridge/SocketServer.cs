@@ -248,6 +248,8 @@ namespace CodeDesigner.Ps2.Bridge
         private static CodeDesignerDbContext CreateLocalDbContext()
         {
             string dbPath = DatabasePaths.GetDefaultDbPath();
+            // Apply one-time compatibility fixups before EF Core migrations run.
+            DatabaseInitialiser.ApplyCompatibilityFixups(dbPath);
             var opts = new DbContextOptionsBuilder<CodeDesignerDbContext>()
                 .UseSqlite($"Data Source={dbPath}")
                 .Options;
