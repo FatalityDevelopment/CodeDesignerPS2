@@ -19,9 +19,7 @@ interface EmuSettings {
 }
 
 interface UserPreferences {
-    /** @deprecated Emulator path is now auto-detected from the install directory. */
     selectedEmulator?: string;
-    /** @deprecated BIOS path is now auto-detected from the install directory. */
     selectedBios?: string;
     selectedGame?: string;
 }
@@ -552,8 +550,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         try {
             const raw = fs.readFileSync(settingsPath, 'utf-8');
             const prefs = JSON.parse(raw) as UserPreferences;
-            // Emulator and BIOS paths are now auto-detected — only restore the game selection.
-            this.selectedGamePath = prefs.selectedGame     ?? '';
+            this.selectedEmulatorPath = prefs.selectedEmulator ?? '';
+            this.selectedBiosPath     = prefs.selectedBios     ?? '';
+            this.selectedGamePath     = prefs.selectedGame     ?? '';
             this.selectedGameName = this.selectedGamePath
                 ? path.basename(this.selectedGamePath, path.extname(this.selectedGamePath))
                 : '';
@@ -568,8 +567,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * Persist the current emulator settings (games list and PCSX2 connection settings).
-     * The emulator executable and BIOS paths are now auto-detected from the install
-     * directory and are no longer stored in the database.
      *
      * Strategy:
      *  - Connected  → write to the DB only (DB is the authoritative store).
@@ -591,7 +588,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             // Offline fallback — write to the JSON file only.
             if (!this.workspaceRoot) { return; }
             const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
-            // Only persist the game list; emulator/bios are auto-detected.
             const toSave = { games: this.settings.games, pcsx2: this.settings.pcsx2 };
             try {
                 await fs.promises.writeFile(settingsPath, JSON.stringify(toSave, null, 2), 'utf-8');
@@ -602,8 +598,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Persist the currently selected game path.
-     * Emulator and BIOS paths are now auto-detected and are no longer stored.
+     * Persist the currently selected emulator, bios, and game paths.
      *
      * Strategy (mirrors saveEmuSettings):
      *  - Connected  → write to DB only.
@@ -611,13 +606,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      */
     private async saveUserPreferences(): Promise<void> {
         const prefs: UserPreferences = {
-            selectedGame: this.selectedGamePath,
+            selectedEmulator: this.selectedEmulatorPath,
+            selectedBios:     this.selectedBiosPath,
+            selectedGame:     this.selectedGamePath,
         };
 
         if (this.socketClient.isConnected()) {
             // DB is authoritative — persist there only.
             try {
-                await this.socketClient.setSetting('ui.selectedGame', this.selectedGamePath);
+                await this.socketClient.setSetting('ui.selectedEmulator', this.selectedEmulatorPath);
+                await this.socketClient.setSetting('ui.selectedBios',     this.selectedBiosPath);
+                await this.socketClient.setSetting('ui.selectedGame',     this.selectedGamePath);
             } catch (err: any) {
                 getOutputChannel().debug(`Could not persist preferences to DB: ${err?.message ?? err}`);
             }
@@ -637,15 +636,23 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      * Pull user preferences and emulator settings from the server-side DB after connect.
      * DB values take priority over any local JSON file values because they represent the
      * most recently saved state.
-     * Emulator executable and BIOS paths are no longer stored in the DB — they are
-     * always resolved from the install directory at runtime.
      */
     private async loadUserPreferencesFromDb(): Promise<void> {
         try {
             const settings = await this.socketClient.getAllSettings();
-            const game = settings['ui.selectedGame'];
+            const emulator = settings['ui.selectedEmulator'];
+            const bios     = settings['ui.selectedBios'];
+            const game     = settings['ui.selectedGame'];
 
             let changed = false;
+            if (emulator != null && emulator !== this.selectedEmulatorPath) {
+                this.selectedEmulatorPath = emulator;
+                changed = true;
+            }
+            if (bios != null && bios !== this.selectedBiosPath) {
+                this.selectedBiosPath = bios;
+                changed = true;
+            }
             if (game && game !== this.selectedGamePath) {
                 this.selectedGamePath = game;
                 this.selectedGameName = game
@@ -684,7 +691,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 const prefsPath = this.settingsJsonPath;
                 if (prefsPath) {
                     const prefs: UserPreferences = {
-                        selectedGame: this.selectedGamePath,
+                        selectedEmulator: this.selectedEmulatorPath,
+                        selectedBios:     this.selectedBiosPath,
+                        selectedGame:     this.selectedGamePath,
                     };
                     try {
                         await fs.promises.writeFile(prefsPath, JSON.stringify(prefs, null, 2), 'utf-8');
