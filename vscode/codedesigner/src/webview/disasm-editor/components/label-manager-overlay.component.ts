@@ -749,7 +749,7 @@ export class LabelManagerOverlayComponent {
   /** Root entries to poll: only entries from the active set with dynamic===true. */
   private readonly _dynamicAddresses = computed(() =>
     (this.currentSet()?.entries ?? [])
-      .filter(e => !e.parentAddress && e.dynamic === true)
+      .filter(e => !e.parentAddress && e.dynamic)
       .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType })),
   );
 
@@ -759,7 +759,7 @@ export class LabelManagerOverlayComponent {
    */
   private readonly _dynamicMemberRows = computed(() =>
     this.treeRows().filter(
-      r => r.kind === 'member' && r.entry.parentAddress != null && r.entry.dynamic === true,
+      r => r.kind === 'member' && r.entry.parentAddress != null && r.entry.dynamic,
     ),
   );
 
@@ -1334,12 +1334,12 @@ export class LabelManagerOverlayComponent {
 
   /** True when this entry's live value should be shown (requires dynamic===true). */
   shouldShowLive(entry: LabelManagerEntry): boolean {
-    return entry.dynamic === true;
+    return entry.dynamic ?? false;
   }
 
   /** True when this child entry should show a live value (requires dynamic===true). */
   hasLiveChild(entry: LabelManagerEntry): boolean {
-    return entry.dynamic === true;
+    return entry.dynamic ?? false;
   }
 
   liveValueClass(entry: LabelManagerEntry): string {
