@@ -121,6 +121,9 @@ interface CommandMessage {
     // MCP Config (MCPCONFIG_LIST / MCPCONFIG_UPDATE)
     McpConfigKey?: string;
     McpConfigValue?: string;
+    // Game Disc (UPDATEGAMEDISC)
+    GameSerial?: string;
+    GameCrc?: string;
 }
 
 /**
@@ -2474,6 +2477,20 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'MCPCONFIG_UPDATE', McpConfigKey: key, McpConfigValue: value });
         if (!response.Success) { throw new Error(response.Error || 'MCPCONFIG_UPDATE failed'); }
         return (response as any).McpConfig as McpConfigEntry;
+    }
+
+    /**
+     * UPDATEGAMEDISC — update the IsoPath and/or CRC for a GameDisc row
+     * identified by its serial (e.g. "SCUS-97275").
+     * Both isoPath and crc are optional; only non-null values are updated.
+     */
+    public async updateGameDisc(serial: string, isoPath?: string, crc?: string): Promise<void> {
+        await this.sendCommand({
+            Command:    'UPDATEGAMEDISC',
+            GameSerial: serial,
+            IsoPath:    isoPath,
+            GameCrc:    crc,
+        });
     }
 
     /**

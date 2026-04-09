@@ -1237,6 +1237,11 @@ namespace CodeDesigner.Ps2.Bridge
                     case "QUERY_DB":
                         return HandleQueryDb(command.SqlQuery);
 
+                    // ── Game Disc ─────────────────────────────────────────────
+                    case "UPDATEGAMEDISC":
+                    case "UPDATE_GAME_DISC":
+                        return HandleUpdateGameDisc(command.GameSerial, command.IsoPath, command.GameCrc);
+
                     // ── Navigation history ────────────────────────────────────
                     case "GETNAVHISTORY":
                     case "GET_NAV_HISTORY":

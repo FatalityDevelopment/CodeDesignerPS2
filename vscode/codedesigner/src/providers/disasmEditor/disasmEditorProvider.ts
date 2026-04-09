@@ -74,6 +74,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _archiveLabels: LabelEntry[] = [];
   /** Current game (ISO) name — used to resolve the per-game labels.json path. */
   private _currentGameName: string = '';
+  /** Current game identifier for label manager DB queries — serial (e.g. "SCUS-97275") or full ISO path. */
+  private _currentGameSerial: string = '';
   /** Workspace root — used to resolve the per-game labels.json path. */
   private _workspaceRoot: string = '';
   /** Suppress repeated live read retries after emulator-side connection failures. */
@@ -364,9 +366,11 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * Called by DisasmPanelProvider when the selected game changes.
    * Used to resolve the per-game labels.json path for user-created labels.
    */
-  public setCurrentGame(gameName: string, workspaceRoot: string): void {
-    this._currentGameName = gameName;
-    this._workspaceRoot = workspaceRoot;
+  public setCurrentGame(gameName: string, workspaceRoot: string, gameSerial?: string): void {
+    this._currentGameName   = gameName;
+    this._workspaceRoot     = workspaceRoot;
+    // Prefer a real serial (e.g. "SCUS-97275") for DB resolution; fall back to ISO path.
+    if (gameSerial) { this._currentGameSerial = gameSerial; }
   }
 
   /**
@@ -2752,7 +2756,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Helper — build workspaceDir and gameId from current context. */
   private _labelManagerCtx(): { workspaceDir: string; gameId: string } | null {
     if (!this._workspaceRoot || !this._currentGameName) { return null; }
-    return { workspaceDir: this._workspaceRoot, gameId: this._currentGameName };
+    // Use serial (e.g. "SCUS-97275") when available so the DB can resolve to the
+    // exact GameDisc row.  Fall back to the ISO filename for backward compatibility.
+    const gameId = this._currentGameSerial || this._currentGameName;
+    return { workspaceDir: this._workspaceRoot, gameId };
   }
 
   /** Broadcast the label set to all open panels and optionally notify struct listeners. */

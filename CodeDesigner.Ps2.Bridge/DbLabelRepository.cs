@@ -16,12 +16,9 @@ namespace CodeDesigner.Ps2.Bridge
 {
     /// <summary>
     /// Async persistence layer for label sets, backed by <see cref="CodeDesignerDbContext"/>.
-    /// All methods accept and return <c>CodeDesigner.Ps2.LabelManager</c> model types so
-    /// that handler code never touches database entity types directly — <see cref="DbMapper"/>
-    /// handles all conversions internally.
-    ///
-    /// Labels are recursive: child labels have <see cref="DbLabel.ParentId"/> set and
-    /// a synthetic path address (e.g. "0x80010000:+0x0010").
+    /// All public methods accept a <paramref name="gameId"/> string (serial, IsoPath suffix,
+    /// or Game.Title) that is resolved to a <see cref="CodeDesigner.Ps2.Database.Entities.GameDisc.Id"/>
+    /// before any DB query, so that labels are always scoped to the exact disc release.
     /// </summary>
     internal sealed class DbLabelRepository
     {
@@ -29,12 +26,68 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal DbLabelRepository(CodeDesignerDbContext db) => _db = db;
 
+        // ── GameDisc resolution ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Resolves an arbitrary game identifier string to a <c>GameDisc.Id</c>.
+        /// Resolution order:
+        /// <list type="number">
+        ///   <item>Direct integer — treated as <c>GameDisc.Id</c> if a matching disc exists.</item>
+        ///   <item>PS2 serial ("SCUS-97130" or "SCUS_97130") — normalised and matched against
+        ///         <c>GameDiscs.Serial</c>.</item>
+        ///   <item>IsoPath suffix — matched against the end of <c>GameDiscs.IsoPath</c>.</item>
+        ///   <item>Game.Title exact match — returns the first disc for that game.</item>
+        /// </list>
+        /// Returns <c>null</c> when no disc can be found.
+        /// </summary>
+        internal async Task<int?> ResolveGameDiscIdAsync(string identifier)
+        {
+            identifier = identifier.Trim();
+
+            // 1. Numeric: treat as GameDisc.Id directly.
+            if (int.TryParse(identifier, out int discId) && discId > 0)
+            {
+                bool exists = await _db.GameDiscs.AnyAsync(d => d.Id == discId);
+                if (exists) return discId;
+            }
+
+            // 2. PS2 serial: normalise (uppercase, _ → -) and match GameDiscs.Serial.
+            var normalized = NormalizeSerial(identifier);
+            var discBySerial = await _db.GameDiscs
+                                        .FirstOrDefaultAsync(d =>
+                                            d.Serial != null &&
+                                            d.Serial.Replace("_", "-").ToUpperInvariant() == normalized);
+            if (discBySerial is not null) return discBySerial.Id;
+
+            // 3. IsoPath suffix (covers bare name, name + ".iso", or full path).
+            var lower = identifier.ToLowerInvariant().TrimEnd('/').TrimEnd('\\');
+            var discByPath = await _db.GameDiscs
+                                      .FirstOrDefaultAsync(d =>
+                                          d.IsoPath != null &&
+                                          (d.IsoPath.ToLower().EndsWith(lower) ||
+                                           d.IsoPath.ToLower().EndsWith(lower + ".iso")));
+            if (discByPath is not null) return discByPath.Id;
+
+            // 4. Game.Title exact match → first disc for that game.
+            var game = await _db.Games
+                                .Include(g => g.Discs)
+                                .FirstOrDefaultAsync(g => g.Title.ToLower() == lower);
+            return game?.Discs.Count > 0 ? game.Discs[0].Id : (int?)null;
+        }
+
+        /// <summary>Normalises a PS2 serial to uppercase dash form, e.g. "scus_97130" → "SCUS-97130".</summary>
+        internal static string NormalizeSerial(string serial) =>
+            serial.Trim().ToUpperInvariant().Replace('_', '-');
+
         // ── Query helpers ──────────────────────────────────────────────────────
 
         internal async Task<IReadOnlyList<string>> GetSetNamesAsync(string gameId)
         {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null) return [];
+
             return await _db.LabelSets
-                            .Where(ls => ls.GameId == gameId && !ls.IsBuiltIn)
+                            .Where(ls => ls.GameDiscId == discId && !ls.IsBuiltIn)
                             .OrderBy(ls => ls.SetName)
                             .Select(ls => ls.SetName)
                             .ToListAsync();
@@ -42,9 +95,13 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal async Task<MgrSet?> LoadSetAsync(string gameId, string setName)
         {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null) return null;
+
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                  .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == setName);
+                                  .Include(ls => ls.GameDisc)
+                                  .FirstOrDefaultAsync(ls => ls.GameDiscId == discId && ls.SetName == setName);
 
             return entity is null ? null : DbMapper.ToMgrSet(entity);
         }
@@ -53,28 +110,39 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal async Task<MgrSet> CreateSetAsync(string gameId, string setName)
         {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null)
+                throw new InvalidOperationException(
+                    $"No GameDisc found for '{gameId}'. Ensure the disc is registered in the database.");
+
             bool exists = await _db.LabelSets
-                                   .AnyAsync(ls => ls.GameId == gameId && ls.SetName == setName);
+                                   .AnyAsync(ls => ls.GameDiscId == discId && ls.SetName == setName);
             if (exists)
-                throw new InvalidOperationException($"Label set '{setName}' already exists for game '{gameId}'.");
+                throw new InvalidOperationException(
+                    $"Label set '{setName}' already exists for disc {discId}.");
 
             var entity = new DbLabelSet
             {
-                SetName   = setName,
-                GameId    = gameId,
-                IsBuiltIn = false,
+                SetName    = setName,
+                GameDiscId = discId,
+                IsBuiltIn  = false,
             };
 
             _db.LabelSets.Add(entity);
             await _db.SaveChangesAsync();
 
+            // Reload with navigation so ToMgrSet can surface the serial.
+            await _db.Entry(entity).Reference(e => e.GameDisc).LoadAsync();
             return DbMapper.ToMgrSet(entity);
         }
 
         internal async Task DeleteSetAsync(string gameId, string setName)
         {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null) return;
+
             var entity = await _db.LabelSets
-                                  .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == setName);
+                                  .FirstOrDefaultAsync(ls => ls.GameDiscId == discId && ls.SetName == setName);
             if (entity is null) return;
 
             _db.LabelSets.Remove(entity);
@@ -102,33 +170,32 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Upserts a full label set: replaces all its <see cref="DbLabel"/> rows with the
-        /// entries supplied in <paramref name="set"/>.
-        /// Entries are inserted in two passes: roots first (to get their IDs), then
-        /// children (to set <see cref="DbLabel.ParentId"/>).
+        /// Upserts a full label set: replaces all its Label rows with the entries supplied.
+        /// Two-pass insertion: roots first (to capture their IDs), then children.
         /// </summary>
         internal async Task<MgrSet> SaveSetAsync(MgrSet set, string gameId)
         {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null)
+                throw new InvalidOperationException($"No GameDisc found for '{gameId}'.");
+
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                  .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == set.SetName);
+                                  .FirstOrDefaultAsync(ls => ls.GameDiscId == discId && ls.SetName == set.SetName);
 
             if (entity is null)
             {
-                entity = DbMapper.ToDbLabelSet(set, gameId);
+                entity = new DbLabelSet { SetName = set.SetName, GameDiscId = discId, IsBuiltIn = false };
                 _db.LabelSets.Add(entity);
                 await _db.SaveChangesAsync();
             }
 
-            // Remove all existing labels (cascade deletes children automatically).
             _db.Labels.RemoveRange(entity.Labels);
             await _db.SaveChangesAsync();
 
-            // Partition: roots vs children (any depth).
             var roots    = set.Entries.Where(e => e.ParentAddress == null).ToList();
             var children = set.Entries.Where(e => e.ParentAddress != null).ToList();
 
-            // Insert roots, collect address → id mapping for parent resolution.
             var addressToId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var root in roots)
             {
@@ -138,8 +205,6 @@ namespace CodeDesigner.Ps2.Bridge
                 addressToId[root.Address] = dbLabel.Id;
             }
 
-            // Insert children depth-by-depth until all are resolved.
-            // (BFS over multiple rounds handles arbitrary nesting depth.)
             var remaining = new Queue<MgrEntry>(children);
             int maxPasses = children.Count + 1;
             while (remaining.Count > 0 && maxPasses-- > 0)
@@ -157,37 +222,38 @@ namespace CodeDesigner.Ps2.Bridge
                     }
                     else
                     {
-                        deferred.Add(child); // parent not yet inserted
+                        deferred.Add(child);
                     }
                 }
                 foreach (var d in deferred) remaining.Enqueue(d);
             }
 
-            // Reload fully.
             var loaded = await _db.LabelSets
                                   .Include(ls => ls.Labels)
+                                  .Include(ls => ls.GameDisc)
                                   .FirstAsync(ls => ls.Id == entity.Id);
             return DbMapper.ToMgrSet(loaded);
         }
 
-        /// <summary>
-        /// Inserts or updates a single label entry within the named set.
-        /// For child entries, the parent is located by <see cref="MgrEntry.ParentAddress"/>.
-        /// </summary>
+        /// <summary>Inserts or updates a single label entry within the named set.</summary>
         internal async Task<MgrSet> AddOrUpdateEntryAsync(string gameId, string setName, MgrEntry entry)
         {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null)
+                throw new InvalidOperationException($"No GameDisc found for '{gameId}'.");
+
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                  .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == setName);
+                                  .Include(ls => ls.GameDisc)
+                                  .FirstOrDefaultAsync(ls => ls.GameDiscId == discId && ls.SetName == setName);
 
             if (entity is null)
             {
-                entity = new DbLabelSet { SetName = setName, GameId = gameId, IsBuiltIn = false };
+                entity = new DbLabelSet { SetName = setName, GameDiscId = discId, IsBuiltIn = false };
                 _db.LabelSets.Add(entity);
                 await _db.SaveChangesAsync();
             }
 
-            // Resolve parent (for child entries).
             int? parentId = null;
             if (entry.ParentAddress != null)
             {
@@ -195,8 +261,7 @@ namespace CodeDesigner.Ps2.Bridge
                 var parent = entity.Labels.FirstOrDefault(l =>
                     NormalizeAddress(l.Address).Equals(normParent, StringComparison.OrdinalIgnoreCase));
                 if (parent is null)
-                    return DbMapper.ToMgrSet(entity); // parent not found – ignore silently
-
+                    return DbMapper.ToMgrSet(entity);
                 parentId = parent.Id;
             }
 
@@ -206,7 +271,6 @@ namespace CodeDesigner.Ps2.Bridge
 
             if (existing is not null)
             {
-                // Update in-place to preserve insertion order.
                 existing.Name           = entry.Name;
                 existing.Comment        = entry.Comment;
                 existing.ValueType      = entry.ValueType;
@@ -232,20 +296,23 @@ namespace CodeDesigner.Ps2.Bridge
 
             var loaded = await _db.LabelSets
                                   .Include(ls => ls.Labels)
+                                  .Include(ls => ls.GameDisc)
                                   .FirstAsync(ls => ls.Id == entity.Id);
             return DbMapper.ToMgrSet(loaded);
         }
 
-        /// <summary>
-        /// Deletes a single label entry by address from the named set.
-        /// Children of the deleted label are removed automatically via cascade.
-        /// </summary>
+        /// <summary>Deletes a single label entry by address. Children are cascade-deleted.</summary>
         internal async Task<MgrSet> DeleteEntryAsync(string gameId, string setName, string address)
         {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null)
+                throw new InvalidOperationException($"No GameDisc found for '{gameId}'.");
+
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                  .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == setName)
-                         ?? throw new InvalidOperationException($"Label set '{setName}' not found for game '{gameId}'.");
+                                  .Include(ls => ls.GameDisc)
+                                  .FirstOrDefaultAsync(ls => ls.GameDiscId == discId && ls.SetName == setName)
+                         ?? throw new InvalidOperationException($"Label set '{setName}' not found.");
 
             var norm     = NormalizeAddress(address);
             var toRemove = entity.Labels
@@ -258,6 +325,7 @@ namespace CodeDesigner.Ps2.Bridge
 
             var loaded = await _db.LabelSets
                                   .Include(ls => ls.Labels)
+                                  .Include(ls => ls.GameDisc)
                                   .FirstAsync(ls => ls.Id == entity.Id);
             return DbMapper.ToMgrSet(loaded);
         }
@@ -266,8 +334,6 @@ namespace CodeDesigner.Ps2.Bridge
 
         private static string NormalizeAddress(string raw)
         {
-            // Synthetic child addresses (e.g. "0x80010000:+0x0010") are returned as-is
-            // after normalising the real-address prefix.
             if (raw.Contains(':'))
             {
                 int colon = raw.IndexOf(':');

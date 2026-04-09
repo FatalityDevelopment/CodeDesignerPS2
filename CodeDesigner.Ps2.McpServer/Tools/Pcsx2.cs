@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -12,6 +13,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_get_symbol")]
+    [DynamicDescription("pcsx2_get_symbol_desc")]
     [Description("Look up the EE function symbol name for a given virtual address via PINE. Only available when PCSX2 has a symbol database loaded.")]
     public async Task<string> Pcsx2GetSymbol(
         [Description("Virtual EE address to look up (hex or decimal).")] string address,
@@ -37,6 +39,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_get_symbol_by_name")]
+    [DynamicDescription("pcsx2_get_symbol_by_name_desc")]
     [Description("Look up an EE symbol address and size by its demangled name via PINE. Only available when PCSX2 has a symbol database loaded.")]
     public async Task<string> Pcsx2GetSymbolByName(
         [Description("Demangled symbol name to look up.")] string symbolName,
@@ -58,6 +61,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_get_call_stack")]
+    [DynamicDescription("pcsx2_get_call_stack_desc")]
     [Description("Walk the EE call stack and return each frame's entry point, current PC, stack pointer, and resolved symbol name (if available).")]
     public async Task<string> Pcsx2GetCallStack(CancellationToken cancellationToken)
     {
@@ -93,6 +97,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_get_iop_threads")]
+    [DynamicDescription("pcsx2_get_iop_threads_desc")]
     [Description("List all IOP (I/O Processor) OS threads via the PINE socket. Returns thread ID, status, priority, and entry point for each thread.")]
     public async Task<string> Pcsx2GetIopThreads(CancellationToken cancellationToken)
     {
@@ -124,6 +129,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_get_modules")]
+    [DynamicDescription("pcsx2_get_modules_desc")]
     [Description("List all loaded IOP modules (IRX files) via the PINE socket. Returns name, version, start address, and size for each module.")]
     public async Task<string> Pcsx2GetModules(CancellationToken cancellationToken)
     {
@@ -158,6 +164,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_get_register")]
+    [DynamicDescription("pcsx2_get_register_desc")]
     [Description("Read any EE or IOP CPU register by category and index via the PINE socket. Returns the 64-bit or 128-bit value depending on register type.")]
     public async Task<string> Pcsx2GetRegister(
         [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
@@ -182,6 +189,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_set_register")]
+    [DynamicDescription("pcsx2_set_register_desc")]
     [Description("Write any EE or IOP CPU register by category and index via the PINE socket. The value is supplied as a 64-bit unsigned integer.")]
     public async Task<string> Pcsx2SetRegister(
         [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
@@ -201,6 +209,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_list_functions")]
+    [DynamicDescription("pcsx2_list_functions_desc")]
     [Description("Retrieve a paginated list of EE function symbols from the PCSX2 symbol database via PINE. Returns function name, address, and size.")]
     public async Task<string> Pcsx2ListFunctions(
         [Description("Pagination offset (0-based index of the first result to return).")] uint offset = 0,
@@ -214,6 +223,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_list_globals")]
+    [DynamicDescription("pcsx2_list_globals_desc")]
     [Description("Retrieve a paginated list of EE global variable symbols from the PCSX2 symbol database via PINE. Returns variable name, address, and size.")]
     public async Task<string> Pcsx2ListGlobals(
         [Description("Pagination offset (0-based index of the first result to return).")] uint offset = 0,
@@ -227,6 +237,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_get_locals")]
+    [DynamicDescription("pcsx2_get_locals_desc")]
     [Description("List the parameters and local variables for the EE function that contains a given virtual address. Uses DWARF debug information loaded by PCSX2.")]
     public async Task<string> Pcsx2GetLocals(
         [Description("Virtual EE address inside the function whose locals should be retrieved (hex or decimal).")] string address,
@@ -265,6 +276,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_disassemble")]
+    [DynamicDescription("pcsx2_disassemble_desc")]
     [Description("Disassemble instructions at a given address on EE or IOP via the PINE live-memory interface. Returns a block of disassembled instructions.")]
     public async Task<string> Pcsx2Disassemble(
         [Description("CPU selector: 0=EE, 1=IOP.")] byte cpuSel,
@@ -305,6 +317,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_version")]
+    [DynamicDescription("pcsx2_version_desc")]
     [Description("Query the PINE IPC protocol version string from PCSX2. Useful for checking that the connected PCSX2 build supports required features.")]
     public async Task<string> Pcsx2Version(CancellationToken cancellationToken)
     {
@@ -313,6 +326,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_save_state_slot")]
+    [DynamicDescription("pcsx2_save_state_slot_desc")]
     [Description("Save the current PCSX2 emulator state to a numbered save-state slot (0–9) via PINE. Slots are persistent across PCSX2 sessions.")]
     public async Task<string> Pcsx2SaveStateSlot(
         [Description("Save-state slot index (0–9).")] byte slot,
@@ -323,6 +337,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_load_state_slot")]
+    [DynamicDescription("pcsx2_load_state_slot_desc")]
     [Description("Load a PCSX2 save-state from a numbered slot (0–9) via PINE. Unlike pcsx2_load_state_file, slot-based saves are managed entirely by PCSX2.")]
     public async Task<string> Pcsx2LoadStateSlot(
         [Description("Save-state slot index (0–9).")] byte slot,
@@ -335,6 +350,7 @@ public sealed partial class CodeDesignerPs2Tools
     // ── PINE hardware watchpoints ──────────────────────────────────────────────
 
     [McpServerTool(Name = "pcsx2_add_watch")]
+    [DynamicDescription("pcsx2_add_watch_desc")]
     [Description("Add a hardware memory watchpoint in PCSX2 via the PINE protocol (opcode 0x2E). " +
                  "Backed by CBreakPoints MemCheck (MEMCHECK_BREAK). JIT-only — no effect under the interpreter or HLE. " +
                  "PINE mode required (connect to PCSX2 with PINE enabled).")]
@@ -358,6 +374,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_remove_watch")]
+    [DynamicDescription("pcsx2_remove_watch_desc")]
     [Description("Remove a hardware memory watchpoint from PCSX2 via the PINE protocol (opcode 0x2F). " +
                  "Returns an error if no matching range is found. PINE mode required.")]
     public async Task<string> Pcsx2RemoveWatch(
@@ -378,6 +395,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_list_watches")]
+    [DynamicDescription("pcsx2_list_watches_desc")]
     [Description("List all active hardware memory watchpoints in PCSX2 via the PINE protocol (opcode 0x30). " +
                  "Each entry shows CPU, start address, end address, and condition. PINE mode required.")]
     public async Task<string> Pcsx2ListWatches(
@@ -417,6 +435,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_clear_all_watches")]
+    [DynamicDescription("pcsx2_clear_all_watches_desc")]
     [Description("Clear all active hardware memory watchpoints on all CPUs in PCSX2 via the PINE protocol (opcode 0x31). " +
                  "PINE mode required.")]
     public async Task<string> Pcsx2ClearAllWatches(CancellationToken cancellationToken = default)
@@ -426,6 +445,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_save_screenshot")]
+    [DynamicDescription("pcsx2_save_screenshot_desc")]
     [Description("Take a screenshot of the game's screen in PCSX2 via the PINE protocol (opcode 0x32). " +
                  "PINE mode required. PCSX2 saves the screenshot to its configured screenshots directory.")]
     public async Task<string> Pcsx2SaveScreenshot(CancellationToken cancellationToken = default)
@@ -439,6 +459,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_reset")]
+    [DynamicDescription("pcsx2_reset_desc")]
     [Description("Send a CPU reset signal to the PS2 emulator (PINE) or reset the internal scheduler. Restarts game execution without reloading the BIOS ROM.")]
     public async Task<string> Pcsx2Reset(CancellationToken cancellationToken)
     {
@@ -451,6 +472,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_get_fps")]
+    [DynamicDescription("pcsx2_get_fps_desc")]
     [Description("Read the current emulated framerate from PCSX2 via the PINE socket. Only available in PINE mode with a game running.")]
     public async Task<string> Pcsx2GetFps(CancellationToken cancellationToken)
     {
@@ -469,6 +491,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_set_limiter_mode")]
+    [DynamicDescription("pcsx2_set_limiter_mode_desc")]
     [Description("Set the PCSX2 speed limiter mode via the PINE socket. mode: 0=Nominal (default 60 fps), 1=Limit, 2=Turbo, 3=Slow-motion.")]
     public async Task<string> Pcsx2SetLimiterMode(
         [Description("Limiter mode: 0=Nominal, 1=Turbo, 2=Slomo, 3=Unlimited.")] byte mode,
@@ -479,6 +502,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_frame_advance")]
+    [DynamicDescription("pcsx2_frame_advance_desc")]
     [Description("Advance the PCSX2 emulator by a fixed number of video frames then pause. Useful for frame-by-frame analysis of game animations or timing-sensitive behaviour.")]
     public async Task<string> Pcsx2FrameAdvance(
         [Description("Number of frames to advance (1–255).")] byte frameCount,
@@ -493,6 +517,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_step_into")]
+    [DynamicDescription("pcsx2_step_into_desc")]
     [Description("Step into the next PS2 EE instruction (follows calls into subroutines). In PINE/PCSX2 mode this issues a CPU step via the PINE debug interface.")]
     public async Task<string> Pcsx2StepInto(CancellationToken cancellationToken)
     {
@@ -501,6 +526,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_step_over")]
+    [DynamicDescription("pcsx2_step_over_desc")]
     [Description("Step over the next PS2 EE instruction (skips into subroutines, executing them fully). Sets a temporary breakpoint at PC+8 (after the delay slot) and resumes.")]
     public async Task<string> Pcsx2StepOver(CancellationToken cancellationToken)
     {
@@ -509,6 +535,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_step_out")]
+    [DynamicDescription("pcsx2_step_out_desc")]
     [Description("Step out of the current PS2 EE subroutine, running until the next return instruction (JR $ra) or equivalent.")]
     public async Task<string> Pcsx2StepOut(CancellationToken cancellationToken)
     {
@@ -517,6 +544,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_list_breakpoints")]
+    [DynamicDescription("pcsx2_list_breakpoints_desc")]
     [Description("List all active PC breakpoints set in PCSX2 via the PINE socket. cpuSel: 0=EE only (default), 1=IOP only, 2=both.")]
     public async Task<string> Pcsx2ListBreakpoints(
         [Description("CPU selector: 0=EE, 1=IOP, 255=both (default).")] byte cpuSel = 0xFF,
@@ -551,6 +579,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_save_state_file")]
+    [DynamicDescription("pcsx2_save_state_file_desc")]
     [Description("Save the current PCSX2 emulator state to a named file path via the PINE socket. The resulting .p2s file can be loaded with pcsx2_load_state_file.")]
     public async Task<string> Pcsx2SaveStateFile(
         [Description("Absolute file path where the save state should be written (e.g. '/saves/slot1.p2s').")] string filePath,
@@ -561,6 +590,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_load_state_file")]
+    [DynamicDescription("pcsx2_load_state_file_desc")]
     [Description("Load a PCSX2 save-state file (.p2s) into the running emulator via the PINE socket. Restores CPU registers, memory, and hardware state.")]
     public async Task<string> Pcsx2LoadStateFile(
         [Description("Absolute path to the .p2s save-state file to load.")] string filePath,
@@ -571,6 +601,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_extract_p2s")]
+    [DynamicDescription("pcsx2_extract_p2s_desc")]
     [Description("Extract the memory dump files (EEmem.bin, IOPmem.bin) from a PCSX2 .p2s save-state archive to a directory for offline analysis.")]
     public async Task<string> Pcsx2ExtractP2s(
         [Description("Absolute path to the .p2s PCSX2 save-state file to extract.")] string filePath,

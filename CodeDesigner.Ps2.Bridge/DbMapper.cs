@@ -109,11 +109,11 @@ namespace CodeDesigner.Ps2.Bridge
 
         // ── LabelSet ───────────────────────────────────────────────────────────
 
-        internal static DbLabelSet ToDbLabelSet(MgrSet src, string gameId) => new()
+        internal static DbLabelSet ToDbLabelSet(MgrSet src, int? gameDiscId) => new()
         {
-            SetName   = src.SetName,
-            GameId    = gameId,
-            IsBuiltIn = src.IsBuiltIn,
+            SetName    = src.SetName,
+            GameDiscId = gameDiscId,
+            IsBuiltIn  = src.IsBuiltIn,
         };
 
         /// <summary>
@@ -139,7 +139,8 @@ namespace CodeDesigner.Ps2.Bridge
             return new MgrSet
             {
                 SetName   = src.SetName,
-                GameId    = src.GameId,
+                // Surface the disc's serial as the GameId so callers can resolve it.
+                GameId    = src.GameDisc?.Serial ?? src.GameDiscId?.ToString() ?? src.GameId,
                 IsBuiltIn = src.IsBuiltIn,
                 Entries   = entries,
             };

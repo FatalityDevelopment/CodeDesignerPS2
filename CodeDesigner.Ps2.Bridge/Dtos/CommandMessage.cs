@@ -157,6 +157,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>ISO / game name for GETSNAPSHOTS and SNAPSHOT (used to link the snapshot to a game in the DB).</summary>
         public string? IsoName { get; set; }
 
+        // Game Disc fields (UPDATEGAMEDISC)
+        /// <summary>PS2 disc serial, e.g. "SCUS-97275". Used to identify the GameDisc row.</summary>
+        public string? GameSerial { get; set; }
+        /// <summary>PCSX2 CRC hash of the game executable (e.g. "EF123456"). Used to update GameDiscs.CRC.</summary>
+        public string? GameCrc { get; set; }
+
         // Memory Manager fields (MCPMEMORY_LIST / MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE / MCPMEMORY_DELETE / MCPMEMORY_IMPORT / MCPMEMORY_EXPORT)
         /// <summary>Database row ID of the MCP memory entry to operate on.</summary>
         public int? McpMemoryId { get; set; }
