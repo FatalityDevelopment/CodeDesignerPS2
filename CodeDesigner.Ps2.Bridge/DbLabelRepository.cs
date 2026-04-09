@@ -29,12 +29,72 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal DbLabelRepository(CodeDesignerDbContext db) => _db = db;
 
+        // ── GameId resolution ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// Resolves an arbitrary game identifier to the string representation of
+        /// <see cref="CodeDesigner.Ps2.Database.Entities.Game.Id"/> stored in
+        /// <see cref="CodeDesigner.Ps2.Database.Entities.LabelSet.GameId"/>.
+        ///
+        /// Resolution order:
+        /// <list type="number">
+        ///   <item>Integer string (direct Games.Id) — returned as-is.</item>
+        ///   <item>PS2 serial (e.g. "SCUS-97130" or "SCUS_97130") — normalised to
+        ///         dash form, matched against GameDiscs.Serial.</item>
+        ///   <item>IsoPath suffix — matched against GameDiscs.IsoPath ending.</item>
+        ///   <item>Game.Title exact match.</item>
+        ///   <item>Fallback — input returned as-is (backward compat).</item>
+        /// </list>
+        /// </summary>
+        internal async Task<string> ResolveGameIdAsync(string gameId)
+        {
+            // 1. Already a numeric Games.Id.
+            if (int.TryParse(gameId.Trim(), out _))
+                return gameId.Trim();
+
+            // 2. Serial: normalise (uppercase + replace _ with -) and look up GameDiscs.
+            var normalizedSerial = NormalizeSerial(gameId);
+            var discBySerial = await _db.GameDiscs
+                                        .FirstOrDefaultAsync(d =>
+                                            d.Serial != null &&
+                                            d.Serial.Replace("_", "-").ToUpperInvariant() == normalizedSerial);
+            if (discBySerial is not null)
+                return discBySerial.GameId.ToString();
+
+            // 3. IsoPath suffix (covers "GoW", "GoW.iso", full path).
+            var lower = gameId.ToLowerInvariant().TrimEnd('/').TrimEnd('\\');
+            var discByPath = await _db.GameDiscs
+                                      .FirstOrDefaultAsync(d =>
+                                          d.IsoPath != null &&
+                                          (d.IsoPath.ToLower().EndsWith(lower) ||
+                                           d.IsoPath.ToLower().EndsWith(lower + ".iso")));
+            if (discByPath is not null)
+                return discByPath.GameId.ToString();
+
+            // 4. Game.Title exact match.
+            var gameByTitle = await _db.Games
+                                       .FirstOrDefaultAsync(g => g.Title.ToLower() == lower);
+            if (gameByTitle is not null)
+                return gameByTitle.Id.ToString();
+
+            // 5. Fall back — use as-is (preserves backward compatibility).
+            return gameId;
+        }
+
+        /// <summary>
+        /// Normalises a PS2 serial to uppercase dash form, e.g.
+        /// "scus_97130" → "SCUS-97130".
+        /// </summary>
+        internal static string NormalizeSerial(string serial) =>
+            serial.Trim().ToUpperInvariant().Replace('_', '-');
+
         // ── Query helpers ──────────────────────────────────────────────────────
 
         internal async Task<IReadOnlyList<string>> GetSetNamesAsync(string gameId)
         {
+            var resolvedId = await ResolveGameIdAsync(gameId);
             return await _db.LabelSets
-                            .Where(ls => ls.GameId == gameId && !ls.IsBuiltIn)
+                            .Where(ls => ls.GameId == resolvedId && !ls.IsBuiltIn)
                             .OrderBy(ls => ls.SetName)
                             .Select(ls => ls.SetName)
                             .ToListAsync();
@@ -42,9 +102,10 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal async Task<MgrSet?> LoadSetAsync(string gameId, string setName)
         {
+            var resolvedId = await ResolveGameIdAsync(gameId);
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                  .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == setName);
+                                  .FirstOrDefaultAsync(ls => ls.GameId == resolvedId && ls.SetName == setName);
 
             return entity is null ? null : DbMapper.ToMgrSet(entity);
         }
@@ -53,15 +114,16 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal async Task<MgrSet> CreateSetAsync(string gameId, string setName)
         {
+            var resolvedId = await ResolveGameIdAsync(gameId);
             bool exists = await _db.LabelSets
-                                   .AnyAsync(ls => ls.GameId == gameId && ls.SetName == setName);
+                                   .AnyAsync(ls => ls.GameId == resolvedId && ls.SetName == setName);
             if (exists)
-                throw new InvalidOperationException($"Label set '{setName}' already exists for game '{gameId}'.");
+                throw new InvalidOperationException($"Label set '{setName}' already exists for game '{resolvedId}'.");
 
             var entity = new DbLabelSet
             {
                 SetName   = setName,
-                GameId    = gameId,
+                GameId    = resolvedId,
                 IsBuiltIn = false,
             };
 
@@ -73,8 +135,9 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal async Task DeleteSetAsync(string gameId, string setName)
         {
+            var resolvedId = await ResolveGameIdAsync(gameId);
             var entity = await _db.LabelSets
-                                  .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == setName);
+                                  .FirstOrDefaultAsync(ls => ls.GameId == resolvedId && ls.SetName == setName);
             if (entity is null) return;
 
             _db.LabelSets.Remove(entity);
