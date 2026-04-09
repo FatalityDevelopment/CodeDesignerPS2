@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -12,6 +13,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_orchestration_plans")]
+    [DynamicDescription("list_orchestration_plans_desc")]
     [Description("List all orchestration plans stored in the CodeDesigner database. Only the active plan is shown in full detail; inactive plans are listed by name only. Returns id, name, isActive, createdAt, and updatedAt for each plan.")]
     public async Task<string> ListOrchestrationPlans(CancellationToken cancellationToken = default)
     {
@@ -50,6 +52,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_active_orchestration_plan")]
+    [DynamicDescription("get_active_orchestration_plan_desc")]
     [Description("Get the full details of the currently active orchestration plan, including all Markdown fields (description, strategy, roles, workflow, rules, notes). Returns an error if no plan is active.")]
     public async Task<string> GetActiveOrchestrationPlan(CancellationToken cancellationToken = default)
     {
@@ -110,6 +113,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "create_orchestration_plan")]
+    [DynamicDescription("create_orchestration_plan_desc")]
     [Description("Create a new orchestration plan in the database. All Markdown text fields are optional and can be updated later with update_orchestration_plan.")]
     public async Task<string> CreateOrchestrationPlan(
         [Description("Display name for the orchestration plan (must be unique).")] string name,
@@ -140,6 +144,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "update_orchestration_plan")]
+    [DynamicDescription("update_orchestration_plan_desc")]
     [Description("Update one or more fields of an existing orchestration plan. Pass null for any field you want to leave unchanged.")]
     public async Task<string> UpdateOrchestrationPlan(
         [Description("The integer ID of the orchestration plan to update (from list_orchestration_plans).")] int id,
@@ -169,6 +174,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_orchestration_plan")]
+    [DynamicDescription("get_orchestration_plan_desc")]
     [Description("Get the full details of a specific orchestration plan by its database ID, including all Markdown fields. Use get_active_orchestration_plan to read the active plan without knowing its ID.")]
     public async Task<string> GetOrchestrationPlan(
         [Description("The integer ID of the orchestration plan (from list_orchestration_plans).")] int id,
@@ -192,6 +198,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "set_active_orchestration_plan")]
+    [DynamicDescription("set_active_orchestration_plan_desc")]
     [Description("Mark an orchestration plan as the active plan. Only one plan can be active at a time; the previously active plan is automatically deactivated.")]
     public async Task<string> SetActiveOrchestrationPlan(
         [Description("The integer ID of the orchestration plan to activate (from list_orchestration_plans).")] int id,
@@ -202,6 +209,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "delete_orchestration_plan")]
+    [DynamicDescription("delete_orchestration_plan_desc")]
     [Description("Permanently delete an orchestration plan from the database by ID. This action cannot be undone.")]
     public async Task<string> DeleteOrchestrationPlan(
         [Description("The integer ID of the orchestration plan to delete (from list_orchestration_plans).")] int id,
@@ -212,6 +220,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "import_orchestration_plan")]
+    [DynamicDescription("import_orchestration_plan_desc")]
     [Description(
         "Import an orchestration plan from a Markdown file on the server's filesystem. " +
         "The file may contain YAML front-matter (delimited by ---) with a 'name' key; " +
@@ -229,6 +238,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "export_orchestration_plan")]
+    [DynamicDescription("export_orchestration_plan_desc")]
     [Description("Export an orchestration plan to a Markdown file on the server's filesystem. The file will include YAML front-matter and all populated sections.")]
     public async Task<string> ExportOrchestrationPlan(
         [Description("The integer ID of the orchestration plan to export (from list_orchestration_plans).")] int id,

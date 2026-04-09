@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -12,6 +13,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "snapshot")]
+    [DynamicDescription("snapshot_desc")]
     [Description("Save a full memory snapshot of the running PS2 emulator to a directory on disk. Snapshots can be compared later to detect memory changes across game states. Provide isoName to link the snapshot to a game so get_snapshots can retrieve it; if omitted the snapshot is saved but not associated with any game.")]
     public async Task<string> Snapshot(
         [Description("ISO filename or game serial used to associate this snapshot with a game (e.g. 'GoW.iso' or 'SCUS-97130'). Omitting this creates an orphaned snapshot that get_snapshots cannot find.")] string? isoName = null,
@@ -28,6 +30,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "load_snapshot")]
+    [DynamicDescription("load_snapshot_desc")]
     [Description("Reload a previously saved memory snapshot as a save state into the running PS2 emulator. Restores EE and IOP RAM to the state at snapshot time.")]
     public async Task<string> LoadSnapshot(
         [Description("Absolute path to the snapshot directory containing the .bin files to restore.")] string inputPath,
@@ -45,6 +48,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_snapshots")]
+    [DynamicDescription("get_snapshots_desc")]
     [Description("List all saved memory snapshots for a game, looked up by ISO filename or game title. Returns snapshot titles, paths, and timestamps so you can choose one to load with load_snapshot.")]
     public async Task<string> GetSnapshots(
         [Description("ISO filename or game title used to look up associated snapshots (e.g. 'GoW.iso' or 'God of War').")] string isoName,

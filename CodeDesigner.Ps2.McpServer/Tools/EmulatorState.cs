@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -11,6 +12,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_pc")]
+    [DynamicDescription("get_pc_desc")]
     [Description("Get the current program counter (PC) of the PS2 EE CPU and the emulator pause state. Useful for determining where execution is currently suspended.")]
     public async Task<string> GetPc(CancellationToken cancellationToken)
     {
@@ -37,6 +39,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_registers")]
+    [DynamicDescription("get_registers_desc")]
     [Description("Get a full register dump of the PS2 EE CPU: all 32 general-purpose registers (GPRs), HI/LO, COP0 system registers, COP1 FPU registers, and VU0 registers.")]
     public async Task<string> GetRegisters(CancellationToken cancellationToken)
     {
@@ -45,6 +48,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "set_register")]
+    [DynamicDescription("set_register_desc")]
     [Description("Write a new value to a named EE CPU register. RegisterName: GPR (requires RegisterIndex 0–31), HI, LO, PC, or COP0_x/COP1_x.")]
     public async Task<string> SetRegister(
         [Description("Register type: GPR, PC, HI, LO, HI1, LO1, SA, COP0, FPR, FCR, VU0I, or VU0F.")] string registerName,
@@ -64,6 +68,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_threads")]
+    [DynamicDescription("get_threads_desc")]
     [Description("Enumerate PS2 EE OS threads by walking the kernel thread control block (TCB) pool. Returns thread ID, state, priority, entry point, and stack pointer for each thread.")]
     public async Task<string> GetThreads(CancellationToken cancellationToken)
     {
@@ -76,6 +81,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pcsx2_status")]
+    [DynamicDescription("pcsx2_status_desc")]
     [Description("Query the running PCSX2 emulator status via the PINE IPC socket. Returns Running/Paused state and whether a game is loaded.")]
     public async Task<string> Pcsx2Status(CancellationToken cancellationToken)
     {
@@ -84,6 +90,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "pcsx2_game_info")]
+    [DynamicDescription("pcsx2_game_info_desc")]
     [Description("Query the running game's title, serial ID, UUID, and version from PCSX2 via the PINE IPC socket. Only available when PCSX2 is running with PINE enabled.")]
     public async Task<string> Pcsx2GameInfo(CancellationToken cancellationToken)
     {
