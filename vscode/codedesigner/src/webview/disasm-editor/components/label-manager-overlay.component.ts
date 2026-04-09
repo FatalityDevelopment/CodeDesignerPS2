@@ -427,19 +427,34 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
         <!-- Type selector -->
         <div class="lm-form-row">
           <label class="lm-form-label">Type</label>
-          <select class="lm-form-input" [value]="editType()" (change)="editType.set(asSelect($event).value)">
+          <select class="lm-form-input" (change)="editType.set(asSelect($event).value)">
             @for (t of unifiedTypes; track t.value) {
-              <option [value]="t.value">{{ t.label }}</option>
+              <option [value]="t.value" [selected]="editType() === t.value">{{ t.label }}</option>
             }
           </select>
         </div>
-        <div class="lm-form-row">
-          <label class="lm-form-label">Address</label>
-          <input class="lm-form-input lm-mono" type="text" spellcheck="false"
-                 placeholder="0x80010000"
-                 [value]="editAddress()"
-                 (input)="editAddress.set(asInput($event).value)" />
-        </div>
+        @if (editParentAddress()) {
+          <!-- Editing a child entry: show parent context + editable offset -->
+          <div class="lm-form-row">
+            <label class="lm-form-label">Parent</label>
+            <span class="lm-form-input lm-mono lm-readonly-addr">{{ editParentAddress() }}</span>
+          </div>
+          <div class="lm-form-row">
+            <label class="lm-form-label">Offset</label>
+            <input class="lm-form-input lm-mono" type="text" spellcheck="false"
+                   placeholder="0x0000"
+                   [value]="editOffsetStr()"
+                   (input)="editOffsetStr.set(asInput($event).value)" />
+          </div>
+        } @else {
+          <div class="lm-form-row">
+            <label class="lm-form-label">Address</label>
+            <input class="lm-form-input lm-mono" type="text" spellcheck="false"
+                   placeholder="0x80010000"
+                   [value]="editAddress()"
+                   (input)="editAddress.set(asInput($event).value)" />
+          </div>
+        }
         <div class="lm-form-row">
           <label class="lm-form-label">Name</label>
           <input class="lm-form-input" type="text" spellcheck="false"
@@ -465,7 +480,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
         </div>
 
         <!-- Child entries editor (for Pointer type — children hang off dereferenced base) -->
-        @if (editType() === 'Pointer' || editType() === 'Struct') {
+        @if (editType() === 'Pointer') {
           <div class="lm-form-row lm-members-row">
             <label class="lm-form-label">Children</label>
             <div class="lm-members-list">
@@ -479,11 +494,11 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                          placeholder="field name"
                          [value]="m.name"
                          (input)="updateMemberName($index, asInput($event).value)" />
-                  <select class="lm-member-type" [value]="m.type ?? ''"
+                  <select class="lm-member-type"
                           (change)="updateMemberType($index, asSelect($event).value)">
-                    <option value="">type…</option>
+                    <option value="" [selected]="!m.type || m.type === ''">type…</option>
                     @for (t of unifiedTypes; track t.value) {
-                      <option [value]="t.value">{{ t.label }}</option>
+                      <option [value]="t.value" [selected]="m.type === t.value">{{ t.label }}</option>
                     }
                   </select>
                   <input class="lm-member-comment" type="text" spellcheck="false"
@@ -570,6 +585,43 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       <div id="lm-status" [class.lm-status-error]="statusIsError()">{{ statusMsg() }}</div>
     }
 
+    <!-- Inline delete-entry confirmation (replaces window.confirm which is blocked in webviews) -->
+    @if (pendingDeleteEntry()) {
+      <div class="lm-confirm-backdrop" (click)="cancelDeleteEntry()">
+        <div class="lm-confirm-dialog" (click)="$event.stopPropagation()">
+          <p class="lm-confirm-title">&#x26A0; Delete label?</p>
+          <p class="lm-confirm-body">
+            <strong>{{ pendingDeleteEntry()!.name }}</strong>
+            @if (pendingDeleteEntry()!.parentAddress) {
+              &nbsp;at offset {{ pendingDeleteEntry()!.address.split(':').slice(1).join(':') }}
+            } @else {
+              &nbsp;at {{ pendingDeleteEntry()!.address }}
+            }
+          </p>
+          <p class="lm-confirm-note lm-muted">This action cannot be undone.</p>
+          <div class="lm-confirm-actions">
+            <button class="lm-tool-btn lm-danger-btn" (click)="confirmDeleteEntry()">Delete</button>
+            <button class="lm-tool-btn" (click)="cancelDeleteEntry()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    }
+
+    <!-- Inline delete-set confirmation -->
+    @if (pendingDeleteSet()) {
+      <div class="lm-confirm-backdrop" (click)="cancelDeleteSet()">
+        <div class="lm-confirm-dialog" (click)="$event.stopPropagation()">
+          <p class="lm-confirm-title">&#x26A0; Delete label set?</p>
+          <p class="lm-confirm-body">Set: <strong>{{ activeSetName() }}</strong></p>
+          <p class="lm-confirm-note lm-muted">All labels in this set will be permanently deleted.</p>
+          <div class="lm-confirm-actions">
+            <button class="lm-tool-btn lm-danger-btn" (click)="confirmDeleteSet()">Delete Set</button>
+            <button class="lm-tool-btn" (click)="cancelDeleteSet()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    }
+
   </div>
 </div>
   `,
@@ -620,6 +672,12 @@ export class LabelManagerOverlayComponent {
   readonly editParentAddress = signal<string | undefined>(undefined);
   /** When editing a child entry, this preserves its byte offset from the parent pointer. */
   readonly editParentOffset  = signal<number | undefined>(undefined);
+  /** When editing a child entry, the user-editable offset string (hex). */
+  readonly editOffsetStr     = signal('');
+
+  // Inline confirmation state (replaces window.confirm which doesn't work in VS Code webviews)
+  readonly pendingDeleteEntry = signal<LabelManagerEntry | null>(null);
+  readonly pendingDeleteSet   = signal(false);
 
   /** Addresses of original children tracked when the edit form is opened, for deletion on save. */
   private _editingOriginalChildAddresses: string[] = [];
@@ -661,9 +719,13 @@ export class LabelManagerOverlayComponent {
     });
   });
 
-  readonly canSave = computed(() =>
-    this.editAddress().trim() !== '' && this.editName().trim() !== ''
-  );
+  readonly canSave = computed(() => {
+    const hasName = this.editName().trim() !== '';
+    if (this.editParentAddress()) {
+      return hasName && this.editOffsetStr().trim() !== '';
+    }
+    return hasName && this.editAddress().trim() !== '';
+  });
 
   /** True when all filtered visible entries have hidden=false (or undefined). */
   readonly allVisible = computed(() => {
@@ -676,26 +738,26 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().some(e => e.dynamic),
   );
 
-  /** Root entries to poll: auto-polled types (Pointer/Float/Value/String) plus Address when dynamic=true. */
+  /** Root entries to poll: auto-polled types (Function/Pointer/Float/Value/String) plus Address when dynamic=true. */
   private readonly _dynamicAddresses = computed(() =>
     this.filteredEntries()
       .filter(e => !e.parentAddress)
       .filter(e => {
         const t = this.effectiveType(e);
-        if (t === 'Function') return false; // FNC shows static info only
-        if (t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
+        if (t === 'Function' || t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
         return e.dynamic; // Address: only when explicitly toggled
       })
       .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType })),
   );
 
   /**
-   * Visible child rows to poll (depth >= 1, with parentAddress set at depth 1).
-   * All visible children are always polled — their type drives the format.
+   * Visible child rows to poll at all nesting depths.
+   * All visible member rows are polled — their type drives the format.
+   * The `path` (synthetic address) encodes the full resolution chain.
    */
   private readonly _dynamicMemberRows = computed(() =>
     this.treeRows().filter(
-      r => r.kind === 'member' && r.depth === 1 && r.entry.parentAddress != null,
+      r => r.kind === 'member' && r.entry.parentAddress != null,
     ),
   );
 
@@ -864,9 +926,16 @@ export class LabelManagerOverlayComponent {
   }
 
   onDeleteSet(): void {
-    const name = this.activeSetName();
-    if (!confirm(`Delete label set "${name}"? This cannot be undone.`)) { return; }
-    this.action$.emit({ type: 'deleteSet', setName: name });
+    this.pendingDeleteSet.set(true);
+  }
+
+  confirmDeleteSet(): void {
+    this.pendingDeleteSet.set(false);
+    this.action$.emit({ type: 'deleteSet', setName: this.activeSetName() });
+  }
+
+  cancelDeleteSet(): void {
+    this.pendingDeleteSet.set(false);
   }
 
   onAddLabel(): void {
@@ -995,11 +1064,26 @@ export class LabelManagerOverlayComponent {
     this.editingAddress.set(entry.address);
     this.editParentAddress.set(entry.parentAddress);
     this.editParentOffset.set(entry.offset);
+    this.editOffsetStr.set(
+      entry.parentAddress != null
+        ? '0x' + (entry.offset ?? 0).toString(16).toUpperCase().padStart(4, '0')
+        : '',
+    );
   }
 
   onDeleteEntry(entry: LabelManagerEntry): void {
-    if (!confirm(`Delete label "${entry.name}" at ${entry.address}?`)) { return; }
+    this.pendingDeleteEntry.set(entry);
+  }
+
+  confirmDeleteEntry(): void {
+    const entry = this.pendingDeleteEntry();
+    if (!entry) { return; }
+    this.pendingDeleteEntry.set(null);
     this.action$.emit({ type: 'deleteEntry', setName: this.activeSetName(), address: entry.address });
+  }
+
+  cancelDeleteEntry(): void {
+    this.pendingDeleteEntry.set(null);
   }
 
   onWalkList(entry: LabelManagerEntry): void {
@@ -1056,7 +1140,18 @@ export class LabelManagerOverlayComponent {
   }
 
   onSave(): void {
-    const addr = this.editAddress().trim();
+    const parentAddr = this.editParentAddress();
+
+    // When editing a child entry, derive address from parent + offset.
+    let addr: string;
+    let childOffset: number | undefined;
+    if (parentAddr) {
+      childOffset = parseInt(this.editOffsetStr().replace(/^0x/i, ''), 16) || 0;
+      addr = parentAddr + ':+0x' + childOffset.toString(16).toUpperCase().padStart(4, '0');
+    } else {
+      addr = this.editAddress().trim();
+    }
+
     const name = this.editName().trim();
     if (!addr || !name) { return; }
 
@@ -1081,8 +1176,8 @@ export class LabelManagerOverlayComponent {
 
     const entry: LabelManagerEntry = {
       address: addr,
-      parentAddress: this.editParentAddress(),
-      offset: this.editParentOffset(),
+      parentAddress: parentAddr,
+      offset: parentAddr != null ? childOffset : this.editParentOffset(),
       name,
       comment: this.editComment().trim() || undefined,
       type,
@@ -1098,8 +1193,8 @@ export class LabelManagerOverlayComponent {
     };
     this.action$.emit({ type: 'addEntry', setName, entry });
 
-    // For Pointer type (and legacy Struct): save children as separate label entries.
-    if (type === 'Pointer' || type === 'Struct' as LabelType) {
+    // For Pointer type: save children as separate label entries.
+    if (type === 'Pointer') {
       const newChildren = this.editMembers()
         .filter(m => m.name.trim())
         .map(m => {
@@ -1203,6 +1298,7 @@ export class LabelManagerOverlayComponent {
     this.editingAddress.set('');
     this.editParentAddress.set(undefined);
     this.editParentOffset.set(undefined);
+    this.editOffsetStr.set('');
   }
 
   // ── Display helpers ───────────────────────────────────────────────────────────
@@ -1263,8 +1359,14 @@ export class LabelManagerOverlayComponent {
     }
   }
 
-  /** Build the static FNC label: "args[a0,a1] rets[v0]" or empty string. */
+  /** Build the FNC live display: live-scanned prolog/epilog result when connected, else saved arg/ret annotations. */
   fncLiveDisplay(entry: LabelManagerEntry): string {
+    // Prefer live-scanned value from provider (prolog/epilog analysis) if available.
+    const live = this.liveValues().get(entry.address);
+    if (live !== undefined && live !== '…') {
+      return live;
+    }
+    // Fall back to saved static arg/ret register annotations.
     const parts: string[] = [];
     if (entry.argRegs?.length) {
       parts.push(`args[${entry.argRegs.map(r => r.split('=')[0].trim()).join(',')}]`);

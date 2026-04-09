@@ -2854,7 +2854,21 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
               }
             }
           } else if (entry.entryType === 'Function') {
-            // Function labels show static arg/ret info from the frontend — skip live memory read.
+            // Scan the function prolog/epilog to detect argument and return registers live.
+            try {
+              const funcBytes = await this.socketClient.readMemory(addr, 128, 'ee');
+              if (funcBytes.length >= 4) {
+                const hexWords = Array.from(
+                  { length: Math.floor(funcBytes.length / 4) },
+                  (_, i) => `0x${funcBytes.readUInt32LE(i * 4).toString(16).padStart(8, '0')}`,
+                ).join(' ');
+                const instructions = await this.socketClient.disassemble(hexWords, addr);
+                const analysis = analyzeFunctionPrologEpilog(instructions);
+                if (analysis) {
+                  values[addrHex] = analysis;
+                }
+              }
+            } catch { /* non-fatal: keep previous live value */ }
           } else {
             // Pointer, Address, Float, Value — read 4 bytes and format by type.
             const buf = await this.socketClient.readMemory(addr, 4, 'ee');
@@ -2875,19 +2889,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       }
       const members = action.members ?? [];
       const values: Record<string, string> = {};
+      const sc = this.socketClient;
       for (const m of members) {
-        const parentAddr = parseInt(m.parentAddress.replace(/^0x/i, ''), 16);
-        if (isNaN(parentAddr)) { continue; }
         try {
-          // Dereference the parent pointer to get the base address.
-          const ptrBuf = await this.socketClient.readMemory(parentAddr, 4, 'ee');
-          if (ptrBuf.length < 4) { continue; }
-          const baseAddr = ptrBuf.readUInt32LE(0);
-          if (baseAddr === 0) { continue; }
-          const resolved = (baseAddr + m.offset) >>> 0;
+          // Resolve the member address by walking the synthetic path chain.
+          // Path format: "0xROOT:+0xOFF1:+0xOFF2" — each segment means
+          // "dereference current address as uint32, then add the offset".
+          const resolved = await resolveMemberPath(m.path, sc);
+          if (resolved === null) { continue; }
           const entryType: string | undefined = m.entryType;
           if (entryType === 'String' || m.valueType?.toLowerCase() === 'string') {
-            const dataBuf = await this.socketClient.readMemory(resolved, 256, 'ee');
+            const dataBuf = await sc.readMemory(resolved, 256, 'ee');
             const firstByte = dataBuf.length > 0 ? dataBuf[0] : 0;
             if (firstByte >= 0x20 && firstByte < 0x7F) {
               const nullIdx = dataBuf.indexOf(0);
@@ -2896,14 +2908,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
               const strPtr = dataBuf.readUInt32LE(0);
               if (strPtr > 0) {
                 try {
-                  const strBuf = await this.socketClient.readMemory(strPtr, 256, 'ee');
+                  const strBuf = await sc.readMemory(strPtr, 256, 'ee');
                   const nullIdx = strBuf.indexOf(0);
                   values[m.path] = strBuf.slice(0, nullIdx !== -1 ? nullIdx : strBuf.length).toString('latin1');
                 } catch { /* ignore */ }
               }
             }
           } else {
-            const dataBuf = await this.socketClient.readMemory(resolved, 4, 'ee');
+            const dataBuf = await sc.readMemory(resolved, 4, 'ee');
             if (dataBuf.length >= 4) {
               values[m.path] = formatLiveValueByEntryType(dataBuf, entryType, m.valueType);
             }
@@ -3070,6 +3082,39 @@ function formatLiveValue(buf: Buffer, valueType?: string): string {
 }
 
 /**
+ * Resolves a synthetic member path to a physical memory address by walking the
+ * pointer chain encoded in the path string.
+ *
+ * Path format: `"0xROOT:+0xOFF1:+0xOFF2"` where:
+ *   - The root segment (`0xROOT`) is a real PS2 address.
+ *   - Each subsequent segment (`:+0xOFF`) means: dereference the current
+ *     address as a 32-bit LE pointer, then add the offset to get the next address.
+ *
+ * Returns `null` when the path cannot be parsed or a null pointer is encountered.
+ */
+async function resolveMemberPath(
+  path: string,
+  socketClient: { readMemory(addr: number, length: number, region: string): Promise<Buffer> },
+): Promise<number | null> {
+  const parts = path.split(':');
+  let addr = parseInt(parts[0].replace(/^0x/i, ''), 16);
+  if (isNaN(addr)) { return null; }
+
+  for (let i = 1; i < parts.length; i++) {
+    const ptrBuf = await socketClient.readMemory(addr, 4, 'ee');
+    if (ptrBuf.length < 4) { return null; }
+    const base = ptrBuf.readUInt32LE(0);
+    if (base === 0) { return null; }
+    const offsetStr = parts[i].replace(/^\+0x/i, '').replace(/^\+/, '');
+    const offset = parseInt(offsetStr, 16);
+    if (isNaN(offset)) { return null; }
+    addr = (base + offset) >>> 0;
+  }
+
+  return addr;
+}
+
+/**
  * Formats a raw 4-byte memory buffer using the semantic label entry type first,
  * falling back to the legacy valueType annotation.
  * Entry type values are PascalCase strings matching the LabelType enum.
@@ -3089,4 +3134,95 @@ function formatLiveValueByEntryType(buf: Buffer, entryType?: string, valueType?:
     default:
       return formatLiveValue(buf, valueType);
   }
+}
+
+/**
+ * Analyze MIPS EE function prolog and epilog instructions to detect:
+ *   - Argument registers (a0–a3) that are read before being written in the first 16 instructions.
+ *   - Return registers (v0–v1) that are written before the terminal `jr ra` in the last 16 instructions.
+ *
+ * Returns a compact string like `"args[a0,a1] rets[v0]"` or an empty string when nothing is detected.
+ * Each InstructionResult is expected to carry the disassembly text in its `Assembly` field.
+ */
+function analyzeFunctionPrologEpilog(instructions: { Assembly?: string }[]): string {
+  const ARG_REGS = ['a0', 'a1', 'a2', 'a3'] as const;
+  const RET_REGS = ['v0', 'v1'] as const;
+
+  // Opcodes where the first operand token is a SOURCE register, not a destination.
+  // Stores: sw/sh/sb/sd/sq/swc1/sdc1 — first operand is the value being stored.
+  // Branches/jumps: beq/bne/bgez/bgtz/blez/bltz/jr/jalr — no destination register.
+  const SOURCE_FIRST_RE =
+    /^(sw|sh|sb|sd|sq|swl|swr|swc1|swc2|sdc1|sdc2|beq|bne|bgez|bgtz|blez|bltz|bgezal|bltzal|beql|bnel|bgezl|bgtzl|blezl|bltzl|jr|jalr|eret)\b/;
+
+  /**
+   * Return the destination register name for a disassembly line, or null when
+   * the first operand is a source (stores, branches, jr/jalr).
+   */
+  function destReg(asm: string): string | null {
+    if (SOURCE_FIRST_RE.test(asm)) { return null; }
+    // "opcode dest, ..." — first whitespace-separated token after the mnemonic.
+    const m = /^\S+\s+(\w+)/.exec(asm);
+    return m ? m[1] : null;
+  }
+
+  /**
+   * Return all register-name-sized alphanumeric tokens from the instruction text.
+   * Assumes `asm` has already been lowercased — the pattern intentionally uses
+   * only `[a-z0-9]` so that it matches the canonical lowercase register names
+   * (a0, v0, ra, sp, …) produced by the EE disassembler.
+   * Includes the destination token — the caller decides whether to treat it as source or dest.
+   */
+  function allTokens(asm: string): string[] {
+    return asm.split(/[^a-z0-9]+/).filter(Boolean);
+  }
+
+  const argFound   = new Set<string>();
+  const argWritten = new Set<string>();
+  const retFound   = new Set<string>();
+
+  // Find the last `jr ra` to mark the epilog boundary.
+  let jrRaIdx = -1;
+  for (let i = instructions.length - 1; i >= 0; i--) {
+    const asm = (instructions[i]?.Assembly ?? '').toLowerCase().trim();
+    if (/^jr\s+ra$/.test(asm)) { jrRaIdx = i; break; }
+  }
+
+  // ── Prolog scan: first 16 instructions (or up to jr ra) ─────────────────────
+  const prologEnd = Math.min(16, jrRaIdx >= 0 ? jrRaIdx : instructions.length);
+  for (let i = 0; i < prologEnd; i++) {
+    const asm = (instructions[i]?.Assembly ?? '').toLowerCase().trim();
+    if (!asm) { continue; }
+    const dest   = destReg(asm);
+    const tokens = allTokens(asm);
+    for (const reg of ARG_REGS) {
+      if (argFound.has(reg) || argWritten.has(reg)) { continue; }
+      if (dest === reg) {
+        // First occurrence is a write — register is not an argument.
+        argWritten.add(reg);
+      } else if (tokens.includes(reg)) {
+        // Register is read before any write — it's a passed argument.
+        argFound.add(reg);
+      }
+    }
+  }
+
+  // ── Epilog scan: 16 instructions before `jr ra` ──────────────────────────────
+  if (jrRaIdx >= 0) {
+    const epilogStart = Math.max(0, jrRaIdx - 16);
+    for (let i = epilogStart; i < jrRaIdx; i++) {
+      const asm = (instructions[i]?.Assembly ?? '').toLowerCase().trim();
+      if (!asm) { continue; }
+      const dest = destReg(asm);
+      for (const reg of RET_REGS) {
+        if (dest === reg) { retFound.add(reg); }
+      }
+    }
+  }
+
+  const parts: string[] = [];
+  const args = ARG_REGS.filter(r => argFound.has(r));
+  const rets = RET_REGS.filter(r => retFound.has(r));
+  if (args.length > 0) { parts.push(`args[${args.join(',')}]`); }
+  if (rets.length > 0) { parts.push(`rets[${rets.join(',')}]`); }
+  return parts.join(' ');
 }
