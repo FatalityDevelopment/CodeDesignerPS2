@@ -150,14 +150,14 @@ public sealed class McpDatabaseService
 
             // Success=true means the command ran; Data="true"/"false" tells us if the
             // row was actually found and deleted (mirrors the direct-DB return value).
-            if (!root.TryGetProperty("success", out var s) || !s.GetBoolean())
+            if (root.TryGetProperty("success", out var s) && !s.GetBoolean())
                 return false;
 
             if (root.TryGetProperty("data", out var d)
                 && bool.TryParse(d.GetString(), out var deleted))
                 return deleted;
 
-            return true; // assume deleted when bridge doesn't say otherwise
+            return false; // no data field — treat as not-found to avoid false positives
         }
 
         // ── Fallback: direct DB write (serialized within this process) ─────────
