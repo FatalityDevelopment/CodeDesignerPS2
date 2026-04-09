@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as child_process from 'child_process';
 import { getOutputChannel, getDebugChannel } from '../../extension';
@@ -18,7 +19,9 @@ interface EmuSettings {
 }
 
 interface UserPreferences {
+    /** @deprecated Emulator path is now auto-detected from the install directory. */
     selectedEmulator?: string;
+    /** @deprecated BIOS path is now auto-detected from the install directory. */
     selectedBios?: string;
     selectedGame?: string;
 }
@@ -375,22 +378,95 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /** Maximum number of parent directories to climb when searching for emu-settings.json. */
     private static readonly MAX_PARENT_SEARCH_DEPTH = 6;
 
+    /**
+     * Returns the CodeDesigner install directory — the same location as the
+     * SQLite database.  Mirrors the C# DatabasePaths.GetInstallDirectory() logic.
+     *
+     * Windows  → %LOCALAPPDATA%\CodeDesigner\
+     * Linux/macOS → ~/.local/share/CodeDesigner/
+     */
+    private static getInstallDirectory(): string {
+        if (process.platform === 'win32') {
+            const localAppData = process.env.LOCALAPPDATA
+                ?? path.join(os.homedir(), 'AppData', 'Local');
+            return path.join(localAppData, 'CodeDesigner');
+        }
+        return path.join(os.homedir(), '.local', 'share', 'CodeDesigner');
+    }
+
+    /**
+     * Returns the path to CodeDesigner.Ps2.Bridge.exe in the install directory,
+     * or null if it does not exist.
+     */
+    private static findBridgeExe(): string | null {
+        const installDir = DisasmPanelProvider.getInstallDirectory();
+        const exeName = process.platform === 'win32'
+            ? 'CodeDesigner.Ps2.Bridge.exe'
+            : 'CodeDesigner.Ps2.Bridge';
+        const candidate = path.join(installDir, exeName);
+        return fs.existsSync(candidate) ? candidate : null;
+    }
+
+    /**
+     * Returns BIOS files discovered in the install directory's Resources/Bios
+     * sub-folder (populated when Bridge is built and deployed).
+     */
+    private static detectBiosFiles(): Array<{ name: string; path: string }> {
+        const biosDir = path.join(DisasmPanelProvider.getInstallDirectory(), 'Resources', 'Bios');
+        const results: Array<{ name: string; path: string }> = [];
+        try {
+            if (!fs.existsSync(biosDir)) { return results; }
+            for (const file of fs.readdirSync(biosDir)) {
+                if (/\.bin$/i.test(file)) {
+                    results.push({
+                        name: path.basename(file, path.extname(file)),
+                        path: path.join(biosDir, file),
+                    });
+                }
+            }
+        } catch { /* ignore read errors */ }
+        return results;
+    }
+
+    /**
+     * Tries to locate a PCSX2 executable at standard installation paths.
+     * Returns the first path found, or null if PCSX2 is not detected.
+     */
+    private static detectPcsx2Exe(): string | null {
+        const candidates: string[] = [];
+        if (process.platform === 'win32') {
+            const pf    = process.env.PROGRAMFILES         ?? 'C:\\Program Files';
+            const pf86  = process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)';
+            const local = process.env.LOCALAPPDATA         ?? '';
+            candidates.push(
+                path.join(pf,   'PCSX2', 'pcsx2-qt.exe'),
+                path.join(pf86, 'PCSX2', 'pcsx2-qt.exe'),
+                ...(local ? [path.join(local, 'Programs', 'PCSX2', 'pcsx2-qt.exe')] : []),
+            );
+        } else if (process.platform === 'darwin') {
+            candidates.push('/Applications/PCSX2.app/Contents/MacOS/PCSX2');
+        } else {
+            candidates.push('/usr/bin/pcsx2', '/usr/local/bin/pcsx2', '/snap/bin/pcsx2');
+        }
+        return candidates.find(c => c && fs.existsSync(c)) ?? null;
+    }
+
     private loadEmuSettings(): void {
         // 1. Try every open workspace folder
         for (const folder of vscode.workspace.workspaceFolders ?? []) {
             if (this.tryLoadSettingsFrom(path.join(folder.uri.fsPath, 'emu-settings.json'))) {
-                return;
+                break;
             }
         }
 
         // 2. Walk up from the extension install directory (handles the case where
         //    the developer opens vscode/codedesigner directly and the repo root is
         //    a few levels above).
-        if (this.extensionPath) {
+        if (!Object.keys(this.settings).length && this.extensionPath) {
             let dir = this.extensionPath;
             for (let i = 0; i < DisasmPanelProvider.MAX_PARENT_SEARCH_DEPTH; i++) {
                 if (this.tryLoadSettingsFrom(path.join(dir, 'emu-settings.json'))) {
-                    return;
+                    break;
                 }
                 const parent = path.dirname(dir);
                 if (parent === dir) { break; }   // reached filesystem root
@@ -398,8 +474,38 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        getOutputChannel().warn('Could not find emu-settings.json in any workspace folder or extension directory tree.');
-        this.settings = {};
+        // 3. Merge auto-detected BIOS files from the install directory into the
+        //    BIOS list so users never need to configure the BIOS path manually.
+        const autoBios = DisasmPanelProvider.detectBiosFiles();
+        if (autoBios.length > 0) {
+            const existing = this.settings.bios ?? [];
+            const merged = [...autoBios];
+            for (const b of existing) {
+                if (!merged.some(m => m.path === b.path)) {
+                    merged.push(b);
+                }
+            }
+            this.settings.bios = merged;
+        }
+
+        // 4. Auto-detect the PCSX2 executable and add it to the emulators list
+        //    (only PCSX2 entries appear in the selector; the Bridge is always
+        //    resolved from the install directory, never from this list).
+        const pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe();
+        if (pcsx2Exe) {
+            const existing = (this.settings.emulators ?? []).filter(e => this.isPcsx2Entry(e));
+            if (!existing.some(e => e.path === pcsx2Exe)) {
+                this.settings.emulators = [
+                    { type: 'PCSX2', path: pcsx2Exe },
+                    ...existing,
+                ];
+            } else {
+                this.settings.emulators = existing;
+            }
+        } else {
+            // Keep only PCSX2 entries — CodeDesigner Bridge is auto-detected.
+            this.settings.emulators = (this.settings.emulators ?? []).filter(e => this.isPcsx2Entry(e));
+        }
     }
 
     /** Attempt to load settings from a specific file path. Returns true on success. */
@@ -439,10 +545,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         try {
             const raw = fs.readFileSync(settingsPath, 'utf-8');
             const prefs = JSON.parse(raw) as UserPreferences;
-            this.selectedEmulatorPath = prefs.selectedEmulator ?? '';
-            this.selectedBiosPath     = prefs.selectedBios     ?? '';
-            this.selectedGamePath     = prefs.selectedGame     ?? '';
-            this.selectedGameName     = this.selectedGamePath
+            // Emulator and BIOS paths are now auto-detected — only restore the game selection.
+            this.selectedGamePath = prefs.selectedGame     ?? '';
+            this.selectedGameName = this.selectedGamePath
                 ? path.basename(this.selectedGamePath, path.extname(this.selectedGamePath))
                 : '';
             this.loadSnapshotsForGame(this.selectedGameName);
@@ -455,22 +560,19 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Persist the current emulator settings (bios/games/emulators lists).
+     * Persist the current emulator settings (games list and PCSX2 connection settings).
+     * The emulator executable and BIOS paths are now auto-detected from the install
+     * directory and are no longer stored in the database.
      *
      * Strategy:
      *  - Connected  → write to the DB only (DB is the authoritative store).
-     *    The JSON file is NOT touched so a partial in-memory state cannot
-     *    overwrite good data that the user saved while connected last session.
-     *  - Disconnected → write to emu-settings.json as a local fallback so the
-     *    settings survive between sessions without needing a server connection.
+     *  - Disconnected → write to emu-settings.json as a local fallback.
      */
     private async saveEmuSettings(): Promise<void> {
         if (this.socketClient.isConnected()) {
             // DB is authoritative — persist there only.
             try {
-                await this.socketClient.setSetting('emu.bios',      JSON.stringify(this.settings.bios      ?? []));
-                await this.socketClient.setSetting('emu.games',     JSON.stringify(this.settings.games     ?? []));
-                await this.socketClient.setSetting('emu.emulators', JSON.stringify(this.settings.emulators ?? []));
+                await this.socketClient.setSetting('emu.games', JSON.stringify(this.settings.games ?? []));
                 if (this.settings.pcsx2?.host != null)
                     await this.socketClient.setSetting('emu.pcsx2.host', String(this.settings.pcsx2.host));
                 if (this.settings.pcsx2?.slot != null)
@@ -482,8 +584,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             // Offline fallback — write to the JSON file only.
             if (!this.workspaceRoot) { return; }
             const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
+            // Only persist the game list; emulator/bios are auto-detected.
+            const toSave = { games: this.settings.games, pcsx2: this.settings.pcsx2 };
             try {
-                await fs.promises.writeFile(settingsPath, JSON.stringify(this.settings, null, 2), 'utf-8');
+                await fs.promises.writeFile(settingsPath, JSON.stringify(toSave, null, 2), 'utf-8');
             } catch (err: any) {
                 getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
             }
@@ -491,7 +595,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Persist the currently selected emulator / bios / game paths.
+     * Persist the currently selected game path.
+     * Emulator and BIOS paths are now auto-detected and are no longer stored.
      *
      * Strategy (mirrors saveEmuSettings):
      *  - Connected  → write to DB only.
@@ -499,17 +604,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
      */
     private async saveUserPreferences(): Promise<void> {
         const prefs: UserPreferences = {
-            selectedEmulator: this.selectedEmulatorPath,
-            selectedBios:     this.selectedBiosPath,
-            selectedGame:     this.selectedGamePath,
+            selectedGame: this.selectedGamePath,
         };
 
         if (this.socketClient.isConnected()) {
             // DB is authoritative — persist there only.
             try {
-                await this.socketClient.setSetting('ui.selectedEmulator', this.selectedEmulatorPath);
-                await this.socketClient.setSetting('ui.selectedBios',     this.selectedBiosPath);
-                await this.socketClient.setSetting('ui.selectedGame',     this.selectedGamePath);
+                await this.socketClient.setSetting('ui.selectedGame', this.selectedGamePath);
             } catch (err: any) {
                 getOutputChannel().debug(`Could not persist preferences to DB: ${err?.message ?? err}`);
             }
@@ -528,20 +629,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
      * Pull user preferences and emulator settings from the server-side DB after connect.
      * DB values take priority over any local JSON file values because they represent the
-     * most recently saved state.  After loading, the local JSON files are updated so
-     * they remain consistent for offline sessions.
+     * most recently saved state.
+     * Emulator executable and BIOS paths are no longer stored in the DB — they are
+     * always resolved from the install directory at runtime.
      */
     private async loadUserPreferencesFromDb(): Promise<void> {
         try {
             const settings = await this.socketClient.getAllSettings();
-            const emu  = settings['ui.selectedEmulator'];
-            const bios = settings['ui.selectedBios'];
             const game = settings['ui.selectedGame'];
 
             let changed = false;
-            if (emu  && emu  !== this.selectedEmulatorPath) { this.selectedEmulatorPath = emu;  changed = true; }
-            if (bios && bios !== this.selectedBiosPath)     { this.selectedBiosPath = bios;      changed = true; }
-            if (game && game !== this.selectedGamePath)     {
+            if (game && game !== this.selectedGamePath) {
                 this.selectedGamePath = game;
                 this.selectedGameName = game
                     ? path.basename(game, path.extname(game))
@@ -551,32 +649,24 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 changed = true;
             }
 
-            // Merge emulator-settings arrays from DB if present.
-            const rawBios      = settings['emu.bios'];
-            const rawGames     = settings['emu.games'];
-            const rawEmulators = settings['emu.emulators'];
-
-            if (rawBios) {
-                try { this.settings.bios = JSON.parse(rawBios); changed = true; } catch { /* ignore */ }
-            }
+            // Merge game list from DB if present.
+            const rawGames = settings['emu.games'];
             if (rawGames) {
                 try { this.settings.games = JSON.parse(rawGames); changed = true; } catch { /* ignore */ }
-            }
-            if (rawEmulators) {
-                try { this.settings.emulators = JSON.parse(rawEmulators); changed = true; } catch { /* ignore */ }
             }
 
             if (changed) {
                 this.postInitMessage();
 
-                // Write the authoritative DB data back to the local JSON files so
-                // they stay in sync and offline sessions load the correct settings.
+                // Write the authoritative DB data back to the local JSON file so
+                // it stays in sync and offline sessions load the correct settings.
                 if (this.workspaceRoot) {
                     const emuSettingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
+                    const toSave = { games: this.settings.games, pcsx2: this.settings.pcsx2 };
                     try {
                         await fs.promises.writeFile(
                             emuSettingsPath,
-                            JSON.stringify(this.settings, null, 2),
+                            JSON.stringify(toSave, null, 2),
                             'utf-8'
                         );
                     } catch (err: any) {
@@ -587,9 +677,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 const prefsPath = this.settingsJsonPath;
                 if (prefsPath) {
                     const prefs: UserPreferences = {
-                        selectedEmulator: this.selectedEmulatorPath,
-                        selectedBios:     this.selectedBiosPath,
-                        selectedGame:     this.selectedGamePath,
+                        selectedGame: this.selectedGamePath,
                     };
                     try {
                         await fs.promises.writeFile(prefsPath, JSON.stringify(prefs, null, 2), 'utf-8');
@@ -605,9 +693,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     private postInitMessage(): void {
         if (!this.webview) { return; }
+        // Only PCSX2 entries appear in the emulator selector; Bridge is auto-detected.
         const emulators = (this.settings.emulators ?? []).map(e => ({ label: e.type, value: e.path }));
+        // BIOS options come from settings (which already include auto-detected ones from loadEmuSettings).
         const biosOptions = (this.settings.bios ?? []).map(b => ({ label: b.name, value: b.path }));
         const gameOptions = (this.settings.games ?? []).map(g => ({ label: g.name, value: g.path }));
+        // Auto-select first BIOS if the stored selection is no longer in the list.
+        const biosPath = biosOptions.length > 0 && !biosOptions.some(b => b.value === this.selectedBiosPath)
+            ? biosOptions[0].value
+            : this.selectedBiosPath;
+        if (biosPath !== this.selectedBiosPath) { this.selectedBiosPath = biosPath; }
         this.webview.postMessage({
             command: 'init',
             emulators,
@@ -668,7 +763,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private getControlServerExecutablePath(selectedEmulatorPath?: string): string | null {
-        if (selectedEmulatorPath) {
+        // Primary: Bridge deployed to the install directory (no user configuration needed).
+        const installExe = DisasmPanelProvider.findBridgeExe();
+        if (installExe) { return installExe; }
+
+        // Fallback: a non-PCSX2 emulator entry the user may have configured manually.
+        if (selectedEmulatorPath && !this.isPcsx2Selection(selectedEmulatorPath)) {
             const selectedEntry = (this.settings.emulators ?? []).find(e =>
                 this.resolvePath(e.path).toLowerCase() === this.resolvePath(selectedEmulatorPath).toLowerCase()
             );
@@ -678,8 +778,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         const fallback = (this.settings.emulators ?? []).find(e => !this.isPcsx2Entry(e));
-        if (!fallback) { return null; }
-        return this.resolvePath(fallback.path);
+        if (fallback) { return this.resolvePath(fallback.path); }
+
+        return null;
     }
 
     private handleConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
@@ -687,7 +788,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         // Save current selections for use by Restart
         this.selectedEmulatorPath = emulatorPath;
-        this.selectedBiosPath = biosPath;
+        this.selectedBiosPath = biosPath || (this.settings.bios?.[0]?.path ?? '');
         this.selectedGamePath = gamePath;
 
         // Toggle: if connected and/or launched from this panel, disconnect and close process.
@@ -702,11 +803,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        if (!emulatorPath) {
-            vscode.window.showWarningMessage('Please select an emulator.');
-            return;
-        }
-
         out.show(true);
         this._pendingRunMode = null;
         this.launchControlServerAndConnect(emulatorPath);
@@ -717,20 +813,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const out = getOutputChannel();
 
         this.selectedEmulatorPath = emulatorPath;
-        this.selectedBiosPath = biosPath;
+        this.selectedBiosPath = biosPath || (this.settings.bios?.[0]?.path ?? '');
         this.selectedGamePath = gamePath;
-
-        if (!emulatorPath) {
-            vscode.window.showWarningMessage('Please select an emulator.');
-            return;
-        }
 
         out.show(true);
         const runMode: 'emulator' | 'pcsx2' = this.isPcsx2Selection(emulatorPath) ? 'pcsx2' : 'emulator';
 
         // If already connected, switch runtime mode immediately over socket.
         if (this.socketClient.isConnected()) {
-            this.startRuntimeMode(runMode, biosPath, gamePath);
+            this.startRuntimeMode(runMode, this.selectedBiosPath, gamePath);
             return;
         }
 
@@ -744,9 +835,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const out = getOutputChannel();
         const resolvedExe = this.getControlServerExecutablePath(selectedEmulatorPath);
         if (!resolvedExe) {
-            out.error('Connect requires CodeDesigner.MipsR9500.exe. Add it via the emulator selector and try again.');
+            const installDir = DisasmPanelProvider.getInstallDirectory();
+            out.error(`CodeDesigner.Ps2.Bridge not found in the install directory (${installDir}). Build the project first to deploy it.`);
             vscode.window.showErrorMessage(
-                'Connect requires CodeDesigner.MipsR9500.exe. Browse for it using the … button next to the emulator selector.'
+                `CodeDesigner.Ps2.Bridge not found in ${installDir}. ` +
+                'Build the Bridge project (dotnet build CodeDesigner.Ps2.Bridge) to deploy it.'
             );
             this.cleanupProcess();
             return;
@@ -763,7 +856,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             out.error(`CodeDesigner executable not found: ${resolvedExe}`);
             vscode.window.showErrorMessage(
                 `CodeDesigner not found: ${resolvedExe}\n` +
-                'Build the project first: cd CodeDesigner.MipsR9500 && dotnet build'
+                'Build the Bridge project first: dotnet build CodeDesigner.Ps2.Bridge'
             );
             this.cleanupProcess();
             return;
@@ -866,34 +959,35 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
      * Launch the external PCSX2 application using CLI arguments from panel selections.
      * This does not connect sockets by itself; Connect/Run still control CodeDesigner.
+     * PCSX2 is located via auto-detection or the emulators list; no manual path config needed.
      */
     private handleStartPcsx2(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
 
         this.selectedEmulatorPath = emulatorPath;
-        this.selectedBiosPath = biosPath;
+        this.selectedBiosPath = biosPath || (this.settings.bios?.[0]?.path ?? '');
         this.selectedGamePath = gamePath;
 
-        if (!emulatorPath || !this.isPcsx2Selection(emulatorPath)) {
-            vscode.window.showWarningMessage('Please select a PCSX2 emulator entry first.');
-            return;
+        // Resolve PCSX2 path: prefer the passed value (from emulator selector if PCSX2 entry),
+        // then fall back to auto-detection.
+        let pcsx2Exe = '';
+        if (emulatorPath && this.isPcsx2Selection(emulatorPath)) {
+            pcsx2Exe = this.resolvePath(emulatorPath);
+        }
+        if (!pcsx2Exe || !fs.existsSync(pcsx2Exe)) {
+            pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe() ?? '';
         }
 
-        const pcsx2Exe = this.resolvePath(emulatorPath);
-        if (!fs.existsSync(pcsx2Exe)) {
-            out.error(`PCSX2 executable not found: ${pcsx2Exe}`);
-            vscode.window.showErrorMessage(`PCSX2 executable not found: ${pcsx2Exe}`);
+        if (!pcsx2Exe || !fs.existsSync(pcsx2Exe)) {
+            out.error('PCSX2 executable not found. Install PCSX2 to a standard location or add it via the emulator selector.');
+            vscode.window.showErrorMessage(
+                'PCSX2 not found. Install PCSX2 to a standard location (e.g. Program Files\\PCSX2) or add it via the emulator selector.'
+            );
             return;
         }
 
         const args: string[] = [];
         const resolvedDisc = gamePath ? this.resolvePath(gamePath) : '';
-        const resolvedBios = biosPath ? this.resolvePath(biosPath) : '';
-
-        /* if (resolvedBios && fs.existsSync(resolvedBios)) {
-            out.info(`PCSX2 BIOS selection: ${resolvedBios}`);
-            args.push('-bios', resolvedBios);
-        } */
 
         if (resolvedDisc && fs.existsSync(resolvedDisc)) {
             out.info(`PCSX2 game selection: ${resolvedDisc}`);
@@ -2407,52 +2501,34 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
     * Auto-start the CodeDesigner console app in default control-server mode.
      * Called at extension activation when auto-connect fails.
-     * Looks for the first non-PCSX2 emulator configured in emu-settings.json.
+     * Looks for CodeDesigner.Ps2.Bridge in the install directory first, then
+     * falls back to any non-PCSX2 emulator configured in emu-settings.json.
      * Returns true if a terminal was spawned (or was already running), false otherwise.
      */
     public async autoStartServer(): Promise<boolean> {
-        // Load settings if not yet done (workspaceRoot is set by loadEmuSettings)
-        if (!this.workspaceRoot) {
-            this.loadEmuSettings();
-        }
-
-        const emulators = this.settings.emulators ?? [];
-        if (emulators.length === 0) {
-            return false;
-        }
-
-        // Prefer the CodeDesigner app over PCSX2
-        const emu = emulators.find(e =>
-            !e.path.toLowerCase().includes('pcsx2') &&
-            !e.type?.toLowerCase().includes('pcsx2')
-        );
-
-        if (!emu) {
-            getOutputChannel().warn('Auto-start: no CodeDesigner emulator found in the emulator list (only PCSX2 entries). Use the Run button to start manually.');
-            return false;
-        }
-
-        const resolvedExe = this.resolvePath(emu.path);
-
-        if (!fs.existsSync(resolvedExe)) {
-            getOutputChannel().warn(`Auto-start: CodeDesigner executable not found at ${resolvedExe}`);
-            return false;
-        }
-
         // Don't spawn a second terminal if one is already open
         if (this.emulatorTerminal) {
             getOutputChannel().info('Auto-start: server terminal is already running.');
             return true;
         }
 
-        const cliArgs: string[] = [];
+        // Primary: Bridge deployed to the install directory.
+        const resolvedExe = DisasmPanelProvider.findBridgeExe();
+        if (!resolvedExe) {
+            const installDir = DisasmPanelProvider.getInstallDirectory();
+            getOutputChannel().warn(
+                `Auto-start: CodeDesigner.Ps2.Bridge not found in ${installDir}. ` +
+                'Build the Bridge project (dotnet build CodeDesigner.Ps2.Bridge) to deploy it automatically.'
+            );
+            return false;
+        }
 
         getOutputChannel().info(`Auto-starting CodeDesigner control server: ${resolvedExe}`);
 
         const terminal = vscode.window.createTerminal({
             name: 'CodeDesigner',
             shellPath: resolvedExe,
-            shellArgs: cliArgs,
+            shellArgs: [],
         });
         terminal.show(false);   // reveal terminal but keep editor focus
         this.emulatorTerminal = terminal;

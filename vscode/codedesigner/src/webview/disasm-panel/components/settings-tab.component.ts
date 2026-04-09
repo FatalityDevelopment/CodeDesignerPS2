@@ -11,8 +11,10 @@ import { EmuOption, SnapshotEntry } from '../types';
 /**
  * SettingsTabComponent - Emulator settings tab content.
  *
- * Presents emulator, BIOS, and game selectors together with action buttons and
- * the snapshot list. All mutable state is owned by the parent; this component
+ * Presents BIOS and game selectors together with action buttons and the
+ * snapshot list.  The CodeDesigner.Ps2.Bridge executable is resolved
+ * automatically from the install directory — no emulator path configuration
+ * is required.  All mutable state is owned by the parent; this component
  * is purely presentational and emits events for every user action.
  */
 @Component({
@@ -23,19 +25,18 @@ import { EmuOption, SnapshotEntry } from '../types';
   template: `
     <div class="container">
 
-      <div class="row">
-        <select id="emulatorSelect"
-                (change)="emulatorChange.emit($any($event.target).value)">
-          <option value="" [selected]="!selectedEmulator()">Select Emulator...</option>
-          @for (e of emulators(); track e.value) {
-            <option [value]="e.value" [selected]="e.value === selectedEmulator()">{{e.label}}</option>
-          }
-        </select>
-        <button class="browse-btn" (click)="browseEmulatorClick.emit()"
-                title="Browse for emulator executable">…</button>
-      </div>
-
       @if (isPcsx2Selected()) {
+        <div class="row">
+          <select id="emulatorSelect"
+                  (change)="emulatorChange.emit($any($event.target).value)">
+            <option value="" [selected]="!selectedEmulator()">Select PCSX2...</option>
+            @for (e of emulators(); track e.value) {
+              <option [value]="e.value" [selected]="e.value === selectedEmulator()">{{e.label}}</option>
+            }
+          </select>
+          <button class="browse-btn" (click)="browseEmulatorClick.emit()"
+                  title="Browse for PCSX2 executable">…</button>
+        </div>
         <div class="pcsx2-note">
           PCSX2 selected. Start PCSX2 launches the external app with CLI args from selected game/BIOS.
           Connect starts CodeDesigner control server; Run sends STARTPCSX2 over socket.
@@ -76,7 +77,7 @@ import { EmuOption, SnapshotEntry } from '../types';
         <button id="runBtn" (click)="runClick.emit()">▶ Run</button>
       </div>
 
-      @if (isCodeDesignerSelected()) {
+      @if (!isPcsx2Selected()) {
         <div class="row">
           <button id="restartBtn" (click)="restartClick.emit()" [disabled]="!isConnected()">
             ⟳ Restart
@@ -98,13 +99,19 @@ import { EmuOption, SnapshotEntry } from '../types';
         </div>
       }
 
+      @if (hasPcsx2()) {
+        <div class="row">
+          <button id="startPcsx2AutoBtn" (click)="startPcsx2Click.emit()">▶ Start PCSX2</button>
+        </div>
+      }
+
       <div class="row">
         <button id="importBinBtn" (click)="importBinClick.emit()" [disabled]="!isConnected()">
           ⬆ Import Binary
         </button>
       </div>
 
-      @if (isCodeDesignerSelected()) {
+      @if (!isPcsx2Selected()) {
         <div class="row">
           <button id="snapshotBtn" (click)="snapshotClick.emit()" [disabled]="!isConnected()">
             Take Snapshot
@@ -185,9 +192,13 @@ export class SettingsTabComponent {
   readonly reloadSnapshotClick = output<SnapshotEntry>();
   readonly openAiConfigClick = output<void>();
 
+  /** True when a PCSX2 emulator is explicitly selected in the dropdown. */
   readonly isPcsx2Selected = computed(() =>
     (this.selectedEmulator() ?? '').toLowerCase().includes('pcsx2')
   );
 
-  readonly isCodeDesignerSelected = computed(() => !this.isPcsx2Selected());
+  /** True when at least one PCSX2 emulator entry is available (auto-detected or configured). */
+  readonly hasPcsx2 = computed(() =>
+    !this.isPcsx2Selected() && this.emulators().some(e => e.label.toLowerCase().includes('pcsx2') || e.value.toLowerCase().includes('pcsx2'))
+  );
 }
