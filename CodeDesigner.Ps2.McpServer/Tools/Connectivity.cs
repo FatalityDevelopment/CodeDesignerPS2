@@ -8,7 +8,7 @@ namespace CodeDesigner.Ps2.McpServer.Tools;
 public sealed partial class CodeDesignerPs2Tools
 {
     [McpServerTool(Name = "ping")]
-    [Description("Test connectivity to the MIPS64 Emotion Engine emulator backend. Returns PONG when the socket server is reachable on localhost:8765.")]
+    [Description("Test connectivity to the Code Designer emulator backend. Returns PONG when the socket server is reachable on localhost:8765.")]
     public async Task<string> Ping(CancellationToken cancellationToken)
     {
         var json = await bridge.SendAsync(new { Command = "PING" }, cancellationToken);
@@ -114,10 +114,13 @@ public sealed partial class CodeDesignerPs2Tools
             var lead    = allAgents.FirstOrDefault(a => a.IsAgentLead);
             var subList = allAgents.Where(a => !a.IsAgentLead).ToList();
 
+            sb.AppendLine("IMPORTANT! Always introduce yourself to the user. WHEN DISCUSSING BETWEEN AGENTS ALWAYS DISPLAY THE CONVERSATION, SO THE USER CAN READ AND DIRECT");
+
             if (lead is not null)
             {
                 sb.AppendLine($"**Lead agent:** {lead.Name} (ID {lead.Id})  ");
                 sb.AppendLine("The lead agent coordinates all sub-agents, assigns tasks, reviews results, and produces the final deliverable.");
+                sb.AppendLine("ALWAYS DO WORK IN PARALLEL. REMEMBER TO USE SUB AGENTS TO CUT DOWN ON TIME. ");
             }
 
             if (subList.Count > 0)
