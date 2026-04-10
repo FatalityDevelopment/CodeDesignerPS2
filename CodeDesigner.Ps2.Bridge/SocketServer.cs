@@ -1299,11 +1299,11 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "MCPMEMORY_ADD":
                     case "MCPMEMORYADD":
-                        return HandleMcpMemoryAdd(command.McpMemoryName, command.McpMemoryContent, command.GameId);
+                        return HandleMcpMemoryAdd(command.McpMemoryName, command.McpMemoryContent, command.GameId, command.McpMemoryAgentId);
 
                     case "MCPMEMORY_UPDATE":
                     case "MCPMEMORYUPDATE":
-                        return HandleMcpMemoryUpdate(command.McpMemoryId, command.McpMemoryName, command.McpMemoryContent, command.GameId);
+                        return HandleMcpMemoryUpdate(command.McpMemoryId, command.McpMemoryName, command.McpMemoryContent, command.GameId, command.McpMemoryAgentId);
 
                     case "MCPMEMORY_DELETE":
                     case "MCPMEMORYDELETE":
@@ -1319,11 +1319,19 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "MCPMEMORY_UPSERT":
                     case "MCPMEMORYUPSERT":
-                        return HandleMcpMemoryUpsert(command.McpMemoryName, command.McpMemoryContent);
+                        return HandleMcpMemoryUpsert(command.McpMemoryName, command.McpMemoryContent, command.McpMemoryAgentId);
 
                     case "MCPMEMORY_DELETE_BY_NAME":
                     case "MCPMEMORYDELETEBYNAME":
                         return HandleMcpMemoryDeleteByName(command.McpMemoryName);
+
+                    case "MCPMEMORY_LIST_FOR_AGENT":
+                    case "MCPMEMORYLISTFORAGENT":
+                        return HandleMcpMemoryListForAgent(command.McpMemoryAgentId);
+
+                    case "MCPMEMORY_LIST_SHARED":
+                    case "MCPMEMORYLISTSHARED":
+                        return HandleMcpMemoryListShared();
 
                     // ── MCP Agent Profiles (DB-backed) ───────────────────────
                     case "MCPAGENT_LIST":

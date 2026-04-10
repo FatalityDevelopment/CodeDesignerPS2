@@ -65,6 +65,28 @@ public sealed class McpDatabaseService
             .ToListAsync(ct);
     }
 
+    /// <summary>Returns the names of memories belonging to the specified agent.</summary>
+    public async Task<IReadOnlyList<string>> ListAgentMemoriesAsync(int agentId, CancellationToken ct = default)
+    {
+        await using var db = new CodeDesignerDbContext(_dbOptions);
+        return await db.McpMemories
+            .Where(m => m.AgentId == agentId)
+            .OrderBy(m => m.Name)
+            .Select(m => m.Name)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>Returns the names of all shared memories (AgentId is null).</summary>
+    public async Task<IReadOnlyList<string>> ListSharedMemoriesAsync(CancellationToken ct = default)
+    {
+        await using var db = new CodeDesignerDbContext(_dbOptions);
+        return await db.McpMemories
+            .Where(m => m.AgentId == null)
+            .OrderBy(m => m.Name)
+            .Select(m => m.Name)
+            .ToListAsync(ct);
+    }
+
     /// <summary>
     /// Returns the Markdown content of the named memory, or <see langword="null"/>
     /// when no matching record exists.
@@ -79,6 +101,10 @@ public sealed class McpDatabaseService
 
     /// <summary>Creates or overwrites a memory entry with the given Markdown content.</summary>
     public async Task SaveMemoryAsync(string name, string content, CancellationToken ct = default)
+        => await SaveMemoryAsync(name, content, agentId: null, ct);
+
+    /// <summary>Creates or overwrites a memory entry with the given Markdown content, optionally scoped to an agent.</summary>
+    public async Task SaveMemoryAsync(string name, string content, int? agentId, CancellationToken ct = default)
     {
         var slug = SanitiseName(name);
 
@@ -87,9 +113,10 @@ public sealed class McpDatabaseService
         {
             var response = await _bridge.SendAsync(new
             {
-                Command          = "MCPMEMORY_UPSERT",
-                McpMemoryName    = slug,
-                McpMemoryContent = content,
+                Command              = "MCPMEMORY_UPSERT",
+                McpMemoryName        = slug,
+                McpMemoryContent     = content,
+                McpMemoryAgentId     = agentId,
             }, ct);
 
             EnsureBridgeSuccess(response, "MCPMEMORY_UPSERT");
@@ -109,6 +136,7 @@ public sealed class McpDatabaseService
                 {
                     Name      = slug,
                     Content   = content,
+                    AgentId   = NormalizeAgentId(agentId),
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                 });
@@ -117,6 +145,8 @@ public sealed class McpDatabaseService
             {
                 existing.Content   = content;
                 existing.UpdatedAt = DateTime.UtcNow;
+                if (agentId.HasValue)
+                    existing.AgentId = NormalizeAgentId(agentId);
             }
 
             await db.SaveChangesAsync(ct);
@@ -222,6 +252,13 @@ public sealed class McpDatabaseService
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Normalizes an agent ID for storage: returns null when the caller passes
+    /// null or the sentinel value 0 (used to clear an agent association).
+    /// </summary>
+    private static int? NormalizeAgentId(int? agentId)
+        => agentId is null or 0 ? null : agentId;
 
     /// <summary>
     /// Converts an arbitrary string into a file/DB-safe slug.
