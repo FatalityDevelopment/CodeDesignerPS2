@@ -465,9 +465,11 @@ public class DatabaseSeeder
     {
         // Resolve the GameDisc.Id from the serial so the LabelSet is linked via
         // the FK that DbLabelRepository queries — not the legacy GameId string.
+        // Pre-normalise to uppercase dash form before hitting the DB so that the
+        // predicate is a simple equality check (index-friendly, no per-row transforms).
         var normalizedSerial = gameSerial.Trim().ToUpperInvariant().Replace('_', '-');
         var disc = await _db.GameDiscs.FirstOrDefaultAsync(
-            d => d.Serial != null && d.Serial.Replace("_", "-").ToUpper() == normalizedSerial, ct);
+            d => d.Serial == normalizedSerial, ct);
         if (disc is null) return; // disc not yet seeded — skip silently
 
         // Skip when the set already exists — idempotent.
