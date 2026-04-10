@@ -1682,7 +1682,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private loadGameLabels(isoName: string): void {
         // Always update the editor provider's current game context so user-created
         // labels are saved to the correct per-game file.
-        this.editorProvider.setCurrentGame(isoName, this.workspaceRoot);
+        // Pass the full ISO path (when available) so that _labelManagerCtx() can
+        // resolve the GameDisc even when PINE is not connected.  Without this the
+        // serial stays empty after a settings-restore and ResolveGameDiscIdAsync
+        // only receives the bare filename — which may fail to match an IsoPath
+        // that is stored as a full path in the database.
+        this.editorProvider.setCurrentGame(isoName, this.workspaceRoot, this.selectedGamePath || undefined);
 
         if (!isoName || !this.workspaceRoot) {
             this.editorProvider.setGameLabels([]);

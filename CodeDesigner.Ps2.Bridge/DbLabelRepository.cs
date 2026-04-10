@@ -88,8 +88,9 @@ namespace CodeDesigner.Ps2.Bridge
 
             return await _db.LabelSets
                             .Where(ls => ls.GameDiscId == discId && !ls.IsBuiltIn)
-                            .OrderBy(ls => ls.SetName)
                             .Select(ls => ls.SetName)
+                            .Distinct()
+                            .OrderBy(n => n)
                             .ToListAsync();
         }
 
