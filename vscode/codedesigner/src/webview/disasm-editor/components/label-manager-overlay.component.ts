@@ -48,11 +48,11 @@ export interface LabelManagerEntry {
   nodeSize?:       number;
 }
 export interface LabelSetPayload {
-  setName:   string;
-  gameId?:   string;
-  isBuiltIn: boolean;
+  setName:      string;
+  gameDiscId?:  string;
+  isBuiltIn:    boolean;
   /** Flat list of ALL labels (roots + children at all depths). */
-  entries:   LabelManagerEntry[];
+  entries:      LabelManagerEntry[];
 }
 
 /** One row in the recursive label-manager tree view. */

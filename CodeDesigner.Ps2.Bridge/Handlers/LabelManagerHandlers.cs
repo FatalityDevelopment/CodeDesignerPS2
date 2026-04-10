@@ -63,10 +63,10 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Convert a LabelManager set to the wire payload.</summary>
         private static LabelSetPayload ToWireSet(MgrSet s) => new()
         {
-            SetName   = s.SetName,
-            GameId    = s.GameId,
-            IsBuiltIn = s.IsBuiltIn,
-            Entries   = s.Entries.Select(ToWireEntry).ToList(),
+            SetName    = s.SetName,
+            GameDiscId = s.GameId,
+            IsBuiltIn  = s.IsBuiltIn,
+            Entries    = s.Entries.Select(ToWireEntry).ToList(),
         };
 
         // ── GETLABELSETS ──────────────────────────────────────────────────────
