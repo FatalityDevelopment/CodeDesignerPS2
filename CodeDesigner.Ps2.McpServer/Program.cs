@@ -79,8 +79,7 @@ var dynamicTools     = McpToolLoader.Build(toolsInstance, dbOptions).ToList();
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithTools(dynamicTools)
-    .WithPrompts<CodeDesignerPs2Prompts>();
+    .WithTools(dynamicTools);
 
 await builder.Build().RunAsync();
 
