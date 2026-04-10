@@ -883,6 +883,10 @@ namespace CodeDesigner.Ps2.Bridge
                     case "APPLYCHEATS":
                         return HandleApplyCheats(command.Data);
 
+                    case "GETGAMECHEATS":
+                    case "GET_GAME_CHEATS":
+                        return HandleGetGameCheats(command.GameSerial);
+
                     case "RESTART":
                         return HandleRestart();
 

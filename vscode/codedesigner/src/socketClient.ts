@@ -433,6 +433,20 @@ interface CommandResponse {
     // MCPORCHESTRATION_LIST / MCPORCHESTRATION_ADD / MCPORCHESTRATION_GET / MCPORCHESTRATION_UPDATE results
     McpOrchestrations?: McpOrchestrationInfo[];
     McpOrchestration?: McpOrchestrationInfo;
+    // GETGAMECHEATS results
+    GameCheats?: GameCheatInfo[];
+    GameTitle?: string;
+    CheatListTitle?: string;
+}
+
+/**
+ * A single cheat entry returned by GETGAMECHEATS.
+ */
+export interface GameCheatInfo {
+    name:    string;
+    author?: string;
+    notes?:  string;
+    codes:   string[];
 }
 
 /**
@@ -1969,6 +1983,31 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'ApplyCheats failed');
         }
+    }
+
+    /**
+     * GETGAMECHEATS — fetch cheat entries for a game by its PS2 serial from the database.
+     * Returns the list of cheats and the game/list titles; returns an empty array when
+     * no cheats are found for the given serial.
+     * @param serial  PS2 disc serial, e.g. "SCUS-97275".
+     */
+    public async getGameCheats(serial: string): Promise<{
+        cheats: GameCheatInfo[];
+        gameTitle: string | null;
+        cheatListTitle: string | null;
+    }> {
+        const response = await this.sendCommand({
+            Command:    'GETGAMECHEATS',
+            GameSerial: serial,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'GETGAMECHEATS failed');
+        }
+        return {
+            cheats:         (response.GameCheats ?? []) as GameCheatInfo[],
+            gameTitle:      response.GameTitle      ?? null,
+            cheatListTitle: response.CheatListTitle ?? null,
+        };
     }
 
     /**

@@ -1905,6 +1905,40 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         out.info(`Archive cheats: searching for serial "${serial}" (${gameTitle})…`);
 
         try {
+            // ── 1. Try the database first ──────────────────────────────────────
+            let dbResult: Awaited<ReturnType<typeof this.socketClient.getGameCheats>> | null = null;
+            try {
+                dbResult = await this.socketClient.getGameCheats(serial);
+            } catch (dbErr: any) {
+                out.warn(`Archive cheats: DB query failed — ${dbErr?.message ?? dbErr}`);
+            }
+
+            if (dbResult && dbResult.cheats.length > 0) {
+                const displayTitle = dbResult.gameTitle || gameTitle;
+                this._archiveCheats = dbResult.cheats.map(c => ({
+                    name:    c.name,
+                    author:  c.author,
+                    notes:   c.notes,
+                    codes:   c.codes,
+                    enabled: false,
+                }));
+                this._archiveCheatType = dbResult.cheatListTitle ?? '';
+
+                out.info(`Archive cheats: loaded ${this._archiveCheats.length} cheats from database for "${displayTitle}".`);
+                this.webview?.postMessage({
+                    command:   'archiveCheatsLoaded',
+                    cheats:    this._archiveCheats,
+                    game:      displayTitle,
+                    serial,
+                    cheatType: this._archiveCheatType,
+                });
+
+                this.editorProvider.setArchiveLabels(this._buildArchiveLabels());
+                return;
+            }
+
+            // ── 2. Fall back to local YAML archive ────────────────────────────
+            out.info(`Archive cheats: no DB results for "${serial}", trying local YAML archive…`);
             const result = await this._fetchArchiveForSerial(serial);
             if (!result) {
                 out.warn(`Archive cheats: no entry found for serial "${serial}".`);
@@ -1917,7 +1951,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             this._archiveCheats    = result.cheats;
             this._archiveCheatType = result.cheatType;
 
-            out.info(`Archive cheats: loaded ${result.cheats.length} cheats for "${result.game}".`);
+            out.info(`Archive cheats: loaded ${result.cheats.length} cheats from YAML for "${result.game}".`);
             this.webview?.postMessage({
                 command:   'archiveCheatsLoaded',
                 cheats:    this._archiveCheats,

@@ -196,6 +196,17 @@ namespace CodeDesigner.Ps2.Bridge
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<SnapshotInfo>? Snapshots { get; set; }
 
+        // GETGAMECHEATS results
+        /// <summary>List of cheat entries returned by GETGAMECHEATS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CheatInfo>? GameCheats { get; set; }
+        /// <summary>Game title returned alongside cheats by GETGAMECHEATS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? GameTitle { get; set; }
+        /// <summary>Cheat list title returned alongside cheats by GETGAMECHEATS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? CheatListTitle { get; set; }
+
         // QUERYDB results
         /// <summary>
         /// Rows returned by a QUERYDB SELECT statement.
@@ -250,5 +261,23 @@ namespace CodeDesigner.Ps2.Bridge
         public string? Description { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("updatedAt")]
         public string UpdatedAt { get; set; } = string.Empty;
+    }
+
+    /// <summary>Wire payload for a single cheat entry returned by GETGAMECHEATS.</summary>
+    public class CheatInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("author")]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? Author { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("notes")]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? Notes { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("codes")]
+        public List<string> Codes { get; set; } = [];
     }
 }
