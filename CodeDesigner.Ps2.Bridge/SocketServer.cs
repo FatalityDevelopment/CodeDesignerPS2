@@ -1241,7 +1241,7 @@ namespace CodeDesigner.Ps2.Bridge
                     // ── Game Disc ─────────────────────────────────────────────
                     case "UPDATEGAMEDISC":
                     case "UPDATE_GAME_DISC":
-                        return HandleUpdateGameDisc(command.GameSerial, command.IsoPath, command.GameCrc);
+                        return HandleUpdateGameDisc(command.GameSerial, command.IsoPath, command.GameCrc, command.GameTitle);
 
                     // ── Navigation history ────────────────────────────────────
                     case "GETNAVHISTORY":
