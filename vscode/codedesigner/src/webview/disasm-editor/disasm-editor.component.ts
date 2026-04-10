@@ -2036,8 +2036,16 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
     };
     this.gridRuntime.cursorMove = (delta: number) => {
+      const prevPageStart = params.getPageStart(params.state.cursor);
       params.state.cursor = params.clamp(params.state.cursor + delta, 0, params.state.totalInstructions - 1);
+      if (params.getPageStart(params.state.cursor) !== prevPageStart) {
+        // Crossing a page boundary: ensure the cursor is scrolled into view once
+        // the new page arrives (async load). Without this the stale scrollTop from
+        // the previous page is used on the next key-press, causing a sudden jump.
+        this.pendingPageScrollBlock = 'nearest';
+      }
       if (params.checkAndLoadPage()) {
+        this.pendingPageScrollBlock = null;
         params.updateCursor();
       }
     };
