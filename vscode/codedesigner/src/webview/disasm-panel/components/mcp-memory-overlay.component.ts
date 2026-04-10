@@ -178,8 +178,11 @@ export class McpMemoryOverlayComponent {
   readonly filteredEntries = computed(() => {
     const f = this.filter();
     const all = this.entries();
-    if (f === 'shared') return all.filter(e => e.agentId === undefined);
-    if (f === 'agent')  return all.filter(e => e.agentId !== undefined);
+    // Use loose equality to catch both null and undefined from the JSON response
+    // eslint-disable-next-line eqeqeq
+    if (f === 'shared') return all.filter(e => e.agentId == null);
+    // eslint-disable-next-line eqeqeq
+    if (f === 'agent')  return all.filter(e => e.agentId != null);
     return all;
   });
 

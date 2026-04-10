@@ -136,7 +136,7 @@ public sealed class McpDatabaseService
                 {
                     Name      = slug,
                     Content   = content,
-                    AgentId   = agentId,
+                    AgentId   = NormalizeAgentId(agentId),
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                 });
@@ -146,7 +146,7 @@ public sealed class McpDatabaseService
                 existing.Content   = content;
                 existing.UpdatedAt = DateTime.UtcNow;
                 if (agentId.HasValue)
-                    existing.AgentId = agentId.Value == 0 ? null : agentId.Value;
+                    existing.AgentId = NormalizeAgentId(agentId);
             }
 
             await db.SaveChangesAsync(ct);
@@ -252,6 +252,13 @@ public sealed class McpDatabaseService
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Normalizes an agent ID for storage: returns null when the caller passes
+    /// null or the sentinel value 0 (used to clear an agent association).
+    /// </summary>
+    private static int? NormalizeAgentId(int? agentId)
+        => agentId is null or 0 ? null : agentId;
 
     /// <summary>
     /// Converts an arbitrary string into a file/DB-safe slug.

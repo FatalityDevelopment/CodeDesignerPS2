@@ -73,7 +73,7 @@ namespace CodeDesigner.Ps2.Bridge
                     Name      = name,
                     Content   = content,
                     GameId    = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim(),
-                    AgentId   = agentId,
+                    AgentId   = NormalizeAgentId(agentId),
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                 };
@@ -87,7 +87,7 @@ namespace CodeDesigner.Ps2.Bridge
             if (gameId is not null)
                 existing.GameId = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim();
             if (agentId.HasValue)
-                existing.AgentId = agentId.Value == 0 ? null : agentId.Value;
+                existing.AgentId = NormalizeAgentId(agentId);
             await _db.SaveChangesAsync();
             return existing;
         }
@@ -108,7 +108,7 @@ namespace CodeDesigner.Ps2.Bridge
                 Name      = name,
                 Content   = content,
                 GameId    = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim(),
-                AgentId   = agentId,
+                AgentId   = NormalizeAgentId(agentId),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };
@@ -145,7 +145,7 @@ namespace CodeDesigner.Ps2.Bridge
                 entry.GameId = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim();
 
             if (agentId.HasValue)
-                entry.AgentId = agentId.Value == 0 ? null : agentId.Value;
+                entry.AgentId = NormalizeAgentId(agentId);
 
             entry.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
@@ -165,6 +165,13 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         // ── Import / export ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Normalizes an agent ID: returns null when the caller passes null or the
+        /// sentinel value 0 (used by callers that want to clear an agent association).
+        /// </summary>
+        private static int? NormalizeAgentId(int? agentId)
+            => agentId is null or 0 ? null : agentId;
 
         /// <summary>
         /// Imports a Markdown file from disk.
