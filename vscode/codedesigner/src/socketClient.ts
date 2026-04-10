@@ -246,10 +246,10 @@ export interface LabelManagerEntry {
 
 /** A named collection of LabelManagerEntry records for a specific game. */
 export interface LabelSetPayload {
-    setName:   string;
-    gameId?:   string;
-    isBuiltIn: boolean;
-    entries:   LabelManagerEntry[];
+    setName:      string;
+    gameDiscId?:  string;
+    isBuiltIn:    boolean;
+    entries:      LabelManagerEntry[];
 }
 
 /**

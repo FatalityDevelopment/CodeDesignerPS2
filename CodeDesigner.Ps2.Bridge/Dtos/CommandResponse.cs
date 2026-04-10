@@ -240,8 +240,8 @@ namespace CodeDesigner.Ps2.Bridge
     {
         [System.Text.Json.Serialization.JsonPropertyName("setName")]
         public string SetName { get; set; } = string.Empty;
-        [System.Text.Json.Serialization.JsonPropertyName("gameId")]
-        public string? GameId { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("gameDiscId")]
+        public string? GameDiscId { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("isBuiltIn")]
         public bool IsBuiltIn { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("entries")]

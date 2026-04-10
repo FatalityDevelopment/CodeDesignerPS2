@@ -74,10 +74,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _archiveLabels: LabelEntry[] = [];
   /** Current game (ISO) name — used to resolve the per-game labels.json path. */
   private _currentGameName: string = '';
-  /** Current game identifier for label manager DB queries — serial (e.g. "SCUS-97275") or full ISO path. */
+  /** Current game disc identifier for label manager DB queries — serial (e.g. "SCUS-97275") or full ISO path. */
   private _currentGameSerial: string = '';
   /** Workspace root — used to resolve the per-game labels.json path. */
   private _workspaceRoot: string = '';
+  /** Name of the currently active label set on the server (e.g. "MyLabels"), or null when no user set is active. */
+  private _activeSetName: string | null = null;
   /** Suppress repeated live read retries after emulator-side connection failures. */
   private _liveReadBackoffUntil = 0;
   private _liveReadFailureActive = false;
@@ -373,6 +375,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     this._workspaceRoot     = workspaceRoot;
     // Prefer a real serial (e.g. "SCUS-97275") for DB resolution; fall back to ISO path.
     if (gameSerial) { this._currentGameSerial = gameSerial; }
+    // Reset the active label set when the game changes — it will be re-established
+    // when the label manager refreshes or the user selects a set.
+    this._activeSetName = null;
   }
 
   /**
@@ -2244,9 +2249,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (ctx && this.socketClient?.isConnected()) {
         // Primary path: route through the DB-backed label manager so that
         // inline label edits and the Label Manager tab share the same database.
-        const { workspaceDir, gameId } = ctx;
+        const { workspaceDir, gameDiscId } = ctx;
+        const setName = this._activeSetName ?? gameDiscId;
         const addrHex = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
-        await this.socketClient.addLabelEntry(workspaceDir, gameId, gameId, {
+        await this.socketClient.addLabelEntry(workspaceDir, gameDiscId, setName, {
           address: addrHex,
           name: labelName,
           comment: comment,
@@ -2286,9 +2292,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (ctx && this.socketClient?.isConnected()) {
         // Primary path: route through the DB-backed label manager so that
         // inline label deletes and the Label Manager tab share the same database.
-        const { workspaceDir, gameId } = ctx;
+        const { workspaceDir, gameDiscId } = ctx;
+        const setName = this._activeSetName ?? gameDiscId;
         const addrHex = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
-        await this.socketClient.deleteLabelEntry(workspaceDir, gameId, gameId, addrHex);
+        await this.socketClient.deleteLabelEntry(workspaceDir, gameDiscId, setName, addrHex);
       } else if (this._gameLabelsPath()) {
         // Offline fallback: socket not connected — remove from per-game labels.json.
         this._deleteGameLabel(address);
@@ -2770,13 +2777,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public onStructsChanged?: (structs: StructEntry[]) => void;
 
-  /** Helper — build workspaceDir and gameId from current context. */
-  private _labelManagerCtx(): { workspaceDir: string; gameId: string } | null {
+  /** Helper — build workspaceDir and gameDiscId from current context. */
+  private _labelManagerCtx(): { workspaceDir: string; gameDiscId: string } | null {
     if (!this._workspaceRoot || !this._currentGameName) { return null; }
     // Use serial (e.g. "SCUS-97275") when available so the DB can resolve to the
     // exact GameDisc row.  Fall back to the ISO filename for backward compatibility.
-    const gameId = this._currentGameSerial || this._currentGameName;
-    return { workspaceDir: this._workspaceRoot, gameId };
+    const gameDiscId = this._currentGameSerial || this._currentGameName;
+    return { workspaceDir: this._workspaceRoot, gameDiscId };
   }
 
   /** Broadcast the label set to all open panels and optionally notify struct listeners. */
@@ -2960,12 +2967,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       webview.postMessage({ type: 'labelManagerError', message: 'No game selected. Open a disc image first.' });
       return;
     }
-    const { workspaceDir, gameId } = ctx;
+    const { workspaceDir, gameDiscId } = ctx;
 
     try {
       switch (action.type) {
         case 'refresh': {
-          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           // Use the set the client was already viewing if it still exists, otherwise
           // fall back to the first user set or Built-in.
@@ -2973,12 +2980,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const activeName = (requestedName && sets.includes(requestedName))
             ? requestedName
             : (sets.find(s => s !== 'Built-in') ?? 'Built-in');
-          const set = await this.socketClient.getLabelSet(workspaceDir, gameId, activeName);
+          // Activate the set on the server so labels appear in the disassembly view,
+          // not just in the Label Manager UI.
+          const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, activeName);
+          this._activeSetName = activeName;
           webview.postMessage({ type: 'labelManagerSet', set });
+          this._broadcastLabelSet(set);
+          await this.refreshStructLabels();
           break;
         }
         case 'setActive': {
-          const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameId, action.setName!);
+          const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, action.setName!);
+          this._activeSetName = action.setName!;
           webview.postMessage({ type: 'labelManagerSet', set });
           this._broadcastLabelSet(set);
           // Refresh labels in the disassembly view.
@@ -2986,30 +2999,35 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           break;
         }
         case 'createSet': {
-          const set = await this.socketClient.createLabelSet(workspaceDir, gameId, action.setName!);
+          const set = await this.socketClient.createLabelSet(workspaceDir, gameDiscId, action.setName!);
           // Activate the new set on the server side so the server's LabelMgr state
           // reflects the new set from the moment it is created.  Without this the
           // server would only activate the set the first time ADDLABELENTRY is called.
-          await this.socketClient.setActiveLabelSet(workspaceDir, gameId, action.setName!);
-          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, action.setName!);
+          this._activeSetName = action.setName!;
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           webview.postMessage({ type: 'labelManagerSet', set });
           webview.postMessage({ type: 'labelManagerStatus', message: `Created label set "${action.setName}".` });
           break;
         }
         case 'deleteSet': {
-          await this.socketClient.deleteLabelSet(workspaceDir, gameId, action.setName!);
-          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          await this.socketClient.deleteLabelSet(workspaceDir, gameDiscId, action.setName!);
+          this._activeSetName = null;
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           // Switch to Built-in after deletion.
-          const builtIn = await this.socketClient.getLabelSet(workspaceDir, gameId, 'Built-in');
+          const builtIn = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, 'Built-in');
           webview.postMessage({ type: 'labelManagerSet', set: builtIn });
+          this._broadcastLabelSet(builtIn);
+          await this.refreshStructLabels();
           webview.postMessage({ type: 'labelManagerStatus', message: `Deleted label set "${action.setName}".` });
           break;
         }
         case 'renameSet': {
-          const set = await this.socketClient.renameLabelSet(workspaceDir, gameId, action.setName!, action.newSetName!);
-          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          const set = await this.socketClient.renameLabelSet(workspaceDir, gameDiscId, action.setName!, action.newSetName!);
+          this._activeSetName = set.setName;
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           webview.postMessage({ type: 'labelManagerSet', set });
           webview.postMessage({ type: 'labelManagerStatus', message: `Renamed label set to "${set.setName}".` });
@@ -3017,8 +3035,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         }
         case 'addEntry': {
           const setName = action.setName!;
-          await this.socketClient.setActiveLabelSet(workspaceDir, gameId, setName);
-          const set = await this.socketClient.addLabelEntry(workspaceDir, gameId, setName, action.entry!);
+          await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, setName);
+          this._activeSetName = setName;
+          const set = await this.socketClient.addLabelEntry(workspaceDir, gameDiscId, setName, action.entry!);
           webview.postMessage({ type: 'labelManagerSet', set });
           this._broadcastLabelSet(set);
           await this.refreshStructLabels();
@@ -3026,22 +3045,23 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         }
         case 'deleteEntry': {
           const setName = action.setName!;
-          const set = await this.socketClient.deleteLabelEntry(workspaceDir, gameId, setName, action.address ?? '');
+          const set = await this.socketClient.deleteLabelEntry(workspaceDir, gameDiscId, setName, action.address ?? '');
           webview.postMessage({ type: 'labelManagerSet', set });
           this._broadcastLabelSet(set);
           await this.refreshStructLabels();
           break;
         }
         case 'importSet': {
-          const set = await this.socketClient.importLabelSet(workspaceDir, gameId, action.setName ?? 'Imported', action.json!);
-          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          const set = await this.socketClient.importLabelSet(workspaceDir, gameDiscId, action.setName ?? 'Imported', action.json!);
+          this._activeSetName = set.setName;
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           webview.postMessage({ type: 'labelManagerSet', set });
           webview.postMessage({ type: 'labelManagerStatus', message: `Imported "${set.setName}" (${set.entries.length} entries).` });
           break;
         }
         case 'exportSet': {
-          const json = await this.socketClient.exportLabelSet(workspaceDir, gameId, action.setName!);
+          const json = await this.socketClient.exportLabelSet(workspaceDir, gameDiscId, action.setName!);
           webview.postMessage({ type: 'labelManagerExport', json, setName: action.setName });
           break;
         }
