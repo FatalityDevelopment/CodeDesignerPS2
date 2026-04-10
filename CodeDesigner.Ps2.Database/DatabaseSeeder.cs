@@ -410,7 +410,7 @@ public class DatabaseSeeder
     // ── Label sets ────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Seeds the two default label sets for "SOCOM II - U.S. Navy SEALs":
+    /// Seeds the two default label sets for SOCOM II: U.S. Navy SEALs (NTSC-U, serial SCUS-97275):
     /// <list type="bullet">
     ///   <item><description>
     ///     <b>CodeDesigner labels</b> — the standard PS2 system register / memory-map
@@ -421,29 +421,31 @@ public class DatabaseSeeder
     ///     (functions, globals, AES/ZDB crypto symbols, and struct definitions).
     ///   </description></item>
     /// </list>
-    /// Rows are only inserted when the set does not already exist for the game.
+    /// Rows are only inserted when the set does not already exist for the game disc.
     /// </summary>
     private async Task SeedLabelSetsAsync(CancellationToken ct)
     {
-        const string socomGameId = "SOCOM II - U.S. Navy SEALs";
+        // Use the disc serial so we resolve the GameDiscId FK correctly.
+        // The serial must match a GameDisc row seeded by SeedGamesAsync.
+        const string socomSerial = "SCUS-97275";
 
         await SeedLabelSetFromResourceAsync(
-            gameId:      socomGameId,
-            setName:     "CodeDesigner labels",
+            gameSerial:     socomSerial,
+            setName:        "CodeDesigner labels",
             resourceSuffix: "codedesigner_labels.json",
             ct);
 
         await SeedLabelSetFromResourceAsync(
-            gameId:      socomGameId,
-            setName:     "patch_labels",
+            gameSerial:     socomSerial,
+            setName:        "patch_labels",
             resourceSuffix: "socom_patch_labels.json",
             ct);
     }
 
     /// <summary>
-    /// Inserts a <see cref="LabelSet"/> and its child <see cref="Label"/> /
-    /// <see cref="LabelMember"/> rows by reading a JSON seed file embedded in
-    /// this assembly under <c>Resources/SeedData/&lt;resourceSuffix&gt;</c>.
+    /// Inserts a <see cref="LabelSet"/> and its child <see cref="Label"/> rows by reading
+    /// a JSON seed file embedded in this assembly under
+    /// <c>Resources/SeedData/&lt;resourceSuffix&gt;</c>.
     /// </summary>
     /// <remarks>
     /// The JSON format supports two optional top-level arrays:
@@ -459,11 +461,18 @@ public class DatabaseSeeder
     /// </list>
     /// </remarks>
     private async Task SeedLabelSetFromResourceAsync(
-        string gameId, string setName, string resourceSuffix, CancellationToken ct)
+        string gameSerial, string setName, string resourceSuffix, CancellationToken ct)
     {
+        // Resolve the GameDisc.Id from the serial so the LabelSet is linked via
+        // the FK that DbLabelRepository queries — not the legacy GameId string.
+        var normalizedSerial = gameSerial.Trim().ToUpperInvariant().Replace('_', '-');
+        var disc = await _db.GameDiscs.FirstOrDefaultAsync(
+            d => d.Serial != null && d.Serial.Replace("_", "-").ToUpper() == normalizedSerial, ct);
+        if (disc is null) return; // disc not yet seeded — skip silently
+
         // Skip when the set already exists — idempotent.
         bool exists = await _db.LabelSets.AnyAsync(
-            ls => ls.GameId == gameId && ls.SetName == setName, ct);
+            ls => ls.GameDiscId == disc.Id && ls.SetName == setName, ct);
         if (exists) return;
 
         // Load the embedded JSON resource.
@@ -476,9 +485,9 @@ public class DatabaseSeeder
 
         var labelSet = new LabelSet
         {
-            SetName   = setName,
-            GameId    = gameId,
-            IsBuiltIn = false,
+            SetName    = setName,
+            GameDiscId = disc.Id,
+            IsBuiltIn  = false,
         };
         _db.LabelSets.Add(labelSet);
         await _db.SaveChangesAsync(ct); // obtain labelSet.Id
