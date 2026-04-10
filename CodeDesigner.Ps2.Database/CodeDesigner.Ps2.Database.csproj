@@ -12,6 +12,10 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources/SeedData/codedesigner_labels.json" />
     <EmbeddedResource Include="Resources/SeedData/socom_patch_labels.json" />
+    <EmbeddedResource Include="Resources/SeedData/seed_games.json" />
+    <EmbeddedResource Include="Resources/SeedData/seed_mcp_agents.json" />
+    <EmbeddedResource Include="Resources/SeedData/seed_mcp_orchestrations.json" />
+    <EmbeddedResource Include="Resources/SeedData/seed_memories.json" />
   </ItemGroup>
 
   <ItemGroup>
