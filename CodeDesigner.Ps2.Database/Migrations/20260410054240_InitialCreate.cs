@@ -321,7 +321,7 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         column: x => x.ParentId,
                         principalTable: "Labels",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.NoAction);
                 });
 
             migrationBuilder.CreateTable(

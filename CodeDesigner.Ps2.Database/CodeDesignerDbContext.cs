@@ -107,10 +107,13 @@ public class CodeDesignerDbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
 
             // Self-referencing parent / child relationship.
+            // SQL Server does not allow two CASCADE paths into the same table
+            // (Labels←LabelSets and Labels←Labels), so cascade is handled by
+            // EF Core on the client side instead of at the database level.
             entity.HasOne(l => l.Parent)
                   .WithMany(l => l.Children)
                   .HasForeignKey(l => l.ParentId)
-                  .OnDelete(DeleteBehavior.Cascade);
+                  .OnDelete(DeleteBehavior.ClientCascade);
 
             entity.HasIndex(l => new { l.LabelSetId, l.Address });
         });
