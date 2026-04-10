@@ -82,6 +82,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _liveReadBackoffUntil = 0;
   private _liveReadFailureActive = false;
   private _liveReadFailureMessage = '';
+  /** True while a live socket read is in-flight; prevents concurrent requests from piling up. */
+  private _liveReadInFlight = false;
 
   /**
    * When true, the editor automatically navigates to the address the AI (MCP
@@ -1184,6 +1186,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.stepAndBroadcast();
             } else if (message.type === 'getStatus') {
               if (!this._canIssueLiveBackendRequest()) { return; }
+                this._liveReadInFlight = true;
                 try {
                     const status = await this.socketClient!.getPC();
                 this._handleLiveReadSuccess();
@@ -1217,6 +1220,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     }
                 } catch (err: any) {
                     this._handleLiveReadFailure('getStatus', err);
+                } finally {
+                    this._liveReadInFlight = false;
                 }
             } else if (message.type === 'search') {
                 await this.handleSearch(panel, message.query, message.mode,
@@ -1640,7 +1645,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     private _canIssueLiveBackendRequest(): boolean {
-      return !!this.socketClient && this.socketClient.isConnected() && !this._isLiveReadBackoffActive();
+      return !!this.socketClient && this.socketClient.isConnected() && !this._isLiveReadBackoffActive() && !this._liveReadInFlight;
     }
 
     private _buildPlaceholderRows(baseAddress: number, startOffset: number, readLength: number): DisassembledRow[] {
@@ -1695,7 +1700,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (!this._liveReadFailureActive) { return; }
       this._liveReadFailureActive = false;
       this._liveReadFailureMessage = '';
-      this._liveReadBackoffUntil = 0;
+      // Intentionally do NOT clear _liveReadBackoffUntil here.  Stale in-flight
+      // requests that happen to succeed can call this while the backoff window is
+      // still active.  Clearing the backoff at that point would immediately allow
+      // new requests, which would also fail, causing the rapid
+      // "unavailable → recovered → unavailable" oscillation seen in the logs.
+      // The backoff expires on its own; _liveReadBackoffUntil is only reset to 0
+      // in _handleLiveReadFailure (refreshed on each failure) and on socket reconnect.
       getOutputChannel().appendLine('[LIVE] Emulator memory reads recovered; resuming normal refresh.');
     }
 
@@ -1741,6 +1752,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
         const socketClient = this.socketClient!;
         const startAddr = baseAddress + startOffset;
+        this._liveReadInFlight = true;
         try {
             const buffer = await socketClient.readMemory(startAddr, readLength, region);
             const rows   = await this.disassembleWithBackend(startAddr, buffer);
@@ -1753,6 +1765,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             rows: this._buildPlaceholderRows(baseAddress, startOffset, readLength),
             startIndex,
           });
+        } finally {
+          this._liveReadInFlight = false;
         }
     }
 
@@ -1770,6 +1784,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
         const socketClient = this.socketClient!;
         const alignedAddr = Math.max(baseAddress, ((highlightAddr & ~0xf) >>> 0) - 0x10);
+        this._liveReadInFlight = true;
         try {
             const buffer = await socketClient.readMemory(
                 alignedAddr, DisasmEditorProvider.HEX_VIEW_SIZE, region);
@@ -1784,6 +1799,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         } catch (err: any) {
         this._handleLiveReadFailure(`sendLiveHexView at 0x${alignedAddr.toString(16)}`, err);
         this._postUnavailableHexView(panel, baseAddress, highlightAddr, highlightLength);
+        } finally {
+          this._liveReadInFlight = false;
         }
     }
 
