@@ -20,4 +20,19 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
   </ItemGroup>
 
+  <!-- After each build, copy the MCP server output to %LOCALAPPDATA%\CodeDesigner so that
+       the .vscode/mcp.json and .vs/mcp.json can reference the exe directly without dotnet run. -->
+  <Target Name="CopyMcpServerToLocalAppData" AfterTargets="Build" Condition="'$(LOCALAPPDATA)' != ''">
+    <PropertyGroup>
+      <McpInstallDir>$(LOCALAPPDATA)\CodeDesigner\</McpInstallDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(McpInstallDir)" />
+    <ItemGroup>
+      <McpBuildOutput Include="$(OutputPath)**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(McpBuildOutput)"
+          DestinationFolder="$(McpInstallDir)%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>
