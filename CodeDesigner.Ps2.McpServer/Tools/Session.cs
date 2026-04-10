@@ -52,7 +52,7 @@ public sealed partial class CodeDesignerPs2Tools
 
     [McpServerTool(Name = "save_progress_report")]
     [DynamicDescription("save_progress_report_desc")]
-    [Description("Create or overwrite a progress report in the database. The name should be a short identifier for the current task (e.g. 'god-of-war-health').")]
+    [Description("Create or overwrite a progress report in the database. The name should be a short identifier for the current task (e.g. 'god-of-war-health'). Optionally scope the report to a specific agent by supplying the agent's database ID.")]
     public async Task<string> SaveProgressReport(
         [Description(
             "Short unique name for this report. Use hyphens as separators. " +
@@ -61,13 +61,17 @@ public sealed partial class CodeDesignerPs2Tools
             "Full Markdown content of the progress report. Include: game name, current objective, " +
             "all discovered addresses with their labels, structure maps, watchpoint findings, " +
             "confirmed cheat codes, and a clear list of next steps.")] string content,
+        [Description(
+            "Optional agent database ID to scope this report to a specific agent. " +
+            "When omitted (or null) the report is shared across all agents.")] int? agentId = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            await db.SaveMemoryAsync(name, content, cancellationToken);
+            await db.SaveMemoryAsync(name, content, agentId, cancellationToken);
             var sanitised = McpDatabaseService.SanitiseName(name);
-            return WithRules($"Progress report '{sanitised}' saved to the database.");
+            var scope = agentId.HasValue ? $" (agent {agentId})" : " (shared)";
+            return WithRules($"Progress report '{sanitised}'{scope} saved to the database.");
         }
         catch (ArgumentException ex)
         {
@@ -93,6 +97,40 @@ public sealed partial class CodeDesignerPs2Tools
         {
             return $"Error: {ex.Message}";
         }
+    }
+
+    [McpServerTool(Name = "get_agent_memories")]
+    [DynamicDescription("get_agent_memories_desc")]
+    [Description("List all memory entries that are scoped to a specific agent (i.e. private to that agent). Returns report names; call get_progress_report to load the content of any entry.")]
+    public async Task<string> GetAgentMemories(
+        [Description("The database ID of the agent whose memories to retrieve.")] int agentId,
+        CancellationToken cancellationToken = default)
+    {
+        var names = await db.ListAgentMemoriesAsync(agentId, cancellationToken);
+        if (names.Count == 0)
+            return $"No agent-specific memories found for agent {agentId}.";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Agent {agentId} memories ({names.Count}):");
+        foreach (var n in names)
+            sb.AppendLine($"  {n}");
+        return sb.ToString().TrimEnd();
+    }
+
+    [McpServerTool(Name = "get_shared_memories")]
+    [DynamicDescription("get_shared_memories_desc")]
+    [Description("List all shared memory entries (not scoped to any specific agent). Returns report names; call get_progress_report to load the content of any entry.")]
+    public async Task<string> GetSharedMemories(CancellationToken cancellationToken = default)
+    {
+        var names = await db.ListSharedMemoriesAsync(cancellationToken);
+        if (names.Count == 0)
+            return "No shared memories found.";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Shared memories ({names.Count}):");
+        foreach (var n in names)
+            sb.AppendLine($"  {n}");
+        return sb.ToString().TrimEnd();
     }
 
     // -------------------------------------------------------------------------

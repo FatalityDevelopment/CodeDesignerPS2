@@ -4,6 +4,7 @@ import {
   ViewEncapsulation,
   signal,
   output,
+  computed,
 } from '@angular/core';
 
 export interface McpMemoryEntry {
@@ -11,6 +12,8 @@ export interface McpMemoryEntry {
   name:      string;
   content:   string;
   gameId?:   string;
+  /** Agent database ID when scoped to a specific agent; undefined/null means shared. */
+  agentId?:  number;
   createdAt: string;
   updatedAt: string;
 }
@@ -25,6 +28,8 @@ export interface McpMemoryActionResult {
   error?:   string;
   message?: string;
 }
+
+export type McpMemoryFilter = 'all' | 'shared' | 'agent';
 
 @Component({
   selector: 'app-mcp-memory-overlay',
@@ -42,6 +47,13 @@ export interface McpMemoryActionResult {
       <button class="mem-small-btn" title="Import a .md file" (click)="importEntry.emit()">&#x2B06; Import</button>
       <button class="mem-small-btn mem-primary-btn" title="Create new memory" (click)="onAddClick()">+ New</button>
     </div>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="mem-filter-bar">
+    <button class="mem-filter-btn" [class.mem-filter-active]="filter() === 'all'"    (click)="filter.set('all')">All</button>
+    <button class="mem-filter-btn" [class.mem-filter-active]="filter() === 'shared'" (click)="filter.set('shared')">Shared</button>
+    <button class="mem-filter-btn" [class.mem-filter-active]="filter() === 'agent'"  (click)="filter.set('agent')">Agent-specific</button>
   </div>
 
   <!-- Status message -->
@@ -76,13 +88,20 @@ export interface McpMemoryActionResult {
 
   <!-- Entries list -->
   <div class="mem-list">
-    @if (entries().length === 0 && !loading()) {
-      <div class="mem-empty">No memories yet. Click "+ New" to create one.</div>
+    @if (filteredEntries().length === 0 && !loading()) {
+      <div class="mem-empty">
+        @if (filter() === 'all') { No memories yet. Click "+ New" to create one. }
+        @if (filter() === 'shared') { No shared memories found. }
+        @if (filter() === 'agent') { No agent-specific memories found. }
+      </div>
     }
-    @for (entry of entries(); track entry.id) {
+    @for (entry of filteredEntries(); track entry.id) {
       <div class="mem-item">
         <div class="mem-item-info">
           <span class="mem-item-name" [title]="entry.name">{{ entry.name }}</span>
+          <span class="mem-item-badge" [class.mem-badge-agent]="entry.agentId != null" [class.mem-badge-shared]="entry.agentId == null">
+            {{ entry.agentId != null ? ('Agent ' + entry.agentId) : 'Shared' }}
+          </span>
           <span class="mem-item-date">{{ formatDate(entry.updatedAt) }}</span>
         </div>
         <div class="mem-item-actions">
@@ -110,6 +129,15 @@ export interface McpMemoryActionResult {
 
 </div>
   `,
+  styles: [`
+    .mem-filter-bar { display: flex; gap: 4px; margin-bottom: 6px; }
+    .mem-filter-btn { padding: 2px 8px; font-size: 11px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border-radius: 3px; }
+    .mem-filter-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    .mem-filter-active { background: var(--vscode-button-background) !important; color: var(--vscode-button-foreground) !important; }
+    .mem-item-badge { font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+    .mem-badge-shared { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+    .mem-badge-agent  { background: var(--vscode-statusBarItem-warningBackground, #f0a500); color: var(--vscode-statusBarItem-warningForeground, #fff); }
+  `],
 })
 export class McpMemoryOverlayComponent {
 
@@ -144,6 +172,16 @@ export class McpMemoryOverlayComponent {
   readonly newName       = signal('');
   /** Id of the entry awaiting delete confirmation, or null. */
   readonly pendingDelete = signal<number | null>(null);
+  /** Active filter: 'all' | 'shared' | 'agent' */
+  readonly filter        = signal<McpMemoryFilter>('all');
+
+  readonly filteredEntries = computed(() => {
+    const f = this.filter();
+    const all = this.entries();
+    if (f === 'shared') return all.filter(e => e.agentId === undefined);
+    if (f === 'agent')  return all.filter(e => e.agentId !== undefined);
+    return all;
+  });
 
   // ── Public API ──────────────────────────────────────────────────────────────
 

@@ -35,6 +35,20 @@ namespace CodeDesigner.Ps2.Bridge
             return await query.OrderBy(m => m.Name).ToListAsync();
         }
 
+        /// <summary>Returns all memories belonging to the specified agent.</summary>
+        internal async Task<List<McpMemory>> ListForAgentAsync(int agentId)
+            => await _db.McpMemories
+                .Where(m => m.AgentId == agentId)
+                .OrderBy(m => m.Name)
+                .ToListAsync();
+
+        /// <summary>Returns all shared memories (AgentId is null).</summary>
+        internal async Task<List<McpMemory>> ListSharedAsync()
+            => await _db.McpMemories
+                .Where(m => m.AgentId == null)
+                .OrderBy(m => m.Name)
+                .ToListAsync();
+
         /// <summary>Returns the entry with the given <paramref name="id"/>, or <c>null</c> if not found.</summary>
         internal async Task<McpMemory?> GetAsync(int id)
             => await _db.McpMemories.FindAsync(id);
@@ -49,7 +63,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// so all MCP agent writes are serialized through the Bridge's shared
         /// <see cref="CodeDesignerDbContext"/>.
         /// </summary>
-        internal async Task<McpMemory> UpsertAsync(string name, string content, string? gameId = null)
+        internal async Task<McpMemory> UpsertAsync(string name, string content, string? gameId = null, int? agentId = null)
         {
             var existing = await _db.McpMemories.FirstOrDefaultAsync(m => m.Name == name);
             if (existing is null)
@@ -59,6 +73,7 @@ namespace CodeDesigner.Ps2.Bridge
                     Name      = name,
                     Content   = content,
                     GameId    = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim(),
+                    AgentId   = agentId,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                 };
@@ -71,6 +86,8 @@ namespace CodeDesigner.Ps2.Bridge
             existing.UpdatedAt = DateTime.UtcNow;
             if (gameId is not null)
                 existing.GameId = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim();
+            if (agentId.HasValue)
+                existing.AgentId = agentId.Value == 0 ? null : agentId.Value;
             await _db.SaveChangesAsync();
             return existing;
         }
@@ -80,7 +97,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// Throws <see cref="InvalidOperationException"/> when a entry with the same
         /// <paramref name="name"/> already exists.
         /// </summary>
-        internal async Task<McpMemory> AddAsync(string name, string content, string? gameId = null)
+        internal async Task<McpMemory> AddAsync(string name, string content, string? gameId = null, int? agentId = null)
         {
             bool exists = await _db.McpMemories.AnyAsync(m => m.Name == name);
             if (exists)
@@ -91,6 +108,7 @@ namespace CodeDesigner.Ps2.Bridge
                 Name      = name,
                 Content   = content,
                 GameId    = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim(),
+                AgentId   = agentId,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };
@@ -105,7 +123,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// Pass <c>null</c> to leave a field unchanged.
         /// Throws <see cref="KeyNotFoundException"/> when the entry does not exist.
         /// </summary>
-        internal async Task<McpMemory> UpdateAsync(int id, string? name = null, string? content = null, string? gameId = null)
+        internal async Task<McpMemory> UpdateAsync(int id, string? name = null, string? content = null, string? gameId = null, int? agentId = null)
         {
             var entry = await _db.McpMemories.FindAsync(id)
                 ?? throw new KeyNotFoundException($"Memory entry {id} not found.");
@@ -125,6 +143,9 @@ namespace CodeDesigner.Ps2.Bridge
 
             if (gameId is not null)
                 entry.GameId = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim();
+
+            if (agentId.HasValue)
+                entry.AgentId = agentId.Value == 0 ? null : agentId.Value;
 
             entry.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();

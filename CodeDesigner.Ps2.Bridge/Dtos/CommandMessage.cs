@@ -172,6 +172,12 @@ namespace CodeDesigner.Ps2.Bridge
         public string? McpMemoryName { get; set; }
         /// <summary>Markdown content of the MCP memory entry (MCPMEMORY_ADD / MCPMEMORY_UPDATE).</summary>
         public string? McpMemoryContent { get; set; }
+        /// <summary>
+        /// Optional agent ID to scope the memory entry to a specific agent.
+        /// Null (or omitted) means the memory is shared across all agents.
+        /// Use 0 to explicitly clear the agent association (convert to shared).
+        /// </summary>
+        public int? McpMemoryAgentId { get; set; }
 
         // Agent Profile fields (MCPAGENT_LIST / MCPAGENT_GET / MCPAGENT_ADD / MCPAGENT_UPDATE / MCPAGENT_DELETE / MCPAGENT_IMPORT / MCPAGENT_EXPORT)
         /// <summary>Database row ID of the MCP agent to operate on.</summary>

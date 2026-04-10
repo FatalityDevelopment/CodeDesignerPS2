@@ -95,6 +95,8 @@ interface CommandMessage {
     McpMemoryId?: number;
     McpMemoryName?: string;
     McpMemoryContent?: string;
+    /** Optional agent ID — when set the memory is scoped to that agent; null/omitted means shared. */
+    McpMemoryAgentId?: number;
     // Agent Profile (MCPAGENT_LIST / MCPAGENT_GET / MCPAGENT_ADD / MCPAGENT_UPDATE / MCPAGENT_DELETE / MCPAGENT_IMPORT / MCPAGENT_EXPORT)
     McpAgentId?: number;
     McpAgentName?: string;
@@ -525,6 +527,8 @@ export interface McpMemoryInfo {
     name:       string;
     content:    string;
     gameId?:    string;
+    /** Agent database ID when the memory is agent-specific; undefined/null means shared. */
+    agentId?:   number;
     createdAt:  string;
     updatedAt:  string;
 }
@@ -2624,6 +2628,24 @@ export class SocketClient {
     }
 
     /**
+     * MCPMEMORY_LIST_FOR_AGENT — returns all memory entries scoped to the given agent.
+     */
+    public async mcpMemoryListForAgent(agentId: number): Promise<McpMemoryInfo[]> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_LIST_FOR_AGENT', McpMemoryAgentId: agentId });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_LIST_FOR_AGENT failed'); }
+        return response.McpMemories ?? [];
+    }
+
+    /**
+     * MCPMEMORY_LIST_SHARED — returns all shared memory entries (not scoped to any agent).
+     */
+    public async mcpMemoryListShared(): Promise<McpMemoryInfo[]> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_LIST_SHARED' });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_LIST_SHARED failed'); }
+        return response.McpMemories ?? [];
+    }
+
+    /**
      * MCPMEMORY_GET — returns a single MCP memory entry by id.
      */
     public async mcpMemoryGet(id: number): Promise<McpMemoryInfo> {
@@ -2634,9 +2656,10 @@ export class SocketClient {
 
     /**
      * MCPMEMORY_ADD — creates a new MCP memory entry.
+     * @param agentId When provided the entry is scoped to that agent; omit for a shared entry.
      */
-    public async mcpMemoryAdd(name: string, content: string, gameId?: string): Promise<McpMemoryInfo> {
-        const response = await this.sendCommand({ Command: 'MCPMEMORY_ADD', McpMemoryName: name, McpMemoryContent: content, GameId: gameId });
+    public async mcpMemoryAdd(name: string, content: string, gameId?: string, agentId?: number): Promise<McpMemoryInfo> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_ADD', McpMemoryName: name, McpMemoryContent: content, GameId: gameId, McpMemoryAgentId: agentId });
         if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_ADD failed'); }
         return response.McpMemory!;
     }
@@ -2644,9 +2667,10 @@ export class SocketClient {
     /**
      * MCPMEMORY_UPDATE — updates name and/or content of an existing MCP memory entry.
      * Pass undefined to leave a field unchanged.
+     * @param agentId Pass 0 to clear the agent association (make shared); omit to leave unchanged.
      */
-    public async mcpMemoryUpdate(id: number, name?: string, content?: string, gameId?: string): Promise<McpMemoryInfo> {
-        const response = await this.sendCommand({ Command: 'MCPMEMORY_UPDATE', McpMemoryId: id, McpMemoryName: name, McpMemoryContent: content, GameId: gameId });
+    public async mcpMemoryUpdate(id: number, name?: string, content?: string, gameId?: string, agentId?: number): Promise<McpMemoryInfo> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_UPDATE', McpMemoryId: id, McpMemoryName: name, McpMemoryContent: content, GameId: gameId, McpMemoryAgentId: agentId });
         if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_UPDATE failed'); }
         return response.McpMemory!;
     }

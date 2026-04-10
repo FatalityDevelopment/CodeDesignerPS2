@@ -19,6 +19,14 @@ namespace CodeDesigner.Ps2.Bridge
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? GameId { get; set; }
 
+        /// <summary>
+        /// FK to the agent that owns this memory.
+        /// Null means the memory is shared across all agents.
+        /// </summary>
+        [JsonPropertyName("agentId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? AgentId { get; set; }
+
         [JsonPropertyName("createdAt")]
         public string CreatedAt { get; set; } = string.Empty;
 
