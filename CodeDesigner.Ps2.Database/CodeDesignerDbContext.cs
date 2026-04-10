@@ -89,8 +89,8 @@ public class CodeDesignerDbContext : DbContext
                   .HasForeignKey(ls => ls.GameDiscId)
                   .OnDelete(DeleteBehavior.Cascade);
 
-            // Unique per disc + name.
-            entity.HasIndex(ls => new { ls.GameDiscId, ls.SetName }).IsUnique();
+            // Non-unique index for fast lookup by disc + name.
+            entity.HasIndex(ls => new { ls.GameDiscId, ls.SetName });
         });
 
         // ── Label ──────────────────────────────────────────────────────────────

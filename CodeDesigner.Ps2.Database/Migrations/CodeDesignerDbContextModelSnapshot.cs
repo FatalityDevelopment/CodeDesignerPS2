@@ -300,9 +300,7 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("GameDiscId", "SetName")
-                        .IsUnique()
-                        .HasFilter("[GameDiscId] IS NOT NULL");
+                    b.HasIndex("GameDiscId", "SetName");
 
                     b.ToTable("LabelSets");
                 });
