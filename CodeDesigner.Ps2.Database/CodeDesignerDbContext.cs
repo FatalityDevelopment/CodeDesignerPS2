@@ -223,7 +223,7 @@ public class CodeDesignerDbContext : DbContext
             entity.HasOne(cl => cl.Game)
                   .WithMany(g => g.CheatLists)
                   .HasForeignKey(cl => cl.GameId)
-                  .OnDelete(DeleteBehavior.SetNull);
+                  .OnDelete(DeleteBehavior.ClientSetNull);
 
             entity.HasOne(cl => cl.GameDisc)
                   .WithMany(d => d.CheatLists)

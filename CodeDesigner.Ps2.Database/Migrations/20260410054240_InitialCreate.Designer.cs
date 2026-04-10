@@ -591,7 +591,7 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.HasOne("CodeDesigner.Ps2.Database.Entities.Game", "Game")
                         .WithMany("CheatLists")
                         .HasForeignKey("GameId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.ClientSetNull);
 
                     b.Navigation("Game");
 
