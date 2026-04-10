@@ -916,8 +916,8 @@ export class LabelManagerOverlayComponent {
   }
 
   setSets(names: string[]): void {
-    // Ensure "Built-in" is always first.
-    const rest = names.filter(n => n !== 'Built-in');
+    // Ensure "Built-in" is always first and deduplicate set names.
+    const rest = [...new Set(names.filter(n => n !== 'Built-in'))];
     this.setNames.set(['Built-in', ...rest]);
   }
 
