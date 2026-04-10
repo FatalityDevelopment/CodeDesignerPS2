@@ -1,13 +1,13 @@
 # CodeDesigner.Ps2.Database
 
-SQLite-backed persistence layer for CodeDesigner, built on **Entity Framework Core**.  
-All data lives in a single `codedesigner.db` file whose location is configurable at runtime.
+SQL Server Express LocalDB-backed persistence layer for CodeDesigner, built on **Entity Framework Core**.  
+All data lives in a `CodeDesigner` database on the local SQL Server Express LocalDB instance.
 
 ---
 
 ## Contents
 
-- [Database path](#database-path)
+- [Connection string](#connection-string)
 - [Schema overview](#schema-overview)
 - [Entity reference](#entity-reference)
 - [Migrations](#migrations)
@@ -18,14 +18,15 @@ All data lives in a single `codedesigner.db` file whose location is configurable
 
 ---
 
-## Database path
+## Connection string
 
-| Caller | Default path | Override |
-|--------|-------------|---------|
-| `CodeDesigner.Ps2` (main app) | `<exe dir>/codedesigner.db` | `--db-path <path>` or `CODEDESIGNER_DB_PATH` env var |
-| `CodeDesigner.Ps2.McpServer` | `<exe dir>/codedesigner.db` | `--db-path <path>` or `CODEDESIGNER_DB_PATH` env var |
+| Caller | Default connection | Override |
+|--------|-------------------|---------|
+| `CodeDesigner.Ps2.Database` (CLI) | `Server=(localdb)\MSSQLLocalDB;Database=CodeDesigner;Trusted_Connection=True;` | `--connection-string <cs>` or `CODEDESIGNER_CONNECTION_STRING` env var |
+| `CodeDesigner.Ps2.McpServer` | same | `--connection-string <cs>` or `CODEDESIGNER_CONNECTION_STRING` env var |
+| `CodeDesigner.Ps2.Bridge` | same | `CODEDESIGNER_CONNECTION_STRING` env var |
 
-Both processes run `MigrateAsync()` on startup, so the schema is always up to date before any code touches the database.
+SQL Server Express LocalDB is included with Visual Studio and the .NET SDK on Windows.  All processes call `MigrateAsync()` on startup, so the schema is always up to date before any code touches the database.
 
 ---
 
@@ -185,25 +186,21 @@ dotnet ef database update
 ### Create a new migration after changing an entity
 
 ```bash
-# From the repo root:
-dotnet ef migrations add <MigrationName> \
-  --project CodeDesigner.Ps2.Database \
-  --startup-project CodeDesigner.Ps2
+# From the CodeDesigner.Ps2.Database project directory:
+dotnet ef migrations add <MigrationName>
 ```
 
-> The startup project is required because EF tooling needs a runnable host to discover the `DbContext` configuration (connection string and options registered in the application's DI setup).
+> The `CodeDesignerDbContextFactory` provides the design-time DbContext pointing at the LocalDB instance, so no separate startup project is required.
 
 ### Undo the last migration (before pushing)
 
 ```bash
-dotnet ef migrations remove \
-  --project CodeDesigner.Ps2.Database \
-  --startup-project CodeDesigner.Ps2
+dotnet ef migrations remove
 ```
 
 ### Automatic migration on startup
 
-Both `CodeDesigner.Ps2` and `CodeDesigner.Ps2.McpServer` call `db.Database.MigrateAsync()` at startup, so the schema is always up to date in production without any manual steps.
+Both `CodeDesigner.Ps2.Bridge` and `CodeDesigner.Ps2.McpServer` call `db.Database.Migrate()` / `db.Database.MigrateAsync()` at startup, so the schema is always up to date in production without any manual steps.
 
 ---
 
@@ -282,9 +279,7 @@ public async Task DoSomethingAsync()
 3. **Configure the model** in `OnModelCreating` (keys, indexes, relationships).
 4. **Create a migration**:
    ```bash
-   dotnet ef migrations add AddMyEntity \
-     --project CodeDesigner.Ps2.Database \
-     --startup-project CodeDesigner.Ps2
+   dotnet ef migrations add AddMyEntity
    ```
 5. **Add a repository** in `CodeDesigner.Ps2.Bridge` if the socket server needs to access it.
 6. **Add MCP tools** in `CodeDesigner.Ps2.McpServer/CodeDesignerPs2Tools.cs` if Copilot needs access.

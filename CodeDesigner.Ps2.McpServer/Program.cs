@@ -20,10 +20,10 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-// Parse optional --host, --port, and --db-path arguments
+// Parse optional --host, --port, and --connection-string arguments
 string? host = null;
 int? port = null;
-string? dbPath = null;
+string? connectionString = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -40,21 +40,18 @@ for (int i = 0; i < args.Length; i++)
             i++;
         }
     }
-    else if (args[i] == "--db-path" && i + 1 < args.Length)
+    else if (args[i] == "--connection-string" && i + 1 < args.Length)
     {
-        dbPath = args[i + 1];
+        connectionString = args[i + 1];
         i++;
     }
 }
 
 // Allow environment-variable override
-dbPath ??= DatabasePaths.GetDefaultDbPath();
+connectionString ??= DatabasePaths.GetDefaultConnectionString();
 
 // ── Connect to the database (already initialised by the Database tool) ─────
-// BuildDbOptions registers SqlitePragmaInterceptor: sets journal_mode=WAL and
-// busy_timeout=30000 on every connection open, preventing SQLITE_BUSY errors when
-// the Bridge and multiple MCP agent processes write concurrently.
-var dbOptions = DatabaseInitialiser.BuildDbOptions(dbPath);
+var dbOptions = DatabaseInitialiser.BuildDbOptions(connectionString);
 
 // Register the socket bridge client as a singleton so all tools share it.
 // Construct the instance via factory so the DI container does not attempt to
@@ -67,8 +64,7 @@ builder.Services.AddSingleton(dbOptions);
 
 // Register the database service for agent memories and configuration.
 // Inject SocketBridgeClient so write operations are routed through the Bridge
-// socket server rather than directly to SQLite, ensuring single-writer semantics
-// across all parallel MCP agent processes.
+// socket server, ensuring single-writer semantics across all parallel MCP agent processes.
 builder.Services.AddSingleton<McpDatabaseService>(sp =>
     new McpDatabaseService(dbOptions, sp.GetRequiredService<SocketBridgeClient>()));
 

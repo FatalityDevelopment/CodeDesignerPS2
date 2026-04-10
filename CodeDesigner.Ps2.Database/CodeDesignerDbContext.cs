@@ -5,7 +5,7 @@ namespace CodeDesigner.Ps2.Database;
 
 /// <summary>
 /// Entity Framework Core database context for CodeDesigner.
-/// Uses SQLite as the underlying storage engine.
+/// Uses SQL Server (Express LocalDB by default) as the underlying storage engine.
 /// </summary>
 public class CodeDesignerDbContext : DbContext
 {
