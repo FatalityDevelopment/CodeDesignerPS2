@@ -201,6 +201,19 @@ export class VirtualGridComponent implements AfterViewInit {
       return;
     }
 
+    if (block === 'start') {
+      viewport.scrollTop = rowTop;
+      this.scrollTop.set(rowTop);
+      return;
+    }
+
+    if (block === 'end') {
+      const endOffset = Math.max(0, rowBottom - viewportSize);
+      viewport.scrollTop = endOffset;
+      this.scrollTop.set(endOffset);
+      return;
+    }
+
     if (rowTop < currentOffset) {
       viewport.scrollTop = rowTop;
       this.scrollTop.set(rowTop);

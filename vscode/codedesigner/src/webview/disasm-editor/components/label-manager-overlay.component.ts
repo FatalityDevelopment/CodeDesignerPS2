@@ -81,6 +81,9 @@ export interface TreeRow {
   ancestorLines: boolean[];
 }
 
+type LabelSortColumn = 'type' | 'address' | 'live' | 'name' | 'comment';
+type LabelSortDirection = 'asc' | 'desc';
+
 export type LabelManagerAction =
   | { type: 'setActive';         setName: string }
   | { type: 'createSet';         setName: string }
@@ -275,11 +278,31 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
               </button>
             </th>
             <th class="lm-col-expand"></th>
-            <th class="lm-col-type">Type</th>
-            <th class="lm-col-addr">Address</th>
-            <th class="lm-col-live">Live Value</th>
-            <th class="lm-col-name">Name</th>
-            <th class="lm-col-comment">Comment</th>
+            <th class="lm-col-type">
+              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'type'" (click)="onSort('type')">
+                <span>Type</span><span class="lm-sort-indicator">{{ sortIndicator('type') }}</span>
+              </button>
+            </th>
+            <th class="lm-col-addr">
+              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'address'" (click)="onSort('address')">
+                <span>Address</span><span class="lm-sort-indicator">{{ sortIndicator('address') }}</span>
+              </button>
+            </th>
+            <th class="lm-col-live">
+              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'live'" (click)="onSort('live')">
+                <span>Live Value</span><span class="lm-sort-indicator">{{ sortIndicator('live') }}</span>
+              </button>
+            </th>
+            <th class="lm-col-name">
+              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'name'" (click)="onSort('name')">
+                <span>Name</span><span class="lm-sort-indicator">{{ sortIndicator('name') }}</span>
+              </button>
+            </th>
+            <th class="lm-col-comment">
+              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'comment'" (click)="onSort('comment')">
+                <span>Comment</span><span class="lm-sort-indicator">{{ sortIndicator('comment') }}</span>
+              </button>
+            </th>
             <th class="lm-col-actions"></th>
           </tr>
         </thead>
@@ -675,6 +698,8 @@ export class LabelManagerOverlayComponent {
 
   // Tree view — track expanded paths by their unique path string
   readonly expandedPaths = signal<Set<string>>(new Set());
+  readonly sortColumn    = signal<LabelSortColumn | null>(null);
+  readonly sortDirection = signal<LabelSortDirection>('asc');
 
   // Inline new-set creation (replaces window.prompt)
   readonly showNewSetInput = signal(false);
@@ -751,6 +776,23 @@ export class LabelManagerOverlayComponent {
     });
   });
 
+  readonly sortedRootEntries = computed(() => {
+    const roots = this.filteredEntries().filter(entry => !entry.parentAddress);
+    const sortColumn = this.sortColumn();
+    if (!sortColumn) {
+      return roots;
+    }
+
+    const direction = this.sortDirection() === 'asc' ? 1 : -1;
+    return [...roots].sort((a, b) => {
+      const compare = this.compareEntries(a, b, sortColumn);
+      if (compare !== 0) {
+        return compare * direction;
+      }
+      return this.compareEntries(a, b, 'address');
+    });
+  });
+
   readonly canSave = computed(() => {
     const hasName = this.editName().trim() !== '';
     if (this.editParentAddress()) {
@@ -822,8 +864,7 @@ export class LabelManagerOverlayComponent {
    */
   readonly treeRows = computed<TreeRow[]>(() => {
     const rows: TreeRow[] = [];
-    for (const entry of this.filteredEntries()) {
-      if (entry.parentAddress) { continue; } // skip children — they appear under their parent
+    for (const entry of this.sortedRootEntries()) {
       const path = entry.address;
       const children = this._childrenOf(path);
       rows.push({
@@ -1021,6 +1062,20 @@ export class LabelManagerOverlayComponent {
 
   isExpanded(path: string): boolean {
     return this.expandedPaths().has(path);
+  }
+
+  onSort(column: LabelSortColumn): void {
+    if (this.sortColumn() === column) {
+      this.sortDirection.update(direction => direction === 'asc' ? 'desc' : 'asc');
+      return;
+    }
+    this.sortColumn.set(column);
+    this.sortDirection.set('asc');
+  }
+
+  sortIndicator(column: LabelSortColumn): string {
+    if (this.sortColumn() !== column) { return ''; }
+    return this.sortDirection() === 'asc' ? '▲' : '▼';
   }
 
   /** Recursively appends member rows to `rows`, with cycle detection via `visited`. */
@@ -1470,6 +1525,27 @@ export class LabelManagerOverlayComponent {
       .sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0))
       .map(c => `+0x${(c.offset ?? 0).toString(16).toUpperCase().padStart(2, '0')}: ${c.name}`)
       .join('\n');
+  }
+
+  private compareEntries(a: LabelManagerEntry, b: LabelManagerEntry, column: LabelSortColumn): number {
+    switch (column) {
+      case 'address':
+        return this.parseSortAddress(a.address) - this.parseSortAddress(b.address);
+      case 'type':
+        return this.effectiveType(a).localeCompare(this.effectiveType(b));
+      case 'live':
+        return this.liveValue(a).localeCompare(this.liveValue(b), undefined, { numeric: true, sensitivity: 'base' });
+      case 'name':
+        return this.displayName(a).localeCompare(this.displayName(b), undefined, { numeric: true, sensitivity: 'base' });
+      case 'comment':
+        return this.entryComment(a).localeCompare(this.entryComment(b), undefined, { numeric: true, sensitivity: 'base' });
+    }
+  }
+
+  private parseSortAddress(address: string): number {
+    const normalized = address.split(':')[0].replace(/^0x/i, '');
+    const parsed = parseInt(normalized, 16);
+    return Number.isNaN(parsed) ? 0 : parsed;
   }
 
   asInput(event: Event): HTMLInputElement { return event.target as HTMLInputElement; }
