@@ -1007,7 +1007,10 @@ export class AiConfigPageComponent implements AfterViewInit {
 
   loadMemories(): void {
     const agentId = this.selectedId();
-    if (agentId === null) { return; }
+    if (agentId === null) {
+      this.setMemStatus('', false);
+      return;
+    }
     this.memStatusMessage.set('Loading…');
     this.vscode.postMessage({ type: 'memoryListForAgent', agentId });
   }
