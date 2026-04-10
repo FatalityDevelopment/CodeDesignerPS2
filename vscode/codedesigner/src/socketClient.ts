@@ -124,6 +124,7 @@ interface CommandMessage {
     // Game Disc (UPDATEGAMEDISC)
     GameSerial?: string;
     GameCrc?: string;
+    GameTitle?: string;
 }
 
 /**
@@ -2480,16 +2481,18 @@ export class SocketClient {
     }
 
     /**
-     * UPDATEGAMEDISC — update the IsoPath and/or CRC for a GameDisc row
+     * UPDATEGAMEDISC — upsert an IsoPath and/or CRC for a GameDisc row
      * identified by its serial (e.g. "SCUS-97275").
-     * Both isoPath and crc are optional; only non-null values are updated.
+     * Creates the Game, GameRegion, and GameDisc rows automatically when missing.
+     * Both isoPath, crc, and gameTitle are optional; only non-null values are used.
      */
-    public async updateGameDisc(serial: string, isoPath?: string, crc?: string): Promise<void> {
+    public async updateGameDisc(serial: string, isoPath?: string, crc?: string, gameTitle?: string): Promise<void> {
         await this.sendCommand({
             Command:    'UPDATEGAMEDISC',
             GameSerial: serial,
             IsoPath:    isoPath,
             GameCrc:    crc,
+            GameTitle:  gameTitle,
         });
     }
 

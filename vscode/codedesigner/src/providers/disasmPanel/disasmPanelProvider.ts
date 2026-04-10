@@ -1509,10 +1509,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (gamePath && this._bridgeMode) {
             try {
                 const info = await this.socketClient.getPcsx2GameInfo();
-                const serial = (info.ID ?? '').replace(/\0/g, '').trim();
+                const serial    = (info.ID    ?? '').replace(/\0/g, '').trim();
+                const gameTitle = (info.Title ?? '').replace(/\0/g, '').trim() || this.selectedGameName;
                 if (serial) {
-                    // Update both IsoPath and serial — also propagate serial to editor.
-                    await this.socketClient.updateGameDisc(serial, gamePath);
+                    // Upsert Game/GameRegion/GameDisc in the database with IsoPath,
+                    // serial, and title so the game appears in the DB immediately.
+                    await this.socketClient.updateGameDisc(serial, gamePath, undefined, gameTitle);
                     this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, serial);
                 } else {
                     // Serial unavailable — just store IsoPath; use filename for DB fallback.
