@@ -296,14 +296,18 @@ public sealed partial class CodeDesignerPs2Tools
     [McpServerTool(Name = "query_db")]
     [DynamicDescription("query_db_desc")]
     [Description("""
-        Execute a read-only SELECT query against the CodeDesigner SQLite database and return the results as a formatted table.
-        Only SELECT and CTE (WITH … SELECT) statements are permitted — INSERT/UPDATE/DELETE/DROP/CREATE are blocked.
+        Execute a SQL statement against the CodeDesigner SQL Server database.
+
+        SELECT and CTE (WITH … SELECT) statements return the full result set as a formatted table.
+        DML statements (INSERT, UPDATE, DELETE) are committed immediately and return the number of rows affected —
+        use these for bulk-importing memory entries, cheat codes, or other data without going through the seeder pipeline.
+        DDL operations (DROP, CREATE, ALTER) are blocked to prevent accidental schema damage.
 
         Available tables:
           Settings          (Key, Value, Description, UpdatedAt)
           LabelSets         (Id, SetName, GameId, IsBuiltIn)
-          Labels            (Id, LabelSetId, Address, Name, Type, Hidden, Comment)
-          LabelMembers      (Id, LabelId, Offset, Name)
+          Labels            (Id, LabelSetId, ParentId, Address, Name, Type, Offset, ValueType, Hidden, Dynamic, Comment)
+          LabelMembers      (Id, LabelId, Offset, Name, ValueType, Dynamic, Hidden) — view over child Labels where ParentId IS NOT NULL
           Games             (Id, Title, Description)
           GameRegions       (Id, Name)
           GameDiscs         (Id, GameId, GameRegionId, Serial, CRC, IsoPath)
@@ -312,7 +316,7 @@ public sealed partial class CodeDesignerPs2Tools
           Cheats            (Id, CheatListId, Label, Description, Author, IsEnabled, SortOrder)
           CheatLines        (Id, CheatId, Code, SortOrder)
           McpConfig         (Id, Key, Value)
-          McpMemory         (Id, Name, Content)
+          McpMemories       (Id, Name, Content, GameId, CreatedAt, UpdatedAt)
           McpAgents         (Id, Name, Status, IsAgentLead, Objective, Rules, Guidelines, SessionBegin, ConcurrentTasks, SessionEnd, Research, RecommendedWorkflow, CreatedAt, UpdatedAt)
           McpAgentTasks     (Id, McpAgentId, Phase, SortOrder, Description)
           McpOrchestrations (Id, Name, Description, Strategy, Roles, Workflow, Rules, Notes, CreatedAt, UpdatedAt)
@@ -321,9 +325,12 @@ public sealed partial class CodeDesignerPs2Tools
           SELECT * FROM Settings WHERE Key LIKE 'theme%'
           SELECT g.Title, d.Serial, d.IsoPath FROM Games g JOIN GameDiscs d ON d.GameId = g.Id
           SELECT l.Address, l.Name, l.Type FROM Labels l JOIN LabelSets ls ON ls.Id = l.LabelSetId WHERE ls.SetName = 'MyGame'
+          INSERT INTO McpMemories (Name, Content, GameId, CreatedAt, UpdatedAt) VALUES ('my-note', '# Note\nContent here.', NULL, GETUTCDATE(), GETUTCDATE())
+          UPDATE McpMemories SET Content = '# Updated' WHERE Name = 'my-note'
+          DELETE FROM McpMemories WHERE Name = 'old-note'
         """)]
     public async Task<string> QueryDb(
-        [Description("A read-only SQL SELECT statement to execute against the CodeDesigner database.")] string sql,
+        [Description("A SQL statement to execute against the CodeDesigner database. SELECT/CTE returns rows; INSERT/UPDATE/DELETE commits and returns rows affected.")] string sql,
         [Description("Maximum number of rows to display in the formatted output (default 200, max 1000). Full data is still returned in JSON.")] int maxDisplayRows = 200,
         CancellationToken cancellationToken = default)
     {

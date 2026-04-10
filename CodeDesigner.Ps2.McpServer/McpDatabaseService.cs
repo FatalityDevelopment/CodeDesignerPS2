@@ -39,7 +39,7 @@ public sealed class McpDatabaseService
     /// </summary>
     private static readonly SemaphoreSlim _writeLock = new(1, 1);
 
-    /// <param name="dbOptions">Options used for read-only direct DB access.</param>
+    /// <param name="dbOptions">Options used for direct DB access (reads open a short-lived context per operation; writes use <see cref="_writeLock"/> when the Bridge is unavailable).</param>
     /// <param name="bridge">
     /// Optional socket bridge client.  When provided, writes are routed through
     /// the Bridge socket server rather than directly to SQL Server, guaranteeing
