@@ -430,6 +430,9 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AgentId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -450,6 +453,8 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AgentId");
 
                     b.HasIndex("Name")
                         .IsUnique();
@@ -651,6 +656,16 @@ namespace CodeDesigner.Ps2.Database.Migrations
                         .IsRequired();
 
                     b.Navigation("McpAgent");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.McpMemory", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.McpAgent", "Agent")
+                        .WithMany()
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Agent");
                 });
 
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Snapshot", b =>
