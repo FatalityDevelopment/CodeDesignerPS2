@@ -6,17 +6,14 @@ namespace CodeDesigner.Ps2.Database;
 /// <summary>
 /// Design-time factory used by <c>dotnet ef migrations add</c> and
 /// <c>dotnet ef database update</c> when no application host is present.
-/// The database file is placed next to the running binary at runtime;
-/// for design-time tooling it defaults to a temp path.
+/// Uses a SQL Server Express LocalDB instance for design-time tooling.
 /// </summary>
 public class CodeDesignerDbContextFactory : IDesignTimeDbContextFactory<CodeDesignerDbContext>
 {
     public CodeDesignerDbContext CreateDbContext(string[] args)
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), "codedesigner_design.db");
-
         var options = new DbContextOptionsBuilder<CodeDesignerDbContext>()
-            .UseSqlite($"Data Source={dbPath}")
+            .UseSqlServer(@"Server=(localdb)\MSSQLLocalDB;Database=CodeDesigner;Trusted_Connection=True;")
             .Options;
 
         return new CodeDesignerDbContext(options);

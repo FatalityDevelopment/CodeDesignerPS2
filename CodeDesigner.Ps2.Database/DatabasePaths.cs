@@ -1,9 +1,9 @@
 namespace CodeDesigner.Ps2.Database;
 
 /// <summary>
-/// Provides a single, canonical install directory and database path for
-/// CodeDesigner so every project (Database tool, Bridge, MCP server) resolves
-/// to the same location regardless of which binary's output directory is used.
+/// Provides a single, canonical install directory and SQL Server connection
+/// string for CodeDesigner so every project (Database tool, Bridge, MCP server)
+/// connects to the same database regardless of which binary is running.
 /// </summary>
 public static class DatabasePaths
 {
@@ -12,10 +12,6 @@ public static class DatabasePaths
     ///
     /// Resolution order:
     /// <list type="number">
-    ///   <item>
-    ///     The directory containing the value of the <c>CODEDESIGNER_DB_PATH</c>
-    ///     environment variable (when set).
-    ///   </item>
     ///   <item>
     ///     <c>%LOCALAPPDATA%\CodeDesigner</c> on Windows or
     ///     <c>~/.local/share/CodeDesigner</c> on Linux/macOS
@@ -26,17 +22,6 @@ public static class DatabasePaths
     /// </summary>
     public static string GetInstallDirectory()
     {
-        var fromEnv = Environment.GetEnvironmentVariable("CODEDESIGNER_DB_PATH");
-        if (!string.IsNullOrWhiteSpace(fromEnv))
-        {
-            var envDir = Path.GetDirectoryName(fromEnv);
-            if (!string.IsNullOrWhiteSpace(envDir))
-            {
-                Directory.CreateDirectory(envDir);
-                return envDir;
-            }
-        }
-
         var dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "CodeDesigner");
@@ -46,9 +31,27 @@ public static class DatabasePaths
     }
 
     /// <summary>
-    /// Returns the resolved path for the CodeDesigner database file.
-    /// The containing directory is created automatically if it does not exist.
+    /// Returns the SQL Server connection string to use for the CodeDesigner database.
+    ///
+    /// Resolution order:
+    /// <list type="number">
+    ///   <item>
+    ///     The value of the <c>CODEDESIGNER_CONNECTION_STRING</c> environment variable
+    ///     (when set), allowing the database to be redirected to any SQL Server instance.
+    ///   </item>
+    ///   <item>
+    ///     A default SQL Server Express LocalDB connection string targeting the
+    ///     <c>CodeDesigner</c> database:
+    ///     <c>Server=(localdb)\MSSQLLocalDB;Database=CodeDesigner;Trusted_Connection=True;</c>
+    ///   </item>
+    /// </list>
     /// </summary>
-    public static string GetDefaultDbPath() =>
-        Path.Combine(GetInstallDirectory(), "codedesigner.db");
+    public static string GetDefaultConnectionString()
+    {
+        var fromEnv = Environment.GetEnvironmentVariable("CODEDESIGNER_CONNECTION_STRING");
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+            return fromEnv;
+
+        return @"Server=(localdb)\MSSQLLocalDB;Database=CodeDesigner;Trusted_Connection=True;";
+    }
 }

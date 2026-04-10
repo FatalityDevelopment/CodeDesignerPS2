@@ -241,18 +241,14 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Creates a SQLite <see cref="CodeDesignerDbContext"/> pointing at the
-        /// canonical application-data database path (used when the caller does not
+        /// Creates a <see cref="CodeDesignerDbContext"/> connected to the
+        /// canonical SQL Server LocalDB instance (used when the caller does not
         /// supply a context).
         /// </summary>
         private static CodeDesignerDbContext CreateLocalDbContext()
         {
-            string dbPath = DatabasePaths.GetDefaultDbPath();
-            // Apply one-time compatibility fixups before EF Core migrations run.
-            DatabaseInitialiser.ApplyCompatibilityFixups(dbPath);
-            // BuildDbOptions registers SqlitePragmaInterceptor: sets journal_mode=WAL
-            // and busy_timeout=30000 automatically on every connection open.
-            var opts = DatabaseInitialiser.BuildDbOptions(dbPath);
+            string connectionString = DatabasePaths.GetDefaultConnectionString();
+            var opts = DatabaseInitialiser.BuildDbOptions(connectionString);
             var ctx = new CodeDesignerDbContext(opts);
             ctx.Database.Migrate();
             return ctx;

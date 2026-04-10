@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.13" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.13" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.13" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.13">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -25,9 +25,12 @@
 
   <!--
     After every build, run the Database tool to apply pending EF Core migrations
-    and seed the database.  Set the CheatArchiveRoot MSBuild property (or the
-    CODEDESIGNER_ARCHIVE_ROOT environment variable) to also run the bulk cheat
-    importer, e.g.:
+    and seed the database.  The default connection string targets SQL Server Express
+    LocalDB (Server=(localdb)\MSSQLLocalDB;Database=CodeDesigner;Trusted_Connection=True;).
+    Override via the CODEDESIGNER_CONNECTION_STRING environment variable or pass
+    a connection-string argument directly to the executable.
+    Set the CheatArchiveRoot MSBuild property (or the CODEDESIGNER_ARCHIVE_ROOT
+    environment variable) to also run the bulk cheat importer, e.g.:
         dotnet build -p:CheatArchiveRoot=/path/to/CheatCodeArchive
   -->
   <Target Name="InitialiseDatabase" AfterTargets="Build">

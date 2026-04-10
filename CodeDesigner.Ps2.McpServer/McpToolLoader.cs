@@ -54,9 +54,7 @@ internal static class McpToolLoader
             // Acquire a named system-wide mutex before writing McpConfig rows.
             // This prevents a race between multiple MCP server processes that all
             // start simultaneously and try to seed missing description keys at once.
-            // busy_timeout=30000 (set by SqlitePragmaInterceptor) backs this up at
-            // the SQLite layer, but the mutex avoids unnecessary contention entirely.
-            using var mutex = new Mutex(false, @"Global\CodeDesignerSQLiteWriter");
+            using var mutex = new Mutex(false, @"Global\CodeDesignerDbWriter");
             bool acquired = false;
             try
             {

@@ -2,14 +2,14 @@ using CodeDesigner.Ps2.Database;
 
 // ── Argument parsing ───────────────────────────────────────────────────────
 
-string? dbPath = null;
+string? connectionString = null;
 string? archiveRoot = null;
 
 for (int i = 0; i < args.Length; i++)
 {
-    if (args[i] == "--db-path" && i + 1 < args.Length)
+    if (args[i] == "--connection-string" && i + 1 < args.Length)
     {
-        dbPath = args[i + 1];
+        connectionString = args[i + 1];
         i++;
     }
     else if (args[i] == "--archive-root" && i + 1 < args.Length)
@@ -19,18 +19,18 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
-dbPath ??= DatabasePaths.GetDefaultDbPath();
+connectionString ??= DatabasePaths.GetDefaultConnectionString();
 
 // Allow the CheatCodeArchive root to be set via environment variable as well.
 archiveRoot ??= Environment.GetEnvironmentVariable("CODEDESIGNER_ARCHIVE_ROOT");
 
 // ── Migrate and seed ───────────────────────────────────────────────────────
 
-Console.WriteLine($"Database path  : {dbPath}");
+Console.WriteLine($"Connection string: {connectionString}");
 if (!string.IsNullOrWhiteSpace(archiveRoot))
-    Console.WriteLine($"Archive root   : {archiveRoot}");
+    Console.WriteLine($"Archive root     : {archiveRoot}");
 Console.WriteLine();
 
 Console.WriteLine("Applying migrations and seeding database…");
-await DatabaseInitialiser.InitialiseDatabaseAsync(dbPath, archiveRoot);
+await DatabaseInitialiser.InitialiseDatabaseAsync(connectionString, archiveRoot);
 Console.WriteLine("Done.");
