@@ -62,12 +62,23 @@ internal static class McpToolLoader
                 catch (AbandonedMutexException) { acquired = true; } // previous holder crashed; we inherit the lock
 
                 using var db = new CodeDesignerDbContext(dbOptions);
+
+                // Re-query inside the mutex: a competing process may have seeded
+                // these keys while we were waiting, so only insert what is still absent.
+                var existingKeys = db.McpConfigs
+                    .Where(c => c.Key.EndsWith("_desc"))
+                    .Select(c => c.Key)
+                    .ToHashSet();
+
                 foreach (var (method, dyn) in missing)
                 {
+                    if (existingKeys.Contains(dyn!.Key))
+                        continue; // already seeded by a concurrent process
+
                     var fallback = method.GetCustomAttribute<DescriptionAttribute>()?.Description ?? string.Empty;
                     db.McpConfigs.Add(new Database.Entities.McpConfig
                     {
-                        Key         = dyn!.Key,
+                        Key         = dyn.Key,
                         Value       = fallback,
                         Description = "MCP tool description",
                         UpdatedAt   = DateTime.UtcNow,

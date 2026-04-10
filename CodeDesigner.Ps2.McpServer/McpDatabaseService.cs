@@ -14,12 +14,12 @@ namespace CodeDesigner.Ps2.McpServer;
 /// <remarks>
 /// <para>
 /// <b>Concurrency design:</b> reads open their own short-lived
-/// <see cref="CodeDesignerDbContext"/> directly (SQLite WAL mode allows unlimited
-/// concurrent readers).  Write operations (<see cref="SaveMemoryAsync"/>,
-/// <see cref="DeleteMemoryAsync"/>) are routed through the Bridge socket server
-/// when a <see cref="SocketBridgeClient"/> is available, so the Bridge's single
-/// <see cref="CodeDesignerDbContext"/> becomes the sole writer and all cross-process
-/// concurrency is eliminated.
+/// <see cref="CodeDesignerDbContext"/> directly (SQL Server handles concurrent readers
+/// natively via its row-versioning / MVCC isolation).  Write operations
+/// (<see cref="SaveMemoryAsync"/>, <see cref="DeleteMemoryAsync"/>) are routed through
+/// the Bridge socket server when a <see cref="SocketBridgeClient"/> is available, so the
+/// Bridge's single <see cref="CodeDesignerDbContext"/> becomes the sole writer and all
+/// cross-process concurrency is eliminated.
 /// </para>
 /// <para>
 /// When the socket bridge is unavailable (e.g. during tests or offline runs),
@@ -42,7 +42,7 @@ public sealed class McpDatabaseService
     /// <param name="dbOptions">Options used for read-only direct DB access.</param>
     /// <param name="bridge">
     /// Optional socket bridge client.  When provided, writes are routed through
-    /// the Bridge socket server rather than directly to SQLite, guaranteeing
+    /// the Bridge socket server rather than directly to SQL Server, guaranteeing
     /// single-writer semantics across all concurrent MCP agent processes.
     /// </param>
     public McpDatabaseService(
