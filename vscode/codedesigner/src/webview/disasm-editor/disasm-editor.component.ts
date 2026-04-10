@@ -1961,6 +1961,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     prevSearchMatch: () => void;
     nextSearchMatch: () => void;
     pushNavHistory: () => void;
+    getPageStart: (index: number) => number;
     checkAndLoadPage: () => boolean;
     updateCursor: (scrollBlock?: ScrollLogicalPosition | null) => void;
     renderDisassembly: (scrollBlock?: ScrollLogicalPosition | null) => void;
@@ -2636,12 +2637,13 @@ export class DisasmEditorComponent implements AfterViewInit {
         clamp,
         toPhysicalAddress,
         parseHexAddress,
-        prevSearchMatch,
-        nextSearchMatch,
-        pushNavHistory,
-        checkAndLoadPage,
-        updateCursor,
-        renderDisassembly,
+      prevSearchMatch,
+      nextSearchMatch,
+      pushNavHistory,
+      getPageStart,
+      checkAndLoadPage,
+      updateCursor,
+      renderDisassembly,
         navigateBack,
         navigateToCurrentRowTarget,
         toggleBreakpointAtCursor,
@@ -2739,5 +2741,4 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   }
 }
-
 
