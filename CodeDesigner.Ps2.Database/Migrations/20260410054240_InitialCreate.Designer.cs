@@ -628,7 +628,7 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.HasOne("CodeDesigner.Ps2.Database.Entities.Label", "Parent")
                         .WithMany("Children")
                         .HasForeignKey("ParentId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .OnDelete(DeleteBehavior.ClientCascade);
 
                     b.Navigation("LabelSet");
 
