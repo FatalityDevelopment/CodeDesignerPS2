@@ -132,8 +132,16 @@ export class AiConfigProvider {
                 await this._sendMemoryList(webview);
                 break;
 
+            case 'memoryListForAgent':
+                await this._sendMemoryListForAgent(msg['agentId'] as number, webview);
+                break;
+
+            case 'memoryListAll':
+                await this._sendMemoryListAll(webview);
+                break;
+
             case 'memoryAdd':
-                await this._handleMemoryAdd(msg['name'] as string, webview);
+                await this._handleMemoryAdd(msg['name'] as string, msg['agentId'] as number | undefined, webview);
                 break;
 
             case 'memoryEdit':
@@ -284,9 +292,27 @@ export class AiConfigProvider {
         }
     }
 
-    private async _handleMemoryAdd(name: string, webview: vscode.Webview): Promise<void> {
+    private async _sendMemoryListForAgent(agentId: number, webview: vscode.Webview): Promise<void> {
         try {
-            const entry = await this.socketClient.mcpMemoryAdd(name, '');
+            const entries = await this.socketClient.mcpMemoryListForAgent(agentId);
+            webview.postMessage({ type: 'memoryListResult', entries });
+        } catch (err: any) {
+            webview.postMessage({ type: 'memoryListResult', entries: [], error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _sendMemoryListAll(webview: vscode.Webview): Promise<void> {
+        try {
+            const entries = await this.socketClient.mcpMemoryList();
+            webview.postMessage({ type: 'memoryListAllResult', entries });
+        } catch (err: any) {
+            webview.postMessage({ type: 'memoryListAllResult', entries: [], error: err?.message ?? String(err) });
+        }
+    }
+
+    private async _handleMemoryAdd(name: string, agentId: number | undefined, webview: vscode.Webview): Promise<void> {
+        try {
+            const entry = await this.socketClient.mcpMemoryAdd(name, '', undefined, agentId);
             webview.postMessage({ type: 'memoryActionResult', entry, message: `Created '${entry.name}'` });
         } catch (err: any) {
             webview.postMessage({ type: 'memoryActionResult', error: err?.message ?? String(err) });
