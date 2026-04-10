@@ -1197,22 +1197,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       return;
     }
 
-    if (row.comment) {
-      const commentMatch = row.comment.match(/0x([0-9A-F]{8})/i) || row.comment.match(/\b([0-9A-F]{8})\b/i);
-      if (commentMatch) {
-        const address = parseInt(commentMatch[1], 16);
-        // Validate address is in valid EE address ranges:
-        // Physical: 0x00000000-0x1FFFFFFF (512MB)
-        // KSEG0/1: 0x80000000-0xBFFFFFFF
-        const isPhysical = address <= 0x1FFFFFFF;
-        const isKseg = address >= 0x80000000 && address <= 0xBFFFFFFF;
-        if (isPhysical || isKseg) {
-          params.navigateToAddress(address);
-          return;
-        }
-      }
-    }
-
     // Check if the current row's address matches a known pointer entry, and if
     // so navigate to the pointsTo address (pointer dereference navigation).
     if (params.state.symPointers && params.state.symPointers.length > 0) {
@@ -1225,6 +1209,22 @@ export class DisasmEditorComponent implements AfterViewInit {
         const target = parseInt(ptrEntry.pointsTo.replace(/^0x/i, ''), 16);
         if (!isNaN(target) && target !== 0) {
           params.navigateToAddress(target);
+          return;
+        }
+      }
+    }
+
+    if (row.comment) {
+      const commentMatch = row.comment.match(/0x([0-9A-F]{8})/i) || row.comment.match(/\b([0-9A-F]{8})\b/i);
+      if (commentMatch) {
+        const address = parseInt(commentMatch[1], 16);
+        // Validate address is in valid EE address ranges:
+        // Physical: 0x00000000-0x1FFFFFFF (512MB)
+        // KSEG0/1: 0x80000000-0xBFFFFFFF
+        const isPhysical = address <= 0x1FFFFFFF;
+        const isKseg = address >= 0x80000000 && address <= 0xBFFFFFFF;
+        if (isPhysical || isKseg) {
+          params.navigateToAddress(address);
           return;
         }
       }
@@ -2036,9 +2036,26 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
     };
     this.gridRuntime.cursorMove = (delta: number) => {
-      params.state.cursor = params.clamp(params.state.cursor + delta, 0, params.state.totalInstructions - 1);
+      const previousCursor = params.state.cursor;
+      const nextCursor = params.clamp(previousCursor + delta, 0, params.state.totalInstructions - 1);
+      if (nextCursor === previousCursor) { return; }
+
+      const previousPageStart = params.getPageStart(previousCursor);
+      const nextPageStart = params.getPageStart(nextCursor);
+      const crossedPageBoundary = previousPageStart !== nextPageStart;
+      const boundaryScrollBlock: ScrollLogicalPosition = crossedPageBoundary
+        ? (delta > 0 ? 'end' : 'start')
+        : 'nearest';
+
+      params.state.cursor = nextCursor;
+      if (crossedPageBoundary) {
+        this.pendingPageScrollBlock = boundaryScrollBlock;
+      }
       if (params.checkAndLoadPage()) {
-        params.updateCursor();
+        if (crossedPageBoundary) {
+          this.pendingPageScrollBlock = null;
+        }
+        params.updateCursor(boundaryScrollBlock);
       }
     };
 
@@ -2722,6 +2739,5 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   }
 }
-
 
 

@@ -3437,6 +3437,26 @@ app-bottom-panel {
     padding: 5px 8px;
     border-bottom: 1px solid #3e3e42;
 }
+.lm-sort-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+}
+.lm-sort-btn:hover { color: #ccc; }
+.lm-sort-btn.lm-sort-active { color: #d4d4d4; }
+.lm-sort-indicator {
+    min-width: 10px;
+    color: #569cd6;
+    font-size: 10px;
+}
 #lm-table td {
     padding: 4px 8px;
     border-bottom: 1px solid #2a2a2a;
