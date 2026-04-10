@@ -125,6 +125,7 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 SetName    = setName,
                 GameDiscId = discId,
+                GameId     = gameId,
                 IsBuiltIn  = false,
             };
 
@@ -151,14 +152,19 @@ namespace CodeDesigner.Ps2.Bridge
 
         internal async Task<MgrSet> RenameSetAsync(string gameId, string oldName, string newName)
         {
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null)
+                throw new InvalidOperationException($"No GameDisc found for '{gameId}'.");
+
             bool nameExists = await _db.LabelSets
-                                       .AnyAsync(ls => ls.GameId == gameId && ls.SetName == newName);
+                                       .AnyAsync(ls => ls.GameDiscId == discId && ls.SetName == newName);
             if (nameExists)
                 throw new InvalidOperationException($"Label set '{newName}' already exists for game '{gameId}'.");
 
             var entity = await _db.LabelSets
                                   .Include(ls => ls.Labels)
-                                  .FirstOrDefaultAsync(ls => ls.GameId == gameId && ls.SetName == oldName)
+                                  .Include(ls => ls.GameDisc)
+                                  .FirstOrDefaultAsync(ls => ls.GameDiscId == discId && ls.SetName == oldName)
                          ?? throw new InvalidOperationException($"Label set '{oldName}' not found for game '{gameId}'.");
 
             if (entity.IsBuiltIn)
@@ -185,7 +191,7 @@ namespace CodeDesigner.Ps2.Bridge
 
             if (entity is null)
             {
-                entity = new DbLabelSet { SetName = set.SetName, GameDiscId = discId, IsBuiltIn = false };
+                entity = new DbLabelSet { SetName = set.SetName, GameDiscId = discId, GameId = gameId, IsBuiltIn = false };
                 _db.LabelSets.Add(entity);
                 await _db.SaveChangesAsync();
             }
@@ -249,7 +255,7 @@ namespace CodeDesigner.Ps2.Bridge
 
             if (entity is null)
             {
-                entity = new DbLabelSet { SetName = setName, GameDiscId = discId, IsBuiltIn = false };
+                entity = new DbLabelSet { SetName = setName, GameDiscId = discId, GameId = gameId, IsBuiltIn = false };
                 _db.LabelSets.Add(entity);
                 await _db.SaveChangesAsync();
             }

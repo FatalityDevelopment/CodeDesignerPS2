@@ -109,10 +109,11 @@ namespace CodeDesigner.Ps2.Bridge
 
         // ── LabelSet ───────────────────────────────────────────────────────────
 
-        internal static DbLabelSet ToDbLabelSet(MgrSet src, int? gameDiscId) => new()
+        internal static DbLabelSet ToDbLabelSet(MgrSet src, int? gameDiscId, string? gameId = null) => new()
         {
             SetName    = src.SetName,
             GameDiscId = gameDiscId,
+            GameId     = gameId ?? src.GameId,
             IsBuiltIn  = src.IsBuiltIn,
         };
 
