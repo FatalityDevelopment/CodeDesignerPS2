@@ -373,8 +373,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   public setCurrentGame(gameName: string, workspaceRoot: string, gameSerial?: string): void {
     this._currentGameName   = gameName;
     this._workspaceRoot     = workspaceRoot;
-    // Prefer a real serial (e.g. "SCUS-97275") for DB resolution; fall back to ISO path.
-    if (gameSerial) { this._currentGameSerial = gameSerial; }
+    // Always update the serial — clear it when not provided so a stale serial
+    // from a previously loaded game isn't used by _labelManagerCtx().
+    this._currentGameSerial = gameSerial ?? '';
     // Reset the active label set when the game changes — it will be re-established
     // when the label manager refreshes or the user selects a set.
     this._activeSetName = null;
