@@ -20,7 +20,11 @@ public static class DatabaseInitialiser
     /// <param name="connectionString">SQL Server connection string.</param>
     public static DbContextOptions<CodeDesignerDbContext> BuildDbOptions(string connectionString)
         => new DbContextOptionsBuilder<CodeDesignerDbContext>()
-            .UseSqlServer(connectionString)
+            .UseSqlServer(connectionString, options =>
+                options.EnableRetryOnFailure(
+                    maxRetryCount: 5,
+                    maxRetryDelay: TimeSpan.FromSeconds(10),
+                    errorNumbersToAdd: null))
             .Options;
 
     /// <summary>
