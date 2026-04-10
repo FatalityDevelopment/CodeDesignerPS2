@@ -13,12 +13,12 @@
     "sessionEnd": "- Write a final progress report summarising all work completed and any open questions.\n- Clear temporary breakpoints with `clear_all_breakpoints` unless they are intentionally persistent.",
     "research": "- PCSX2 source: `pcsx2/R5900OpcodeImpl.cpp`, `pcsx2/FPU.cpp`, `pcsx2/VUops.cpp`\n- PS2 SDK: https://github.com/ps2dev/ps2sdk\n- GameFAQs / PS2 modding communities for game-specific knowledge",
     "tasks": [
-      { "phase": 0, "sortOrder": 0, "description": "Call session_start to load operational guidelines and resume any previous work." },
-      { "phase": 0, "sortOrder": 1, "description": "Call get_pc to check the current emulator state (paused / running)." },
-      { "phase": 1, "sortOrder": 0, "description": "Save progress frequently using save_progress_report after each significant discovery." },
-      { "phase": 1, "sortOrder": 1, "description": "Keep the active label set current — call add_label after every newly identified address." },
+      { "phase": 0, "sortOrder": 0, "description": "Call `session_start` to load operational guidelines and resume any previous work." },
+      { "phase": 0, "sortOrder": 1, "description": "Call `get_pc` to check the current emulator state (paused / running)." },
+      { "phase": 1, "sortOrder": 0, "description": "Save progress frequently using `save_progress_report` after each significant discovery." },
+      { "phase": 1, "sortOrder": 1, "description": "Keep the active label set current — call `add_label` after every newly identified address." },
       { "phase": 2, "sortOrder": 0, "description": "Save a final progress report summarising all work completed and any open questions." },
-      { "phase": 2, "sortOrder": 1, "description": "Clear temporary breakpoints with clear_all_breakpoints unless they should persist." }
+      { "phase": 2, "sortOrder": 1, "description": "Clear temporary breakpoints with `clear_all_breakpoints` unless they should persist." }
     ]
   }
 ]

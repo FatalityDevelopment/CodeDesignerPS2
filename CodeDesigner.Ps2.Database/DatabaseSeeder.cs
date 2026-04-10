@@ -176,8 +176,12 @@ public class DatabaseSeeder
                 if (string.IsNullOrWhiteSpace(region) || !regionCache.TryGetValue(region, out var gameRegion))
                     continue;
 
-                bool exists = await _db.GameDiscs.AnyAsync(
-                    d => d.GameId == game.Id && d.GameRegionId == gameRegion.Id, ct);
+                // Uniqueness: match by game + region + serial (serial may be null for region-only discs).
+                bool exists = string.IsNullOrWhiteSpace(serial)
+                    ? await _db.GameDiscs.AnyAsync(
+                        d => d.GameId == game.Id && d.GameRegionId == gameRegion.Id && d.Serial == null, ct)
+                    : await _db.GameDiscs.AnyAsync(
+                        d => d.GameId == game.Id && d.Serial == serial, ct);
 
                 if (!exists)
                 {
