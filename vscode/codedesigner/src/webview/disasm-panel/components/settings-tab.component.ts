@@ -86,6 +86,10 @@ import { EmuOption, SnapshotEntry } from '../types';
         <button id="runBtn" (click)="runClick.emit()">▶ Run</button>
       </div>
 
+      <div class="row">
+        <button id="startNetworkBtn" (click)="startNetworkClick.emit()">🌐 Start Network</button>
+      </div>
+
       @if (!isPcsx2Selected()) {
         <div class="row">
           <button id="restartBtn" (click)="restartClick.emit()" [disabled]="!isConnected()">
@@ -181,6 +185,7 @@ export class SettingsTabComponent {
 
   readonly connectClick = output<void>();
   readonly runClick = output<void>();
+  readonly startNetworkClick = output<void>();
   readonly startPcsx2Click = output<void>();
   readonly restartClick = output<void>();
   readonly snapshotClick = output<void>();
