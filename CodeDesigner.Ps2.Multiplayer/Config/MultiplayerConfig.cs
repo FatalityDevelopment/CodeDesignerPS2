@@ -26,14 +26,45 @@ public class MultiplayerConfig
 
     // ── DNAS ─────────────────────────────────────────────────────────────────
 
-    /// <summary>DNAS authentication server TCP port.</summary>
+    /// <summary>
+    /// DNAS HTTPS server port (plain-HTTP debug fallback). The PS2 contacts the
+    /// DNAS gateway over HTTPS; the real port is DnasHttpsPort (443).
+    /// This port is kept for plain-HTTP debugging without SSL.
+    /// </summary>
     public int DnasPort { get; set; } = 10060;
+
+    /// <summary>
+    /// DNAS HTTPS server port. PS2 contacts gate1.*.dnas.playstation.org:443.
+    /// Requires elevated privileges on Linux (run as root or use iptables redirect).
+    /// Set to 0 to disable the HTTPS listener.
+    /// </summary>
+    public int DnasHttpsPort { get; set; } = 443;
+
+    /// <summary>
+    /// DNAS DNS responder port (normally 53). The DNS server intercepts
+    /// *.dnas.playstation.org queries and returns ServerIp.
+    /// Requires elevated privileges on Linux (run as root or redirect port 53).
+    /// Set to 0 to disable the built-in DNS responder.
+    /// </summary>
+    public int DnsDnasPort { get; set; } = 53;
 
     /// <summary>
     /// DNAS region sub-folder inside Data/. The server looks for response files
     /// under Data/<DnasRegion>/. Valid values: us-gw, eu-gw, gai-gw.
     /// </summary>
     public string DnasRegion { get; set; } = "us-gw";
+
+    /// <summary>
+    /// Path to the TLS certificate file (PEM or DER) for the DNAS HTTPS server.
+    /// If empty, defaults to Certificates/dnas.crt relative to the app base directory.
+    /// </summary>
+    public string DnasCertPath { get; set; } = "";
+
+    /// <summary>
+    /// Path to the TLS private-key file (PEM) for the DNAS HTTPS server.
+    /// If empty, defaults to Certificates/dnas.key relative to the app base directory.
+    /// </summary>
+    public string DnasKeyPath { get; set; } = "";
 
     // ── NAT ───────────────────────────────────────────────────────────────────
 
