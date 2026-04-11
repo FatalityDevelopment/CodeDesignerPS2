@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent, StructEntry, LabelManagerEntry, LabelSetPayload } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent, AiSessionStartEvent, AiLabelUpdateEvent, StructEntry, LabelManagerEntry, LabelSetPayload } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
@@ -162,6 +162,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         if (this._followAiEnabled) {
           this.navigateToAddress(event.address);
         }
+      });
+      // Automatically enable Follow AI mode when the MCP server starts a session.
+      socketClient.onSessionStart((_event: AiSessionStartEvent) => {
+        this.setFollowAiEnabled(true);
+      });
+      // Refresh the label manager when the AI modifies labels.
+      socketClient.onLabelUpdate((event: AiLabelUpdateEvent) => {
+        this._handleAiLabelUpdate(event);
       });
     }
   }
@@ -362,6 +370,41 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     const msg = { type: 'followAiState', enabled: this._followAiEnabled };
     for (const p of this._livePanels) {
       p.webview.postMessage(msg);
+    }
+  }
+
+  /**
+   * Handle an AI label-update notification pushed by the server.
+   * Refreshes the label manager UI and navigates to the label set the AI
+   * is working with so the user can follow along.
+   */
+  private async _handleAiLabelUpdate(event: AiLabelUpdateEvent): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    const ctx = this._labelManagerCtx();
+    if (!ctx) { return; }
+    const { workspaceDir, gameDiscId } = ctx;
+    try {
+      // Determine which set to display — prefer the set from the notification,
+      // fall back to the currently active set.
+      const targetSetName = event.setName ?? this._activeSetName;
+      if (!targetSetName) { return; }
+
+      // Activate and load the label set.
+      const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, targetSetName);
+      this._activeSetName = targetSetName;
+
+      // Broadcast the updated set to all live panels and the standalone
+      // label manager tab (if open).
+      this._broadcastLabelSet(set);
+
+      // Also refresh the label set list so newly created sets appear.
+      const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
+      for (const p of this._livePanels) {
+        p.webview.postMessage({ type: 'labelManagerSets', sets });
+      }
+      this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSets', sets });
+    } catch {
+      // Non-fatal — the user can always manually refresh.
     }
   }
 

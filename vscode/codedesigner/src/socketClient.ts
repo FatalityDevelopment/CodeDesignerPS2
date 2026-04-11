@@ -694,6 +694,27 @@ export interface AiActivityEvent {
 }
 
 /**
+ * Pushed unsolicited by the server when the MCP client calls session_start.
+ * Used by the VSCode extension to automatically enable "Follow AI" mode.
+ */
+export interface AiSessionStartEvent {
+    type: 'ai_session_start';
+}
+
+/**
+ * Pushed unsolicited by the server when the MCP client modifies labels
+ * (ADDLABELENTRY, ADDLABELENTRIES, CREATELABELSET, DELETELABELENTRY, DELETELABELSET).
+ * Used by the VSCode extension to refresh the label manager UI and navigate to the
+ * label set the AI is working with.
+ */
+export interface AiLabelUpdateEvent {
+    type:     'ai_label_update';
+    command:  string;
+    setName?: string;
+    gameId?:  string;
+}
+
+/**
  * Socket client for communication with C# server
  */
 export class SocketClient {
@@ -711,6 +732,16 @@ export class SocketClient {
      * pushes an unsolicited AI-activity event (type === "ai_activity").
      */
     private _activityHandlers: Array<(event: AiActivityEvent) => void> = [];
+    /**
+     * Handlers registered via onSessionStart() — invoked when the server
+     * pushes an unsolicited ai_session_start event.
+     */
+    private _sessionStartHandlers: Array<(event: AiSessionStartEvent) => void> = [];
+    /**
+     * Handlers registered via onLabelUpdate() — invoked when the server
+     * pushes an unsolicited ai_label_update event.
+     */
+    private _labelUpdateHandlers: Array<(event: AiLabelUpdateEvent) => void> = [];
     /**
      * FIFO queue of one-time response handlers added by sendCommand().
      * Using a dedicated queue (with shift()) avoids the Array.forEach +
@@ -806,6 +837,12 @@ export class SocketClient {
                             if (parsed['type'] === 'ai_activity') {
                                 const evt = parsed as unknown as AiActivityEvent;
                                 this._activityHandlers.forEach(h => h(evt));
+                            } else if (parsed['type'] === 'ai_session_start') {
+                                const evt = parsed as unknown as AiSessionStartEvent;
+                                this._sessionStartHandlers.forEach(h => h(evt));
+                            } else if (parsed['type'] === 'ai_label_update') {
+                                const evt = parsed as unknown as AiLabelUpdateEvent;
+                                this._labelUpdateHandlers.forEach(h => h(evt));
                             }
                             this.messageHandlers.forEach(handler => handler(message));
                             continue;
@@ -938,6 +975,25 @@ export class SocketClient {
      */
     public onActivityNotification(handler: (event: AiActivityEvent) => void): void {
         this._activityHandlers.push(handler);
+    }
+
+    /**
+     * Register a handler for server-pushed AI session-start notifications.
+     * Called when the MCP server calls session_start, signalling that an AI
+     * session is beginning and Follow AI mode should be enabled.
+     */
+    public onSessionStart(handler: (event: AiSessionStartEvent) => void): void {
+        this._sessionStartHandlers.push(handler);
+    }
+
+    /**
+     * Register a handler for server-pushed AI label-update notifications.
+     * Called when the MCP server modifies labels (add/delete entry, create/delete set).
+     * The front end can use this to refresh the label manager and navigate to the
+     * label set the AI is working with.
+     */
+    public onLabelUpdate(handler: (event: AiLabelUpdateEvent) => void): void {
+        this._labelUpdateHandlers.push(handler);
     }
 
     /**

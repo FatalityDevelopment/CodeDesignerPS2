@@ -8,6 +8,17 @@ namespace CodeDesigner.Ps2.McpServer.Tools;
 
 public sealed partial class CodeDesignerPs2Tools
 {
+    /// <summary>
+    /// Helper to extract an optional int32 value from a parsed JSON dictionary entry.
+    /// Returns null if the key is missing or the value is not a JSON number.
+    /// </summary>
+    private static int? TryGetJsonInt32(Dictionary<string, object?> dict, string key)
+    {
+        if (dict.TryGetValue(key, out var val) && val is JsonElement el && el.ValueKind == JsonValueKind.Number)
+            return el.GetInt32();
+        return null;
+    }
+
     // -------------------------------------------------------------------------
     // Label set management
     // -------------------------------------------------------------------------
@@ -183,6 +194,89 @@ public sealed partial class CodeDesignerPs2Tools
                     nodeNextOffset,
                     nodeSize,
                 },
+            },
+            cancellationToken);
+
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "label_add_batch")]
+    [DynamicDescription("label_add_batch_desc")]
+    [Description("Insert or update multiple label entries in a single call. More efficient than calling label_add repeatedly when labelling many addresses at once. Each entry supports the same fields as label_add. Always use a dedicated label set (create one with label_create_set if needed) rather than polluting the built-in set.")]
+    public async Task<string> AddLabelBatch(
+        [Description("Game identifier / ISO serial (e.g. 'SCUS-97130').")] string gameId,
+        [Description("Label set to add the entries to (e.g. 'ai-analysis').")] string labelSet,
+        [Description("JSON array of label entries. Each entry is an object with at minimum 'address' and 'name' fields. Optional fields: 'comment', 'type' (Address|Pointer|Function|Float|Value|String), 'argRegs' (comma-separated), 'returnRegs' (comma-separated), 'elementStride', 'elementCount', 'nodeNextOffset', 'nodeSize'.")] string entries,
+        CancellationToken cancellationToken = default)
+    {
+        List<Dictionary<string, object?>>? parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(entries,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (JsonException ex)
+        {
+            return $"Error: invalid JSON entries array — {ex.Message}";
+        }
+        if (parsed is null || parsed.Count == 0)
+            return "Error: entries must be a non-empty JSON array.";
+
+        // Build wire entries.
+        var wireEntries = new List<object>();
+        foreach (var raw in parsed)
+        {
+            string? address = raw.TryGetValue("address", out var a) ? a?.ToString() : null;
+            string? name    = raw.TryGetValue("name",    out var n) ? n?.ToString() : null;
+            if (string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(name))
+                return "Error: each entry must have 'address' and 'name' fields.";
+
+            string resolvedAddress;
+            if (address.Contains(':'))
+            {
+                resolvedAddress = address;
+            }
+            else
+            {
+                uint? parsedAddr = TryParseAddress(address);
+                if (parsedAddr is null)
+                    return $"Error: invalid address '{address}'.";
+                resolvedAddress = $"0x{parsedAddr.Value:X8}";
+            }
+
+            string? comment = raw.TryGetValue("comment", out var c) ? c?.ToString() : null;
+            string? type    = raw.TryGetValue("type",    out var t) ? t?.ToString() : null;
+
+            string? argRegsStr    = raw.TryGetValue("argRegs",    out var ar) ? ar?.ToString() : null;
+            string? returnRegsStr = raw.TryGetValue("returnRegs", out var rr) ? rr?.ToString() : null;
+
+            int? elementStride  = TryGetJsonInt32(raw, "elementStride");
+            int? elementCount   = TryGetJsonInt32(raw, "elementCount");
+            int? nodeNextOffset = TryGetJsonInt32(raw, "nodeNextOffset");
+            int? nodeSize       = TryGetJsonInt32(raw, "nodeSize");
+
+            wireEntries.Add(new
+            {
+                address        = resolvedAddress,
+                name,
+                comment,
+                type,
+                argRegs        = argRegsStr?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                returnRegs     = returnRegsStr?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                elementStride,
+                elementCount,
+                nodeNextOffset,
+                nodeSize,
+            });
+        }
+
+        var json = await bridge.SendAsync(
+            new
+            {
+                Command      = "ADDLABELENTRIES",
+                GameId       = gameId,
+                SetName      = labelSet,
+                LabelEntries = wireEntries,
             },
             cancellationToken);
 

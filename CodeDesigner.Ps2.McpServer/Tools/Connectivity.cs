@@ -31,6 +31,16 @@ public sealed partial class CodeDesignerPs2Tools
         "This tool is the primary way to load guidelines — do not rely on prompts/get.")]
     public async Task<string> SessionStart(CancellationToken cancellationToken = default)
     {
+        // Notify the front end that an AI session has started.  The bridge
+        // pushes this as an "ai_session_start" notification to subscribers,
+        // which allows the VS Code extension to automatically enable
+        // Follow AI mode.
+        try
+        {
+            await bridge.SendAsync(new { Command = "SESSION_START" }, cancellationToken);
+        }
+        catch { /* non-fatal — the session_start tool still works offline */ }
+
         var sb = new StringBuilder();
 
         // Load all agent definitions so we can build a team roster and identify the lead.
