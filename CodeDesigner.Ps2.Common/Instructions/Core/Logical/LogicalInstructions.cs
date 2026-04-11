@@ -54,6 +54,9 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             ulong rtVal = cpu.RegsLo[args.Rt];
             return $"{CpuHelpers.RegName(args.Rd)} = 0x{(uint)(rsVal & rtVal):X8}";
         }
+    }
+
+    // OR - Bitwise OR
     public sealed class OR : Instruction<Args_R>
     {
         public OR()
