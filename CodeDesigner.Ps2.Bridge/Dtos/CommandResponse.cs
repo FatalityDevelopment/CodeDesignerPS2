@@ -226,6 +226,23 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Controller type value returned by PADGETTYPE (0=NotConnected, 1=DualShock2, etc.).</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public byte? PadControllerType { get; set; }
+
+        // DEV9 network bridge results (NETGETSTATUS / NETGETSTATS / NETRECVCAPTURE / NETDISASSEMBLE)
+        /// <summary>Network adapter status returned by NETGETSTATUS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public NetStatusInfo? NetStatus { get; set; }
+        /// <summary>Network statistics returned by NETGETSTATS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public NetStatsInfo? NetStats { get; set; }
+        /// <summary>Captured packets returned by NETRECVCAPTURE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CapturedPacketInfo>? CapturedPackets { get; set; }
+        /// <summary>Packet dissection text returned by NETDISASSEMBLE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? DissectionText { get; set; }
+        /// <summary>Injection success flag returned by NETINJECT / NETINJECTTX.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public bool? InjectionSuccess { get; set; }
     }
 
     /// <summary>Snapshot metadata wire payload returned by GETSNAPSHOTS.</summary>
@@ -306,5 +323,59 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>16 pressure values (0–255) in PadDualshock2::Inputs order.</summary>
         [System.Text.Json.Serialization.JsonPropertyName("pressures")]
         public byte[] Pressures { get; set; } = [];
+    }
+
+    /// <summary>Wire payload for network adapter status returned by NETGETSTATUS.</summary>
+    public class NetStatusInfo
+    {
+        /// <summary>True when EthEnable is set and the adapter has been opened.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("enabled")]
+        public bool Enabled { get; set; }
+        /// <summary>Adapter type (0=Unset, 1=PCAP_Bridged, 2=PCAP_Switched, 3=TAP, 4=Sockets).</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("adapterType")]
+        public byte AdapterType { get; set; }
+        /// <summary>PS2 MAC address as colon-separated hex string.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("ps2Mac")]
+        public string PS2Mac { get; set; } = string.Empty;
+        /// <summary>Last known PS2 IPv4 address as dotted decimal string.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("ps2IP")]
+        public string PS2IP { get; set; } = string.Empty;
+    }
+
+    /// <summary>Wire payload for network statistics returned by NETGETSTATS.</summary>
+    public class NetStatsInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("txPackets")]
+        public uint TxPackets { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("rxPackets")]
+        public uint RxPackets { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("txBytes")]
+        public ulong TxBytes { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("rxBytes")]
+        public ulong RxBytes { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("captureQueueSize")]
+        public ushort CaptureQueueSize { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("droppedCount")]
+        public uint DroppedCount { get; set; }
+    }
+
+    /// <summary>Wire payload for a single captured packet returned by NETRECVCAPTURE.</summary>
+    public class CapturedPacketInfo
+    {
+        /// <summary>0 = TX (PS2→Host), 1 = RX (Host→PS2).</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("direction")]
+        public byte Direction { get; set; }
+        /// <summary>Direction as human-readable string.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("directionName")]
+        public string DirectionName { get; set; } = string.Empty;
+        /// <summary>Monotonic timestamp in microseconds.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("timestampUs")]
+        public ulong TimestampUs { get; set; }
+        /// <summary>Length of the raw Ethernet frame in bytes.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("length")]
+        public int Length { get; set; }
+        /// <summary>Raw Ethernet frame bytes as base64-encoded string.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("data")]
+        public string Data { get; set; } = string.Empty;
     }
 }

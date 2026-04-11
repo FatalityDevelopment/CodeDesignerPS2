@@ -256,6 +256,26 @@ namespace CodeDesigner.Ps2.Bridge
         public uint? PadButtons { get; set; }
         /// <summary>16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order).</summary>
         public List<byte>? PadPressures { get; set; }
+
+        // DEV9 network bridge fields (NETCAPTURE / NETRECVCAPTURE / NETINJECT / NETINJECTTX / NETDISASSEMBLE / NETSETFILTER)
+        /// <summary>Enable flag for NETCAPTURE (true = enable, false = disable).</summary>
+        public bool? NetCaptureEnable { get; set; }
+        /// <summary>Direction filter for NETCAPTURE: 0 = both, 1 = TX only, 2 = RX only.</summary>
+        public byte? NetCaptureDirection { get; set; }
+        /// <summary>Maximum capture queue size for NETCAPTURE (0 → default 1000).</summary>
+        public ushort? NetCaptureMaxQueue { get; set; }
+        /// <summary>Maximum packets to drain for NETRECVCAPTURE.</summary>
+        public ushort? NetMaxPackets { get; set; }
+        /// <summary>Raw Ethernet frame bytes as base64 string for NETINJECT / NETINJECTTX / NETDISASSEMBLE.</summary>
+        public string? NetFrameData { get; set; }
+        /// <summary>Filter type for NETSETFILTER: 0=none, 1=protocol, 2=port, 3=IP.</summary>
+        public byte? NetFilterType { get; set; }
+        /// <summary>Protocol value for NETSETFILTER type 1: 0=all, 1=TCP, 2=UDP, 3=ICMP, 4=ARP, 5=DNS, 6=DHCP.</summary>
+        public byte? NetFilterProtocol { get; set; }
+        /// <summary>Port number for NETSETFILTER type 2.</summary>
+        public ushort? NetFilterPort { get; set; }
+        /// <summary>IPv4 address for NETSETFILTER type 3 (dotted decimal, e.g. "192.168.1.1").</summary>
+        public string? NetFilterIP { get; set; }
     }
 
     /// <summary>
