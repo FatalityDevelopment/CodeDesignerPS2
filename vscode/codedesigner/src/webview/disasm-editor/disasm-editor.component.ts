@@ -2009,6 +2009,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.state.cursor = instrIndex;
       params.state.searchActive = false;
       params.signals.panels.search.set(false);
+      // Invalidate the cached hex window so updateHexForRow always fetches
+      // fresh bytes for the destination address instead of reusing stale data
+      // that may happen to cover the new address.
+      params.state.hexData = [];
+      params.state.hexOffset = 0;
       this.pendingPageScrollBlock = 'center';
       if (params.checkAndLoadPage()) {
         this.pendingPageScrollBlock = null;
@@ -2695,6 +2700,11 @@ export class DisasmEditorComponent implements AfterViewInit {
       state.searchActive = false;
       signals.panels.search.set(false);
       searchToggleBtn.classList.remove('active');
+      // Invalidate the cached hex window so updateHexForRow always fetches
+      // fresh bytes for the destination address instead of reusing stale data
+      // that may happen to cover the new address.
+      state.hexData = [];
+      state.hexOffset = 0;
       this.pendingPageScrollBlock = 'center';
       const pageReady = checkAndLoadPage();
       if (pageReady) {
