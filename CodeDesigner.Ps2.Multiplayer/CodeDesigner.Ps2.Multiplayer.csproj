@@ -27,18 +27,20 @@
   </ItemGroup>
 
   <!--
-    Deploy build output to the well-known install directory so the VSCode
-    extension can locate the Multiplayer server without user configuration.
+    Deploy build output to a 'Multiplayer' subdirectory inside the CodeDesigner
+    install directory so the VSCode extension can locate the Multiplayer server
+    without user configuration.  The subdirectory keeps Multiplayer assemblies
+    isolated from the Bridge deployment to avoid DLL contamination.
 
     Install directory mirrors the C# DatabasePaths.GetInstallDirectory() logic:
-      Windows  →  %LOCALAPPDATA%\CodeDesigner\
-      Linux/macOS →  $HOME/.local/share/CodeDesigner/
+      Windows  →  %LOCALAPPDATA%\CodeDesigner\Multiplayer\
+      Linux/macOS →  $HOME/.local/share/CodeDesigner/Multiplayer/
   -->
   <Target Name="DeployToInstallDir" AfterTargets="Build">
     <PropertyGroup>
       <_LocalAppData Condition="'$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)</_LocalAppData>
       <_LocalAppData Condition="'$(LOCALAPPDATA)' == '' AND '$(HOME)' != ''">$(HOME)/.local/share</_LocalAppData>
-      <_InstallDir Condition="'$(_LocalAppData)' != ''">$(_LocalAppData)/CodeDesigner</_InstallDir>
+      <_InstallDir Condition="'$(_LocalAppData)' != ''">$(_LocalAppData)/CodeDesigner/Multiplayer</_InstallDir>
     </PropertyGroup>
     <MakeDir Directories="$(_InstallDir)" Condition="'$(_InstallDir)' != ''" />
     <ItemGroup Condition="'$(_InstallDir)' != ''">
