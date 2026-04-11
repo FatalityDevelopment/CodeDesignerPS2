@@ -376,7 +376,7 @@ namespace CodeDesigner.Ps2.LabelManager
         // ── Helpers ───────────────────────────────────────────────────────────
 
         private static string LabelsDir(string workspaceDir, string gameId) =>
-            Path.Combine(workspaceDir, "snapshots", gameId, "labels");
+            Path.Combine(workspaceDir, "snapshots", SanitiseGameId(gameId), "labels");
 
         private static string SetPath(string workspaceDir, string gameId, string setName) =>
             Path.Combine(LabelsDir(workspaceDir, gameId), SanitiseFileName(setName) + ".json");
@@ -386,6 +386,28 @@ namespace CodeDesigner.Ps2.LabelManager
             var dir = LabelsDir(workspaceDir, gameId);
             if (!Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
+        }
+
+        /// <summary>
+        /// Converts an arbitrary game identifier (serial, full ISO path, or bare filename)
+        /// into a safe directory name that can be used inside the workspace snapshots folder.
+        /// Full file paths (e.g. <c>c:\Users\...\Game.iso</c>) are reduced to the filename
+        /// without extension so they don't poison <see cref="Path.Combine"/> with absolute
+        /// path segments or invalid characters.
+        /// </summary>
+        private static string SanitiseGameId(string gameId)
+        {
+            // If the gameId looks like a file path (rooted path or contains directory
+            // separators), extract just the filename without extension so it can be
+            // used safely as a directory name component.
+            if (Path.IsPathRooted(gameId)                        ||
+                gameId.Contains(Path.DirectorySeparatorChar)      ||
+                gameId.Contains(Path.AltDirectorySeparatorChar))
+            {
+                gameId = Path.GetFileNameWithoutExtension(gameId);
+            }
+
+            return SanitiseFileName(gameId);
         }
 
         private static string SanitiseFileName(string name)
