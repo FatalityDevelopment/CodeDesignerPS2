@@ -1375,3 +1375,45 @@ app-cds-tab {
 .joker-clear-btn:hover {
     background: var(--vscode-button-secondaryHoverBackground, #4c4c4c);
 }
+
+/* ── Joker live pad-status indicator ─────────────────────────────────────── */
+
+.joker-pad-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--vscode-input-border, #3c3c3c);
+    margin-left: auto;
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+
+.joker-pad-dot-active {
+    background: #4ec94e;
+    box-shadow: 0 0 4px rgba(78, 201, 78, 0.6);
+}
+
+.joker-live-row {
+    border-color: rgba(78, 201, 78, 0.25);
+}
+
+.joker-live-indicator {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--vscode-input-border, #3c3c3c);
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.joker-live-indicator.joker-live-active {
+    background: #4ec94e;
+    animation: joker-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes joker-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}

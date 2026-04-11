@@ -122,7 +122,7 @@ interface ArchiveCheatsUpdatedMsg {
       }
     </div>
 
-    <app-joker-maker-overlay #jokerOverlay />
+    <app-joker-maker-overlay #jokerOverlay [isConnected]="isConnected()" />
   `,
 })
 export class CheatsTabComponent implements OnDestroy {
