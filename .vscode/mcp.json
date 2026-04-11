@@ -2,7 +2,7 @@
   "servers": {
     "CodeDesigner": {
       "type": "stdio",
-      "command": "${env:LOCALAPPDATA}/CodeDesigner/CodeDesigner.Ps2.McpServer.exe"
+      "command": "${env:LOCALAPPDATA}/CodeDesigner/McpServer/CodeDesigner.Ps2.McpServer.exe"
     }
   }
 }
