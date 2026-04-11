@@ -1,7 +1,12 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Security;
+using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using CodeDesigner.Ps2.Multiplayer.Config;
+using CodeDesigner.Ps2.Multiplayer.Crypto;
 using Microsoft.Extensions.Logging;
 
 namespace CodeDesigner.Ps2.Multiplayer.Servers;
@@ -9,32 +14,53 @@ namespace CodeDesigner.Ps2.Multiplayer.Servers;
 /// <summary>
 /// DNAS — Dynamic Network Authentication System server.
 ///
-/// PS2 games contact DNAS over HTTP before connecting to Medius to verify the
-/// disc and obtain a session token. This server replays pre-captured binary
-/// responses keyed by the game ID embedded in the request body.
+/// PS2 games contact the DNAS gateway over HTTPS (port 443) before connecting
+/// to Medius.  This server listens on two sockets:
 ///
-/// Protocol (HTTP, no SCERT layer):
-///   Client POSTs a binary DNAS request body.
-///   Server reads it, extracts the 8-byte game ID at offset 0x2C, and returns
-///   the pre-captured raw response file from:
-///     Data/<Region>/<gameId>.raw            (exact match)
-///     Data/<Region>/packets/<hex>_<flags>   (hash-based fallback)
-///     Data/<Region>/error.raw               (final fallback)
+///   • TcpListener on DnasHttpsPort (443) — HTTPS using SslStream.
+///     Handles the real PS2 DNAS flow with SSL/TLS.
 ///
-/// Default port: 10060
+///   • HttpListener on DnasPort (10060) — plain HTTP debug fallback.
+///     Useful for testing without SSL when the DNS redirect points here.
+///
+/// Request routing (mirrors DNASrep's Apache RewriteRules):
+///
+///   Path contains "connect"  →  ConnectHandler
+///     • Game ID at offset 0x2C (8 bytes)
+///     • Packet file key: hex(gameID) + "_" + hex(qrytype[0..4])
+///     • Response is encrypted with per-request Triple-DES keys (DnasCrypto)
+///
+///   Path contains "others"   →  OthersHandler
+///     • Game ID at offset 0x1B (8 bytes)
+///     • Same packet-file key scheme
+///     • Response is returned as-is (no crypto)
+///
+/// Response headers sent to the PS2:
+///   HTTP/1.0 200 OK
+///   Content-Type: image/gif
+///   Content-Length: N
 /// </summary>
 public class DnasServer
 {
-    private readonly MultiplayerConfig  _config;
+    private readonly MultiplayerConfig   _config;
     private readonly ILogger<DnasServer> _log;
-    private HttpListener?                _listener;
-    private CancellationToken            _ct;
 
-    /// <summary>Offset into the DNAS request body where the 8-byte ASCII game ID lives.</summary>
-    private const int GameIdOffset = 0x2C;
-    private const int GameIdLength = 8;
+    // HTTPS listener (SslStream over TcpListener)
+    private TcpListener? _httpsListener;
+
+    // Plain-HTTP debug fallback
+    private HttpListener? _httpListener;
+
+    private CancellationToken _ct;
 
     private readonly ConcurrentDictionary<string, byte[]> _responseCache = new();
+
+    // Game-ID extraction offsets per request type
+    private const int ConnectGameIdOffset = 0x2C;
+    private const int OthersGameIdOffset  = 0x1B;
+    private const int GameIdLength        = 8;
+    private const int QryTypeOffset       = 0x00;
+    private const int QryTypeLength       = 4;
 
     public DnasServer(MultiplayerConfig config, ILogger<DnasServer> log)
     {
@@ -42,112 +68,196 @@ public class DnasServer
         _log    = log;
     }
 
-    // -------------------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
     // Lifecycle
-    // -------------------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
 
     public Task StartAsync(CancellationToken ct)
     {
         _ct = ct;
 
-        // "+" binds to all interfaces; works on Linux without elevation and on
-        // Windows when run as Administrator (or with a netsh urlacl entry).
-        // If the privileged binding fails, fall back to localhost-only.
-        string prefix = $"http://+:{_config.DnasPort}/";
+        // HTTPS listener
+        if (_config.DnasHttpsPort > 0)
+            StartHttpsListener(ct);
 
-        try
-        {
-            _listener = new HttpListener();
-            _listener.Prefixes.Add(prefix);
-            _listener.Start();
-        }
-        catch (HttpListenerException ex) when (ex.ErrorCode == 5)
-        {
-            // Error 5 = Access Denied (Windows, no admin / no urlacl)
-            _log.LogWarning(
-                "[DNAS] Cannot bind to {Prefix} ({Msg}). " +
-                "Falling back to http://localhost:{FallbackPort}/. " +
-                "To listen on all interfaces without admin, run:  " +
-                "netsh http add urlacl url=http://+:{UrlAclPort}/ user=Everyone",
-                prefix, ex.Message, _config.DnasPort, _config.DnasPort);
+        // Plain-HTTP debug listener
+        if (_config.DnasPort > 0)
+            StartHttpListener(ct);
 
-            _listener = new HttpListener();
-            prefix = $"http://localhost:{_config.DnasPort}/";
-            _listener.Prefixes.Add(prefix);
-            _listener.Start();
-        }
-
-        _log.LogInformation("[DNAS] Listening on {Prefix} (region={Region})",
-            prefix, _config.DnasRegion);
-
-        _ = AcceptLoopAsync(ct);
         return Task.CompletedTask;
     }
 
     public void Stop()
     {
-        try { _listener?.Stop(); } catch { /* ignore */ }
+        try { _httpsListener?.Stop(); } catch { /* ignore */ }
+        try { _httpListener?.Stop();  } catch { /* ignore */ }
     }
 
-    // -------------------------------------------------------------------------
-    // Accept loop
-    // -------------------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
+    // HTTPS (TcpListener + SslStream)
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private async Task AcceptLoopAsync(CancellationToken ct)
+    private void StartHttpsListener(CancellationToken ct)
+    {
+        var cert = LoadCertificate();
+        if (cert == null)
+        {
+            _log.LogWarning("[DNAS] No certificate loaded — HTTPS listener disabled. " +
+                            "Place dnas.crt + dnas.key in the Certificates/ folder.");
+            return;
+        }
+
+        try
+        {
+            _httpsListener = new TcpListener(IPAddress.Parse(_config.BindAddress), _config.DnasHttpsPort);
+            _httpsListener.Start();
+            _log.LogInformation("[DNAS] HTTPS listening on {Addr}:{Port} (region={Region}) cert={Cn}",
+                _config.BindAddress, _config.DnasHttpsPort, _config.DnasRegion,
+                cert.GetNameInfo(X509NameType.SimpleName, false));
+            _ = HttpsAcceptLoopAsync(cert, ct);
+        }
+        catch (SocketException ex)
+        {
+            _log.LogWarning("[DNAS] Cannot bind HTTPS on port {Port} ({Msg}). " +
+                            "Run as root or use: sudo setcap 'cap_net_bind_service=+ep' <binary>",
+                _config.DnasHttpsPort, ex.Message);
+        }
+    }
+
+    private async Task HttpsAcceptLoopAsync(X509Certificate2 cert, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                var ctx = await _listener!.GetContextAsync();
-                _ = HandleRequestAsync(ctx);
+                var tcp = await _httpsListener!.AcceptTcpClientAsync(ct);
+                _ = HandleHttpsClientAsync(tcp, cert, ct);
+            }
+            catch (OperationCanceledException) { break; }
+            catch (ObjectDisposedException)    { break; }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "[DNAS] HTTPS accept error");
+            }
+        }
+    }
+
+    private async Task HandleHttpsClientAsync(TcpClient tcp, X509Certificate2 cert, CancellationToken ct)
+    {
+        var ep = tcp.Client.RemoteEndPoint?.ToString() ?? "?";
+        try
+        {
+            tcp.NoDelay = true;
+            var netStream = tcp.GetStream();
+
+            var sslStream = new SslStream(netStream, leaveInnerStreamOpen: false);
+
+            var authOpts = new SslServerAuthenticationOptions
+            {
+                ServerCertificate          = cert,
+                ClientCertificateRequired  = false,
+                // Allow older protocol versions; the PS2 uses SSLv3/TLS 1.0.
+                // On modern .NET the minimum is TLS 1.0 unless the OS allows lower.
+#pragma warning disable SYSLIB0039 // TLS 1.0/1.1 are intentionally enabled for PS2 compatibility
+                EnabledSslProtocols        = SslProtocols.Tls | SslProtocols.Tls11 | SslProtocols.Tls12,
+#pragma warning restore SYSLIB0039
+                AllowRenegotiation         = false,
+            };
+
+            await sslStream.AuthenticateAsServerAsync(authOpts, ct);
+
+            _log.LogDebug("[DNAS] SSL handshake OK from {Ep} proto={Proto} cipher={Cipher}",
+                ep, sslStream.SslProtocol, sslStream.CipherAlgorithm);
+
+            await HandleHttpRequestAsync(sslStream, ep, isConnect: null, ct);
+        }
+        catch (AuthenticationException ex)
+        {
+            _log.LogWarning("[DNAS] SSL handshake failed from {Ep}: {Msg}", ep, ex.Message);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _log.LogWarning("[DNAS] HTTPS client error {Ep}: {Msg}", ep, ex.Message);
+        }
+        finally
+        {
+            tcp.Close();
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Plain-HTTP debug fallback (HttpListener)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void StartHttpListener(CancellationToken ct)
+    {
+        string prefix = $"http://+:{_config.DnasPort}/";
+        try
+        {
+            _httpListener = new HttpListener();
+            _httpListener.Prefixes.Add(prefix);
+            _httpListener.Start();
+        }
+        catch (HttpListenerException ex) when (ex.ErrorCode == 5)
+        {
+            prefix = $"http://localhost:{_config.DnasPort}/";
+            _httpListener = new HttpListener();
+            _httpListener.Prefixes.Add(prefix);
+            _httpListener.Start();
+            _log.LogWarning("[DNAS] HTTP fallback bound to localhost only (access denied on +). " +
+                            "Run with admin or: netsh http add urlacl url=http://+:{Port}/ user=Everyone",
+                _config.DnasPort);
+        }
+        catch (SocketException ex)
+        {
+            _log.LogWarning("[DNAS] Cannot start plain-HTTP listener on {Port}: {Msg}", _config.DnasPort, ex.Message);
+            return;
+        }
+        _log.LogInformation("[DNAS] Plain-HTTP debug listener on {Prefix} (region={Region})", prefix, _config.DnasRegion);
+        _ = HttpAcceptLoopAsync(ct);
+    }
+
+    private async Task HttpAcceptLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var ctx = await _httpListener!.GetContextAsync();
+                _ = HandleLegacyRequestAsync(ctx, ct);
             }
             catch (HttpListenerException) when (ct.IsCancellationRequested) { break; }
             catch (ObjectDisposedException)                                  { break; }
             catch (Exception ex)
             {
-                _log.LogError(ex, "[DNAS] Accept error");
+                _log.LogError(ex, "[DNAS] HTTP accept error");
             }
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Per-request handler
-    // -------------------------------------------------------------------------
-
-    private async Task HandleRequestAsync(HttpListenerContext ctx)
+    private async Task HandleLegacyRequestAsync(HttpListenerContext ctx, CancellationToken ct)
     {
         var req  = ctx.Request;
         var resp = ctx.Response;
         var ep   = req.RemoteEndPoint?.ToString() ?? "?";
-
         try
         {
-            // Read the full POST body
             using var ms = new MemoryStream();
-            await req.InputStream.CopyToAsync(ms);
+            await req.InputStream.CopyToAsync(ms, ct);
             var body = ms.ToArray();
+            var path = req.Url?.AbsolutePath ?? "/";
 
-            var gameId   = ExtractGameId(body);
-            var response = ResolveResponse(gameId, body);
+            bool isConnect = IsConnectPath(path);
+            var (gameId, responseBytes) = ProcessRequest(body, isConnect, path);
 
-            _log.LogInformation("[DNAS] {Ep} {Method} {Url} gameId={Id} → {Len} bytes",
-                ep, req.HttpMethod, req.Url?.AbsolutePath, gameId, response.Length);
+            _log.LogInformation("[DNAS] HTTP {Ep} {Method} {Path} gameId={Id} → {Len} bytes",
+                ep, req.HttpMethod, path, gameId, responseBytes.Length);
 
-            if (response.Length > 0)
-            {
-                resp.ContentType     = "application/octet-stream";
-                resp.ContentLength64 = response.Length;
-                await resp.OutputStream.WriteAsync(response, _ct);
-            }
-            else
-            {
-                resp.StatusCode = 404;
-            }
+            WriteHttpResponse(resp, responseBytes);
         }
-        catch (Exception ex) when (!_ct.IsCancellationRequested)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            _log.LogWarning("[DNAS] {Ep} request error: {Msg}", ep, ex.Message);
+            _log.LogWarning("[DNAS] HTTP {Ep} error: {Msg}", ep, ex.Message);
             resp.StatusCode = 500;
         }
         finally
@@ -156,67 +266,286 @@ public class DnasServer
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Game ID extraction
-    // -------------------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
+    // Raw-stream HTTP/1.0 parser (used by HTTPS path)
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private string ExtractGameId(byte[] body)
+    private async Task HandleHttpRequestAsync(Stream stream, string ep, bool? isConnect, CancellationToken ct)
     {
-        if (body.Length < GameIdOffset + GameIdLength)
-            return "unknown";
+        try
+        {
+            // Read HTTP/1.0 request line + headers, then body (Content-Length bytes)
+            string requestLine;
+            Dictionary<string, string> headers;
+            byte[] body;
 
-        var raw = Encoding.ASCII.GetString(body, GameIdOffset, GameIdLength);
-        return raw.TrimEnd('\0').Trim();
+            try
+            {
+                (requestLine, headers, body) = await ReadHttpRequestAsync(stream, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning("[DNAS] HTTPS {Ep}: failed to parse HTTP request: {Msg}", ep, ex.Message);
+                return;
+            }
+
+            // Determine path from the request line  e.g. "POST /us-gw/connect HTTP/1.0"
+            var parts = requestLine.Split(' ');
+            var path  = parts.Length >= 2 ? parts[1] : "/";
+
+            bool connectPath = isConnect ?? IsConnectPath(path);
+            var (gameId, responseBytes) = ProcessRequest(body, connectPath, path);
+
+            _log.LogInformation("[DNAS] HTTPS {Ep} {ReqLine} gameId={Id} → {Len} bytes",
+                ep, Sanitize(requestLine), gameId, responseBytes.Length);
+
+            // Build HTTP/1.0 response (PS2 requires HTTP/1.0, not HTTP/1.1)
+            await WriteHttp10ResponseAsync(stream, responseBytes, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _log.LogWarning("[DNAS] HTTPS {Ep} handler error: {Msg}", ep, ex.Message);
+        }
     }
 
-    // -------------------------------------------------------------------------
-    // Response resolution
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Resolves the raw response bytes to return, checked in order:
-    ///   1. Data/<Region>/<gameId>.raw
-    ///   2. Data/<Region>/packets/ — file whose name starts with the FNV-1a hash of the body
-    ///   3. Data/<Region>/error.raw
-    /// </summary>
-    private byte[] ResolveResponse(string gameId, byte[] body)
+    /// <summary>Read a full HTTP/1.0 or HTTP/1.1 request from a raw stream.</summary>
+    private static async Task<(string requestLine, Dictionary<string, string> headers, byte[] body)>
+        ReadHttpRequestAsync(Stream stream, CancellationToken ct)
     {
-        var regionDir = DataDirectory(_config.DnasRegion);
+        // Read headers line by line until blank line
+        var headerBuf = new List<byte>(4096);
+        while (true)
+        {
+            int b = await ReadByteAsync(stream, ct);
+            if (b < 0) break;
+            headerBuf.Add((byte)b);
+            // Detect \r\n\r\n  or  \n\n — check the last 4 bytes directly to avoid per-iteration ToArray()
+            int count = headerBuf.Count;
+            if (count >= 4 &&
+                headerBuf[count - 4] == '\r' && headerBuf[count - 3] == '\n' &&
+                headerBuf[count - 2] == '\r' && headerBuf[count - 1] == '\n') break;
+            if (count >= 2 && headerBuf[count - 2] == '\n' && headerBuf[count - 1] == '\n') break;
+        }
 
-        // 1. Exact game-ID match
-        var exactPath = Path.Combine(regionDir, $"{gameId}.raw");
+        var headerText = Encoding.ASCII.GetString(headerBuf.ToArray());
+        var lines = headerText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        var requestLine = lines.Length > 0 ? lines[0] : "";
+
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 1; i < lines.Length; i++)
+        {
+            var colon = lines[i].IndexOf(':');
+            if (colon > 0)
+                headers[lines[i][..colon].Trim()] = lines[i][(colon + 1)..].Trim();
+        }
+
+        // Read body
+        byte[] body = Array.Empty<byte>();
+        if (headers.TryGetValue("Content-Length", out var clStr) && int.TryParse(clStr, out int cl) && cl > 0)
+        {
+            body = new byte[cl];
+            int read = 0;
+            while (read < cl)
+            {
+                int n = await stream.ReadAsync(body.AsMemory(read, cl - read), ct);
+                if (n == 0) break;
+                read += n;
+            }
+        }
+
+        return (requestLine, headers, body);
+    }
+
+    private static async Task<int> ReadByteAsync(Stream stream, CancellationToken ct)
+    {
+        var buf = new byte[1];
+        int n = await stream.ReadAsync(buf, ct);
+        return n == 0 ? -1 : buf[0];
+    }
+
+    private static async Task WriteHttp10ResponseAsync(Stream stream, byte[] body, CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+        sb.Append("HTTP/1.0 200 OK\r\n");
+        sb.Append("Content-Type: image/gif\r\n");
+        sb.Append($"Content-Length: {body.Length}\r\n");
+        sb.Append("Connection: close\r\n");
+        sb.Append("\r\n");
+        var header = Encoding.ASCII.GetBytes(sb.ToString());
+        await stream.WriteAsync(header, ct);
+        if (body.Length > 0)
+            await stream.WriteAsync(body, ct);
+        await stream.FlushAsync(ct);
+    }
+
+    private static void WriteHttpResponse(HttpListenerResponse resp, byte[] body)
+    {
+        resp.StatusCode      = 200;
+        resp.ContentType     = "image/gif";
+        resp.ContentLength64 = body.Length;
+        if (body.Length > 0)
+            resp.OutputStream.Write(body, 0, body.Length);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Request processing (shared by both HTTP paths)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private (string gameId, byte[] response) ProcessRequest(byte[] body, bool isConnect, string path)
+    {
+        int gameIdOffset = isConnect ? ConnectGameIdOffset : OthersGameIdOffset;
+        var gameId       = ExtractField(body, gameIdOffset,   GameIdLength);
+        var qryType      = ExtractField(body, QryTypeOffset,  QryTypeLength);
+        var fname        = $"{ToHex(body, gameIdOffset, GameIdLength)}_{ToHex(body, QryTypeOffset, QryTypeLength)}";
+
+        _log.LogDebug("[DNAS] Route={Route} gameId={Id} fname={File}",
+            isConnect ? "connect" : "others", gameId, fname);
+
+        var rawResponse = ResolveResponse(_config.DnasRegion, fname, gameId);
+
+        if (isConnect && rawResponse.Length > 0)
+        {
+            // Apply Triple-DES encryption passes to the connect response
+            rawResponse = DnasCrypto.EncryptConnectResponse(body, rawResponse);
+            _log.LogDebug("[DNAS] Connect response encrypted ({Len} bytes)", rawResponse.Length);
+        }
+
+        return (gameId, rawResponse);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Response resolution
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private byte[] ResolveResponse(string region, string fname, string gameId)
+    {
+        var regionDir  = DataDirectory(region);
+        var packetsDir = Path.Combine(regionDir, "packets");
+
+        // 1. Exact fname match in packets/
+        var exactPath = Path.Combine(packetsDir, fname);
         if (TryReadCached(exactPath, out var data))
         {
-            _log.LogDebug("[DNAS] Exact match: {Path}", exactPath);
+            _log.LogDebug("[DNAS] Packet match: {File}", fname);
             return data!;
         }
 
-        // 2. Hash-based match inside packets/ folder
-        var packetHash = ComputeBodyHash(body);
-        var packetsDir = Path.Combine(regionDir, "packets");
+        // 2. Prefix match (fname may have extra flags suffix in the filename)
         if (Directory.Exists(packetsDir))
         {
-            var prefix = packetHash.ToString("x16");
-            var match  = Directory.EnumerateFiles(packetsDir)
-                                  .FirstOrDefault(f =>
-                                      Path.GetFileName(f).StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            var gameIdHex = fname.Split('_')[0];
+            var match = Directory.EnumerateFiles(packetsDir)
+                .FirstOrDefault(f => Path.GetFileName(f).StartsWith(gameIdHex, StringComparison.OrdinalIgnoreCase));
             if (match != null && TryReadCached(match, out data))
             {
-                _log.LogDebug("[DNAS] Hash match: {File}", Path.GetFileName(match));
+                _log.LogDebug("[DNAS] Prefix match: {File}", Path.GetFileName(match));
                 return data!;
             }
         }
 
-        // 3. Error fallback
-        var errorPath = Path.Combine(regionDir, "error.raw");
-        if (TryReadCached(errorPath, out data))
+        // 3. Legacy <gameId>.raw
+        var legacyPath = Path.Combine(regionDir, $"{gameId}.raw");
+        if (TryReadCached(legacyPath, out data))
         {
-            _log.LogWarning("[DNAS] No match for gameId={Id}, sending error.raw", gameId);
+            _log.LogDebug("[DNAS] Legacy .raw match: {File}", $"{gameId}.raw");
             return data!;
         }
 
-        _log.LogWarning("[DNAS] No response file found for gameId={Id}", gameId);
+        // 4. error.raw fallback
+        var errorPath = Path.Combine(regionDir, "error.raw");
+        if (TryReadCached(errorPath, out data))
+        {
+            _log.LogWarning("[DNAS] No packet for fname={File} gameId={Id} — sending error.raw", fname, gameId);
+            return data!;
+        }
+
+        _log.LogWarning("[DNAS] No response for fname={File} gameId={Id}", fname, gameId);
         return Array.Empty<byte>();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Certificate loading
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private X509Certificate2? LoadCertificate()
+    {
+        // Determine cert + key paths
+        string certPath = ResolvePath(_config.DnasCertPath, "Certificates", "dnas.crt");
+        string keyPath  = ResolvePath(_config.DnasKeyPath,  "Certificates", "dnas.key");
+
+        // Fallback: try community certs matching the configured region
+        if (!File.Exists(certPath))
+        {
+            var regionCert = RegionCertName(_config.DnasRegion);
+            certPath = ResolvePath("", "Certificates", regionCert + ".pem");
+            keyPath  = ResolvePath("", "Certificates", regionCert + "-key.pem");
+        }
+
+        if (!File.Exists(certPath))
+        {
+            _log.LogWarning("[DNAS] Certificate not found at {Path}", certPath);
+            return null;
+        }
+
+        try
+        {
+            if (File.Exists(keyPath))
+            {
+                // PEM cert + separate PEM key (the DNASrep community certs)
+                return X509Certificate2.CreateFromPemFile(certPath, keyPath);
+            }
+            else
+            {
+                // Single PFX/PKCS12 or PEM with embedded key
+                return new X509Certificate2(certPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("[DNAS] Failed to load certificate from {Path}: {Msg}", certPath, ex.Message);
+            return null;
+        }
+    }
+
+    private static string RegionCertName(string region) => region switch
+    {
+        "eu-gw"  => "cert-eu",
+        "gai-gw" => "cert-jp",
+        _        => "cert-us",
+    };
+
+    private static string ResolvePath(string configured, string subDir, string defaultFile)
+    {
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured;
+
+        var candidate = Path.Combine(AppContext.BaseDirectory, subDir, defaultFile);
+        if (File.Exists(candidate)) return candidate;
+        return Path.Combine(subDir, defaultFile);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Utilities
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static bool IsConnectPath(string path)
+    {
+        // Match paths like /us-gw/connect, /us-gw/v2.5_i-connect, /connect …
+        // Anything NOT matching "others" or "v2.5_others" is treated as connect.
+        var lower = path.ToLowerInvariant();
+        return !lower.Contains("others");
+    }
+
+    private static string ExtractField(byte[] body, int offset, int length)
+    {
+        if (body.Length < offset + length) return "unknown";
+        return Encoding.ASCII.GetString(body, offset, length).TrimEnd('\0').Trim();
+    }
+
+    private static string ToHex(byte[] body, int offset, int length)
+    {
+        if (body.Length < offset + length) return new string('0', length * 2);
+        return Convert.ToHexString(body, offset, length).ToLowerInvariant();
     }
 
     private string DataDirectory(string region)
@@ -251,39 +580,14 @@ public class DnasServer
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Log sanitization — strips control characters that could be used to forge
-    // log entries (CRLF injection / log-forging).
-    // -------------------------------------------------------------------------
-
     private static string Sanitize(string? value)
     {
         if (value is null) return "(null)";
-        // Replace any control character (< 0x20) and DEL (0x7F) with a space
         var chars = value.ToCharArray();
         for (int i = 0; i < chars.Length; i++)
-        {
             if (chars[i] < ' ' || chars[i] == '\x7F')
                 chars[i] = ' ';
-        }
         return new string(chars);
-    }
-
-    // -------------------------------------------------------------------------
-    // FNV-1a 64-bit hash for packet-file matching
-    // -------------------------------------------------------------------------
-
-    private static ulong ComputeBodyHash(byte[] data)
-    {
-        const ulong fnvPrime  = 0x00000100000001B3UL;
-        const ulong fnvOffset = 0xCBF29CE484222325UL;
-        ulong hash = fnvOffset;
-        foreach (var b in data)
-        {
-            hash ^= b;
-            hash *= fnvPrime;
-        }
-        return hash;
     }
 }
 
