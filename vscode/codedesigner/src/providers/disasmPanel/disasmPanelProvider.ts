@@ -897,12 +897,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const exeName = process.platform === 'win32'
             ? 'CodeDesigner.Ps2.Multiplayer.exe'
             : 'CodeDesigner.Ps2.Multiplayer';
-        const exePath = path.join(installDir, exeName);
+        const exePath = path.join(installDir, 'Multiplayer', exeName);
 
         if (!fs.existsSync(exePath)) {
+            const multiDir = path.join(installDir, 'Multiplayer');
             out.error(`Multiplayer server not found: ${exePath}. Build the project first to deploy it.`);
             vscode.window.showErrorMessage(
-                `CodeDesigner.Ps2.Multiplayer not found in ${installDir}. ` +
+                `CodeDesigner.Ps2.Multiplayer not found in ${multiDir}. ` +
                 'Build the Multiplayer project (dotnet build CodeDesigner.Ps2.Multiplayer) to deploy it.'
             );
             return;
