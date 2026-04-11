@@ -100,10 +100,18 @@ public class DnsServer
 
         try
         {
-            if (buf.Length < 12) return; // too short to be a DNS message
+            if (buf.Length < 12)
+            {
+                _log.LogDebug("[DNS] Query from {Ep} too short ({Len} bytes, need 12)", client, buf.Length);
+                return;
+            }
 
             string? qname = ParseQName(buf, 12, out int afterQname);
-            if (qname == null || afterQname + 4 > buf.Length) return;
+            if (qname == null || afterQname + 4 > buf.Length)
+            {
+                _log.LogDebug("[DNS] Malformed query from {Ep}: invalid QNAME", client);
+                return;
+            }
 
             ushort qtype  = (ushort)((buf[afterQname]     << 8) | buf[afterQname + 1]);
             // ushort qclass = (ushort)((buf[afterQname + 2] << 8) | buf[afterQname + 3]); // unused
@@ -234,8 +242,7 @@ public class DnsServer
         try
         {
             using var fwd = new UdpClient();
-            fwd.Connect(Upstream);
-            await fwd.SendAsync(query, query.Length);
+            await fwd.SendAsync(query, query.Length, Upstream);
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(3));

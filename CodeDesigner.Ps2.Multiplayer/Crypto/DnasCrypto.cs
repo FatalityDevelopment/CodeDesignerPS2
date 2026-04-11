@@ -175,7 +175,7 @@ public static class DnasCrypto
             throw new ArgumentException("Hex string length must be even.", nameof(hex));
         var result = new byte[hex.Length / 2];
         for (int i = 0; i < result.Length; i++)
-            result[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+            result[i] = byte.Parse(hex.AsSpan(i * 2, 2), System.Globalization.NumberStyles.HexNumber);
         return result;
     }
 }

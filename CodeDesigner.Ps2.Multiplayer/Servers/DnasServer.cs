@@ -319,14 +319,12 @@ public class DnasServer
             int b = await ReadByteAsync(stream, ct);
             if (b < 0) break;
             headerBuf.Add((byte)b);
-            // Detect \r\n\r\n  or  \n\n
-            if (headerBuf.Count >= 4)
-            {
-                var tail = headerBuf.ToArray();
-                int n = tail.Length;
-                if (tail[n - 4] == '\r' && tail[n - 3] == '\n' && tail[n - 2] == '\r' && tail[n - 1] == '\n') break;
-                if (tail[n - 2] == '\n' && tail[n - 1] == '\n') break;
-            }
+            // Detect \r\n\r\n  or  \n\n — check the last 4 bytes directly to avoid per-iteration ToArray()
+            int count = headerBuf.Count;
+            if (count >= 4 &&
+                headerBuf[count - 4] == '\r' && headerBuf[count - 3] == '\n' &&
+                headerBuf[count - 2] == '\r' && headerBuf[count - 1] == '\n') break;
+            if (count >= 2 && headerBuf[count - 2] == '\n' && headerBuf[count - 1] == '\n') break;
         }
 
         var headerText = Encoding.ASCII.GetString(headerBuf.ToArray());
@@ -398,7 +396,7 @@ public class DnasServer
         int gameIdOffset = isConnect ? ConnectGameIdOffset : OthersGameIdOffset;
         var gameId       = ExtractField(body, gameIdOffset,   GameIdLength);
         var qryType      = ExtractField(body, QryTypeOffset,  QryTypeLength);
-        var fname        = ToHex(body, gameIdOffset, GameIdLength) + "_" + ToHex(body, QryTypeOffset, QryTypeLength);
+        var fname        = $"{ToHex(body, gameIdOffset, GameIdLength)}_{ToHex(body, QryTypeOffset, QryTypeLength)}";
 
         _log.LogDebug("[DNAS] Route={Route} gameId={Id} fname={File}",
             isConnect ? "connect" : "others", gameId, fname);
