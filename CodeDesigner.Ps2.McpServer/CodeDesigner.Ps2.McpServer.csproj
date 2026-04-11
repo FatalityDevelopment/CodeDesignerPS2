@@ -20,19 +20,34 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
   </ItemGroup>
 
-  <!-- After each build, copy the MCP server output to %LOCALAPPDATA%\CodeDesigner so that
-       the .vscode/mcp.json and .vs/mcp.json can reference the exe directly without dotnet run. -->
-  <Target Name="CopyMcpServerToLocalAppData" AfterTargets="Build" Condition="'$(LOCALAPPDATA)' != ''">
+  <!--
+    Deploy build output to a 'McpServer' subdirectory inside the CodeDesigner
+    install directory so the VSCode extension and mcp.json can locate the MCP
+    server without user configuration.  The subdirectory keeps McpServer
+    assemblies isolated from the Bridge deployment to avoid DLL contamination
+    (ModelContextProtocol pulls in Microsoft.Extensions.* 10.x which conflicts
+    with the Bridge's 8.x dependencies).
+
+    Install directory mirrors the C# DatabasePaths.GetInstallDirectory() logic:
+      Windows     →  %LOCALAPPDATA%\CodeDesigner\McpServer\
+      Linux/macOS →  $HOME/.local/share/CodeDesigner/McpServer/
+  -->
+  <Target Name="DeployToInstallDir" AfterTargets="Build">
     <PropertyGroup>
-      <McpInstallDir>$(LOCALAPPDATA)\CodeDesigner\</McpInstallDir>
+      <_LocalAppData Condition="'$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)</_LocalAppData>
+      <_LocalAppData Condition="'$(LOCALAPPDATA)' == '' AND '$(HOME)' != ''">$(HOME)/.local/share</_LocalAppData>
+      <_InstallDir Condition="'$(_LocalAppData)' != ''">$(_LocalAppData)/CodeDesigner/McpServer</_InstallDir>
     </PropertyGroup>
-    <MakeDir Directories="$(McpInstallDir)" />
-    <ItemGroup>
-      <McpBuildOutput Include="$(OutputPath)**\*" />
+    <MakeDir Directories="$(_InstallDir)" Condition="'$(_InstallDir)' != ''" />
+    <ItemGroup Condition="'$(_InstallDir)' != ''">
+      <_DeployFiles Include="$(OutputPath)**\*" />
     </ItemGroup>
-    <Copy SourceFiles="@(McpBuildOutput)"
-          DestinationFolder="$(McpInstallDir)%(RecursiveDir)"
-          SkipUnchangedFiles="true" />
+    <Copy
+      SourceFiles="@(_DeployFiles)"
+      DestinationFiles="@(_DeployFiles->'$(_InstallDir)/%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true"
+      Condition="'$(_InstallDir)' != ''" />
+    <Message Text="[CodeDesigner.McpServer] Deployed to $(_InstallDir)" Importance="high" Condition="'$(_InstallDir)' != ''" />
   </Target>
 
 </Project>
