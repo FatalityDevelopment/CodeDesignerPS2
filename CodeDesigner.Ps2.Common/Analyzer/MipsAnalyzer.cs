@@ -127,15 +127,14 @@ namespace CodeDesigner.Ps2.Common
                     }
                 }
 
-                // Check for LUI+ADDIU or LUI+ORI patterns and append pointer target hint
+                // Check for LUI+ADDIU or LUI+ORI patterns and append a label/string hint when available
                 uint? pointerTarget = TryGetPointerLoadTarget(instruction, cpu);
                 if (pointerTarget.HasValue && (lookupLabel != null || bus != null))
                 {
                     string? hint = BuildTargetHint(pointerTarget.Value, bus, lookupLabel);
                     if (hint != null)
-                        analysis += $" → 0x{pointerTarget.Value:X8} {hint}";
-                    else
-                        analysis += $" → 0x{pointerTarget.Value:X8}";
+                        analysis += $" {hint}";
+                    // No hint: the instruction's own Analyze() already shows the computed address
                 }
 
                 return $"; {analysis}";

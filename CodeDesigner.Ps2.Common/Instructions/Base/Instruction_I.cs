@@ -30,7 +30,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"I-Type: {Disasm(args, pc)}";
+            return string.Empty;
         }
     }
 }
