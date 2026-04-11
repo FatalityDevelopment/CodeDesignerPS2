@@ -49,19 +49,14 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
+            if (cpu == null) return string.Empty;
+            ulong rtVal = cpu.RegsLo[args.Rt];
+            if (rtVal == 0)
             {
-                ulong rsVal = cpu.RegsLo[args.Rs];
-                ulong rtVal = cpu.RegsLo[args.Rt];
-                bool willMove = rtVal == 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rt)} = 0x{rtVal:X16}, move = {willMove}";
+                uint rsVal = (uint)cpu.RegsLo[args.Rs];
+                return $"{CpuHelpers.RegName(args.Rd)} ← {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X8}  [MOVED]";
             }
-            return eq;
+            return $"skip  ({CpuHelpers.RegName(args.Rt)} ≠ 0)";
         }
     }
 
@@ -101,19 +96,14 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
+            if (cpu == null) return string.Empty;
+            ulong rtVal = cpu.RegsLo[args.Rt];
+            if (rtVal != 0)
             {
-                ulong rsVal = cpu.RegsLo[args.Rs];
-                ulong rtVal = cpu.RegsLo[args.Rt];
-                bool willMove = rtVal != 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rt)} = 0x{rtVal:X16}, move = {willMove}";
+                uint rsVal = (uint)cpu.RegsLo[args.Rs];
+                return $"{CpuHelpers.RegName(args.Rd)} ← {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X8}  [MOVED]";
             }
-            return eq;
+            return $"skip  ({CpuHelpers.RegName(args.Rt)} = 0)";
         }
     }
 
@@ -151,16 +141,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            uint upperValue = (uint)(args.Imm << 16);
-            string eq = Equation
-                .Replace("rt", CpuHelpers.RegName(args.Rt))
-                .Replace("imm", $"${args.Imm:X4}");
-            
-            if (cpu != null)
-            {
-                return $"{eq} => ${args.Imm:X4} << 16 = 0x{upperValue:X8}";
-            }
-            return eq;
+            return $"{CpuHelpers.RegName(args.Rt)} = 0x{(uint)(args.Imm << 16):X8}";
         }
     }
 
@@ -195,7 +176,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return "No operation";
+            return string.Empty;
         }
     }
 
@@ -241,11 +222,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (args.Shamt != 0)
-            {
-                return $"Memory synchronization barrier (type {args.Shamt})";
-            }
-            return "Memory synchronization barrier";
+            return string.Empty;
         }
     }
 
@@ -301,15 +278,11 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         {
             bool tf = (args.Rt & 1) != 0;
             int cc = (args.Rt >> 2) & 0x7;
-            string mnemonic = tf ? "movt" : "movf";
-            string eq = $"{mnemonic} {CpuHelpers.RegName(args.Rd)}, {CpuHelpers.RegName(args.Rs)}, {cc}";
-            if (cpu != null)
-            {
-                bool fcc = cpu.COP1.GetConditionCode();
-                bool willMove = tf == fcc;
-                return $"{eq} => FCC0={fcc}, move={willMove}";
-            }
-            return eq;
+            if (cpu == null) return string.Empty;
+            bool fcc = cpu.COP1.GetConditionCode();
+            if (tf == fcc)
+                return $"{CpuHelpers.RegName(args.Rd)} ← {CpuHelpers.RegName(args.Rs)}  [MOVED FCC={fcc}]";
+            return $"skip  (FCC={fcc} ≠ {tf})";
         }
     }
 
@@ -337,9 +310,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rd", CpuHelpers.RegName(args.Rd));
-            if (cpu != null) return $"{eq} => SA={cpu.SA}, rd={CpuHelpers.RegName(args.Rd)}";
-            return eq;
+            if (cpu == null) return string.Empty;
+            return $"{CpuHelpers.RegName(args.Rd)} = SA=0x{cpu.SA:X}";
         }
     }
 
@@ -367,9 +339,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-            if (cpu != null) return $"{eq} => {CpuHelpers.RegName(args.Rs)}={cpu.RegsLo[args.Rs]}, SA={cpu.SA}";
-            return eq;
+            if (cpu == null) return string.Empty;
+            return $"SA = {CpuHelpers.RegName(args.Rs)}=0x{(uint)cpu.RegsLo[args.Rs]:X8}";
         }
     }
 }
