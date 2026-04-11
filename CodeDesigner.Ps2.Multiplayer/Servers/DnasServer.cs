@@ -50,15 +50,35 @@ public class DnasServer
     {
         _ct = ct;
 
-        _listener = new HttpListener();
-
         // "+" binds to all interfaces; works on Linux without elevation and on
         // Windows when run as Administrator (or with a netsh urlacl entry).
-        _listener.Prefixes.Add($"http://+:{_config.DnasPort}/");
-        _listener.Start();
+        // If the privileged binding fails, fall back to localhost-only.
+        string prefix = $"http://+:{_config.DnasPort}/";
 
-        _log.LogInformation("[DNAS] Listening on http://+:{Port}/ (region={Region})",
-            _config.DnasPort, _config.DnasRegion);
+        try
+        {
+            _listener = new HttpListener();
+            _listener.Prefixes.Add(prefix);
+            _listener.Start();
+        }
+        catch (HttpListenerException ex) when (ex.ErrorCode == 5)
+        {
+            // Error 5 = Access Denied (Windows, no admin / no urlacl)
+            _log.LogWarning(
+                "[DNAS] Cannot bind to {Prefix} ({Msg}). " +
+                "Falling back to http://localhost:{FallbackPort}/. " +
+                "To listen on all interfaces without admin, run:  " +
+                "netsh http add urlacl url=http://+:{UrlAclPort}/ user=Everyone",
+                prefix, ex.Message, _config.DnasPort, _config.DnasPort);
+
+            _listener = new HttpListener();
+            prefix = $"http://localhost:{_config.DnasPort}/";
+            _listener.Prefixes.Add(prefix);
+            _listener.Start();
+        }
+
+        _log.LogInformation("[DNAS] Listening on {Prefix} (region={Region})",
+            prefix, _config.DnasRegion);
 
         _ = AcceptLoopAsync(ct);
         return Task.CompletedTask;
