@@ -218,6 +218,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Number of rows returned by the last QUERYDB statement.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public int? DbRowCount { get; set; }
+
+        // Pad / controller input results (PADGETSTATE / PADGETTYPE)
+        /// <summary>Full pad state returned by PADGETSTATE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public PadStateInfo? PadState { get; set; }
+        /// <summary>Controller type value returned by PADGETTYPE (0=NotConnected, 1=DualShock2, etc.).</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public byte? PadControllerType { get; set; }
     }
 
     /// <summary>Snapshot metadata wire payload returned by GETSNAPSHOTS.</summary>
@@ -279,5 +287,24 @@ namespace CodeDesigner.Ps2.Bridge
 
         [System.Text.Json.Serialization.JsonPropertyName("codes")]
         public List<string> Codes { get; set; } = [];
+    }
+
+    /// <summary>Wire payload for a pad state snapshot returned by PADGETSTATE.</summary>
+    public class PadStateInfo
+    {
+        /// <summary>PS2 button bitmask; a bit that is <b>clear</b> means pressed.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("buttons")]
+        public uint Buttons { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("lx")]
+        public byte Lx { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("ly")]
+        public byte Ly { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("rx")]
+        public byte Rx { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("ry")]
+        public byte Ry { get; set; }
+        /// <summary>16 pressure values (0–255) in PadDualshock2::Inputs order.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("pressures")]
+        public byte[] Pressures { get; set; } = [];
     }
 }

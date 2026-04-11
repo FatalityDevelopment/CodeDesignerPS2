@@ -127,6 +127,25 @@ interface CommandMessage {
     GameSerial?: string;
     GameCrc?: string;
     GameTitle?: string;
+    // Pad / controller input (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
+    /** Unified pad slot index (0–7). */
+    PadSlot?: number;
+    /** Button index in PadDualshock2::Inputs (0–25) for PADSETBUTTON. */
+    PadButtonIndex?: number;
+    /** Normalized button value (0.0–1.0) for PADSETBUTTON. */
+    PadButtonValue?: number;
+    /** Left stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadLx?: number;
+    /** Left stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadLy?: number;
+    /** Right stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadRx?: number;
+    /** Right stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadRy?: number;
+    /** PS2 button bitmask for PADSETSTATE (reserved; button state derived from pressures). */
+    PadButtons?: number;
+    /** 16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order). */
+    PadPressures?: number[];
 }
 
 /**
@@ -439,6 +458,10 @@ interface CommandResponse {
     GameCheats?: GameCheatInfo[];
     GameTitle?: string;
     CheatListTitle?: string;
+    // PADGETSTATE result
+    PadState?: PadStateInfo;
+    // PADGETTYPE result
+    PadControllerType?: number;
 }
 
 /**
@@ -517,6 +540,24 @@ export interface PineWatchInfo {
 export interface CallTraceEntry {
     From: string;
     To:   string;
+}
+
+/**
+ * Full pad state snapshot returned by PADGETSTATE.
+ */
+export interface PadStateInfo {
+    /** PS2 button bitmask; a bit that is clear means the button is pressed. */
+    buttons: number;
+    /** Left stick X axis (0–255, 0x7F = centred). */
+    lx: number;
+    /** Left stick Y axis (0–255, 0x7F = centred). */
+    ly: number;
+    /** Right stick X axis (0–255, 0x7F = centred). */
+    rx: number;
+    /** Right stick Y axis (0–255, 0x7F = centred). */
+    ry: number;
+    /** 16 pressure values (0–255) in PadDualshock2::Inputs order. */
+    pressures: number[];
 }
 
 /**
