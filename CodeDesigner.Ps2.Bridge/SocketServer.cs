@@ -771,6 +771,27 @@ namespace CodeDesigner.Ps2.Bridge
                         });
                     }
                 }
+                else if (cmdUpper == "SESSION_START")
+                {
+                    // Notify subscribers that an AI session has started so the
+                    // front end can automatically enable Follow AI mode.
+                    notificationJson = JsonSerializer.Serialize(new
+                    {
+                        type = "ai_session_start",
+                    });
+                }
+                else if (cmdUpper is "ADDLABELENTRY" or "ADDLABELENTRIES" or "CREATELABELSET" or "DELETELABELENTRY" or "DELETELABELSET")
+                {
+                    // Notify subscribers that the label set has changed so the
+                    // front end can refresh the label manager UI.
+                    notificationJson = JsonSerializer.Serialize(new
+                    {
+                        type    = "ai_label_update",
+                        command = command.Command,
+                        setName = command.SetName,
+                        gameId  = command.GameId,
+                    });
+                }
 
                 if (notificationJson == null) { return; }
 
@@ -1399,6 +1420,14 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "MCPCONFIG_UPDATE":
                         return HandleMcpConfigUpdate(command.McpConfigKey, command.McpConfigValue);
+
+                    // ── AI session lifecycle ───────────────────────────────────────────
+                    case "SESSION_START":
+                        return CreateSuccessResponse("AI session started");
+
+                    // ── Batch label entry ──────────────────────────────────────────────
+                    case "ADDLABELENTRIES":
+                        return HandleAddLabelEntries(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntries);
 
                     default:
                         // Echo for unknown commands

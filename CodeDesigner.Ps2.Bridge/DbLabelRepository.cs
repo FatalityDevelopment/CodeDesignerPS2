@@ -308,6 +308,89 @@ namespace CodeDesigner.Ps2.Bridge
             return DbMapper.ToMgrSet(loaded);
         }
 
+        /// <summary>
+        /// Batch add-or-update multiple label entries in a single set, saving changes
+        /// once at the end for efficiency.
+        /// </summary>
+        internal async Task<MgrSet> AddOrUpdateEntriesAsync(string gameId, string setName, IReadOnlyList<MgrEntry> entries)
+        {
+            if (entries.Count == 0)
+                throw new ArgumentException("entries must not be empty", nameof(entries));
+
+            var discId = await ResolveGameDiscIdAsync(gameId);
+            if (discId is null)
+                throw new InvalidOperationException($"No GameDisc found for '{gameId}'.");
+
+            var entity = await _db.LabelSets
+                                  .Include(ls => ls.Labels)
+                                  .Include(ls => ls.GameDisc)
+                                  .FirstOrDefaultAsync(ls => ls.GameDiscId == discId && ls.SetName == setName);
+
+            if (entity is null)
+            {
+                entity = new DbLabelSet { SetName = setName, GameDiscId = discId, GameId = gameId, IsBuiltIn = false };
+                _db.LabelSets.Add(entity);
+                await _db.SaveChangesAsync();
+                // Re-load so entity.Labels is tracked.
+                entity = await _db.LabelSets
+                                  .Include(ls => ls.Labels)
+                                  .Include(ls => ls.GameDisc)
+                                  .FirstAsync(ls => ls.Id == entity.Id);
+            }
+
+            foreach (var entry in entries)
+            {
+                int? parentId = null;
+                if (entry.ParentAddress != null)
+                {
+                    var normParent = NormalizeAddress(entry.ParentAddress);
+                    var parent = entity.Labels.FirstOrDefault(l =>
+                        NormalizeAddress(l.Address).Equals(normParent, StringComparison.OrdinalIgnoreCase));
+                    if (parent is null)
+                        continue; // skip entries whose parent doesn't exist
+                    parentId = parent.Id;
+                }
+
+                var norm = NormalizeAddress(entry.Address);
+                var existing = entity.Labels.FirstOrDefault(l =>
+                    NormalizeAddress(l.Address).Equals(norm, StringComparison.OrdinalIgnoreCase));
+
+                if (existing is not null)
+                {
+                    existing.Name           = entry.Name;
+                    existing.Comment        = entry.Comment;
+                    existing.ValueType      = entry.ValueType;
+                    existing.Hidden         = entry.Hidden;
+                    existing.Dynamic        = entry.Dynamic;
+                    existing.Type           = DbMapper.ToDbLabelType(entry.Type);
+                    existing.ParentId       = parentId;
+                    existing.Offset         = entry.Offset;
+                    existing.ArgRegsJson    = entry.ArgRegs    is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(entry.ArgRegs)    : null;
+                    existing.ReturnRegsJson = entry.ReturnRegs is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(entry.ReturnRegs) : null;
+                    existing.ElementStride  = entry.ElementStride;
+                    existing.ElementCount   = entry.ElementCount;
+                    existing.NodeNextOffset = entry.NodeNextOffset;
+                    existing.NodeSize       = entry.NodeSize;
+                }
+                else
+                {
+                    var newLabel = DbMapper.ToDbLabel(entry, entity.Id, parentId);
+                    _db.Labels.Add(newLabel);
+                    // Add to entity.Labels so subsequent entries in the batch can
+                    // reference this one as a parent by address.
+                    entity.Labels.Add(newLabel);
+                }
+            }
+
+            await _db.SaveChangesAsync();
+
+            var loaded = await _db.LabelSets
+                                  .Include(ls => ls.Labels)
+                                  .Include(ls => ls.GameDisc)
+                                  .FirstAsync(ls => ls.Id == entity.Id);
+            return DbMapper.ToMgrSet(loaded);
+        }
+
         /// <summary>Deletes a single label entry by address. Children are cascade-deleted.</summary>
         internal async Task<MgrSet> DeleteEntryAsync(string gameId, string setName, string address)
         {
