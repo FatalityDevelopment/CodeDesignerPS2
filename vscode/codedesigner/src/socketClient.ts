@@ -146,6 +146,16 @@ interface CommandMessage {
     PadButtons?: number;
     /** 16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order). */
     PadPressures?: number[];
+    // DEV9 Network (NETCAPTURE / NETRECVCAPTURE / NETINJECT / NETINJECTTX / NETDISASSEMBLE / NETSETFILTER)
+    NetCaptureEnable?: boolean;
+    NetCaptureDirection?: number;
+    NetCaptureMaxQueue?: number;
+    NetMaxPackets?: number;
+    NetFrameData?: string;
+    NetFilterType?: number;
+    NetFilterProtocol?: number;
+    NetFilterPort?: number;
+    NetFilterIP?: string;
 }
 
 /**
@@ -462,6 +472,12 @@ interface CommandResponse {
     PadState?: PadStateInfo;
     // PADGETTYPE result
     PadControllerType?: number;
+    // NETGETSTATUS / NETGETSTATS / NETRECVCAPTURE / NETDISASSEMBLE results
+    NetStatus?: NetStatusInfo;
+    NetStats?: NetStatsInfo;
+    CapturedPackets?: CapturedPacketInfo[];
+    DissectionText?: string;
+    InjectionSuccess?: boolean;
 }
 
 /**
@@ -3065,6 +3081,65 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_EXPORT', McpOrchestrationId: id, OutputPath: outputPath });
         if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_EXPORT failed'); }
     }
+
+    // ── DEV9 Network commands ────────────────────────────────────────────────
+
+    /** NETGETSTATUS — queries the DEV9 network adapter status. */
+    public async netGetStatus(): Promise<NetStatusInfo> {
+        const r = await this.sendCommand({ Command: 'NETGETSTATUS' });
+        if (!r.Success) { throw new Error(r.Error || 'NETGETSTATUS failed'); }
+        return r.NetStatus!;
+    }
+
+    /** NETCAPTURE — enables or disables packet capture. */
+    public async netCapture(enable: boolean, direction?: number, maxQueue?: number): Promise<void> {
+        const r = await this.sendCommand({
+            Command: 'NETCAPTURE',
+            NetCaptureEnable: enable,
+            NetCaptureDirection: direction,
+            NetCaptureMaxQueue: maxQueue,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETCAPTURE failed'); }
+    }
+
+    /** NETRECVCAPTURE — drains captured packets from the ring buffer. */
+    public async netRecvCapture(maxPackets?: number): Promise<CapturedPacketInfo[]> {
+        const r = await this.sendCommand({
+            Command: 'NETRECVCAPTURE',
+            NetMaxPackets: maxPackets,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETRECVCAPTURE failed'); }
+        return r.CapturedPackets ?? [];
+    }
+
+    /** NETDISASSEMBLE — dissects a raw Ethernet frame and returns human-readable text. */
+    public async netDisassemble(frameBase64: string): Promise<string> {
+        const r = await this.sendCommand({
+            Command: 'NETDISASSEMBLE',
+            NetFrameData: frameBase64,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETDISASSEMBLE failed'); }
+        return r.DissectionText ?? '';
+    }
+
+    /** NETGETSTATS — returns TX/RX counters and capture queue statistics. */
+    public async netGetStats(): Promise<NetStatsInfo> {
+        const r = await this.sendCommand({ Command: 'NETGETSTATS' });
+        if (!r.Success) { throw new Error(r.Error || 'NETGETSTATS failed'); }
+        return r.NetStats!;
+    }
+
+    /** NETSETFILTER — sets the capture filter (protocol/port/IP). */
+    public async netSetFilter(filterType: number, protocol?: number, port?: number, ip?: string): Promise<void> {
+        const r = await this.sendCommand({
+            Command: 'NETSETFILTER',
+            NetFilterType: filterType,
+            NetFilterProtocol: protocol,
+            NetFilterPort: port,
+            NetFilterIP: ip,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETSETFILTER failed'); }
+    }
 }
 
 /** Snapshot metadata entry returned by GETSNAPSHOTS. */
@@ -3074,5 +3149,34 @@ export interface SnapshotInfo {
     description?: string;
     snapshotPath: string;
     snapshotDateTime: string;
+}
+
+// ── Network / DEV9 types ─────────────────────────────────────────────────────
+
+/** Network adapter status returned by NETGETSTATUS. */
+export interface NetStatusInfo {
+    enabled: boolean;
+    adapterType: number;
+    ps2Mac: string;
+    ps2IP: string;
+}
+
+/** Network statistics returned by NETGETSTATS. */
+export interface NetStatsInfo {
+    txPackets: number;
+    rxPackets: number;
+    txBytes: number;
+    rxBytes: number;
+    captureQueueSize: number;
+    droppedCount: number;
+}
+
+/** A single captured packet returned by NETRECVCAPTURE. */
+export interface CapturedPacketInfo {
+    direction: number;
+    directionName: string;
+    timestampUs: number;
+    length: number;
+    data: string;
 }
 

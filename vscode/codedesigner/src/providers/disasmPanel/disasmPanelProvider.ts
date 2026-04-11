@@ -9,6 +9,7 @@ import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { AiConfigProvider } from '../aiConfig/aiConfigProvider';
 import { McpMemoryEditorProvider } from '../mcpMemoryEditor/mcpMemoryEditorProvider';
+import { PacketViewerProvider } from '../packetViewer/packetViewerProvider';
 import { ArchiveCheat } from '../../webview/disasm-panel/types';
 
 interface EmuSettings {
@@ -116,10 +117,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     ) {
         this._mcpMemoryEditorProvider = new McpMemoryEditorProvider(socketClient);
         this._aiConfigProvider        = new AiConfigProvider(_extensionUri, socketClient);
+        this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient);
     }
 
     private readonly _mcpMemoryEditorProvider: McpMemoryEditorProvider;
     private readonly _aiConfigProvider: AiConfigProvider;
+    private readonly _packetViewerProvider: PacketViewerProvider;
 
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
@@ -357,6 +360,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // ── AI Configuration ──────────────────────────────────────
                 case 'openAiConfig':
                     this._aiConfigProvider.open();
+                    break;
+                // ── Packet Viewer ─────────────────────────────────────────
+                case 'openPacketViewer':
+                    this._packetViewerProvider.open();
                     break;
                 // ── Follow-AI mode toggle ─────────────────────────────────
                 case 'toggleFollowAi': {
