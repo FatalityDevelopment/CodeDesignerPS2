@@ -233,8 +233,11 @@ export class JokerMakerOverlayComponent implements OnDestroy {
   }
 
   private stopPolling(): void {
+    const wasPolling = this.isPolling();
     this.isPolling.set(false);
     this.livePadButtons.set(0xFFFF);
-    this.bridge.postMessage({ command: 'stopJokerPadPoll' });
+    if (wasPolling) {
+      this.bridge.postMessage({ command: 'stopJokerPadPoll' });
+    }
   }
 }

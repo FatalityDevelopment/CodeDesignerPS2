@@ -1024,12 +1024,18 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.stopJokerPadPoll();
         if (!this.socketClient.isConnected()) { return; }
 
+        let errorCount = 0;
         const poll = async () => {
             try {
                 const state = await this.socketClient.padGetState(0);
+                errorCount = 0;
                 this.webview?.postMessage({ command: 'jokerPadState', buttons: state.buttons });
             } catch {
-                // Silently ignore — the overlay will stop polling on close.
+                errorCount++;
+                if (errorCount >= 5) {
+                    getOutputChannel().warn('Joker pad poll: too many consecutive failures, stopping.');
+                    this.stopJokerPadPoll();
+                }
             }
         };
         // Fire immediately, then every 200ms.
