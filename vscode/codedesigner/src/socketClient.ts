@@ -3091,7 +3091,12 @@ export class SocketClient {
         return r.NetStatus!;
     }
 
-    /** NETCAPTURE — enables or disables packet capture. */
+    /**
+     * NETCAPTURE — enables or disables packet capture.
+     * @param enable Whether to enable (true) or disable (false) packet capture.
+     * @param direction Capture direction filter: 0 = both, 1 = TX only, 2 = RX only.
+     * @param maxQueue Maximum ring-buffer size (0 = server default of 1000).
+     */
     public async netCapture(enable: boolean, direction?: number, maxQueue?: number): Promise<void> {
         const r = await this.sendCommand({
             Command: 'NETCAPTURE',
@@ -3129,7 +3134,13 @@ export class SocketClient {
         return r.NetStats!;
     }
 
-    /** NETSETFILTER — sets the capture filter (protocol/port/IP). */
+    /**
+     * NETSETFILTER — sets the capture filter (protocol/port/IP).
+     * @param filterType Filter type: 0 = none, 1 = protocol, 2 = port, 3 = IP.
+     * @param protocol Protocol filter (type=1): 0=all, 1=TCP, 2=UDP, 3=ICMP, 4=ARP, 5=DNS, 6=DHCP.
+     * @param port Port number to filter on (type=2).
+     * @param ip IPv4 address as dotted-quad string to filter on (type=3).
+     */
     public async netSetFilter(filterType: number, protocol?: number, port?: number, ip?: string): Promise<void> {
         const r = await this.sendCommand({
             Command: 'NETSETFILTER',

@@ -77,18 +77,22 @@ function toHex(b: number, pad = 2): string {
 }
 
 function readU16BE(buf: Uint8Array, off: number): number {
+    if (off + 1 >= buf.length) { return 0; }
     return (buf[off] << 8) | buf[off + 1];
 }
 
 function readU32BE(buf: Uint8Array, off: number): number {
+    if (off + 3 >= buf.length) { return 0; }
     return ((buf[off] << 24) | (buf[off + 1] << 16) | (buf[off + 2] << 8) | buf[off + 3]) >>> 0;
 }
 
 function fmtMac(buf: Uint8Array, off: number): string {
+    if (off + 6 > buf.length) { return '00:00:00:00:00:00'; }
     return Array.from(buf.slice(off, off + 6)).map(b => toHex(b)).join(':');
 }
 
 function fmtIP(buf: Uint8Array, off: number): string {
+    if (off + 4 > buf.length) { return '0.0.0.0'; }
     return `${buf[off]}.${buf[off + 1]}.${buf[off + 2]}.${buf[off + 3]}`;
 }
 

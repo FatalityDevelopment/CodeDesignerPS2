@@ -121,8 +121,8 @@ export class PacketViewerProvider {
                     // No server action needed — packets are cleared client-side.
                     break;
             }
-        } catch (err: any) {
-            const msg = err?.message ?? String(err);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
             getOutputChannel().error(`[PacketViewer] ${actionType} failed: ${msg}`);
             webview.postMessage({ type: 'packetViewerError', message: msg });
         }
