@@ -239,6 +239,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  startNetwork(): void {
+    this.bridge.postMessage({ command: 'startNetwork' });
+  }
+
   startPcsx2(): void {
     this.bridge.postMessage({
       command: 'startPcsx2',

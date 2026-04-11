@@ -242,6 +242,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         msg.gamePath ?? this.selectedGamePath
                     );
                     break;
+                case 'startNetwork':
+                    this.handleStartNetwork();
+                    break;
                 case 'startPcsx2':
                     this.handleStartPcsx2(
                         msg.emulatorPath ?? this.selectedEmulatorPath,
@@ -885,6 +888,34 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Not connected yet: launch control server, then run mode once connected.
         this._pendingRunMode = runMode;
         this.launchControlServerAndConnect(emulatorPath);
+    }
+
+    /** Launch the Multiplayer server executable in a VSCode terminal. */
+    private handleStartNetwork(): void {
+        const out = getOutputChannel();
+        const installDir = DisasmPanelProvider.getInstallDirectory();
+        const exeName = process.platform === 'win32'
+            ? 'CodeDesigner.Ps2.Multiplayer.exe'
+            : 'CodeDesigner.Ps2.Multiplayer';
+        const exePath = path.join(installDir, exeName);
+
+        if (!fs.existsSync(exePath)) {
+            out.error(`Multiplayer server not found: ${exePath}. Build the project first to deploy it.`);
+            vscode.window.showErrorMessage(
+                `CodeDesigner.Ps2.Multiplayer not found in ${installDir}. ` +
+                'Build the Multiplayer project (dotnet build CodeDesigner.Ps2.Multiplayer) to deploy it.'
+            );
+            return;
+        }
+
+        out.info(`Starting Multiplayer server: ${exePath}`);
+
+        const terminal = vscode.window.createTerminal({
+            name: 'CodeDesigner Multiplayer',
+            shellPath: exePath,
+            shellArgs: [],
+        });
+        terminal.show(true);
     }
 
     /** Launch CodeDesigner control server with no mode args, then connect socket/views. */
