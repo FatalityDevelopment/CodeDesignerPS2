@@ -158,6 +158,11 @@ import { EmuOption, SnapshotEntry } from '../types';
                 title="Open the AI Configuration panel to manage agent profiles">
           🤖 AI Configuration
         </button>
+        <button (click)="openPacketViewerClick.emit()"
+                title="Open the Packet Viewer to capture and inspect PS2 network traffic"
+                style="margin-left:8px">
+          📡 Packet Viewer
+        </button>
       </div>
 
     </div>
@@ -191,6 +196,7 @@ export class SettingsTabComponent {
   readonly openSnapshotClick = output<SnapshotEntry>();
   readonly reloadSnapshotClick = output<SnapshotEntry>();
   readonly openAiConfigClick = output<void>();
+  readonly openPacketViewerClick = output<void>();
 
   /** True when a PCSX2 emulator is explicitly selected in the dropdown. */
   readonly isPcsx2Selected = computed(() =>
