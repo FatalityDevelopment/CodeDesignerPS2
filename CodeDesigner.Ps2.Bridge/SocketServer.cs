@@ -1277,6 +1277,39 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PAD_GET_TYPE":
                         return HandlePadGetType(command.PadSlot);
 
+                    // ── DEV9 network bridge ───────────────────────────────────
+                    case "NETGETSTATUS":
+                    case "NET_GET_STATUS":
+                        return HandleNetGetStatus();
+
+                    case "NETCAPTURE":
+                    case "NET_CAPTURE":
+                        return HandleNetCapture(command.NetCaptureEnable, command.NetCaptureDirection, command.NetCaptureMaxQueue);
+
+                    case "NETRECVCAPTURE":
+                    case "NET_RECV_CAPTURE":
+                        return HandleNetRecvCapture(command.NetMaxPackets);
+
+                    case "NETINJECT":
+                    case "NET_INJECT":
+                        return HandleNetInject(command.NetFrameData);
+
+                    case "NETINJECTTX":
+                    case "NET_INJECT_TX":
+                        return HandleNetInjectTx(command.NetFrameData);
+
+                    case "NETDISASSEMBLE":
+                    case "NET_DISASSEMBLE":
+                        return HandleNetDisassemble(command.NetFrameData);
+
+                    case "NETSETFILTER":
+                    case "NET_SET_FILTER":
+                        return HandleNetSetFilter(command.NetFilterType, command.NetFilterProtocol, command.NetFilterPort, command.NetFilterIP);
+
+                    case "NETGETSTATS":
+                    case "NET_GET_STATS":
+                        return HandleNetGetStats();
+
                     // ── Database query (read-only) ────────────────────────────
                     case "QUERYDB":
                     case "QUERY_DB":
