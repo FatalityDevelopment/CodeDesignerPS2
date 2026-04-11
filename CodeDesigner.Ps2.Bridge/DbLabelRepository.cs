@@ -347,7 +347,10 @@ namespace CodeDesigner.Ps2.Bridge
                     var parent = entity.Labels.FirstOrDefault(l =>
                         NormalizeAddress(l.Address).Equals(normParent, StringComparison.OrdinalIgnoreCase));
                     if (parent is null)
-                        continue; // skip entries whose parent doesn't exist
+                    {
+                        Console.WriteLine($"[LabelRepo] Skipped entry '{entry.Name}' at {entry.Address}: parent {entry.ParentAddress} not found in set '{setName}'.");
+                        continue;
+                    }
                     parentId = parent.Id;
                 }
 

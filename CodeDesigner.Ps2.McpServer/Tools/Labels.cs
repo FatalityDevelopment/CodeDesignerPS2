@@ -8,6 +8,17 @@ namespace CodeDesigner.Ps2.McpServer.Tools;
 
 public sealed partial class CodeDesignerPs2Tools
 {
+    /// <summary>
+    /// Helper to extract an optional int32 value from a parsed JSON dictionary entry.
+    /// Returns null if the key is missing or the value is not a JSON number.
+    /// </summary>
+    private static int? TryGetJsonInt32(Dictionary<string, object?> dict, string key)
+    {
+        if (dict.TryGetValue(key, out var val) && val is JsonElement el && el.ValueKind == JsonValueKind.Number)
+            return el.GetInt32();
+        return null;
+    }
+
     // -------------------------------------------------------------------------
     // Label set management
     // -------------------------------------------------------------------------
@@ -239,10 +250,10 @@ public sealed partial class CodeDesignerPs2Tools
             string? argRegsStr    = raw.TryGetValue("argRegs",    out var ar) ? ar?.ToString() : null;
             string? returnRegsStr = raw.TryGetValue("returnRegs", out var rr) ? rr?.ToString() : null;
 
-            int? elementStride  = raw.TryGetValue("elementStride",  out var es) && es is JsonElement esEl && esEl.ValueKind == JsonValueKind.Number ? esEl.GetInt32() : null;
-            int? elementCount   = raw.TryGetValue("elementCount",   out var ec) && ec is JsonElement ecEl && ecEl.ValueKind == JsonValueKind.Number ? ecEl.GetInt32() : null;
-            int? nodeNextOffset = raw.TryGetValue("nodeNextOffset", out var no) && no is JsonElement noEl && noEl.ValueKind == JsonValueKind.Number ? noEl.GetInt32() : null;
-            int? nodeSize       = raw.TryGetValue("nodeSize",       out var ns) && ns is JsonElement nsEl && nsEl.ValueKind == JsonValueKind.Number ? nsEl.GetInt32() : null;
+            int? elementStride  = TryGetJsonInt32(raw, "elementStride");
+            int? elementCount   = TryGetJsonInt32(raw, "elementCount");
+            int? nodeNextOffset = TryGetJsonInt32(raw, "nodeNextOffset");
+            int? nodeSize       = TryGetJsonInt32(raw, "nodeSize");
 
             wireEntries.Add(new
             {

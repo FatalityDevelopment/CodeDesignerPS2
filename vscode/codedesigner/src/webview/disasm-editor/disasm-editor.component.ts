@@ -414,7 +414,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     const hasBreakpoint = this.svc.state.breakpoints.has(addr);
     const hasWatch = this.svc.state.pineWatches.some((w: PineWatchInfo) => parseInt(w.Start, 16) === addr);
     const hasTarget = !!(event.row.args.match(/\$([0-9A-F]{8})/i) ||
-                          event.row.args.match(/0x([0-9A-F]{8})/i));
+                          event.row.args.match(/0x([0-9A-F]{8})/i) ||
+                          this._bytesLookLikePointer(event.row.bytes));
 
     // Open the context menu
     const menuData: ContextMenuData = {
@@ -1229,6 +1230,40 @@ export class DisasmEditorComponent implements AfterViewInit {
         }
       }
     }
+
+    // Fallback: treat the raw bytes at this address as a potential pointer.
+    // The bytes column is big-endian hex (e.g. "80123456"), so parsing it
+    // directly gives the 32-bit value stored at this address.
+    if (row.bytes) {
+      const rawHex = row.bytes.replace(/\s+/g, '');
+      if (rawHex.length === 8) {
+        const dataValue = parseInt(rawHex, 16);
+        if (!isNaN(dataValue) && dataValue !== 0) {
+          const isPhysical = dataValue > 0 && dataValue <= 0x1FFFFFFF;
+          const isKseg = dataValue >= 0x80000000 && dataValue <= 0xBFFFFFFF;
+          if (isPhysical || isKseg) {
+            params.navigateToAddress(dataValue);
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Returns true when the raw bytes column (big-endian hex, e.g. "80123456")
+   * represents a 32-bit value that falls within a valid PS2 EE address range.
+   * Used by both the ArrowRight navigation and the context-menu "Go to Target".
+   */
+  private _bytesLookLikePointer(bytes: string | undefined): boolean {
+    if (!bytes) { return false; }
+    const rawHex = bytes.replace(/\s+/g, '');
+    if (rawHex.length !== 8) { return false; }
+    const value = parseInt(rawHex, 16);
+    if (isNaN(value) || value === 0) { return false; }
+    const isPhysical = value > 0 && value <= 0x1FFFFFFF;
+    const isKseg = value >= 0x80000000 && value <= 0xBFFFFFFF;
+    return isPhysical || isKseg;
   }
 
   private toggleBreakpointAtCursor(params: {
