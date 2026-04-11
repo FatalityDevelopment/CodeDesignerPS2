@@ -93,6 +93,13 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgClearAllWatches   = 0x31;
         private const byte MsgSaveScreenshot    = 0x32;
 
+        // ── Pad / controller input opcodes ────────────────────────────────────
+        private const byte MsgPadGetState       = 0x33;
+        private const byte MsgPadSetButton      = 0x34;
+        private const byte MsgPadSetAnalog      = 0x35;
+        private const byte MsgPadSetState       = 0x36;
+        private const byte MsgPadGetType        = 0x37;
+
         // ── PINE result codes ─────────────────────────────────────────────────
         private const byte IPC_OK   = 0x00;
         private const byte IPC_FAIL = 0xFF;
@@ -1300,6 +1307,139 @@ namespace CodeDesigner.Ps2.Bridge
             if (rep[4] != IPC_OK) throw PineFail("MsgSaveScreenshot");
         }
 
+        // ── Pad / controller input ────────────────────────────────────────────
+
+        /// <summary>Full pad state snapshot returned by <see cref="PadGetState"/>.</summary>
+        public sealed class PadStateSnapshot
+        {
+            /// <summary>PS2 button bitmask; a bit that is <b>clear</b> means the button is <b>pressed</b>.</summary>
+            public uint Buttons { get; }
+            public byte Lx { get; }
+            public byte Ly { get; }
+            public byte Rx { get; }
+            public byte Ry { get; }
+            /// <summary>16 pressure values (0–255) in PadDualshock2::Inputs order.</summary>
+            public byte[] Pressures { get; }
+
+            internal PadStateSnapshot(uint buttons, byte lx, byte ly, byte rx, byte ry, byte[] pressures)
+            {
+                Buttons = buttons; Lx = lx; Ly = ly; Rx = rx; Ry = ry; Pressures = pressures;
+            }
+        }
+
+        /// <summary>
+        /// [Extended PINE] Read the full input state of one pad slot (opcode 0x33).
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        public PadStateSnapshot PadGetState(byte pad)
+        {
+            // Request: [6][0x33][pad]
+            var req = new byte[6];
+            WriteU32LE(req, 0, 6u);
+            req[4] = MsgPadGetState;
+            req[5] = pad;
+
+            // Reply: [size(4)][IPC_OK(1)][buttons(4)][lx][ly][rx][ry][pressure×16] = 29 bytes
+            byte[] rep = SendReceive(req, expectedReplySize: 29);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadGetState");
+
+            uint buttons = ReadU32LE(rep, 5);
+            byte lx = rep[9];
+            byte ly = rep[10];
+            byte rx = rep[11];
+            byte ry = rep[12];
+            var pressures = new byte[16];
+            Buffer.BlockCopy(rep, 13, pressures, 0, 16);
+            return new PadStateSnapshot(buttons, lx, ly, rx, ry, pressures);
+        }
+
+        /// <summary>
+        /// [Extended PINE] Set a single button/axis on a pad by index and normalized value (opcode 0x34).
+        /// Routes through Pad::SetControllerState() so deadzone/pressure logic applies.
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        /// <param name="buttonIndex">Index in PadDualshock2::Inputs (0–25).</param>
+        /// <param name="value">Normalized value 0.0 (released) – 1.0 (fully pressed).</param>
+        public void PadSetButton(byte pad, byte buttonIndex, float value)
+        {
+            // Request: [11][0x34][pad][button_index][value:f32 LE]
+            var req = new byte[11];
+            WriteU32LE(req, 0, 11u);
+            req[4] = MsgPadSetButton;
+            req[5] = pad;
+            req[6] = buttonIndex;
+            WriteFloatLE(req, 7, value);
+
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadSetButton");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Set raw analog stick positions, bypassing deadzone (opcode 0x35).
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        public void PadSetAnalog(byte pad, byte lx, byte ly, byte rx, byte ry)
+        {
+            // Request: [10][0x35][pad][lx][ly][rx][ry]
+            var req = new byte[10];
+            WriteU32LE(req, 0, 10u);
+            req[4] = MsgPadSetAnalog;
+            req[5] = pad;
+            req[6] = lx;
+            req[7] = ly;
+            req[8] = rx;
+            req[9] = ry;
+
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadSetAnalog");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Atomically replace the complete input state of one pad (opcode 0x36).
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        /// <param name="buttons">PS2 button bitmask (reserved; button state derived from pressures).</param>
+        /// <param name="pressures">16 pressure bytes in PadDualshock2::Inputs order. Pressure > 0 ⇒ pressed.</param>
+        public void PadSetState(byte pad, uint buttons, byte lx, byte ly, byte rx, byte ry, byte[] pressures)
+        {
+            if (pressures == null || pressures.Length != 16)
+                throw new ArgumentException("pressures must be exactly 16 bytes", nameof(pressures));
+
+            // Request: [30][0x36][pad][buttons:u32][lx][ly][rx][ry][pressure×16]
+            var req = new byte[30];
+            WriteU32LE(req, 0, 30u);
+            req[4] = MsgPadSetState;
+            req[5] = pad;
+            WriteU32LE(req, 6, buttons);
+            req[10] = lx;
+            req[11] = ly;
+            req[12] = rx;
+            req[13] = ry;
+            Buffer.BlockCopy(pressures, 0, req, 14, 16);
+
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadSetState");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Query the controller type installed in a pad slot (opcode 0x37).
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        /// <returns>Controller type value (0=NotConnected, 1=DualShock2, 2=Guitar, 3=Jogcon, 4=Negcon, 5=Popn).</returns>
+        public byte PadGetType(byte pad)
+        {
+            // Request: [6][0x37][pad]
+            var req = new byte[6];
+            WriteU32LE(req, 0, 6u);
+            req[4] = MsgPadGetType;
+            req[5] = pad;
+
+            // Reply: [size(4)][IPC_OK(1)][controller_type(1)] = 6 bytes
+            byte[] rep = SendReceive(req, expectedReplySize: 6);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadGetType");
+            return rep[5];
+        }
+
         // ── Bulk memory helpers ───────────────────────────────────────────────
 
         private byte ReadOneByte(uint address)
@@ -1513,6 +1653,13 @@ namespace CodeDesigner.Ps2.Bridge
                     | (buf[offset + 1] <<  8)
                     | (buf[offset + 2] << 16)
                     | (buf[offset + 3] << 24));
+
+        private static void WriteFloatLE(byte[] buf, int offset, float value)
+        {
+            byte[] bytes = BitConverter.GetBytes(value);
+            if (!BitConverter.IsLittleEndian) Array.Reverse(bytes);
+            Buffer.BlockCopy(bytes, 0, buf, offset, 4);
+        }
 
         private static void SplitU128(byte[] buf, out uint lo32, out uint hi32, out uint upLo32, out uint upHi32, out ulong lo64, out ulong hi64)
         {

@@ -236,6 +236,26 @@ namespace CodeDesigner.Ps2.Bridge
         public string? McpConfigKey { get; set; }
         /// <summary>New value (tool description) for MCPCONFIG_UPDATE.</summary>
         public string? McpConfigValue { get; set; }
+
+        // Pad / controller input fields (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
+        /// <summary>Unified pad slot index (0–7).</summary>
+        public byte? PadSlot { get; set; }
+        /// <summary>Button index in PadDualshock2::Inputs (0–25) for PADSETBUTTON.</summary>
+        public byte? PadButtonIndex { get; set; }
+        /// <summary>Normalized button value (0.0–1.0) for PADSETBUTTON.</summary>
+        public float? PadButtonValue { get; set; }
+        /// <summary>Left stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
+        public byte? PadLx { get; set; }
+        /// <summary>Left stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
+        public byte? PadLy { get; set; }
+        /// <summary>Right stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
+        public byte? PadRx { get; set; }
+        /// <summary>Right stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
+        public byte? PadRy { get; set; }
+        /// <summary>PS2 button bitmask for PADSETSTATE (reserved; button state derived from pressures).</summary>
+        public uint? PadButtons { get; set; }
+        /// <summary>16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order).</summary>
+        public List<byte>? PadPressures { get; set; }
     }
 
     /// <summary>

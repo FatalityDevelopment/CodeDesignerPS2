@@ -1254,6 +1254,29 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PINE_SAVE_SCREENSHOT":
                         return HandlePineSaveScreenshot();
 
+                    // ── Pad / controller input ────────────────────────────────
+                    case "PADGETSTATE":
+                    case "PAD_GET_STATE":
+                        return HandlePadGetState(command.PadSlot);
+
+                    case "PADSETBUTTON":
+                    case "PAD_SET_BUTTON":
+                        return HandlePadSetButton(command.PadSlot, command.PadButtonIndex, command.PadButtonValue);
+
+                    case "PADSETANALOG":
+                    case "PAD_SET_ANALOG":
+                        return HandlePadSetAnalog(command.PadSlot, command.PadLx, command.PadLy, command.PadRx, command.PadRy);
+
+                    case "PADSETSTATE":
+                    case "PAD_SET_STATE":
+                        return HandlePadSetState(command.PadSlot, command.PadButtons,
+                            command.PadLx, command.PadLy, command.PadRx, command.PadRy,
+                            command.PadPressures);
+
+                    case "PADGETTYPE":
+                    case "PAD_GET_TYPE":
+                        return HandlePadGetType(command.PadSlot);
+
                     // ── Database query (read-only) ────────────────────────────
                     case "QUERYDB":
                     case "QUERY_DB":

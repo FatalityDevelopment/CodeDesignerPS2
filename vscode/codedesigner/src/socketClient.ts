@@ -127,6 +127,25 @@ interface CommandMessage {
     GameSerial?: string;
     GameCrc?: string;
     GameTitle?: string;
+    // Pad / controller input (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
+    /** Unified pad slot index (0–7). */
+    PadSlot?: number;
+    /** Button index in PadDualshock2::Inputs (0–25) for PADSETBUTTON. */
+    PadButtonIndex?: number;
+    /** Normalized button value (0.0–1.0) for PADSETBUTTON. */
+    PadButtonValue?: number;
+    /** Left stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadLx?: number;
+    /** Left stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadLy?: number;
+    /** Right stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadRx?: number;
+    /** Right stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadRy?: number;
+    /** PS2 button bitmask for PADSETSTATE (reserved; button state derived from pressures). */
+    PadButtons?: number;
+    /** 16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order). */
+    PadPressures?: number[];
 }
 
 /**
@@ -439,6 +458,10 @@ interface CommandResponse {
     GameCheats?: GameCheatInfo[];
     GameTitle?: string;
     CheatListTitle?: string;
+    // PADGETSTATE result
+    PadState?: PadStateInfo;
+    // PADGETTYPE result
+    PadControllerType?: number;
 }
 
 /**
@@ -517,6 +540,24 @@ export interface PineWatchInfo {
 export interface CallTraceEntry {
     From: string;
     To:   string;
+}
+
+/**
+ * Full pad state snapshot returned by PADGETSTATE.
+ */
+export interface PadStateInfo {
+    /** PS2 button bitmask; a bit that is clear means the button is pressed. */
+    buttons: number;
+    /** Left stick X axis (0–255, 0x7F = centred). */
+    lx: number;
+    /** Left stick Y axis (0–255, 0x7F = centred). */
+    ly: number;
+    /** Right stick X axis (0–255, 0x7F = centred). */
+    rx: number;
+    /** Right stick Y axis (0–255, 0x7F = centred). */
+    ry: number;
+    /** 16 pressure values (0–255) in PadDualshock2::Inputs order. */
+    pressures: number[];
 }
 
 /**
@@ -1511,6 +1552,90 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'SaveScreenshot failed');
         }
+    }
+
+    /**
+     * PCSX2 PINE: read the full input state of a PS2 controller pad (opcode 0x33).
+     * Returns buttons bitmask, analog stick positions, and 16 pressure values.
+     */
+    public async padGetState(padSlot: number = 0): Promise<PadStateInfo> {
+        const response = await this.sendCommand({ Command: 'PADGETSTATE', PadSlot: padSlot });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadGetState failed');
+        }
+        if (!response.PadState) {
+            throw new Error('PadGetState: no pad state returned');
+        }
+        return response.PadState;
+    }
+
+    /**
+     * PCSX2 PINE: set a single button/axis on a pad by index and normalized value (opcode 0x34).
+     * Routes through deadzone/pressure pipeline.
+     */
+    public async padSetButton(padSlot: number, buttonIndex: number, value: number): Promise<void> {
+        const response = await this.sendCommand({
+            Command: 'PADSETBUTTON',
+            PadSlot: padSlot,
+            PadButtonIndex: buttonIndex,
+            PadButtonValue: value,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadSetButton failed');
+        }
+    }
+
+    /**
+     * PCSX2 PINE: set raw analog stick positions, bypassing deadzone (opcode 0x35).
+     * Values are 0–255 with 0x7F = centred.
+     */
+    public async padSetAnalog(padSlot: number, lx: number = 0x7F, ly: number = 0x7F, rx: number = 0x7F, ry: number = 0x7F): Promise<void> {
+        const response = await this.sendCommand({
+            Command: 'PADSETANALOG',
+            PadSlot: padSlot,
+            PadLx: lx,
+            PadLy: ly,
+            PadRx: rx,
+            PadRy: ry,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadSetAnalog failed');
+        }
+    }
+
+    /**
+     * PCSX2 PINE: atomically replace the complete input state of a pad (opcode 0x36).
+     * pressures must be 16 bytes in PadDualshock2::Inputs order; pressure > 0 means pressed.
+     */
+    public async padSetState(padSlot: number, lx: number = 0x7F, ly: number = 0x7F, rx: number = 0x7F, ry: number = 0x7F, pressures: number[] = new Array(16).fill(0), buttons: number = 0xFFFF): Promise<void> {
+        if (pressures.length !== 16) {
+            throw new Error('padSetState: pressures must be exactly 16 elements');
+        }
+        const response = await this.sendCommand({
+            Command: 'PADSETSTATE',
+            PadSlot: padSlot,
+            PadButtons: buttons,
+            PadLx: lx,
+            PadLy: ly,
+            PadRx: rx,
+            PadRy: ry,
+            PadPressures: pressures,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadSetState failed');
+        }
+    }
+
+    /**
+     * PCSX2 PINE: query the controller type installed in a pad slot (opcode 0x37).
+     * Returns the numeric controller type (0=NotConnected, 1=DualShock2, 2=Guitar, etc.).
+     */
+    public async padGetType(padSlot: number = 0): Promise<number> {
+        const response = await this.sendCommand({ Command: 'PADGETTYPE', PadSlot: padSlot });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadGetType failed');
+        }
+        return response.PadControllerType ?? 0;
     }
 
     /**
