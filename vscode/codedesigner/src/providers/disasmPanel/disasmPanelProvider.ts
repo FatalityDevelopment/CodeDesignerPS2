@@ -98,6 +98,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _globalStoragePath: string = '';
     /** In-flight archive sync promise — reused so concurrent callers don't start duplicate clones. */
     private _archiveSyncPromise: Promise<void> | null = null;
+    /** Interval timer for live Joker pad-status polling (cleared on close/disconnect). */
+    private _jokerPadPollTimer: ReturnType<typeof setInterval> | undefined;
 
     /** Returns the workspace root directory (used by DisasmEditorProvider for history lookup). */
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
@@ -309,6 +311,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'applyAllArchiveCheats':
                     await this.handleApplyAllArchiveCheats();
+                    break;
+                case 'startJokerPadPoll':
+                    this.startJokerPadPoll();
+                    break;
+                case 'stopJokerPadPoll':
+                    this.stopJokerPadPoll();
                     break;
                 case 'compileCds':
                     await this.handleCompileCds();
@@ -1002,11 +1010,44 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private cleanupProcess(): void {
+        this.stopJokerPadPoll();
         this.emulatorTerminal = undefined;
         this._paused = false;
         this._bridgeMode = false;
         this._pendingRunMode = null;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
+    }
+
+    // ── Joker live pad polling ──────────────────────────────────────────────
+
+    private startJokerPadPoll(): void {
+        this.stopJokerPadPoll();
+        if (!this.socketClient.isConnected()) { return; }
+
+        let errorCount = 0;
+        const poll = async () => {
+            try {
+                const state = await this.socketClient.padGetState(0);
+                errorCount = 0;
+                this.webview?.postMessage({ command: 'jokerPadState', buttons: state.buttons });
+            } catch {
+                errorCount++;
+                if (errorCount >= 5) {
+                    getOutputChannel().warn('Joker pad poll: too many consecutive failures, stopping.');
+                    this.stopJokerPadPoll();
+                }
+            }
+        };
+        // Fire immediately, then every 200ms.
+        void poll();
+        this._jokerPadPollTimer = setInterval(() => void poll(), 200);
+    }
+
+    private stopJokerPadPoll(): void {
+        if (this._jokerPadPollTimer !== undefined) {
+            clearInterval(this._jokerPadPollTimer);
+            this._jokerPadPollTimer = undefined;
+        }
     }
 
     private startRuntimeMode(mode: 'emulator' | 'pcsx2', biosPath: string, gamePath: string): void {

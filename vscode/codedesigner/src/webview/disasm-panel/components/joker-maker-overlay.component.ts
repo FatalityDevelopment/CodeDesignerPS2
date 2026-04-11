@@ -4,7 +4,12 @@ import {
   ViewEncapsulation,
   signal,
   computed,
+  inject,
+  input,
+  OnDestroy,
 } from '@angular/core';
+import { Subscription } from 'rxjs';
+import { VsCodeBridgeService } from '../../shared/vscode-bridge.service';
 
 interface Ps2Button {
   name: string;
@@ -73,6 +78,9 @@ const INITIAL_BUTTONS: Ps2Button[] = [
                    [checked]="btn.checked"
                    (change)="toggle(i, $any($event.target).checked)" />
             <span>{{ btn.name }}</span>
+            @if (isConnected()) {
+              <span class="joker-pad-dot" [class.joker-pad-dot-active]="isBtnPressed(btn.value)" title="Live pad status"></span>
+            }
           </label>
         }
       </div>
@@ -81,6 +89,16 @@ const INITIAL_BUTTONS: Ps2Button[] = [
         <span class="joker-config-label">Active:</span>
         <span class="joker-config-value">{{ activeConfig() }}</span>
       </div>
+
+      @if (isConnected()) {
+        <div class="joker-config-row joker-live-row">
+          <span class="joker-config-label">
+            <span class="joker-live-indicator" [class.joker-live-active]="isPolling()"></span>
+            Live:
+          </span>
+          <span class="joker-config-value">{{ liveConfig() }}</span>
+        </div>
+      }
 
       <div class="joker-output-row">
         <span class="joker-output-label">Code Data:</span>
@@ -101,12 +119,24 @@ const INITIAL_BUTTONS: Ps2Button[] = [
 </div>
   `,
 })
-export class JokerMakerOverlayComponent {
+export class JokerMakerOverlayComponent implements OnDestroy {
+
+  private readonly bridge = inject(VsCodeBridgeService);
+  private readonly subs: Subscription[] = [];
 
   readonly visible = signal(false);
 
+  /** Whether the emulator is connected (enables live pad status). */
+  readonly isConnected = input(false);
+
   /** Mutable button array kept as a signal so the template reacts to changes. */
   readonly buttons = signal<Ps2Button[]>(INITIAL_BUTTONS.map(b => ({ ...b })));
+
+  /** Raw pad button bitmask from the emulator (0xFFFF = nothing pressed, clear bit = pressed). */
+  readonly livePadButtons = signal(0xFFFF);
+
+  /** Whether the pad polling loop is active. */
+  readonly isPolling = signal(false);
 
   /** Computed 8-digit GameShark data value. */
   readonly outputCode = computed(() => {
@@ -125,16 +155,46 @@ export class JokerMakerOverlayComponent {
     return names.length ? names.join(', ') : '(None)';
   });
 
+  /** Human-readable list of currently pressed button names from the live pad. */
+  readonly liveConfig = computed(() => {
+    const mask = this.livePadButtons();
+    const names = INITIAL_BUTTONS
+      .filter(b => (mask & b.value) === 0)
+      .map(b => b.name);
+    return names.length ? names.join(', ') : '(None)';
+  });
+
   readonly copyLabel = signal('Copy');
+
+  constructor() {
+    this.subs.push(
+      this.bridge.on<{ command: 'jokerPadState'; buttons: number }>('jokerPadState').subscribe(msg => {
+        this.livePadButtons.set(msg.buttons);
+        this.isPolling.set(true);
+      }),
+    );
+  }
+
+  ngOnDestroy(): void {
+    this.stopPolling();
+    this.subs.forEach(s => s.unsubscribe());
+  }
+
+  /** Returns true when the given button value is currently pressed on the live pad. */
+  isBtnPressed(value: number): boolean {
+    return (this.livePadButtons() & value) === 0;
+  }
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
   open(): void {
     this.visible.set(true);
+    this.startPolling();
   }
 
   close(): void {
     this.visible.set(false);
+    this.stopPolling();
   }
 
   // ── Event Handlers ─────────────────────────────────────────────────────────
@@ -161,6 +221,23 @@ export class JokerMakerOverlayComponent {
   onBackdropClick(event: MouseEvent): void {
     if ((event.target as HTMLElement).id === 'joker-overlay') {
       this.close();
+    }
+  }
+
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  private startPolling(): void {
+    if (this.isConnected()) {
+      this.bridge.postMessage({ command: 'startJokerPadPoll' });
+    }
+  }
+
+  private stopPolling(): void {
+    const wasPolling = this.isPolling();
+    this.isPolling.set(false);
+    this.livePadButtons.set(0xFFFF);
+    if (wasPolling) {
+      this.bridge.postMessage({ command: 'stopJokerPadPoll' });
     }
   }
 }
