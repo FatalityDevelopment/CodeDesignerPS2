@@ -341,6 +341,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
         <thead>
           <tr>
             <th class="lm-col-vis" title="Toggle all visibility">
+              @if (!isScannerView()) {
               <button class="lm-vis-btn lm-vis-all-btn"
                       [class.lm-is-hidden]="!allVisible()"
                       [disabled]="activeSetIsBuiltIn() || filteredEntries().length === 0"
@@ -354,6 +355,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   }
                 </svg>
               </button>
+              }
             </th>
             <th class="lm-col-expand"></th>
             <th class="lm-col-type">
@@ -392,6 +394,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   [class.lm-fnc-row]="effectiveType(row.entry!) === 'Function'"
                   [class.lm-hidden-row]="row.entry!.hidden">
                 <td class="lm-col-vis">
+                  @if (!isScannerView()) {
                   <button class="lm-vis-btn"
                           [class.lm-is-hidden]="row.entry!.hidden"
                           [title]="row.entry!.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
@@ -405,6 +408,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                       }
                     </svg>
                   </button>
+                  }
                 </td>
                 <td class="lm-col-expand">
                   @if (row.expandable) {
@@ -456,6 +460,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
               <!-- Child label sub-row (recursive; entry = the child LabelManagerEntry) -->
               <tr class="lm-member-sub-row" [class.lm-hidden-row]="row.entry.hidden">
                 <td class="lm-col-vis">
+                  @if (!isScannerView()) {
                   <button class="lm-vis-btn"
                           [class.lm-is-hidden]="row.entry.hidden"
                           [title]="row.entry.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
@@ -469,6 +474,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                       }
                     </svg>
                   </button>
+                  }
                 </td>
                 <td class="lm-col-expand lm-member-tree-indent">
                   @for (hasLine of row.ancestorLines; track $index) {
@@ -864,6 +870,9 @@ export class LabelManagerOverlayComponent {
     this.activeSetName() === 'Built-in' || (this.currentSet()?.isBuiltIn ?? false)
   );
 
+  /** True when scanner results are being displayed instead of a label set. */
+  readonly isScannerView = computed(() => this.scanResultEntries().length > 0);
+
   readonly filteredEntries = computed(() => {
     const scanEntries = this.scanResultEntries();
     // When scanner results are present, show only scan results (not the label set).
@@ -923,12 +932,16 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().some(e => e.dynamic),
   );
 
-  /** Root entries to poll: only entries from the active set with dynamic===true. */
-  private readonly _dynamicAddresses = computed(() =>
-    (this.currentSet()?.entries ?? [])
+  /** Root entries to poll: entries with dynamic===true from the active set OR scanner results. */
+  private readonly _dynamicAddresses = computed(() => {
+    const scanEntries = this.scanResultEntries();
+    const source = scanEntries.length > 0
+      ? scanEntries
+      : (this.currentSet()?.entries ?? []);
+    return source
       .filter(e => !e.parentAddress && e.dynamic)
-      .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType })),
-  );
+      .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType }));
+  });
 
   /**
    * Visible child rows to poll: only expanded member rows with dynamic===true.
@@ -1058,6 +1071,8 @@ export class LabelManagerOverlayComponent {
 
   setActiveSet(set: LabelSetPayload): void {
     this.activeSetName.set(set.setName);
+    // Ensure entries is always an array to avoid downstream null-reference errors.
+    if (!set.entries) { set = { ...set, entries: [] }; }
     this.currentSet.set(set);
 
     const pending = this._pendingPrefillAddress;
@@ -1108,6 +1123,8 @@ export class LabelManagerOverlayComponent {
 
   /** Called by the toolbar scan buttons. */
   onRunScanner(kind: ScannerKind): void {
+    // Stop any active polling to avoid socket FIFO conflicts during the scan.
+    this._stopPolling();
     this.activeScannerKind.set(kind);
     this.scannerStatus.set('scanning');
     this.scanResultEntries.set([]);
@@ -1135,6 +1152,10 @@ export class LabelManagerOverlayComponent {
     this.currentPage.set(0);
     const count = entries.length;
     this.showStatus(`Scan complete: ${count} ${kind} found.`);
+    // Restart polling if the user had live polling enabled before the scan.
+    if (this.livePollingEnabled()) {
+      this._updatePolling();
+    }
   }
 
   // ── Pagination ──────────────────────────────────────────────────────────────
@@ -1403,17 +1424,24 @@ export class LabelManagerOverlayComponent {
     // Use undefined (not false) so the field is omitted from the JSON payload when disabled,
     // matching the WhenWritingDefault serialisation convention on the C# side.
     const updated: LabelManagerEntry = { ...entry, dynamic: entry.dynamic ? undefined : true };
-    // Optimistic local update so the toggle feels instant.
-    const set = this.currentSet();
-    if (set) {
-      this.currentSet.set({
-        ...set,
-        entries: set.entries.map(e => e.address === entry.address ? updated : e),
-      });
-    }
-    // Persist only for user (non-built-in) sets.
-    if (!this.activeSetIsBuiltIn()) {
-      this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
+    if (this.isScannerView()) {
+      // Scanner entries are ephemeral — update only the local scan results signal.
+      this.scanResultEntries.update(entries =>
+        entries.map(e => e.address === entry.address ? updated : e),
+      );
+    } else {
+      // Optimistic local update so the toggle feels instant.
+      const set = this.currentSet();
+      if (set) {
+        this.currentSet.set({
+          ...set,
+          entries: set.entries.map(e => e.address === entry.address ? updated : e),
+        });
+      }
+      // Persist only for user (non-built-in) sets.
+      if (!this.activeSetIsBuiltIn()) {
+        this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
+      }
     }
     // Start or stop polling based on whether any dynamic entries remain.
     this._updatePolling();
