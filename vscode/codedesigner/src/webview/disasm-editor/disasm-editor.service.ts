@@ -168,6 +168,8 @@ export class DisasmEditorService implements OnDestroy {
   readonly threadsReceived$ = new Subject<ThreadEntry[]>();
   /** Fired when the extension host returns the IOP module list. */
   readonly modulesReceived$ = new Subject<ModuleEntry[]>();
+  /** Fired when the extension host reports that the panel became visible or hidden. */
+  readonly panelVisibilityChanged$ = new Subject<{ visible: boolean }>();
 
   private readonly _subs: Subscription[] = [];
 
@@ -196,6 +198,7 @@ export class DisasmEditorService implements OnDestroy {
       this._bridge.on<Record<string, unknown>>('gotoRegionNotFound').subscribe(msg => this.gotoRegionNotFoundReceived$.next({ address: msg['address'] as number })),
       this._bridge.on<Record<string, unknown>>('threads').subscribe(msg => this.threadsReceived$.next((msg['threads'] as ThreadEntry[] | undefined) ?? [])),
       this._bridge.on<Record<string, unknown>>('modules').subscribe(msg => this.modulesReceived$.next((msg['modules'] as ModuleEntry[] | undefined) ?? [])),
+      this._bridge.on<Record<string, unknown>>('panelVisibility').subscribe(msg => this.panelVisibilityChanged$.next({ visible: msg['visible'] as boolean })),
     );
   }
 

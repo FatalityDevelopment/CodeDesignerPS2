@@ -235,6 +235,14 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       <input #fileInput type="file" accept=".json" style="display:none" (change)="onFileSelected($event)" />
 
       <button class="lm-tool-btn lm-refresh-btn" title="Refresh" (click)="action$.emit({ type: 'refresh', activeSetName: activeSetName() })">&#x21BB;</button>
+
+      <!-- Live polling toggle -->
+      <label class="lm-live-toggle" title="Enable continuous live-value polling (500ms). When off, values are fetched once on open.">
+        <input type="checkbox"
+               [checked]="livePollingEnabled()"
+               (change)="setLivePolling(asInput($event).checked)" />
+        Live
+      </label>
     </div>
 
     <!-- Filter / type-filter row -->
@@ -749,6 +757,13 @@ export class LabelManagerOverlayComponent {
   private _pollTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
+   * Whether continuous live-value polling is enabled.  Defaults to false —
+   * the label manager fetches values once on open and then stops.  The user
+   * can toggle this to true via a checkbox to enable continuous 500ms polling.
+   */
+  readonly livePollingEnabled = signal(false);
+
+  /**
    * Normalised address (no "0x" prefix, uppercase) that should be pre-filled
    * into the form the next time `setActiveSet` is called after a refresh.
    * Set by `openWithAddress`; cleared immediately once applied.
@@ -889,7 +904,11 @@ export class LabelManagerOverlayComponent {
   open(): void {
     this.visible.set(true);
     this.action$.emit({ type: 'refresh' });
-    this._updatePolling();
+    // Fetch values once; continuous polling only if user enables it.
+    this._emitOnePoll();
+    if (this.livePollingEnabled()) {
+      this._updatePolling();
+    }
   }
 
   /**
@@ -904,7 +923,11 @@ export class LabelManagerOverlayComponent {
     this._pendingPrefillAddress = addressHex.toUpperCase().replace(/^0x/i, '');
     this.visible.set(true);
     this.action$.emit({ type: 'refresh' });
-    this._updatePolling();
+    // Fetch values once; continuous polling only if user enables it.
+    this._emitOnePoll();
+    if (this.livePollingEnabled()) {
+      this._updatePolling();
+    }
   }
 
   close(): void {
@@ -1584,9 +1607,28 @@ export class LabelManagerOverlayComponent {
     return this.liveValues().get(entry.address) ?? '…';
   }
 
-  /** Start live-value polling if there are dynamic entries. Called by the page-mode host. */
+  /**
+   * Start live-value polling if there are dynamic entries. Called by the
+   * page-mode host.  In the default mode (`livePollingEnabled === false`),
+   * this performs a single fetch and then stops.  When live polling is
+   * enabled, it starts the 500ms interval timer.
+   */
   startPolling(): void {
-    this._updatePolling();
+    // Always do a single immediate fetch so values are populated on open.
+    this._emitOnePoll();
+    if (this.livePollingEnabled()) {
+      this._updatePolling();
+    }
+  }
+
+  /** Toggle continuous live-value polling on/off. */
+  setLivePolling(enabled: boolean): void {
+    this.livePollingEnabled.set(enabled);
+    if (enabled) {
+      this._updatePolling();
+    } else {
+      this._stopPolling();
+    }
   }
 
   /**
@@ -1595,6 +1637,10 @@ export class LabelManagerOverlayComponent {
    * unnecessary socket traffic.
    */
   private _updatePolling(): void {
+    if (!this.livePollingEnabled()) {
+      this._stopPolling();
+      return;
+    }
     const hasDynamic =
       this._dynamicAddresses().length > 0 || this._dynamicMemberRows().length > 0;
     if (hasDynamic) {
@@ -1633,6 +1679,27 @@ export class LabelManagerOverlayComponent {
     if (this._pollTimer !== null) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
+    }
+  }
+
+  /** Emit a single poll cycle without starting the interval timer. */
+  private _emitOnePoll(): void {
+    const entries = this._dynamicAddresses();
+    if (entries.length > 0) {
+      this.action$.emit({ type: 'readLiveValues', entries });
+    }
+    const dynMembers = this._dynamicMemberRows();
+    if (dynMembers.length > 0) {
+      this.action$.emit({
+        type: 'readMemberLiveValues',
+        members: dynMembers.map(r => ({
+          parentAddress: r.entry.parentAddress!,
+          offset: r.entry.offset ?? 0,
+          path: r.path,
+          entryType: this.childEffectiveType(r.entry) as LabelType,
+          valueType: r.entry.valueType,
+        })),
+      });
     }
   }
 }
