@@ -90,6 +90,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     addWatch: null as (() => void) | null,
     removeWatch: null as (() => void) | null,
     gotoTarget: null as (() => void) | null,
+    findReferences: null as (() => void) | null,
     addToLabelManager: null as (() => void) | null,
   };
 
@@ -363,7 +364,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     const hasWatch = this.svc.state.pineWatches.some((w: PineWatchInfo) => parseInt(w.Start, 16) === addr);
     const hasTarget = !!(event.row.args.match(/\$([0-9A-F]{8})/i) ||
                           event.row.args.match(/0x([0-9A-F]{8})/i) ||
-                          this._bytesLookLikePointer(event.row.bytes));
+                          this._bytesLookLikePointer(event.row.bytes) ||
+                          this._commentHasAddress(event.row.comment));
 
     // Open the context menu
     const menuData: ContextMenuData = {
@@ -394,6 +396,10 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onCtxGotoTarget(): void {
     this.contextMenuRuntime.gotoTarget?.();
+  }
+
+  protected onCtxFindReferences(): void {
+    this.contextMenuRuntime.findReferences?.();
   }
 
   protected onCtxAddToLabelManager(): void {
@@ -1072,6 +1078,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const row = params.state.disasmRows[localIndex];
     if (!row) { return; }
 
+    // Priority 1: jump / branch instruction target in the args field
     const branchMatch = row.args.match(/\$([0-9A-F]{8})/i);
     if (branchMatch) {
       params.navigateToAddress(parseInt(branchMatch[1], 16));
@@ -1084,6 +1091,23 @@ export class DisasmEditorComponent implements AfterViewInit {
       return;
     }
 
+    // Priority 2: raw bytes at this address could be a pointer
+    if (row.bytes) {
+      const rawHex = row.bytes.replace(/\s+/g, '');
+      if (rawHex.length === 8) {
+        const dataValue = parseInt(rawHex, 16);
+        if (!isNaN(dataValue) && dataValue !== 0) {
+          const isPhysical = dataValue > 0 && dataValue <= 0x1FFFFFFF;
+          const isKseg = dataValue >= 0x80000000 && dataValue <= 0xBFFFFFFF;
+          if (isPhysical || isKseg) {
+            params.navigateToAddress(dataValue);
+            return;
+          }
+        }
+      }
+    }
+
+    // Priority 3: comment resolved an address
     if (row.comment) {
       const commentMatch = row.comment.match(/0x([0-9A-F]{8})/i) || row.comment.match(/\b([0-9A-F]{8})\b/i);
       if (commentMatch) {
@@ -1096,24 +1120,6 @@ export class DisasmEditorComponent implements AfterViewInit {
         if (isPhysical || isKseg) {
           params.navigateToAddress(address);
           return;
-        }
-      }
-    }
-
-    // Fallback: treat the raw bytes at this address as a potential pointer.
-    // The bytes column is big-endian hex (e.g. "80123456"), so parsing it
-    // directly gives the 32-bit value stored at this address.
-    if (row.bytes) {
-      const rawHex = row.bytes.replace(/\s+/g, '');
-      if (rawHex.length === 8) {
-        const dataValue = parseInt(rawHex, 16);
-        if (!isNaN(dataValue) && dataValue !== 0) {
-          const isPhysical = dataValue > 0 && dataValue <= 0x1FFFFFFF;
-          const isKseg = dataValue >= 0x80000000 && dataValue <= 0xBFFFFFFF;
-          if (isPhysical || isKseg) {
-            params.navigateToAddress(dataValue);
-            return;
-          }
         }
       }
     }
@@ -1132,6 +1138,20 @@ export class DisasmEditorComponent implements AfterViewInit {
     if (isNaN(value) || value === 0) { return false; }
     const isPhysical = value > 0 && value <= 0x1FFFFFFF;
     const isKseg = value >= 0x80000000 && value <= 0xBFFFFFFF;
+    return isPhysical || isKseg;
+  }
+
+  /**
+   * Returns true when the comment field contains a valid PS2 EE address.
+   * Used by both the ArrowRight navigation and the context-menu "Go to Target".
+   */
+  private _commentHasAddress(comment: string | undefined): boolean {
+    if (!comment) { return false; }
+    const match = comment.match(/0x([0-9A-F]{8})/i) || comment.match(/\b([0-9A-F]{8})\b/i);
+    if (!match) { return false; }
+    const address = parseInt(match[1], 16);
+    const isPhysical = address <= 0x1FFFFFFF;
+    const isKseg = address >= 0x80000000 && address <= 0xBFFFFFFF;
     return isPhysical || isKseg;
   }
 
@@ -1290,7 +1310,13 @@ export class DisasmEditorComponent implements AfterViewInit {
     const cachedRows = params.state.loadedPages.get(startIndex)!;
     if (params.state.disasmRows !== cachedRows) {
       params.state.disasmRows = cachedRows;
-      params.renderDisassembly('nearest');
+      // Only sync grid data without scrolling — the caller is responsible for
+      // calling updateCursor with the correct scroll position. Using
+      // renderDisassembly('nearest') here caused a double-render: the first
+      // scroll to 'nearest' visually jumped the cursor to the wrong position
+      // before the caller's scroll corrected it, producing a flicker at page
+      // boundaries.
+      params.renderDisassembly(null);
     }
     return true;
   }
@@ -2012,6 +2038,22 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (this._ctxGlobalIndex < 0) { return; }
       params.state.cursor = this._ctxGlobalIndex;
       params.navigateToCurrentRowTarget();
+    };
+
+    this.contextMenuRuntime.findReferences = () => {
+      if (!this._ctxRow) { return; }
+      // Reverse the address bytes for little-endian search.
+      // e.g. address "00123456" → "56 34 12 00"
+      const addr = this._ctxRow.addr.padStart(8, '0');
+      const reversed = `${addr.slice(6, 8)} ${addr.slice(4, 6)} ${addr.slice(2, 4)} ${addr.slice(0, 2)}`;
+      // Open the search panel in bytes mode and populate the query
+      params.state.searchActive = true;
+      params.signals.panels.search.set(true);
+      params.state.searchMode = 'bytes';
+      params.signals.searchMode.set('bytes');
+      params.state.searchQuery = reversed;
+      params.signals.searchQuery.set(reversed);
+      this.vscode.postMessage({ type: 'search', query: reversed, mode: 'bytes' });
     };
 
     this.contextMenuRuntime.addToLabelManager = () => {

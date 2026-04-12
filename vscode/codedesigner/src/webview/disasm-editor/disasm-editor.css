@@ -367,7 +367,7 @@ app-bottom-panel {
  
 .addr { color: #c586c0; } 
 .bytes { color: #9cdcfe; } 
-.label { color: #4ec9b0; } 
+.label { color: #4ec9b0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } 
 .op { color: #dcdcaa; } 
 .args { color: #ce9178; } 
 .comment { color: #6a9955; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } 
