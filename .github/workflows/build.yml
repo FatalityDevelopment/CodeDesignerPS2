@@ -1,0 +1,73 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Restore .NET dependencies
+        shell: bash
+        run: |
+          for proj in $(find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*"); do
+            dotnet restore "$proj"
+          done
+
+      - name: Build .NET projects
+        shell: bash
+        run: |
+          for proj in $(find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*"); do
+            echo "::group::Building $proj"
+            dotnet build "$proj" -c Release --no-restore
+            echo "::endgroup::"
+          done
+
+      - name: Run tests
+        run: dotnet test CodeDesigner.Ps2.TestProject/CodeDesigner.Ps2.TestProject.csproj -c Release --no-build --no-restore --verbosity normal
+
+      - name: Publish .NET projects
+        shell: bash
+        run: |
+          # Publish all C# projects except the test project
+          for proj in $(find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*" -not -path "*/CodeDesigner.Ps2.TestProject/*"); do
+            name=$(basename "$(dirname "$proj")")
+            echo "::group::Publishing $name"
+            dotnet publish "$proj" -c Release -o "publish/$name" --no-build
+            echo "::endgroup::"
+          done
+
+      - name: Build VSCode Extension
+        working-directory: vscode/codedesigner
+        run: |
+          npm ci
+          npx @vscode/vsce package --out ../../publish/codedesigner.vsix
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodeDesigner
+          path: publish/
