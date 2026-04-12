@@ -363,3 +363,26 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# ── .NET build outputs ─────────────────────────────────────────────────────
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+.vs/
+
+# ── Angular / Node.js ──────────────────────────────────────────────────────
+node_modules/
+dist/
+CodeDesigner.Ps2.Website/obj/
+CodeDesigner.Ps2.Website/dist/
+website/obj/
+
+# ── MSBuild JS SDK intermediates (never commit these) ──────────────────────
+**/obj/**/package.g.props
+
+# ── Secrets and local config ───────────────────────────────────────────────
+appsettings.Local.json
+*.db
+*.db-shm
+*.db-wal
