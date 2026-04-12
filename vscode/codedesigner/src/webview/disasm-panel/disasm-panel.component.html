@@ -46,6 +46,9 @@
     (reloadSnapshotClick)="reloadSnapshot($event)"
     (openAiConfigClick)="onOpenAiConfig()"
     (openPacketViewerClick)="onOpenPacketViewer()"
+    (openLabelManagerClick)="onOpenLabelManager()"
+    (openMemoryCardClick)="onOpenMemoryCard()"
+    (openHddClick)="onOpenHdd()"
     (listEntries)="onMcpMemoryList()"
     (addEntry)="onMcpMemoryAdd($event)"
     (editEntry)="onMcpMemoryEdit($event)"
@@ -60,6 +63,9 @@
     [isConnected]="isConnected"
     [isPcsx2]="isPcsx2"
     [(cheatText)]="cheatText"
+    (openConverterClick)="onOpenConverter()"
+    (openPorterClick)="onOpenPorter()"
+    (openScannerClick)="onOpenScanner()"
   />
 </div>
 

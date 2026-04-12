@@ -198,6 +198,18 @@ const SNAP_PREVIEW = 5;
                       title="Open the Packet Viewer to capture and inspect PS2 network traffic">
                 📡 Packets
               </button>
+              <button (click)="openLabelManagerClick.emit()"
+                      title="Open the Label Manager to manage address labels">
+                🏷 Labels
+              </button>
+              <button (click)="openMemoryCardClick.emit()"
+                      title="Open the Memory Card Manager to browse and edit PS2 memory cards">
+                💾 Mem Card
+              </button>
+              <button (click)="openHddClick.emit()"
+                      title="Open the HDD Image Manager to browse and edit PS2 HDD images">
+                💿 HDD
+              </button>
             </div>
           </div>
         }
@@ -281,6 +293,9 @@ export class SettingsTabComponent {
   readonly reloadSnapshotClick = output<SnapshotEntry>();
   readonly openAiConfigClick  = output<void>();
   readonly openPacketViewerClick = output<void>();
+  readonly openLabelManagerClick = output<void>();
+  readonly openMemoryCardClick   = output<void>();
+  readonly openHddClick          = output<void>();
   readonly openMemoryViewClick = output<string>();
 
   // ── Outputs (memory relay) ──────────────────────────────────────────────────

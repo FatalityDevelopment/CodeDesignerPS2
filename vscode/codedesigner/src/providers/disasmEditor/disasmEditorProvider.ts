@@ -128,9 +128,39 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * Called by external providers (e.g. the Pointer Manager tree view).
    */
   public openStructCalculator(): void {
+    this._revealAndPost('openStructCalculator');
+  }
+
+  /** Open the Cheat Code Converter overlay in the first live panel. */
+  public openConverterOverlay(): void {
+    this._revealAndPost('openConverterOverlay');
+  }
+
+  /** Open the Cheat Code Porter overlay in the first live panel. */
+  public openPorterOverlay(): void {
+    this._revealAndPost('openPorterOverlay');
+  }
+
+  /** Open the Memory Card Manager overlay in the first live panel. */
+  public openMemoryCardOverlay(): void {
+    this._revealAndPost('openMemoryCardOverlay');
+  }
+
+  /** Open the HDD Image Manager overlay in the first live panel. */
+  public openHddOverlay(): void {
+    this._revealAndPost('openHddOverlay');
+  }
+
+  /** Open the Memory Scanner overlay in the first live panel. */
+  public openScannerOverlay(): void {
+    this._revealAndPost('openScannerOverlay');
+  }
+
+  /** Reveal the first live panel and post a message to it. */
+  private _revealAndPost(messageType: string): void {
     if (this._livePanels.length === 0) { return; }
     this._livePanels[0].reveal(undefined, false);
-    this._livePanels[0].webview.postMessage({ type: 'openStructCalculator' });
+    this._livePanels[0].webview.postMessage({ type: messageType });
   }
 
   public navigateToAddress(address: number): void {
