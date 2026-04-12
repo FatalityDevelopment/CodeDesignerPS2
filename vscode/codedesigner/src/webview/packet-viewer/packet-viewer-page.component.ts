@@ -57,12 +57,20 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
                         break;
                     case 'packetViewerPackets':
                         pv.addCapturedPackets(data['packets'] as any[] ?? []);
+                        pv.recvCaptureComplete();
+                        break;
+                    case 'packetViewerCaptureStarted':
+                        pv.captureStarted();
+                        break;
+                    case 'packetViewerCaptureFailed':
+                        pv.captureStartFailed(data['message'] as string ?? 'Capture failed');
                         break;
                     case 'packetViewerMessage':
                         pv.showStatus(data['message'] as string ?? '');
                         break;
                     case 'packetViewerError':
                         pv.showStatus(data['message'] as string ?? 'Error');
+                        pv.recvCaptureComplete();
                         break;
                 }
             });
