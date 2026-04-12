@@ -16,7 +16,7 @@ a familiar installer experience instead of needing to right-click a `.ps1` file.
 
 1. On launch, the installer looks for a `scripts` subfolder next to the exe.
 2. It lists all `*.ps1` files found, sorted alphabetically.
-3. The user clicks **Install** and each script is executed in order via
+3. The user clicks **Start** and each script is executed in order via
    `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script>`.
 4. Real-time output is streamed into a log panel with a progress bar.
 5. A final summary screen shows which scripts succeeded or failed.

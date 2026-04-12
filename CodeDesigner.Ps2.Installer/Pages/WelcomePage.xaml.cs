@@ -2,57 +2,30 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using CodeDesigner.Ps2.Installer.Services;
-using Microsoft.Win32;
 
 namespace CodeDesigner.Ps2.Installer.Pages;
 
 public partial class WelcomePage : UserControl
 {
     private readonly ScriptRunner _runner = new();
+    private readonly string _scriptFolder = Path.Combine(AppContext.BaseDirectory, "scripts");
     private IReadOnlyList<ScriptRunner.ScriptInfo> _scripts = Array.Empty<ScriptRunner.ScriptInfo>();
 
-    /// <summary>Raised when the user clicks Install with a valid script folder.</summary>
+    /// <summary>Raised when the user clicks Start with discovered scripts.</summary>
     public event Action<string, IReadOnlyList<ScriptRunner.ScriptInfo>>? InstallRequested;
 
     public WelcomePage()
     {
         InitializeComponent();
 
-        // Default to a "scripts" subfolder next to the exe
-        var defaultScripts = Path.Combine(AppContext.BaseDirectory, "scripts");
-        if (Directory.Exists(defaultScripts))
-        {
-            ScriptFolderBox.Text = defaultScripts;
-            RefreshScriptList(defaultScripts);
-        }
-
-        ScriptFolderBox.TextChanged += (_, _) =>
-        {
-            var folder = ScriptFolderBox.Text.Trim();
-            if (Directory.Exists(folder))
-                RefreshScriptList(folder);
-            else
-                ClearScriptList();
-        };
+        // Automatically resolve the scripts folder relative to the installer location
+        RefreshScriptList(_scriptFolder);
     }
 
-    private void BrowseButton_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new OpenFolderDialog
-        {
-            Title = "Select the folder containing PowerShell scripts"
-        };
-
-        if (dialog.ShowDialog() == true)
-        {
-            ScriptFolderBox.Text = dialog.FolderName;
-        }
-    }
-
-    private void InstallButton_Click(object sender, RoutedEventArgs e)
+    private void StartButton_Click(object sender, RoutedEventArgs e)
     {
         if (_scripts.Count > 0)
-            InstallRequested?.Invoke(ScriptFolderBox.Text.Trim(), _scripts);
+            InstallRequested?.Invoke(_scriptFolder, _scripts);
     }
 
     private void RefreshScriptList(string folder)
@@ -64,20 +37,14 @@ public partial class WelcomePage : UserControl
             ScriptCountLabel.Text = $"{_scripts.Count} script(s) found:";
             ScriptListBox.ItemsSource = _scripts.Select(s => s.FileName).ToList();
             ScriptListBox.Visibility = Visibility.Visible;
-            InstallButton.IsEnabled = true;
+            StartButton.IsEnabled = true;
         }
         else
         {
-            ClearScriptList();
+            ScriptCountLabel.Text = "No scripts found in the scripts folder.";
+            ScriptListBox.ItemsSource = null;
+            ScriptListBox.Visibility = Visibility.Collapsed;
+            StartButton.IsEnabled = false;
         }
-    }
-
-    private void ClearScriptList()
-    {
-        _scripts = Array.Empty<ScriptRunner.ScriptInfo>();
-        ScriptCountLabel.Text = "";
-        ScriptListBox.ItemsSource = null;
-        ScriptListBox.Visibility = Visibility.Collapsed;
-        InstallButton.IsEnabled = false;
     }
 }
