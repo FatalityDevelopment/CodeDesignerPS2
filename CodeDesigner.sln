@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Multiplaye
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Database", "CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj", "{B3D5C221-A4C1-44CD-AD5B-54561DC043AC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.WebApi", "CodeDesigner.Ps2.WebApi\CodeDesigner.Ps2.WebApi.csproj", "{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -219,6 +221,18 @@ Global
 		{B3D5C221-A4C1-44CD-AD5B-54561DC043AC}.Release|x64.Build.0 = Release|Any CPU
 		{B3D5C221-A4C1-44CD-AD5B-54561DC043AC}.Release|x86.ActiveCfg = Release|Any CPU
 		{B3D5C221-A4C1-44CD-AD5B-54561DC043AC}.Release|x86.Build.0 = Release|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Debug|x64.Build.0 = Debug|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Debug|x86.Build.0 = Debug|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Release|x64.ActiveCfg = Release|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Release|x64.Build.0 = Release|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Release|x86.ActiveCfg = Release|Any CPU
+		{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
