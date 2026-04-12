@@ -55,7 +55,7 @@ public class DnsServer
             return Task.CompletedTask;
         }
 
-        _log.LogInformation("[DNS] Listening on {Addr}:{Port} (UDP) — intercepting *.dnas.playstation.org → {Ip}",
+        _log.LogInformation("[DNS] Listening on {Addr}:{Port} (UDP) — intercepting *.dnas.playstation.org + *.pdonline.scea.com → {Ip}",
             _config.BindAddress, _config.DnsDnasPort, _config.ServerIp);
 
         _ = ReceiveLoopAsync(ct);
@@ -116,22 +116,24 @@ public class DnsServer
             ushort qtype  = (ushort)((buf[afterQname]     << 8) | buf[afterQname + 1]);
             // ushort qclass = (ushort)((buf[afterQname + 2] << 8) | buf[afterQname + 3]); // unused
 
-            bool isDnas = qname.EndsWith(".dnas.playstation.org", StringComparison.OrdinalIgnoreCase)
-                       || qname.Equals("dnas.playstation.org",    StringComparison.OrdinalIgnoreCase);
+            bool isIntercept = qname.EndsWith(".dnas.playstation.org", StringComparison.OrdinalIgnoreCase)
+                            || qname.Equals("dnas.playstation.org",    StringComparison.OrdinalIgnoreCase)
+                            || qname.EndsWith(".pdonline.scea.com",    StringComparison.OrdinalIgnoreCase)
+                            || qname.Equals("pdonline.scea.com",       StringComparison.OrdinalIgnoreCase);
 
-            _log.LogDebug("[DNS] Query from {Ep}: {Name} type={Type} isDnas={IsDnas}",
-                client, qname, qtype, isDnas);
+            _log.LogDebug("[DNS] Query from {Ep}: {Name} type={Type} intercept={Intercept}",
+                client, qname, qtype, isIntercept);
 
             byte[] reply;
-            if (isDnas && qtype == 1 /* A */)
+            if (isIntercept && qtype == 1 /* A */)
             {
                 reply = BuildAResponse(buf, qname, _config.ServerIp);
-                _log.LogInformation("[DNS] {Name} → {Ip} (DNAS intercept)", qname, _config.ServerIp);
+                _log.LogInformation("[DNS] {Name} → {Ip} (intercept)", qname, _config.ServerIp);
             }
             else
             {
                 reply = await ForwardAsync(buf, ct);
-                _log.LogDebug("[DNS] Forwarded {Name} (not DNAS)", qname);
+                _log.LogDebug("[DNS] Forwarded {Name}", qname);
             }
 
             if (reply.Length > 0)

@@ -16,6 +16,8 @@ public class ScertPacket
     public RT_MSG_TYPE MessageType { get; set; }
     public byte[]      Payload     { get; set; } = Array.Empty<byte>();
     public bool        IsEncrypted { get; set; }
+    /// <summary>4-byte per-packet hash from the SCERT encrypted-packet header. Non-null only when IsEncrypted=true.</summary>
+    public byte[]?     Hash        { get; set; }
 
     // -------------------------------------------------------------------------
     // Factory helpers
@@ -152,17 +154,19 @@ public class ScertPacket
         if (length < totalSize)
             return null;
 
-        byte[] payload;
+        byte[]? hash = null;
         int payloadOffset;
         if (isEncrypted)
         {
+            hash = new byte[EncryptedHashSize];
+            Buffer.BlockCopy(buffer, offset + HeaderSize, hash, 0, EncryptedHashSize);
             payloadOffset = offset + HeaderSize + EncryptedHashSize;
         }
         else
         {
             payloadOffset = offset + HeaderSize;
         }
-        payload = new byte[payloadLen];
+        var payload = new byte[payloadLen];
         Buffer.BlockCopy(buffer, payloadOffset, payload, 0, payloadLen);
 
         consumed = totalSize;
@@ -171,6 +175,7 @@ public class ScertPacket
             MessageType = msgType,
             Payload     = payload,
             IsEncrypted = isEncrypted,
+            Hash        = hash,
         };
     }
 
