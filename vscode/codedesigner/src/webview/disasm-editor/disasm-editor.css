@@ -3393,6 +3393,11 @@ app-bottom-panel {
 .lm-live-toggle input { margin: 0; cursor: pointer; }
 .lm-spacer { flex: 1; }
 
+/* Scanner group */
+.lm-scanner-group { display: flex; align-items: center; gap: 2px; }
+.lm-scanner-label { font-size: 11px; opacity: .7; margin-right: 2px; }
+.lm-scan-active { background: #264f78 !important; border-color: #3794ff !important; }
+
 #lm-filter-row {
     display: flex;
     align-items: center;

@@ -2931,7 +2931,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; newSetName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }> },
+    action: { type: string; setName?: string; newSetName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }>; scannerKind?: string },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -3171,6 +3171,69 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           webview.postMessage({ type: 'labelManagerExport', json, setName: action.setName });
           break;
         }
+        case 'runScanner': {
+          const kind = action.scannerKind as string;
+          // Default to EE main RAM region for label manager scans.
+          const region = 'ee';
+          const baseAddress = 0x00000000;
+          const totalBytes = 32 * 1024 * 1024; // 32 MB EE Main RAM
+          try {
+            let entries: LabelManagerEntry[] = [];
+            if (kind === 'strings') {
+              const results = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: r.value.length > 40 ? r.value.substring(0, 40) + '…' : r.value,
+                comment: r.value.length > 40 ? r.value : undefined,
+                type: 'String' as const,
+              }));
+            } else if (kind === 'functions') {
+              const results = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: r.label || `func_${r.address}`,
+                type: 'Function' as const,
+              }));
+            } else if (kind === 'pointers') {
+              const results = await this.socketClient.scanLivePointers(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: `ptr → ${r.pointsTo}`,
+                comment: `Points to ${r.pointsTo}`,
+                type: 'Pointer' as const,
+              }));
+            } else if (kind === 'floats') {
+              const results = await this.socketClient.scanLiveFloats(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: `${r.value}`,
+                comment: `raw: ${r.raw}`,
+                type: 'Float' as const,
+              }));
+            } else if (kind === 'hexValues') {
+              const results = await this.socketClient.scanLiveIntegers(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: r.hex,
+                comment: `dec: ${r.value}`,
+                type: 'Hex' as const,
+              }));
+            }
+            webview.postMessage({ type: 'labelManagerScanResults', scannerKind: kind, entries });
+          } catch (scanErr: unknown) {
+            const scanErrMsg = scanErr instanceof Error ? scanErr.message : String(scanErr);
+            webview.postMessage({ type: 'labelManagerScanResults', scannerKind: kind, entries: [] });
+            webview.postMessage({ type: 'labelManagerError', message: `Scan failed: ${scanErrMsg}` });
+          }
+          break;
+        }
+        case 'clearScanResults':
+          // Nothing to do server-side; the UI already cleared its state.
+          break;
+        case 'resolveStrings':
+          // Legacy: re-route to the scanner for strings.
+          await this._handleLabelManagerAction(webview, { type: 'runScanner', scannerKind: 'strings' });
+          break;
         default:
           webview.postMessage({ type: 'labelManagerError', message: `Unknown action: ${action.type}` });
       }

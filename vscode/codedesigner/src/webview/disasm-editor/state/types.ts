@@ -163,7 +163,6 @@ export interface PanelVisibility {
   search: boolean;
   goto: boolean;
   setpc: boolean;
-  symbols: boolean;
   registers: boolean;
   bottom: boolean;
 }
