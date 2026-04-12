@@ -41,14 +41,23 @@ interface SnapshotInfoFile {
     regions: Array<{ Label: string; File: string; BaseAddress: number; Size: number }>;
 }
 
-/** Memory regions exposed as separate editor windows when the emulator is running. */
-const LIVE_REGIONS = [
+/**
+ * Memory regions that are always opened as live views on emulator connect.
+ * Rarely-used regions (IOP RAM, BIOS ROM, Scratchpad) are kept in a separate
+ * list so they can be opened on-demand via the sidebar menu without adding
+ * constant socket traffic and causing flickering in the primary EE view.
+ */
+const LIVE_REGIONS_DEFAULT = [
     // EE Main RAM: shown at the physical base (0x00000000–0x01FFFFFF, 32 MB).
     // Using physical addresses keeps rows consistent with the memory map table
     // regardless of which virtual alias the CPU uses (KSEG0 0x80000000, uncached
     // 0x20100000, or uncached+accelerated 0x30100000).  HandleReadMem accepts
     // physical addresses for the EE region directly.
     { region: 'ee',  address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
+];
+
+/** Rarely-used memory regions available on-demand via the sidebar menu. */
+const LIVE_REGIONS_OPTIONAL = [
     // IOP RAM: shown at the EE physical base (0x1C000000–0x1DFFFFFF, 4 MB).
     // Per the PS2 memory map, IOP RAM is mirrored into EE address space at
     // 0xBC000000 (logical) → 0x1C000000 (physical).  Using the physical base
@@ -64,6 +73,9 @@ const LIVE_REGIONS = [
     { region: 'ee',  address: 0x1FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
     { region: 'ee',  address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad'    },
 ];
+
+/** All memory regions combined — used when the user explicitly opens all views (restart, etc.). */
+const LIVE_REGIONS = [...LIVE_REGIONS_DEFAULT, ...LIVE_REGIONS_OPTIONAL];
 
 /** URL and branch for the cheat code archive repository. */
 const ARCHIVE_REPO_URL    = 'https://github.com/TylerDev888/CheatCodeArchive.git';
@@ -328,6 +340,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'focusRegion':
                     this.editorProvider.focusLivePanelByLabel(msg.label ?? '');
+                    break;
+                case 'openMemoryView':
+                    await this.openOptionalMemoryView(msg.label ?? '');
                     break;
                 case 'listDiscElfs':
                     await this.handleListDiscElfs(msg.gamePath ?? this.selectedGamePath);
@@ -995,7 +1010,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.socketClient.connect();
                 }
                 out.info('Socket connected to emulator. Opening memory views…');
-                for (const r of LIVE_REGIONS) {
+                for (const r of LIVE_REGIONS_DEFAULT) {
                     await this.editorProvider.openLiveMemoryView(
                         r.region, r.address, r.size, r.label);
                 }
@@ -2669,7 +2684,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public async onSocketConnected(): Promise<void> {
         this._setPauseState(false);
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
-        for (const r of LIVE_REGIONS) {
+        for (const r of LIVE_REGIONS_DEFAULT) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
 
@@ -2688,15 +2703,28 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Open all live memory view panels immediately, even if not connected.
+     * Open the default live memory view panels immediately, even if not connected.
      * Panels will show placeholder content until the socket connects.
-     * Called at extension activation so tabs are always visible.
+     * Called at extension activation so the EE Main RAM tab is always visible.
+     * Rarely-used regions (IOP, BIOS, Scratchpad) can be opened on-demand via
+     * the sidebar menu to reduce socket traffic and prevent flickering.
      */
     public async openAllLivePanels(): Promise<void> {
-        for (const r of LIVE_REGIONS) {
+        for (const r of LIVE_REGIONS_DEFAULT) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
         this.editorProvider.openIntroPanel();
+    }
+
+    /**
+     * Open an optional memory view by label name.
+     * Called from the sidebar when the user chooses to open IOP/BIOS/Scratchpad.
+     */
+    public async openOptionalMemoryView(label: string): Promise<void> {
+        const r = LIVE_REGIONS_OPTIONAL.find(r => r.label === label);
+        if (r) {
+            await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+        }
     }
 
     /**

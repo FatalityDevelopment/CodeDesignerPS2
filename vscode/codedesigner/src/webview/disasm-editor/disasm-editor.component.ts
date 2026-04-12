@@ -1985,6 +1985,17 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.rebuildPointerLabelMap();
       params.renderDisassembly(null);
     });
+
+    // Pause/resume the live-refresh timers when the VS Code tab becomes
+    // hidden/visible.  Hidden panels that keep polling waste socket bandwidth
+    // and cause the visible panel to see placeholder zero-rows (flickering).
+    params.svc.panelVisibilityChanged$.subscribe(({ visible }) => {
+      if (visible) {
+        this.restartLiveRefresh(params.vscode, params.requestRefresh);
+      } else {
+        this.stopLiveRefresh();
+      }
+    });
   }
 
   private configureRuntimeCallbacks(params: {
