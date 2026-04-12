@@ -1,7 +1,61 @@
 # CodeDesigner Installer
 
-Two PowerShell scripts — one for **developers** who build the package, one for
-**end users** who just want to install it.
+Three components — a **GUI installer exe**, and two PowerShell scripts — one for
+**developers** who build the package, one for **end users** who just want to
+install it.
+
+---
+
+## GUI Installer — `CodeDesigner.Ps2.Installer.exe`
+
+A modern dark-themed WPF application that discovers and runs PowerShell scripts
+from a folder.  It is shipped alongside the PowerShell scripts so end users get
+a familiar installer experience instead of needing to right-click a `.ps1` file.
+
+### How it works
+
+1. On launch, the installer looks for a `scripts` subfolder next to the exe.
+2. It lists all `*.ps1` files found, sorted alphabetically.
+3. The user clicks **Install** and each script is executed in order via
+   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script>`.
+4. Real-time output is streamed into a log panel with a progress bar.
+5. A final summary screen shows which scripts succeeded or failed.
+
+### Naming convention for scripts
+
+Prefix script filenames with numbers to control execution order:
+
+```
+scripts\
+    01-Install-CodeDesigner.ps1
+    02-Configure-Settings.ps1
+    03-Install-Extension.ps1
+```
+
+### Building
+
+```bash
+cd CodeDesigner.Ps2.Installer
+dotnet build -c Release
+```
+
+The output exe is at
+`bin\Release\net8.0-windows\CodeDesigner.Ps2.Installer.exe`.
+
+### Packaging for distribution
+
+Place the exe and a `scripts\` folder together:
+
+```
+CodeDesignerSetup\
+    CodeDesigner.Ps2.Installer.exe
+    scripts\
+        01-Install-CodeDesigner.ps1
+    CodeDesigner\
+        CodeDesigner.Ps2.Bridge.exe
+        (supporting DLLs)
+    codedesigner.vsix
+```
 
 ---
 

@@ -1,0 +1,58 @@
+<UserControl x:Class="CodeDesigner.Ps2.Installer.Pages.ProgressPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Margin="40,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ── Header ─────────────────────────────────────────────── -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Installing…"
+                       FontSize="22"
+                       FontWeight="SemiBold"
+                       Foreground="{StaticResource FgPrimaryBrush}" />
+
+            <TextBlock x:Name="StatusLabel"
+                       Text="Preparing…"
+                       FontSize="13"
+                       Foreground="{StaticResource AccentTealBrush}"
+                       Margin="0,6,0,0" />
+        </StackPanel>
+
+        <!-- ── Progress bar ───────────────────────────────────────── -->
+        <Grid Grid.Row="1" Margin="0,0,0,6">
+            <ProgressBar x:Name="ProgressBar"
+                         Style="{StaticResource InstallerProgressBar}"
+                         Minimum="0" Maximum="100" Value="0" />
+        </Grid>
+
+        <TextBlock x:Name="ProgressLabel"
+                   Grid.Row="2"
+                   Text="0%"
+                   FontSize="12"
+                   Foreground="{StaticResource FgMutedBrush}"
+                   HorizontalAlignment="Right"
+                   Margin="0,0,0,12" />
+
+        <!-- ── Log output ─────────────────────────────────────────── -->
+        <TextBox x:Name="LogBox"
+                 Grid.Row="3"
+                 Style="{StaticResource LogTextBox}"
+                 VerticalScrollBarVisibility="Auto" />
+
+        <!-- ── Cancel button ──────────────────────────────────────── -->
+        <DockPanel Grid.Row="4" LastChildFill="False" Margin="0,16,0,0">
+            <Button x:Name="CancelButton"
+                    DockPanel.Dock="Right"
+                    Content="Cancel"
+                    Style="{StaticResource SecondaryButton}"
+                    Click="CancelButton_Click" />
+        </DockPanel>
+    </Grid>
+</UserControl>
