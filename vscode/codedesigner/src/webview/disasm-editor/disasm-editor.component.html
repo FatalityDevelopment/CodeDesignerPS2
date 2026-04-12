@@ -1,6 +1,5 @@
 <div id="header">
 <div id="header-toolbar">
-    <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">&#8862; Symbols</button>
     <button class="header-tool-btn" id="registers-toggle-btn" title="Toggle Registers Panel (Ctrl+Alt+R)">&#8863; Regs</button>
     <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)">&#8693; Debug Tools</button>
     <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
@@ -70,32 +69,6 @@
     (gotoTarget)="onCtxGotoTarget()"
     (addToLabelManager)="onCtxAddToLabelManager()"
     (closed)="onCtxClosed()"
-  />
-<!-- Angular SymbolsPanel (Phase 9) -->
-<app-symbols-panel
-    [visible]="symbolsPanelVisible()"
-    [regionLabel]="symbolsPanelRegionLabel()"
-    [labels]="symbolsPanelLabels()"
-    [strings]="symbolsPanelStrings()"
-    [functions]="symbolsPanelFunctions()"
-    [pointers]="symbolsPanelPointers()"
-    [floats]="symbolsPanelFloats()"
-    [integers]="symbolsPanelIntegers()"
-    [stringsStatus]="symbolsPanelStringsStatus()"
-    [functionsStatus]="symbolsPanelFunctionsStatus()"
-    [pointersStatus]="symbolsPanelPointersStatus()"
-    [floatsStatus]="symbolsPanelFloatsStatus()"
-    [integersStatus]="symbolsPanelIntegersStatus()"
-    (close)="onSymbolsPanelClose()"
-    (refresh)="onSymbolsPanelRefresh()"
-    (navigateToAddress)="onSymbolsPanelNavigate($event)"
-    (addLabel)="onSymbolsPanelAddLabel($event)"
-    (deleteLabel)="onSymbolsPanelDeleteLabel($event)"
-    (scanStrings)="onSymbolsPanelScanStrings()"
-    (scanFunctions)="onSymbolsPanelScanFunctions()"
-    (scanPointers)="onSymbolsPanelScanPointers()"
-    (scanFloats)="onSymbolsPanelScanFloats()"
-    (scanIntegers)="onSymbolsPanelScanIntegers()"
   />
 <!-- Angular DebugPanel (Phase 7) -->
 <app-debug-panel

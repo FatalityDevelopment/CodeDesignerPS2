@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 
 export type LabelType =
-  | 'Address' | 'Function' | 'String' | 'Pointer' | 'Float' | 'Value'
+  | 'Address' | 'Function' | 'String' | 'Pointer' | 'Float' | 'Value' | 'Hex'
   /** Legacy — mapped to Pointer at display time. */
   | 'Struct' | 'Array' | 'ArrayOfPointers' | 'LinkedList';
 
@@ -84,6 +84,8 @@ export interface TreeRow {
 type LabelSortColumn = 'type' | 'address' | 'live' | 'name' | 'comment';
 type LabelSortDirection = 'asc' | 'desc';
 
+export type ScannerKind = 'functions' | 'pointers' | 'strings' | 'floats' | 'hexValues';
+
 export type LabelManagerAction =
   | { type: 'setActive';         setName: string }
   | { type: 'createSet';         setName: string }
@@ -103,7 +105,11 @@ export type LabelManagerAction =
   /** Poll live values at each address (handled by provider). String entries read as null-terminated strings. */
   | { type: 'readLiveValues';    entries: { address: string; entryType?: LabelType; valueType?: string }[] }
   /** Poll live values at resolved member addresses (handled by provider). */
-  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string; entryType?: LabelType; valueType?: string }[] };
+  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string; entryType?: LabelType; valueType?: string }[] }
+  /** Run a memory scanner and display results as entries in the tree. */
+  | { type: 'runScanner';        scannerKind: ScannerKind }
+  /** Clear scanner results. */
+  | { type: 'clearScanResults' };
 
 const TYPE_BADGE: Record<string, string> = {
   Address:  '[Addr]',
@@ -112,6 +118,7 @@ const TYPE_BADGE: Record<string, string> = {
   Float:    '[Float]',
   Value:    '[Value]',
   String:   '[Str]',
+  Hex:      '[Hex]',
   // legacy back-compat
   Struct:         '[Ptr]',
   Array:          '[Array]',
@@ -126,6 +133,7 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
   Float:    'lm-badge-float',
   Value:    'lm-badge-value',
   String:   'lm-badge-str',
+  Hex:      'lm-badge-value',
   // legacy
   Struct:         'lm-badge-ptr',
   Array:          'lm-badge-array',
@@ -226,8 +234,43 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
 
       <span class="lm-spacer"></span>
 
-      <!-- Runtime resolution (PINE only) -->
-      <button class="lm-tool-btn" title="Resolve String labels from live PCSX2 memory (PINE mode)" (click)="action$.emit({ type: 'resolveStrings' })">&#x1F50D; Strings</button>
+      <!-- Scanners -->
+      <span class="lm-scanner-group">
+        <span class="lm-scanner-label">Scan:</span>
+        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'functions'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for function entry points"
+                (click)="onRunScanner('functions')">
+          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'functions') { ⏳ } @else { &#x2699; } FNC
+        </button>
+        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'pointers'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for pointer values"
+                (click)="onRunScanner('pointers')">
+          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'pointers') { ⏳ } @else { &#x2699; } Ptr
+        </button>
+        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'strings'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for null-terminated strings"
+                (click)="onRunScanner('strings')">
+          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'strings') { ⏳ } @else { &#x1F50D; } Str
+        </button>
+        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'floats'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for IEEE-754 float values"
+                (click)="onRunScanner('floats')">
+          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'floats') { ⏳ } @else { &#x2699; } Float
+        </button>
+        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'hexValues'"
+                [disabled]="scannerStatus() === 'scanning'"
+                title="Scan memory for non-zero hex values (integers)"
+                (click)="onRunScanner('hexValues')">
+          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'hexValues') { ⏳ } @else { &#x2699; } Hex
+        </button>
+        @if (scanResultEntries().length > 0) {
+          <button class="lm-tool-btn lm-danger-btn" title="Clear scan results" (click)="onClearScanResults()">&#xD7;</button>
+        }
+      </span>
 
       <!-- Import / Export -->
       <button class="lm-tool-btn" title="Import labels from a JSON file" (click)="triggerImport()">&#x2B06; Import</button>
@@ -763,6 +806,14 @@ export class LabelManagerOverlayComponent {
    */
   readonly livePollingEnabled = signal(false);
 
+  // ── Scanner state ──────────────────────────────────────────────────────────
+  /** Which scanner is currently active/running. */
+  readonly activeScannerKind = signal<ScannerKind | null>(null);
+  /** 'idle', 'scanning', or 'done'. */
+  readonly scannerStatus = signal<'idle' | 'scanning' | 'done'>('idle');
+  /** Scanner results converted to LabelManagerEntry items. */
+  readonly scanResultEntries = signal<LabelManagerEntry[]>([]);
+
   /**
    * Normalised address (no "0x" prefix, uppercase) that should be pre-filled
    * into the form the next time `setActiveSet` is called after a refresh.
@@ -779,7 +830,9 @@ export class LabelManagerOverlayComponent {
   );
 
   readonly filteredEntries = computed(() => {
-    const entries = this.currentSet()?.entries ?? [];
+    const labelEntries = this.currentSet()?.entries ?? [];
+    const scanEntries = this.scanResultEntries();
+    const entries = scanEntries.length > 0 ? [...labelEntries, ...scanEntries] : labelEntries;
     const f  = this.filterText().trim().toLowerCase();
     const tf = this.typeFilter().trim();
     return entries.filter(e => {
@@ -984,6 +1037,36 @@ export class LabelManagerOverlayComponent {
     if (!isError) {
       setTimeout(() => { if (this.statusMsg() === msg) { this.statusMsg.set(''); } }, 3000);
     }
+  }
+
+  // ── Scanner public API ───────────────────────────────────────────────────────
+
+  /** Called by the toolbar scan buttons. */
+  onRunScanner(kind: ScannerKind): void {
+    this.activeScannerKind.set(kind);
+    this.scannerStatus.set('scanning');
+    this.scanResultEntries.set([]);
+    this.action$.emit({ type: 'runScanner', scannerKind: kind });
+  }
+
+  /** Clear scanner results from the view. */
+  onClearScanResults(): void {
+    this.activeScannerKind.set(null);
+    this.scannerStatus.set('idle');
+    this.scanResultEntries.set([]);
+    this.action$.emit({ type: 'clearScanResults' });
+  }
+
+  /**
+   * Called by the host when scanner results arrive from the provider.
+   * Converts raw scanner entries into LabelManagerEntry format for the tree.
+   */
+  setScanResults(kind: ScannerKind, entries: LabelManagerEntry[]): void {
+    this.activeScannerKind.set(kind);
+    this.scannerStatus.set('done');
+    this.scanResultEntries.set(entries);
+    const count = entries.length;
+    this.showStatus(`Scan complete: ${count} ${kind} found.`);
   }
 
   // ── Event Handlers ────────────────────────────────────────────────────────────
