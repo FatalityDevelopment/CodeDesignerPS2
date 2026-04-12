@@ -3397,6 +3397,44 @@ app-bottom-panel {
 .lm-scanner-group { display: flex; align-items: center; gap: 2px; }
 .lm-scanner-label { font-size: 11px; opacity: .7; margin-right: 2px; }
 .lm-scan-active { background: #264f78 !important; border-color: #3794ff !important; }
+.lm-search-icon { width: 12px; height: 12px; vertical-align: middle; display: inline-block; margin-right: 1px; }
+
+/* Scanning progress bar */
+.lm-scanning-bar {
+    position: relative;
+    height: 22px;
+    margin: 0;
+    background: #1e1e1e;
+    border-bottom: 1px solid #3e3e42;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.lm-scanning-bar-inner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 30%;
+    background: linear-gradient(90deg, transparent, #264f78, #3794ff, #264f78, transparent);
+    animation: lm-scan-slide 1.5s ease-in-out infinite;
+}
+@keyframes lm-scan-slide {
+    0%   { left: -30%; }
+    100% { left: 100%; }
+}
+.lm-scanning-text {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: #9cdcfe;
+    text-shadow: 0 0 4px #000;
+}
 
 #lm-filter-row {
     display: flex;
