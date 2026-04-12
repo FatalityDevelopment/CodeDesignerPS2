@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["angular:styles/component:css;efebc79af00cdc85694864286e78fe17a1db79d3925fb33426fccb1c995d47fd;/home/runner/work/CodeDesigner/CodeDesigner/CodeDesigner.Ps2.Website/src/app/app.component.ts"],
-  "sourcesContent": [":host { display: block; height: 100%; }"],
-  "mappings": ";AAAA;AAAQ,WAAS;AAAO,UAAQ;AAAM;",
-  "names": []
-}
