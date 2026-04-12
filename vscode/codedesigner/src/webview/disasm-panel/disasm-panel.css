@@ -32,10 +32,23 @@ app-disasm-panel {
     border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
     background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d30);
     flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--vscode-scrollbarSlider-background, #555) transparent;
+}
+
+#panel-tabs::-webkit-scrollbar {
+    height: 3px;
+}
+
+#panel-tabs::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background, #555);
+    border-radius: 2px;
 }
 
 .panel-tab {
-    flex: 1;
+    flex: 0 0 auto;
+    min-width: 60px;
     background: transparent;
     color: var(--vscode-tab-inactiveForeground, #969696);
     border: none;
@@ -409,6 +422,107 @@ app-cheats-tab {
     gap: 10px;
 }
 
+/* ── Settings tab accordion container ────────────────────────────────────── */
+
+.settings-container {
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Accordion sections ──────────────────────────────────────────────────── */
+
+.acc-section {
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.08));
+}
+
+.acc-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--vscode-foreground, #cccccc);
+    padding: 7px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-align: left;
+    outline: none;
+    font-family: var(--vscode-editor-font-family);
+}
+
+.acc-header:hover {
+    background: rgba(255,255,255,0.05);
+}
+
+.acc-chevron {
+    font-size: 10px;
+    width: 12px;
+    flex-shrink: 0;
+    line-height: 1;
+    color: var(--vscode-descriptionForeground, #888);
+}
+
+.acc-title {
+    flex: 1;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.acc-subtitle {
+    font-weight: normal;
+    color: var(--vscode-foreground, #cccccc);
+    opacity: 0.75;
+}
+
+.acc-count {
+    font-size: 10px;
+    font-weight: normal;
+    color: var(--vscode-descriptionForeground, #888);
+    margin-left: 4px;
+}
+
+.acc-badge-ok {
+    font-size: 9px;
+    color: #4ec94e;
+    flex-shrink: 0;
+}
+
+.acc-body {
+    padding: 6px 10px 10px;
+}
+
+/* ── 2-column button grid ────────────────────────────────────────────────── */
+
+.btn-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+
+/* Show-more toggle (snapshots + memories) */
+.show-more-btn {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.1));
+    color: var(--vscode-descriptionForeground, #888);
+    font-size: 11px;
+    font-family: var(--vscode-editor-font-family);
+    padding: 3px 0;
+    cursor: pointer;
+    border-radius: 2px;
+    margin-top: 4px;
+    text-align: center;
+}
+
+.show-more-btn:hover {
+    background: rgba(255,255,255,0.05);
+    color: var(--vscode-foreground, #cccccc);
+}
+
 .row {
     display: flex;
     gap: 8px;
@@ -475,9 +589,7 @@ button:disabled {
 }
 
 .snapshot-list {
-    margin-top: 12px;
-    border-top: 1px solid var(--vscode-input-border);
-    padding-top: 8px;
+    padding-top: 0;
 }
 
 .snapshot-list h4 {
@@ -503,7 +615,6 @@ button:disabled {
 }
 
 .snapshot-scroll {
-    max-height: 220px;
     overflow-y: auto;
 }
 
@@ -572,16 +683,14 @@ button:disabled {
     margin: 12px 0 4px;
 }
 
-/* ── Memories section (embedded in Settings tab) ─────────────────────────── */
+/* ── Memories section (embedded in Settings tab accordion) ──────────────── */
 
 app-mcp-memory-overlay {
     display: block;
 }
 
 .mem-section {
-    margin-top: 12px;
-    border-top: 1px solid var(--vscode-input-border);
-    padding-top: 8px;
+    padding-top: 0;
 }
 
 .mem-section-header {
@@ -704,7 +813,6 @@ app-mcp-memory-overlay {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    max-height: 220px;
     overflow-y: auto;
 }
 

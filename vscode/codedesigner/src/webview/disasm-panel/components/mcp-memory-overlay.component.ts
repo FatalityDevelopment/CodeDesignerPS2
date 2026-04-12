@@ -5,6 +5,7 @@ import {
   signal,
   output,
   computed,
+  effect,
 } from '@angular/core';
 
 export interface McpMemoryEntry {
@@ -30,6 +31,8 @@ export interface McpMemoryActionResult {
 }
 
 export type McpMemoryFilter = 'all' | 'shared' | 'agent';
+
+const MEM_PREVIEW = 5;
 
 @Component({
   selector: 'app-mcp-memory-overlay',
@@ -126,6 +129,11 @@ export type McpMemoryFilter = 'all' | 'shared' | 'agent';
       </div>
     }
   </div>
+  @if (totalFilteredCount() > memPreview) {
+    <button class="show-more-btn" (click)="showAll.set(!showAll())">
+      {{showAll() ? '▴ Show fewer' : '▾ Show ' + (totalFilteredCount() - memPreview) + ' more'}}
+    </button>
+  }
 
 </div>
   `,
@@ -174,19 +182,44 @@ export class McpMemoryOverlayComponent {
   readonly pendingDelete = signal<number | null>(null);
   /** Active filter: 'all' | 'shared' | 'agent' */
   readonly filter        = signal<McpMemoryFilter>('all');
+  /** Show all entries (true) or just the first MEM_PREVIEW (false). */
+  readonly showAll       = signal(false);
+  /** Expose constant so the template can read it. */
+  readonly memPreview    = MEM_PREVIEW;
+
+  /** Total count of entries matching the current filter (before show-all capping). */
+  readonly totalFilteredCount = computed(() => {
+    const f = this.filter();
+    const all = this.entries();
+    // eslint-disable-next-line eqeqeq
+    if (f === 'shared') { return all.filter(e => e.agentId == null).length; }
+    // eslint-disable-next-line eqeqeq
+    if (f === 'agent')  { return all.filter(e => e.agentId != null).length; }
+    return all.length;
+  });
 
   readonly filteredEntries = computed(() => {
     const f = this.filter();
     const all = this.entries();
+    let result: McpMemoryEntry[];
     // Use loose equality to catch both null and undefined from the JSON response
     // eslint-disable-next-line eqeqeq
-    if (f === 'shared') return all.filter(e => e.agentId == null);
+    if (f === 'shared') { result = all.filter(e => e.agentId == null); }
     // eslint-disable-next-line eqeqeq
-    if (f === 'agent')  return all.filter(e => e.agentId != null);
-    return all;
+    else if (f === 'agent') { result = all.filter(e => e.agentId != null); }
+    else { result = all; }
+    return this.showAll() ? result : result.slice(0, MEM_PREVIEW);
   });
 
   // ── Public API ──────────────────────────────────────────────────────────────
+
+  constructor() {
+    // Reset show-all when the filter changes so the preview is fresh.
+    effect(() => {
+      this.filter();
+      this.showAll.set(false);
+    });
+  }
 
   load(): void {
     this.loading.set(true);
