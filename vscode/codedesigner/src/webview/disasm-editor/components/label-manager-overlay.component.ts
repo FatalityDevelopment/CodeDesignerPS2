@@ -253,7 +253,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                 [disabled]="scannerStatus() === 'scanning'"
                 title="Scan memory for null-terminated strings"
                 (click)="onRunScanner('strings')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'strings') { ⏳ } @else { &#x1F50D; } Str
+          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'strings') { ⏳ } @else { <svg class="lm-search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.5"/><line x1="10" y1="10" x2="14" y2="14"/></svg> } Str
         </button>
         <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'floats'"
                 [disabled]="scannerStatus() === 'scanning'"
@@ -305,7 +305,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
           <option [value]="t.value">{{ t.label }}</option>
         }
       </select>
-      <span id="lm-count">{{ filteredEntries().length }} / {{ currentSet()?.entries?.length ?? 0 }}</span>
+      <span id="lm-count">{{ filteredEntries().length }} / {{ totalEntryCount() }}</span>
     </div>
 
     <!-- Pagination controls -->
@@ -324,6 +324,14 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
             <option [value]="opt" [selected]="pageSize() === opt">{{ opt }} / page</option>
           }
         </select>
+      </div>
+    }
+
+    <!-- Scanning progress indicator -->
+    @if (scannerStatus() === 'scanning') {
+      <div class="lm-scanning-bar">
+        <div class="lm-scanning-bar-inner"></div>
+        <span class="lm-scanning-text">Scanning {{ activeScannerKind() }}… this may take a moment</span>
       </div>
     }
 
@@ -857,9 +865,11 @@ export class LabelManagerOverlayComponent {
   );
 
   readonly filteredEntries = computed(() => {
-    const labelEntries = this.currentSet()?.entries ?? [];
     const scanEntries = this.scanResultEntries();
-    const entries = [...labelEntries, ...scanEntries];
+    // When scanner results are present, show only scan results (not the label set).
+    const entries = scanEntries.length > 0
+      ? scanEntries
+      : (this.currentSet()?.entries ?? []);
     const f  = this.filterText().trim().toLowerCase();
     const tf = this.typeFilter().trim();
     return entries.filter(e => {
@@ -894,6 +904,12 @@ export class LabelManagerOverlayComponent {
       return hasName && this.editOffsetStr().trim() !== '';
     }
     return hasName && this.editAddress().trim() !== '';
+  });
+
+  /** Total entry count: scan results when scanning, otherwise label set entries. */
+  readonly totalEntryCount = computed(() => {
+    const scan = this.scanResultEntries();
+    return scan.length > 0 ? scan.length : (this.currentSet()?.entries?.length ?? 0);
   });
 
   /** True when all filtered visible entries have hidden=false (or undefined). */
@@ -1071,6 +1087,12 @@ export class LabelManagerOverlayComponent {
     } else {
       this.clearForm();
       this.statusMsg.set('');
+    }
+
+    // Now that entries are loaded, fetch live values for any dynamic entries.
+    this._emitOnePoll();
+    if (this.livePollingEnabled()) {
+      this._updatePolling();
     }
   }
 
@@ -1681,7 +1703,11 @@ export class LabelManagerOverlayComponent {
   }
 
   displayName(entry: LabelManagerEntry): string {
-    return this.effectiveType(entry) === 'Function' ? 'FNC_' + entry.name : entry.name;
+    if (this.effectiveType(entry) === 'Function') {
+      // Avoid double-prefixing — the backend may already return FNC_ names.
+      return entry.name.startsWith('FNC_') ? entry.name : 'FNC_' + entry.name;
+    }
+    return entry.name;
   }
 
   /** Returns the comment text for an entry. */
