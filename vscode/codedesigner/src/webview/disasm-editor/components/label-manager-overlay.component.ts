@@ -1072,8 +1072,8 @@ export class LabelManagerOverlayComponent {
   setActiveSet(set: LabelSetPayload): void {
     this.activeSetName.set(set.setName);
     // Ensure entries is always an array to avoid downstream null-reference errors.
-    if (!set.entries) { set = { ...set, entries: [] }; }
-    this.currentSet.set(set);
+    const safeSet: LabelSetPayload = set.entries ? set : { ...set, entries: [] };
+    this.currentSet.set(safeSet);
 
     const pending = this._pendingPrefillAddress;
 
@@ -1081,7 +1081,7 @@ export class LabelManagerOverlayComponent {
       // A context-menu "Add Label" was triggered — apply the prefill.
       this.clearForm();
       this.editAddress.set('0x' + pending);
-      const existing = set.entries.find(
+      const existing = safeSet.entries.find(
         e => e.address.toUpperCase().replace(/^0x/i, '') === pending,
       );
       if (existing) {
@@ -1089,7 +1089,7 @@ export class LabelManagerOverlayComponent {
       }
       // If the active set is read-only, keep the pending address so it is
       // reapplied automatically when the user switches to (or creates) a user set.
-      if (set.isBuiltIn) {
+      if (safeSet.isBuiltIn) {
         this.statusMsg.set('Create or select a user label set (via + New) to add this address.');
         this.statusIsError.set(false);
       } else {
