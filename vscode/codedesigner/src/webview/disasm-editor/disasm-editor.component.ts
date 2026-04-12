@@ -1115,7 +1115,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         // Validate address is in valid EE address ranges:
         // Physical: 0x00000000-0x1FFFFFFF (512MB)
         // KSEG0/1: 0x80000000-0xBFFFFFFF
-        const isPhysical = address <= 0x1FFFFFFF;
+        const isPhysical = address > 0 && address <= 0x1FFFFFFF;
         const isKseg = address >= 0x80000000 && address <= 0xBFFFFFFF;
         if (isPhysical || isKseg) {
           params.navigateToAddress(address);
@@ -1150,7 +1150,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const match = comment.match(/0x([0-9A-F]{8})/i) || comment.match(/\b([0-9A-F]{8})\b/i);
     if (!match) { return false; }
     const address = parseInt(match[1], 16);
-    const isPhysical = address <= 0x1FFFFFFF;
+    const isPhysical = address > 0 && address <= 0x1FFFFFFF;
     const isKseg = address >= 0x80000000 && address <= 0xBFFFFFFF;
     return isPhysical || isKseg;
   }
