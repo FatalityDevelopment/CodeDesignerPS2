@@ -92,10 +92,13 @@ const INITIAL_BUTTONS: Ps2Button[] = [
 
       @if (isConnected()) {
         <div class="joker-config-row joker-live-row">
-          <span class="joker-config-label">
+          <label class="joker-live-toggle">
+            <input type="checkbox"
+                   [checked]="liveEnabled()"
+                   (change)="toggleLive($any($event.target).checked)" />
             <span class="joker-live-indicator" [class.joker-live-active]="isPolling()"></span>
             Live:
-          </span>
+          </label>
           <span class="joker-config-value">{{ liveConfig() }}</span>
         </div>
       }
@@ -137,6 +140,9 @@ export class JokerMakerOverlayComponent implements OnDestroy {
 
   /** Whether the pad polling loop is active. */
   readonly isPolling = signal(false);
+
+  /** Whether the user has opted-in to live pad polling. */
+  readonly liveEnabled = signal(false);
 
   /** Computed 8-digit GameShark data value. */
   readonly outputCode = computed(() => {
@@ -189,7 +195,10 @@ export class JokerMakerOverlayComponent implements OnDestroy {
 
   open(): void {
     this.visible.set(true);
-    this.startPolling();
+    // Only resume polling if the user had previously enabled it.
+    if (this.liveEnabled()) {
+      this.startPolling();
+    }
   }
 
   close(): void {
@@ -221,6 +230,16 @@ export class JokerMakerOverlayComponent implements OnDestroy {
   onBackdropClick(event: MouseEvent): void {
     if ((event.target as HTMLElement).id === 'joker-overlay') {
       this.close();
+    }
+  }
+
+  /** Toggle the live pad polling on/off based on user checkbox. */
+  toggleLive(enabled: boolean): void {
+    this.liveEnabled.set(enabled);
+    if (enabled) {
+      this.startPolling();
+    } else {
+      this.stopPolling();
     }
   }
 

@@ -889,7 +889,7 @@ export class LabelManagerOverlayComponent {
   open(): void {
     this.visible.set(true);
     this.action$.emit({ type: 'refresh' });
-    this._startPolling();
+    this._updatePolling();
   }
 
   /**
@@ -904,7 +904,7 @@ export class LabelManagerOverlayComponent {
     this._pendingPrefillAddress = addressHex.toUpperCase().replace(/^0x/i, '');
     this.visible.set(true);
     this.action$.emit({ type: 'refresh' });
-    this._startPolling();
+    this._updatePolling();
   }
 
   close(): void {
@@ -1210,6 +1210,8 @@ export class LabelManagerOverlayComponent {
     if (!this.activeSetIsBuiltIn()) {
       this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
     }
+    // Start or stop polling based on whether any dynamic entries remain.
+    this._updatePolling();
   }
 
   /** Toggle dynamic flag on a child entry directly. */
@@ -1226,6 +1228,8 @@ export class LabelManagerOverlayComponent {
     if (!this.activeSetIsBuiltIn()) {
       this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
     }
+    // Start or stop polling based on whether any dynamic entries remain.
+    this._updatePolling();
   }
 
   /** Toggle hidden flag on a child entry directly. */
@@ -1580,9 +1584,26 @@ export class LabelManagerOverlayComponent {
     return this.liveValues().get(entry.address) ?? '…';
   }
 
-  /** Start live-value polling. Called by the overlay itself and by the page-mode host. */
+  /** Start live-value polling if there are dynamic entries. Called by the page-mode host. */
   startPolling(): void {
-    this._startPolling();
+    this._updatePolling();
+  }
+
+  /**
+   * Start or stop the poll timer based on whether any dynamic entries exist.
+   * If no entries have `dynamic === true`, polling is stopped to avoid
+   * unnecessary socket traffic.
+   */
+  private _updatePolling(): void {
+    const hasDynamic =
+      this._dynamicAddresses().length > 0 || this._dynamicMemberRows().length > 0;
+    if (hasDynamic) {
+      if (this._pollTimer === null) {
+        this._startPolling();
+      }
+    } else {
+      this._stopPolling();
+    }
   }
 
   private _startPolling(): void {
