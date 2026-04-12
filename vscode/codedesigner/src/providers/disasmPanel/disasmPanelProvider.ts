@@ -100,6 +100,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _archiveSyncPromise: Promise<void> | null = null;
     /** Interval timer for live Joker pad-status polling (cleared on close/disconnect). */
     private _jokerPadPollTimer: ReturnType<typeof setInterval> | undefined;
+    /** Last pad button bitmask sent to the webview — used to skip duplicate messages. */
+    private _lastJokerPadButtons: number | undefined;
 
     /** Returns the workspace root directory (used by DisasmEditorProvider for history lookup). */
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
@@ -1026,11 +1028,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (!this.socketClient.isConnected()) { return; }
 
         let errorCount = 0;
+        this._lastJokerPadButtons = undefined;
         const poll = async () => {
             try {
                 const state = await this.socketClient.padGetState(0);
                 errorCount = 0;
-                this.webview?.postMessage({ command: 'jokerPadState', buttons: state.buttons });
+                // Only post to webview when the pad state actually changed.
+                if (state.buttons !== this._lastJokerPadButtons) {
+                    this._lastJokerPadButtons = state.buttons;
+                    this.webview?.postMessage({ command: 'jokerPadState', buttons: state.buttons });
+                }
             } catch {
                 errorCount++;
                 if (errorCount >= 5) {
@@ -1039,9 +1046,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 }
             }
         };
-        // Fire immediately, then every 200ms.
+        // Fire immediately, then every 500ms.
         void poll();
-        this._jokerPadPollTimer = setInterval(() => void poll(), 200);
+        this._jokerPadPollTimer = setInterval(() => void poll(), 500);
     }
 
     private stopJokerPadPoll(): void {
@@ -1049,6 +1056,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             clearInterval(this._jokerPadPollTimer);
             this._jokerPadPollTimer = undefined;
         }
+        this._lastJokerPadButtons = undefined;
     }
 
     private startRuntimeMode(mode: 'emulator' | 'pcsx2', biosPath: string, gamePath: string): void {
