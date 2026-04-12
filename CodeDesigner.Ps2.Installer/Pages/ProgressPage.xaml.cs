@@ -64,6 +64,11 @@ public partial class ProgressPage : UserControl
             AppendLog("\n── Installation cancelled by user ──");
             results = Array.Empty<ScriptRunner.ScriptResult>();
         }
+        catch (Exception ex)
+        {
+            AppendLog($"\n── Unexpected error: {ex.Message} ──");
+            results = Array.Empty<ScriptRunner.ScriptResult>();
+        }
         finally
         {
             _runner.OutputReceived -= OnOutput;
