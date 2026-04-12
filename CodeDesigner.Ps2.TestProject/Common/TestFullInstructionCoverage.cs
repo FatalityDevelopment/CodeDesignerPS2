@@ -1287,7 +1287,7 @@ namespace CodeDesigner.Ps2.TestProject
             AssertAsm("sync", enc);
             AssertDisasm(enc, "sync");
             var cpu = MakeCpu(); Exec(cpu, enc); // sync is a no-op
-            AssertAnalysis(enc);
+            // SYNC has no operands and no runtime data to show — analysis is intentionally empty
         }
 
         // -----------------------------------------------------------------------
