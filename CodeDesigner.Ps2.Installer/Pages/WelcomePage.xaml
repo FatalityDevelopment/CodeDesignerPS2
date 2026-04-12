@@ -73,43 +73,12 @@
                 </TextBlock>
             </StackPanel>
 
-            <!-- Script folder selector -->
-            <TextBlock Text="Script Folder"
-                       FontSize="12"
-                       Foreground="{StaticResource FgMutedBrush}"
-                       Margin="0,24,0,6" />
-
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <TextBox x:Name="ScriptFolderBox"
-                         Grid.Column="0"
-                         Background="{StaticResource BgInputBrush}"
-                         Foreground="{StaticResource FgSecondaryBrush}"
-                         BorderBrush="{StaticResource BorderBrush}"
-                         BorderThickness="1"
-                         Padding="8,6"
-                         FontSize="13"
-                         CaretBrush="{StaticResource FgPrimaryBrush}"
-                         VerticalContentAlignment="Center" />
-
-                <Button x:Name="BrowseButton"
-                        Grid.Column="1"
-                        Content="Browse…"
-                        Style="{StaticResource SecondaryButton}"
-                        Margin="8,0,0,0"
-                        Click="BrowseButton_Click" />
-            </Grid>
-
             <!-- Discovered scripts list -->
             <TextBlock x:Name="ScriptCountLabel"
                        Text=""
                        FontSize="12"
                        Foreground="{StaticResource FgMutedBrush}"
-                       Margin="0,12,0,4" />
+                       Margin="0,24,0,4" />
 
             <ListBox x:Name="ScriptListBox"
                      MaxHeight="120"
@@ -130,12 +99,12 @@
                 Padding="0,16,0,0"
                 Margin="0,16,0,0">
             <DockPanel LastChildFill="False" Margin="40,0">
-                <Button x:Name="InstallButton"
+                <Button x:Name="StartButton"
                         DockPanel.Dock="Right"
-                        Content="Install"
+                        Content="Start"
                         Style="{StaticResource PrimaryButton}"
                         IsEnabled="False"
-                        Click="InstallButton_Click" />
+                        Click="StartButton_Click" />
 
                 <TextBlock DockPanel.Dock="Left"
                            Text="v1.0"
