@@ -2892,13 +2892,22 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     return { workspaceDir: this._workspaceRoot, gameDiscId };
   }
 
-  /** Broadcast the label set to all open panels and optionally notify struct listeners. */
-  private _broadcastLabelSet(set: LabelSetPayload): void {
+  /**
+   * Broadcast the label set to all open panels and optionally notify struct listeners.
+   * @param skipWebview When provided, skip posting to this webview (to avoid duplicate sends
+   *                    when the caller already posted directly to the originating webview).
+   */
+  private _broadcastLabelSet(set: LabelSetPayload, skipWebview?: vscode.Webview): void {
     for (const p of this._livePanels) {
-      p.webview.postMessage({ type: 'labelManagerSet', set });
+      if (p.webview !== skipWebview) {
+        p.webview.postMessage({ type: 'labelManagerSet', set });
+      }
     }
-    // Also notify the standalone label manager tab if open.
-    this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSet', set });
+    // Also notify the standalone label manager tab if open (unless it's the caller).
+    const lmWebview = this._labelManagerPanel?.webview;
+    if (lmWebview && lmWebview !== skipWebview) {
+      lmWebview.postMessage({ type: 'labelManagerSet', set });
+    }
     // Convert to StructEntry[] for backward-compat listeners (STRUCTS panel).
     // Children of each struct entry are now full label entries with parentAddress = struct's address.
     // Hidden children are excluded from the struct member display.
@@ -3091,7 +3100,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, activeName);
           this._activeSetName = activeName;
           webview.postMessage({ type: 'labelManagerSet', set });
-          this._broadcastLabelSet(set);
+          this._broadcastLabelSet(set, webview);
           await this.refreshStructLabels();
           break;
         }
@@ -3099,7 +3108,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, action.setName!);
           this._activeSetName = action.setName!;
           webview.postMessage({ type: 'labelManagerSet', set });
-          this._broadcastLabelSet(set);
+          this._broadcastLabelSet(set, webview);
           // Refresh labels in the disassembly view.
           await this.refreshStructLabels();
           break;
@@ -3125,7 +3134,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           // Switch to Built-in after deletion.
           const builtIn = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, 'Built-in');
           webview.postMessage({ type: 'labelManagerSet', set: builtIn });
-          this._broadcastLabelSet(builtIn);
+          this._broadcastLabelSet(builtIn, webview);
           await this.refreshStructLabels();
           webview.postMessage({ type: 'labelManagerStatus', message: `Deleted label set "${action.setName}".` });
           break;
@@ -3145,7 +3154,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           this._activeSetName = setName;
           const set = await this.socketClient.addLabelEntry(workspaceDir, gameDiscId, setName, action.entry!);
           webview.postMessage({ type: 'labelManagerSet', set });
-          this._broadcastLabelSet(set);
+          this._broadcastLabelSet(set, webview);
           await this.refreshStructLabels();
           break;
         }
@@ -3153,7 +3162,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const setName = action.setName!;
           const set = await this.socketClient.deleteLabelEntry(workspaceDir, gameDiscId, setName, action.address ?? '');
           webview.postMessage({ type: 'labelManagerSet', set });
-          this._broadcastLabelSet(set);
+          this._broadcastLabelSet(set, webview);
           await this.refreshStructLabels();
           break;
         }
