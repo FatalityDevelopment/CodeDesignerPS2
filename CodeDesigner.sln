@@ -36,7 +36,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.WebApi", "CodeDesigner.Ps2.WebApi\CodeDesigner.Ps2.WebApi.csproj", "{B5400E22-2C0D-46BE-97CD-FE71052A7DFD}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeDesigner.Ps2.Installer", "CodeDesigner.Ps2.Installer\CodeDesigner.Ps2.Installer.csproj", "{066B1A25-100C-48BD-AA35-6086A015BC14}"
-Project("{54A90642-561A-4BB1-A94E-469ADEE60C69}") = "website", "website\src\website.esproj", "{080E36A6-BAA4-2CF0-3829-304223C0B60E}"
+EndProject
+Project("{54A90642-561A-4BB1-A94E-469ADEE60C69}") = "website", "website\codedesigner.esproj", "{080E36A6-BAA4-2CF0-3829-304223C0B60E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
