@@ -3389,6 +3389,8 @@ app-bottom-panel {
 .lm-danger-btn { color: #f48771; border-color: #7d3c2a; }
 .lm-danger-btn:hover:not(:disabled) { background: #5a2a1e; }
 .lm-refresh-btn { margin-left: auto; }
+.lm-live-toggle { display: flex; align-items: center; gap: 4px; font-size: 11px; margin-left: 6px; cursor: pointer; user-select: none; opacity: 0.85; }
+.lm-live-toggle input { margin: 0; cursor: pointer; }
 .lm-spacer { flex: 1; }
 
 #lm-filter-row {

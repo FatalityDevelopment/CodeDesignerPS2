@@ -169,6 +169,26 @@ import { EmuOption, SnapshotEntry } from '../types';
         </button>
       </div>
 
+      <div style="margin-top:12px; border-top:1px solid var(--vscode-panel-border,#404040); padding-top:12px;">
+        <h4 style="margin:0 0 6px 0; font-size:11px; text-transform:uppercase; opacity:0.7;">Memory Views</h4>
+        <div class="row">
+          <button (click)="openMemoryViewClick.emit('IOP RAM')"
+                  title="Open IOP RAM memory view (0x1C000000)">
+            IOP RAM
+          </button>
+          <button (click)="openMemoryViewClick.emit('BIOS ROM')"
+                  title="Open BIOS ROM memory view (0x1FC00000)"
+                  style="margin-left:8px">
+            BIOS ROM
+          </button>
+          <button (click)="openMemoryViewClick.emit('Scratchpad')"
+                  title="Open Scratchpad memory view (0x70000000)"
+                  style="margin-left:8px">
+            Scratchpad
+          </button>
+        </div>
+      </div>
+
     </div>
   `,
 })
@@ -202,6 +222,7 @@ export class SettingsTabComponent {
   readonly reloadSnapshotClick = output<SnapshotEntry>();
   readonly openAiConfigClick = output<void>();
   readonly openPacketViewerClick = output<void>();
+  readonly openMemoryViewClick = output<string>();
 
   /** True when a PCSX2 emulator is explicitly selected in the dropdown. */
   readonly isPcsx2Selected = computed(() =>

@@ -1078,6 +1078,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             this._panelScanCache.delete(panel);
         });
 
+        // Pause/resume the webview's live-refresh timers based on panel
+        // visibility.  Hidden panels that keep polling waste socket bandwidth
+        // and cause the visible panel to receive placeholder zero-rows
+        // (flickering) when the in-flight guard blocks concurrent reads.
+        panel.onDidChangeViewState(e => {
+            panel.webview.postMessage({
+                type: 'panelVisibility',
+                visible: e.webviewPanel.visible,
+            });
+        });
+
         const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
 
         // Register the message handler BEFORE setting html so 'ready' is never missed.
@@ -1697,6 +1708,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       return !!this.socketClient && this.socketClient.isConnected() && !this._isLiveReadBackoffActive() && !this._liveReadInFlight;
     }
 
+    /**
+     * Returns true when a live read cannot proceed because the socket is
+     * simply busy with another in-flight request (as opposed to the backend
+     * being unavailable).  Callers should silently skip the refresh cycle
+     * instead of pushing placeholder zero-rows to the webview — sending
+     * placeholders in this case is the root cause of the memory view
+     * "flickering" between real data and zeroes.
+     */
+    private _isLiveReadBusy(): boolean {
+      return !!this.socketClient && this.socketClient.isConnected() && !this._isLiveReadBackoffActive() && this._liveReadInFlight;
+    }
+
     private _buildPlaceholderRows(baseAddress: number, startOffset: number, readLength: number): DisassembledRow[] {
       const count = Math.floor(readLength / DisasmEditorProvider.INSTRUCTION_SIZE);
       const rows: DisassembledRow[] = [];
@@ -1790,6 +1813,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const readLength  = Math.min(totalBytes - startOffset, maxBytes);
         if (readLength <= 0) { return; }
 
+        // When the socket is merely busy with another in-flight read, silently
+        // skip this refresh cycle.  Pushing placeholder zero-rows while the
+        // previous read is still pending causes the visible "flickering" between
+        // real memory and zeroes.
+        if (this._isLiveReadBusy()) { return; }
+
         if (!this._canIssueLiveBackendRequest()) {
           panel.webview.postMessage({
             type: 'disasmPage',
@@ -1826,6 +1855,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         highlightAddr: number,
         highlightLength: number
     ): Promise<void> {
+      // Silently skip when a read is already in-flight — see sendLiveDisasmPage.
+      if (this._isLiveReadBusy()) { return; }
+
       if (!this._canIssueLiveBackendRequest()) {
         this._postUnavailableHexView(panel, baseAddress, highlightAddr, highlightLength);
         return;
