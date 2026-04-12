@@ -1725,9 +1725,29 @@ export class DisasmEditorComponent implements AfterViewInit {
   }
 
   private handleWindowMessage(data: Record<string, unknown>): void {
-    // Handle extension-driven overlay open requests (e.g. from tree-view header button).
+    // Handle extension-driven overlay open requests (e.g. from sidebar panel buttons).
     if (data['type'] === 'openStructCalculator') {
       this.zone.run(() => this.openStructOverlay());
+      return;
+    }
+    if (data['type'] === 'openConverterOverlay') {
+      this.zone.run(() => this.openConverterOverlay());
+      return;
+    }
+    if (data['type'] === 'openPorterOverlay') {
+      this.zone.run(() => this.openPorterOverlay());
+      return;
+    }
+    if (data['type'] === 'openMemoryCardOverlay') {
+      this.zone.run(() => this.openMemoryCardOverlay());
+      return;
+    }
+    if (data['type'] === 'openHddOverlay') {
+      this.zone.run(() => this.openHddOverlay());
+      return;
+    }
+    if (data['type'] === 'openScannerOverlay') {
+      this.zone.run(() => this.openScannerOverlay());
       return;
     }
     if (data['type'] === 'pineWatches') {
@@ -2545,38 +2565,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.handleWindowMessage((e.data as Record<string, unknown>) ?? {});
     });
 
-    // ── Converter overlay (Angular-only) ─────────────────────────────────────
-    const converterBtn = document.getElementById('converter-btn')!;
-
-    converterBtn.addEventListener('click', () => this.openConverterOverlay());
-
-    // ── Porter overlay (Angular-only) ────────────────────────────────────────
-    const porterBtn = document.getElementById('porter-btn')!;
-
-    porterBtn.addEventListener('click', () => this.openPorterOverlay());
-
-    // ── Memory Card overlay (Angular-only) ───────────────────────────────────
-    const mcBtn = document.getElementById('mc-btn')!;
-
-    mcBtn.addEventListener('click', () => this.openMemoryCardOverlay());
-
-    // ── HDD overlay (Angular-only) ──────────────────────────────────────────
-    const hddBtn = document.getElementById('hdd-btn');
-    if (hddBtn) {
-      hddBtn.addEventListener('click', () => this.openHddOverlay());
-    }
-
-    // ── Scanner overlay (Angular-only) ───────────────────────────────────────
-    const scannerBtn = document.getElementById('scanner-btn');
-    if (scannerBtn) {
-      scannerBtn.addEventListener('click', () => this.openScannerOverlay());
-    }
-
-    // ── Label Manager overlay (Angular-only) ─────────────────────────────────
-    const labelsBtn = document.getElementById('labels-btn');
-    if (labelsBtn) {
-      labelsBtn.addEventListener('click', () => this.openLabelManager());
-    }
+    // Overlay open triggers are now driven by extension-host messages
+    // (routed from the sidebar panel) rather than local header buttons.
 
     // ── Search ────────────────────────────────────────────────────────────────
     const clearSearchMatches = () => this.clearSearchMatches({

@@ -393,6 +393,30 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'openPacketViewer':
                     this._packetViewerProvider.open();
                     break;
+                // ── Label Manager ─────────────────────────────────────────
+                case 'openLabelManager':
+                    this.editorProvider.openLabelManagerTab();
+                    break;
+                // ── Memory Card Manager ───────────────────────────────────
+                case 'openMemoryCard':
+                    this.editorProvider.openMemoryCardOverlay();
+                    break;
+                // ── HDD Image Manager ─────────────────────────────────────
+                case 'openHdd':
+                    this.editorProvider.openHddOverlay();
+                    break;
+                // ── Cheat Code Converter ──────────────────────────────────
+                case 'openConverter':
+                    this.editorProvider.openConverterOverlay();
+                    break;
+                // ── Cheat Code Porter ─────────────────────────────────────
+                case 'openPorter':
+                    this.editorProvider.openPorterOverlay();
+                    break;
+                // ── Memory Scanner ────────────────────────────────────────
+                case 'openScanner':
+                    this.editorProvider.openScannerOverlay();
+                    break;
                 // ── Follow-AI mode toggle ─────────────────────────────────
                 case 'toggleFollowAi': {
                     const enabled = !!msg.enabled;

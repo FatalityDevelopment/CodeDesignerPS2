@@ -102,6 +102,17 @@ app-cheats-tab {
     min-height: 0;
 }
 
+.cheats-tools {
+    flex-shrink: 0;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+    margin-bottom: 2px;
+}
+
+.cheats-tool-btn {
+    font-size: 11px;
+}
+
 #cheats-input {
     flex: 1;
     min-height: 0;

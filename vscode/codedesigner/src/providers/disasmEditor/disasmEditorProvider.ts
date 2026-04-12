@@ -133,6 +133,41 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     this._livePanels[0].webview.postMessage({ type: 'openStructCalculator' });
   }
 
+  /** Open the Cheat Code Converter overlay in the first live panel. */
+  public openConverterOverlay(): void {
+    if (this._livePanels.length === 0) { return; }
+    this._livePanels[0].reveal(undefined, false);
+    this._livePanels[0].webview.postMessage({ type: 'openConverterOverlay' });
+  }
+
+  /** Open the Cheat Code Porter overlay in the first live panel. */
+  public openPorterOverlay(): void {
+    if (this._livePanels.length === 0) { return; }
+    this._livePanels[0].reveal(undefined, false);
+    this._livePanels[0].webview.postMessage({ type: 'openPorterOverlay' });
+  }
+
+  /** Open the Memory Card Manager overlay in the first live panel. */
+  public openMemoryCardOverlay(): void {
+    if (this._livePanels.length === 0) { return; }
+    this._livePanels[0].reveal(undefined, false);
+    this._livePanels[0].webview.postMessage({ type: 'openMemoryCardOverlay' });
+  }
+
+  /** Open the HDD Image Manager overlay in the first live panel. */
+  public openHddOverlay(): void {
+    if (this._livePanels.length === 0) { return; }
+    this._livePanels[0].reveal(undefined, false);
+    this._livePanels[0].webview.postMessage({ type: 'openHddOverlay' });
+  }
+
+  /** Open the Memory Scanner overlay in the first live panel. */
+  public openScannerOverlay(): void {
+    if (this._livePanels.length === 0) { return; }
+    this._livePanels[0].reveal(undefined, false);
+    this._livePanels[0].webview.postMessage({ type: 'openScannerOverlay' });
+  }
+
   public navigateToAddress(address: number): void {
     const physAddr = DisasmEditorProvider._toPhysAddr(address);
     const target = this._livePanelInfo.find(info =>
