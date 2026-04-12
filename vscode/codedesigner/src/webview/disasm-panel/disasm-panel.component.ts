@@ -7,7 +7,6 @@ import {
   CheatsTabComponent,
   CdsTabComponent,
   RecompileTabComponent,
-  McpMemoryOverlayComponent,
 } from './components';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './components';
 import { EmuOption, SnapshotEntry } from './types';
@@ -84,7 +83,6 @@ interface Pcsx2ModeChangedMsg {
     CheatsTabComponent,
     CdsTabComponent,
     RecompileTabComponent,
-    McpMemoryOverlayComponent,
   ],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-panel.component.html',
@@ -108,7 +106,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   currentGameName = '';
   private subs: Subscription[] = [];
 
-  @ViewChild(McpMemoryOverlayComponent) private mcpMemoryOverlay?: McpMemoryOverlayComponent;
+  @ViewChild(SettingsTabComponent) private settingsTab?: SettingsTabComponent;
 
   constructor(private bridge: VsCodeBridgeService) {}
 
@@ -119,7 +117,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
         this.isPaused = false;
         if (!msg.connected) { this.isPcsx2 = false; }
         // Reload memories when the socket connects (in case the first load failed while disconnected)
-        if (msg.connected) { this.mcpMemoryOverlay?.load(); }
+        if (msg.connected) { this.settingsTab?.load(); }
       }),
       this.bridge.on<Pcsx2ModeChangedMsg>('pcsx2ModeChanged').subscribe(msg => {
         this.isPcsx2 = msg.isPcsx2;
@@ -169,10 +167,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       }),
       // MCP Memory Manager messages from the provider
       this.bridge.on<{ command: 'mcpMemoryListResult'; entries?: McpMemoryEntry[]; error?: string }>('mcpMemoryListResult').subscribe(msg => {
-        this.mcpMemoryOverlay?.setListResult({ entries: msg.entries, error: msg.error });
+        this.settingsTab?.setListResult({ entries: msg.entries, error: msg.error });
       }),
       this.bridge.on<{ command: 'mcpMemoryActionResult'; entry?: McpMemoryEntry; error?: string; message?: string }>('mcpMemoryActionResult').subscribe(msg => {
-        this.mcpMemoryOverlay?.setActionResult({ entry: msg.entry, error: msg.error, message: msg.message });
+        this.settingsTab?.setActionResult({ entry: msg.entry, error: msg.error, message: msg.message });
       }),
       // Follow-AI state sync from the extension host
       this.bridge.on<{ enabled: boolean }>('followAiState').subscribe(msg => {
@@ -184,7 +182,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     // Load memories list after the view (and child components) are fully initialized
-    this.mcpMemoryOverlay?.load();
+    this.settingsTab?.load();
   }
 
   ngOnDestroy(): void {

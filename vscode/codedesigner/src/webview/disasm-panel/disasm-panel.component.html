@@ -46,9 +46,6 @@
     (reloadSnapshotClick)="reloadSnapshot($event)"
     (openAiConfigClick)="onOpenAiConfig()"
     (openPacketViewerClick)="onOpenPacketViewer()"
-    (openMemoryViewClick)="onOpenMemoryView($event)"
-  />
-  <app-mcp-memory-overlay
     (listEntries)="onMcpMemoryList()"
     (addEntry)="onMcpMemoryAdd($event)"
     (editEntry)="onMcpMemoryEdit($event)"
@@ -79,4 +76,3 @@
     [selectedGame]="selectedGame"
   />
 </div>
-
