@@ -348,27 +348,54 @@ function packetProtocol(raw: Uint8Array): string {
     return ipProtoName(raw[23]);
 }
 
-/** Build a hex dump with an optional highlighted byte range. */
+/**
+ * Build a structured hex dump with an optional highlighted byte range.
+ * Returns HTML matching the disassembler memory webview layout —
+ * a header row followed by data rows using flex-based alignment with
+ * distinct colours for address, data bytes, and ASCII columns.
+ */
 function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
-    const lines: string[] = [];
+    // Header row
+    let header = '<div class="pv-hex-row">';
+    header += '<span class="pv-hex-addr">Offset</span>';
+    header += '<span class="pv-hex-bytes">';
+    for (let i = 0; i < 16; i++) {
+        if (i && i % 4 === 0) { header += '<span class="pv-hex-gap"></span>'; }
+        header += `<span class="pv-hex-byte">+${i.toString(16).toUpperCase()}</span>`;
+    }
+    header += '</span>';
+    header += '<span class="pv-hex-ascii">0123456789ABCDEF</span>';
+    header += '</div>';
+
+    // Data rows
+    const rows: string[] = [header];
     for (let i = 0; i < raw.length; i += 16) {
-        const addr = toHex(i, 4);
-        const hexParts: string[] = [];
-        let ascii = '';
+        const addr = toHex(i, 8);
+        let bytesHtml = '';
+        let asciiHtml = '';
         for (let j = 0; j < 16; j++) {
+            if (j && j % 4 === 0) { bytesHtml += '<span class="pv-hex-gap"></span>'; }
             if (i + j < raw.length) {
                 const b = raw[i + j];
                 const inHl = hlOff >= 0 && (i + j) >= hlOff && (i + j) < hlOff + hlLen;
-                hexParts.push(inHl ? `<b>${toHex(b)}</b>` : toHex(b));
-                ascii += (b >= 0x20 && b < 0x7F) ? String.fromCharCode(b) : '.';
+                const hlClass = inHl ? ' pv-hex-hl' : '';
+                bytesHtml += `<span class="pv-hex-byte${hlClass}">${toHex(b)}</span>`;
+                const ch = (b >= 0x20 && b < 0x7F) ? String.fromCharCode(b) : '.';
+                asciiHtml += `<span class="pv-hex-char${hlClass}">${ch}</span>`;
             } else {
-                hexParts.push('  ');
-                ascii += ' ';
+                bytesHtml += '<span class="pv-hex-byte">  </span>';
+                asciiHtml += '<span class="pv-hex-char"> </span>';
             }
         }
-        lines.push(`${addr}  ${hexParts.slice(0, 8).join(' ')}  ${hexParts.slice(8).join(' ')}  ${ascii}`);
+        rows.push(
+            `<div class="pv-hex-row">` +
+            `<span class="pv-hex-addr">${addr}</span>` +
+            `<span class="pv-hex-bytes">${bytesHtml}</span>` +
+            `<span class="pv-hex-ascii">${asciiHtml}</span>` +
+            `</div>`
+        );
     }
-    return lines.join('\n');
+    return rows.join('');
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -514,16 +541,64 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
 .pv-tree-field-name { color: #9cdcfe; }
 .pv-tree-field-value { color: #ce9178; }
 
-/* ── Hex dump ─────────────────────────────────────────────────── */
+/* ── Hex dump (disassembler-style) ────────────────────────────── */
 .pv-hex {
     font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', monospace);
     font-size: 12px;
-    padding: 6px 12px;
-    white-space: pre;
-    line-height: 1.4;
-    color: #aaa;
+    padding: 2px 4px 4px;
+    background: #2d2d30;
 }
-.pv-hex b { color: #fff; background: #264f78; font-weight: normal; }
+.pv-hex-row {
+    display: flex;
+    gap: 8px;
+    padding: 2px 6px;
+    line-height: 1.4;
+}
+.pv-hex-row:first-child {
+    background: #2d2d30;
+    border-bottom: 2px solid #3e3e42;
+}
+.pv-hex-addr {
+    color: #858585;
+    width: 10ch;
+    flex-shrink: 0;
+}
+.pv-hex-bytes {
+    display: flex;
+    gap: 0;
+    flex: 1;
+}
+.pv-hex-byte {
+    color: #d4d4d4;
+    width: 2ch;
+    text-align: center;
+    margin: 0 1px;
+}
+.pv-hex-byte.pv-hex-hl {
+    background: #264f78;
+    color: #fff;
+}
+.pv-hex-gap {
+    width: 8px;
+    flex-shrink: 0;
+}
+.pv-hex-ascii {
+    color: #608b4e;
+    width: 16ch;
+    border-left: 1px solid #3e3e42;
+    padding-left: 8px;
+    display: flex;
+    flex-shrink: 0;
+}
+.pv-hex-char {
+    width: 1ch;
+    display: inline-block;
+    text-align: center;
+}
+.pv-hex-char.pv-hex-hl {
+    background: #264f78;
+    color: #fff;
+}
 
 /* ── Status bar ───────────────────────────────────────────────── */
 .pv-statusbar {
@@ -738,6 +813,9 @@ export class PacketViewerComponent {
     // Public callback — set by the page component to emit actions.
     onAction: ((action: PacketViewerAction) => void) | undefined;
 
+    /** True while a recvCapture request is in-flight — prevents overlapping polls. */
+    private _recvInFlight = false;
+
     // ── Processed packet list for display ────────────────────────────────────
     readonly packets = signal<Array<{
         index: number;
@@ -796,11 +874,19 @@ export class PacketViewerComponent {
     startPolling(): void {
         this.stopPolling();
         this._pollTimer = setInterval(() => {
+            // Skip this tick if the previous recvCapture hasn't returned yet.
+            if (this._recvInFlight) { return; }
+            this._recvInFlight = true;
             this.onAction?.({ type: 'recvCapture', maxPackets: 100 });
         }, 500);
         this._statsTimer = setInterval(() => {
             this.onAction?.({ type: 'getStats' });
         }, 2000);
+    }
+
+    /** Called by the page component after a recvCapture response (success or error). */
+    recvCaptureComplete(): void {
+        this._recvInFlight = false;
     }
 
     stopPolling(): void {
@@ -811,10 +897,22 @@ export class PacketViewerComponent {
     // ── UI event handlers ────────────────────────────────────────────────────
 
     onStartCapture(): void {
-        this.capturing.set(true);
-        this.onAction?.({ type: 'getStatus' });
+        this.statusMessage.set('Starting capture…');
         this.onAction?.({ type: 'startCapture', direction: this.captureDirection(), maxQueue: 1000 });
+    }
+
+    /** Called by the page component when the provider confirms capture started. */
+    captureStarted(): void {
+        this.capturing.set(true);
+        this.statusMessage.set('');
+        this.onAction?.({ type: 'getStatus' });
         this.startPolling();
+    }
+
+    /** Called by the page component when the provider reports capture failed to start. */
+    captureStartFailed(msg: string): void {
+        this.capturing.set(false);
+        this.statusMessage.set(msg);
     }
 
     onStopCapture(): void {

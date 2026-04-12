@@ -76,6 +76,8 @@ export class PacketViewerProvider {
                     const dir = (action['direction'] as number) ?? 0;
                     const maxQ = (action['maxQueue'] as number) ?? 1000;
                     await this.socketClient.netCapture(true, dir, maxQ);
+                    // Capture was enabled successfully — tell the webview to start polling.
+                    webview.postMessage({ type: 'packetViewerCaptureStarted' });
                     break;
                 }
 
@@ -88,6 +90,9 @@ export class PacketViewerProvider {
                     const packets = await this.socketClient.netRecvCapture(max);
                     if (packets.length > 0) {
                         webview.postMessage({ type: 'packetViewerPackets', packets });
+                    } else {
+                        // Send an empty response so the in-flight guard is cleared.
+                        webview.postMessage({ type: 'packetViewerPackets', packets: [] });
                     }
                     break;
                 }
@@ -124,7 +129,11 @@ export class PacketViewerProvider {
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             getOutputChannel().error(`[PacketViewer] ${actionType} failed: ${msg}`);
-            webview.postMessage({ type: 'packetViewerError', message: msg });
+            if (actionType === 'startCapture') {
+                webview.postMessage({ type: 'packetViewerCaptureFailed', message: msg });
+            } else {
+                webview.postMessage({ type: 'packetViewerError', message: msg });
+            }
         }
     }
 
