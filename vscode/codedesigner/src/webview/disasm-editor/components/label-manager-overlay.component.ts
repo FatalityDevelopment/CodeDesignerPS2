@@ -832,7 +832,7 @@ export class LabelManagerOverlayComponent {
   readonly filteredEntries = computed(() => {
     const labelEntries = this.currentSet()?.entries ?? [];
     const scanEntries = this.scanResultEntries();
-    const entries = scanEntries.length > 0 ? [...labelEntries, ...scanEntries] : labelEntries;
+    const entries = [...labelEntries, ...scanEntries];
     const f  = this.filterText().trim().toLowerCase();
     const tf = this.typeFilter().trim();
     return entries.filter(e => {

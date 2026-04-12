@@ -115,7 +115,6 @@ export class DisasmEditorService implements OnDestroy {
     pineWatches: [],
     pcAddress: undefined,
     symLabels: [],
-    /** Live-resolved labels from the Pointer Manager, keyed by normalised address. */
     pointerLabels: [],
   };
 
