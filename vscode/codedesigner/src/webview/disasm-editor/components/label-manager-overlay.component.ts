@@ -295,11 +295,11 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
              placeholder="Filter by address or name…"
              spellcheck="false"
              [value]="filterText()"
-             (input)="filterText.set(asInput($event).value)" />
+             (input)="onFilterTextChange(asInput($event).value)" />
       @if (filterText()) {
-        <button class="lm-clear-filter" (click)="filterText.set('')">&#xD7;</button>
+        <button class="lm-clear-filter" (click)="onFilterTextChange('')">&#xD7;</button>
       }
-      <select id="lm-type-filter" [value]="typeFilter()" (change)="typeFilter.set(asSelect($event).value)">
+      <select id="lm-type-filter" [value]="typeFilter()" (change)="onTypeFilterChange(asSelect($event).value)">
         <option value="">All types</option>
         @for (t of unifiedTypes; track t.value) {
           <option [value]="t.value">{{ t.label }}</option>
@@ -307,6 +307,25 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       </select>
       <span id="lm-count">{{ filteredEntries().length }} / {{ currentSet()?.entries?.length ?? 0 }}</span>
     </div>
+
+    <!-- Pagination controls -->
+    @if (totalPages() > 1 || totalRootEntries() > pageSizeOptions[0]) {
+      <div class="lm-pagination">
+        <button class="lm-page-btn" [disabled]="currentPage() === 0" title="First page" (click)="goToPage(0)">&#x23EE;</button>
+        <button class="lm-page-btn" [disabled]="currentPage() === 0" title="Previous page" (click)="goToPage(currentPage() - 1)">&#x25C0;</button>
+        <span class="lm-page-info">
+          Page {{ currentPage() + 1 }} of {{ totalPages() }}
+          <span class="lm-muted">({{ totalRootEntries() }} entries)</span>
+        </span>
+        <button class="lm-page-btn" [disabled]="currentPage() >= totalPages() - 1" title="Next page" (click)="goToPage(currentPage() + 1)">&#x25B6;</button>
+        <button class="lm-page-btn" [disabled]="currentPage() >= totalPages() - 1" title="Last page" (click)="goToPage(totalPages() - 1)">&#x23ED;</button>
+        <select class="lm-page-size-select" [value]="pageSize()" (change)="onPageSizeChange(asSelect($event).value)" title="Entries per page">
+          @for (opt of pageSizeOptions; track opt) {
+            <option [value]="opt" [selected]="pageSize() === opt">{{ opt }} / page</option>
+          }
+        </select>
+      </div>
+    }
 
     <!-- Table -->
     <div id="lm-table-wrap">
@@ -814,6 +833,14 @@ export class LabelManagerOverlayComponent {
   /** Scanner results converted to LabelManagerEntry items. */
   readonly scanResultEntries = signal<LabelManagerEntry[]>([]);
 
+  // ── Pagination state ─────────────────────────────────────────────────────────
+  /** Current page index (0-based). */
+  readonly currentPage = signal(0);
+  /** Number of root entries displayed per page. */
+  readonly pageSize = signal(100);
+  /** Available page-size options. */
+  readonly pageSizeOptions = [50, 100, 250, 500];
+
   /**
    * Normalised address (no "0x" prefix, uppercase) that should be pre-filled
    * into the form the next time `setActiveSet` is called after a refresh.
@@ -931,8 +958,16 @@ export class LabelManagerOverlayComponent {
    * if they have children — fully recursive with cycle detection.
    */
   readonly treeRows = computed<TreeRow[]>(() => {
+    const roots = this.sortedRootEntries();
+    const size = this.pageSize();
+    const maxPage = Math.max(0, Math.ceil(roots.length / size) - 1);
+    const page = Math.min(this.currentPage(), maxPage);
+    const start = page * size;
+    const end = start + size;
+    const pagedRoots = roots.slice(start, end);
+
     const rows: TreeRow[] = [];
-    for (const entry of this.sortedRootEntries()) {
+    for (const entry of pagedRoots) {
       const path = entry.address;
       const children = this._childrenOf(path);
       rows.push({
@@ -950,6 +985,14 @@ export class LabelManagerOverlayComponent {
     }
     return rows;
   });
+
+  /** Total number of root entries (before paging). */
+  readonly totalRootEntries = computed(() => this.sortedRootEntries().length);
+
+  /** Total number of pages. */
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalRootEntries() / this.pageSize()))
+  );
 
 
   // ── Public API ────────────────────────────────────────────────────────────────
@@ -1046,6 +1089,7 @@ export class LabelManagerOverlayComponent {
     this.activeScannerKind.set(kind);
     this.scannerStatus.set('scanning');
     this.scanResultEntries.set([]);
+    this.currentPage.set(0);
     this.action$.emit({ type: 'runScanner', scannerKind: kind });
   }
 
@@ -1054,6 +1098,7 @@ export class LabelManagerOverlayComponent {
     this.activeScannerKind.set(null);
     this.scannerStatus.set('idle');
     this.scanResultEntries.set([]);
+    this.currentPage.set(0);
     this.action$.emit({ type: 'clearScanResults' });
   }
 
@@ -1065,13 +1110,44 @@ export class LabelManagerOverlayComponent {
     this.activeScannerKind.set(kind);
     this.scannerStatus.set('done');
     this.scanResultEntries.set(entries);
+    this.currentPage.set(0);
     const count = entries.length;
     this.showStatus(`Scan complete: ${count} ${kind} found.`);
   }
 
+  // ── Pagination ──────────────────────────────────────────────────────────────
+
+  /** Navigate to the given page (clamped to valid range). */
+  goToPage(page: number): void {
+    const clamped = Math.max(0, Math.min(page, this.totalPages() - 1));
+    this.currentPage.set(clamped);
+  }
+
+  /** Handle page-size dropdown change. */
+  onPageSizeChange(value: string): void {
+    const size = parseInt(value, 10);
+    if (!Number.isNaN(size) && size > 0) {
+      this.pageSize.set(size);
+      this.currentPage.set(0);
+    }
+  }
+
   // ── Event Handlers ────────────────────────────────────────────────────────────
 
+  /** Update filter text and reset to first page. */
+  onFilterTextChange(value: string): void {
+    this.filterText.set(value);
+    this.currentPage.set(0);
+  }
+
+  /** Update type filter and reset to first page. */
+  onTypeFilterChange(value: string): void {
+    this.typeFilter.set(value);
+    this.currentPage.set(0);
+  }
+
   onSetChange(name: string): void {
+    this.currentPage.set(0);
     this.action$.emit({ type: 'setActive', setName: name });
   }
 
@@ -1173,10 +1249,11 @@ export class LabelManagerOverlayComponent {
   onSort(column: LabelSortColumn): void {
     if (this.sortColumn() === column) {
       this.sortDirection.update(direction => direction === 'asc' ? 'desc' : 'asc');
-      return;
+    } else {
+      this.sortColumn.set(column);
+      this.sortDirection.set('asc');
     }
-    this.sortColumn.set(column);
-    this.sortDirection.set('asc');
+    this.currentPage.set(0);
   }
 
   sortIndicator(column: LabelSortColumn): string {
