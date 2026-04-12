@@ -2724,6 +2724,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const r = LIVE_REGIONS_OPTIONAL.find(r => r.label === label);
         if (r) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
+        } else {
+            getOutputChannel().warn(`Unknown optional memory view: '${label}'`);
         }
     }
 
