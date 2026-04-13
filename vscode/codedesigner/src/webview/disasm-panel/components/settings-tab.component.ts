@@ -255,6 +255,84 @@ const SNAP_PREVIEW = 5;
         </div>
       </div>
 
+      <!-- ── File Loader ──────────────────────────────────────────────────── -->
+      <div class="acc-section" style="margin-top:8px;">
+        <button class="acc-header" (click)="fileOpen.set(!fileOpen())">
+          <span class="acc-chevron">{{fileOpen() ? '▾' : '▸'}}</span>
+          <span class="acc-title">File Loader</span>
+        </button>
+        @if (fileOpen()) {
+          <div class="acc-body">
+            <div style="font-size:11px;opacity:0.75;margin-bottom:6px;">
+              Load a memory dump or ELF into the internal emulator.
+              After loading, all memory views update automatically.
+              Set a PC and resume to debug.
+            </div>
+
+            <!-- ELF loader -->
+            <div style="margin-bottom:8px;">
+              <div style="font-size:11px;font-weight:600;margin-bottom:4px;">ELF File</div>
+              <div class="row">
+                <input #elfPathInput type="text" placeholder="Path to .elf file…"
+                       style="flex:1;min-width:0;font-size:11px;"
+                       [value]="elfPath()"
+                       (input)="elfPath.set($any($event.target).value)" />
+                <button class="browse-btn" (click)="browseElfClick.emit()"
+                        title="Browse for ELF file">…</button>
+              </div>
+              <div class="row" style="margin-top:4px;">
+                <button (click)="loadElfClick.emit(elfPath())"
+                        [disabled]="!isConnected() || !elfPath()"
+                        style="width:100%">
+                  ⬆ Load ELF
+                </button>
+              </div>
+              @if (elfEntryPoint()) {
+                <div style="font-size:11px;margin-top:4px;opacity:0.8;">
+                  Entry point: <code>0x{{elfEntryPoint()}}</code>
+                </div>
+              }
+            </div>
+
+            <!-- Snapshot loader -->
+            <div style="margin-bottom:8px;">
+              <div style="font-size:11px;font-weight:600;margin-bottom:4px;">Snapshot Directory</div>
+              <div class="row">
+                <input type="text" placeholder="Path to snapshot folder…"
+                       style="flex:1;min-width:0;font-size:11px;"
+                       [value]="fileSnapPath()"
+                       (input)="fileSnapPath.set($any($event.target).value)" />
+                <button class="browse-btn" (click)="browseFileSnapClick.emit()"
+                        title="Browse for snapshot directory">…</button>
+              </div>
+              <div class="row" style="margin-top:4px;">
+                <button (click)="loadFileSnapClick.emit(fileSnapPath())"
+                        [disabled]="!isConnected() || !fileSnapPath()"
+                        style="width:100%">
+                  ⬆ Load Snapshot
+                </button>
+              </div>
+            </div>
+
+            <!-- Set PC -->
+            <div>
+              <div style="font-size:11px;font-weight:600;margin-bottom:4px;">Set PC</div>
+              <div class="row">
+                <input type="text" placeholder="0x80010000"
+                       style="flex:1;min-width:0;font-size:11px;"
+                       [value]="setPcValue()"
+                       (input)="setPcValue.set($any($event.target).value)"
+                       (keydown.enter)="setPcClick.emit(setPcValue())" />
+                <button (click)="setPcClick.emit(setPcValue())"
+                        [disabled]="!isConnected() || !setPcValue()"
+                        title="Apply PC value">Apply</button>
+              </div>
+            </div>
+
+          </div>
+        }
+      </div>
+
     </div>
   `,
 })
@@ -298,6 +376,14 @@ export class SettingsTabComponent {
   readonly openHddClick          = output<void>();
   readonly openMemoryViewClick = output<string>();
 
+  // ── File Loader outputs ──────────────────────────────────────────────────────
+
+  readonly browseElfClick      = output<void>();
+  readonly loadElfClick        = output<string>();
+  readonly browseFileSnapClick = output<void>();
+  readonly loadFileSnapClick   = output<string>();
+  readonly setPcClick          = output<string>();
+
   // ── Outputs (memory relay) ──────────────────────────────────────────────────
 
   readonly listEntries  = output<void>();
@@ -318,6 +404,18 @@ export class SettingsTabComponent {
   readonly snapOpen  = signal(true);
   readonly toolsOpen = signal(false);
   readonly memOpen   = signal(false);
+  readonly fileOpen  = signal(false);
+
+  // ── File Loader state ────────────────────────────────────────────────────────
+
+  /** Path to the ELF file chosen in the File Loader section. */
+  readonly elfPath      = signal('');
+  /** Entry-point address shown after a successful ELF load (hex string without 0x). */
+  readonly elfEntryPoint = signal('');
+  /** Path to the snapshot directory chosen in the File Loader section. */
+  readonly fileSnapPath = signal('');
+  /** Current value of the Set PC input. */
+  readonly setPcValue   = signal('');
 
   // ── Snapshot show-all ────────────────────────────────────────────────────────
 
@@ -346,4 +444,23 @@ export class SettingsTabComponent {
 
   /** Forward a memory action result from the extension host to the overlay. */
   setActionResult(r: McpMemoryActionResult): void { this.mcpOverlay()?.setActionResult(r); }
+
+  /**
+   * Display the ELF entry point returned by the provider after a successful
+   * LOADELF command.  Called by the parent DisasmPanelComponent on the
+   * 'fileElfLoaded' bridge message.
+   */
+  setElfEntryPoint(address: string): void { this.elfEntryPoint.set(address); }
+
+  /**
+   * Populate the ELF path input after the user browses for a file.
+   * Called by the parent DisasmPanelComponent on 'browseElfResult'.
+   */
+  setElfPath(p: string): void { this.elfPath.set(p); }
+
+  /**
+   * Populate the snapshot path input after the user browses for a directory.
+   * Called by the parent DisasmPanelComponent on 'browseFileSnapResult'.
+   */
+  setFileSnapPath(p: string): void { this.fileSnapPath.set(p); }
 }

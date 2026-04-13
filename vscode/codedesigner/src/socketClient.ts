@@ -1434,6 +1434,40 @@ export class SocketClient {
     }
 
     /**
+     * Load a PS2 ELF32 executable into the internal emulator's memory bus.
+     * PT_LOAD segments are written to EE RAM at their virtual addresses and
+     * the EE program counter is set to the ELF entry point.  The emulator is
+     * left paused so the caller can set breakpoints before resuming.
+     *
+     * Only works with the internal emulator (not PCSX2 PINE mode).
+     *
+     * @param filePath  Absolute path to the ELF32 file.
+     * @returns The ELF entry-point address and loaded region descriptors.
+     */
+    public async loadElf(filePath: string): Promise<{ entryPoint: number; regions: SnapshotRegion[] }> {
+        const command: CommandMessage = {
+            Command: 'LOADELF',
+            InputPath: filePath,
+        };
+
+        const response = await this.sendCommand(command);
+
+        if (!response.Success) {
+            throw new Error(response.Error || 'LoadElf failed');
+        }
+
+        return { entryPoint: response.PC ?? 0, regions: response.Regions || [] };
+    }
+
+    /**
+     * Set the EE program counter to a specific virtual address.
+     * The emulator must be paused; this does not resume execution.
+     */
+    public async setPC(address: number): Promise<void> {
+        await this.setRegister('PC', 0, `0x${address.toString(16).toUpperCase().padStart(8, '0')}`);
+    }
+
+    /**
      * Pause emulator execution
      */
     public async pause(): Promise<void> {
