@@ -393,8 +393,12 @@ namespace CodeDesigner.Ps2.Common
             var matches = Regex.Matches(analysis, @"\[?0x([0-9A-Fa-f]{8})\]?");
             foreach (Match m in matches)
             {
-                // Skip if already annotated right after this match
-                if (analysis.Substring(m.Index).Contains(" \""))
+                // Skip if this address is already immediately followed by an annotation quote
+                int afterMatch = m.Index + m.Length;
+                bool alreadyAnnotated = afterMatch + 1 < analysis.Length
+                    && analysis[afterMatch] == ' '
+                    && analysis[afterMatch + 1] == '"';
+                if (alreadyAnnotated)
                     continue;
 
                 uint addr = Convert.ToUInt32(m.Groups[1].Value, 16);
