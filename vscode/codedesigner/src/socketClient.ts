@@ -1195,9 +1195,9 @@ export class SocketClient {
 
         const response = await this.sendCommand(command);
 
-        // Do not throw on !response.Success — assert failures set Success=false but still
-        // populate Results (with error entries) and Sidecars (with assert metadata).
-        // The caller is responsible for inspecting the error entries.
+        // Assert failures return Success=false but still populate Results (with error entries)
+        // and Sidecars (with assert metadata). Only throw when no Results are present — that
+        // indicates a hard protocol or parse error with nothing for the caller to inspect.
         if (!response.Success && !response.Results) {
             throw new Error(response.Error || 'Compilation failed');
         }

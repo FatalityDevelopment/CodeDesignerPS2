@@ -43,7 +43,13 @@ public sealed partial class CodeDesignerPs2Tools
 
     [McpServerTool(Name = "compile_cds")]
     [DynamicDescription("compile_cds_desc")]
-    [Description("Compile a Code Designer Script (.cds) source file into PS2 GameShark/Action Replay cheat codes. The script uses a structured language that maps address/value assignments to the appropriate cheat code type.")]
+    [Description("Compile a Code Designer Script (.cds) source into PS2 GameShark/Action Replay cheat codes and MIPS memory patches. " +
+                 "The language supports: MIPS instructions, address directives, hexcode, setreg, mem.b/h/w/d typed writes, string embedding, " +
+                 "scope blocks, labels, const/alias/macro preprocessor, if/while/repeat control flow, " +
+                 "and sidecar directives (assert, breakpoint, watchpoint). " +
+                 "assert directives are checked against live memory when a backend is connected — a failing assert aborts code output. " +
+                 "breakpoint and watchpoint sidecars are returned as metadata for the caller to install. " +
+                 "Server-registered labels are automatically available in CDS source.")]
     public async Task<string> CompileCds(
         [Description("CDS source code to compile.")] string sourceCode,
         CancellationToken cancellationToken = default)
