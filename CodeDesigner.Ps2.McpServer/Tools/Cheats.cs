@@ -116,4 +116,82 @@ public sealed partial class CodeDesignerPs2Tools
             return Task.FromResult($"Error: {ex.Message}");
         }
     }
+
+    // -------------------------------------------------------------------------
+    // CDS cheat engine (live injection into running emulator)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "inject_cheat_engine")]
+    [DynamicDescription("inject_cheat_engine_desc")]
+    [Description("Inject the CDS MIPS cheat engine into the running PS2 emulator and activate a set of cheats. " +
+                 "The engine is written into EE RAM and hooked at a stable call site in game code so it runs every frame. " +
+                 "Supply cheats as a CDS source block (preferred) or as raw GameShark codes.")]
+    public async Task<string> InjectCheatEngine(
+        [Description("Virtual address (hex, e.g. '0x001A3BC0') in game code where the engine hook is installed. " +
+                     "Choose a frequently-called function such as a frame-update routine.")] string hookAddress,
+        [Description("CDS source code defining the cheats to activate (freeze/cond blocks). " +
+                     "Takes precedence over cheatCodes when both are supplied.")] string? cdsSource = null,
+        [Description("Raw GameShark/Action Replay cheat codes to activate (used when cdsSource is not provided).")] string? cheatCodes = null,
+        [Description("Optional base address (hex) in EE RAM where the engine binary is installed. " +
+                     "Defaults to 0x000C0000 if omitted.")] string? engineBase = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(hookAddress))
+            return "Error: hookAddress is required";
+        if (string.IsNullOrWhiteSpace(cdsSource) && string.IsNullOrWhiteSpace(cheatCodes))
+            return "Error: provide cdsSource or cheatCodes";
+
+        uint? parsedHook    = TryParseAddress(hookAddress);
+        uint? parsedBase    = TryParseAddress(engineBase);
+
+        if (parsedHook is null)
+            return $"Error: cannot parse hookAddress '{hookAddress}'";
+
+        var json = await bridge.SendAsync(
+            new
+            {
+                Command       = "INJECTCHEATENGINE",
+                Data          = cheatCodes,
+                CdsSource     = cdsSource,
+                HookAddress   = parsedHook,
+                EngineBase    = parsedBase
+            },
+            cancellationToken);
+
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "update_cheat_engine")]
+    [DynamicDescription("update_cheat_engine_desc")]
+    [Description("Update the active cheat table in the already-injected CDS cheat engine without re-hooking. " +
+                 "The engine picks up the new values on its next iteration. " +
+                 "inject_cheat_engine must have been called first.")]
+    public async Task<string> UpdateCheatEngine(
+        [Description("CDS source code defining the updated cheats (freeze/cond blocks). " +
+                     "Takes precedence over cheatCodes when both are supplied.")] string? cdsSource = null,
+        [Description("Raw GameShark/Action Replay cheat codes to write into the table (used when cdsSource is not provided).")] string? cheatCodes = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(cdsSource) && string.IsNullOrWhiteSpace(cheatCodes))
+            return "Error: provide cdsSource or cheatCodes";
+
+        var json = await bridge.SendAsync(
+            new { Command = "UPDATECHEATENGINE", Data = cheatCodes, CdsSource = cdsSource },
+            cancellationToken);
+
+        return SimpleMessage(json);
+    }
+
+    [McpServerTool(Name = "remove_cheat_engine")]
+    [DynamicDescription("remove_cheat_engine_desc")]
+    [Description("Remove the injected CDS cheat engine from the running PS2 emulator, restoring the original instructions at the hook point. " +
+                 "inject_cheat_engine must have been called first.")]
+    public async Task<string> RemoveCheatEngine(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "REMOVECHEATENGINE" },
+            cancellationToken);
+
+        return SimpleMessage(json);
+    }
 }

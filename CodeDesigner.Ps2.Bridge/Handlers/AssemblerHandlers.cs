@@ -77,7 +77,7 @@ namespace CodeDesigner.Ps2.Bridge
                     results.Add(new InstructionResult
                     {
                         Success    = false,
-                        Assembly   = diag.SourceText,
+                        Assembly   = string.Empty,
                         Error      = diag.Message,
                         LineNumber = diag.LineNumber
                     });
@@ -91,13 +91,19 @@ namespace CodeDesigner.Ps2.Bridge
 
                 foreach (var (addr, word) in compiled)
                 {
-                    lineByAddress.TryGetValue(addr, out var annotation);
+                    string lineText = string.Empty;
+                    int? lineNum = null;
+                    if (lineByAddress.TryGetValue(addr, out var annotation))
+                    {
+                        lineText = annotation.lineText;
+                        lineNum  = annotation.lineNumber;
+                    }
                     results.Add(new InstructionResult
                     {
                         Success    = true,
-                        Assembly   = annotation?.lineText ?? string.Empty,
+                        Assembly   = lineText,
                         Hex        = FormatGameSharkCode(addr, word),
-                        LineNumber = annotation?.lineNumber
+                        LineNumber = lineNum
                     });
                 }
 
@@ -352,19 +358,6 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>Format a (address, word) pair as a GameShark type-2 code.</summary>
-        private static string FormatGameSharkCode(uint address, uint value)
-        {
-            // Type-2 prefix (0x20000000) ORed with the low 28 bits of the target address.
-            uint codeAddr = 0x20000000u | (address & 0x0FFFFFFFu);
-            return $"{codeAddr:X8} {value:X8}";
-        }
-    }
-}
-
-        /// <summary>
-        /// Format a 32-bit address/value pair as a PS2 GameShark type-2 (32-bit write) code.
-        /// Format: 2AAAAAAA VVVVVVVV  (address low 28 bits, value 32 bits).
-        /// </summary>
         private static string FormatGameSharkCode(uint address, uint value)
         {
             // Type-2 prefix (0x20000000) ORed with the low 28 bits of the target address.
