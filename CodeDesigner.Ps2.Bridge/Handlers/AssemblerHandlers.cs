@@ -29,6 +29,17 @@ namespace CodeDesigner.Ps2.Bridge
         /// </para>
         ///
         /// <para>
+        /// Sidecar commands are extracted from the compiled output and returned in the
+        /// <c>Sidecars</c> field of the response:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item><c>assert</c> — checked against live memory when a backend is available;
+        ///     a failed assertion aborts code output and reports an error.</item>
+        ///   <item><c>breakpoint</c> — returned as metadata for the caller to install.</item>
+        ///   <item><c>watchpoint</c> — returned as metadata for the caller to install.</item>
+        /// </list>
+        ///
+        /// <para>
         /// Each emitted (address, word) pair is formatted as a GameShark type-2 code:
         /// <c>2AAAAAAA VVVVVVVV</c>
         /// </para>
@@ -83,6 +94,84 @@ namespace CodeDesigner.Ps2.Bridge
                     });
                 }
 
+                // ── Process sidecar commands ─────────────────────────────────────────
+                var sidecars       = CdsCompiler.GetSidecarCommands(items);
+                var sidecarResults = new List<CdsSidecarResult>();
+                bool assertFailed  = false;
+
+                foreach (var sc in sidecars)
+                {
+                    switch (sc)
+                    {
+                        case AssertSyntaxItem assert:
+                        {
+                            var sidecar = new CdsSidecarResult
+                            {
+                                Kind          = "assert",
+                                Address       = assert.Address,
+                                Operator      = assert.Operator,
+                                ExpectedValue = assert.ExpectedValue,
+                            };
+
+                            uint? actual = TryReadWordFromLiveMemory(assert.Address);
+                            if (actual.HasValue)
+                            {
+                                sidecar.ActualValue = actual;
+                                bool pass = string.Equals(assert.Operator, "!=",
+                                    StringComparison.Ordinal)
+                                    ? actual.Value != assert.ExpectedValue
+                                    : actual.Value == assert.ExpectedValue;
+                                sidecar.AssertPassed = pass;
+
+                                if (!pass)
+                                {
+                                    assertFailed = true;
+                                    results.Add(new InstructionResult
+                                    {
+                                        Success = false,
+                                        Error   = $"Assert failed at 0x{assert.Address:X8}: " +
+                                                  $"expected {assert.Operator} 0x{assert.ExpectedValue:X8}, " +
+                                                  $"got 0x{actual.Value:X8}"
+                                    });
+                                }
+                            }
+
+                            sidecarResults.Add(sidecar);
+                            break;
+                        }
+
+                        case BreakpointSyntaxItem bp:
+                            sidecarResults.Add(new CdsSidecarResult
+                            {
+                                Kind    = "breakpoint",
+                                Address = bp.Address
+                            });
+                            break;
+
+                        case WatchpointSyntaxItem wp:
+                            sidecarResults.Add(new CdsSidecarResult
+                            {
+                                Kind       = "watchpoint",
+                                Address    = wp.Address,
+                                WatchSize  = wp.Size,
+                                AccessType = wp.AccessType.ToString().ToLowerInvariant()
+                            });
+                            break;
+                    }
+                }
+
+                // If any assert failed against live memory, return without code words.
+                if (assertFailed)
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success  = false,
+                        Command  = "COMPILECDS",
+                        Results  = results,
+                        Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
+                    });
+                }
+
                 // Walk the compiled (address, word) pairs and format as GameShark codes
                 var compiled = CdsCompiler.Compile(items);
                 // Build a lookup from item LineNumber/LineText using the item tree
@@ -109,15 +198,37 @@ namespace CodeDesigner.Ps2.Bridge
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
-                    Success = true,
-                    Command = "COMPILECDS",
-                    Results = results
+                    Success  = true,
+                    Command  = "COMPILECDS",
+                    Results  = results,
+                    Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
                 });
             }
             catch (Exception ex)
             {
                 return CreateErrorResponse($"Compile error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Try to read a 32-bit word from live PS2 memory at the given virtual address.
+        /// Returns <see langword="null"/> when no live backend is connected or the read fails.
+        /// </summary>
+        private uint? TryReadWordFromLiveMemory(uint address)
+        {
+            try
+            {
+                if (IsPineMode && PineClient != null)
+                {
+                    uint pineAddr = address & 0x1FFFFFFF;
+                    byte[] bytes  = PineClient.ReadBytes(pineAddr, 4);
+                    return System.BitConverter.ToUInt32(bytes, 0);
+                }
+                if (Scheduler != null)
+                    return Scheduler.EE.Bus.ReadWord(address);
+            }
+            catch { /* swallow — no live backend or address out of range */ }
+            return null;
         }
 
         /// <summary>

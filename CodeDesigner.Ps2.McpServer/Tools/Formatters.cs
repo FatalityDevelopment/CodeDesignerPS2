@@ -101,32 +101,94 @@ public sealed partial class CodeDesignerPs2Tools
                 errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
-            if (!root.TryGetProperty("Results", out var results))
-                return SimpleMessage(json);
-
             var sb = new StringBuilder();
             bool hasErrors = false;
-            foreach (var item in results.EnumerateArray())
+
+            // ── Main instruction results ──────────────────────────────────────────
+            if (root.TryGetProperty("Results", out var results))
             {
-                bool success = item.TryGetProperty("Success", out var s) && s.GetBoolean();
-                int line = item.TryGetProperty("LineNumber", out var ln) ? ln.GetInt32() : 0;
-
-                if (!success)
+                foreach (var item in results.EnumerateArray())
                 {
-                    hasErrors = true;
-                    string errMsg = item.TryGetProperty("Error",    out var e) ? (e.GetString() ?? "?") : "?";
-                    string srcAsm = item.TryGetProperty("Assembly", out var a) ? (a.GetString() ?? "") : "";
-                    sb.AppendLine($"  [line {line} error] {srcAsm}: {errMsg}");
-                    continue;
-                }
+                    bool success = item.TryGetProperty("Success", out var s) && s.GetBoolean();
 
-                string hex = item.TryGetProperty("Hex",      out var h) ? (h.GetString() ?? "") : "";
-                string asm = item.TryGetProperty("Assembly", out var aa) ? (aa.GetString() ?? "") : "";
-                sb.AppendLine($"  {hex}  ; {asm}");
+                    // LineNumber is int? — may be JSON null or absent
+                    int line = item.TryGetProperty("LineNumber", out var ln) &&
+                               ln.ValueKind == JsonValueKind.Number
+                               ? ln.GetInt32() : 0;
+
+                    if (!success)
+                    {
+                        hasErrors = true;
+                        string errMsg = item.TryGetProperty("Error",    out var e) ? (e.GetString() ?? "?") : "?";
+                        string srcAsm = item.TryGetProperty("Assembly", out var a) ? (a.GetString() ?? "") : "";
+                        string prefix = line > 0 ? $"[line {line}] " : "";
+                        sb.AppendLine(string.IsNullOrEmpty(srcAsm)
+                            ? $"  {prefix}error: {errMsg}"
+                            : $"  {prefix}error: {srcAsm}: {errMsg}");
+                        continue;
+                    }
+
+                    string hex = item.TryGetProperty("Hex",      out var h)  ? (h.GetString()  ?? "") : "";
+                    string asm = item.TryGetProperty("Assembly", out var aa) ? (aa.GetString() ?? "") : "";
+                    sb.AppendLine(string.IsNullOrEmpty(asm)
+                        ? $"  {hex}"
+                        : $"  {hex}  ; {asm}");
+                }
             }
 
             if (hasErrors)
                 sb.Insert(0, "Compiled with errors:\n");
+
+            // ── Sidecar commands ──────────────────────────────────────────────────
+            if (root.TryGetProperty("Sidecars", out var sidecars) &&
+                sidecars.ValueKind == JsonValueKind.Array)
+            {
+                var sidecarSb = new StringBuilder();
+                foreach (var sc in sidecars.EnumerateArray())
+                {
+                    string kind = sc.TryGetProperty("Kind", out var k) ? (k.GetString() ?? "") : "";
+                    uint   addr = sc.TryGetProperty("Address", out var a) ? a.GetUInt32() : 0;
+
+                    switch (kind)
+                    {
+                        case "assert":
+                        {
+                            bool?   passed = sc.TryGetProperty("AssertPassed", out var p) && p.ValueKind != JsonValueKind.Null
+                                             ? p.GetBoolean() : null;
+                            uint?   expected = sc.TryGetProperty("ExpectedValue", out var ev) && ev.ValueKind == JsonValueKind.Number
+                                               ? ev.GetUInt32() : null;
+                            uint?   actual   = sc.TryGetProperty("ActualValue",   out var av) && av.ValueKind == JsonValueKind.Number
+                                               ? av.GetUInt32() : null;
+                            string  op       = sc.TryGetProperty("Operator", out var op2) ? (op2.GetString() ?? "==") : "==";
+
+                            string passStr = passed.HasValue ? (passed.Value ? "✓ passed" : "✗ FAILED") : "(not checked — no live backend)";
+                            string expected_ = expected.HasValue ? $"0x{expected.Value:X8}" : "?";
+                            string actual_   = actual.HasValue   ? $"0x{actual.Value:X8}"   : "";
+                            string actualPart = actual.HasValue ? $", got {actual_}" : "";
+                            sidecarSb.AppendLine($"  assert 0x{addr:X8} {op} {expected_}{actualPart} — {passStr}");
+                            break;
+                        }
+                        case "breakpoint":
+                            sidecarSb.AppendLine($"  breakpoint @ 0x{addr:X8}");
+                            break;
+                        case "watchpoint":
+                        {
+                            string access = sc.TryGetProperty("AccessType", out var at) ? (at.GetString() ?? "write") : "write";
+                            uint   size   = sc.TryGetProperty("WatchSize",   out var ws) && ws.ValueKind == JsonValueKind.Number
+                                            ? ws.GetUInt32() : 4;
+                            sidecarSb.AppendLine($"  watchpoint {access} @ 0x{addr:X8} ({size} bytes)");
+                            break;
+                        }
+                    }
+                }
+
+                if (sidecarSb.Length > 0)
+                {
+                    sb.AppendLine();
+                    sb.Append("Sidecars:\n");
+                    sb.Append(sidecarSb);
+                }
+            }
 
             return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no output)");
         }

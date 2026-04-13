@@ -113,6 +113,8 @@ namespace CodeDesigner.Ps2.Bridge
         public List<ScanValueResult>? ScanResults { get; set; }
         // GETSTRUCTS results
         public List<StructEntry>? Structs { get; set; }
+        // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
+        public List<CdsSidecarResult>? Sidecars { get; set; }
         // New PINE extended command response fields
         public float? FPS { get; set; }
         public string? SymbolAddress { get; set; }
@@ -377,5 +379,57 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Raw Ethernet frame bytes as base64-encoded string.</summary>
         [System.Text.Json.Serialization.JsonPropertyName("data")]
         public string Data { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// A sidecar command from a compiled CDS source file.
+    /// Sidecar items (<c>assert</c>, <c>breakpoint</c>, <c>watchpoint</c>) do not emit
+    /// MIPS code words but carry instructions for the bridge to act on alongside the patch.
+    /// </summary>
+    public class CdsSidecarResult
+    {
+        /// <summary>
+        /// Type of the sidecar: <c>"assert"</c>, <c>"breakpoint"</c>, or <c>"watchpoint"</c>.
+        /// </summary>
+        public string Kind { get; set; } = string.Empty;
+
+        /// <summary>The PS2 virtual address referenced by the sidecar directive.</summary>
+        public uint Address { get; set; }
+
+        // ── Assert fields ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Comparison operator for an <c>assert</c> sidecar: <c>"=="</c> or <c>"!="</c>.
+        /// </summary>
+        public string? Operator { get; set; }
+
+        /// <summary>The value that the memory location was expected to contain.</summary>
+        public uint? ExpectedValue { get; set; }
+
+        /// <summary>
+        /// The value actually read from live memory, if a live backend was available.
+        /// <see langword="null"/> when no backend was connected during compilation.
+        /// </summary>
+        public uint? ActualValue { get; set; }
+
+        /// <summary>
+        /// <see langword="true"/> when the assertion passed, <see langword="false"/> when it
+        /// failed, and <see langword="null"/> when the assertion could not be checked (no live
+        /// memory backend was available).
+        /// </summary>
+        public bool? AssertPassed { get; set; }
+
+        // ── Watchpoint fields ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Number of bytes to watch for a <c>watchpoint</c> sidecar (typically 1, 2, or 4).
+        /// </summary>
+        public uint? WatchSize { get; set; }
+
+        /// <summary>
+        /// Access type for a <c>watchpoint</c> sidecar: <c>"read"</c>, <c>"write"</c>, or
+        /// <c>"readwrite"</c>.
+        /// </summary>
+        public string? AccessType { get; set; }
     }
 }
