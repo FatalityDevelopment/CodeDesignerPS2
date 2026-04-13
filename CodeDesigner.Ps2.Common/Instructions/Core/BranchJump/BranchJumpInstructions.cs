@@ -1,4 +1,4 @@
-﻿using CodeDesigner.Ps2.Common.Cpu.InstrArgs;
+using CodeDesigner.Ps2.Common.Cpu.InstrArgs;
 using CodeDesigner.Ps2.Common.CPU;
 using System;
 
@@ -77,7 +77,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = cpu.RegsLo[args.Rs] == cpu.RegsLo[args.Rt];
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -140,7 +141,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = cpu.RegsLo[args.Rs] != cpu.RegsLo[args.Rt];
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -202,7 +204,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] <= 0;
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -264,7 +267,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] > 0;
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -326,7 +330,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] < 0;
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -388,7 +393,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] >= 0;
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -452,7 +458,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = cpu.RegsLo[args.Rs] == cpu.RegsLo[args.Rt];
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -516,7 +523,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = cpu.RegsLo[args.Rs] != cpu.RegsLo[args.Rt];
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -616,6 +624,14 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (!pc.HasValue) return $"call 0x{args.Addr << 2:X8}";
             uint pcUpper = (pc.Value + 4) & 0xF0000000;
             uint target = pcUpper | (args.Addr << 2);
+            if (cpu != null)
+            {
+                uint a0 = (uint)cpu.RegsLo[4];
+                uint a1 = (uint)cpu.RegsLo[5];
+                uint a2 = (uint)cpu.RegsLo[6];
+                uint a3 = (uint)cpu.RegsLo[7];
+                return $"call 0x{target:X8} ($a0=0x{a0:X8} $a1=0x{a1:X8} $a2=0x{a2:X8} $a3=0x{a3:X8})";
+            }
             return $"call 0x{target:X8}";
         }
     }
@@ -700,7 +716,14 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             if (cpu != null)
-                return $"call 0x{(uint)cpu.RegsLo[args.Rs]:X8}";
+            {
+                uint target = (uint)cpu.RegsLo[args.Rs];
+                uint a0 = (uint)cpu.RegsLo[4];
+                uint a1 = (uint)cpu.RegsLo[5];
+                uint a2 = (uint)cpu.RegsLo[6];
+                uint a3 = (uint)cpu.RegsLo[7];
+                return $"call 0x{target:X8} ($a0=0x{a0:X8} $a1=0x{a1:X8} $a2=0x{a2:X8} $a3=0x{a3:X8})";
+            }
             return $"call {CpuHelpers.RegName(args.Rs)}";
         }
     }
@@ -1020,7 +1043,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] < 0;
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -1077,7 +1101,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] >= 0;
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -1134,7 +1159,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] <= 0;
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
@@ -1191,7 +1217,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 bool taken = (long)cpu.RegsLo[args.Rs] > 0;
-                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
         }
