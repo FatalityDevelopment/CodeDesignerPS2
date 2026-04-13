@@ -23,11 +23,29 @@ namespace CodeDesigner.Ps2.CdsLanguage
         /// <summary>1-based source line number where the issue was detected.</summary>
         public int LineNumber { get; init; }
 
+        /// <summary>1-based start column where the issue begins.</summary>
+        public int ColumnNumber { get; init; } = 1;
+
+        /// <summary>1-based end line number for the diagnostic span.</summary>
+        public int EndLineNumber { get; init; }
+
+        /// <summary>
+        /// 1-based exclusive end column for the diagnostic span.
+        /// Defaults to one character past <see cref="ColumnNumber"/> when omitted.
+        /// </summary>
+        public int EndColumnNumber { get; init; }
+
+        /// <summary>Optional stable diagnostic code.</summary>
+        public string? Code { get; init; }
+
         /// <summary>Human-readable description of the issue.</summary>
         public string Message { get; init; } = string.Empty;
 
+        /// <summary>Original source line, when available.</summary>
+        public string? SourceLine { get; init; }
+
         /// <inheritdoc/>
         public override string ToString() =>
-            $"{Severity} (line {LineNumber}): {Message}";
+            $"{Severity} (line {LineNumber}, col {ColumnNumber}): {Message}";
     }
 }

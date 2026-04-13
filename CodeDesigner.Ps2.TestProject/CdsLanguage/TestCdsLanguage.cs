@@ -651,6 +651,56 @@ hexcode $DEADBEEF
             Assert.AreEqual(3, w.LineNumber);
         }
 
+        [TestMethod]
+        public void Diagnostics_ColumnRange_IsPopulated()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nbne $t0, $t1, :missing");
+            var diag = parser.Diagnostics.First(d => d.Message.Contains("missing"));
+            Assert.IsTrue(diag.ColumnNumber > 0);
+            Assert.IsTrue(diag.EndColumnNumber > diag.ColumnNumber);
+        }
+
+        [TestMethod]
+        public void Diagnostics_MemDirective_WarnsAboutT9Clobber()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nmem[0x0010] t0 = 0x05");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Warning &&
+                d.Message.Contains("$t9")));
+        }
+
+        [TestMethod]
+        public void Diagnostics_IfImmediateCondition_WarnsAboutScratchRegisterClobber()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nif $t0 == 0x05\n  nop\nendif");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Warning &&
+                d.Message.Contains("$t9")));
+        }
+
+        [TestMethod]
+        public void Diagnostics_EmptyDelaySlot_EmitsWarning()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nj :target\ntarget:");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Warning &&
+                d.Message.Contains("delay slot")));
+        }
+
+        [TestMethod]
+        public void Diagnostics_UnterminatedIf_EmitsError()
+        {
+            var parser = new CdsParser();
+            parser.Parse("if $t0 == $zero\n  nop");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Error &&
+                d.Message.Contains("unterminated if block")));
+        }
+
         // -----------------------------------------------------------------------
         // P0: const / alias directives (via CdsPreprocessor)
         // -----------------------------------------------------------------------
@@ -1505,4 +1555,3 @@ nop
         }
     }
 }
-

@@ -246,8 +246,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     string op  = ifMatch.Groups[2].Value;
                     string rhs = ifMatch.Groups[3].Value;
 
-                    var (thenLines, elseLines, consumed) = CollectBlock(lines, i);
+                    var (thenLines, elseLines, consumed, terminated) = CollectBlock(lines, i);
                     i += consumed;
+
+                    if (!terminated)
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            "unterminated if block — missing 'endif'", raw, "if", "CDS1001");
+                        continue;
+                    }
 
                     int id = _counter++;
                     string endLabel  = $"__cds_if_{id}_end";
@@ -257,7 +264,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     string branchTarget = hasElse ? elseLabel : endLabel;
 
                     // Emit inverted branch (branch when condition is FALSE)
-                    EmitBranch(output, lhs, op, rhs, branchTarget, lineNumber);
+                    EmitBranch(output, lhs, op, rhs, branchTarget, lineNumber, clean);
 
                     // Recursively preprocess the then-body
                     string thenExpanded = Process(
@@ -287,15 +294,22 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     string op  = whileMatch.Groups[2].Value;
                     string rhs = whileMatch.Groups[3].Value;
 
-                    var (bodyLines, _, consumed) = CollectBlock(lines, i);
+                    var (bodyLines, _, consumed, terminated) = CollectBlock(lines, i);
                     i += consumed;
+
+                    if (!terminated)
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            "unterminated while block — missing 'endwhile'", raw, "while", "CDS1002");
+                        continue;
+                    }
 
                     int id = _counter++;
                     string topLabel = $"__cds_while_{id}_top";
                     string endLabel = $"__cds_while_{id}_end";
 
                     output.Add($"{topLabel}:");
-                    EmitBranch(output, lhs, op, rhs, endLabel, lineNumber);
+                    EmitBranch(output, lhs, op, rhs, endLabel, lineNumber, clean);
 
                     string bodyExpanded = Process(
                         string.Join("\n", bodyLines), basePath, depth + 1);
@@ -313,8 +327,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 {
                     uint count = uint.Parse(repeatMatch.Groups[1].Value);
 
-                    var (bodyLines, _, consumed) = CollectBlock(lines, i);
+                    var (bodyLines, _, consumed, terminated) = CollectBlock(lines, i);
                     i += consumed;
+
+                    if (!terminated)
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            "unterminated repeat block — missing 'endrepeat'", raw, "repeat", "CDS1003");
+                        continue;
+                    }
 
                     int id = _counter++;
                     string topLabel = $"__cds_repeat_{id}_top";
@@ -327,6 +348,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         continue;
                     }
 
+                    AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                        "register $t9 is clobbered by repeat expansion", clean, "$t9", "CDS1004");
+
                     // Use $t9 as the iteration counter (documented; same scratch reg as mem[] ops)
                     output.Add($"addiu $t9, $zero, ${count:X}");
                     output.Add($"{topLabel}:");
@@ -338,6 +362,16 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     output.Add($"addiu $t9, $t9, $FFFF");   // $t9 -= 1 (signed 16-bit -1)
                     output.Add($"bne $t9, $zero, :{topLabel}");
                     output.Add("nop");
+                    continue;
+                }
+
+                if (string.Equals(clean, "else", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(clean, "endif", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(clean, "endwhile", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(clean, "endrepeat", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                        $"unexpected block terminator '{clean}'", raw, clean, "CDS1005");
                     continue;
                 }
 
@@ -443,7 +477,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
         ///   <item><c>consumed</c> — number of source lines consumed (caller advances by this).</item>
         /// </list>
         /// </returns>
-        private static (List<string> thenLines, List<string>? elseLines, int consumed)
+        private (List<string> thenLines, List<string>? elseLines, int consumed, bool terminated)
             CollectBlock(IList<string> lines, int from)
         {
             var thenLines = new List<string>();
@@ -451,6 +485,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
             bool inElse = false;
             int depth = 0;
             int i = from;
+            bool terminated = false;
 
             while (i < lines.Count)
             {
@@ -465,6 +500,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     {
                         // This is our matching close
                         i++;
+                        terminated = true;
                         break;
                     }
                     depth--;
@@ -486,7 +522,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 i++;
             }
 
-            return (thenLines, elseLines, i - from);
+            return (thenLines, elseLines, i - from, terminated);
         }
 
         // -----------------------------------------------------------------------
@@ -512,7 +548,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
             List<string> output,
             string lhs, string op, string rhs,
             string targetLabel,
-            int lineNumber)
+            int lineNumber,
+            string lineText)
         {
             bool isZero = rhs is "0" or "0x0" or "0x00" or "0x0000" or "0x00000000"
                        || string.Equals(rhs, "$zero", StringComparison.OrdinalIgnoreCase)
@@ -539,14 +576,12 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 {
                     if (!TryParseImmediate(rhs, out uint immVal))
                     {
-                        _diagnostics.Add(new CdsDiagnostic
-                        {
-                            Severity   = CdsDiagnosticSeverity.Error,
-                            LineNumber = lineNumber,
-                            Message    = $"cannot parse immediate '{rhs}' in condition"
-                        });
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            $"cannot parse immediate '{rhs}' in condition", lineText, rhs, "CDS1006");
                         return;
                     }
+                    AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                        "register $t9 is clobbered by condition expansion", lineText, "$t9", "CDS1007");
                     output.Add($"setreg t9, ${immVal:X8}");
                     output.Add($"{branchMnem} {lhs}, $t9, :{targetLabel}");
                     output.Add("nop");
@@ -602,11 +637,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 // Unsigned compare with zero: sltu x, reg, $zero is always 0.
                 // For simplicity, materialise zero in $t9 and fall through to the
                 // register-comparison path below.
+                AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                    "register $t9 is clobbered by condition expansion", lineText, "$t9", "CDS1007");
                 output.Add($"setreg t9, $00000000");
             }
 
             if (isReg || isZero)
             {
+                AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                    "register $t8 is clobbered by condition expansion", lineText, "$t8", "CDS1008");
                 string rhsReg = isZero ? "$t9" : rhs;
                 string a = rhsFirst ? rhsReg : lhs;
                 string b = rhsFirst ? lhs     : rhsReg;
@@ -619,14 +658,14 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 // Immediate RHS: materialise into $t9 first
                 if (!TryParseImmediate(rhs, out uint immVal))
                 {
-                    _diagnostics.Add(new CdsDiagnostic
-                    {
-                        Severity   = CdsDiagnosticSeverity.Error,
-                        LineNumber = lineNumber,
-                        Message    = $"cannot parse immediate '{rhs}' in condition"
-                    });
+                    AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                        $"cannot parse immediate '{rhs}' in condition", lineText, rhs, "CDS1006");
                     return;
                 }
+                AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                    "register $t9 is clobbered by condition expansion", lineText, "$t9", "CDS1007");
+                AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                    "register $t8 is clobbered by condition expansion", lineText, "$t8", "CDS1008");
                 output.Add($"setreg t9, ${immVal:X8}");
                 string a = rhsFirst ? "$t9" : lhs;
                 string b = rhsFirst ? lhs   : "$t9";
@@ -697,6 +736,40 @@ namespace CodeDesigner.Ps2.CdsLanguage
             // Pure hex string (no 0x prefix, but all hex digits)
             try { value = Convert.ToUInt32(src, 16); return true; }
             catch { value = 0; return false; }
+        }
+
+        private void AddDiagnostic(
+            CdsDiagnosticSeverity severity,
+            int lineNumber,
+            string message,
+            string lineText,
+            string? token = null,
+            string? code = null)
+        {
+            int startColumn = 1;
+            int endColumn = Math.Max(2, lineText.Length + 1);
+
+            if (!string.IsNullOrEmpty(token))
+            {
+                int tokenIndex = lineText.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+                if (tokenIndex >= 0)
+                {
+                    startColumn = tokenIndex + 1;
+                    endColumn = Math.Max(startColumn + 1, startColumn + token.Length);
+                }
+            }
+
+            _diagnostics.Add(new CdsDiagnostic
+            {
+                Severity        = severity,
+                LineNumber      = Math.Max(1, lineNumber),
+                ColumnNumber    = startColumn,
+                EndLineNumber   = Math.Max(1, lineNumber),
+                EndColumnNumber = endColumn,
+                Message         = message,
+                Code            = code,
+                SourceLine      = lineText
+            });
         }
 
         // -----------------------------------------------------------------------

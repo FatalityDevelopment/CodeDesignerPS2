@@ -822,8 +822,26 @@ public sealed partial class CodeDesignerPs2Tools
             var sb = new StringBuilder();
             sb.AppendLine(success ? $"✓ {message}" : $"✗ {(string.IsNullOrEmpty(error) ? message : error)}");
 
-            if (root.TryGetProperty("Results", out var results) &&
-                results.ValueKind == JsonValueKind.Array)
+            if (root.TryGetProperty("Diagnostics", out var diagnostics) &&
+                diagnostics.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in diagnostics.EnumerateArray())
+                {
+                    string severity = item.TryGetProperty("Severity", out var sev) ? sev.ToString().ToLowerInvariant() : "info";
+                    string itemMsg  = item.TryGetProperty("Message", out var im) ? (im.GetString() ?? "") : "";
+                    int?   lineNo   = item.TryGetProperty("LineNumber", out var il) && il.ValueKind == JsonValueKind.Number
+                        ? il.GetInt32() : (int?)null;
+                    int?   colNo    = item.TryGetProperty("ColumnNumber", out var ic) && ic.ValueKind == JsonValueKind.Number
+                        ? ic.GetInt32() : (int?)null;
+
+                    string loc = lineNo.HasValue
+                        ? colNo.HasValue ? $" (line {lineNo}, col {colNo})" : $" (line {lineNo})"
+                        : "";
+                    sb.AppendLine($"  {severity}{loc}: {itemMsg}");
+                }
+            }
+            else if (root.TryGetProperty("Results", out var results) &&
+                     results.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in results.EnumerateArray())
                 {

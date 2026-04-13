@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using CodeDesigner.Ps2.CheatEngine;
+using CodeDesigner.Ps2.CdsLanguage;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -115,6 +116,8 @@ namespace CodeDesigner.Ps2.Bridge
         public List<StructEntry>? Structs { get; set; }
         // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
         public List<CdsSidecarResult>? Sidecars { get; set; }
+        // Structured CDS diagnostics returned by VALIDATECDS / COMPILECDS / CDSPATCH.
+        public List<CdsDiagnostic>? Diagnostics { get; set; }
         // New PINE extended command response fields
         public float? FPS { get; set; }
         public string? SymbolAddress { get; set; }

@@ -480,6 +480,8 @@ interface CommandResponse {
     InjectionSuccess?: boolean;
     // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
     Sidecars?: CdsSidecarResult[];
+    // Structured CDS diagnostics from VALIDATECDS / COMPILECDS.
+    Diagnostics?: CdsDiagnostic[];
 }
 
 /**
@@ -649,6 +651,17 @@ interface InstructionResult {
     Comment?: string;
     Label?: string;
     LineNumber?: number;
+}
+
+export interface CdsDiagnostic {
+    Severity: 'Info' | 'Warning' | 'Error' | string;
+    LineNumber: number;
+    ColumnNumber?: number;
+    EndLineNumber?: number;
+    EndColumnNumber?: number;
+    Code?: string;
+    Message: string;
+    SourceLine?: string;
 }
 
 /**
@@ -1205,6 +1218,23 @@ export class SocketClient {
         return {
             results:  response.Results  ?? [],
             sidecars: response.Sidecars ?? [],
+        };
+    }
+
+    public async validateCds(sourceCode: string, labels?: LabelEntry[]): Promise<{ success: boolean; message?: string; diagnostics: CdsDiagnostic[] }> {
+        const command: CommandMessage = {
+            Command: 'VALIDATECDS',
+            Data: sourceCode
+        };
+        if (labels && labels.length > 0) {
+            command.Labels = labels;
+        }
+
+        const response = await this.sendCommand(command);
+        return {
+            success: response.Success,
+            message: response.Message || response.Error,
+            diagnostics: response.Diagnostics ?? [],
         };
     }
 
@@ -3258,4 +3288,3 @@ export interface CapturedPacketInfo {
     length: number;
     data: string;
 }
-

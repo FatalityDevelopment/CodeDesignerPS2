@@ -119,6 +119,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
             "j", "jal"
         };
 
+        private static readonly HashSet<string> DelaySlotMnemonics = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "j", "jal", "jr", "jalr",
+            "beq",  "bne",  "blez",  "bgtz",  "bltz",  "bgez",
+            "beql", "bnel", "blezl", "bgtzl", "bltzl", "bgezl",
+            "bltzal", "bgezal", "bltzall", "bgezall",
+            "bc1t", "bc1f", "bc1tl", "bc1fl"
+        };
+
         // -----------------------------------------------------------------------
         // Diagnostics
         // -----------------------------------------------------------------------
@@ -279,6 +288,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         itemsStack.Pop();
                         if (itemsKindStack.Count > 0) itemsKindStack.Pop();
                     }
+                    else
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            "unexpected '}' with no open scope", trimmed, "}");
+                    }
                     continue;
                 }
 
@@ -357,6 +371,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     uint instrCount = memOp == CdsMemoryOperation.Assign ? 2u : 3u;
                     var item = BuildMemOp(lineNumber, trimmed, offset, reg, memOp, operand, currentAddress, memSz);
                     current.Add(item);
+                    AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                        "register $t9 is clobbered by mem[] expansion", trimmed, "mem", "CDS0003");
                     currentAddress += instrCount * 4;
                     continue;
                 }
@@ -504,11 +520,39 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         itemsStack.Pop();
                         itemsKindStack.Pop();
                     }
+                    else
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            "unexpected 'endcond' with no open cond block", trimmed, "endcond");
+                    }
                     continue;
                 }
                 TryParseOperation(trimmed, lineNumber, scopeStack, labelMap,
                                   ref currentAddress, current);
             }
+
+            if (inMultiLine)
+            {
+                AddDiagnostic(CdsDiagnosticSeverity.Error, multiLineStart,
+                    "unterminated multi-line comment", multiLineBuf.ToString().TrimEnd(), "/*");
+            }
+
+            while (scopeStack.Count > 0)
+            {
+                string scopeName = scopeStack.Pop();
+                AddDiagnostic(CdsDiagnosticSeverity.Error, rawLines.Length > 0 ? rawLines.Length : 1,
+                    $"unterminated scope '{scopeName}' — missing '}}'", rawLines.LastOrDefault() ?? string.Empty,
+                    scopeName, "CDS0004");
+            }
+
+            if (itemsKindStack.Any(k => k == "cond"))
+            {
+                AddDiagnostic(CdsDiagnosticSeverity.Error, rawLines.Length > 0 ? rawLines.Length : 1,
+                    "unterminated cond block — missing 'endcond'", rawLines.LastOrDefault() ?? string.Empty,
+                    "cond", "CDS0005");
+            }
+
+            AddDelaySlotDiagnostics(rootItems);
 
             return rootItems;
         }
@@ -657,12 +701,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 string? qualified = ResolveLabel(labelRef, scopeStack, labelMap);
                 if (qualified == null)
                 {
-                    _diagnostics.Add(new CdsDiagnostic
-                    {
-                        Severity   = CdsDiagnosticSeverity.Warning,
-                        LineNumber = lineNumber,
-                        Message    = $"unresolved label reference ':{labelRef}' in '{line}'"
-                    });
+                    AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                        $"unresolved label reference ':{labelRef}' in '{line}'", line, $":{labelRef}", "CDS0001");
                     // Keep coreLine as-is; encoding will fail naturally
                     assemblyLine = coreLine;
                 }
@@ -699,12 +739,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
             }
             catch (Exception ex)
             {
-                _diagnostics.Add(new CdsDiagnostic
-                {
-                    Severity   = CdsDiagnosticSeverity.Error,
-                    LineNumber = lineNumber,
-                    Message    = $"assembly failed for '{assemblyLine}': {ex.Message}"
-                });
+                AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                    $"assembly failed for '{assemblyLine}': {ex.Message}", line, mnemonic, "CDS0002");
                 encoded = 0;
             }
 
@@ -983,5 +1019,104 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 "d" => CdsMemorySize.Doubleword,
                 _   => CdsMemorySize.Word   // "w" or empty (default)
             };
+
+        private void AddDiagnostic(
+            CdsDiagnosticSeverity severity,
+            int lineNumber,
+            string message,
+            string lineText,
+            string? token = null,
+            string? code = null)
+        {
+            int startColumn = 1;
+            int endColumn = Math.Max(2, lineText.Length + 1);
+
+            if (!string.IsNullOrEmpty(token))
+            {
+                int tokenIndex = lineText.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+                if (tokenIndex >= 0)
+                {
+                    startColumn = tokenIndex + 1;
+                    endColumn = Math.Max(startColumn + 1, startColumn + token.Length);
+                }
+            }
+
+            _diagnostics.Add(new CdsDiagnostic
+            {
+                Severity        = severity,
+                LineNumber      = Math.Max(1, lineNumber),
+                ColumnNumber    = startColumn,
+                EndLineNumber   = Math.Max(1, lineNumber),
+                EndColumnNumber = endColumn,
+                Message         = message,
+                Code            = code,
+                SourceLine      = lineText
+            });
+        }
+
+        private void AddDelaySlotDiagnostics(IEnumerable<CdsSyntaxItem> items)
+        {
+            var executableItems = new List<(CdsSyntaxItem Item, uint Address)>();
+            CollectExecutableItems(items, executableItems);
+
+            for (int i = 0; i < executableItems.Count; i++)
+            {
+                if (executableItems[i].Item is not OperationSyntaxItem op ||
+                    !DelaySlotMnemonics.Contains(op.Mnemonic))
+                {
+                    continue;
+                }
+
+                var next = i + 1 < executableItems.Count
+                    ? executableItems[i + 1]
+                    : ((CdsSyntaxItem Item, uint Address)?)null;
+
+                if (!next.HasValue || next.Value.Address != op.Address + 4)
+                {
+                    AddDiagnostic(CdsDiagnosticSeverity.Warning, op.LineNumber,
+                        $"instruction '{op.Mnemonic}' has an empty branch delay slot (NOP recommended)",
+                        op.LineText, op.Mnemonic, "CDS0006");
+                    continue;
+                }
+
+                if (next.Value.Item is OperationSyntaxItem nextOp &&
+                    DelaySlotMnemonics.Contains(nextOp.Mnemonic))
+                {
+                    AddDiagnostic(CdsDiagnosticSeverity.Warning, op.LineNumber,
+                        $"instruction '{op.Mnemonic}' has an unsafe delay slot containing control-flow instruction '{nextOp.Mnemonic}'",
+                        op.LineText, op.Mnemonic, "CDS0007");
+                }
+            }
+        }
+
+        private static void CollectExecutableItems(
+            IEnumerable<CdsSyntaxItem> items,
+            List<(CdsSyntaxItem Item, uint Address)> result)
+        {
+            foreach (var item in items)
+            {
+                switch (item)
+                {
+                    case OperationSyntaxItem op:
+                        result.Add((op, op.Address));
+                        break;
+                    case HexCodeSyntaxItem hex:
+                        result.Add((hex, hex.Address));
+                        break;
+                    case SetRegSyntaxItem setReg:
+                        result.Add((setReg, setReg.Address));
+                        break;
+                    case MemorySyntaxItem mem:
+                        result.Add((mem, mem.Address));
+                        break;
+                    case StringSyntaxItem str:
+                        result.Add((str, str.Address));
+                        break;
+                    case ScopeSyntaxItem scope:
+                        CollectExecutableItems(scope.Body, result);
+                        break;
+                }
+            }
+        }
     }
 }

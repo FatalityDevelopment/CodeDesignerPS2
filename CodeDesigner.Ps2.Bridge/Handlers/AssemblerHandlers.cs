@@ -83,9 +83,13 @@ namespace CodeDesigner.Ps2.Bridge
                 // ── Build results list ───────────────────────────────────────────────
                 var results = new List<InstructionResult>();
 
-                // Diagnostics from the preprocessor / parser → error results
+                // Diagnostics from the preprocessor / parser.
+                // Preserve all structured diagnostics on the response, but only surface
+                // hard errors as failed instruction results so warnings do not make
+                // COMPILECDS look like a failed compile in existing clients.
                 foreach (var diag in parser.Diagnostics)
                 {
+                    if (diag.Severity != CdsDiagnosticSeverity.Error) continue;
                     results.Add(new InstructionResult
                     {
                         Success    = false,
@@ -169,7 +173,8 @@ namespace CodeDesigner.Ps2.Bridge
                         Success  = false,
                         Command  = "COMPILECDS",
                         Results  = results,
-                        Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
+                        Sidecars = sidecarResults.Count > 0 ? sidecarResults : null,
+                        Diagnostics = parser.Diagnostics.Count > 0 ? parser.Diagnostics.ToList() : null
                     });
                 }
 
@@ -202,7 +207,8 @@ namespace CodeDesigner.Ps2.Bridge
                     Success  = true,
                     Command  = "COMPILECDS",
                     Results  = results,
-                    Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
+                    Sidecars = sidecarResults.Count > 0 ? sidecarResults : null,
+                    Diagnostics = parser.Diagnostics.Count > 0 ? parser.Diagnostics.ToList() : null
                 });
             }
             catch (Exception ex)
@@ -493,7 +499,8 @@ namespace CodeDesigner.Ps2.Bridge
                         : hasWarnings
                             ? $"Validation passed with {diagnostics.Count(d => d.Severity == CdsDiagnosticSeverity.Warning)} warning(s)"
                             : "Validation passed — no errors or warnings",
-                    Results  = results.Count > 0 ? results : null
+                    Results  = results.Count > 0 ? results : null,
+                    Diagnostics = diagnostics.Count > 0 ? diagnostics : null
                 });
             }
             catch (Exception ex)
