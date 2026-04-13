@@ -307,8 +307,11 @@ namespace CodeDesigner.Ps2.Bridge
                 return CreateErrorResponse("ELF file not found: " + filePath);
             if (IsPineMode)
                 return CreateErrorResponse("LOADELF is only supported in internal emulator mode; use LOADBIN for PINE");
+
+            // Auto-create a lightweight scheduler when none exists so the user
+            // can load an ELF for analysis/debugging without booting a BIOS first.
             if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
+                Scheduler = new DualCpuScheduler();
 
             Scheduler.Paused = true;
             try
