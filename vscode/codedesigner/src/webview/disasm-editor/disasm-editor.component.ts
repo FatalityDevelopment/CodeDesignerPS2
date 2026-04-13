@@ -1216,17 +1216,67 @@ export class DisasmEditorComponent implements AfterViewInit {
     pointerLabelMap: Map<string, string>;
   }): void {
     if (!this.useVirtualGrid()) { return; }
-    const currentPageStart = params.getPageStart(params.state.cursor);
-    const pageRows = params.state.loadedPages.get(currentPageStart) as DisasmRowType[] | undefined;
+    const state = params.state;
+    const currentPageStart = params.getPageStart(state.cursor);
+    const pageRows = state.loadedPages.get(currentPageStart) as DisasmRowType[] | undefined;
+
+    // ── Multi-page merge for smooth boundary scrolling ──────────────────
+    // When the cursor is near the start or end of the current page, merge
+    // with the adjacent cached page so the virtual grid has continuous data
+    // across the boundary.  This prevents the cursor from jumping to the
+    // top of a freshly loaded page.
+    const localIndex = state.cursor - currentPageStart;
+    const pageSize = state.pageSize;
+    const BOUNDARY_THRESHOLD = 60; // rows from edge to trigger merge
+
+    let effectivePageStart = currentPageStart;
+    let p1: DisasmRowType[] | undefined = pageRows;
+    let p2: DisasmRowType[] | undefined;
+
+    if (localIndex < BOUNDARY_THRESHOLD && currentPageStart > 0) {
+      // Near the start of the current page — prepend the previous page
+      const prevStart = currentPageStart - pageSize;
+      const prevRows = state.loadedPages.get(prevStart) as DisasmRowType[] | undefined;
+      if (prevRows) {
+        effectivePageStart = prevStart;
+        p1 = prevRows;
+        p2 = pageRows;
+      }
+    } else if (pageRows && localIndex >= pageSize - BOUNDARY_THRESHOLD) {
+      // Near the end of the current page — append the next page
+      const nextStart = currentPageStart + pageSize;
+      const nextRows = state.loadedPages.get(nextStart) as DisasmRowType[] | undefined;
+      if (nextRows) {
+        p1 = pageRows;
+        p2 = nextRows;
+      }
+    }
 
     const last = this.lastGridState;
-    if (!last || last.pageStart !== currentPageStart || last.p1 !== pageRows) {
-      const gridRows = pageRows && pageRows.length > 0
-        ? pageRows
-        : (params.state.disasmRows as DisasmRowType[]);
+    if (!last || last.pageStart !== effectivePageStart || last.p1 !== p1 || last.p2 !== p2) {
+      let gridRows: DisasmRowType[];
+      if (p1 && p2) {
+        gridRows = [...p1, ...p2];
+      } else if (p1 && p1.length > 0) {
+        gridRows = p1;
+      } else {
+        gridRows = (state.disasmRows as DisasmRowType[]);
+      }
+
+      // When the effective page start changes (merge ↔ de-merge),
+      // adjust the virtual grid's scroll position so the same physical
+      // rows stay visible and the user sees no jump.
+      const oldPageStart = last?.pageStart ?? effectivePageStart;
+      if (oldPageStart !== effectivePageStart && last) {
+        const grid = this.virtualGridRef();
+        if (grid) {
+          grid.adjustScroll((oldPageStart - effectivePageStart) * grid.rowHeight);
+        }
+      }
+
       this.gridRows.set(gridRows);
-      this.gridPageStart.set(currentPageStart);
-      this.lastGridState = { pageStart: currentPageStart, p1: pageRows, p2: undefined };
+      this.gridPageStart.set(effectivePageStart);
+      this.lastGridState = { pageStart: effectivePageStart, p1, p2 };
     }
 
     // Pass the same map reference so the signal only changes when rebuildPointerLabelMap() fires
