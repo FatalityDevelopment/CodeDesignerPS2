@@ -23,6 +23,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
     ///   <item><c>setreg reg, $XXXXXXXX</c> – load 32-bit immediate (LUI+ADDIU)</item>
     ///   <item><c>mem[0xOFFSET] reg = 0xVAL</c> – 32-bit memory write (default)</item>
     ///   <item><c>mem.b / mem.h / mem.w / mem.d</c> – sized memory operations (8/16/32/64-bit)</item>
+    ///   <item><c>pointer $BASE + $OFF1 [+ $OFF2 ...] = $VALUE</c> – pointer-chain write expansion</item>
     ///   <item><c>string "text"</c> – null-terminated ASCII string data</item>
     ///   <item><c>name:</c> – label definition</item>
     ///   <item><c>instr args :label</c> – MIPS instruction with optional label reference</item>
@@ -73,6 +74,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
         private static readonly Regex MemRegex =
             new(@"^mem(?:\.(b|h|w|d))?\[(0x[0-9A-Fa-f]+)\]\s+(\w+)\s*(\+=|-=|\*=|/=|=)\s*(0x[0-9A-Fa-f]+|\d+)$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static readonly Regex PointerRegex =
+            new(@"^pointer\s+(.+?)\s*=\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex ScopeRegex =
             new(@"^scope\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -385,6 +389,25 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     continue;
                 }
 
+                // ---- Pointer-chain directive ----
+                if (TryParsePointerDirective(trimmed, out uint pointerBase, out var pointerOffsets, out uint pointerValue))
+                {
+                    var item = BuildPointer(lineNumber, trimmed, pointerBase, pointerOffsets, pointerValue, currentAddress);
+                    current.Add(item);
+                    AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                        "pointer directive clobbers scratch registers $t8 and $t9",
+                        trimmed, "pointer", "CDS0009");
+                    currentAddress += (uint)item.Operations.Count * 4;
+                    continue;
+                }
+                if (trimmed.StartsWith("pointer", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                        "malformed pointer directive; expected pointer $BASE + $OFFSET [+ $OFFSET ...] = $VALUE",
+                        trimmed, "pointer", "CDS0010");
+                    continue;
+                }
+
                 // ---- String directive ----
                 var strMatch = StringRegex.Match(trimmed);
                 if (strMatch.Success)
@@ -657,6 +680,12 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     continue;
                 }
 
+                if (TryParsePointerDirective(t, out _, out var pointerOffsets, out _))
+                {
+                    currentAddress += (uint)(pointerOffsets.Count + 5) * 4;
+                    continue;
+                }
+
                 var strMatch = StringRegex.Match(t);
                 if (strMatch.Success)
                 {
@@ -899,6 +928,70 @@ namespace CodeDesigner.Ps2.CdsLanguage
             };
         }
 
+        private static PointerSyntaxItem BuildPointer(
+            int lineNumber, string lineText,
+            uint baseAddress, IReadOnlyList<ushort> offsets, uint value,
+            uint address)
+        {
+            var item = new PointerSyntaxItem
+            {
+                LineNumber  = lineNumber,
+                LineText    = lineText,
+                Address     = address,
+                BaseAddress = baseAddress,
+                Offsets     = offsets.ToList(),
+                Value       = value
+            };
+
+            uint cur = address;
+
+            var loadBase = BuildSetReg(lineNumber, lineText, "t8", baseAddress, cur);
+            item.Operations.Add(loadBase.LuiOp);
+            item.Operations.Add(loadBase.AddiuOp);
+            cur += 8;
+
+            item.Operations.Add(new OperationSyntaxItem
+            {
+                LineNumber = lineNumber,
+                LineText   = lineText,
+                Address    = cur,
+                EncodedWord = TryAssemble("lw t8, $0000(t8)"),
+                Mnemonic   = "lw"
+            });
+            cur += 4;
+
+            for (int i = 0; i < offsets.Count - 1; i++)
+            {
+                string offsetStr = $"${offsets[i]:X4}";
+                item.Operations.Add(new OperationSyntaxItem
+                {
+                    LineNumber = lineNumber,
+                    LineText   = lineText,
+                    Address    = cur,
+                    EncodedWord = TryAssemble($"lw t8, {offsetStr}(t8)"),
+                    Mnemonic   = "lw"
+                });
+                cur += 4;
+            }
+
+            var loadValue = BuildSetReg(lineNumber, lineText, "t9", value, cur);
+            item.Operations.Add(loadValue.LuiOp);
+            item.Operations.Add(loadValue.AddiuOp);
+            cur += 8;
+
+            string finalOffsetStr = $"${offsets[^1]:X4}";
+            item.Operations.Add(new OperationSyntaxItem
+            {
+                LineNumber = lineNumber,
+                LineText   = lineText,
+                Address    = cur,
+                EncodedWord = TryAssemble($"sw t9, {finalOffsetStr}(t8)"),
+                Mnemonic   = "sw"
+            });
+
+            return item;
+        }
+
         private static StringSyntaxItem BuildString(
             int lineNumber, string lineText, string text, uint address)
         {
@@ -1031,9 +1124,53 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
         private static uint ParseUInt(string s)
         {
+            if (s.StartsWith("$", StringComparison.Ordinal))
+                return Convert.ToUInt32(s[1..], 16);
             if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
                 return Convert.ToUInt32(s, 16);
             return uint.Parse(s);
+        }
+
+        private static bool TryParsePointerDirective(
+            string line,
+            out uint baseAddress,
+            out List<ushort> offsets,
+            out uint value)
+        {
+            baseAddress = 0;
+            offsets = new List<ushort>();
+            value = 0;
+
+            var match = PointerRegex.Match(line);
+            if (!match.Success)
+                return false;
+
+            string chainText = match.Groups[1].Value.Trim();
+            string valueText = match.Groups[2].Value.Trim();
+            var chainParts = chainText.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (chainParts.Length < 2)
+                return false;
+
+            try
+            {
+                baseAddress = ParseUInt(chainParts[0]);
+
+                for (int i = 1; i < chainParts.Length; i++)
+                {
+                    uint parsedOffset = ParseUInt(chainParts[i]);
+                    if (parsedOffset > ushort.MaxValue)
+                        return false;
+                    offsets.Add((ushort)parsedOffset);
+                }
+
+                value = ParseUInt(valueText);
+                return offsets.Count > 0;
+            }
+            catch
+            {
+                offsets.Clear();
+                return false;
+            }
         }
 
         private static CdsMemoryOperation ParseMemOp(string opStr) => opStr switch

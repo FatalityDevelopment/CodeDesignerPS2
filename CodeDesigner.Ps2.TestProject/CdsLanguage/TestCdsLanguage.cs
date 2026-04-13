@@ -672,6 +672,17 @@ hexcode $DEADBEEF
         }
 
         [TestMethod]
+        public void Diagnostics_PointerDirective_WarnsAboutScratchRegisterClobber()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\npointer $20347A50 + $0100 + $0048 = $00000063");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Warning &&
+                d.Message.Contains("$t8") &&
+                d.Message.Contains("$t9")));
+        }
+
+        [TestMethod]
         public void Diagnostics_IfImmediateCondition_WarnsAboutScratchRegisterClobber()
         {
             var parser = new CdsParser();
@@ -709,6 +720,16 @@ hexcode $DEADBEEF
             Assert.IsTrue(parser.Diagnostics.Any(d =>
                 d.Severity == CdsDiagnosticSeverity.Error &&
                 d.Message.Contains("malformed log/print directive")));
+        }
+
+        [TestMethod]
+        public void Diagnostics_MalformedPointerDirective_EmitsError()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\npointer $20347A50 = $00000063");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Error &&
+                d.Message.Contains("malformed pointer directive")));
         }
 
         // -----------------------------------------------------------------------
@@ -851,6 +872,43 @@ setreg tmp, BASE
             Assert.AreEqual(2, pairs.Count);
             Assert.AreEqual(0x00100000u, pairs[0].Address);
             Assert.AreEqual(0x00100004u, pairs[1].Address);
+        }
+
+        // -----------------------------------------------------------------------
+        // P1: pointer directive
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void PointerDirective_IsParsedCorrectly()
+        {
+            var items = Parse("address $00100000\npointer $20347A50 + $0100 + $0048 = $000003E7");
+            var pointer = FindItem<PointerSyntaxItem>(items);
+            Assert.AreEqual(0x00100000u, pointer.Address);
+            Assert.AreEqual(0x20347A50u, pointer.BaseAddress);
+            CollectionAssert.AreEqual(new ushort[] { 0x0100, 0x0048 }, pointer.Offsets);
+            Assert.AreEqual(0x000003E7u, pointer.Value);
+        }
+
+        [TestMethod]
+        public void PointerDirective_EmitsExpectedInstructionCount()
+        {
+            var items = Parse("address $00100000\npointer $20347A50 + $0100 + $0048 = $00000063");
+            var pointer = FindItem<PointerSyntaxItem>(items);
+            Assert.AreEqual(7, pointer.Operations.Count);
+            Assert.AreEqual("lw", pointer.Operations[2].Mnemonic, StringComparer.OrdinalIgnoreCase);
+            Assert.AreEqual("lw", pointer.Operations[3].Mnemonic, StringComparer.OrdinalIgnoreCase);
+            Assert.AreEqual("sw", pointer.Operations.Last().Mnemonic, StringComparer.OrdinalIgnoreCase);
+        }
+
+        [TestMethod]
+        public void PointerDirective_CompileAdvancesAddresses()
+        {
+            var pairs = Compile("address $00100000\npointer $20347A50 + $0100 + $0048 = $00000063\nhexcode $DEADBEEF");
+            Assert.AreEqual(8, pairs.Count);
+            Assert.AreEqual(0x00100000u, pairs[0].Address);
+            Assert.AreEqual(0x00100018u, pairs[6].Address);
+            Assert.AreEqual(0x0010001Cu, pairs[7].Address);
+            Assert.AreEqual(0xDEADBEEFu, pairs[7].Word);
         }
 
         // -----------------------------------------------------------------------

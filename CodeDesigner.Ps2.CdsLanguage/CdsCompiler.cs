@@ -118,6 +118,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
                             result.Add((op.Address, op.EncodedWord));
                         break;
 
+                    case PointerSyntaxItem pointer:
+                        foreach (var op in pointer.Operations)
+                            result.Add((op.Address, op.EncodedWord));
+                        break;
+
                     case StringSyntaxItem str:
                         foreach (var word in str.Words)
                             result.Add((word.Address, word.Value));
