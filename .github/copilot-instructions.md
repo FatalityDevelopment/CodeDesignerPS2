@@ -98,6 +98,12 @@ cd CodeDesigner.Ps2 && dotnet run -- --server
 - **DMAC**: `0x10008000–0x1000DFFF` (10 channels) + `0x1000E000–0x1000E0FF` (global D_CTRL/D_STAT/PCR/SQWC/RBSR/RBOR/STADR). Normal-mode DMA executes synchronously on CHCR STR=1 write. `PS2Emulator.DmaChannelComplete` event fires when a channel completes with its enable bit set.
 - **SIF**: `0x1000F200–0x1000F26F` (MSCOM/SMCOM/MSFLAG/SMFLAG/F240/F250/F260). Accessible via `Bus.Sif`.
 - **VIF0/VIF1**: `VifUnit` in `Emulator/Hardware/VifUnit.cs`. Supports all 14 UNPACK formats, MPG, MSCAL/MSCNT, STROW/STCOL/STMASK. VIF0 base = `0x10003800`, VIF1 base = `0x10003C00` (0x200-byte register window each). VIF0's `VuDataMem` is wired to `VU0State.DataMem`. DMAC CH0/CH1 feeds data to VIF0/VIF1 respectively.
+
+### Git Hygiene — Build Artifacts
+
+- **NEVER** commit files under any `obj/` or `bin/` directory. These are build outputs covered by `.gitignore`.
+- Before committing, run `git status` and verify no `obj/`, `bin/`, or `Debug/` paths appear in the staged files.
+- The `website/obj/` directory in particular has caused repeated Windows-incompatible path issues. Do not `git add` any file matching `**/obj/**`.
 - **GIF**: registers at `0x10003000` (0x100-byte window): GIF_CTRL/MODE/STAT/TAG0–3/CNT/P3CNT/P3TAG. Supports full GIFtag processing: PACKED (A+D), REGLIST, IMAGE. PATH2 = VIF1.GifOutput, PATH3 = DMAC CH2 DataConsumer.
 - **GS**: `GS.cs` manages 128×64-bit internal registers + privileged registers at `0x12000000` (16-byte aligned, 32/64-bit access).
 
