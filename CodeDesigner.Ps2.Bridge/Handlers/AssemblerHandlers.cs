@@ -20,7 +20,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// The full CDS language is supported, including all preprocessor features
         /// (const/alias/macro/include/if/else/endif/while/endwhile/repeat/endrepeat),
         /// mem.b/h/w/d typed memory writes, scope blocks, sidecar directives
-        /// (assert, breakpoint, watchpoint), and freeze/cond cheat entries.
+         /// (assert, breakpoint, watchpoint, log/print), and freeze/cond cheat entries.
         /// </para>
         ///
         /// <para>
@@ -37,7 +37,8 @@ namespace CodeDesigner.Ps2.Bridge
         ///   <item><c>assert</c> — checked against live memory when a backend is available;
         ///     a failed assertion aborts code output and reports an error.</item>
         ///   <item><c>breakpoint</c> — returned as metadata for the caller to install.</item>
-        ///   <item><c>watchpoint</c> — returned as metadata for the caller to install.</item>
+         ///   <item><c>watchpoint</c> — returned as metadata for the caller to install.</item>
+         ///   <item><c>log</c>/<c>print</c> — returned as metadata for the caller to surface.</item>
         /// </list>
         ///
         /// <para>
@@ -110,13 +111,7 @@ namespace CodeDesigner.Ps2.Bridge
                     {
                         case AssertSyntaxItem assert:
                         {
-                            var sidecar = new CdsSidecarResult
-                            {
-                                Kind          = "assert",
-                                Address       = assert.Address,
-                                Operator      = assert.Operator,
-                                ExpectedValue = assert.ExpectedValue,
-                            };
+                            var sidecar = CreateSidecarResult(assert);
 
                             uint? actual = TryReadWordFromLiveMemory(assert.Address);
                             if (actual.HasValue)
@@ -145,22 +140,10 @@ namespace CodeDesigner.Ps2.Bridge
                             break;
                         }
 
-                        case BreakpointSyntaxItem bp:
-                            sidecarResults.Add(new CdsSidecarResult
-                            {
-                                Kind    = "breakpoint",
-                                Address = bp.Address
-                            });
-                            break;
-
-                        case WatchpointSyntaxItem wp:
-                            sidecarResults.Add(new CdsSidecarResult
-                            {
-                                Kind       = "watchpoint",
-                                Address    = wp.Address,
-                                WatchSize  = wp.Size,
-                                AccessType = wp.AccessType.ToString().ToLowerInvariant()
-                            });
+                        case BreakpointSyntaxItem:
+                        case WatchpointSyntaxItem:
+                        case LogSyntaxItem:
+                            sidecarResults.Add(CreateSidecarResult(sc));
                             break;
                     }
                 }
@@ -306,15 +289,14 @@ namespace CodeDesigner.Ps2.Bridge
 
                 foreach (var sc in sidecars)
                 {
-                    if (sc is not AssertSyntaxItem assert) continue;
-
-                    var sidecar = new CdsSidecarResult
+                    if (sc is not AssertSyntaxItem assert)
                     {
-                        Kind          = "assert",
-                        Address       = assert.Address,
-                        Operator      = assert.Operator,
-                        ExpectedValue = assert.ExpectedValue,
-                    };
+                        if (sc is LogSyntaxItem log)
+                            sidecarResults.Add(CreateSidecarResult(log));
+                        continue;
+                    }
+
+                    var sidecar = CreateSidecarResult(assert);
 
                     uint? actual = TryReadWordFromLiveMemory(assert.Address);
                     if (actual.HasValue)
@@ -383,11 +365,7 @@ namespace CodeDesigner.Ps2.Bridge
                             try
                             {
                                 SetBreakpointInternal(bp.Address);
-                                sidecarResults.Add(new CdsSidecarResult
-                                {
-                                    Kind    = "breakpoint",
-                                    Address = bp.Address
-                                });
+                                sidecarResults.Add(CreateSidecarResult(bp));
                                 installed.Add($"breakpoint @ 0x{bp.Address:X8}");
                             }
                             catch (Exception ex)
@@ -400,13 +378,7 @@ namespace CodeDesigner.Ps2.Bridge
                             try
                             {
                                 SetWatchpointInternal(wp.Address, wp.Size, wp.AccessType);
-                                sidecarResults.Add(new CdsSidecarResult
-                                {
-                                    Kind       = "watchpoint",
-                                    Address    = wp.Address,
-                                    WatchSize  = wp.Size,
-                                    AccessType = wp.AccessType.ToString().ToLowerInvariant()
-                                });
+                                sidecarResults.Add(CreateSidecarResult(wp));
                                 installed.Add($"watchpoint {wp.AccessType} @ 0x{wp.Address:X8} ({wp.Size} bytes)");
                             }
                             catch (Exception ex)
@@ -438,6 +410,38 @@ namespace CodeDesigner.Ps2.Bridge
                 return CreateErrorResponse($"CDSPATCH error: {ex.Message}");
             }
         }
+
+        private static CdsSidecarResult CreateSidecarResult(CdsSyntaxItem sidecar) =>
+            sidecar switch
+            {
+                AssertSyntaxItem assert => new CdsSidecarResult
+                {
+                    Kind          = "assert",
+                    Address       = assert.Address,
+                    Operator      = assert.Operator,
+                    ExpectedValue = assert.ExpectedValue,
+                },
+                BreakpointSyntaxItem bp => new CdsSidecarResult
+                {
+                    Kind    = "breakpoint",
+                    Address = bp.Address
+                },
+                WatchpointSyntaxItem wp => new CdsSidecarResult
+                {
+                    Kind       = "watchpoint",
+                    Address    = wp.Address,
+                    WatchSize  = wp.Size,
+                    AccessType = wp.AccessType.ToString().ToLowerInvariant()
+                },
+                LogSyntaxItem log => new CdsSidecarResult
+                {
+                    Kind        = "log",
+                    Address     = log.Address,
+                    Directive   = log.Directive,
+                    MessageText = log.MessageText
+                },
+                _ => throw new ArgumentException($"Unsupported CDS sidecar type: {sidecar.GetType().Name}", nameof(sidecar))
+            };
 
         /// <summary>
         /// Handle VALIDATECDS command — parse a CDS source without assembling or emitting any

@@ -31,6 +31,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
     ///   <item><c>assert mem[$ADDR] == $VAL</c> – sidecar injection-time assertion</item>
     ///   <item><c>breakpoint</c> – sidecar hardware breakpoint at current address</item>
     ///   <item><c>watchpoint (write|read|rw) $ADDR SIZE</c> – sidecar memory watchpoint</item>
+    ///   <item><c>log "message"</c> / <c>print "message"</c> – sidecar compile/apply log message</item>
     /// </list>
     ///
     /// <para><b>Scope support:</b> Labels defined inside a <c>scope</c> block are automatically
@@ -89,6 +90,13 @@ namespace CodeDesigner.Ps2.CdsLanguage
         private static readonly Regex WatchpointRegex =
             new(@"^watchpoint\s+(write|read|rw|readwrite)\s+\$([0-9a-fA-F]+)\s+(\d+)$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // log "message" / print "message"
+        private static readonly Regex LogRegex =
+            new(@"^(log|print)\s+""(.*?)""$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static readonly Regex LogPrefixRegex =
+            new(@"^(log|print)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // freeze (byte|half|word) $ADDR = VALUE
         private static readonly Regex FreezeRegex =
@@ -464,6 +472,33 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         AccessType = accessType
                     });
                     // Sidecar — does not advance the address counter
+                    continue;
+                }
+
+                // ---- Log/print sidecar ----
+                var logMatch = LogRegex.Match(trimmed);
+                if (logMatch.Success)
+                {
+                    string directive = logMatch.Groups[1].Value.ToLowerInvariant();
+                    string messageText = logMatch.Groups[2].Value;
+                    current.Add(new LogSyntaxItem
+                    {
+                        LineNumber  = lineNumber,
+                        LineText    = trimmed,
+                        Address     = currentAddress,
+                        Directive   = directive,
+                        MessageText = messageText
+                    });
+                    // Sidecar — does not advance the address counter
+                    continue;
+                }
+                if (LogPrefixRegex.IsMatch(trimmed))
+                {
+                    AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                        "malformed log/print directive; expected log \"message\" or print \"message\"",
+                        trimmed,
+                        trimmed.StartsWith("print", StringComparison.OrdinalIgnoreCase) ? "print" : "log",
+                        "CDS0008");
                     continue;
                 }
 

@@ -2510,6 +2510,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     case 'watchpoint':
                         out.info(`CDS watchpoint requested: ${sc.AccessType ?? 'write'} @ ${addrHex} (${sc.WatchSize ?? 4} bytes) — use PINEADDWATCH to install`);
                         break;
+                    case 'log': {
+                        const directive = sc.Directive ?? 'log';
+                        out.info(`CDS ${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
+                        break;
+                    }
                 }
             }
 
@@ -2653,6 +2658,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                                        : 2; // default: write
                             await this.socketClient.addPineWatch(sc.Address, endAddr, cond);
                             out.info(`CDS watchpoint installed: ${sc.AccessType ?? 'write'} @ ${addrHex} (${size} bytes)`);
+                            break;
+                        }
+
+                        case 'log': {
+                            const directive = sc.Directive ?? 'log';
+                            out.info(`CDS ${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
                             break;
                         }
                     }

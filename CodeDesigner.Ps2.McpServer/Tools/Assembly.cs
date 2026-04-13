@@ -48,9 +48,9 @@ public sealed partial class CodeDesignerPs2Tools
     [Description("Compile a Code Designer Script (.cds) source into PS2 GameShark/Action Replay cheat codes and MIPS memory patches. " +
                  "The language supports: MIPS instructions, address directives, hexcode, setreg, mem.b/h/w/d typed writes, string embedding, " +
                  "scope blocks, labels, const/alias/macro preprocessor, if/while/repeat control flow, " +
-                 "and sidecar directives (assert, breakpoint, watchpoint). " +
+                 "and sidecar directives (assert, breakpoint, watchpoint, log/print). " +
                  "assert directives are checked against live memory when a backend is connected — a failing assert aborts code output. " +
-                 "breakpoint and watchpoint sidecars are returned as metadata for the caller to install. " +
+                 "breakpoint and watchpoint sidecars are returned as metadata for the caller to install, and log/print sidecars are returned as metadata for the caller to surface. " +
                  "Server-registered labels are automatically available in CDS source.")]
     public async Task<string> CompileCds(
         [Description("CDS source code to compile.")] string sourceCode,
@@ -71,7 +71,8 @@ public sealed partial class CodeDesignerPs2Tools
                  "(2) any assert sidecars are checked against live memory — a failing assert aborts the patch; " +
                  "(3) the generated GameShark codes are written to RAM; " +
                  "(4) breakpoint sidecars are installed via SETBP; " +
-                 "(5) watchpoint sidecars are installed via PINEADDWATCH (PINE mode only). " +
+                 "(5) watchpoint sidecars are installed via PINEADDWATCH (PINE mode only); " +
+                 "(6) log/print sidecars are returned for the caller to surface. " +
                  "A live emulator backend (--run or --pcsx2) must be connected.")]
     public async Task<string> ApplyCdsPatch(
         [Description("CDS source code to compile and apply.")] string sourceCode,

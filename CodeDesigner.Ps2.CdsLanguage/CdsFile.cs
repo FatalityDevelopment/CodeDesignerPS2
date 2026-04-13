@@ -78,8 +78,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
         /// <summary>
         /// Parse and compile the file, returning any sidecar commands (e.g. breakpoints,
-        /// watchpoints, assert results) produced by <see langword="assert"/>,
-        /// <see langword="breakpoint"/>, and <see langword="watchpoint"/> directives.
+        /// watchpoints, assert results, log messages) produced by <see langword="assert"/>,
+        /// <see langword="breakpoint"/>, <see langword="watchpoint"/>, and
+        /// <see langword="log"/> / <see langword="print"/> directives.
         /// </summary>
         public List<CdsSyntaxItem> GetSidecarCommands()
         {

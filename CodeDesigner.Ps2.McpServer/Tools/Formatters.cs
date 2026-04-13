@@ -180,6 +180,13 @@ public sealed partial class CodeDesignerPs2Tools
                             sidecarSb.AppendLine($"  watchpoint {access} @ 0x{addr:X8} ({size} bytes)");
                             break;
                         }
+                        case "log":
+                        {
+                            string directive = sc.TryGetProperty("Directive", out var dir) ? (dir.GetString() ?? "log") : "log";
+                            string message = sc.TryGetProperty("MessageText", out var mt) ? (mt.GetString() ?? "") : "";
+                            sidecarSb.AppendLine($"  {directive} @ 0x{addr:X8}: {message}");
+                            break;
+                        }
                     }
                 }
 
@@ -938,6 +945,13 @@ public sealed partial class CodeDesignerPs2Tools
                             uint   size   = sc.TryGetProperty("WatchSize",  out var ws) && ws.ValueKind == JsonValueKind.Number
                                             ? ws.GetUInt32() : 4;
                             sidecarSb.AppendLine($"  watchpoint {access} @ 0x{addr:X8} ({size} bytes) installed");
+                            break;
+                        }
+                        case "log":
+                        {
+                            string directive = sc.TryGetProperty("Directive", out var dir) ? (dir.GetString() ?? "log") : "log";
+                            string message = sc.TryGetProperty("MessageText", out var mt) ? (mt.GetString() ?? "") : "";
+                            sidecarSb.AppendLine($"  {directive} @ 0x{addr:X8}: {message}");
                             break;
                         }
                     }

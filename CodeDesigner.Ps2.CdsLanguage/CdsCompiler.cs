@@ -28,7 +28,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
         /// <summary>
         /// Extract all <em>sidecar</em> items from the syntax tree.
         /// Sidecar items (<see cref="AssertSyntaxItem"/>, <see cref="BreakpointSyntaxItem"/>,
-        /// <see cref="WatchpointSyntaxItem"/>) do not emit MIPS code but carry instructions
+        /// <see cref="WatchpointSyntaxItem"/>, <see cref="LogSyntaxItem"/>) do not emit MIPS code but carry instructions
         /// for the bridge server (e.g., install breakpoints, verify memory before patching).
         /// </summary>
         /// <param name="items">Syntax items returned by <see cref="CdsParser.Parse"/>.</param>
@@ -128,7 +128,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         Collect(scope.Body, result);
                         break;
 
-                    // AssertSyntaxItem, BreakpointSyntaxItem, WatchpointSyntaxItem:
+                    // AssertSyntaxItem, BreakpointSyntaxItem, WatchpointSyntaxItem, LogSyntaxItem:
                     //   sidecar items — no code words emitted (see GetSidecarCommands).
                     // AddressSyntaxItem, LabelSyntaxItem, CommentSyntaxItem, IncludeSyntaxItem:
                     //   metadata — no words emitted.
@@ -145,6 +145,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     case AssertSyntaxItem:
                     case BreakpointSyntaxItem:
                     case WatchpointSyntaxItem:
+                    case LogSyntaxItem:
                         result.Add(item);
                         break;
 

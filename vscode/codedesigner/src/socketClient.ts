@@ -666,11 +666,11 @@ export interface CdsDiagnostic {
 
 /**
  * One sidecar command from a compiled CDS source file.
- * Sidecar items (assert, breakpoint, watchpoint) do not emit MIPS code words
+ * Sidecar items (assert, breakpoint, watchpoint, log) do not emit MIPS code words
  * but carry instructions for the bridge to act on alongside the patch.
  */
 export interface CdsSidecarResult {
-    /** Type: "assert", "breakpoint", or "watchpoint". */
+    /** Type: "assert", "breakpoint", "watchpoint", or "log". */
     Kind: string;
     /** PS2 virtual address referenced by the sidecar directive. */
     Address: number;
@@ -688,6 +688,11 @@ export interface CdsSidecarResult {
     WatchSize?: number;
     /** Access type: "read", "write", or "readwrite". */
     AccessType?: string;
+    // Log/print fields
+    /** Original CDS directive keyword: "log" or "print". */
+    Directive?: string;
+    /** Message text to surface for log/print sidecars. */
+    MessageText?: string;
 }
 
 /**

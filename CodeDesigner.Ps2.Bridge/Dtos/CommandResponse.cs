@@ -386,13 +386,14 @@ namespace CodeDesigner.Ps2.Bridge
 
     /// <summary>
     /// A sidecar command from a compiled CDS source file.
-    /// Sidecar items (<c>assert</c>, <c>breakpoint</c>, <c>watchpoint</c>) do not emit
+    /// Sidecar items (<c>assert</c>, <c>breakpoint</c>, <c>watchpoint</c>, <c>log</c>) do not emit
     /// MIPS code words but carry instructions for the bridge to act on alongside the patch.
     /// </summary>
     public class CdsSidecarResult
     {
         /// <summary>
-        /// Type of the sidecar: <c>"assert"</c>, <c>"breakpoint"</c>, or <c>"watchpoint"</c>.
+        /// Type of the sidecar: <c>"assert"</c>, <c>"breakpoint"</c>, <c>"watchpoint"</c>,
+        /// or <c>"log"</c>.
         /// </summary>
         public string Kind { get; set; } = string.Empty;
 
@@ -434,5 +435,17 @@ namespace CodeDesigner.Ps2.Bridge
         /// <c>"readwrite"</c>.
         /// </summary>
         public string? AccessType { get; set; }
+
+        // ── Log/print fields ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Original CDS directive keyword for a log sidecar: <c>"log"</c> or <c>"print"</c>.
+        /// </summary>
+        public string? Directive { get; set; }
+
+        /// <summary>
+        /// Message text carried by a <c>log</c> / <c>print</c> sidecar.
+        /// </summary>
+        public string? MessageText { get; set; }
     }
 }

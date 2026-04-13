@@ -701,6 +701,16 @@ hexcode $DEADBEEF
                 d.Message.Contains("unterminated if block")));
         }
 
+        [TestMethod]
+        public void Diagnostics_MalformedLogDirective_EmitsError()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nlog hello");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Error &&
+                d.Message.Contains("malformed log/print directive")));
+        }
+
         // -----------------------------------------------------------------------
         // P0: const / alias directives (via CdsPreprocessor)
         // -----------------------------------------------------------------------
@@ -1379,6 +1389,42 @@ Foo(t0)
             Assert.IsInstanceOfType(sidecars[0], typeof(AssertSyntaxItem));
             Assert.IsInstanceOfType(sidecars[1], typeof(BreakpointSyntaxItem));
             Assert.IsInstanceOfType(sidecars[2], typeof(WatchpointSyntaxItem));
+        }
+
+        [TestMethod]
+        public void LogDirective_IsParsedAsSidecar()
+        {
+            var items = Parse("address $00100000\nlog \"Hello from CDS\"");
+            var log = FindItem<LogSyntaxItem>(items);
+            Assert.AreEqual(0x00100000u, log.Address);
+            Assert.AreEqual("log", log.Directive);
+            Assert.AreEqual("Hello from CDS", log.MessageText);
+        }
+
+        [TestMethod]
+        public void PrintDirective_IsParsedAsSidecar()
+        {
+            var items = Parse("address $00100000\nnop\nprint \"after nop\"");
+            var log = FindItem<LogSyntaxItem>(items);
+            Assert.AreEqual(0x00100004u, log.Address);
+            Assert.AreEqual("print", log.Directive);
+            Assert.AreEqual("after nop", log.MessageText);
+        }
+
+        [TestMethod]
+        public void GetSidecarCommands_IncludesLogSidecarsInSourceOrder()
+        {
+            var items = Parse(
+                "address $00100000\nlog \"one\"\nassert mem[$20010000] == $DEADBEEF\nbreakpoint\nprint \"two\"\nwatchpoint write $20347A50 4");
+            var sidecars = CdsCompiler.GetSidecarCommands(items);
+            Assert.AreEqual(5, sidecars.Count);
+            Assert.IsInstanceOfType(sidecars[0], typeof(LogSyntaxItem));
+            Assert.IsInstanceOfType(sidecars[1], typeof(AssertSyntaxItem));
+            Assert.IsInstanceOfType(sidecars[2], typeof(BreakpointSyntaxItem));
+            Assert.IsInstanceOfType(sidecars[3], typeof(LogSyntaxItem));
+            Assert.IsInstanceOfType(sidecars[4], typeof(WatchpointSyntaxItem));
+            Assert.AreEqual("one", ((LogSyntaxItem)sidecars[0]).MessageText);
+            Assert.AreEqual("two", ((LogSyntaxItem)sidecars[3]).MessageText);
         }
 
         [TestMethod]
