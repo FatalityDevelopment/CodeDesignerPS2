@@ -2557,7 +2557,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
                         case 'watchpoint': {
                             // Watchpoint covers [Address, Address + WatchSize)
-                            const size   = sc.WatchSize ?? 4;
+                            const size    = sc.WatchSize ?? 4;
+                            // Guard against address + size wrapping past 0xFFFFFFFF
+                            if (sc.Address > 0xFFFFFFFF - size) {
+                                throw new Error(`Watchpoint range overflow: 0x${sc.Address.toString(16).toUpperCase()} + ${size} exceeds 32-bit address space`);
+                            }
                             const endAddr = sc.Address + size;
                             // Condition: 1=read, 2=write, 3=readwrite
                             const cond = sc.AccessType === 'read'      ? 1

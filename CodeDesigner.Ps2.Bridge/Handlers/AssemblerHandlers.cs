@@ -473,6 +473,10 @@ namespace CodeDesigner.Ps2.Bridge
                 _                              => 2u   // Write
             };
             uint physStart = address & 0x1FFFFFFF;
+            // Guard against physStart + size wrapping past the 29-bit physical address space
+            if (size > 0x1FFFFFFF - physStart)
+                throw new ArgumentOutOfRangeException(nameof(size),
+                    $"Watchpoint range overflow: physStart=0x{physStart:X8} + size={size} exceeds physical address space");
             uint physEnd   = physStart + size;
             PineClient.AddWatch(cpu: 0, physStart, physEnd, (byte)cond);
         }

@@ -317,8 +317,16 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     int id = _counter++;
                     string topLabel = $"__cds_repeat_{id}_top";
 
+                    // addiu immediate is a signed 16-bit field; values 1–0x7FFF are safe.
+                    // Values 0x8000–0xFFFF would be interpreted as negative and loop forever.
+                    if (count == 0 || count > 0x7FFF)
+                    {
+                        output.Add($"// repeat count {count} is out of range (must be 1–32767); block skipped");
+                        continue;
+                    }
+
                     // Use $t9 as the iteration counter (documented; same scratch reg as mem[] ops)
-                    output.Add($"addiu $t9, $zero, ${count:X4}");
+                    output.Add($"addiu $t9, $zero, ${count:X}");
                     output.Add($"{topLabel}:");
 
                     string bodyExpanded = Process(

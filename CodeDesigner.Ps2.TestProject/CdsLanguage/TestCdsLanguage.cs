@@ -1077,6 +1077,29 @@ endrepeat
             Assert.AreEqual(0x24190005u, pairs[0].Word);
         }
 
+        [TestMethod]
+        public void Preprocessor_Repeat_CountOutOfRange_SkipsBlock()
+        {
+            // Count 0 and count > 32767 (0x7FFF) are invalid — emits a comment and skips the body
+            var src0 = @"
+address $00100000
+repeat 0
+  nop
+endrepeat
+";
+            var pairsZero = Compile(src0);
+            Assert.AreEqual(0, pairsZero.Count, "repeat 0 should emit no code");
+
+            var srcOver = @"
+address $00100000
+repeat 32768
+  nop
+endrepeat
+";
+            var pairsOver = Compile(srcOver);
+            Assert.AreEqual(0, pairsOver.Count, "repeat 32768 should emit no code (overflow)");
+        }
+
         // -----------------------------------------------------------------------
         // P2: CdsPreprocessor — macro / endmacro
         // -----------------------------------------------------------------------
