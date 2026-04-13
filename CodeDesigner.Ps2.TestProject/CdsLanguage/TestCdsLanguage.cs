@@ -1044,6 +1044,166 @@ endwhile
         }
 
         // -----------------------------------------------------------------------
+        // P2: CdsPreprocessor — relational operators (<, >, <=, >=, unsigned)
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Preprocessor_If_LessThan_Register_EmitsSltThenBeq()
+        {
+            var src = @"
+address $00100000
+if $t0 < $t1
+  nop
+endif
+";
+            var pairs = Compile(src);
+            // slt $t8,lhs,rhs (1) + beq $t8,$zero,:end (1) + nop ds (1) + nop body (1) = 4
+            Assert.AreEqual(4, pairs.Count);
+            // slt t8, $t0, $t1 = opcode SPECIAL(0), rs=t0(8)=01000, rt=t1(9)=01001, rd=t8(24)=11000, shamt=0, funct=SLT(42=0x2A)
+            // 000000 01000 01001 11000 00000 101010
+            // = 0x0109C02A
+            Assert.AreEqual(0x0109C02Au, pairs[0].Word, "slt $t8, $t0, $t1");
+            // beq $t8,$zero,:end (at +4 = next word) — offset = 1 (skip nop delay to body, then body is 1 more)
+            // Actually offset points past the branch: body is pairs[2] and pairs[3], end is pairs[4] (doesn't exist)
+            // beq t8,zero,offset: address 0x00100008, target 0x00100010 (past the nop body), delta = 0x8/4 = 2 words
+            Assert.AreEqual(0x13000002u, pairs[1].Word, "beq $t8, $zero, :end (offset +2)");
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_GreaterThan_Register_EmitsSwappedSlt()
+        {
+            var src = @"
+address $00100000
+if $t0 > $t1
+  nop
+endif
+";
+            var pairs = Compile(src);
+            // slt $t8,$t1,$t0 (swapped) + beq $t8,$zero,:end + nop + nop body = 4
+            Assert.AreEqual(4, pairs.Count);
+            // slt t8, $t1, $t0 = rs=t1(9)=01001, rt=t0(8)=01000
+            // 000000 01001 01000 11000 00000 101010
+            // = 0x0128C02A
+            Assert.AreEqual(0x0128C02Au, pairs[0].Word, "slt $t8, $t1, $t0");
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_LessOrEqual_Register_EmitsSwappedSltThenBne()
+        {
+            var src = @"
+address $00100000
+if $t0 <= $t1
+  nop
+endif
+";
+            var pairs = Compile(src);
+            // slt $t8,$t1,$t0 (swapped) + bne $t8,$zero,:end + nop + nop body = 4
+            Assert.AreEqual(4, pairs.Count);
+            // bne $t8, $zero, offset — opcode BNE(5=000101), rs=t8(24)=11000, rt=zero(0)=00000
+            // (5<<26)|(24<<21)|(0<<16)|2 = 0x14000000|0x03000000|0|2 = 0x17000002
+            Assert.AreEqual(0x17000002u, pairs[1].Word, "bne $t8, $zero, :end");
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_GreaterOrEqual_Register_EmitsSltThenBne()
+        {
+            var src = @"
+address $00100000
+if $t0 >= $t1
+  nop
+endif
+";
+            var pairs = Compile(src);
+            // slt $t8,$t0,$t1 + bne $t8,$zero,:end + nop + nop body = 4
+            Assert.AreEqual(4, pairs.Count);
+            Assert.AreEqual(0x0109C02Au, pairs[0].Word, "slt $t8, $t0, $t1");
+            Assert.AreEqual(0x17000002u, pairs[1].Word, "bne $t8, $zero, :end");
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_LessThan_Zero_EmitsBgez()
+        {
+            var src = @"
+address $00100000
+if $t0 < 0
+  nop
+endif
+";
+            var pairs = Compile(src);
+            // bgez $t0, :end (1) + nop ds (1) + nop body (1) = 3
+            Assert.AreEqual(3, pairs.Count);
+            // bgez $t0, offset: opcode REGIMM(1=000001), rs=t0(8), rt=BGEZ(1)
+            // (1<<26)|(8<<21)|(1<<16)|2 = 0x04000000|0x01000000|0x00010000|2 = 0x05010002
+            Assert.AreEqual(0x05010002u, pairs[0].Word, "bgez $t0, :end");
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_GreaterThan_Zero_EmitsBlez()
+        {
+            var src = @"
+address $00100000
+if $t0 > 0
+  nop
+endif
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(3, pairs.Count);
+            // blez $t0, offset: opcode BLEZ(6=000110), rs=t0(8)=01000, rt=0
+            // 000110 01000 00000 00000000 00000010 = 0x19000002
+            Assert.AreEqual(0x19000002u, pairs[0].Word, "blez $t0, :end");
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_LessThan_Immediate_MaterialisesViaT9()
+        {
+            var src = @"
+address $00100000
+if $t0 < 0x64
+  nop
+endif
+";
+            var pairs = Compile(src);
+            // setreg t9,$00000064 (2: lui+ori) + slt (1) + beq (1) + nop (1) + body nop (1) = 6
+            Assert.AreEqual(6, pairs.Count);
+            // slt $t8, $t0, $t9  = rs=t0(8), rt=t9(25)=11001, rd=t8(24)=11000
+            // 000000 01000 11001 11000 00000 101010
+            // = 0x0119C02A
+            Assert.AreEqual(0x0119C02Au, pairs[2].Word, "slt $t8, $t0, $t9");
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_UnsignedLessThan_UsesSltu()
+        {
+            var src = @"
+address $00100000
+if $t0 <u $t1
+  nop
+endif
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(4, pairs.Count);
+            // sltu $t8, $t0, $t1: funct SLTU = 0x2B (43)
+            // 000000 01000 01001 11000 00000 101011
+            // = 0x0109C02B
+            Assert.AreEqual(0x0109C02Bu, pairs[0].Word, "sltu $t8, $t0, $t1");
+        }
+
+        [TestMethod]
+        public void Preprocessor_While_LessThan_Register_CorrectStructure()
+        {
+            var src = @"
+address $00100000
+while $t0 < $t1
+  nop
+endwhile
+";
+            var pairs = Compile(src);
+            // top_label(0) + slt(1) + beq(1) + nop ds(1) + nop body(1) + j :top(1) + nop ds(1) = 6
+            Assert.AreEqual(6, pairs.Count);
+            Assert.AreEqual(0x0109C02Au, pairs[0].Word, "slt $t8, $t0, $t1");
+        }
+
+        // -----------------------------------------------------------------------
         // P2: CdsPreprocessor — repeat / endrepeat
         // -----------------------------------------------------------------------
 

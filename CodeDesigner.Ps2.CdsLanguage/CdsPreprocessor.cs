@@ -20,9 +20,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
     ///
     /// <para><b>Condition syntax</b> (for <c>if</c> and <c>while</c>):</para>
     /// <list type="bullet">
-    ///   <item><c>$reg == $reg2</c> / <c>$reg != $reg2</c> — register comparison.</item>
+    ///   <item><c>$reg == $reg2</c> / <c>$reg != $reg2</c> — register equality comparison.</item>
     ///   <item><c>$reg == 0</c> / <c>$reg != 0</c> — compare with zero.</item>
     ///   <item><c>$reg == 0xVALUE</c> / <c>$reg != 0xVALUE</c> — compare with immediate (uses <c>$t9</c> as scratch).</item>
+    ///   <item><c>$reg &lt; $reg2</c> / <c>$reg &gt; $reg2</c> / <c>$reg &lt;= $reg2</c> / <c>$reg &gt;= $reg2</c> — signed relational comparison (expands via <c>slt</c> + conditional branch; uses <c>$t8</c> as scratch).</item>
+    ///   <item><c>$reg &lt;u $reg2</c> / <c>$reg &gt;u $reg2</c> / <c>$reg &lt;=u $reg2</c> / <c>$reg &gt;=u $reg2</c> — unsigned relational comparison (uses <c>sltu</c>).</item>
     /// </list>
     ///
     /// <para>
@@ -62,11 +64,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex IfRegex =
-            new(@"^if\s+(\$?\w+)\s*(==|!=)\s*(\$?\w+|0x[0-9a-fA-F]+|\d+)$",
+            new(@"^if\s+(\$?\w+)\s*(==|!=|<=u|>=u|<u|>u|<=|>=|<|>)\s*(\$?\w+|0x[0-9a-fA-F]+|\d+)$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex WhileRegex =
-            new(@"^while\s+(\$?\w+)\s*(==|!=)\s*(\$?\w+|0x[0-9a-fA-F]+|\d+)$",
+            new(@"^while\s+(\$?\w+)\s*(==|!=|<=u|>=u|<u|>u|<=|>=|<|>)\s*(\$?\w+|0x[0-9a-fA-F]+|\d+)$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex RepeatRegex =
@@ -495,34 +497,145 @@ namespace CodeDesigner.Ps2.CdsLanguage
         /// Emit the MIPS instructions that branch to <paramref name="targetLabel"/> when
         /// the condition is <em>false</em> (inverted), followed by a delay-slot NOP.
         /// </summary>
+        /// <remarks>
+        /// <para>Equality operators (== / !=) expand to a single <c>beq</c> / <c>bne</c>.</para>
+        /// <para>
+        /// Relational operators (&lt;, &gt;, &lt;=, &gt;=) expand via <c>slt</c> (signed) or
+        /// <c>sltu</c> (unsigned, suffix <c>u</c>) plus a conditional branch.
+        /// Register <c>$t8</c> is used as the SLT result scratch; register <c>$t9</c> is
+        /// used to materialise large immediates.
+        /// </para>
+        /// <para>Comparisons against zero emit specialised MIPS branch instructions
+        /// (<c>bltz</c>, <c>bgtz</c>, <c>blez</c>, <c>bgez</c>) instead of SLT sequences.</para>
+        /// </remarks>
         private void EmitBranch(
             List<string> output,
             string lhs, string op, string rhs,
             string targetLabel,
             int lineNumber)
         {
-            // Invert the operator: we branch when the condition is FALSE
-            string branchMnem = op == "==" ? "bne" : "beq";
-
             bool isZero = rhs is "0" or "0x0" or "0x00" or "0x0000" or "0x00000000"
                        || string.Equals(rhs, "$zero", StringComparison.OrdinalIgnoreCase)
                        || string.Equals(rhs, "zero",  StringComparison.OrdinalIgnoreCase);
 
             bool isReg = rhs.StartsWith("$") && !TryParseImmediate(rhs, out _);
 
+            // ── Equality operators — single beq / bne ─────────────────────────────
+            if (op is "==" or "!=")
+            {
+                // Invert: branch when condition is FALSE
+                string branchMnem = op == "==" ? "bne" : "beq";
+                if (isZero)
+                {
+                    output.Add($"{branchMnem} {lhs}, $zero, :{targetLabel}");
+                    output.Add("nop");
+                }
+                else if (isReg)
+                {
+                    output.Add($"{branchMnem} {lhs}, {rhs}, :{targetLabel}");
+                    output.Add("nop");
+                }
+                else
+                {
+                    if (!TryParseImmediate(rhs, out uint immVal))
+                    {
+                        _diagnostics.Add(new CdsDiagnostic
+                        {
+                            Severity   = CdsDiagnosticSeverity.Error,
+                            LineNumber = lineNumber,
+                            Message    = $"cannot parse immediate '{rhs}' in condition"
+                        });
+                        return;
+                    }
+                    output.Add($"setreg t9, ${immVal:X8}");
+                    output.Add($"{branchMnem} {lhs}, $t9, :{targetLabel}");
+                    output.Add("nop");
+                }
+                return;
+            }
+
+            // ── Relational operators — expand via slt / sltu ──────────────────────
+            // Strip trailing 'u' to get the base operator; determine signed vs unsigned
+            bool isUnsigned = op.EndsWith("u", StringComparison.OrdinalIgnoreCase);
+            string baseOp   = isUnsigned ? op[..^1] : op;   // "<", ">", "<=", ">="
+            string sltMnem  = isUnsigned ? "sltu" : "slt";
+
+            // Special case: comparisons against zero use dedicated MIPS branches
+            // (bltz/bgtz/blez/bgez) which do not require SLT and work regardless of sign.
+            if (isZero && !isUnsigned)
+            {
+                // We branch to target when condition is FALSE (inverted logic):
+                //   if $t0 <  0  → body runs when $t0 < 0;  skip (branch) when $t0 >= 0 → bgez
+                //   if $t0 >  0  → skip when $t0 <= 0 → blez
+                //   if $t0 <= 0  → skip when $t0 > 0  → bgtz
+                //   if $t0 >= 0  → skip when $t0 < 0  → bltz
+                string zBranch = baseOp switch
+                {
+                    "<"  => "bgez",
+                    ">"  => "blez",
+                    "<=" => "bgtz",
+                    _    => "bltz"   // ">="
+                };
+                output.Add($"{zBranch} {lhs}, :{targetLabel}");
+                output.Add("nop");
+                return;
+            }
+
+            // General relational: compute SLT into $t8, then beq/bne $t8, $zero.
+            //
+            // Truth table (branch = skip body = condition is FALSE):
+            //
+            //   Cond       SLT form             Branch when FALSE
+            //   ─────────  ──────────────────── ─────────────────────────────────────
+            //   lhs <  rhs  slt $t8,lhs,rhs=1   beq $t8,$zero (skip when NOT less)
+            //   lhs >  rhs  slt $t8,rhs,lhs=1   beq $t8,$zero (skip when NOT greater)
+            //   lhs <= rhs  slt $t8,rhs,lhs=1   bne $t8,$zero (skip when rhs < lhs)
+            //   lhs >= rhs  slt $t8,lhs,rhs=1   bne $t8,$zero (skip when lhs < rhs)
+
+            string sltLhs, sltRhs, sltBranch;
+            switch (baseOp)
+            {
+                case "<":
+                    sltLhs   = lhs;
+                    sltBranch = "beq";
+                    break;
+                case ">":
+                    sltLhs   = null!;   // rhs is the first operand (swap)
+                    sltBranch = "beq";
+                    break;
+                case "<=":
+                    sltLhs   = null!;   // rhs is the first operand
+                    sltBranch = "bne";
+                    break;
+                default:  // ">="
+                    sltLhs   = lhs;
+                    sltBranch = "bne";
+                    break;
+            }
+
+            bool rhsFirst = baseOp is ">" or "<=";  // $t8 = (rhs < lhs) rather than (lhs < rhs)
+
             if (isZero)
             {
-                output.Add($"{branchMnem} {lhs}, $zero, :{targetLabel}");
-                output.Add("nop");
+                // Unsigned compare with zero: sltu x,reg,$zero is always 0; use sltiu instead.
+                // lhs <u 0 → always false (unsigned can't be less than 0); emit no branch.
+                // lhs >u 0 → sltu $t8,$zero,lhs... simplified: bne lhs,$zero,:target for >u 0
+                // For simplicity, materialise zero in $t9 and fall through to immediate path.
+                output.Add($"setreg t9, $00000000");
             }
-            else if (isReg)
+
+            if (isReg || isZero)
             {
-                output.Add($"{branchMnem} {lhs}, {rhs}, :{targetLabel}");
+                string rhsReg = isZero ? "$t9" : rhs;
+                string a = rhsFirst ? rhsReg : lhs;
+                string b = rhsFirst ? lhs     : rhsReg;
+                output.Add($"{sltMnem} $t8, {a}, {b}");
+                output.Add($"{sltBranch} $t8, $zero, :{targetLabel}");
                 output.Add("nop");
             }
             else
             {
-                // Immediate: load into $t9 then compare
+                // Immediate RHS: materialise into $t9 first
                 if (!TryParseImmediate(rhs, out uint immVal))
                 {
                     _diagnostics.Add(new CdsDiagnostic
@@ -533,10 +646,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     });
                     return;
                 }
-
-                // Use setreg to handle values > 0x7FFF (16-bit signed limit of addiu)
-                output.Add($"setreg t9, ${immVal:X8}");  // no $ on register: matches SetRegRegex
-                output.Add($"{branchMnem} {lhs}, $t9, :{targetLabel}");
+                output.Add($"setreg t9, ${immVal:X8}");
+                string a = rhsFirst ? "$t9" : lhs;
+                string b = rhsFirst ? lhs   : "$t9";
+                output.Add($"{sltMnem} $t8, {a}, {b}");
+                output.Add($"{sltBranch} $t8, $zero, :{targetLabel}");
                 output.Add("nop");
             }
         }
