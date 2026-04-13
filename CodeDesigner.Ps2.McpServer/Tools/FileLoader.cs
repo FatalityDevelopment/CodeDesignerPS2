@@ -73,9 +73,9 @@ public sealed partial class CodeDesignerPs2Tools
             {
                 foreach (var item in arr.EnumerateArray())
                 {
-                    string label = item.TryGetProperty("Label", out var lp) ? (lp.GetString() ?? "?") : "?";
-                    uint   baseA = item.TryGetProperty("BaseAddress", out var bp) ? bp.GetUInt32() : 0u;
-                    int    size  = item.TryGetProperty("Size", out var sp) ? sp.GetInt32() : 0;
+                    string label = item.TryGetProperty("Label", out var labelProp) ? (labelProp.GetString() ?? "?") : "?";
+                    uint   baseA = item.TryGetProperty("BaseAddress", out var baseProp) ? baseProp.GetUInt32() : 0u;
+                    int    size  = item.TryGetProperty("Size", out var sizeProp) ? sizeProp.GetInt32() : 0;
                     sb.AppendLine($"  [{label}]  base=0x{baseA:X8}  size={size / 1024} KB");
                 }
             }
@@ -142,9 +142,9 @@ public sealed partial class CodeDesignerPs2Tools
             sb.AppendLine(successHeader);
             foreach (var item in arr.EnumerateArray())
             {
-                string label = item.TryGetProperty("Label", out var lp) ? (lp.GetString() ?? "?") : "?";
-                string file  = item.TryGetProperty("File",  out var fp) ? (fp.GetString() ?? "?") : "?";
-                int    size  = item.TryGetProperty("Size",  out var sp) ? sp.GetInt32() : 0;
+                string label = item.TryGetProperty("Label", out var labelProp) ? (labelProp.GetString() ?? "?") : "?";
+                string file  = item.TryGetProperty("File",  out var fileProp)  ? (fileProp.GetString()  ?? "?") : "?";
+                int    size  = item.TryGetProperty("Size",  out var sizeProp)  ? sizeProp.GetInt32() : 0;
                 sb.AppendLine($"  [{label}]  size={size / 1024} KB  ← {file}");
             }
             sb.AppendLine("Emulator is now paused. Use file_set_pc / set_breakpoint / resume_emulator to debug.");
