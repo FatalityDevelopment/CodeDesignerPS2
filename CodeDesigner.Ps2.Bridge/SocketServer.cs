@@ -867,6 +867,9 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "LOADSNAPSHOT":
                         return HandleLoadSnapshot(command.InputPath);
+
+                    case "LOADELF":
+                        return HandleLoadElf(command.InputPath);
                     
                     case "PAUSE":
                         return HandlePause();

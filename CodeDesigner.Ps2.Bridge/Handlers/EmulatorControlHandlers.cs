@@ -289,6 +289,66 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
+        /// <summary>
+        /// Handle LOADELF command — load an ELF32 PS2 executable into the internal
+        /// emulator's memory bus, set the PC to the ELF entry point, and leave the
+        /// emulator paused so the user can set breakpoints before running.
+        /// <para>
+        /// Only supported in internal emulator mode (not PINE).  Use this command
+        /// to load a raw ELF for memory-dump analysis or debugging without needing
+        /// a BIOS boot sequence.
+        /// </para>
+        /// </summary>
+        private string HandleLoadElf(string? filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return CreateErrorResponse("InputPath is required for LOADELF");
+            if (!File.Exists(filePath))
+                return CreateErrorResponse("ELF file not found: " + filePath);
+            if (IsPineMode)
+                return CreateErrorResponse("LOADELF is only supported in internal emulator mode; use LOADBIN for PINE");
+            if (Scheduler == null)
+                return CreateErrorResponse("Emulator not running — no scheduler attached");
+
+            Scheduler.Paused = true;
+            try
+            {
+                byte[] elfData = File.ReadAllBytes(filePath);
+                uint entryPoint = ElfLoader.LoadIntoEmulator(elfData, Scheduler.EE);
+
+                // Collect loaded regions for the response (EE RAM only; BIOS and
+                // Scratchpad are not modified by ELF loading).
+                var loaded = new List<SnapshotRegion>
+                {
+                    new SnapshotRegion
+                    {
+                        Label       = "EE Main RAM",
+                        File        = filePath,
+                        BaseAddress = 0x00000000u,
+                        Size        = (int)PS2MemoryBus.MainRamSize,
+                    }
+                };
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success    = true,
+                    Command    = "LOADELF",
+                    PC         = entryPoint,
+                    Paused     = true,
+                    Regions    = loaded,
+                    Message    = $"ELF loaded; entry point 0x{entryPoint:X8}",
+                });
+            }
+            catch (ElfLoadException ex)
+            {
+                return CreateErrorResponse("ELF load error: " + ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse("LoadElf error: " + ex.Message);
+            }
+        }
+
         private string HandleExtractP2s(string? filePath)
         {
             if (string.IsNullOrEmpty(filePath))
