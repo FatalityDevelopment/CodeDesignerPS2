@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using CodeDesigner.Ps2.CheatEngine;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.CdsLanguage;
 using CodeDesigner.Ps2.CdsLanguage.SyntaxItems;
@@ -229,6 +230,251 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch { /* swallow — no live backend or address out of range */ }
             return null;
+        }
+
+        /// <summary>
+        /// Handle CDSPATCH command — compile a CDS source, check assert sidecars against live
+        /// memory, apply the generated GameShark codes to RAM, and then install any
+        /// <c>breakpoint</c> / <c>watchpoint</c> sidecar commands.
+        ///
+        /// <para>
+        /// This is the atomic "compile + apply" variant of the two-step
+        /// <c>COMPILECDS</c> → <c>APPLYCHEATS</c> workflow, useful for MCP agents and
+        /// automation scripts that want a single round-trip.
+        /// </para>
+        ///
+        /// <para>
+        /// On assert failure the command returns <c>Success=false</c> and aborts without
+        /// writing any memory or installing any breakpoints or watchpoints.
+        /// </para>
+        /// </summary>
+        private string HandleCdsPatch(string? sourceCode, List<LabelEntry>? externalLabels = null)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(sourceCode))
+                    return CreateErrorResponse("No source code provided");
+
+                if (Scheduler == null && PineClient == null)
+                    return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+
+                // ── Build external label dictionary ──────────────────────────────────
+                var extDict = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+                if (externalLabels != null)
+                {
+                    foreach (var entry in externalLabels)
+                    {
+                        if (string.IsNullOrWhiteSpace(entry.Label) ||
+                            string.IsNullOrWhiteSpace(entry.Address)) continue;
+                        var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                            ? entry.Address[2..]
+                            : entry.Address;
+                        if (uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber,
+                                null, out uint addr))
+                            extDict[entry.Label] = addr;
+                    }
+                }
+                foreach (var kv in _labels)
+                    extDict[kv.Value.Label] = kv.Key;
+
+                // ── Parse ────────────────────────────────────────────────────────────
+                var parser = new CdsParser();
+                var items  = parser.Parse(sourceCode, basePath: "", externalLabels: extDict);
+
+                // Collect parser diagnostics as error results (informational — returned in response)
+                var errorResults = new List<InstructionResult>();
+                foreach (var diag in parser.Diagnostics)
+                {
+                    errorResults.Add(new InstructionResult
+                    {
+                        Success    = false,
+                        Assembly   = string.Empty,
+                        Error      = diag.Message,
+                        LineNumber = diag.LineNumber
+                    });
+                }
+
+                // ── Check assert sidecars ────────────────────────────────────────────
+                var sidecars       = CdsCompiler.GetSidecarCommands(items);
+                var sidecarResults = new List<CdsSidecarResult>();
+
+                foreach (var sc in sidecars)
+                {
+                    if (sc is not AssertSyntaxItem assert) continue;
+
+                    var sidecar = new CdsSidecarResult
+                    {
+                        Kind          = "assert",
+                        Address       = assert.Address,
+                        Operator      = assert.Operator,
+                        ExpectedValue = assert.ExpectedValue,
+                    };
+
+                    uint? actual = TryReadWordFromLiveMemory(assert.Address);
+                    if (actual.HasValue)
+                    {
+                        sidecar.ActualValue = actual;
+                        bool pass = string.Equals(assert.Operator, "!=", StringComparison.Ordinal)
+                            ? actual.Value != assert.ExpectedValue
+                            : actual.Value == assert.ExpectedValue;
+                        sidecar.AssertPassed = pass;
+
+                        if (!pass)
+                        {
+                            sidecarResults.Add(sidecar);
+                            return JsonSerializer.Serialize(new CommandResponse
+                            {
+                                Success  = false,
+                                Command  = "CDSPATCH",
+                                Error    = $"Assert failed at 0x{assert.Address:X8}: " +
+                                           $"expected {assert.Operator} 0x{assert.ExpectedValue:X8}, " +
+                                           $"got 0x{actual.Value:X8}",
+                                Results  = errorResults.Count > 0 ? errorResults : null,
+                                Sidecars = sidecarResults
+                            });
+                        }
+                    }
+
+                    sidecarResults.Add(sidecar);
+                }
+
+                if (errorResults.Count > 0)
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success  = false,
+                        Command  = "CDSPATCH",
+                        Error    = $"{errorResults.Count} CDS parse error(s) — patch not applied",
+                        Results  = errorResults,
+                        Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
+                    });
+                }
+
+                // ── Build GameShark codes and apply them ─────────────────────────────
+                var compiled   = CdsCompiler.Compile(items);
+                var codeLines  = new List<string>(compiled.Count);
+                foreach (var (addr, word) in compiled)
+                    codeLines.Add(FormatGameSharkCode(addr, word));
+
+                var cheatText = string.Join('\n', codeLines);
+
+                IByteEditor byteEditor = IsPineMode
+                    ? (IByteEditor)new PinePcsx2ByteEditor(PineClient!)
+                    : new PS2ByteEditor(Scheduler!);
+                var engine    = new CheatEngine.CheatEngine(byteEditor);
+                var cheatList = new CheatList(cheatText);
+                engine.PatchMemory(cheatList);
+
+                // ── Install remaining sidecars (breakpoints / watchpoints) ────────────
+                var installed = new List<string>();
+                var skipped   = new List<string>();
+
+                foreach (var sc in sidecars)
+                {
+                    switch (sc)
+                    {
+                        case BreakpointSyntaxItem bp:
+                            try
+                            {
+                                SetBreakpointInternal(bp.Address);
+                                sidecarResults.Add(new CdsSidecarResult
+                                {
+                                    Kind    = "breakpoint",
+                                    Address = bp.Address
+                                });
+                                installed.Add($"breakpoint @ 0x{bp.Address:X8}");
+                            }
+                            catch (Exception ex)
+                            {
+                                skipped.Add($"breakpoint @ 0x{bp.Address:X8}: {ex.Message}");
+                            }
+                            break;
+
+                        case WatchpointSyntaxItem wp:
+                            try
+                            {
+                                SetWatchpointInternal(wp.Address, wp.Size, wp.AccessType);
+                                sidecarResults.Add(new CdsSidecarResult
+                                {
+                                    Kind       = "watchpoint",
+                                    Address    = wp.Address,
+                                    WatchSize  = wp.Size,
+                                    AccessType = wp.AccessType.ToString().ToLowerInvariant()
+                                });
+                                installed.Add($"watchpoint {wp.AccessType} @ 0x{wp.Address:X8} ({wp.Size} bytes)");
+                            }
+                            catch (Exception ex)
+                            {
+                                skipped.Add($"watchpoint @ 0x{wp.Address:X8}: {ex.Message}");
+                            }
+                            break;
+                    }
+                }
+
+                // ── Build summary message ────────────────────────────────────────────
+                var sb = new System.Text.StringBuilder();
+                sb.Append($"Patch applied — {codeLines.Count} code(s) written");
+                if (installed.Count > 0)
+                    sb.Append($", {installed.Count} sidecar(s) installed");
+                if (skipped.Count > 0)
+                    sb.Append($", {skipped.Count} sidecar(s) skipped (see Sidecars)");
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "CDSPATCH",
+                    Message  = sb.ToString(),
+                    Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"CDSPATCH error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Install a software breakpoint at the given EE virtual address.
+        /// Delegates to PineClient in PINE mode or to Scheduler.Breakpoints in internal mode.
+        /// </summary>
+        private void SetBreakpointInternal(uint address)
+        {
+            if (IsPineMode)
+            {
+                if (PineClient == null)
+                    throw new InvalidOperationException("PINE client not connected");
+                PineClient.SetBreakpoint(NormalizePcToKseg0(address));
+            }
+            else if (Scheduler != null)
+            {
+                Scheduler.Breakpoints.Add(NormalizeBreakpointToPhysical(address));
+            }
+            else
+            {
+                throw new InvalidOperationException("No live backend for breakpoint installation");
+            }
+        }
+
+        /// <summary>
+        /// Install a hardware watchpoint at the given EE virtual address range.
+        /// In PINE mode delegates to <see cref="PineClient.AddWatch"/>; PINE-only feature.
+        /// </summary>
+        private void SetWatchpointInternal(uint address, uint size, WatchpointAccessType accessType)
+        {
+            if (!IsPineMode)
+                throw new InvalidOperationException("Watchpoints via CDSPATCH require PINE mode (connect to PCSX2 first)");
+            if (PineClient == null)
+                throw new InvalidOperationException("PINE client not connected");
+
+            uint cond = accessType switch
+            {
+                WatchpointAccessType.Read      => 1u,
+                WatchpointAccessType.ReadWrite => 3u,
+                _                              => 2u   // Write
+            };
+            uint physStart = address & 0x1FFFFFFF;
+            uint physEnd   = physStart + size;
+            PineClient.AddWatch(cpu: 0, physStart, physEnd, (byte)cond);
         }
 
         /// <summary>

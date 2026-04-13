@@ -907,6 +907,9 @@ namespace CodeDesigner.Ps2.Bridge
                     case "APPLYCHEATS":
                         return HandleApplyCheats(command.Data);
 
+                    case "CDSPATCH":
+                        return HandleCdsPatch(command.Data, command.Labels);
+
                     case "INJECTCHEATENGINE":
                         return HandleInjectCheatEngine(command.Data, command.HookAddress, command.EngineBase, command.CdsSource);
 

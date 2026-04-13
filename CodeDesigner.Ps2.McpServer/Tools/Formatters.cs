@@ -803,4 +803,97 @@ public sealed partial class CodeDesignerPs2Tools
             return json;
         }
     }
+
+    /// <summary>
+    /// Format the JSON response from CDSPATCH into a human-readable summary for MCP callers.
+    /// </summary>
+    private static string FormatCdsPatchResult(string json)
+    {
+        try
+        {
+            using var doc  = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            bool   success = root.TryGetProperty("Success", out var s) && s.GetBoolean();
+            string message = root.TryGetProperty("Message", out var m) ? (m.GetString() ?? "") : "";
+            string error   = root.TryGetProperty("Error",   out var e) ? (e.GetString() ?? "") : "";
+
+            var sb = new StringBuilder();
+            sb.AppendLine(success ? "CDS patch applied successfully." : $"CDS patch failed: {error}");
+
+            if (!string.IsNullOrEmpty(message) && message != error)
+                sb.AppendLine(message);
+
+            // Report any parse/compile errors
+            if (root.TryGetProperty("Results", out var results) && results.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in results.EnumerateArray())
+                {
+                    bool ok  = item.TryGetProperty("Success", out var rs) && rs.GetBoolean();
+                    if (!ok)
+                    {
+                        int    ln  = item.TryGetProperty("LineNumber", out var ln2) && ln2.ValueKind == JsonValueKind.Number
+                                     ? ln2.GetInt32() : 0;
+                        string err = item.TryGetProperty("Error", out var er) ? (er.GetString() ?? "?") : "?";
+                        sb.AppendLine($"  [line {ln}] {err}");
+                    }
+                }
+            }
+
+            // Report sidecars
+            if (root.TryGetProperty("Sidecars", out var sidecars) && sidecars.ValueKind == JsonValueKind.Array)
+            {
+                var sidecarSb = new StringBuilder();
+                foreach (var sc in sidecars.EnumerateArray())
+                {
+                    string kind = sc.TryGetProperty("Kind",    out var k) ? (k.GetString() ?? "") : "";
+                    uint   addr = sc.TryGetProperty("Address", out var ad) && ad.ValueKind == JsonValueKind.Number
+                                  ? ad.GetUInt32() : 0;
+
+                    switch (kind)
+                    {
+                        case "assert":
+                        {
+                            bool?   passed   = sc.TryGetProperty("AssertPassed", out var p) && p.ValueKind != JsonValueKind.Null
+                                               ? p.GetBoolean() : null;
+                            uint?   expected = sc.TryGetProperty("ExpectedValue", out var ev) && ev.ValueKind == JsonValueKind.Number
+                                               ? ev.GetUInt32() : null;
+                            uint?   actual   = sc.TryGetProperty("ActualValue",   out var av) && av.ValueKind == JsonValueKind.Number
+                                               ? av.GetUInt32() : null;
+                            string  op       = sc.TryGetProperty("Operator", out var op2) ? (op2.GetString() ?? "==") : "==";
+                            string passStr   = passed.HasValue ? (passed.Value ? "✓ passed" : "✗ FAILED") : "(not checked)";
+                            string exp_      = expected.HasValue ? $"0x{expected.Value:X8}" : "?";
+                            string act_      = actual.HasValue   ? $", got 0x{actual.Value:X8}" : "";
+                            sidecarSb.AppendLine($"  assert 0x{addr:X8} {op} {exp_}{act_} — {passStr}");
+                            break;
+                        }
+                        case "breakpoint":
+                            sidecarSb.AppendLine($"  breakpoint installed @ 0x{addr:X8}");
+                            break;
+                        case "watchpoint":
+                        {
+                            string access = sc.TryGetProperty("AccessType", out var at) ? (at.GetString() ?? "write") : "write";
+                            uint   size   = sc.TryGetProperty("WatchSize",  out var ws) && ws.ValueKind == JsonValueKind.Number
+                                            ? ws.GetUInt32() : 4;
+                            sidecarSb.AppendLine($"  watchpoint {access} @ 0x{addr:X8} ({size} bytes) installed");
+                            break;
+                        }
+                    }
+                }
+
+                if (sidecarSb.Length > 0)
+                {
+                    sb.AppendLine();
+                    sb.Append("Sidecars:\n");
+                    sb.Append(sidecarSb);
+                }
+            }
+
+            return WithRules(sb.ToString().TrimEnd());
+        }
+        catch
+        {
+            return json;
+        }
+    }
 }

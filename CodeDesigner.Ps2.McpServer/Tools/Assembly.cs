@@ -60,4 +60,25 @@ public sealed partial class CodeDesignerPs2Tools
 
         return FormatCompileCdsResults(json);
     }
+
+    [McpServerTool(Name = "apply_cds_patch")]
+    [DynamicDescription("apply_cds_patch_desc")]
+    [Description("Compile a Code Designer Script (.cds) source and immediately apply the resulting memory patch to the live PS2 emulator. " +
+                 "This is an atomic compile-and-apply operation: " +
+                 "(1) the CDS source is compiled; " +
+                 "(2) any assert sidecars are checked against live memory — a failing assert aborts the patch; " +
+                 "(3) the generated GameShark codes are written to RAM; " +
+                 "(4) breakpoint sidecars are installed via SETBP; " +
+                 "(5) watchpoint sidecars are installed via PINEADDWATCH (PINE mode only). " +
+                 "A live emulator backend (--run or --pcsx2) must be connected.")]
+    public async Task<string> ApplyCdsPatch(
+        [Description("CDS source code to compile and apply.")] string sourceCode,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "CDSPATCH", Data = sourceCode },
+            cancellationToken);
+
+        return FormatCdsPatchResult(json);
+    }
 }

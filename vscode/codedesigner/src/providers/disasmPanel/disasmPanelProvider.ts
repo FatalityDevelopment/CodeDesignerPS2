@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as child_process from 'child_process';
 import { getOutputChannel, getDebugChannel } from '../../extension';
-import { SocketClient, LabelEntry, DiscElfEntry } from '../../socketClient';
+import { SocketClient, LabelEntry, DiscElfEntry, CdsSidecarResult } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { AiConfigProvider } from '../aiConfig/aiConfigProvider';
@@ -104,6 +104,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _archiveCheatType: string = '';
     private _activeCdsFilePath: string = '';
     private _activeCdsContent: string = '';
+    /** Sidecar commands (assert/breakpoint/watchpoint) from the most recent successful CDS compilation. */
+    private _lastCdsSidecars: CdsSidecarResult[] = [];
     /** Diagnostic collection for CDS compilation errors — shows red squiggles in the editor. */
     private _cdsDiagnostics!: vscode.DiagnosticCollection;
     /** Path to the extension's global storage directory (set in register()). */
@@ -2508,9 +2510,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 out.warn(`CDS compilation finished with ${errors.length} error(s).`);
                 // Reveal the Debug channel so the user sees the red error entries
                 getDebugChannel().show(true);
+                // Clear any stored sidecars — the patch is not valid when there are errors
+                this._lastCdsSidecars = [];
                 this.webview?.postMessage({ command: 'cdsCompileResult', success: false, errors });
             } else {
                 const codes = codeLines.join('\n');
+                // Cache sidecars so handleAddPatch can install breakpoints/watchpoints
+                this._lastCdsSidecars = sidecars;
                 out.info(`CDS compilation succeeded — ${codeLines.length} code(s) generated.`);
                 this.webview?.postMessage({ command: 'cdsCompileResult', success: true, codes, errors: [] });
             }
@@ -2526,7 +2532,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Apply compiled GameShark codes to live memory (Add Patch). */
+    /** Apply compiled GameShark codes to live memory (Add Patch), then install any sidecar breakpoints/watchpoints. */
     private async handleAddPatch(codes: string): Promise<void> {
         const out = getOutputChannel();
         if (!this.socketClient.isConnected()) {
@@ -2534,8 +2540,41 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
         try {
+            // 1 — Apply the GameShark memory-patch codes
             await this.socketClient.applyCheats(codes);
             out.info('CDS patch applied to memory successfully.');
+
+            // 2 — Install sidecar commands from the most recent compilation
+            const sidecars = this._lastCdsSidecars;
+            for (const sc of sidecars) {
+                const addrHex = `0x${sc.Address.toString(16).toUpperCase().padStart(8, '0')}`;
+                try {
+                    switch (sc.Kind) {
+                        case 'breakpoint':
+                            await this.socketClient.setBreakpoint(sc.Address);
+                            out.info(`CDS breakpoint installed @ ${addrHex}`);
+                            break;
+
+                        case 'watchpoint': {
+                            // Watchpoint covers [Address, Address + WatchSize)
+                            const size   = sc.WatchSize ?? 4;
+                            const endAddr = sc.Address + size;
+                            // Condition: 1=read, 2=write, 3=readwrite
+                            const cond = sc.AccessType === 'read'      ? 1
+                                       : sc.AccessType === 'readwrite' ? 3
+                                       : 2; // default: write
+                            await this.socketClient.addPineWatch(sc.Address, endAddr, cond);
+                            out.info(`CDS watchpoint installed: ${sc.AccessType ?? 'write'} @ ${addrHex} (${size} bytes)`);
+                            break;
+                        }
+                    }
+                } catch (sidecarErr: any) {
+                    // Log but do not abort — sidecar install is best-effort (e.g. breakpoints
+                    // require PINE debugger extension; watchpoints require PINE mode).
+                    out.warn(`CDS sidecar install failed for ${sc.Kind} @ ${addrHex}: ${sidecarErr?.message ?? sidecarErr}`);
+                }
+            }
+
             this.webview?.postMessage({ command: 'cdsPatchApplied', success: true });
         } catch (err: any) {
             const msg = err?.message ?? String(err);
