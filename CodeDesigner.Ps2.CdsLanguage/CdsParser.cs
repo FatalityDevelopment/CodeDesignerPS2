@@ -166,6 +166,10 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     continue;
                 }
 
+                // ---- Strip inline comments (// ; #) from code lines ----
+                trimmed = StripInlineComments(trimmed);
+                if (string.IsNullOrWhiteSpace(trimmed)) continue;
+
                 // ---- Scope open: scope Name { ----
                 var scopeMatch = ScopeRegex.Match(trimmed);
                 if (scopeMatch.Success)
@@ -350,6 +354,10 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     continue;
                 }
                 if (t.StartsWith("//")) continue;
+
+                // Strip inline comments (// ; #) from code lines
+                t = StripInlineComments(t);
+                if (string.IsNullOrWhiteSpace(t)) continue;
 
                 // Scope open / close
                 var scopeMatch = ScopeRegex.Match(t);
@@ -695,6 +703,25 @@ namespace CodeDesigner.Ps2.CdsLanguage
             if (stack.Count == 0) return string.Empty;
             // Stack is innermost-first; we want outermost-first for the path
             return string.Join(".", stack.Reverse());
+        }
+
+        /// <summary>
+        /// Strip inline single-line comments (<c>//</c>, <c>;</c>, <c>#</c>) from a
+        /// code line, being careful not to strip comment markers that appear inside
+        /// string literals.
+        /// </summary>
+        private static string StripInlineComments(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return line;
+
+            int cutAt = int.MaxValue;
+            foreach (var marker in new[] { "//", ";", "#" })
+            {
+                int ci = line.IndexOf(marker, StringComparison.Ordinal);
+                if (ci > 0 && ci < cutAt) cutAt = ci;
+            }
+
+            return cutAt != int.MaxValue ? line[..cutAt].TrimEnd() : line;
         }
 
         private static uint TryAssemble(string asm)

@@ -12,6 +12,8 @@ namespace CodeDesigner.Ps2.Bridge
 {
     partial class SocketServer
     {
+        // ── CDS Cheat Engine instance (persistent across commands) ────────────
+        private CdsCheatEngine? _cdsCheatEngine;
         /// <summary>
         /// Handle GETGAMECHEATS command — returns cheat entries from the database for the
         /// game identified by <paramref name="serial"/>.  The serial is normalised before
@@ -210,6 +212,90 @@ namespace CodeDesigner.Ps2.Bridge
             catch (Exception ex)
             {
                 return CreateErrorResponse($"ConvertCheat error: {ex.Message}");
+            }
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        //  CDS Cheat Engine — persistent hook-based cheat injection
+        // ────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Handle INJECTCHEATENGINE command — compiles the CDS cheat engine template,
+        /// writes it into EE RAM, populates the cheat table, and hooks the game at
+        /// the specified hook address.  The engine runs every frame, continuously
+        /// re-applying cheat values so they persist against the running CPU.
+        /// </summary>
+        private string HandleInjectCheatEngine(string? cheatText, uint? hookAddress, uint? engineBase)
+        {
+            if (Scheduler == null && PineClient == null)
+                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+            if (string.IsNullOrWhiteSpace(cheatText))
+                return CreateErrorResponse("No cheat data provided");
+            if (!hookAddress.HasValue)
+                return CreateErrorResponse("HookAddress is required for INJECTCHEATENGINE");
+
+            try
+            {
+                IByteEditor byteEditor = IsPineMode
+                    ? (IByteEditor)new PinePcsx2ByteEditor(PineClient!)
+                    : new PS2ByteEditor(Scheduler!);
+
+                uint baseAddr = engineBase ?? 0x000C0000;
+                _cdsCheatEngine = new CdsCheatEngine(byteEditor, baseAddr);
+                _cdsCheatEngine.Inject(hookAddress.Value, cheatText);
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "INJECTCHEATENGINE",
+                    Data    = $"Cheat engine injected at 0x{baseAddr:X8}, hooked at 0x{hookAddress.Value:X8}"
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"InjectCheatEngine error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle UPDATECHEATENGINE command — updates the cheat table in-place without
+        /// re-hooking.  The engine picks up the new values on its next iteration.
+        /// </summary>
+        private string HandleUpdateCheatEngine(string? cheatText)
+        {
+            if (_cdsCheatEngine == null || !_cdsCheatEngine.IsInjected)
+                return CreateErrorResponse("Cheat engine is not injected. Use INJECTCHEATENGINE first.");
+            if (string.IsNullOrWhiteSpace(cheatText))
+                return CreateErrorResponse("No cheat data provided");
+
+            try
+            {
+                _cdsCheatEngine.UpdateCheatTable(cheatText);
+                return CreateSuccessResponse("Cheat table updated");
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"UpdateCheatEngine error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle REMOVECHEATENGINE command — removes the hook and restores the
+        /// original instructions at the hook point.
+        /// </summary>
+        private string HandleRemoveCheatEngine()
+        {
+            if (_cdsCheatEngine == null || !_cdsCheatEngine.IsInjected)
+                return CreateErrorResponse("Cheat engine is not injected.");
+
+            try
+            {
+                _cdsCheatEngine.Remove();
+                return CreateSuccessResponse("Cheat engine removed and original code restored");
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"RemoveCheatEngine error: {ex.Message}");
             }
         }
     }

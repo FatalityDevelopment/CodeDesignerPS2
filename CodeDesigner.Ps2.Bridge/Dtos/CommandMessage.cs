@@ -276,6 +276,11 @@ namespace CodeDesigner.Ps2.Bridge
         public ushort? NetFilterPort { get; set; }
         /// <summary>IPv4 address for NETSETFILTER type 3 (dotted decimal, e.g. "192.168.1.1").</summary>
         public string? NetFilterIP { get; set; }
+        // CDS Cheat Engine fields (INJECTCHEATENGINE / UPDATECHEATENGINE / REMOVECHEATENGINE)
+        /// <summary>Hook address — the instruction to replace with a jump to the cheat engine.</summary>
+        public uint? HookAddress { get; set; }
+        /// <summary>Base address where the cheat engine code is placed in EE RAM (default 0x000C0000).</summary>
+        public uint? EngineBase { get; set; }
     }
 
     /// <summary>
