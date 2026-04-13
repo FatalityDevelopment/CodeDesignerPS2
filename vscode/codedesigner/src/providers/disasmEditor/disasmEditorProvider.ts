@@ -1935,9 +1935,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     fileData?: Buffer
   ): Promise<void> {
     if (fileData) {
-      // File-based panel: prefer the C# backend for text/regex (full disassembly
+      // File-based panel: prefer the C# backend for text/regex/refs (full disassembly
       // search) but fall back to pure TypeScript so search always works.
-      if ((mode === 'text' || mode === 'regex') && this.socketClient?.isConnected()) {
+      if ((mode === 'text' || mode === 'regex' || mode === 'refs') && this.socketClient?.isConnected()) {
         try {
           const matches = await this.socketClient.search(
             baseAddress, length, query, mode, undefined, fileData
@@ -2047,6 +2047,150 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           i += strBytes.length - 1;
         }
       }
+      return matches;
+    }
+
+    // refs — scan for MIPS instructions that reference the target address.
+    if (mode === 'refs') {
+      const cleaned = query.replace(/^0x/i, '');
+      const targetAddr = parseInt(cleaned, 16);
+      if (isNaN(targetAddr)) { return []; }
+
+      const signExt16 = (v: number): number => ((v & 0x8000) !== 0) ? (v | 0xFFFF0000) : v;
+
+      // Per-register LUI tracking (mirrors BuildCodeReferencedAddresses in C#).
+      const luiSlot = new Int32Array(32).fill(-1);
+      const luiImm  = new Uint32Array(32);
+
+      for (let i = 0; i + 3 < fileData.length; i += 4) {
+        const word      = fileData.readUInt32LE(i);
+        const opcode    = (word >>> 26) & 0x3F;
+        const rs        = (word >>> 21) & 0x1F;
+        const rt        = (word >>> 16) & 0x1F;
+        const instrAddr = (startAddress + i) >>> 0;
+
+        // J / JAL (opcode 2/3)
+        if (opcode === 0x02 || opcode === 0x03) {
+          const target = (((instrAddr + 4) & 0xF0000000) | ((word & 0x03FFFFFF) << 2)) >>> 0;
+          if (target === (targetAddr >>> 0)) {
+            matches.push({ instructionIndex: Math.floor(i / 4), address: instrAddr, field: 'op', start: 0, length: 3 });
+          }
+          if (opcode === 0x03) { luiSlot[31] = -1; } // JAL writes $ra
+          continue;
+        }
+
+        // I-type branches: BEQ/BNE/BLEZ/BGTZ (4-7) + BEQL/BNEL/BLEZL/BGTZL (0x14-0x17)
+        if ((opcode >= 0x04 && opcode <= 0x07) || (opcode >= 0x14 && opcode <= 0x17)) {
+          const target = (instrAddr + 4 + (signExt16(word & 0xFFFF) << 2)) >>> 0;
+          if (target === (targetAddr >>> 0)) {
+            matches.push({ instructionIndex: Math.floor(i / 4), address: instrAddr, field: 'op', start: 0, length: 3 });
+          }
+          continue;
+        }
+
+        // REGIMM (opcode 0x01): BLTZ/BGEZ/BLTZL/BGEZL/BLTZAL/BGEZAL/BLTZALL/BGEZALL
+        if (opcode === 0x01) {
+          const isBranch = rt === 0x00 || rt === 0x01 || rt === 0x02 || rt === 0x03
+                        || rt === 0x10 || rt === 0x11 || rt === 0x12 || rt === 0x13;
+          if (isBranch) {
+            const target = (instrAddr + 4 + (signExt16(word & 0xFFFF) << 2)) >>> 0;
+            if (target === (targetAddr >>> 0)) {
+              matches.push({ instructionIndex: Math.floor(i / 4), address: instrAddr, field: 'op', start: 0, length: 4 });
+            }
+          }
+          // BLTZAL/BGEZAL/BLTZALL/BGEZALL write $ra
+          if (rt === 0x10 || rt === 0x11 || rt === 0x12 || rt === 0x13) { luiSlot[31] = -1; }
+          continue;
+        }
+
+        // COP1 branches (opcode 0x11, rs=8): BC1F/BC1T/BC1FL/BC1TL
+        if (opcode === 0x11 && rs === 0x08) {
+          const target = (instrAddr + 4 + (signExt16(word & 0xFFFF) << 2)) >>> 0;
+          if (target === (targetAddr >>> 0)) {
+            matches.push({ instructionIndex: Math.floor(i / 4), address: instrAddr, field: 'op', start: 0, length: 4 });
+          }
+          continue;
+        }
+
+        // LUI (opcode 0x0F)
+        if (opcode === 0x0F) {
+          if (rt !== 0) { luiSlot[rt] = i; luiImm[rt] = word & 0xFFFF; }
+          continue;
+        }
+
+        // ADDIU (opcode 0x09): detect LUI+ADDIU pair
+        if (opcode === 0x09) {
+          if (rs !== 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= 128) {
+            const combined = ((luiImm[rs] << 16) + signExt16(word & 0xFFFF)) >>> 0;
+            if (combined === (targetAddr >>> 0)) {
+              const luiByteOffset = luiSlot[rs];
+              matches.push({ instructionIndex: Math.floor(luiByteOffset / 4), address: (startAddress + luiByteOffset) >>> 0, field: 'args', start: 0, length: 100 });
+              matches.push({ instructionIndex: Math.floor(i / 4),             address: instrAddr,                             field: 'args', start: 0, length: 100 });
+            }
+          }
+          if (rt !== 0) { luiSlot[rt] = -1; }
+          continue;
+        }
+
+        // ORI (opcode 0x0D): detect LUI+ORI pair
+        if (opcode === 0x0D) {
+          if (rs !== 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= 128) {
+            const combined = ((luiImm[rs] << 16) | (word & 0xFFFF)) >>> 0;
+            if (combined === (targetAddr >>> 0)) {
+              const luiByteOffset = luiSlot[rs];
+              matches.push({ instructionIndex: Math.floor(luiByteOffset / 4), address: (startAddress + luiByteOffset) >>> 0, field: 'args', start: 0, length: 100 });
+              matches.push({ instructionIndex: Math.floor(i / 4),             address: instrAddr,                             field: 'args', start: 0, length: 100 });
+            }
+          }
+          if (rt !== 0) { luiSlot[rt] = -1; }
+          continue;
+        }
+
+        // Loads (0x20-0x27): detect LUI+load pair
+        if (opcode >= 0x20 && opcode <= 0x27) {
+          if (rs !== 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= 128) {
+            const combined = ((luiImm[rs] << 16) + signExt16(word & 0xFFFF)) >>> 0;
+            if (combined === (targetAddr >>> 0)) {
+              const luiByteOffset = luiSlot[rs];
+              matches.push({ instructionIndex: Math.floor(luiByteOffset / 4), address: (startAddress + luiByteOffset) >>> 0, field: 'args', start: 0, length: 100 });
+              matches.push({ instructionIndex: Math.floor(i / 4),             address: instrAddr,                             field: 'args', start: 0, length: 100 });
+            }
+          }
+          if (rt !== 0) { luiSlot[rt] = -1; }
+          continue;
+        }
+
+        // Stores (0x28-0x2F): detect LUI+store pair
+        if (opcode >= 0x28 && opcode <= 0x2F) {
+          if (rs !== 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= 128) {
+            const combined = ((luiImm[rs] << 16) + signExt16(word & 0xFFFF)) >>> 0;
+            if (combined === (targetAddr >>> 0)) {
+              const luiByteOffset = luiSlot[rs];
+              matches.push({ instructionIndex: Math.floor(luiByteOffset / 4), address: (startAddress + luiByteOffset) >>> 0, field: 'args', start: 0, length: 100 });
+              matches.push({ instructionIndex: Math.floor(i / 4),             address: instrAddr,                             field: 'args', start: 0, length: 100 });
+            }
+          }
+          // Stores don't write $rt — no LUI slot invalidation.
+          continue;
+        }
+
+        // Register-write invalidation for everything else.
+        if (opcode === 0x00) { // SPECIAL (R-type) writes $rd
+          const rd = (word >>> 11) & 0x1F;
+          if (rd !== 0) { luiSlot[rd] = -1; }
+          continue;
+        }
+        // All other I-type opcodes write $rt — invalidate its LUI slot.
+        if (opcode !== 0x02
+         && opcode !== 0x04 && opcode !== 0x05
+         && opcode !== 0x06 && opcode !== 0x07
+         && opcode !== 0x14 && opcode !== 0x15
+         && opcode !== 0x16 && opcode !== 0x17
+         && opcode !== 0x1C) {
+          if (rt !== 0) { luiSlot[rt] = -1; }
+        }
+      }
+
       return matches;
     }
 

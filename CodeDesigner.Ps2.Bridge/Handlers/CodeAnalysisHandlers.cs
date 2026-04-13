@@ -777,6 +777,22 @@ namespace CodeDesigner.Ps2.Bridge
 
                 var matches = new List<SearchMatch>();
 
+                // ── Instruction-reference search ──────────────────────────────────────
+                if (mode == "refs")
+                {
+                    string hexStr = query.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? query[2..] : query;
+                    if (!uint.TryParse(hexStr, System.Globalization.NumberStyles.HexNumber,
+                                       System.Globalization.CultureInfo.InvariantCulture, out uint targetAddr))
+                        return CreateErrorResponse("Invalid address for instruction-reference search");
+
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success  = true,
+                        Command  = "SEARCH",
+                        Matches  = HandleSearchRefs(targetAddr, bytes, startAddress),
+                    });
+                }
+
                 if (mode == "bytes")
                 {
                     var pattern = ParseBytePattern(query);
@@ -902,6 +918,187 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 return CreateErrorResponse($"Search error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Scans <paramref name="bytes"/> (loaded at virtual base <paramref name="baseAddress"/>)
+        /// for all MIPS instructions that directly or indirectly reference
+        /// <paramref name="targetAddress"/>, and returns them as a list of search matches.
+        /// <para>
+        /// Covers: J/JAL absolute jumps; I-type branches (BEQ, BNE, BLEZ, BGTZ,
+        /// BEQL, BNEL, BLEZL, BGTZL); REGIMM branches (BLTZ, BGEZ and their
+        /// -L/-AL/-ALL variants); COP1 branches (BC1F, BC1T, BC1FL, BC1TL);
+        /// and LUI+ADDIU/ORI/load/store pointer-load pairs.
+        /// </para>
+        /// </summary>
+        private static List<SearchMatch> HandleSearchRefs(uint targetAddress, byte[] bytes, uint baseAddress)
+        {
+            var matches = new List<SearchMatch>();
+            int len = bytes.Length;
+
+            // Per-register LUI tracking (same approach as BuildCodeReferencedAddresses).
+            var luiSlot = new int[32];    // byte offset of most recent LUI per register (-1 = none)
+            var luiImm  = new uint[32];   // immediate of that LUI instruction
+            Array.Fill(luiSlot, -1);
+
+            for (int i = 0; i + 3 < len; i += 4)
+            {
+                uint instr  = BitConverter.ToUInt32(bytes, i);
+                uint opcode = (instr >> 26) & 0x3Fu;
+                uint rs     = (instr >> 21) & 0x1Fu;
+                uint rt     = (instr >> 16) & 0x1Fu;
+                uint pc     = baseAddress + (uint)i;
+
+                // ── J / JAL (opcode 2/3): absolute jump ──────────────────────────────
+                if (opcode == 0x02u || opcode == 0x03u)
+                {
+                    uint target = ((pc + 4) & 0xF0000000u) | ((instr & 0x03FFFFFFu) << 2);
+                    if (target == targetAddress)
+                        matches.Add(new SearchMatch { InstructionIndex = i / 4, Address = pc, Field = "op", Start = 0, Length = 3 });
+                    if (opcode == 0x03u) luiSlot[31] = -1; // JAL writes $ra
+                    continue;
+                }
+
+                // ── I-type branches: BEQ/BNE/BLEZ/BGTZ (4-7) + BEQL/BNEL/BLEZL/BGTZL (0x14-0x17) ──
+                if ((opcode >= 0x04u && opcode <= 0x07u) || (opcode >= 0x14u && opcode <= 0x17u))
+                {
+                    short offset = (short)(instr & 0xFFFFu);
+                    uint target = (uint)(pc + 4 + ((int)offset << 2));
+                    if (target == targetAddress)
+                        matches.Add(new SearchMatch { InstructionIndex = i / 4, Address = pc, Field = "op", Start = 0, Length = 3 });
+                    continue;
+                }
+
+                // ── REGIMM (opcode 0x01): BLTZ/BGEZ/BLTZL/BGEZL/BLTZAL/BGEZAL/BLTZALL/BGEZALL ──
+                if (opcode == 0x01u)
+                {
+                    bool isBranch = rt == 0x00u || rt == 0x01u || rt == 0x02u || rt == 0x03u
+                                 || rt == 0x10u || rt == 0x11u || rt == 0x12u || rt == 0x13u;
+                    if (isBranch)
+                    {
+                        short offset = (short)(instr & 0xFFFFu);
+                        uint target = (uint)(pc + 4 + ((int)offset << 2));
+                        if (target == targetAddress)
+                            matches.Add(new SearchMatch { InstructionIndex = i / 4, Address = pc, Field = "op", Start = 0, Length = 4 });
+                    }
+                    // BLTZAL/BGEZAL/BLTZALL/BGEZALL write $ra (reg 31)
+                    if (rt == 0x10u || rt == 0x11u || rt == 0x12u || rt == 0x13u)
+                        luiSlot[31] = -1;
+                    continue;
+                }
+
+                // ── COP1 branches (opcode 0x11, rs=8): BC1F/BC1T/BC1FL/BC1TL ────────
+                if (opcode == 0x11u && rs == 0x08u)
+                {
+                    short offset = (short)(instr & 0xFFFFu);
+                    uint target = (uint)(pc + 4 + ((int)offset << 2));
+                    if (target == targetAddress)
+                        matches.Add(new SearchMatch { InstructionIndex = i / 4, Address = pc, Field = "op", Start = 0, Length = 4 });
+                    continue;
+                }
+
+                // ── LUI (opcode 0x0F): track per register ────────────────────────────
+                if (opcode == 0x0Fu)
+                {
+                    if (rt != 0) { luiSlot[rt] = i; luiImm[rt] = instr & 0xFFFFu; }
+                    continue;
+                }
+
+                // ── ADDIU (opcode 0x09): detect LUI+ADDIU pair ───────────────────────
+                if (opcode == 0x09u)
+                {
+                    if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        short addOff  = (short)(instr & 0xFFFFu);
+                        uint combined = unchecked((luiImm[rs] << 16) + (uint)addOff);
+                        if (combined == targetAddress)
+                        {
+                            int luiIdx = luiSlot[rs];
+                            matches.Add(new SearchMatch { InstructionIndex = luiIdx / 4, Address = baseAddress + (uint)luiIdx, Field = "args", Start = 0, Length = 100 });
+                            matches.Add(new SearchMatch { InstructionIndex = i / 4,      Address = pc,                         Field = "args", Start = 0, Length = 100 });
+                        }
+                    }
+                    if (rt != 0) luiSlot[rt] = -1;
+                    continue;
+                }
+
+                // ── ORI (opcode 0x0D): detect LUI+ORI pair ───────────────────────────
+                if (opcode == 0x0Du)
+                {
+                    if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        uint oriOff   = instr & 0xFFFFu;
+                        uint combined = (luiImm[rs] << 16) | oriOff;
+                        if (combined == targetAddress)
+                        {
+                            int luiIdx = luiSlot[rs];
+                            matches.Add(new SearchMatch { InstructionIndex = luiIdx / 4, Address = baseAddress + (uint)luiIdx, Field = "args", Start = 0, Length = 100 });
+                            matches.Add(new SearchMatch { InstructionIndex = i / 4,      Address = pc,                         Field = "args", Start = 0, Length = 100 });
+                        }
+                    }
+                    if (rt != 0) luiSlot[rt] = -1;
+                    continue;
+                }
+
+                // ── Loads (0x20–0x27): detect LUI+load pair ──────────────────────────
+                if (opcode >= 0x20u && opcode <= 0x27u)
+                {
+                    if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        short loadOff = (short)(instr & 0xFFFFu);
+                        uint combined = unchecked((luiImm[rs] << 16) + (uint)loadOff);
+                        if (combined == targetAddress)
+                        {
+                            int luiIdx = luiSlot[rs];
+                            matches.Add(new SearchMatch { InstructionIndex = luiIdx / 4, Address = baseAddress + (uint)luiIdx, Field = "args", Start = 0, Length = 100 });
+                            matches.Add(new SearchMatch { InstructionIndex = i / 4,      Address = pc,                         Field = "args", Start = 0, Length = 100 });
+                        }
+                    }
+                    if (rt != 0) luiSlot[rt] = -1;
+                    continue;
+                }
+
+                // ── Stores (0x28–0x2F): detect LUI+store pair ────────────────────────
+                if (opcode >= 0x28u && opcode <= 0x2Fu)
+                {
+                    if (rs != 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= MaxLuiWindow)
+                    {
+                        short storeOff = (short)(instr & 0xFFFFu);
+                        uint combined  = unchecked((luiImm[rs] << 16) + (uint)storeOff);
+                        if (combined == targetAddress)
+                        {
+                            int luiIdx = luiSlot[rs];
+                            matches.Add(new SearchMatch { InstructionIndex = luiIdx / 4, Address = baseAddress + (uint)luiIdx, Field = "args", Start = 0, Length = 100 });
+                            matches.Add(new SearchMatch { InstructionIndex = i / 4,      Address = pc,                         Field = "args", Start = 0, Length = 100 });
+                        }
+                    }
+                    // Stores do not write to any register — no LUI slot invalidation.
+                    continue;
+                }
+
+                // ── Register-write invalidation for everything else ───────────────────
+                // SPECIAL (0x00) R-type instructions write $rd.
+                if (opcode == 0x00u)
+                {
+                    uint rd = (instr >> 11) & 0x1Fu;
+                    if (rd != 0) luiSlot[rd] = -1;
+                    continue;
+                }
+
+                // All other I-type opcodes write $rt — invalidate its LUI slot.
+                // Branch/jump opcodes that do not write $rt are excluded.
+                if (opcode != 0x02u             // J
+                 && opcode != 0x04u && opcode != 0x05u  // BEQ / BNE
+                 && opcode != 0x06u && opcode != 0x07u  // BLEZ / BGTZ
+                 && opcode != 0x14u && opcode != 0x15u  // BEQL / BNEL
+                 && opcode != 0x16u && opcode != 0x17u  // BLEZL / BGTZL
+                 && opcode != 0x1Cu)            // MMI (R-type, $rd handled above)
+                {
+                    if (rt != 0) luiSlot[rt] = -1;
+                }
+            }
+
+            return matches;
         }
 
         /// <summary>Parse a whitespace/comma-separated hex byte pattern string.</summary>

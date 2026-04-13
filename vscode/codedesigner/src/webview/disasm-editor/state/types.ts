@@ -15,7 +15,7 @@ export interface DisasmRow {
 
 // ── Search ────────────────────────────────────────────────────────────────────
 
-export type SearchMode = 'text' | 'bytes' | 'string' | 'regex';
+export type SearchMode = 'text' | 'bytes' | 'string' | 'regex' | 'refs';
 
 export interface SearchMatch {
   instructionIndex: number;

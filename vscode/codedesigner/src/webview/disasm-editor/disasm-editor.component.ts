@@ -91,6 +91,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     removeWatch: null as (() => void) | null,
     gotoTarget: null as (() => void) | null,
     findReferences: null as (() => void) | null,
+    findCodeReferences: null as (() => void) | null,
     addToLabelManager: null as (() => void) | null,
   };
 
@@ -400,6 +401,10 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onCtxFindReferences(): void {
     this.contextMenuRuntime.findReferences?.();
+  }
+
+  protected onCtxFindCodeReferences(): void {
+    this.contextMenuRuntime.findCodeReferences?.();
   }
 
   protected onCtxAddToLabelManager(): void {
@@ -2054,6 +2059,21 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.state.searchQuery = reversed;
       params.signals.searchQuery.set(reversed);
       this.vscode.postMessage({ type: 'search', query: reversed, mode: 'bytes' });
+    };
+
+    this.contextMenuRuntime.findCodeReferences = () => {
+      if (!this._ctxRow) { return; }
+      // Open the search panel in refs mode with the instruction's address.
+      // The backend will scan for all instructions that target this address
+      // (J/JAL, branches, LUI+ADDIU/ORI/load/store pairs).
+      const addr = this._ctxRow.addr.padStart(8, '0');
+      params.state.searchActive = true;
+      params.signals.panels.search.set(true);
+      params.state.searchMode = 'refs';
+      params.signals.searchMode.set('refs');
+      params.state.searchQuery = addr;
+      params.signals.searchQuery.set(addr);
+      this.vscode.postMessage({ type: 'search', query: addr, mode: 'refs' });
     };
 
     this.contextMenuRuntime.addToLabelManager = () => {

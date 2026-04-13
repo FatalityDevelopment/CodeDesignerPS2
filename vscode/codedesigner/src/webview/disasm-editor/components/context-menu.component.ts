@@ -89,6 +89,9 @@ export interface ContextMenuData {
     <div class="ctx-menu-item" (click)="onFindReferences()">
       <span class="ctx-menu-icon">🔍</span>Find References
     </div>
+    <div class="ctx-menu-item" (click)="onFindCodeReferences()">
+      <span class="ctx-menu-icon">📌</span>Find Code References
+    </div>
     <div class="ctx-menu-separator"></div>
     <div class="ctx-menu-item" (click)="onAddToLabelManager()">
       <span class="ctx-menu-icon">&#128211;</span>{{ data()?.currentLabel ? 'Edit Label…' : 'Add Label…' }}
@@ -118,6 +121,7 @@ export class ContextMenuComponent {
   readonly removeWatch = output<void>();
   readonly gotoTarget = output<void>();
   readonly findReferences = output<void>();
+  readonly findCodeReferences = output<void>();
   readonly addToLabelManager = output<void>();
   readonly closed = output<void>();
 
@@ -203,6 +207,11 @@ export class ContextMenuComponent {
 
   onFindReferences(): void {
     this.findReferences.emit();
+    this.close();
+  }
+
+  onFindCodeReferences(): void {
+    this.findCodeReferences.emit();
     this.close();
   }
 
