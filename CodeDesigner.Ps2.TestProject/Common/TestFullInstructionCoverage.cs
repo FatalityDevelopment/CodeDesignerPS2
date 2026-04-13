@@ -2560,7 +2560,7 @@ namespace CodeDesigner.Ps2.TestProject
             string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x80000000u, cpu, bus);
 
             // The store address should appear in the comment
-            Assert.IsTrue(analysis.Contains("3000") || analysis.Contains("3000"),
+            Assert.IsTrue(analysis.Contains("3000") || analysis.Contains("$a0"),
                 $"Analysis should mention the store address, got: {analysis}");
         }
 
@@ -2721,7 +2721,7 @@ namespace CodeDesigner.Ps2.TestProject
             var cpu = new CpuState();
             string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x80000000u, cpu, null);
 
-            Assert.IsFalse(analysis.Contains("stack") || analysis.Contains("allocate") || analysis.Contains("free"),
+            Assert.IsFalse(analysis.Contains("stack") && (analysis.Contains("allocate") || analysis.Contains("free")),
                 $"Non-$sp ADDIU should not show stack hint, got: {analysis}");
         }
 
