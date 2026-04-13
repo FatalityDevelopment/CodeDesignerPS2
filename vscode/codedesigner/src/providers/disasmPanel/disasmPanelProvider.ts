@@ -145,6 +145,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.extensionPath = context.extensionPath;
         this._globalStoragePath = context.globalStorageUri.fsPath;
 
+        // Initialise workspaceRoot early so that any feature relying on it
+        // (label manager, snapshots, settings persistence) works even before
+        // resolveWebviewView is called — e.g. when the socket auto-connects
+        // at startup before the sidebar becomes visible.
+        this.loadEmuSettings();
+
         // Sync the CheatCodeArchive repo in the background so cheats are
         // available without blocking the UI.
         this._syncArchiveRepo().catch(err =>

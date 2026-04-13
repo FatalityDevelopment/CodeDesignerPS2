@@ -33,6 +33,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private static readonly PAGE_SIZE = 1000;
   private static readonly BUFFER_PAGES = 2;
   private static readonly LIVE_READ_BACKOFF_MS = 5000;
+  /** Placeholder game ID used when no disc image is selected; the backend resolves
+   *  this to null and returns only the Built-in label set for all read operations. */
+  private static readonly NO_GAME_SELECTED = 'no-game-selected';
   private socketClient: SocketClient | null;
   /** All currently-open live memory panels. Used to broadcast pause/resume state. */
   private _livePanels: vscode.WebviewPanel[] = [];
@@ -3029,11 +3032,20 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
   /** Helper — build workspaceDir and gameDiscId from current context. */
   private _labelManagerCtx(): { workspaceDir: string; gameDiscId: string } | null {
-    if (!this._workspaceRoot || !this._currentGameName) { return null; }
-    // Use serial (e.g. "SCUS-97275") when available so the DB can resolve to the
-    // exact GameDisc row.  Fall back to the ISO filename for backward compatibility.
-    const gameDiscId = this._currentGameSerial || this._currentGameName;
-    return { workspaceDir: this._workspaceRoot, gameDiscId };
+    // Fall back to the first VS Code workspace folder when the cached root has
+    // not been set yet (e.g. on startup before resolveWebviewView fires).
+    const workspaceDir = this._workspaceRoot
+      || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+      || '';
+    if (!workspaceDir) { return null; }
+
+    // Use serial (e.g. "SCUS-97275") when available so the DB can resolve to
+    // the exact GameDisc row.  Fall back to the ISO filename for backward
+    // compatibility.  When no game is selected at all, use a placeholder so
+    // the label manager still opens and shows the Built-in set; the backend
+    // gracefully returns an empty user-set list for an unknown identifier.
+    const gameDiscId = this._currentGameSerial || this._currentGameName || DisasmEditorProvider.NO_GAME_SELECTED;
+    return { workspaceDir, gameDiscId };
   }
 
   /**
@@ -3223,7 +3235,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
     const ctx = this._labelManagerCtx();
     if (!ctx) {
-      webview.postMessage({ type: 'labelManagerError', message: 'No game selected. Open a disc image first.' });
+      webview.postMessage({ type: 'labelManagerError', message: 'No workspace folder is open. Open a folder in VS Code to use the Label Manager.' });
       return;
     }
     const { workspaceDir, gameDiscId } = ctx;
