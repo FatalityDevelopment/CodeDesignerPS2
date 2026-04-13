@@ -54,7 +54,104 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return "System call exception - transfers control to OS";
+            // Extract the 20-bit code field from the instruction (bits 25:6)
+            uint code = ((uint)args.Rs << 14) | ((uint)args.Rt << 9) | ((uint)args.Rd << 4) | (uint)(args.Shamt >> 1);
+            string codePart = code != 0 ? $" #{code}" : string.Empty;
+
+            // Common PS2 EE BIOS syscall names (incomplete but useful subset)
+            string? name = code switch
+            {
+                0x00 => null,               // varies
+                0x01 => "ResetEE",
+                0x02 => "SetGsCrt",
+                0x04 => "Exit",
+                0x05 => "LoadExecPS2",
+                0x06 => "ExecPS2",
+                0x07 => "RFU007",
+                0x09 => "AddSbusIntcHandler",
+                0x0A => "RemoveSbusIntcHandler",
+                0x0B => "Interrupt2Iop",
+                0x0C => "SetVTLBRefillHandler",
+                0x0D => "SetVCommonHandler",
+                0x0E => "SetVInterruptHandler",
+                0x0F => "AddIntcHandler",
+                0x10 => "RemoveIntcHandler",
+                0x11 => "AddDmacHandler",
+                0x12 => "RemoveDmacHandler",
+                0x13 => "_EnableIntc",
+                0x14 => "_DisableIntc",
+                0x15 => "_EnableDmac",
+                0x16 => "_DisableDmac",
+                0x17 => "_SetAlarm",
+                0x18 => "_ReleaseAlarm",
+                0x19 => "iEnableIntc",
+                0x1A => "iDisableIntc",
+                0x1B => "iEnableDmac",
+                0x1C => "iDisableDmac",
+                0x1D => "iSetAlarm",
+                0x1E => "iReleaseAlarm",
+                0x20 => "CreateThread",
+                0x21 => "DeleteThread",
+                0x22 => "StartThread",
+                0x23 => "ExitThread",
+                0x24 => "ExitDeleteThread",
+                0x25 => "TerminateThread",
+                0x26 => "iTerminateThread",
+                0x27 => "DisableDispatchThread",
+                0x28 => "EnableDispatchThread",
+                0x29 => "ChangeThreadPriority",
+                0x2A => "iChangeThreadPriority",
+                0x2B => "RotateThreadReadyQueue",
+                0x2C => "iRotateThreadReadyQueue",
+                0x2D => "ReleaseWaitThread",
+                0x2E => "iReleaseWaitThread",
+                0x2F => "GetThreadId",
+                0x30 => "ReferThreadStatus",
+                0x31 => "iReferThreadStatus",
+                0x32 => "SleepThread",
+                0x33 => "WakeupThread",
+                0x34 => "iWakeupThread",
+                0x35 => "CancelWakeupThread",
+                0x36 => "iCancelWakeupThread",
+                0x37 => "SuspendThread",
+                0x38 => "iSuspendThread",
+                0x39 => "ResumeThread",
+                0x3A => "iResumeThread",
+                0x3C => "SetupThread",
+                0x3D => "SetupHeap",
+                0x3E => "EndOfHeap",
+                0x40 => "CreateSema",
+                0x41 => "DeleteSema",
+                0x42 => "SignalSema",
+                0x43 => "iSignalSema",
+                0x44 => "WaitSema",
+                0x45 => "PollSema",
+                0x46 => "iPollSema",
+                0x47 => "ReferSemaStatus",
+                0x48 => "iReferSemaStatus",
+                0x64 => "FlushCache",
+                0x68 => "GsGetIMR",
+                0x6B => "SifSetDma",
+                0x6C => "SifSetDmaC",
+                0x6F => "SifSetReg",
+                0x70 => "SifGetReg",
+                0x73 => "ExecOSD",
+                0x74 => "Deci2Call",
+                0x76 => "MachineType",
+                0x77 => "GetMemorySize",
+                _ => null
+            };
+
+            string namePart = name != null ? $" ({name})" : string.Empty;
+
+            if (cpu != null && code == 0)
+            {
+                // When code is not embedded in the instruction, try $v1 (reg 3) as syscall number
+                uint v1 = (uint)cpu.RegsLo[3];
+                return $"syscall $v1=0x{v1:X4} — OS exception";
+            }
+
+            return $"syscall{codePart}{namePart} — OS exception";
         }
     }
 

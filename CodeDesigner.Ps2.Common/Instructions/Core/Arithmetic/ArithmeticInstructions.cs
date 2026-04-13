@@ -448,7 +448,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu == null) return string.Empty;
             int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
             int imm = CpuHelpers.SignExtend16(args.Imm);
-            return $"{CpuHelpers.RegName(args.Rt)} = 0x{(uint)(rsVal + imm):X8}";
+            uint result = (uint)(rsVal + imm);
+
+            // Detect stack frame allocation/deallocation: ADDIU $sp, $sp, ±N
+            if (args.Rt == 29 && args.Rs == 29)
+            {
+                if (imm < 0)
+                    return $"allocate {-imm}-byte stack frame → $sp = 0x{result:X8}";
+                if (imm > 0)
+                    return $"free {imm}-byte stack frame → $sp = 0x{result:X8}";
+            }
+
+            return $"{CpuHelpers.RegName(args.Rt)} = 0x{result:X8}";
         }
     }
 
