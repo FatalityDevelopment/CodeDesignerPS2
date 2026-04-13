@@ -567,6 +567,20 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         }
 
+        // 2b. If no settings file was found anywhere, still set workspaceRoot so
+        //     that features depending on it (label manager, snapshot loading, save
+        //     preferences) can function.  The settings file will be created here
+        //     once the user saves settings.  Prefer the first open workspace folder;
+        //     fall back to the extension install directory.
+        if (!this.workspaceRoot) {
+            const firstFolder = vscode.workspace.workspaceFolders?.[0];
+            if (firstFolder) {
+                this.workspaceRoot = firstFolder.uri.fsPath;
+            } else if (this.extensionPath) {
+                this.workspaceRoot = this.extensionPath;
+            }
+        }
+
         // 3. Auto-detect the PCSX2 executable and add it to the emulators list.
         //    Only PCSX2 entries appear in the selector; the Bridge is always
         //    resolved from the install directory, never from this list.
