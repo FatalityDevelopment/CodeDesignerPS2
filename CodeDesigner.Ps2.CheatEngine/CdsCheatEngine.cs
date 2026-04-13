@@ -333,41 +333,12 @@ namespace CodeDesigner.Ps2.CheatEngine
         /// </remarks>
         private void PatchOriginalInstructions(uint word0, uint word1)
         {
-            // The origInstr0/origInstr1 nops are at a known position in the compiled code.
-            // From the CDS template, after the register restore block:
-            //   done: 9 lw instructions (9*4=36) + addiu sp (4) = 40 bytes from done label
-            //   origInstr0 is at done + 40, origInstr1 at done + 44
-            //
-            // Rather than hardcoding, we scan for the pattern: two consecutive nops
-            // followed by the loadReturn sequence (lui v0 + ori v0 + jr v0 + nop).
-            // This is more robust against template changes.
-            //
-            // However, the simplest reliable approach is to compile the template,
-            // find the nop-nop-lui-ori-jr-nop sequence at the end of the engine scope,
-            // and patch those addresses.
-
-            // We know the engine data area stores this info too, but the actual code
-            // patching must happen at the instruction addresses.  We'll find them by
-            // scanning backwards from the data area offset.
-            // The last 6 instructions before the data area are:
-            //   origInstr0 (nop), origInstr1 (nop), lui v0, ori v0, jr v0, nop
-            // That's 24 bytes before the next section.
-            // But sections may not be contiguous.  Let's use the simpler approach of
-            // searching for two consecutive 0x00000000 (nop) followed by specific
-            // lui/ori patterns.
-
-            // Actually, the cleanest approach: compile the template, record the addresses
-            // of the two nops.  But since we already wrote the compiled code, we scan
-            // the last portion of the code section for the origInstr pattern.
-
-            // Find by scanning from the end of code area backwards for two consecutive nops
-            // that precede a lui+ori+jr+nop sequence.
-            // The engine code occupies EngineBase..EngineBase+DataOffset.
-            // Scan the last 64 bytes of the code section.
-            uint scanStart = EngineBase + DataOffset - 64;
+            // Scan the entire code section for the nop-nop-lui_v0-ori_v0 pattern.
+            // The engine code may not fill the full DataOffset region, so we must
+            // start from EngineBase rather than scanning backwards from DataOffset.
             uint patchAddr0 = 0;
 
-            for (uint addr = scanStart; addr < EngineBase + DataOffset - 20; addr += 4)
+            for (uint addr = EngineBase; addr < EngineBase + DataOffset - 20; addr += 4)
             {
                 uint w0 = ReadWord(addr);
                 uint w1 = ReadWord(addr + 4);
@@ -401,10 +372,8 @@ namespace CodeDesigner.Ps2.CheatEngine
             ushort upper = (ushort)(returnAddr >> 16);
             ushort lower = (ushort)(returnAddr & 0xFFFF);
 
-            // Scan for lui v0 (0x3C02xxxx) + ori v0, v0 (0x3442xxxx) in the last 64 bytes
-            uint scanStart = EngineBase + DataOffset - 64;
-
-            for (uint addr = scanStart; addr < EngineBase + DataOffset - 8; addr += 4)
+            // Scan for lui v0 (0x3C02xxxx) + ori v0, v0 (0x3442xxxx) in the code section
+            for (uint addr = EngineBase; addr < EngineBase + DataOffset - 8; addr += 4)
             {
                 uint w0 = ReadWord(addr);
                 uint w1 = ReadWord(addr + 4);
