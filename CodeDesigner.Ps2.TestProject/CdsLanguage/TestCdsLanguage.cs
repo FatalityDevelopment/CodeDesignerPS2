@@ -1005,8 +1005,9 @@ if $t1 == $zero
 endif
 ";
             // Should parse without unresolved label errors
-            var items = Parse(src);
-            var diags = Parser.Diagnostics.ToList();
+            var parser = new CdsParser();
+            parser.Parse(src.Trim());
+            var diags = parser.Diagnostics.ToList();
             Assert.IsFalse(diags.Any(d => d.Severity == CdsDiagnosticSeverity.Error));
         }
 
