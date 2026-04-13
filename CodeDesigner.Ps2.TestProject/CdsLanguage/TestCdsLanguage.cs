@@ -1155,6 +1155,171 @@ Foo(t0)
             var sidecars = CdsCompiler.GetSidecarCommands(items);
             Assert.AreEqual(0, sidecars.Count);
         }
+
+        // -----------------------------------------------------------------------
+        // P1: freeze directive
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Freeze_Byte_ParsedCorrectly()
+        {
+            var items = Parse("freeze byte $20347A50 = 0x63");
+            var fr = FindItem<FreezeSyntaxItem>(items);
+            Assert.AreEqual(CdsFreezeType.Byte, fr.FreezeType);
+            Assert.AreEqual(0x20347A50u, fr.Address);
+            Assert.AreEqual(0x63u, fr.Value);
+        }
+
+        [TestMethod]
+        public void Freeze_Half_ParsedCorrectly()
+        {
+            var items = Parse("freeze half $20347A52 = 0x03E7");
+            var fr = FindItem<FreezeSyntaxItem>(items);
+            Assert.AreEqual(CdsFreezeType.Half, fr.FreezeType);
+            Assert.AreEqual(0x20347A52u, fr.Address);
+            Assert.AreEqual(0x03E7u, fr.Value);
+        }
+
+        [TestMethod]
+        public void Freeze_Word_ParsedCorrectly()
+        {
+            var items = Parse("freeze word $20347A54 = FFFFFFFF");
+            var fr = FindItem<FreezeSyntaxItem>(items);
+            Assert.AreEqual(CdsFreezeType.Word, fr.FreezeType);
+            Assert.AreEqual(0x20347A54u, fr.Address);
+            Assert.AreEqual(0xFFFFFFFFu, fr.Value);
+        }
+
+        [TestMethod]
+        public void Freeze_DoesNotEmitCodeWords()
+        {
+            var pairs = Compile("address $00100000\nfreeze byte $20347A50 = 0x63");
+            Assert.AreEqual(0, pairs.Count);
+        }
+
+        [TestMethod]
+        public void GetCheatTableEntries_FreezeByteEntry()
+        {
+            var items = Parse("freeze byte $20347A50 = 0x63");
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            Assert.AreEqual(1, entries.Count);
+            // TypeAddr: type=0x00 (byte), addr lower 24 bits = 0x347A50
+            Assert.AreEqual(0x00347A50u, entries[0].TypeAddr);
+            Assert.AreEqual(0x63u, entries[0].Value);
+        }
+
+        [TestMethod]
+        public void GetCheatTableEntries_FreezeHalfEntry()
+        {
+            var items = Parse("freeze half $20347A52 = 03E7");
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            Assert.AreEqual(1, entries.Count);
+            // TypeAddr: type=0x10 (half), addr lower 24 bits = 0x347A52
+            Assert.AreEqual(0x10347A52u, entries[0].TypeAddr);
+            Assert.AreEqual(0x03E7u, entries[0].Value);
+        }
+
+        [TestMethod]
+        public void GetCheatTableEntries_FreezeWordEntry()
+        {
+            var items = Parse("freeze word $00347A54 = DEADBEEF");
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            Assert.AreEqual(1, entries.Count);
+            // TypeAddr: type=0x20 (word), addr lower 24 bits = 0x347A54
+            Assert.AreEqual(0x20347A54u, entries[0].TypeAddr);
+            Assert.AreEqual(0xDEADBEEFu, entries[0].Value);
+        }
+
+        [TestMethod]
+        public void GetCheatTableEntries_MultipleFreezeEntries()
+        {
+            var src = @"
+freeze byte $20347A50 = 63
+freeze half $20347A52 = 03E7
+freeze word $20347A54 = FFFFFFFF
+";
+            var items = Parse(src);
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            Assert.AreEqual(3, entries.Count);
+        }
+
+        // -----------------------------------------------------------------------
+        // P1: cond/endcond directive
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Cond_ParsedCorrectly()
+        {
+            var src = @"
+cond mem[$20347A50] == 0x0001
+  freeze word $20347A54 = FF
+endcond
+";
+            var items = Parse(src);
+            var cd = FindItem<CondSyntaxItem>(items);
+            Assert.AreEqual(0x20347A50u, cd.Address);
+            Assert.AreEqual(0x0001u, cd.ConditionValue);
+            Assert.AreEqual(1, cd.Body.Count);
+            Assert.IsInstanceOfType(cd.Body[0], typeof(FreezeSyntaxItem));
+        }
+
+        [TestMethod]
+        public void Cond_DoesNotEmitCodeWords()
+        {
+            var src = @"
+cond mem[$20347A50] == 0x0001
+  freeze word $20347A54 = FF
+endcond
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(0, pairs.Count);
+        }
+
+        [TestMethod]
+        public void GetCheatTableEntries_CondBlock()
+        {
+            var src = @"
+cond mem[$20347A50] == 0001
+  freeze word $20347A54 = FF
+endcond
+";
+            var items = Parse(src);
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            // 1 condition entry (0xC0) + 1 freeze entry (0x20)
+            Assert.AreEqual(2, entries.Count);
+            // Condition entry
+            Assert.AreEqual(0xC0347A50u, entries[0].TypeAddr);
+            Assert.AreEqual(0x0001u,     entries[0].Value);
+            // Freeze entry
+            Assert.AreEqual(0x20347A54u, entries[1].TypeAddr);
+            Assert.AreEqual(0xFFu,       entries[1].Value);
+        }
+
+        [TestMethod]
+        public void GetCheatTableEntries_EmptyWhenNoFreezeOrCond()
+        {
+            var items = Parse("address $00100000\nnop\nhexcode $DEADBEEF");
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            Assert.AreEqual(0, entries.Count);
+        }
+
+        [TestMethod]
+        public void Freeze_AndMipsCode_CanCoexist()
+        {
+            var src = @"
+address $00100000
+nop
+freeze byte $20347A50 = 63
+nop
+";
+            // The two nops emit code; the freeze does not
+            var pairs = Compile(src);
+            Assert.AreEqual(2, pairs.Count);
+
+            var items = Parse(src);
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            Assert.AreEqual(1, entries.Count);
+        }
     }
 }
 

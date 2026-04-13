@@ -42,9 +42,57 @@ namespace CodeDesigner.Ps2.CdsLanguage
             return result;
         }
 
-        // -----------------------------------------------------------------------
-        // Recursive collector
-        // -----------------------------------------------------------------------
+        /// <summary>
+        /// Flatten all <see cref="FreezeSyntaxItem"/> and <see cref="CondSyntaxItem"/> items
+        /// in the syntax tree into a list of raw cheat-table entries compatible with
+        /// <c>CodeDesigner.Ps2.CheatEngine.CdsCheatEngine</c>.
+        ///
+        /// <para>
+        /// Each entry is a pair <c>(TypeAddr, Value)</c> where <c>TypeAddr</c> encodes the
+        /// cheat type in the upper byte and the lower 24 bits of the target address in bits
+        /// 23–0 — the same layout used by the engine's 8-byte table rows.
+        /// </para>
+        ///
+        /// <para>
+        /// A <see cref="CondSyntaxItem"/> emits a condition entry first (type 0xC0), then
+        /// the entries for its body; this matches the engine's evaluation order.
+        /// </para>
+        /// </summary>
+        public static List<(uint TypeAddr, uint Value)> GetCheatTableEntries(IEnumerable<CdsSyntaxItem> items)
+        {
+            var result = new List<(uint, uint)>();
+            CollectCheatEntries(items, result);
+            return result;
+        }
+
+        private static void CollectCheatEntries(IEnumerable<CdsSyntaxItem> items, List<(uint, uint)> result)
+        {
+            foreach (var item in items)
+            {
+                switch (item)
+                {
+                    case FreezeSyntaxItem fr:
+                    {
+                        uint typeAddr = ((uint)fr.FreezeType << 24) | (fr.Address & 0x00FFFFFF);
+                        result.Add((typeAddr, fr.Value));
+                        break;
+                    }
+
+                    case CondSyntaxItem cd:
+                    {
+                        // Emit the condition entry (type 0xC0), then the body entries
+                        uint typeAddr = ((uint)cd.FreezeType << 24) | (cd.Address & 0x00FFFFFF);
+                        result.Add((typeAddr, cd.ConditionValue));
+                        CollectCheatEntries(cd.Body, result);
+                        break;
+                    }
+
+                    case ScopeSyntaxItem scope:
+                        CollectCheatEntries(scope.Body, result);
+                        break;
+                }
+            }
+        }
 
         private static void Collect(IEnumerable<CdsSyntaxItem> items, List<(uint, uint)> result)
         {

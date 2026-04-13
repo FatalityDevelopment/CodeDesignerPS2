@@ -90,6 +90,20 @@ namespace CodeDesigner.Ps2.CdsLanguage
             new(@"^watchpoint\s+(write|read|rw|readwrite)\s+\$([0-9a-fA-F]+)\s+(\d+)$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // freeze (byte|half|word) $ADDR = VALUE
+        private static readonly Regex FreezeRegex =
+            new(@"^freeze\s+(byte|half|word)\s+\$([0-9a-fA-F]+)\s*=\s*(?:0x)?([0-9a-fA-F]+)$",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // cond mem[$ADDR] == VALUE
+        private static readonly Regex CondRegex =
+            new(@"^cond\s+mem\[\$([0-9a-fA-F]+)\]\s*==\s*(?:0x)?([0-9a-fA-F]+)$",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // endcond
+        private static readonly Regex EndCondRegex =
+            new(@"^endcond$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         // Branch mnemonics that use a PC-relative 16-bit offset
         private static readonly HashSet<string> BranchMnemonics = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -153,6 +167,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
             var rootItems = new List<CdsSyntaxItem>();
             var itemsStack = new Stack<List<CdsSyntaxItem>>();
             var scopeStack = new Stack<string>();  // scope path components
+            // Tracks what opened each frame on itemsStack: "scope" or "cond"
+            var itemsKindStack = new Stack<string>();
 
             itemsStack.Push(rootItems);
 
@@ -241,6 +257,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     current.Add(scopeItem);
                     scopeStack.Push(scopeName.ToLowerInvariant());
                     itemsStack.Push(scopeItem.Body);
+                    itemsKindStack.Push("scope");
                     continue;
                 }
 
@@ -251,6 +268,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     {
                         scopeStack.Pop();
                         itemsStack.Pop();
+                        if (itemsKindStack.Count > 0) itemsKindStack.Pop();
                     }
                     continue;
                 }
@@ -424,7 +442,61 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     continue;
                 }
 
-                // ---- MIPS instruction (possibly with :label target) ----
+                // ---- Freeze sidecar ----
+                var freezeMatch = FreezeRegex.Match(trimmed);
+                if (freezeMatch.Success)
+                {
+                    string sizeStr   = freezeMatch.Groups[1].Value.ToLowerInvariant();
+                    uint freezeAddr  = Convert.ToUInt32(freezeMatch.Groups[2].Value, 16);
+                    uint freezeVal   = Convert.ToUInt32(freezeMatch.Groups[3].Value, 16);
+                    var freezeType = sizeStr switch
+                    {
+                        "half" => CdsFreezeType.Half,
+                        "word" => CdsFreezeType.Word,
+                        _      => CdsFreezeType.Byte
+                    };
+                    current.Add(new FreezeSyntaxItem
+                    {
+                        LineNumber = lineNumber,
+                        LineText   = trimmed,
+                        FreezeType = freezeType,
+                        Address    = freezeAddr,
+                        Value      = freezeVal
+                    });
+                    // Sidecar — does not advance the address counter
+                    continue;
+                }
+
+                // ---- Cond block sidecar ----
+                var condMatch = CondRegex.Match(trimmed);
+                if (condMatch.Success)
+                {
+                    uint condAddr = Convert.ToUInt32(condMatch.Groups[1].Value, 16);
+                    uint condVal  = Convert.ToUInt32(condMatch.Groups[2].Value, 16);
+                    var condItem  = new CondSyntaxItem
+                    {
+                        LineNumber      = lineNumber,
+                        LineText        = trimmed,
+                        Address         = condAddr,
+                        ConditionValue  = condVal
+                    };
+                    current.Add(condItem);
+                    itemsStack.Push(condItem.Body);
+                    itemsKindStack.Push("cond");
+                    // Sidecar — does not advance the address counter
+                    continue;
+                }
+
+                // ---- Endcond ----
+                if (EndCondRegex.IsMatch(trimmed))
+                {
+                    if (itemsKindStack.Count > 0 && itemsKindStack.Peek() == "cond")
+                    {
+                        itemsStack.Pop();
+                        itemsKindStack.Pop();
+                    }
+                    continue;
+                }
                 TryParseOperation(trimmed, lineNumber, scopeStack, labelMap,
                                   ref currentAddress, current);
             }
@@ -517,6 +589,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 if (AssertRegex.IsMatch(t))     continue;
                 if (BreakpointRegex.IsMatch(t)) continue;
                 if (WatchpointRegex.IsMatch(t)) continue;
+                if (FreezeRegex.IsMatch(t))     continue;
+                if (CondRegex.IsMatch(t))        continue;
+                if (EndCondRegex.IsMatch(t))     continue;
 
                 // Everything else that emits an instruction takes 4 bytes
                 if (!t.StartsWith("include") && !t.StartsWith("//"))
