@@ -143,7 +143,15 @@ namespace CodeDesigner.Ps2.CdsLanguage
         /// Directory used to resolve relative <c>include</c> paths.
         /// Pass <see cref="string.Empty"/> when parsing in-memory without file I/O.
         /// </param>
-        public List<CdsSyntaxItem> Parse(string sourceCode, string basePath = "")
+        /// <param name="externalLabels">
+        /// Optional dictionary of pre-resolved label name → virtual address pairs injected
+        /// before the two-pass parse.  Useful when the caller has labels from an external
+        /// source (e.g., pointer-manager or server-registered labels) that CDS source should
+        /// be able to reference.  Labels defined inside the CDS source take precedence on
+        /// name conflicts.
+        /// </param>
+        public List<CdsSyntaxItem> Parse(string sourceCode, string basePath = "",
+            IReadOnlyDictionary<string, uint>? externalLabels = null)
         {
             _diagnostics.Clear();
 
@@ -155,8 +163,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
             string[] rawLines = sourceCode.Replace("\r\n", "\n").Split('\n');
 
-            // First pass: build a map of fully-qualified label name → address
-            var labelMap = BuildLabelMap(rawLines);
+            // First pass: build a map of fully-qualified label name → address.
+            // Seed with external labels first so source-defined labels take precedence.
+            var labelMap = BuildLabelMap(rawLines, externalLabels);
 
             // Second pass: produce syntax items
             uint currentAddress = 0;
@@ -513,9 +522,14 @@ namespace CodeDesigner.Ps2.CdsLanguage
         /// and returns a map of fully-qualified label name → address.
         /// All keys are lower-case.
         /// </summary>
-        private static Dictionary<string, uint> BuildLabelMap(string[] rawLines)
+        private static Dictionary<string, uint> BuildLabelMap(
+            string[] rawLines,
+            IReadOnlyDictionary<string, uint>? externalLabels = null)
         {
-            var map = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+            // Seed with external labels first — source-defined labels will overwrite on collision.
+            var map = externalLabels != null
+                ? new Dictionary<string, uint>(externalLabels, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
             uint currentAddress = 0;
             bool inMultiLine = false;
             var scopeStack = new Stack<string>();
