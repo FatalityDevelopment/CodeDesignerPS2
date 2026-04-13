@@ -33,6 +33,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private static readonly PAGE_SIZE = 1000;
   private static readonly BUFFER_PAGES = 2;
   private static readonly LIVE_READ_BACKOFF_MS = 5000;
+  /** Placeholder game ID used when no disc image is selected; the backend resolves
+   *  this to null and returns only the Built-in label set for all read operations. */
+  private static readonly NO_GAME_SELECTED = 'no-game-selected';
   private socketClient: SocketClient | null;
   /** All currently-open live memory panels. Used to broadcast pause/resume state. */
   private _livePanels: vscode.WebviewPanel[] = [];
@@ -3041,7 +3044,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     // compatibility.  When no game is selected at all, use a placeholder so
     // the label manager still opens and shows the Built-in set; the backend
     // gracefully returns an empty user-set list for an unknown identifier.
-    const gameDiscId = this._currentGameSerial || this._currentGameName || '__no_game__';
+    const gameDiscId = this._currentGameSerial || this._currentGameName || DisasmEditorProvider.NO_GAME_SELECTED;
     return { workspaceDir, gameDiscId };
   }
 
