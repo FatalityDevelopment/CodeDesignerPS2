@@ -434,6 +434,75 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
+        /// Handle VALIDATECDS command — parse a CDS source without assembling or emitting any
+        /// codes.  Returns all diagnostics (errors and warnings) produced by the preprocessor
+        /// and parser, or a success message if no issues were found.
+        /// </summary>
+        private string HandleValidateCds(string? sourceCode, List<LabelEntry>? externalLabels = null)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(sourceCode))
+                    return CreateErrorResponse("No source code provided");
+
+                // ── Build external label dictionary ──────────────────────────────
+                var extDict = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+                if (externalLabels != null)
+                {
+                    foreach (var entry in externalLabels)
+                    {
+                        if (string.IsNullOrWhiteSpace(entry.Label) ||
+                            string.IsNullOrWhiteSpace(entry.Address)) continue;
+                        var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                            ? entry.Address[2..]
+                            : entry.Address;
+                        if (uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber,
+                                null, out uint addr))
+                            extDict[entry.Label] = addr;
+                    }
+                }
+                foreach (var kv in _labels)
+                    extDict[kv.Value.Label] = kv.Key;
+
+                // ── Parse (no compile step) ──────────────────────────────────────
+                var parser = new CdsParser();
+                parser.Parse(sourceCode, basePath: "", externalLabels: extDict);
+
+                var diagnostics = parser.Diagnostics.ToList();
+                var results = new List<InstructionResult>();
+                foreach (var diag in diagnostics)
+                {
+                    results.Add(new InstructionResult
+                    {
+                        Success    = diag.Severity != CdsDiagnosticSeverity.Error,
+                        Error      = diag.Severity == CdsDiagnosticSeverity.Error ? diag.Message : null,
+                        Assembly   = diag.Severity == CdsDiagnosticSeverity.Warning ? diag.Message : null,
+                        LineNumber = diag.LineNumber
+                    });
+                }
+
+                bool hasErrors   = diagnostics.Any(d => d.Severity == CdsDiagnosticSeverity.Error);
+                bool hasWarnings = diagnostics.Any(d => d.Severity == CdsDiagnosticSeverity.Warning);
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = !hasErrors,
+                    Command  = "VALIDATECDS",
+                    Message  = hasErrors
+                        ? $"Validation failed — {diagnostics.Count(d => d.Severity == CdsDiagnosticSeverity.Error)} error(s), {diagnostics.Count(d => d.Severity == CdsDiagnosticSeverity.Warning)} warning(s)"
+                        : hasWarnings
+                            ? $"Validation passed with {diagnostics.Count(d => d.Severity == CdsDiagnosticSeverity.Warning)} warning(s)"
+                            : "Validation passed — no errors or warnings",
+                    Results  = results.Count > 0 ? results : null
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"VALIDATECDS error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Install a software breakpoint at the given EE virtual address.
         /// Delegates to PineClient in PINE mode or to Scheduler.Breakpoints in internal mode.
         /// </summary>

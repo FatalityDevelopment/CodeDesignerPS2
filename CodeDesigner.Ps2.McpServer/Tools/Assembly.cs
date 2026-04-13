@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.ComponentModel;
+using System.Text.Json;
 using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 
@@ -80,5 +82,85 @@ public sealed partial class CodeDesignerPs2Tools
             cancellationToken);
 
         return FormatCdsPatchResult(json);
+    }
+
+    [McpServerTool(Name = "validate_cds")]
+    [DynamicDescription("validate_cds_desc")]
+    [Description(
+        "Parse a Code Designer Script (.cds) source without assembling or emitting any codes. " +
+        "Returns all diagnostics: errors (lines that cannot be parsed or have unresolved labels) " +
+        "and warnings (e.g. missing delay-slot NOPs, clobbered registers). " +
+        "Use this to check CDS syntax before running compile_cds or apply_cds_patch.")]
+    public async Task<string> ValidateCds(
+        [Description("CDS source code to validate.")] string sourceCode,
+        CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(
+            new { Command = "VALIDATECDS", Data = sourceCode },
+            cancellationToken);
+
+        return FormatValidateCdsResult(json);
+    }
+
+    [McpServerTool(Name = "decompile_to_cds")]
+    [DynamicDescription("decompile_to_cds_desc")]
+    [Description(
+        "Read a memory range from the live PS2 emulator, disassemble the MIPS EE instructions, " +
+        "and produce a Code Designer Script (.cds) source file. " +
+        "Branch and jump targets within the disassembled range are automatically converted to " +
+        "labels (prefixed ':target_'), making the output directly re-compilable with compile_cds. " +
+        "Unknown opcodes become hexcode directives. " +
+        "The resulting CDS source is a useful starting point for writing patches over existing functions.")]
+    public async Task<string> DecompileToCds(
+        [Description("Virtual start address (hex or decimal) of the memory region to decompile.")] string address,
+        [Description("Number of instructions to decompile (default 16, max 512).")] int count = 16,
+        [Description("Memory region: 'ee' (default) for the Emotion Engine, or 'iop' for the I/O Processor.")] string region = "ee",
+        CancellationToken cancellationToken = default)
+    {
+        uint? parsedAddress = TryParseAddress(address);
+        if (parsedAddress is null)
+            return $"Error: invalid address '{address}'. Use hex (0x80010000) or decimal.";
+
+        count = Math.Clamp(count, 1, 512);
+
+        // Step 1: read raw bytes from live memory
+        var memJson = await bridge.SendAsync(
+            new { Command = "READMEM", Address = parsedAddress.Value, Length = count * 4, Region = region },
+            cancellationToken);
+
+        string? base64Data = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(memJson);
+            if (doc.RootElement.TryGetProperty("Data", out var dataEl))
+                base64Data = dataEl.GetString();
+            if (doc.RootElement.TryGetProperty("Error", out var errEl) &&
+                errEl.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errEl.GetString()))
+                return $"Error reading memory: {errEl.GetString()}";
+        }
+        catch
+        {
+            return $"Error parsing memory read response: {memJson}";
+        }
+
+        if (string.IsNullOrEmpty(base64Data))
+            return "Error: no data returned from memory read. Check that a live emulator backend is connected.";
+
+        // Step 2: convert base64 bytes → space-separated hex words
+        var bytes = Convert.FromBase64String(base64Data);
+        var words = new System.Text.StringBuilder();
+        for (int i = 0; i + 3 < bytes.Length; i += 4)
+        {
+            if (words.Length > 0) words.Append(' ');
+            uint word = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i));
+            words.Append(word.ToString("X8"));
+        }
+
+        // Step 3: disassemble with the start address so branch targets are resolved
+        var disasmJson = await bridge.SendAsync(
+            new { Command = "DISASSEMBLE", Data = words.ToString(), Address = parsedAddress.Value },
+            cancellationToken);
+
+        return FormatDecompileToCds(disasmJson, parsedAddress.Value);
     }
 }

@@ -856,6 +856,9 @@ namespace CodeDesigner.Ps2.Bridge
                     case "COMPILECDS":
                         return HandleCompileCds(command.Data, command.Labels);
                     
+                    case "VALIDATECDS":
+                        return HandleValidateCds(command.Data, command.Labels);
+                    
                     case "DISASSEMBLE":
                         return HandleDisassemble(command.Data, command.Address);
 

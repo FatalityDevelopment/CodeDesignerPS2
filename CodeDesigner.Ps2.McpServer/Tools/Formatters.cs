@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 
@@ -805,6 +806,49 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     /// <summary>
+    /// Format the JSON response from VALIDATECDS into a human-readable diagnostics list.
+    /// </summary>
+    private static string FormatValidateCdsResult(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            bool   success = root.TryGetProperty("Success", out var s) && s.GetBoolean();
+            string message = root.TryGetProperty("Message", out var m) ? (m.GetString() ?? "") : "";
+            string error   = root.TryGetProperty("Error",   out var e) ? (e.GetString() ?? "") : "";
+
+            var sb = new StringBuilder();
+            sb.AppendLine(success ? $"✓ {message}" : $"✗ {(string.IsNullOrEmpty(error) ? message : error)}");
+
+            if (root.TryGetProperty("Results", out var results) &&
+                results.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in results.EnumerateArray())
+                {
+                    bool   itemSuccess = item.TryGetProperty("Success", out var is_) && is_.GetBoolean();
+                    string itemError   = item.TryGetProperty("Error",   out var ie) ? (ie.GetString() ?? "") : "";
+                    string itemAsm     = item.TryGetProperty("Assembly", out var ia) ? (ia.GetString() ?? "") : "";
+                    int?   lineNo      = item.TryGetProperty("LineNumber", out var il) && il.ValueKind == JsonValueKind.Number
+                        ? il.GetInt32() : (int?)null;
+
+                    string prefix = itemSuccess ? "  warning" : "  error  ";
+                    string loc    = lineNo.HasValue ? $" (line {lineNo})" : "";
+                    string msg    = !string.IsNullOrEmpty(itemError) ? itemError : itemAsm;
+                    sb.AppendLine($"{prefix}{loc}: {msg}");
+                }
+            }
+
+            return WithRules(sb.ToString().TrimEnd());
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    /// <summary>
     /// Format the JSON response from CDSPATCH into a human-readable summary for MCP callers.
     /// </summary>
     private static string FormatCdsPatchResult(string json)
@@ -887,6 +931,122 @@ public sealed partial class CodeDesignerPs2Tools
                     sb.Append("Sidecars:\n");
                     sb.Append(sidecarSb);
                 }
+            }
+
+            return WithRules(sb.ToString().TrimEnd());
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // decompile_to_cds formatter
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Regular expression that matches the address hint appended by the disassembler to
+    /// branch / jump instructions, e.g. <c>$00100020 (+5▼)</c>.
+    /// The full match is the trailing hint portion; group 1 captures the 8-digit hex address.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex BranchHintRegex =
+        new(@"\s*\(([+-]\d+[▼▲])\)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Matches a CDS-style hex address token in a disassembled instruction line, e.g. <c>$00100020</c>.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex HexAddrRegex =
+        new(@"\$([0-9A-Fa-f]{8})\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static string FormatDecompileToCds(string json, uint startAddress)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
+                return $"Error: {errProp.GetString()}";
+
+            if (!root.TryGetProperty("Results", out var results))
+                return SimpleMessage(json);
+
+            // ── First pass: collect all instructions ────────────────────────────
+            var instructions = new List<(uint Address, string Assembly, bool Success)>();
+            uint pc = startAddress;
+            foreach (var item in results.EnumerateArray())
+            {
+                bool success = item.TryGetProperty("Success", out var s) && s.GetBoolean();
+                string asm = item.TryGetProperty("Assembly", out var a) ? (a.GetString() ?? "") : "";
+                instructions.Add((pc, asm, success));
+                pc += 4;
+            }
+
+            uint endAddress = pc;
+
+            // ── Second pass: collect branch targets within the range ─────────────
+            var branchTargets = new HashSet<uint>();
+            foreach (var (_, asm, success) in instructions)
+            {
+                if (!success) continue;
+                foreach (System.Text.RegularExpressions.Match m in HexAddrRegex.Matches(asm))
+                {
+                    if (uint.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, null, out uint target))
+                    {
+                        if (target >= startAddress && target < endAddress && (target & 3) == 0)
+                            branchTargets.Add(target);
+                    }
+                }
+            }
+
+            // ── Third pass: build CDS source ────────────────────────────────────
+            var sb = new StringBuilder();
+            sb.AppendLine($"address ${ startAddress:X8}");
+            sb.AppendLine();
+
+            foreach (var (addr, asm, success) in instructions)
+            {
+                // Emit a label if this address is a branch target
+                if (branchTargets.Contains(addr))
+                    sb.AppendLine($":target_{addr:X8}:");
+
+                if (!success)
+                {
+                    sb.AppendLine($"// [disassembly error at 0x{addr:X8}]");
+                    continue;
+                }
+
+                string line = asm;
+
+                // Strip disassembler hints like " (+5▼)" or " (-2▲)"
+                line = BranchHintRegex.Replace(line, "");
+
+                // Convert '.word 0xXXXXXXXX' → 'hexcode $XXXXXXXX'
+                if (line.StartsWith(".word ", StringComparison.OrdinalIgnoreCase))
+                {
+                    string hex = line[".word ".Length..].Trim();
+                    if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                        hex = hex[2..];
+                    // Also strip trailing comment (e.g., "  # Unknown R-type ...")
+                    int commentIdx = hex.IndexOf(' ');
+                    if (commentIdx > 0) hex = hex[..commentIdx];
+                    sb.AppendLine($"hexcode ${hex.ToUpperInvariant().PadLeft(8, '0')}");
+                    continue;
+                }
+
+                // Replace $XXXXXXXX branch target addresses with :target_ labels
+                // Only replace if the address is a known branch target in our range
+                line = HexAddrRegex.Replace(line, m =>
+                {
+                    if (uint.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, null, out uint target)
+                        && branchTargets.Contains(target))
+                        return $":target_{target:X8}";
+                    return m.Value;  // leave addresses outside range as-is
+                });
+
+                sb.AppendLine(line);
             }
 
             return WithRules(sb.ToString().TrimEnd());
