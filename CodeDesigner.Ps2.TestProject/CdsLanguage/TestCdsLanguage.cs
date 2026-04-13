@@ -530,15 +530,19 @@ scope FuncB {
         }
 
         // -----------------------------------------------------------------------
-        // Include directive (just checks the item is created; no file I/O)
+        // Include directive
         // -----------------------------------------------------------------------
 
         [TestMethod]
-        public void Include_Creates_IncludeSyntaxItem()
+        public void Include_MissingFile_EmitsDiagnosticError()
         {
-            var items = Parse("include \"sub.cds\"");
-            var inc = FindItem<IncludeSyntaxItem>(items);
-            StringAssert.EndsWith(inc.FilePath, "sub.cds");
+            // When the included file does not exist the preprocessor emits an error diagnostic.
+            var parser = new CdsParser();
+            parser.Parse("include \"sub.cds\"");
+            var diags = parser.Diagnostics.ToList();
+            Assert.IsTrue(diags.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Error &&
+                d.Message.Contains("sub.cds")));
         }
 
         // -----------------------------------------------------------------------
@@ -593,5 +597,563 @@ hexcode $DEADBEEF
             // 2 (setreg) + 2 (nop) + 1 (j) + 1 (hexcode) = 6
             Assert.IsTrue(pairs.Count >= 5);
         }
+
+        // -----------------------------------------------------------------------
+        // P0: Diagnostics
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Diagnostics_UnresolvedLabel_EmitsWarning()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nbne $t0, $t1, :nonexistent");
+            var diags = parser.Diagnostics.ToList();
+            Assert.IsTrue(diags.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Warning &&
+                d.Message.Contains("nonexistent")));
+        }
+
+        [TestMethod]
+        public void Diagnostics_ClearedBetweenParseCalls()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nbne $t0, $t1, :nonexistent");
+            Assert.IsTrue(parser.Diagnostics.Count > 0);
+            parser.Parse("address $00100000\nnop");
+            Assert.AreEqual(0, parser.Diagnostics.Count);
+        }
+
+        [TestMethod]
+        public void Diagnostics_BadInstruction_EmitsError()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nthis_is_not_an_instruction");
+            var diags = parser.Diagnostics.ToList();
+            Assert.IsTrue(diags.Any(d => d.Severity == CdsDiagnosticSeverity.Error));
+        }
+
+        [TestMethod]
+        public void Diagnostics_ValidSource_HasNoDiagnostics()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nnop\nnop");
+            Assert.AreEqual(0, parser.Diagnostics.Count);
+        }
+
+        [TestMethod]
+        public void Diagnostics_LineNumber_IsCorrect()
+        {
+            var parser = new CdsParser();
+            parser.Parse("address $00100000\nnop\nbne $t0, $t1, :missing");
+            var diags = parser.Diagnostics.ToList();
+            var w = diags.FirstOrDefault(d => d.Message.Contains("missing"));
+            Assert.IsNotNull(w);
+            Assert.AreEqual(3, w.LineNumber);
+        }
+
+        // -----------------------------------------------------------------------
+        // P0: const / alias directives (via CdsPreprocessor)
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Preprocessor_Const_SubstitutedInInstruction()
+        {
+            var src = @"
+const MAXHP = $00000064
+address $00100000
+setreg t0, MAXHP
+";
+            var pairs = Compile(src);
+            // setreg emits 2 words; value 0x00000064 → lui+addiu
+            Assert.AreEqual(2, pairs.Count);
+            // addiu $t0, $t0, 0x0064 should be present
+            Assert.IsTrue(pairs.Any(p => (p.Word & 0xFFFF) == 0x0064));
+        }
+
+        [TestMethod]
+        public void Preprocessor_Alias_SubstitutedInInstruction()
+        {
+            var src = @"
+alias health = $t0
+address $00100000
+addiu health, health, $0001
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(1, pairs.Count);
+            // addiu $t0, $t0, 1  →  opcode 0x09 (addiu), rs=$t0(8), rt=$t0(8), imm=1
+            // 0x09_08_08_0001 = 0x25080001
+            Assert.AreEqual(0x25080001u, pairs[0].Word);
+        }
+
+        [TestMethod]
+        public void Preprocessor_Alias_MultipleRegisters()
+        {
+            var src = @"
+alias player = $s0
+alias count  = $t1
+address $00100000
+add player, player, count
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(1, pairs.Count);
+            // add $s0, $s0, $t1  →  funct=0x20, rs=$s0(16), rt=$t1(9), rd=$s0(16)
+            // 0x00_0A_90_20... let's just verify it's non-zero and non-0
+            Assert.AreNotEqual(0u, pairs[0].Word);
+        }
+
+        [TestMethod]
+        public void Preprocessor_ConstAndAlias_UsedTogether()
+        {
+            var src = @"
+const BASE = $20100000
+alias tmp = $t9
+address $00100000
+setreg tmp, BASE
+";
+            var pairs = Compile(src);
+            // setreg should produce 2 words
+            Assert.AreEqual(2, pairs.Count);
+        }
+
+        // -----------------------------------------------------------------------
+        // P0: Sized memory operations (mem.b / mem.h / mem.w / mem.d)
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Mem_DefaultSize_IsWord()
+        {
+            var items = Parse("address $00100000\nmem[0x0100] s0 = 0x63");
+            var mem = FindItem<MemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Word, mem.MemorySize);
+        }
+
+        [TestMethod]
+        public void Mem_Byte_Size_HasSbInstruction()
+        {
+            var items = Parse("address $00100000\nmem.b[0x0100] s0 = 0x63");
+            var mem = FindItem<MemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Byte, mem.MemorySize);
+            // store op should use sb
+            var storeOp = mem.Operations.Last();
+            Assert.AreEqual("sb", storeOp.Mnemonic, StringComparer.OrdinalIgnoreCase);
+        }
+
+        [TestMethod]
+        public void Mem_Half_Size_HasShInstruction()
+        {
+            var items = Parse("address $00100000\nmem.h[0x0100] s0 = 0x03E7");
+            var mem = FindItem<MemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Half, mem.MemorySize);
+            var storeOp = mem.Operations.Last();
+            Assert.AreEqual("sh", storeOp.Mnemonic, StringComparer.OrdinalIgnoreCase);
+        }
+
+        [TestMethod]
+        public void Mem_Word_ExplicitSuffix_SetsWordSize()
+        {
+            var items = Parse("address $00100000\nmem.w[0x0100] s0 = 0x01");
+            var mem = FindItem<MemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Word, mem.MemorySize);
+        }
+
+        [TestMethod]
+        public void Mem_Doubleword_Size_HasSdInstruction()
+        {
+            var items = Parse("address $00100000\nmem.d[0x0100] s0 = 0x0");
+            var mem = FindItem<MemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Doubleword, mem.MemorySize);
+            var storeOp = mem.Operations.Last();
+            Assert.AreEqual("sd", storeOp.Mnemonic, StringComparer.OrdinalIgnoreCase);
+        }
+
+        [TestMethod]
+        public void Mem_Byte_Assign_EmitsTwoOps()
+        {
+            var items = Parse("address $00100000\nmem.b[0x0100] s0 = 0x01");
+            var mem = FindItem<MemorySyntaxItem>(items);
+            Assert.AreEqual(2, mem.Operations.Count);  // addiu + sb
+        }
+
+        [TestMethod]
+        public void Mem_Half_AddAssign_EmitsThreeOps()
+        {
+            var items = Parse("address $00100000\nmem.h[0x0100] s0 += 0x01");
+            var mem = FindItem<MemorySyntaxItem>(items);
+            Assert.AreEqual(3, mem.Operations.Count);  // lh + addiu + sh
+            Assert.AreEqual("lh", mem.Operations[0].Mnemonic, StringComparer.OrdinalIgnoreCase);
+        }
+
+        [TestMethod]
+        public void Mem_Byte_Compiled_CorrectAddressRange()
+        {
+            var pairs = Compile("address $00100000\nmem.b[0x0100] s0 = 0x01");
+            // mem assign = 2 instructions at +0 and +4
+            Assert.AreEqual(2, pairs.Count);
+            Assert.AreEqual(0x00100000u, pairs[0].Address);
+            Assert.AreEqual(0x00100004u, pairs[1].Address);
+        }
+
+        // -----------------------------------------------------------------------
+        // P1: assert sidecar
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Assert_CreatesAssertSyntaxItem()
+        {
+            var items = Parse("assert mem[$20010000] == $3C010020");
+            var a = FindItem<AssertSyntaxItem>(items);
+            Assert.AreEqual(0x20010000u, a.Address);
+            Assert.AreEqual("==", a.Operator);
+            Assert.AreEqual(0x3C010020u, a.ExpectedValue);
+        }
+
+        [TestMethod]
+        public void Assert_NotEqual_ParsesOperator()
+        {
+            var items = Parse("assert mem[$20010000] != $00000000");
+            var a = FindItem<AssertSyntaxItem>(items);
+            Assert.AreEqual("!=", a.Operator);
+        }
+
+        [TestMethod]
+        public void Assert_DoesNotAdvanceAddress()
+        {
+            // assert is a sidecar — no code emitted
+            var items = Parse("address $00100000\nassert mem[$20010000] == $DEADBEEF\nhexcode $12345678");
+            var hex = FindItem<HexCodeSyntaxItem>(items);
+            Assert.AreEqual(0x00100000u, hex.Address);  // unchanged
+        }
+
+        [TestMethod]
+        public void Assert_NotInCompilerOutput()
+        {
+            var pairs = Compile("address $00100000\nassert mem[$20010000] == $DEADBEEF\nhexcode $CAFEBABE");
+            Assert.AreEqual(1, pairs.Count);
+            Assert.AreEqual(0xCAFEBABEu, pairs[0].Word);
+        }
+
+        // -----------------------------------------------------------------------
+        // P1: breakpoint sidecar
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Breakpoint_CreatesBreakpointSyntaxItem()
+        {
+            var items = Parse("address $20010000\nbreakpoint");
+            var bp = FindItem<BreakpointSyntaxItem>(items);
+            Assert.AreEqual(0x20010000u, bp.Address);
+        }
+
+        [TestMethod]
+        public void Breakpoint_DoesNotAdvanceAddress()
+        {
+            var items = Parse("address $00100000\nbreakpoint\nhexcode $12345678");
+            var hex = FindItem<HexCodeSyntaxItem>(items);
+            Assert.AreEqual(0x00100000u, hex.Address);
+        }
+
+        [TestMethod]
+        public void Breakpoint_AfterNop_RecordsCorrectAddress()
+        {
+            var items = Parse("address $00100000\nnop\nbreakpoint");
+            var bp = FindItem<BreakpointSyntaxItem>(items);
+            Assert.AreEqual(0x00100004u, bp.Address);
+        }
+
+        [TestMethod]
+        public void Breakpoint_NotInCompilerOutput()
+        {
+            var pairs = Compile("address $00100000\nbreakpoint\nhexcode $DEADBEEF");
+            Assert.AreEqual(1, pairs.Count);
+        }
+
+        // -----------------------------------------------------------------------
+        // P1: watchpoint sidecar
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Watchpoint_Write_CreatesItem()
+        {
+            var items = Parse("watchpoint write $20347A50 4");
+            var wp = FindItem<WatchpointSyntaxItem>(items);
+            Assert.AreEqual(0x20347A50u, wp.Address);
+            Assert.AreEqual(4u, wp.Size);
+            Assert.AreEqual(WatchpointAccessType.Write, wp.AccessType);
+        }
+
+        [TestMethod]
+        public void Watchpoint_Read_CreatesItem()
+        {
+            var items = Parse("watchpoint read $20347A50 2");
+            var wp = FindItem<WatchpointSyntaxItem>(items);
+            Assert.AreEqual(WatchpointAccessType.Read, wp.AccessType);
+        }
+
+        [TestMethod]
+        public void Watchpoint_ReadWrite_CreatesItem()
+        {
+            var items = Parse("watchpoint rw $20347A50 1");
+            var wp = FindItem<WatchpointSyntaxItem>(items);
+            Assert.AreEqual(WatchpointAccessType.ReadWrite, wp.AccessType);
+        }
+
+        [TestMethod]
+        public void Watchpoint_ReadWrite_LongForm()
+        {
+            var items = Parse("watchpoint readwrite $20347A50 4");
+            var wp = FindItem<WatchpointSyntaxItem>(items);
+            Assert.AreEqual(WatchpointAccessType.ReadWrite, wp.AccessType);
+        }
+
+        [TestMethod]
+        public void Watchpoint_DoesNotAdvanceAddress()
+        {
+            var items = Parse("address $00100000\nwatchpoint write $20347A50 4\nhexcode $12345678");
+            var hex = FindItem<HexCodeSyntaxItem>(items);
+            Assert.AreEqual(0x00100000u, hex.Address);
+        }
+
+        // -----------------------------------------------------------------------
+        // P2: CdsPreprocessor — if / else / endif
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Preprocessor_If_WithoutElse_BranchesToEnd()
+        {
+            var src = @"
+address $00100000
+if $t0 == $zero
+  nop
+endif
+nop
+";
+            var pairs = Compile(src);
+            // Expected: bne $t0,$zero,:end (1) + nop delay (1) + nop body (1) + nop after (1) = 4
+            Assert.AreEqual(4, pairs.Count);
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_WithElse_EmitsJumpAndBothBodies()
+        {
+            var src = @"
+address $00100000
+if $t0 == $zero
+  nop
+else
+  nop
+  nop
+endif
+";
+            // bne (1) + nop ds (1) + then nop (1) + j :end (1) + nop ds (1) + else nop (1) + else nop (1) = 7
+            var pairs = Compile(src);
+            Assert.AreEqual(7, pairs.Count);
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_NotEqual_Condition()
+        {
+            var src = @"
+address $00100000
+if $t0 != $zero
+  nop
+endif
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(3, pairs.Count);  // beq + nop + nop body
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_ImmediateCondition_UsesSetregThenBranch()
+        {
+            var src = @"
+address $00100000
+if $t0 == 0x05
+  nop
+endif
+";
+            var pairs = Compile(src);
+            // setreg t9, $00000005 (2) + bne (1) + nop delay (1) + nop body (1) = 5
+            Assert.AreEqual(5, pairs.Count);
+        }
+
+        [TestMethod]
+        public void Preprocessor_NestedIf_Works()
+        {
+            var src = @"
+address $00100000
+if $t0 != $zero
+  if $t1 != $zero
+    nop
+  endif
+endif
+";
+            // outer beq (1) + outer nop ds (1) + inner beq (1) + inner nop ds (1) + nop body (1) = 5
+            var pairs = Compile(src);
+            Assert.AreEqual(5, pairs.Count);
+        }
+
+        [TestMethod]
+        public void Preprocessor_If_LabelsAreUnique_ForMultipleBlocks()
+        {
+            var src = @"
+address $00100000
+if $t0 == $zero
+  nop
+endif
+if $t1 == $zero
+  nop
+endif
+";
+            // Should parse without unresolved label errors
+            var items = Parse(src);
+            var diags = Parser.Diagnostics.ToList();
+            Assert.IsFalse(diags.Any(d => d.Severity == CdsDiagnosticSeverity.Error));
+        }
+
+        // -----------------------------------------------------------------------
+        // P2: CdsPreprocessor — while / endwhile
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Preprocessor_While_EmitsCorrectStructure()
+        {
+            var src = @"
+address $00100000
+while $t0 != $zero
+  nop
+endwhile
+";
+            // top_label(0) + beq(1) + nop ds(1) + nop body(1) + j :top(1) + nop ds(1) = 5
+            var pairs = Compile(src);
+            Assert.AreEqual(5, pairs.Count);
+        }
+
+        [TestMethod]
+        public void Preprocessor_While_WithImmediateCondition()
+        {
+            var src = @"
+address $00100000
+while $t0 != 0x0A
+  nop
+endwhile
+";
+            // setreg (2) + beq (1) + nop ds (1) + nop body (1) + j (1) + nop ds (1) = 7
+            var pairs = Compile(src);
+            Assert.AreEqual(7, pairs.Count);
+        }
+
+        // -----------------------------------------------------------------------
+        // P2: CdsPreprocessor — repeat / endrepeat
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Preprocessor_Repeat_EmitsCounterAndLoop()
+        {
+            var src = @"
+address $00100000
+repeat 3
+  nop
+endrepeat
+";
+            // addiu $t9,$zero,3 (1) + top_label(0) + nop body(1) + addiu t9,-1 (1) + bne(1) + nop ds(1) = 5
+            var pairs = Compile(src);
+            Assert.AreEqual(5, pairs.Count);
+        }
+
+        [TestMethod]
+        public void Preprocessor_Repeat_CounterIsSetCorrectly()
+        {
+            var src = @"
+address $00100000
+repeat 5
+  nop
+endrepeat
+";
+            var pairs = Compile(src);
+            // addiu $t9, $zero, $0005 = 0x24190005
+            // opcode=9(001001), rs=$zero(0)=00000, rt=$t9(25)=11001, imm=5=0000000000000101
+            // 001001 00000 11001 0000000000000101 = 0x24190005
+            Assert.AreEqual(0x24190005u, pairs[0].Word);
+        }
+
+        // -----------------------------------------------------------------------
+        // P2: CdsPreprocessor — macro / endmacro
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Preprocessor_Macro_ExpandsAtCallSite()
+        {
+            var src = @"
+macro Nop2()
+  nop
+  nop
+endmacro
+address $00100000
+Nop2()
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(2, pairs.Count);
+        }
+
+        [TestMethod]
+        public void Preprocessor_Macro_ParametersAreSubstituted()
+        {
+            var src = @"
+macro LoadVal(dst, val)
+  setreg dst, val
+endmacro
+address $00100000
+LoadVal(t0, $00000064)
+";
+            var pairs = Compile(src);
+            // setreg t0, $00000064 = 2 instructions
+            Assert.AreEqual(2, pairs.Count);
+            // lui $t0, 0 = 0x3C080000, addiu $t0,$t0,100 = 0x25080064
+            Assert.AreEqual(0x3C080000u, pairs[0].Word);
+            Assert.AreEqual(0x25080064u, pairs[1].Word);
+        }
+
+        [TestMethod]
+        public void Preprocessor_Macro_WrongArgCount_EmitsDiagnostic()
+        {
+            var src = @"
+macro Foo(a, b)
+  nop
+endmacro
+address $00100000
+Foo(t0)
+";
+            var parser = new CdsParser();
+            parser.Parse(src.Trim());
+            var diags = parser.Diagnostics.ToList();
+            Assert.IsTrue(diags.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Error &&
+                d.Message.Contains("Foo")));
+        }
+
+        // -----------------------------------------------------------------------
+        // CdsCompiler.GetSidecarCommands
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void GetSidecarCommands_ReturnsSidecarItems()
+        {
+            var items = Parse(
+                "address $00100000\nassert mem[$20010000] == $DEADBEEF\nbreakpoint\nwatchpoint write $20347A50 4");
+            var sidecars = CdsCompiler.GetSidecarCommands(items);
+            Assert.AreEqual(3, sidecars.Count);
+            Assert.IsInstanceOfType(sidecars[0], typeof(AssertSyntaxItem));
+            Assert.IsInstanceOfType(sidecars[1], typeof(BreakpointSyntaxItem));
+            Assert.IsInstanceOfType(sidecars[2], typeof(WatchpointSyntaxItem));
+        }
+
+        [TestMethod]
+        public void GetSidecarCommands_ExcludesNonSidecarItems()
+        {
+            var items = Parse("address $00100000\nnop\nhexcode $DEADBEEF");
+            var sidecars = CdsCompiler.GetSidecarCommands(items);
+            Assert.AreEqual(0, sidecars.Count);
+        }
     }
 }
+

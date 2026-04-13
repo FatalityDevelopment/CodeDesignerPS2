@@ -25,6 +25,23 @@ namespace CodeDesigner.Ps2.CdsLanguage
             return result;
         }
 
+        /// <summary>
+        /// Extract all <em>sidecar</em> items from the syntax tree.
+        /// Sidecar items (<see cref="AssertSyntaxItem"/>, <see cref="BreakpointSyntaxItem"/>,
+        /// <see cref="WatchpointSyntaxItem"/>) do not emit MIPS code but carry instructions
+        /// for the bridge server (e.g., install breakpoints, verify memory before patching).
+        /// </summary>
+        /// <param name="items">Syntax items returned by <see cref="CdsParser.Parse"/>.</param>
+        /// <returns>
+        /// A flat list of sidecar items in source order, including those inside scope bodies.
+        /// </returns>
+        public static List<CdsSyntaxItem> GetSidecarCommands(IEnumerable<CdsSyntaxItem> items)
+        {
+            var result = new List<CdsSyntaxItem>();
+            CollectSidecars(items, result);
+            return result;
+        }
+
         // -----------------------------------------------------------------------
         // Recursive collector
         // -----------------------------------------------------------------------
@@ -63,8 +80,29 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         Collect(scope.Body, result);
                         break;
 
+                    // AssertSyntaxItem, BreakpointSyntaxItem, WatchpointSyntaxItem:
+                    //   sidecar items — no code words emitted (see GetSidecarCommands).
                     // AddressSyntaxItem, LabelSyntaxItem, CommentSyntaxItem, IncludeSyntaxItem:
-                    // these are metadata; no words are emitted directly
+                    //   metadata — no words emitted.
+                }
+            }
+        }
+
+        private static void CollectSidecars(IEnumerable<CdsSyntaxItem> items, List<CdsSyntaxItem> result)
+        {
+            foreach (var item in items)
+            {
+                switch (item)
+                {
+                    case AssertSyntaxItem:
+                    case BreakpointSyntaxItem:
+                    case WatchpointSyntaxItem:
+                        result.Add(item);
+                        break;
+
+                    case ScopeSyntaxItem scope:
+                        CollectSidecars(scope.Body, result);
+                        break;
                 }
             }
         }

@@ -9,24 +9,39 @@ namespace CodeDesigner.Ps2.CdsLanguage
     /// Parses CDS (Code Designer Script) source text into a structured list of
     /// <see cref="CdsSyntaxItem"/> objects.
     ///
-    /// <para><b>Language features:</b></para>
+    /// <para>
+    /// Before the two-pass parse the source is run through <see cref="CdsPreprocessor"/>,
+    /// which expands high-level constructs (<c>const</c>, <c>alias</c>, <c>macro</c>,
+    /// <c>include</c>, <c>if</c>/<c>else</c>/<c>endif</c>, <c>while</c>/<c>endwhile</c>,
+    /// <c>repeat</c>/<c>endrepeat</c>) into plain CDS.
+    /// </para>
+    ///
+    /// <para><b>Language features (after preprocessing):</b></para>
     /// <list type="bullet">
-    ///   <item><c>include "file.cds"</c> – file inclusion</item>
     ///   <item><c>address $XXXXXXXX</c> – set current assembly address</item>
     ///   <item><c>hexcode $XXXXXXXX</c> – emit a raw 32-bit word</item>
     ///   <item><c>setreg reg, $XXXXXXXX</c> – load 32-bit immediate (LUI+ADDIU)</item>
-    ///   <item><c>mem[0xOFFSET] reg = 0xVAL</c> or <c>+= -= *= /=</c> – memory operation</item>
+    ///   <item><c>mem[0xOFFSET] reg = 0xVAL</c> – 32-bit memory write (default)</item>
+    ///   <item><c>mem.b / mem.h / mem.w / mem.d</c> – sized memory operations (8/16/32/64-bit)</item>
     ///   <item><c>string "text"</c> – null-terminated ASCII string data</item>
     ///   <item><c>name:</c> – label definition</item>
     ///   <item><c>instr args :label</c> – MIPS instruction with optional label reference</item>
     ///   <item><c>// …</c> and <c>/* … */</c> – comments</item>
-    ///   <item><c>scope Name { … }</c> – named scope block (NEW)</item>
+    ///   <item><c>scope Name { … }</c> – named scope block</item>
+    ///   <item><c>assert mem[$ADDR] == $VAL</c> – sidecar injection-time assertion</item>
+    ///   <item><c>breakpoint</c> – sidecar hardware breakpoint at current address</item>
+    ///   <item><c>watchpoint (write|read|rw) $ADDR SIZE</c> – sidecar memory watchpoint</item>
     /// </list>
     ///
     /// <para><b>Scope support:</b> Labels defined inside a <c>scope</c> block are automatically
     /// qualified with the scope path (e.g., label <c>loop</c> inside <c>scope Foo</c> becomes
     /// <c>foo.loop</c>). Within a scope, labels may be referenced by their short name; from
     /// outside, use the fully-qualified form <c>Foo.loop</c>.</para>
+    ///
+    /// <para>
+    /// Diagnostics (errors and warnings) produced during parse are available via
+    /// <see cref="Diagnostics"/> after the call returns.
+    /// </para>
     /// </summary>
     public class CdsParser
     {
@@ -44,7 +59,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
             new(@"^hexcode\s+\$([0-9a-fA-F]+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex SetRegRegex =
-            new(@"^setreg\s+(\w+)\s*,\s*\$([0-9a-fA-F]+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            new(@"^setreg\s+\$?(\w+)\s*,\s*\$([0-9a-fA-F]+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex LabelDefRegex =
             new(@"^([a-zA-Z_][a-zA-Z0-9_]*):$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -52,12 +67,28 @@ namespace CodeDesigner.Ps2.CdsLanguage
         private static readonly Regex StringRegex =
             new(@"^string\s+""(.*?)""$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // Group 1: optional size suffix (b/h/w/d), Group 2: offset, Group 3: register,
+        // Group 4: operator, Group 5: operand value.
         private static readonly Regex MemRegex =
-            new(@"^mem\[(0x[0-9A-Fa-f]+)\]\s+(\w+)\s*(\+=|-=|\*=|/=|=)\s*(0x[0-9A-Fa-f]+|\d+)$",
+            new(@"^mem(?:\.(b|h|w|d))?\[(0x[0-9A-Fa-f]+)\]\s+(\w+)\s*(\+=|-=|\*=|/=|=)\s*(0x[0-9A-Fa-f]+|\d+)$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex ScopeRegex =
             new(@"^scope\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // assert mem[$ADDR] == $VAL  (or !=)
+        private static readonly Regex AssertRegex =
+            new(@"^assert\s+mem\[\$([0-9a-fA-F]+)\]\s*(==|!=)\s*\$([0-9a-fA-F]+)$",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // breakpoint
+        private static readonly Regex BreakpointRegex =
+            new(@"^breakpoint$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // watchpoint (write|read|rw|readwrite) $ADDR SIZE
+        private static readonly Regex WatchpointRegex =
+            new(@"^watchpoint\s+(write|read|rw|readwrite)\s+\$([0-9a-fA-F]+)\s+(\d+)$",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Branch mnemonics that use a PC-relative 16-bit offset
         private static readonly HashSet<string> BranchMnemonics = new(StringComparer.OrdinalIgnoreCase)
@@ -75,6 +106,18 @@ namespace CodeDesigner.Ps2.CdsLanguage
         };
 
         // -----------------------------------------------------------------------
+        // Diagnostics
+        // -----------------------------------------------------------------------
+
+        private readonly List<CdsDiagnostic> _diagnostics = new();
+
+        /// <summary>
+        /// Diagnostics (errors and warnings) produced during the most recent
+        /// <see cref="Parse"/> call.  Cleared at the start of every <see cref="Parse"/> call.
+        /// </summary>
+        public IReadOnlyList<CdsDiagnostic> Diagnostics => _diagnostics;
+
+        // -----------------------------------------------------------------------
         // Public entry point
         // -----------------------------------------------------------------------
 
@@ -88,6 +131,14 @@ namespace CodeDesigner.Ps2.CdsLanguage
         /// </param>
         public List<CdsSyntaxItem> Parse(string sourceCode, string basePath = "")
         {
+            _diagnostics.Clear();
+
+            // Pre-process high-level constructs (const/alias/macro/include/if/while/repeat)
+            // before the two-pass parse.
+            var preprocessor = new CdsPreprocessor();
+            sourceCode = preprocessor.Process(sourceCode, basePath);
+            _diagnostics.AddRange(preprocessor.Diagnostics);
+
             string[] rawLines = sourceCode.Replace("\r\n", "\n").Split('\n');
 
             // First pass: build a map of fully-qualified label name → address
@@ -268,14 +319,16 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 var memMatch = MemRegex.Match(trimmed);
                 if (memMatch.Success)
                 {
-                    uint offset = Convert.ToUInt32(memMatch.Groups[1].Value, 16);
-                    string reg = memMatch.Groups[2].Value;
-                    string opStr = memMatch.Groups[3].Value;
-                    string operandStr = memMatch.Groups[4].Value;
+                    string sizeSuffix = memMatch.Groups[1].Value;
+                    uint offset  = Convert.ToUInt32(memMatch.Groups[2].Value, 16);
+                    string reg   = memMatch.Groups[3].Value;
+                    string opStr = memMatch.Groups[4].Value;
+                    string operandStr = memMatch.Groups[5].Value;
                     uint operand = ParseUInt(operandStr);
-                    var memOp = ParseMemOp(opStr);
+                    var memOp  = ParseMemOp(opStr);
+                    var memSz  = ParseMemSize(sizeSuffix);
                     uint instrCount = memOp == CdsMemoryOperation.Assign ? 2u : 3u;
-                    var item = BuildMemOp(lineNumber, trimmed, offset, reg, memOp, operand, currentAddress);
+                    var item = BuildMemOp(lineNumber, trimmed, offset, reg, memOp, operand, currentAddress, memSz);
                     current.Add(item);
                     currentAddress += instrCount * 4;
                     continue;
@@ -310,6 +363,64 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         Name = localName,
                         FullName = fullName
                     });
+                    continue;
+                }
+
+                // ---- Assert sidecar ----
+                var assertMatch = AssertRegex.Match(trimmed);
+                if (assertMatch.Success)
+                {
+                    uint assertAddr  = Convert.ToUInt32(assertMatch.Groups[1].Value, 16);
+                    string assertOp  = assertMatch.Groups[2].Value;
+                    uint assertVal   = Convert.ToUInt32(assertMatch.Groups[3].Value, 16);
+                    current.Add(new AssertSyntaxItem
+                    {
+                        LineNumber    = lineNumber,
+                        LineText      = trimmed,
+                        Address       = assertAddr,
+                        Operator      = assertOp,
+                        ExpectedValue = assertVal
+                    });
+                    // Sidecar — does not advance the address counter
+                    continue;
+                }
+
+                // ---- Breakpoint sidecar ----
+                if (BreakpointRegex.IsMatch(trimmed))
+                {
+                    current.Add(new BreakpointSyntaxItem
+                    {
+                        LineNumber = lineNumber,
+                        LineText   = trimmed,
+                        Address    = currentAddress
+                    });
+                    // Sidecar — does not advance the address counter
+                    continue;
+                }
+
+                // ---- Watchpoint sidecar ----
+                var watchMatch = WatchpointRegex.Match(trimmed);
+                if (watchMatch.Success)
+                {
+                    string accessStr = watchMatch.Groups[1].Value;
+                    uint watchAddr   = Convert.ToUInt32(watchMatch.Groups[2].Value, 16);
+                    uint watchSize   = uint.Parse(watchMatch.Groups[3].Value);
+                    var accessType = accessStr.ToLowerInvariant() switch
+                    {
+                        "read"      => WatchpointAccessType.Read,
+                        "rw"        => WatchpointAccessType.ReadWrite,
+                        "readwrite" => WatchpointAccessType.ReadWrite,
+                        _           => WatchpointAccessType.Write
+                    };
+                    current.Add(new WatchpointSyntaxItem
+                    {
+                        LineNumber = lineNumber,
+                        LineText   = trimmed,
+                        Address    = watchAddr,
+                        Size       = watchSize,
+                        AccessType = accessType
+                    });
+                    // Sidecar — does not advance the address counter
                     continue;
                 }
 
@@ -376,7 +487,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 var memMatch = MemRegex.Match(t);
                 if (memMatch.Success)
                 {
-                    string opStr = memMatch.Groups[3].Value;
+                    string opStr = memMatch.Groups[4].Value;
                     currentAddress += opStr == "=" ? 8u : 12u;
                     continue;
                 }
@@ -401,6 +512,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     map.TryAdd(fullName, currentAddress);
                     continue;
                 }
+
+                // Sidecar directives — consume no address space
+                if (AssertRegex.IsMatch(t))     continue;
+                if (BreakpointRegex.IsMatch(t)) continue;
+                if (WatchpointRegex.IsMatch(t)) continue;
 
                 // Everything else that emits an instruction takes 4 bytes
                 if (!t.StartsWith("include") && !t.StartsWith("//"))
@@ -452,6 +568,12 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 string? qualified = ResolveLabel(labelRef, scopeStack, labelMap);
                 if (qualified == null)
                 {
+                    _diagnostics.Add(new CdsDiagnostic
+                    {
+                        Severity   = CdsDiagnosticSeverity.Warning,
+                        LineNumber = lineNumber,
+                        Message    = $"unresolved label reference ':{labelRef}' in '{line}'"
+                    });
                     // Keep coreLine as-is; encoding will fail naturally
                     assemblyLine = coreLine;
                 }
@@ -486,8 +608,14 @@ namespace CodeDesigner.Ps2.CdsLanguage
             {
                 encoded = MipsAssembler.Assemble(assemblyLine);
             }
-            catch
+            catch (Exception ex)
             {
+                _diagnostics.Add(new CdsDiagnostic
+                {
+                    Severity   = CdsDiagnosticSeverity.Error,
+                    LineNumber = lineNumber,
+                    Message    = $"assembly failed for '{assemblyLine}': {ex.Message}"
+                });
                 encoded = 0;
             }
 
@@ -544,22 +672,32 @@ namespace CodeDesigner.Ps2.CdsLanguage
             int lineNumber, string lineText,
             uint memOffset, string reg,
             CdsMemoryOperation op, uint operand,
-            uint address)
+            uint address,
+            CdsMemorySize memSize = CdsMemorySize.Word)
         {
             string offsetStr  = $"${(ushort)memOffset:X4}";
             string operandStr = $"${(ushort)operand:X4}";
+
+            // Select load/store mnemonics based on data width
+            var (loadMnem, storeMnem) = memSize switch
+            {
+                CdsMemorySize.Byte       => ("lb",  "sb"),
+                CdsMemorySize.Half       => ("lh",  "sh"),
+                CdsMemorySize.Doubleword => ("ld",  "sd"),
+                _                        => ("lw",  "sw")
+            };
 
             var ops = new List<OperationSyntaxItem>();
             uint cur = address;
 
             if (op != CdsMemoryOperation.Assign)
             {
-                // Load current value: lw $t9, offset(reg)
-                uint lw = TryAssemble($"lw $t9, {offsetStr}(${reg})");
+                // Load current value
+                uint load = TryAssemble($"{loadMnem} $t9, {offsetStr}(${reg})");
                 ops.Add(new OperationSyntaxItem
                 {
                     LineNumber = lineNumber, LineText = lineText,
-                    Address = cur, EncodedWord = lw, Mnemonic = "lw"
+                    Address = cur, EncodedWord = load, Mnemonic = loadMnem
                 });
                 cur += 4;
             }
@@ -583,12 +721,12 @@ namespace CodeDesigner.Ps2.CdsLanguage
             });
             cur += 4;
 
-            // Store result: sw $t9, offset(reg)
-            uint sw = TryAssemble($"sw $t9, {offsetStr}(${reg})");
+            // Store result
+            uint store = TryAssemble($"{storeMnem} $t9, {offsetStr}(${reg})");
             ops.Add(new OperationSyntaxItem
             {
                 LineNumber = lineNumber, LineText = lineText,
-                Address = cur, EncodedWord = sw, Mnemonic = "sw"
+                Address = cur, EncodedWord = store, Mnemonic = storeMnem
             });
 
             return new MemorySyntaxItem
@@ -596,6 +734,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 LineNumber = lineNumber, LineText = lineText,
                 Address = address, MemoryOffset = memOffset,
                 Register = reg, Operation = op, Operand = operand,
+                MemorySize = memSize,
                 Operations = ops
             };
         }
@@ -746,5 +885,14 @@ namespace CodeDesigner.Ps2.CdsLanguage
             "/=" => CdsMemoryOperation.Divide,
             _    => throw new ArgumentException($"Unknown memory operation '{opStr}'")
         };
+
+        private static CdsMemorySize ParseMemSize(string suffix) =>
+            suffix.ToLowerInvariant() switch
+            {
+                "b" => CdsMemorySize.Byte,
+                "h" => CdsMemorySize.Half,
+                "d" => CdsMemorySize.Doubleword,
+                _   => CdsMemorySize.Word   // "w" or empty (default)
+            };
     }
 }
