@@ -585,42 +585,23 @@ namespace CodeDesigner.Ps2.CdsLanguage
             //
             // Truth table (branch = skip body = condition is FALSE):
             //
-            //   Cond       SLT form             Branch when FALSE
-            //   ─────────  ──────────────────── ─────────────────────────────────────
-            //   lhs <  rhs  slt $t8,lhs,rhs=1   beq $t8,$zero (skip when NOT less)
-            //   lhs >  rhs  slt $t8,rhs,lhs=1   beq $t8,$zero (skip when NOT greater)
-            //   lhs <= rhs  slt $t8,rhs,lhs=1   bne $t8,$zero (skip when rhs < lhs)
-            //   lhs >= rhs  slt $t8,lhs,rhs=1   bne $t8,$zero (skip when lhs < rhs)
-
-            string sltLhs, sltRhs, sltBranch;
-            switch (baseOp)
-            {
-                case "<":
-                    sltLhs   = lhs;
-                    sltBranch = "beq";
-                    break;
-                case ">":
-                    sltLhs   = null!;   // rhs is the first operand (swap)
-                    sltBranch = "beq";
-                    break;
-                case "<=":
-                    sltLhs   = null!;   // rhs is the first operand
-                    sltBranch = "bne";
-                    break;
-                default:  // ">="
-                    sltLhs   = lhs;
-                    sltBranch = "bne";
-                    break;
-            }
-
-            bool rhsFirst = baseOp is ">" or "<=";  // $t8 = (rhs < lhs) rather than (lhs < rhs)
+            //   Cond       SLT form                Branch when FALSE
+            //   ─────────  ─────────────────────── ─────────────────────────────────────
+            //   lhs <  rhs  slt $t8, lhs, rhs = 1  beq $t8, $zero (skip when NOT less)
+            //   lhs >  rhs  slt $t8, rhs, lhs = 1  beq $t8, $zero (skip when NOT greater)
+            //   lhs <= rhs  slt $t8, rhs, lhs = 1  bne $t8, $zero (skip when rhs < lhs)
+            //   lhs >= rhs  slt $t8, lhs, rhs = 1  bne $t8, $zero (skip when lhs < rhs)
+            //
+            // rhsFirst=true  →  slt $t8, <rhs>, <lhs>  (operands swapped)
+            // rhsFirst=false →  slt $t8, <lhs>, <rhs>
+            bool rhsFirst  = baseOp is ">" or "<=";
+            string sltBranch = baseOp is "<" or ">" ? "beq" : "bne";
 
             if (isZero)
             {
-                // Unsigned compare with zero: sltu x,reg,$zero is always 0; use sltiu instead.
-                // lhs <u 0 → always false (unsigned can't be less than 0); emit no branch.
-                // lhs >u 0 → sltu $t8,$zero,lhs... simplified: bne lhs,$zero,:target for >u 0
-                // For simplicity, materialise zero in $t9 and fall through to immediate path.
+                // Unsigned compare with zero: sltu x, reg, $zero is always 0.
+                // For simplicity, materialise zero in $t9 and fall through to the
+                // register-comparison path below.
                 output.Add($"setreg t9, $00000000");
             }
 

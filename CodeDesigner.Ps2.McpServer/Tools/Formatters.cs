@@ -946,9 +946,10 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Regular expression that matches the address hint appended by the disassembler to
-    /// branch / jump instructions, e.g. <c>$00100020 (+5▼)</c>.
-    /// The full match is the trailing hint portion; group 1 captures the 8-digit hex address.
+    /// Regular expression that matches the offset hint appended by the disassembler to
+    /// branch / jump instructions, e.g. <c>(+5▼)</c> or <c>(-2▲)</c>.
+    /// The full match is the trailing hint portion including surrounding whitespace;
+    /// group 1 captures the signed offset with direction arrow (e.g. <c>+5▼</c>).
     /// </summary>
     private static readonly System.Text.RegularExpressions.Regex BranchHintRegex =
         new(@"\s*\(([+-]\d+[▼▲])\)", System.Text.RegularExpressions.RegexOptions.Compiled);
