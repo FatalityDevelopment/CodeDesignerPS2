@@ -176,16 +176,6 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       this.bridge.on<{ enabled: boolean }>('followAiState').subscribe(msg => {
         this.followAiEnabled = !!msg.enabled;
       }),
-      // File Loader: provider sends browse results and load confirmations back to the webview
-      this.bridge.on<{ command: 'browseElfResult'; filePath: string }>('browseElfResult').subscribe(msg => {
-        if (msg.filePath) { this.settingsTab?.setElfPath(msg.filePath); }
-      }),
-      this.bridge.on<{ command: 'browseFileSnapResult'; dirPath: string }>('browseFileSnapResult').subscribe(msg => {
-        if (msg.dirPath) { this.settingsTab?.setFileSnapPath(msg.dirPath); }
-      }),
-      this.bridge.on<{ command: 'fileElfLoaded'; entryPoint: string }>('fileElfLoaded').subscribe(msg => {
-        this.settingsTab?.setElfEntryPoint(msg.entryPoint ?? '');
-      }),
     );
     this.bridge.postMessage({ command: 'ready' });
   }
@@ -373,31 +363,6 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onOpenMemoryView(label: string): void {
     this.bridge.postMessage({ command: 'openMemoryView', label });
-  }
-
-  // ── File Loader handlers ─────────────────────────────────────────────────
-
-  onBrowseElf(): void {
-    this.bridge.postMessage({ command: 'browseElf' });
-  }
-
-  onLoadElf(filePath: string): void {
-    if (!filePath) { return; }
-    this.bridge.postMessage({ command: 'loadFileElf', filePath });
-  }
-
-  onBrowseFileSnap(): void {
-    this.bridge.postMessage({ command: 'browseFileSnap' });
-  }
-
-  onLoadFileSnap(dirPath: string): void {
-    if (!dirPath) { return; }
-    this.bridge.postMessage({ command: 'loadFileSnapshot', dirPath });
-  }
-
-  onSetPc(address: string): void {
-    if (!address) { return; }
-    this.bridge.postMessage({ command: 'setPC', address });
   }
 
   onOpenConverter(): void {

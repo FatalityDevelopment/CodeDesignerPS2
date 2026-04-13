@@ -1729,6 +1729,26 @@ export class SocketClient {
     }
 
     /**
+     * Runtime mode switch: start internal emulator in file mode (no BIOS, no disc).
+     * Loads an ELF32, BIN, or RAW binary into a bare scheduler and leaves it paused
+     * at the file's entry point.  The VS Code extension calls this when the user opens
+     * a registered file type (.elf, .bin, .raw) via File → Open.
+     *
+     * @param filePath  Absolute path to the file to load.
+     * @param address   Optional load address for flat binaries (defaults to 0x00000000).
+     */
+    public async startFileMode(filePath: string, address?: number): Promise<{ entryPoint: number }> {
+        const command: CommandMessage = { Command: 'STARTFILEMODE', InputPath: filePath };
+        if (address !== undefined) { command.Address = address; }
+
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'STARTFILEMODE failed');
+        }
+        return { entryPoint: response.PC ?? 0 };
+    }
+
+    /**
      * Get a full CPU register dump from the running emulator
      */
     public async getRegisters(): Promise<RegisterDump> {

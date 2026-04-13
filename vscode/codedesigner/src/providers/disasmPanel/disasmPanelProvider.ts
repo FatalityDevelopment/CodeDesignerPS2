@@ -426,22 +426,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     this.webview?.postMessage({ command: 'followAiState', enabled });
                     break;
                 }
-                // ── File Loader ───────────────────────────────────────────
-                case 'browseElf':
-                    await this.handleBrowseElf();
-                    break;
-                case 'loadFileElf':
-                    await this.handleLoadFileElf(msg.filePath ?? '');
-                    break;
-                case 'browseFileSnap':
-                    await this.handleBrowseFileSnap();
-                    break;
-                case 'loadFileSnapshot':
-                    await this.handleLoadFileSnapshot(msg.dirPath ?? '');
-                    break;
-                case 'setPC':
-                    await this.handleSetPC(msg.address ?? '');
-                    break;
             }
         });
     }
@@ -2883,142 +2867,40 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    // ── File Loader ───────────────────────────────────────────────────────────
+    // ── File mode (internal emulator, no BIOS) ────────────────────────────────
 
     /**
-     * Show an open-file dialog to browse for a PS2 ELF file.
-     * Sends the chosen path back to the webview as 'browseElfResult'.
+     * Load a PS2 ELF, BIN, or RAW file into the internal emulator in file mode
+     * (STARTFILEMODE command).  The emulator is initialised with a bare scheduler —
+     * no BIOS, no disc — and left paused at the file's entry point.  All default
+     * live memory panels are opened so the user can inspect memory immediately.
+     *
+     * Called from extension.ts when the user opens a registered file type
+     * (.elf, .bin, .raw) via the standard VS Code File → Open menu.
      */
-    private async handleBrowseElf(): Promise<void> {
-        const uris = await vscode.window.showOpenDialog({
-            canSelectMany: false,
-            filters: {
-                'PS2 ELF': ['elf', 'ELF'],
-                'All Files': ['*'],
-            },
-            title: 'Select PS2 ELF File',
-        });
-        if (!uris?.length) { return; }
-        this.webview?.postMessage({ command: 'browseElfResult', filePath: uris[0].fsPath });
-    }
-
-    /**
-     * Load a PS2 ELF file into the internal emulator via LOADELF.
-     * After a successful load the EE Main RAM and BIOS ROM live panels are
-     * (re-)opened so the user can inspect the loaded content immediately.
-     * The emulator is left paused; the entry-point address is sent back to
-     * the webview as 'fileElfLoaded' so the UI can display it.
-     */
-    private async handleLoadFileElf(filePath: string): Promise<void> {
+    public async openFileMode(filePath: string): Promise<void> {
         const out = getOutputChannel();
-        if (!filePath) { return; }
         if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator. Cannot load ELF.');
+            vscode.window.showWarningMessage('Not connected to emulator. Cannot open file.');
             return;
         }
 
-        out.info(`Loading ELF into internal emulator: ${filePath}`);
+        out.info(`Opening file in internal emulator (file mode): ${filePath}`);
         try {
-            const result = await this.socketClient.loadElf(filePath);
+            const result = await this.socketClient.startFileMode(filePath);
             const entryHex = result.entryPoint.toString(16).toUpperCase().padStart(8, '0');
-            out.info(`ELF loaded — entry point 0x${entryHex}`);
+            out.info(`File mode started — entry point 0x${entryHex}`);
 
-            // Send the entry point back so the UI can display it and populate the Set PC field
-            this.webview?.postMessage({ command: 'fileElfLoaded', entryPoint: entryHex });
-
-            // Open all default live panels so the loaded content is visible immediately.
-            // Each region reuses an already-open panel (if any) or creates a new one.
             for (const r of LIVE_REGIONS_DEFAULT) {
                 await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
             }
 
             vscode.window.showInformationMessage(
-                `ELF loaded. Entry point: 0x${entryHex}. Emulator is paused — set breakpoints then press Run.`
+                `File loaded. Entry point: 0x${entryHex}. Emulator is paused — set breakpoints then press Run.`
             );
         } catch (err: any) {
-            out.error(`Load ELF failed: ${err?.message ?? err}`);
-            vscode.window.showErrorMessage(`Load ELF failed: ${err?.message ?? err}`);
-        }
-    }
-
-    /**
-     * Show a folder picker to browse for a snapshot directory.
-     * Sends the chosen path back to the webview as 'browseFileSnapResult'.
-     */
-    private async handleBrowseFileSnap(): Promise<void> {
-        const uris = await vscode.window.showOpenDialog({
-            canSelectMany: false,
-            canSelectFolders: true,
-            canSelectFiles: false,
-            title: 'Select Snapshot Directory',
-        });
-        if (!uris?.length) { return; }
-        this.webview?.postMessage({ command: 'browseFileSnapResult', dirPath: uris[0].fsPath });
-    }
-
-    /**
-     * Load a snapshot directory into the internal emulator via LOADSNAPSHOT.
-     * After a successful load, all default live panels are (re-)opened so the
-     * user can inspect the restored content immediately.  The emulator is left
-     * paused exactly as it was when the snapshot was taken.
-     */
-    private async handleLoadFileSnapshot(dirPath: string): Promise<void> {
-        const out = getOutputChannel();
-        if (!dirPath) { return; }
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator. Cannot load snapshot.');
-            return;
-        }
-
-        out.info(`Loading snapshot into internal emulator: ${dirPath}`);
-        try {
-            const regions = await this.socketClient.loadSnapshot(dirPath);
-            out.info(`Snapshot loaded — ${regions.length} region(s) restored.`);
-
-            // (Re-)open all default live panels to show the restored content.
-            for (const r of LIVE_REGIONS_DEFAULT) {
-                await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
-            }
-
-            vscode.window.showInformationMessage(
-                `Snapshot loaded (${regions.length} region(s)). Emulator is paused — set a PC and breakpoints then press Run.`
-            );
-        } catch (err: any) {
-            out.error(`Load snapshot failed: ${err?.message ?? err}`);
-            vscode.window.showErrorMessage(`Load snapshot failed: ${err?.message ?? err}`);
-        }
-    }
-
-    /**
-     * Set the EE program counter to the given address string (hex or decimal).
-     * Does not resume the emulator.
-     */
-    private async handleSetPC(address: string): Promise<void> {
-        const out = getOutputChannel();
-        if (!address) { return; }
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator. Cannot set PC.');
-            return;
-        }
-
-        const raw = address.trim();
-        const parsed = raw.startsWith('0x') || raw.startsWith('0X')
-            ? parseInt(raw, 16)
-            : parseInt(raw, 10);
-        if (isNaN(parsed)) {
-            vscode.window.showErrorMessage(`Invalid address: ${address}`);
-            return;
-        }
-
-        try {
-            await this.socketClient.setPC(parsed);
-            const hex = parsed.toString(16).toUpperCase().padStart(8, '0');
-            out.info(`PC set to 0x${hex}`);
-            // Notify all live panels so the PC indicator updates
-            this.editorProvider.notifyPauseState(true);
-        } catch (err: any) {
-            out.error(`Set PC failed: ${err?.message ?? err}`);
-            vscode.window.showErrorMessage(`Set PC failed: ${err?.message ?? err}`);
+            out.error(`File mode failed: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`File mode failed: ${err?.message ?? err}`);
         }
     }
 }

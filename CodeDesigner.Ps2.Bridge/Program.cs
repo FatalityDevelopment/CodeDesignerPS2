@@ -806,7 +806,7 @@ namespace CodeDesigner.Ps2.Bridge
                     uint loadAddress = command.Address ?? 0u;
                     var bus = scheduler.EE.Bus;
                     for (int i = 0; i < fileData.Length; i++)
-                        bus.Write8(loadAddress + (uint)i, fileData[i]);
+                        bus.WriteByte(loadAddress + (uint)i, fileData[i]);
                     entryPoint = loadAddress;
                     scheduler.EE.Cpu.PC = entryPoint;
                 }
