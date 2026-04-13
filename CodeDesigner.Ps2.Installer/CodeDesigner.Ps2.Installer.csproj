@@ -12,4 +12,8 @@
     <Description>CodeDesigner PS2 Toolkit Installer</Description>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Folder Include="Scripts\" />
+  </ItemGroup>
+
 </Project>

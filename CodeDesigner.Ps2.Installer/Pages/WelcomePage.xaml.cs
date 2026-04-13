@@ -8,7 +8,7 @@ namespace CodeDesigner.Ps2.Installer.Pages;
 public partial class WelcomePage : UserControl
 {
     private readonly ScriptRunner _runner = new();
-    private readonly string _scriptFolder = Path.Combine(AppContext.BaseDirectory, "scripts");
+    private readonly string _scriptFolder = Path.Combine(AppContext.BaseDirectory, "Scripts");
     private IReadOnlyList<ScriptRunner.ScriptInfo> _scripts = Array.Empty<ScriptRunner.ScriptInfo>();
 
     /// <summary>Raised when the user clicks Start with discovered scripts.</summary>
