@@ -183,8 +183,8 @@ public sealed partial class CodeDesignerPs2Tools
                         case "log":
                         {
                             string directive = sc.TryGetProperty("Directive", out var dir) ? (dir.GetString() ?? "log") : "log";
-                            string message = sc.TryGetProperty("MessageText", out var mt) ? (mt.GetString() ?? "") : "";
-                            sidecarSb.AppendLine($"  {directive} @ 0x{addr:X8}: {message}");
+                            string text = sc.TryGetProperty("MessageText", out var mt) ? (mt.GetString() ?? "") : "";
+                            sidecarSb.AppendLine($"  {directive} @ 0x{addr:X8}: {text}");
                             break;
                         }
                     }
@@ -950,8 +950,8 @@ public sealed partial class CodeDesignerPs2Tools
                         case "log":
                         {
                             string directive = sc.TryGetProperty("Directive", out var dir) ? (dir.GetString() ?? "log") : "log";
-                            string message = sc.TryGetProperty("MessageText", out var mt) ? (mt.GetString() ?? "") : "";
-                            sidecarSb.AppendLine($"  {directive} @ 0x{addr:X8}: {message}");
+                            string text = sc.TryGetProperty("MessageText", out var mt) ? (mt.GetString() ?? "") : "";
+                            sidecarSb.AppendLine($"  {directive} @ 0x{addr:X8}: {text}");
                             break;
                         }
                     }
