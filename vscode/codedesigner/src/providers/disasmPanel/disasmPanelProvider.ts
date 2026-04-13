@@ -2426,7 +2426,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 try { pointerLabels = await this.getPointerLabels(); } catch { /* ignore — not connected */ }
             }
 
-            const results = await this.socketClient.compileCds(
+            const { results, sidecars } = await this.socketClient.compileCds(
                 sourceCode,
                 pointerLabels.length > 0 ? pointerLabels : undefined
             );
@@ -2468,6 +2468,34 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         diag.source = 'CDS';
                         diagnostics.push(diag);
                     }
+                }
+            }
+
+            // ── Log sidecar commands to the Debug channel ─────────────────────
+            for (const sc of sidecars) {
+                const addrHex = `0x${sc.Address.toString(16).toUpperCase().padStart(8, '0')}`;
+                switch (sc.Kind) {
+                    case 'assert': {
+                        const expHex = sc.ExpectedValue !== undefined
+                            ? `0x${sc.ExpectedValue.toString(16).toUpperCase().padStart(8, '0')}` : '?';
+                        if (sc.AssertPassed === true) {
+                            out.info(`CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} — passed`);
+                        } else if (sc.AssertPassed === false) {
+                            const actHex = sc.ActualValue !== undefined
+                                ? `0x${sc.ActualValue.toString(16).toUpperCase().padStart(8, '0')}` : '?';
+                            getDebugChannel().error(
+                                `CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} FAILED (got ${actHex})`);
+                        } else {
+                            out.info(`CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} (not checked — no live backend)`);
+                        }
+                        break;
+                    }
+                    case 'breakpoint':
+                        out.info(`CDS breakpoint requested @ ${addrHex} — use SETBP to install`);
+                        break;
+                    case 'watchpoint':
+                        out.info(`CDS watchpoint requested: ${sc.AccessType ?? 'write'} @ ${addrHex} (${sc.WatchSize ?? 4} bytes) — use PINEADDWATCH to install`);
+                        break;
                 }
             }
 

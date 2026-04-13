@@ -478,6 +478,8 @@ interface CommandResponse {
     CapturedPackets?: CapturedPacketInfo[];
     DissectionText?: string;
     InjectionSuccess?: boolean;
+    // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
+    Sidecars?: CdsSidecarResult[];
 }
 
 /**
@@ -647,6 +649,32 @@ interface InstructionResult {
     Comment?: string;
     Label?: string;
     LineNumber?: number;
+}
+
+/**
+ * One sidecar command from a compiled CDS source file.
+ * Sidecar items (assert, breakpoint, watchpoint) do not emit MIPS code words
+ * but carry instructions for the bridge to act on alongside the patch.
+ */
+export interface CdsSidecarResult {
+    /** Type: "assert", "breakpoint", or "watchpoint". */
+    Kind: string;
+    /** PS2 virtual address referenced by the sidecar directive. */
+    Address: number;
+    // Assert fields
+    /** Comparison operator: "==" or "!=". Present for assert sidecars. */
+    Operator?: string;
+    /** Expected memory value for assert. */
+    ExpectedValue?: number;
+    /** Actual value read from live memory (null if no live backend). */
+    ActualValue?: number;
+    /** true = passed, false = failed, undefined = not checked. */
+    AssertPassed?: boolean;
+    // Watchpoint fields
+    /** Number of bytes to watch (typically 1, 2, or 4). */
+    WatchSize?: number;
+    /** Access type: "read", "write", or "readwrite". */
+    AccessType?: string;
 }
 
 /**
@@ -1156,7 +1184,7 @@ export class SocketClient {
      * @param labels Optional pre-resolved pointer-manager labels (e.g. from PointerManagerProvider.getResolvedLabels()).
      *               These are injected into the compiler so CDS source can reference them as `:seal.health` or `@seal.health`.
      */
-    public async compileCds(sourceCode: string, labels?: LabelEntry[]): Promise<InstructionResult[]> {
+    public async compileCds(sourceCode: string, labels?: LabelEntry[]): Promise<{ results: InstructionResult[]; sidecars: CdsSidecarResult[] }> {
         const command: CommandMessage = {
             Command: 'COMPILECDS',
             Data: sourceCode
@@ -1167,11 +1195,17 @@ export class SocketClient {
 
         const response = await this.sendCommand(command);
 
-        if (!response.Success) {
+        // Do not throw on !response.Success — assert failures set Success=false but still
+        // populate Results (with error entries) and Sidecars (with assert metadata).
+        // The caller is responsible for inspecting the error entries.
+        if (!response.Success && !response.Results) {
             throw new Error(response.Error || 'Compilation failed');
         }
 
-        return response.Results || [];
+        return {
+            results:  response.Results  ?? [],
+            sidecars: response.Sidecars ?? [],
+        };
     }
 
     /**
