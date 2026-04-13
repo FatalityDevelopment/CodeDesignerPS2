@@ -291,6 +291,35 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(openLiveMemoryCommand);
 
+	// ── File mode: open .elf / .bin / .raw in the internal emulator ──────────
+	// Registered as a command so it can be invoked from the command palette
+	// or from the onDidOpenTextDocument handler below.
+	const openElfFileCommand = vscode.commands.registerCommand(
+		'codedesigner.openElfFile',
+		async (uri?: vscode.Uri) => {
+			const filePath = uri?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
+			if (!filePath) { return; }
+			await disasmPanelProvider.openFileMode(filePath);
+		}
+	);
+	context.subscriptions.push(openElfFileCommand);
+
+	// Intercept opens of registered PS2 binary file types so the user can use
+	// the standard File → Open menu.  When VS Code opens one of these files as
+	// a text document we close it immediately and load it into the emulator
+	// via STARTFILEMODE instead.
+	const FILE_MODE_EXTENSIONS = new Set(['.elf', '.bin', '.raw']);
+	context.subscriptions.push(
+		vscode.workspace.onDidOpenTextDocument(async (doc) => {
+			const ext = doc.uri.fsPath.slice(doc.uri.fsPath.lastIndexOf('.')).toLowerCase();
+			if (!FILE_MODE_EXTENSIONS.has(ext)) { return; }
+			// Close the raw text editor VS Code opened.
+			await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+			// Load the file into the internal emulator.
+			await disasmPanelProvider.openFileMode(doc.uri.fsPath);
+		})
+	);
+
 	// Auto-connect on activation — try to reach an already-running server first;
 	// if that fails, auto-start the CodeDesigner console app with --server.
 	outputChannel.info('Extension activated, attempting to connect to server...');

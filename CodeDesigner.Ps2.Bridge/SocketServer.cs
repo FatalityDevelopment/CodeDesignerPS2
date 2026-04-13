@@ -846,6 +846,8 @@ namespace CodeDesigner.Ps2.Bridge
                     case "START_BUILTIN_EMULATOR":
                     case "STARTEMULATORMODE":
                     case "START_EMULATOR_MODE":
+                    case "STARTFILEMODE":
+                    case "START_FILE_MODE":
                         if (RuntimeCommandHandler == null)
                             return CreateErrorResponse("Runtime mode switching is not enabled in this server instance");
                         return RuntimeCommandHandler(command);

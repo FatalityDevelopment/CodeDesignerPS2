@@ -47,6 +47,12 @@ namespace CodeDesigner.Ps2.Bridge
                 return;
             }
 
+            if (HasFlag(args, "--file"))
+            {
+                await RunFileMode(args);
+                return;
+            }
+
             if (HasFlag(args, "--pcsx2"))
             {
                 await StartPcsx2BridgeServer(args);
@@ -369,6 +375,123 @@ namespace CodeDesigner.Ps2.Bridge
             await serverTask;
         }
 
+        /// <summary>
+        /// Mode 2 — file mode: load a PS2 ELF32 executable into a bare emulator (no BIOS,
+        /// no disc), start the socket server paused at the ELF entry point, and wait for
+        /// the VS Code client to connect and send debugger commands.
+        /// </summary>
+        private static async Task RunFileMode(string[] args, SocketServer? attachedServer = null)
+        {
+            string? elfPath = GetArg(args, "--file");
+
+            if (string.IsNullOrWhiteSpace(elfPath))
+            {
+                Console.Error.WriteLine("Error: --file requires an ELF path, e.g. --file game.elf");
+                return;
+            }
+
+            if (!File.Exists(elfPath))
+            {
+                Console.Error.WriteLine($"Error: ELF file not found: {elfPath}");
+                return;
+            }
+
+            byte[] elfData;
+            try { elfData = File.ReadAllBytes(elfPath); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error reading ELF file: {ex.Message}");
+                return;
+            }
+
+            var scheduler = new DualCpuScheduler();
+            uint entryPoint;
+            try
+            {
+                entryPoint = ElfLoader.LoadIntoEmulator(elfData, scheduler.EE);
+            }
+            catch (ElfLoadException ex)
+            {
+                Console.Error.WriteLine($"Error loading ELF: {ex.Message}");
+                return;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error loading ELF: {ex.Message}");
+                return;
+            }
+
+            scheduler.Paused = true;
+            Console.WriteLine($"ELF loaded: {elfPath}");
+            Console.WriteLine($"Entry point: 0x{entryPoint:X8}");
+            Console.WriteLine("Emulator is paused in file mode. Connect VS Code to debug.");
+
+            bool ownsEmbeddedServer = attachedServer == null;
+            var embeddedServer = attachedServer ?? new SocketServer(8765);
+            Task serverTask = Task.CompletedTask;
+
+            if (embeddedServer.PineClient != null)
+            {
+                embeddedServer.PineClient.Dispose();
+                embeddedServer.PineClient = null;
+            }
+
+            embeddedServer.Scheduler = scheduler;
+
+            if (ownsEmbeddedServer)
+            {
+                embeddedServer.ClientConnected += (_, ep) => Console.WriteLine($"[File Mode] Client connected: {ep}");
+                embeddedServer.ClientDisconnected += (_, _) => Console.WriteLine("[File Mode] Client disconnected");
+                serverTask = Task.Run(() => embeddedServer.StartAsync());
+            }
+
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                cts.Cancel();
+                Console.WriteLine("\nStopping file mode emulator...");
+            };
+
+            const int SliceSize = 256;
+            long totalSteps = 0;
+
+            try
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    if (scheduler.Paused)
+                    {
+                        await scheduler.WaitForResumeAsync(cts.Token).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    try { scheduler.RunSlice(SliceSize); }
+                    catch (CodeDesigner.Ps2.Common.Cpu.Instructions.EE.BreakpointException)
+                    {
+                        uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+                        Console.WriteLine($"[BREAK] pc=0x{bpPc:x8}");
+                    }
+
+                    scheduler.TickHardware((uint)SliceSize);
+                    totalSteps += SliceSize;
+                }
+            }
+            catch (OperationCanceledException) { }
+
+            Console.WriteLine($"File mode stopped after {totalSteps:N0} EE steps.");
+
+            if (ownsEmbeddedServer)
+            {
+                embeddedServer.Stop();
+                await serverTask.ConfigureAwait(false);
+            }
+            else
+            {
+                embeddedServer.Scheduler = null;
+            }
+        }
+
         private static Task RunRecompiler(string[] args)
         {
             string? elfPath = GetArg(args, "--elf");
@@ -455,6 +578,9 @@ namespace CodeDesigner.Ps2.Bridge
                 "STARTEMULATOR" or "START_EMULATOR" or "STARTBUILTINEMULATOR" or "START_BUILTIN_EMULATOR"
                 or "STARTEMULATORMODE" or "START_EMULATOR_MODE"
                     => HandleStartEmulatorMode(server, command),
+
+                "STARTFILEMODE" or "START_FILE_MODE"
+                    => HandleStartFileMode(server, command),
 
                 _ => JsonSerializer.Serialize(new CommandResponse
                 {
@@ -606,6 +732,99 @@ namespace CodeDesigner.Ps2.Bridge
                 Command = "STARTEMULATOR",
                 Message = "Built-in emulator mode started"
             });
+        }
+
+        /// <summary>
+        /// STARTFILEMODE runtime command — load a PS2 ELF32, BIN, or RAW binary into
+        /// a bare emulator (no BIOS, no disc), leave it paused at the entry point.
+        /// Supported file types:
+        ///   .elf / .ELF  — PS2 ELF32 executable (entry point from ELF header)
+        ///   .bin / .raw  — flat binary loaded at <see cref="CommandMessage.Address"/>
+        ///                  (defaults to 0x00000000); PC set to load address
+        /// </summary>
+        private static string HandleStartFileMode(SocketServer server, CommandMessage command)
+        {
+            string? filePath = command.InputPath;
+            if (string.IsNullOrWhiteSpace(filePath))
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = false, Command = "STARTFILEMODE",
+                    Error = "InputPath is required for STARTFILEMODE"
+                });
+
+            if (!File.Exists(filePath))
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = false, Command = "STARTFILEMODE",
+                    Error = $"File not found: {filePath}"
+                });
+
+            byte[] fileData;
+            try { fileData = File.ReadAllBytes(filePath); }
+            catch (Exception ex)
+            {
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = false, Command = "STARTFILEMODE",
+                    Error = $"Cannot read file: {ex.Message}"
+                });
+            }
+
+            lock (RuntimeModeLock)
+            {
+                // Stop any running emulator task by replacing the scheduler; the
+                // run-loop will exit naturally when the task next checks for the
+                // cancellation token or detects the scheduler swap.
+                if (ActiveEmulatorTask != null && !ActiveEmulatorTask.IsCompleted)
+                    ActiveEmulatorTask = null;
+
+                if (server.PineClient != null)
+                {
+                    server.PineClient.Dispose();
+                    server.PineClient = null;
+                }
+
+                var scheduler = new DualCpuScheduler();
+                uint entryPoint;
+
+                string ext = Path.GetExtension(filePath).ToLowerInvariant();
+                if (ext == ".elf")
+                {
+                    try { entryPoint = ElfLoader.LoadIntoEmulator(fileData, scheduler.EE); }
+                    catch (ElfLoadException ex)
+                    {
+                        return JsonSerializer.Serialize(new CommandResponse
+                        {
+                            Success = false, Command = "STARTFILEMODE",
+                            Error = $"ELF load error: {ex.Message}"
+                        });
+                    }
+                }
+                else
+                {
+                    // .bin / .raw — flat binary; load at the requested address (default 0)
+                    uint loadAddress = command.Address ?? 0u;
+                    var bus = scheduler.EE.Bus;
+                    for (int i = 0; i < fileData.Length; i++)
+                        bus.WriteByte(loadAddress + (uint)i, fileData[i]);
+                    entryPoint = loadAddress;
+                    scheduler.EE.Cpu.PC = entryPoint;
+                }
+
+                scheduler.Paused = true;
+                server.Scheduler = scheduler;
+
+                Console.WriteLine($"[File Mode] Loaded: {filePath}  entry=0x{entryPoint:X8}");
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "STARTFILEMODE",
+                    PC       = entryPoint,
+                    Paused   = true,
+                    Message  = $"File mode started; entry point 0x{entryPoint:X8}. Emulator is paused.",
+                });
+            }
         }
 
         private static async Task StartSocketServer()
