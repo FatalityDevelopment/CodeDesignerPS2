@@ -281,6 +281,12 @@ namespace CodeDesigner.Ps2.Bridge
         public uint? HookAddress { get; set; }
         /// <summary>Base address where the cheat engine code is placed in EE RAM (default 0x000C0000).</summary>
         public uint? EngineBase { get; set; }
+        /// <summary>
+        /// CDS source text containing <c>freeze</c> / <c>cond</c> directives for use with
+        /// INJECTCHEATENGINE / UPDATECHEATENGINE.  When provided, takes precedence over
+        /// the GameShark-format <see cref="Data"/> field.
+        /// </summary>
+        public string? CdsSource { get; set; }
     }
 
     /// <summary>

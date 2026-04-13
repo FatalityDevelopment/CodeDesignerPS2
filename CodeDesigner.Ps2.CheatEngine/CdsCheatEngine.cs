@@ -156,6 +156,85 @@ namespace CodeDesigner.Ps2.CheatEngine
         }
 
         /// <summary>
+        /// Compile the CDS cheat-engine template, write it into EE RAM, populate
+        /// the cheat table from a CDS source file containing <c>freeze</c> / <c>cond</c>
+        /// directives, and hook the game at <paramref name="hookAddress"/>.
+        /// </summary>
+        /// <param name="hookAddress">
+        /// Virtual address of the instruction to replace with a <c>j engineEntry</c>.
+        /// </param>
+        /// <param name="cdsSource">
+        /// CDS source text containing <c>freeze</c> and/or <c>cond</c> directives.
+        /// Example:
+        /// <code>
+        /// freeze word $20347A54 = FFFFFFFF
+        /// cond mem[$20010000] == 0001
+        ///   freeze half $20010002 = 03E7
+        /// endcond
+        /// </code>
+        /// </param>
+        public void InjectFromCds(uint hookAddress, string cdsSource)
+        {
+            if (IsInjected)
+                throw new InvalidOperationException("Engine is already injected. Call Remove() first.");
+
+            HookAddress = hookAddress;
+
+            // ── 1. Compile engine code ──────────────────────────────────────
+            string engineCds = GetCdsTemplate();
+            engineCds = RebaseSource(engineCds, EngineBase);
+            var compiled = CompileCds(engineCds);
+
+            // ── 2. Write compiled engine into RAM ───────────────────────────
+            foreach (var (addr, word) in compiled)
+                WriteWord(addr, word);
+
+            // ── 3. Save original instructions at the hook point ─────────────
+            _origWord0 = ReadWord(hookAddress);
+            _origWord1 = ReadWord(hookAddress + 4);
+
+            // ── 4. Patch engine: embed original instructions ────────────────
+            PatchOriginalInstructions(_origWord0, _origWord1);
+
+            // ── 5. Patch engine: set return address ─────────────────────────
+            uint returnAddr = hookAddress + 8;
+            PatchReturnAddress(returnAddr);
+
+            // ── 6. Patch engine: set cheat table base pointer ───────────────
+            PatchTableBasePointer();
+
+            // ── 7. Write cheat table from CDS freeze/cond items ────────────
+            WriteCheatTableFromCds(cdsSource);
+
+            // ── 8. Store metadata in engine data area ───────────────────────
+            WriteWord(EngineBase + DataOffset,     _origWord0);
+            WriteWord(EngineBase + DataOffset + 4, _origWord1);
+            WriteWord(EngineBase + DataOffset + 8, returnAddr);
+
+            // ── 9. Hook: replace instruction at hook point with j engine ────
+            uint engineEntry = EngineBase;
+            uint jInstr = EncodeJ(engineEntry);
+            WriteWord(hookAddress,     jInstr);
+            WriteWord(hookAddress + 4, 0x00000000); // nop in delay slot
+
+            IsInjected = true;
+        }
+
+        /// <summary>
+        /// Update the cheat table in-place from a CDS source text containing
+        /// <c>freeze</c> / <c>cond</c> directives, without re-hooking.
+        /// The engine picks up the new values on its next iteration.
+        /// </summary>
+        /// <param name="cdsSource">CDS source text with <c>freeze</c> / <c>cond</c> directives.</param>
+        public void UpdateCheatTableFromCds(string cdsSource)
+        {
+            if (!IsInjected)
+                throw new InvalidOperationException("Engine is not injected. Call InjectFromCds() or Inject() first.");
+
+            WriteCheatTableFromCds(cdsSource);
+        }
+
+        /// <summary>
         /// Remove the hook: restore the original instructions at the hook point
         /// and mark the engine as not injected.
         /// </summary>
@@ -302,6 +381,26 @@ namespace CodeDesigner.Ps2.CheatEngine
         private void WriteCheatTable(string cheats)
         {
             var entries = BuildCheatTableEntries(cheats);
+            WriteCheatTableEntries(entries);
+        }
+
+        /// <summary>
+        /// Parse CDS source for <c>freeze</c> / <c>cond</c> directives and write the
+        /// resulting cheat-table entries into the engine's table area in RAM.
+        /// </summary>
+        private void WriteCheatTableFromCds(string cdsSource)
+        {
+            var parser = new CdsParser();
+            var items  = parser.Parse(cdsSource ?? string.Empty);
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            WriteCheatTableEntries(entries);
+        }
+
+        /// <summary>
+        /// Write a pre-built list of cheat-table entries into the engine's table area in RAM.
+        /// </summary>
+        private void WriteCheatTableEntries(List<(uint TypeAddr, uint Value)> entries)
+        {
             if (entries.Count > MaxCheatEntries)
                 throw new InvalidOperationException(
                     $"Too many cheat entries ({entries.Count}). Maximum is {MaxCheatEntries}.");

@@ -908,10 +908,10 @@ namespace CodeDesigner.Ps2.Bridge
                         return HandleApplyCheats(command.Data);
 
                     case "INJECTCHEATENGINE":
-                        return HandleInjectCheatEngine(command.Data, command.HookAddress, command.EngineBase);
+                        return HandleInjectCheatEngine(command.Data, command.HookAddress, command.EngineBase, command.CdsSource);
 
                     case "UPDATECHEATENGINE":
-                        return HandleUpdateCheatEngine(command.Data);
+                        return HandleUpdateCheatEngine(command.Data, command.CdsSource);
 
                     case "REMOVECHEATENGINE":
                         return HandleRemoveCheatEngine();

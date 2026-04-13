@@ -224,12 +224,21 @@ namespace CodeDesigner.Ps2.Bridge
         /// writes it into EE RAM, populates the cheat table, and hooks the game at
         /// the specified hook address.  The engine runs every frame, continuously
         /// re-applying cheat values so they persist against the running CPU.
+        ///
+        /// <para>
+        /// Cheat entries may be supplied in two formats:
+        /// <list type="bullet">
+        ///   <item><paramref name="cdsSource"/> — CDS source text with <c>freeze</c> / <c>cond</c> directives (preferred).</item>
+        ///   <item><paramref name="cheatText"/> — GameShark text format (legacy fallback).</item>
+        /// </list>
+        /// When both are provided, <paramref name="cdsSource"/> takes precedence.
+        /// </para>
         /// </summary>
-        private string HandleInjectCheatEngine(string? cheatText, uint? hookAddress, uint? engineBase)
+        private string HandleInjectCheatEngine(string? cheatText, uint? hookAddress, uint? engineBase, string? cdsSource)
         {
             if (Scheduler == null && PineClient == null)
                 return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
-            if (string.IsNullOrWhiteSpace(cheatText))
+            if (string.IsNullOrWhiteSpace(cheatText) && string.IsNullOrWhiteSpace(cdsSource))
                 return CreateErrorResponse("No cheat data provided");
             if (!hookAddress.HasValue)
                 return CreateErrorResponse("HookAddress is required for INJECTCHEATENGINE");
@@ -242,7 +251,11 @@ namespace CodeDesigner.Ps2.Bridge
 
                 uint baseAddr = engineBase ?? 0x000C0000;
                 _cdsCheatEngine = new CdsCheatEngine(byteEditor, baseAddr);
-                _cdsCheatEngine.Inject(hookAddress.Value, cheatText);
+
+                if (!string.IsNullOrWhiteSpace(cdsSource))
+                    _cdsCheatEngine.InjectFromCds(hookAddress.Value, cdsSource);
+                else
+                    _cdsCheatEngine.Inject(hookAddress.Value, cheatText!);
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -260,17 +273,26 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>
         /// Handle UPDATECHEATENGINE command — updates the cheat table in-place without
         /// re-hooking.  The engine picks up the new values on its next iteration.
+        ///
+        /// <para>
+        /// Accepts either CDS source (<paramref name="cdsSource"/>) or GameShark text
+        /// (<paramref name="cheatText"/>); CDS source takes precedence when both are supplied.
+        /// </para>
         /// </summary>
-        private string HandleUpdateCheatEngine(string? cheatText)
+        private string HandleUpdateCheatEngine(string? cheatText, string? cdsSource)
         {
             if (_cdsCheatEngine == null || !_cdsCheatEngine.IsInjected)
                 return CreateErrorResponse("Cheat engine is not injected. Use INJECTCHEATENGINE first.");
-            if (string.IsNullOrWhiteSpace(cheatText))
+            if (string.IsNullOrWhiteSpace(cheatText) && string.IsNullOrWhiteSpace(cdsSource))
                 return CreateErrorResponse("No cheat data provided");
 
             try
             {
-                _cdsCheatEngine.UpdateCheatTable(cheatText);
+                if (!string.IsNullOrWhiteSpace(cdsSource))
+                    _cdsCheatEngine.UpdateCheatTableFromCds(cdsSource);
+                else
+                    _cdsCheatEngine.UpdateCheatTable(cheatText!);
+
                 return CreateSuccessResponse("Cheat table updated");
             }
             catch (Exception ex)

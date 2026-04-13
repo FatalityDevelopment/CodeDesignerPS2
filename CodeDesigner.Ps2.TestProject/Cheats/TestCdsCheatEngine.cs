@@ -299,5 +299,140 @@ namespace CodeDesigner.Ps2.TestProject
             uint tableBase = 0x000C0000 + 0x0300;
             Assert.AreEqual(0x20AABBCCu, editor.ReadWord(tableBase));
         }
+
+        // ────────────────────────────────────────────────────────────────────
+        //  InjectFromCds / UpdateCheatTableFromCds
+        // ────────────────────────────────────────────────────────────────────
+
+        [TestMethod]
+        public void InjectFromCds_FreezeWord_WritesCorrectTableEntry()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 000003E8");
+
+            uint tableBase = 0x000C0000 + 0x0300;
+            // Type 0x20 (word), lower 24 bits of address = 0x123456
+            Assert.AreEqual(0x20123456u, editor.ReadWord(tableBase));
+            Assert.AreEqual(0x000003E8u, editor.ReadWord(tableBase + 4));
+            // End marker
+            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 8));
+        }
+
+        [TestMethod]
+        public void InjectFromCds_FreezeByte_WritesCorrectTableEntry()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            engine.InjectFromCds(0x00100000, "freeze byte $00AABBCC = 63");
+
+            uint tableBase = 0x000C0000 + 0x0300;
+            // Type 0x00 (byte), lower 24 bits = 0xAABBCC
+            Assert.AreEqual(0x00AABBCCu, editor.ReadWord(tableBase));
+            Assert.AreEqual(0x00000063u, editor.ReadWord(tableBase + 4));
+        }
+
+        [TestMethod]
+        public void InjectFromCds_FreezeHalf_WritesCorrectTableEntry()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            engine.InjectFromCds(0x00100000, "freeze half $00AABBCC = 03E7");
+
+            uint tableBase = 0x000C0000 + 0x0300;
+            // Type 0x10 (half), lower 24 bits = 0xAABBCC
+            Assert.AreEqual(0x10AABBCCu, editor.ReadWord(tableBase));
+            Assert.AreEqual(0x000003E7u, editor.ReadWord(tableBase + 4));
+        }
+
+        [TestMethod]
+        public void InjectFromCds_CondBlock_WritesConditionAndBodyEntries()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            var cds = @"
+cond mem[$00010000] == 0001
+  freeze word $00123456 = FFFFFFFF
+endcond";
+
+            engine.InjectFromCds(0x00100000, cds);
+
+            uint tableBase = 0x000C0000 + 0x0300;
+            // Condition entry: type 0xC0, lower 24 bits of 0x00010000 = 0x010000
+            Assert.AreEqual(0xC0010000u, editor.ReadWord(tableBase));
+            Assert.AreEqual(0x00000001u, editor.ReadWord(tableBase + 4));
+            // Body entry: type 0x20, addr 0x123456, value 0xFFFFFFFF
+            Assert.AreEqual(0x20123456u, editor.ReadWord(tableBase + 8));
+            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 12));
+            // End marker
+            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 16));
+        }
+
+        [TestMethod]
+        public void InjectFromCds_SetsIsInjected()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 03E8");
+            Assert.IsTrue(engine.IsInjected);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(InvalidOperationException))]
+        public void InjectFromCds_WhenAlreadyInjected_Throws()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 03E8");
+            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 00FF");
+        }
+
+        [TestMethod]
+        public void UpdateCheatTableFromCds_ChangesValues()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 000003E8");
+
+            // Update with a different freeze
+            engine.UpdateCheatTableFromCds("freeze half $00AABBCC = 0001");
+
+            uint tableBase = 0x000C0000 + 0x0300;
+            Assert.AreEqual(0x10AABBCCu, editor.ReadWord(tableBase));
+            Assert.AreEqual(0x00000001u, editor.ReadWord(tableBase + 4));
+            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 8));
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(InvalidOperationException))]
+        public void UpdateCheatTableFromCds_WhenNotInjected_Throws()
+        {
+            var editor = new MockByteEditor();
+            var engine = new CdsCheatEngine(editor);
+            engine.UpdateCheatTableFromCds("freeze word $00123456 = 03E8");
+        }
+
+        [TestMethod]
+        public void InjectFromCds_ThenUpdateViaGameShark_Works()
+        {
+            // InjectFromCds should set up the engine so that
+            // UpdateCheatTable (GameShark) also works afterwards.
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            engine.InjectFromCds(0x00100000, "freeze word $00123456 = 000003E8");
+            engine.UpdateCheatTable("20AABBCC 0000FFFF");
+
+            uint tableBase = 0x000C0000 + 0x0300;
+            Assert.AreEqual(0x20AABBCCu, editor.ReadWord(tableBase));
+            Assert.AreEqual(0x0000FFFFu, editor.ReadWord(tableBase + 4));
+        }
     }
 }
