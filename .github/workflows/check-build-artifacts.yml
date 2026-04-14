@@ -15,8 +15,8 @@ jobs:
 
       - name: Reject obj/bin directories
         run: |
-          # Check if any files under obj/ or bin/ directories are tracked in this PR
-          BAD_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '**/obj/**' '**/bin/**' '**\\obj\\**' '**\\bin\\**' || true)
+          # Check for build artifacts using both glob AND grep to catch backslash paths
+          BAD_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null | grep -iE '[\\/](obj|bin)[\\/]' || true)
           if [ -n "$BAD_FILES" ]; then
             echo "::error::BUILD ARTIFACTS DETECTED! The following files under obj/ or bin/ must not be committed:"
             echo "$BAD_FILES"
@@ -25,4 +25,12 @@ jobs:
             echo "  git rm --cached <file>"
             exit 1
           fi
-          echo "No build artifacts found."
+
+          # Also check the full tree for files with backslash in paths (Windows corruption)
+          BAD_PATHS=$(git ls-tree -r HEAD --name-only | grep '\\\\' || true)
+          if [ -n "$BAD_PATHS" ]; then
+            echo "::error::FILES WITH BACKSLASH PATHS DETECTED! These cause checkout failures on Windows:"
+            echo "$BAD_PATHS"
+            exit 1
+          fi
+          echo "No build artifacts or invalid paths found."

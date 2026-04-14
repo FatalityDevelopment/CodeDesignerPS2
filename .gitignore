@@ -380,6 +380,10 @@ website/obj/
 
 # ── MSBuild JS SDK intermediates (never commit these) ──────────────────────
 **/obj/**/package.g.props
+**/obj/Debug/
+**/obj/Release/
+**/bin/Debug/
+**/bin/Release/
 
 # ── Secrets and local config ───────────────────────────────────────────────
 appsettings.Local.json
