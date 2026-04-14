@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as child_process from 'child_process';
 import { getOutputChannel, getDebugChannel } from '../../extension';
-import { SocketClient, LabelEntry, DiscElfEntry } from '../../socketClient';
+import { SocketClient, LabelEntry, DiscElfEntry, CdsSidecarResult, CdsDiagnostic } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { AiConfigProvider } from '../aiConfig/aiConfigProvider';
@@ -104,8 +104,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _archiveCheatType: string = '';
     private _activeCdsFilePath: string = '';
     private _activeCdsContent: string = '';
+    /** Sidecar commands (assert/breakpoint/watchpoint) from the most recent successful CDS compilation. */
+    private _lastCdsSidecars: CdsSidecarResult[] = [];
     /** Diagnostic collection for CDS compilation errors — shows red squiggles in the editor. */
     private _cdsDiagnostics!: vscode.DiagnosticCollection;
+    /** Debounce timer for background CDS validation. */
+    private _cdsValidationTimer: ReturnType<typeof setTimeout> | undefined;
+    /** Monotonic token used to ignore stale async CDS validation responses. */
+    private _cdsValidationVersion = 0;
     /** Path to the extension's global storage directory (set in register()). */
     private _globalStoragePath: string = '';
     /** In-flight archive sync promise — reused so concurrent callers don't start duplicate clones. */
@@ -194,6 +200,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         context.subscriptions.push(
             vscode.window.onDidChangeActiveTextEditor(editor => {
                 this._syncActiveCdsEditor(editor);
+                this._scheduleValidateCds(50);
             })
         );
         // Sync content when the document is modified
@@ -201,6 +208,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             vscode.workspace.onDidChangeTextDocument(e => {
                 if (e.document.uri.fsPath === this._activeCdsFilePath) {
                     this._activeCdsContent = e.document.getText();
+                    this._scheduleValidateCds();
                 }
             })
         );
@@ -214,9 +222,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         this._activeCdsFilePath = '';
                         this._activeCdsContent  = '';
                     }
+                    if (this._cdsValidationTimer) {
+                        clearTimeout(this._cdsValidationTimer);
+                        this._cdsValidationTimer = undefined;
+                    }
                 }
             })
         );
+
+        this._syncActiveCdsEditor(vscode.window.activeTextEditor);
     }
 
     resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -2416,7 +2430,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 try { pointerLabels = await this.getPointerLabels(); } catch { /* ignore — not connected */ }
             }
 
-            const results = await this.socketClient.compileCds(
+            const { results, sidecars } = await this.socketClient.compileCds(
                 sourceCode,
                 pointerLabels.length > 0 ? pointerLabels : undefined
             );
@@ -2461,6 +2475,39 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 }
             }
 
+            // ── Log sidecar commands to the Debug channel ─────────────────────
+            for (const sc of sidecars) {
+                const addrHex = `0x${sc.Address.toString(16).toUpperCase().padStart(8, '0')}`;
+                switch (sc.Kind) {
+                    case 'assert': {
+                        const expHex = sc.ExpectedValue !== undefined
+                            ? `0x${sc.ExpectedValue.toString(16).toUpperCase().padStart(8, '0')}` : '?';
+                        if (sc.AssertPassed === true) {
+                            out.info(`CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} — passed`);
+                        } else if (sc.AssertPassed === false) {
+                            const actHex = sc.ActualValue !== undefined
+                                ? `0x${sc.ActualValue.toString(16).toUpperCase().padStart(8, '0')}` : '?';
+                            getDebugChannel().error(
+                                `CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} FAILED (got ${actHex})`);
+                        } else {
+                            out.info(`CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} (not checked — no live backend)`);
+                        }
+                        break;
+                    }
+                    case 'breakpoint':
+                        out.info(`CDS breakpoint requested @ ${addrHex} — use SETBP to install`);
+                        break;
+                    case 'watchpoint':
+                        out.info(`CDS watchpoint requested: ${sc.AccessType ?? 'write'} @ ${addrHex} (${sc.WatchSize ?? 4} bytes) — use PINEADDWATCH to install`);
+                        break;
+                    case 'log': {
+                        const directive = sc.Directive ?? 'log';
+                        out.info(`CDS ${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
+                        break;
+                    }
+                }
+            }
+
             // Push all diagnostics to VS Code so squiggles and gutter icons appear
             if (fileUri) {
                 this._cdsDiagnostics.set(fileUri, diagnostics.length > 0 ? diagnostics : []);
@@ -2470,9 +2517,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 out.warn(`CDS compilation finished with ${errors.length} error(s).`);
                 // Reveal the Debug channel so the user sees the red error entries
                 getDebugChannel().show(true);
+                // Clear any stored sidecars — the patch is not valid when there are errors
+                this._lastCdsSidecars = [];
                 this.webview?.postMessage({ command: 'cdsCompileResult', success: false, errors });
             } else {
                 const codes = codeLines.join('\n');
+                // Cache sidecars so handleAddPatch can install breakpoints/watchpoints
+                this._lastCdsSidecars = sidecars;
                 out.info(`CDS compilation succeeded — ${codeLines.length} code(s) generated.`);
                 this.webview?.postMessage({ command: 'cdsCompileResult', success: true, codes, errors: [] });
             }
@@ -2488,7 +2539,79 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Apply compiled GameShark codes to live memory (Add Patch). */
+    private _scheduleValidateCds(delayMs = 250): void {
+        if (this._cdsValidationTimer) {
+            clearTimeout(this._cdsValidationTimer);
+        }
+
+        const validationVersion = ++this._cdsValidationVersion;
+        this._cdsValidationTimer = setTimeout(() => {
+            void this._runValidateCds(validationVersion);
+        }, delayMs);
+    }
+
+    private async _runValidateCds(validationVersion: number): Promise<void> {
+        const filePath = this._activeCdsFilePath;
+        const sourceCode = this._activeCdsContent;
+        if (!filePath || !sourceCode || !filePath.toLowerCase().endsWith('.cds')) { return; }
+        if (!this.socketClient.isConnected()) { return; }
+
+        const fileUri = vscode.Uri.file(filePath);
+        const openDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === fileUri.toString());
+
+        try {
+            let pointerLabels: LabelEntry[] = [];
+            if (this.getPointerLabels) {
+                try { pointerLabels = await this.getPointerLabels(); } catch { /* ignore */ }
+            }
+
+            const { diagnostics } = await this.socketClient.validateCds(
+                sourceCode,
+                pointerLabels.length > 0 ? pointerLabels : undefined
+            );
+
+            if (validationVersion !== this._cdsValidationVersion) { return; }
+            this._cdsDiagnostics.set(fileUri, this._mapCdsDiagnostics(diagnostics, openDoc));
+        } catch {
+            // Ignore background validation failures; explicit compile still surfaces errors.
+        }
+    }
+
+    private _mapCdsDiagnostics(
+        diagnostics: CdsDiagnostic[],
+        openDoc: vscode.TextDocument | undefined
+    ): vscode.Diagnostic[] {
+        return diagnostics.map(diag => {
+            const startLine = Math.max(0, (diag.LineNumber || 1) - 1);
+            const endLineRaw = (diag.EndLineNumber || diag.LineNumber || 1) - 1;
+            const endLine = Math.max(startLine, endLineRaw);
+
+            const startChar = Math.max(0, (diag.ColumnNumber || 1) - 1);
+            const fallbackEndChar = openDoc && startLine < openDoc.lineCount
+                ? openDoc.lineAt(startLine).text.length
+                : startChar + 1;
+            const endChar = Math.max(
+                startChar + 1,
+                diag.EndColumnNumber ? diag.EndColumnNumber - 1 : fallbackEndChar
+            );
+
+            const range = new vscode.Range(startLine, startChar, endLine, endChar);
+            const severity = diag.Severity === 'Error'
+                ? vscode.DiagnosticSeverity.Error
+                : diag.Severity === 'Warning'
+                    ? vscode.DiagnosticSeverity.Warning
+                    : vscode.DiagnosticSeverity.Information;
+
+            const vscodeDiagnostic = new vscode.Diagnostic(range, diag.Message, severity);
+            vscodeDiagnostic.source = 'CDS';
+            if (diag.Code) {
+                vscodeDiagnostic.code = diag.Code;
+            }
+            return vscodeDiagnostic;
+        });
+    }
+
+    /** Apply compiled GameShark codes to live memory (Add Patch), then install any sidecar breakpoints/watchpoints. */
     private async handleAddPatch(codes: string): Promise<void> {
         const out = getOutputChannel();
         if (!this.socketClient.isConnected()) {
@@ -2496,8 +2619,51 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
         try {
+            // 1 — Apply the GameShark memory-patch codes
             await this.socketClient.applyCheats(codes);
             out.info('CDS patch applied to memory successfully.');
+
+            // 2 — Install sidecar commands from the most recent compilation
+            const sidecars = this._lastCdsSidecars;
+            for (const sc of sidecars) {
+                const addrHex = `0x${sc.Address.toString(16).toUpperCase().padStart(8, '0')}`;
+                try {
+                    switch (sc.Kind) {
+                        case 'breakpoint':
+                            await this.socketClient.setBreakpoint(sc.Address);
+                            out.info(`CDS breakpoint installed @ ${addrHex}`);
+                            break;
+
+                        case 'watchpoint': {
+                            // Watchpoint covers [Address, Address + WatchSize)
+                            const size    = sc.WatchSize ?? 4;
+                            // Guard against address + size wrapping past 0xFFFFFFFF
+                            if (sc.Address > 0xFFFFFFFF - size) {
+                                throw new Error(`Watchpoint range overflow: 0x${sc.Address.toString(16).toUpperCase()} + ${size} exceeds 32-bit address space`);
+                            }
+                            const endAddr = sc.Address + size;
+                            // Condition: 1=read, 2=write, 3=readwrite
+                            const cond = sc.AccessType === 'read'      ? 1
+                                       : sc.AccessType === 'readwrite' ? 3
+                                       : 2; // default: write
+                            await this.socketClient.addPineWatch(sc.Address, endAddr, cond);
+                            out.info(`CDS watchpoint installed: ${sc.AccessType ?? 'write'} @ ${addrHex} (${size} bytes)`);
+                            break;
+                        }
+
+                        case 'log': {
+                            const directive = sc.Directive ?? 'log';
+                            out.info(`CDS ${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
+                            break;
+                        }
+                    }
+                } catch (sidecarErr: any) {
+                    // Log but do not abort — sidecar install is best-effort (e.g. breakpoints
+                    // require PINE debugger extension; watchpoints require PINE mode).
+                    out.warn(`CDS sidecar install failed for ${sc.Kind} @ ${addrHex}: ${sidecarErr?.message ?? sidecarErr}`);
+                }
+            }
+
             this.webview?.postMessage({ command: 'cdsPatchApplied', success: true });
         } catch (err: any) {
             const msg = err?.message ?? String(err);
@@ -2728,6 +2894,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public async onSocketConnected(): Promise<void> {
         this._setPauseState(false);
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
+        this._scheduleValidateCds(50);
         for (const r of LIVE_REGIONS_DEFAULT) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }

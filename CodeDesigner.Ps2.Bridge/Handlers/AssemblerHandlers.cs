@@ -2,405 +2,621 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using CodeDesigner.Ps2.CheatEngine;
 using CodeDesigner.Ps2.Common;
+using CodeDesigner.Ps2.CdsLanguage;
+using CodeDesigner.Ps2.CdsLanguage.SyntaxItems;
 
 namespace CodeDesigner.Ps2.Bridge
 {
     partial class SocketServer
     {
-        // ── Compiled regexes for CDS compilation (avoid per-line recompilation) ──
-        /// <summary>Matches a bare label definition line: "Name:"  (identifier + colon, optional trailing whitespace).</summary>
-        private static readonly Regex CdsLabelDefRegex =
-            new(@"^([A-Za-z_][A-Za-z0-9_]*):\s*$",
-                RegexOptions.Compiled);
 
         /// <summary>
-        /// Matches a label reference inside an instruction operand: ":Name" or ":scope.name".
-        /// Dots are allowed to support pointer-manager scoped labels (e.g. <c>:seal.health</c>).
-        /// </summary>
-        private static readonly Regex CdsLabelRefRegex =
-            new(@":([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)",
-                RegexOptions.Compiled);
-
-        /// <summary>
-        /// Matches an absolute-address label reference: "@Name" or "@scope.name".
-        /// Dots are allowed to support pointer-manager scoped labels (e.g. <c>@seal.health</c>).
-        /// Replaced with the raw hex address of the label (e.g. 0x80010018),
-        /// suitable for use with jump instructions or absolute address operands.
-        /// </summary>
-        private static readonly Regex CdsAbsLabelRefRegex =
-            new(@"@([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)",
-                RegexOptions.Compiled);
-
-        /// <summary>
-        /// Handle COMPILECDS command — compiles a .cds (Code Designer Script) assembly file
+        /// Handle COMPILECDS command — compiles a CDS (Code Designer Script) source text
         /// into PS2 GameShark / Action Replay cheat codes.
         ///
-        /// Supported directives:
-        ///   address 0xXXXXXXXX  or  address $XXXXXXXX  — set the current target address.
-        ///   hexcode 0xXXXXXXXX  or  hexcode $XXXXXXXX  — emit a raw 32-bit word.
-        ///   print   "string"                            — ignored (no instruction output).
+        /// <para>
+        /// The full CDS language is supported, including all preprocessor features
+        /// (const/alias/macro/include/if/else/endif/while/endwhile/repeat/endrepeat),
+        /// mem.b/h/w/d typed memory writes, scope blocks, sidecar directives
+         /// (assert, breakpoint, watchpoint, log/print), and freeze/cond cheat entries.
+        /// </para>
         ///
-        /// Supported pseudo-instruction:
-        ///   setreg  reg, value   — expands to lui reg, upper16 + ori reg, reg, lower16.
+        /// <para>
+        /// External label names (from the server label registry and the pointer-manager)
+        /// can be injected via <paramref name="externalLabels"/> so that CDS source can
+        /// reference them in branch/jump targets and setreg operands.
+        /// </para>
         ///
-        /// Label definitions (Name:) and branch label references (:Name) are supported
-        /// via a two-pass approach.
+        /// <para>
+        /// Sidecar commands are extracted from the compiled output and returned in the
+        /// <c>Sidecars</c> field of the response:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item><c>assert</c> — checked against live memory when a backend is available;
+        ///     a failed assertion aborts code output and reports an error.</item>
+        ///   <item><c>breakpoint</c> — returned as metadata for the caller to install.</item>
+         ///   <item><c>watchpoint</c> — returned as metadata for the caller to install.</item>
+         ///   <item><c>log</c>/<c>print</c> — returned as metadata for the caller to surface.</item>
+        /// </list>
         ///
-        /// Registers may be written with or without the $ prefix ($v0 or v0).
-        /// Numeric immediates may be decimal (1), 0x-hex (0x0001), or $-hex ($0001).
-        ///
-        /// Each instruction is emitted as a GameShark type-2 code: 2AAAAAAA VVVVVVVV
+        /// <para>
+        /// Each emitted (address, word) pair is formatted as a GameShark type-2 code:
+        /// <c>2AAAAAAA VVVVVVVV</c>
+        /// </para>
         /// </summary>
         private string HandleCompileCds(string? sourceCode, List<LabelEntry>? externalLabels = null)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(sourceCode))
-                {
                     return CreateErrorResponse("No source code provided");
-                }
 
-                // Split preserving original line numbers (1-based).
-                var rawLines = sourceCode.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                // ── Build external label dictionary ──────────────────────────────────
+                // Priority (lowest to highest): pointer-manager labels → server labels → CDS source.
+                var extDict = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
 
-                // ── Pass 1: collect label → address mapping ───────────────────────
-                // Pre-populate with all emulator/server labels so CDS source can use them
-                // directly. CDS-defined labels (Name:) take precedence if names collide.
-                var labelAddresses = new Dictionary<string, uint>(StringComparer.Ordinal);
-                foreach (var kv in _labels)
-                    labelAddresses[kv.Value.Label] = kv.Key;
-
-                // Merge pointer-manager labels (pre-resolved by the frontend).
-                // These carry dotted scope names (e.g. "seal.health") and are injected
-                // here so that CDS source can reference them as :seal.health or @seal.health.
-                // Server labels take precedence on name conflicts.
+                // Pointer-manager labels (pre-resolved dotted names like "seal.health")
                 if (externalLabels != null)
                 {
                     foreach (var entry in externalLabels)
                     {
-                        if (string.IsNullOrWhiteSpace(entry.Label) || string.IsNullOrWhiteSpace(entry.Address))
-                            continue;
+                        if (string.IsNullOrWhiteSpace(entry.Label) ||
+                            string.IsNullOrWhiteSpace(entry.Address)) continue;
                         var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                             ? entry.Address[2..]
                             : entry.Address;
                         if (uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber,
-                                null, out uint addr) && !labelAddresses.ContainsKey(entry.Label))
-                            labelAddresses[entry.Label] = addr;
+                                null, out uint addr))
+                            extDict[entry.Label] = addr;
                     }
                 }
 
-                uint scanAddress   = 0;
-                bool scanInBlock   = false;
+                // Server-registered labels (breakpoints, user labels, etc.)
+                foreach (var kv in _labels)
+                    extDict[kv.Value.Label] = kv.Key;
 
-                foreach (var rawLine in rawLines)
+                // ── Parse ────────────────────────────────────────────────────────────
+                var parser = new CdsParser();
+                var items  = parser.Parse(sourceCode, basePath: "", externalLabels: extDict);
+
+                // ── Build results list ───────────────────────────────────────────────
+                var results = new List<InstructionResult>();
+
+                // Diagnostics from the preprocessor / parser.
+                // Preserve all structured diagnostics on the response, but only surface
+                // hard errors as failed instruction results so warnings do not make
+                // COMPILECDS look like a failed compile in existing clients.
+                foreach (var diag in parser.Diagnostics)
                 {
-                    var raw = rawLine.Trim();
-
-                    // Block comment tracking (/* ... */)
-                    if (scanInBlock)
+                    if (diag.Severity != CdsDiagnosticSeverity.Error) continue;
+                    results.Add(new InstructionResult
                     {
-                        if (raw.Contains("*/")) scanInBlock = false;
-                        continue;
-                    }
-                    if (raw.StartsWith("/*", StringComparison.Ordinal))
-                    {
-                        if (!raw.Contains("*/")) scanInBlock = true;
-                        continue;
-                    }
-
-                    var scan = StripCdsComments(raw);
-                    if (string.IsNullOrWhiteSpace(scan)) { continue; }
-
-                    if (scan.StartsWith("address", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var p = scan.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (p.Length >= 2)
-                        {
-                            if (TryParseCdsUInt32(p[1], out uint addr))
-                                scanAddress = addr;
-                            else if (labelAddresses.TryGetValue(StripLabelPrefix(p[1]), out addr))
-                                scanAddress = addr;
-                        }
-                        continue;
-                    }
-                    if (scan.StartsWith("hexcode", StringComparison.OrdinalIgnoreCase)) { scanAddress += 4; continue; }
-                    if (scan.StartsWith("print",   StringComparison.OrdinalIgnoreCase)) { continue; }
-                    if (scan.StartsWith("setreg",  StringComparison.OrdinalIgnoreCase)) { scanAddress += 8; continue; }
-
-                    // Label definition: "Name:" at start of line (identifier + colon, optional trailing ws)
-                    var labelMatch = CdsLabelDefRegex.Match(scan);
-                    if (labelMatch.Success)
-                    {
-                        labelAddresses[labelMatch.Groups[1].Value] = scanAddress;
-                        continue;
-                    }
-
-                    // Everything else is a regular instruction (4 bytes)
-                    scanAddress += 4;
+                        Success    = false,
+                        Assembly   = string.Empty,
+                        Error      = diag.Message,
+                        LineNumber = diag.LineNumber
+                    });
                 }
 
-                // ── Pass 2: assemble ──────────────────────────────────────────────
-                var results        = new List<InstructionResult>();
-                uint currentAddress = 0;
-                bool inBlockComment = false;
+                // ── Process sidecar commands ─────────────────────────────────────────
+                var sidecars       = CdsCompiler.GetSidecarCommands(items);
+                var sidecarResults = new List<CdsSidecarResult>();
+                bool assertFailed  = false;
 
-                for (int i = 0; i < rawLines.Length; i++)
+                foreach (var sc in sidecars)
                 {
-                    int lineNumber = i + 1;
-                    var raw2 = rawLines[i].Trim();
-
-                    // Block comment tracking (/* ... */)
-                    if (inBlockComment)
+                    switch (sc)
                     {
-                        if (raw2.Contains("*/")) inBlockComment = false;
-                        continue;
-                    }
-                    if (raw2.StartsWith("/*", StringComparison.Ordinal))
-                    {
-                        if (!raw2.Contains("*/")) inBlockComment = true;
-                        continue;
-                    }
-
-                    var trimmed    = StripCdsComments(raw2);
-                    if (string.IsNullOrWhiteSpace(trimmed)) { continue; }
-
-                    // ── address directive ────────────────────────────────────────────
-                    if (trimmed.StartsWith("address", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length >= 2)
+                        case AssertSyntaxItem assert:
                         {
-                            var addrToken = StripLabelPrefix(parts[1]);
-                            if (TryParseCdsUInt32(parts[1], out uint addr))
+                            var sidecar = CreateSidecarResult(assert);
+
+                            uint? actual = TryReadWordFromLiveMemory(assert.Address);
+                            if (actual.HasValue)
                             {
-                                currentAddress = addr;
-                            }
-                            else if (labelAddresses.TryGetValue(addrToken, out addr))
-                            {
-                                currentAddress = addr;
-                            }
-                            else
-                            {
-                                results.Add(new InstructionResult
+                                sidecar.ActualValue = actual;
+                                bool pass = string.Equals(assert.Operator, "!=",
+                                    StringComparison.Ordinal)
+                                    ? actual.Value != assert.ExpectedValue
+                                    : actual.Value == assert.ExpectedValue;
+                                sidecar.AssertPassed = pass;
+
+                                if (!pass)
                                 {
-                                    Assembly   = trimmed,
-                                    Error      = $"Invalid address value '{parts[1]}'",
-                                    Success    = false,
-                                    LineNumber = lineNumber
-                                });
+                                    assertFailed = true;
+                                    results.Add(new InstructionResult
+                                    {
+                                        Success = false,
+                                        Error   = $"Assert failed at 0x{assert.Address:X8}: " +
+                                                  $"expected {assert.Operator} 0x{assert.ExpectedValue:X8}, " +
+                                                  $"got 0x{actual.Value:X8}"
+                                    });
+                                }
                             }
-                        }
-                        else
-                        {
-                            results.Add(new InstructionResult
-                            {
-                                Assembly   = trimmed,
-                                Error      = "address directive requires a value (e.g. address 0x20123456 or address EE_BIOS_PUTS)",
-                                Success    = false,
-                                LineNumber = lineNumber
-                            });
-                        }
-                        continue;
-                    }
 
-                    // ── hexcode directive (raw 32-bit word) ──────────────────────────
-                    if (trimmed.StartsWith("hexcode", StringComparison.OrdinalIgnoreCase))
+                            sidecarResults.Add(sidecar);
+                            break;
+                        }
+
+                        case BreakpointSyntaxItem:
+                        case WatchpointSyntaxItem:
+                        case LogSyntaxItem:
+                            sidecarResults.Add(CreateSidecarResult(sc));
+                            break;
+                    }
+                }
+
+                // If any assert failed against live memory, return without code words.
+                if (assertFailed)
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
                     {
-                        var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length >= 2)
-                        {
-                            if (TryParseCdsUInt32(parts[1], out uint raw))
-                            {
-                                results.Add(new InstructionResult
-                                {
-                                    Assembly   = trimmed,
-                                    Hex        = FormatGameSharkCode(currentAddress, raw),
-                                    Success    = true,
-                                    LineNumber = lineNumber
-                                });
-                                currentAddress += 4;
-                            }
-                            else
-                            {
-                                results.Add(new InstructionResult
-                                {
-                                    Assembly   = trimmed,
-                                    Error      = $"Invalid hex value '{parts[1]}'",
-                                    Success    = false,
-                                    LineNumber = lineNumber
-                                });
-                            }
-                        }
-                        else
-                        {
-                            results.Add(new InstructionResult
-                            {
-                                Assembly   = trimmed,
-                                Error      = "hexcode directive requires a value (e.g. hexcode 0xABCD1234 or hexcode $ABCD1234)",
-                                Success    = false,
-                                LineNumber = lineNumber
-                            });
-                        }
-                        continue;
-                    }
+                        Success  = false,
+                        Command  = "COMPILECDS",
+                        Results  = results,
+                        Sidecars = sidecarResults.Count > 0 ? sidecarResults : null,
+                        Diagnostics = parser.Diagnostics.Count > 0 ? parser.Diagnostics.ToList() : null
+                    });
+                }
 
-                    // ── print directive — no instruction output ──────────────────────
-                    if (trimmed.StartsWith("print", StringComparison.OrdinalIgnoreCase)) { continue; }
+                // Walk the compiled (address, word) pairs and format as GameShark codes
+                var compiled = CdsCompiler.Compile(items);
+                // Build a lookup from item LineNumber/LineText using the item tree
+                // so we can annotate each code with the originating source line.
+                var lineByAddress = BuildLineAnnotations(items);
 
-                    // ── label definition — no instruction output ─────────────────────
-                    if (CdsLabelDefRegex.IsMatch(trimmed)) { continue; }
-
-                    // ── setreg pseudo-instruction ────────────────────────────────────
-                    // setreg reg, value  →  lui reg, upper16 ; ori reg, reg, lower16
-                    if (trimmed.StartsWith("setreg", StringComparison.OrdinalIgnoreCase))
+                foreach (var (addr, word) in compiled)
+                {
+                    string lineText = string.Empty;
+                    int? lineNum = null;
+                    if (lineByAddress.TryGetValue(addr, out var annotation))
                     {
-                        var parts = trimmed.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length < 3)
-                        {
-                            results.Add(new InstructionResult
-                            {
-                                Assembly   = trimmed,
-                                Error      = "setreg requires two operands: setreg reg, value",
-                                Success    = false,
-                                LineNumber = lineNumber
-                            });
-                            continue;
-                        }
-
-                        string regName = parts[1];
-                        string valStr  = parts[2];
-
-                        if (!TryParseCdsUInt32(valStr, out uint setVal) &&
-                            !labelAddresses.TryGetValue(StripLabelPrefix(valStr), out setVal))
-                        {
-                            results.Add(new InstructionResult
-                            {
-                                Assembly   = trimmed,
-                                Error      = $"Invalid setreg value '{valStr}' — expected a number or a known label",
-                                Success    = false,
-                                LineNumber = lineNumber
-                            });
-                            continue;
-                        }
-
-                        uint upper16 = (setVal >> 16) & 0xFFFF;
-                        uint lower16 = setVal & 0xFFFF;
-
-                        try
-                        {
-                            // lui reg, upper16
-                            uint luiEncoded = MipsAssembler.Assemble($"lui {regName}, 0x{upper16:X4}");
-                            results.Add(new InstructionResult
-                            {
-                                Assembly   = $"lui {regName}, 0x{upper16:X4}",
-                                Hex        = FormatGameSharkCode(currentAddress, luiEncoded),
-                                Success    = true,
-                                LineNumber = lineNumber
-                            });
-                            currentAddress += 4;
-
-                            // ori reg, reg, lower16
-                            uint oriEncoded = MipsAssembler.Assemble($"ori {regName}, {regName}, 0x{lower16:X4}");
-                            results.Add(new InstructionResult
-                            {
-                                Assembly   = $"ori {regName}, {regName}, 0x{lower16:X4}",
-                                Hex        = FormatGameSharkCode(currentAddress, oriEncoded),
-                                Success    = true,
-                                LineNumber = lineNumber
-                            });
-                            currentAddress += 4;
-                        }
-                        catch (Exception ex)
-                        {
-                            results.Add(new InstructionResult
-                            {
-                                Assembly   = trimmed,
-                                Error      = ex.Message,
-                                Success    = false,
-                                LineNumber = lineNumber
-                            });
-                        }
-                        continue;
+                        lineText = annotation.lineText;
+                        lineNum  = annotation.lineNumber;
                     }
-
-                    // ── MIPS instruction (resolve label references first) ─────────────
-                    try
+                    results.Add(new InstructionResult
                     {
-                        // Determine if this is a J-type jump instruction (j/jal) vs a branch.
-                        // Jumps encode an absolute 26-bit word address; branches use a
-                        // PC-relative 16-bit word offset.
-                        string instMnemonic = trimmed
-                            .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)[0]
-                            .ToLowerInvariant();
-                        bool isJumpInstr = instMnemonic == "j" || instMnemonic == "jal";
-
-                        // Replace :LabelName with the computed target value.
-                        // • Jumps (j/jal)   → absolute byte address (0xXXXXXXXX)
-                        // • Branches (beq…) → PC-relative word offset (signed integer)
-                        string resolved = CdsLabelRefRegex.Replace(
-                            trimmed,
-                            m =>
-                            {
-                                var name = m.Groups[1].Value;
-                                if (!labelAddresses.TryGetValue(name, out uint labelAddr))
-                                    throw new ArgumentException(
-                                        $"Undefined label '{name}' in '{trimmed}' (line {lineNumber})");
-                                if (isJumpInstr)
-                                    return $"0x{labelAddr:X8}";
-                                // Branch offset = (label_addr - (current_addr + 4)) / 4
-                                // Use long arithmetic to avoid overflow when addresses exceed 0x7FFFFFFF
-                                long branchOff = ((long)labelAddr - (long)(currentAddress + 4)) / 4;
-                                return ((int)branchOff).ToString();
-                            });
-
-                        // Replace @LabelName with the raw absolute hex address.
-                        // Use this for jump/call targets and any operand that requires an
-                        // absolute address (e.g. j @EE_BIOS_PUTS, jal @InitHeap,
-                        // setreg $a0, @EE_SCRATCHPAD).
-                        resolved = CdsAbsLabelRefRegex.Replace(
-                            resolved,
-                            m =>
-                            {
-                                var name = m.Groups[1].Value;
-                                if (!labelAddresses.TryGetValue(name, out uint labelAddr))
-                                    throw new ArgumentException(
-                                        $"Undefined label '@{name}' in '{trimmed}' (line {lineNumber})");
-                                return $"0x{labelAddr:X8}";
-                            });
-
-                        uint encoded  = MipsAssembler.Assemble(resolved);
-                        results.Add(new InstructionResult
-                        {
-                            Assembly   = trimmed,
-                            Hex        = FormatGameSharkCode(currentAddress, encoded),
-                            Success    = true,
-                            LineNumber = lineNumber
-                        });
-                        currentAddress += 4;
-                    }
-                    catch (Exception ex)
-                    {
-                        results.Add(new InstructionResult
-                        {
-                            Assembly   = trimmed,
-                            Error      = ex.Message,
-                            Success    = false,
-                            LineNumber = lineNumber
-                        });
-                    }
+                        Success    = true,
+                        Assembly   = lineText,
+                        Hex        = FormatGameSharkCode(addr, word),
+                        LineNumber = lineNum
+                    });
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
-                    Success = true,
-                    Command = "COMPILECDS",
-                    Results = results
+                    Success  = true,
+                    Command  = "COMPILECDS",
+                    Results  = results,
+                    Sidecars = sidecarResults.Count > 0 ? sidecarResults : null,
+                    Diagnostics = parser.Diagnostics.Count > 0 ? parser.Diagnostics.ToList() : null
                 });
             }
             catch (Exception ex)
             {
                 return CreateErrorResponse($"Compile error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Try to read a 32-bit word from live PS2 memory at the given virtual address.
+        /// Returns <see langword="null"/> when no live backend is connected or the read fails.
+        /// </summary>
+        private uint? TryReadWordFromLiveMemory(uint address)
+        {
+            try
+            {
+                if (IsPineMode && PineClient != null)
+                {
+                    uint pineAddr = address & 0x1FFFFFFF;
+                    byte[] bytes  = PineClient.ReadBytes(pineAddr, 4);
+                    return System.BitConverter.ToUInt32(bytes, 0);
+                }
+                if (Scheduler != null)
+                    return Scheduler.EE.Bus.ReadWord(address);
+            }
+            catch { /* swallow — no live backend or address out of range */ }
+            return null;
+        }
+
+        /// <summary>
+        /// Handle CDSPATCH command — compile a CDS source, check assert sidecars against live
+        /// memory, apply the generated GameShark codes to RAM, and then install any
+        /// <c>breakpoint</c> / <c>watchpoint</c> sidecar commands.
+        ///
+        /// <para>
+        /// This is the atomic "compile + apply" variant of the two-step
+        /// <c>COMPILECDS</c> → <c>APPLYCHEATS</c> workflow, useful for MCP agents and
+        /// automation scripts that want a single round-trip.
+        /// </para>
+        ///
+        /// <para>
+        /// On assert failure the command returns <c>Success=false</c> and aborts without
+        /// writing any memory or installing any breakpoints or watchpoints.
+        /// </para>
+        /// </summary>
+        private string HandleCdsPatch(string? sourceCode, List<LabelEntry>? externalLabels = null)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(sourceCode))
+                    return CreateErrorResponse("No source code provided");
+
+                if (Scheduler == null && PineClient == null)
+                    return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+
+                // ── Build external label dictionary ──────────────────────────────────
+                var extDict = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+                if (externalLabels != null)
+                {
+                    foreach (var entry in externalLabels)
+                    {
+                        if (string.IsNullOrWhiteSpace(entry.Label) ||
+                            string.IsNullOrWhiteSpace(entry.Address)) continue;
+                        var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                            ? entry.Address[2..]
+                            : entry.Address;
+                        if (uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber,
+                                null, out uint addr))
+                            extDict[entry.Label] = addr;
+                    }
+                }
+                foreach (var kv in _labels)
+                    extDict[kv.Value.Label] = kv.Key;
+
+                // ── Parse ────────────────────────────────────────────────────────────
+                var parser = new CdsParser();
+                var items  = parser.Parse(sourceCode, basePath: "", externalLabels: extDict);
+
+                // Collect parser diagnostics as error results (informational — returned in response)
+                var errorResults = new List<InstructionResult>();
+                foreach (var diag in parser.Diagnostics)
+                {
+                    errorResults.Add(new InstructionResult
+                    {
+                        Success    = false,
+                        Assembly   = string.Empty,
+                        Error      = diag.Message,
+                        LineNumber = diag.LineNumber
+                    });
+                }
+
+                // ── Check assert sidecars ────────────────────────────────────────────
+                var sidecars       = CdsCompiler.GetSidecarCommands(items);
+                var sidecarResults = new List<CdsSidecarResult>();
+
+                foreach (var sc in sidecars)
+                {
+                    if (sc is not AssertSyntaxItem assert)
+                    {
+                        if (sc is LogSyntaxItem log)
+                            sidecarResults.Add(CreateSidecarResult(log));
+                        continue;
+                    }
+
+                    var sidecar = CreateSidecarResult(assert);
+
+                    uint? actual = TryReadWordFromLiveMemory(assert.Address);
+                    if (actual.HasValue)
+                    {
+                        sidecar.ActualValue = actual;
+                        bool pass = string.Equals(assert.Operator, "!=", StringComparison.Ordinal)
+                            ? actual.Value != assert.ExpectedValue
+                            : actual.Value == assert.ExpectedValue;
+                        sidecar.AssertPassed = pass;
+
+                        if (!pass)
+                        {
+                            sidecarResults.Add(sidecar);
+                            return JsonSerializer.Serialize(new CommandResponse
+                            {
+                                Success  = false,
+                                Command  = "CDSPATCH",
+                                Error    = $"Assert failed at 0x{assert.Address:X8}: " +
+                                           $"expected {assert.Operator} 0x{assert.ExpectedValue:X8}, " +
+                                           $"got 0x{actual.Value:X8}",
+                                Results  = errorResults.Count > 0 ? errorResults : null,
+                                Sidecars = sidecarResults
+                            });
+                        }
+                    }
+
+                    sidecarResults.Add(sidecar);
+                }
+
+                if (errorResults.Count > 0)
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success  = false,
+                        Command  = "CDSPATCH",
+                        Error    = $"{errorResults.Count} CDS parse error(s) — patch not applied",
+                        Results  = errorResults,
+                        Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
+                    });
+                }
+
+                // ── Build GameShark codes and apply them ─────────────────────────────
+                var compiled   = CdsCompiler.Compile(items);
+                var codeLines  = new List<string>(compiled.Count);
+                foreach (var (addr, word) in compiled)
+                    codeLines.Add(FormatGameSharkCode(addr, word));
+
+                var cheatText = string.Join('\n', codeLines);
+
+                IByteEditor byteEditor = IsPineMode
+                    ? (IByteEditor)new PinePcsx2ByteEditor(PineClient!)
+                    : new PS2ByteEditor(Scheduler!);
+                var engine    = new CheatEngine.CheatEngine(byteEditor);
+                var cheatList = new CheatList(cheatText);
+                engine.PatchMemory(cheatList);
+
+                // ── Install remaining sidecars (breakpoints / watchpoints) ────────────
+                var installed = new List<string>();
+                var skipped   = new List<string>();
+
+                foreach (var sc in sidecars)
+                {
+                    switch (sc)
+                    {
+                        case BreakpointSyntaxItem bp:
+                            try
+                            {
+                                SetBreakpointInternal(bp.Address);
+                                sidecarResults.Add(CreateSidecarResult(bp));
+                                installed.Add($"breakpoint @ 0x{bp.Address:X8}");
+                            }
+                            catch (Exception ex)
+                            {
+                                skipped.Add($"breakpoint @ 0x{bp.Address:X8}: {ex.Message}");
+                            }
+                            break;
+
+                        case WatchpointSyntaxItem wp:
+                            try
+                            {
+                                SetWatchpointInternal(wp.Address, wp.Size, wp.AccessType);
+                                sidecarResults.Add(CreateSidecarResult(wp));
+                                installed.Add($"watchpoint {wp.AccessType} @ 0x{wp.Address:X8} ({wp.Size} bytes)");
+                            }
+                            catch (Exception ex)
+                            {
+                                skipped.Add($"watchpoint @ 0x{wp.Address:X8}: {ex.Message}");
+                            }
+                            break;
+                    }
+                }
+
+                // ── Build summary message ────────────────────────────────────────────
+                var sb = new System.Text.StringBuilder();
+                sb.Append($"Patch applied — {codeLines.Count} code(s) written");
+                if (installed.Count > 0)
+                    sb.Append($", {installed.Count} sidecar(s) installed");
+                if (skipped.Count > 0)
+                    sb.Append($", {skipped.Count} sidecar(s) skipped (see Sidecars)");
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "CDSPATCH",
+                    Message  = sb.ToString(),
+                    Sidecars = sidecarResults.Count > 0 ? sidecarResults : null
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"CDSPATCH error: {ex.Message}");
+            }
+        }
+
+        private static CdsSidecarResult CreateSidecarResult(CdsSyntaxItem sidecar) =>
+            sidecar switch
+            {
+                AssertSyntaxItem assert => new CdsSidecarResult
+                {
+                    Kind          = "assert",
+                    Address       = assert.Address,
+                    Operator      = assert.Operator,
+                    ExpectedValue = assert.ExpectedValue,
+                },
+                BreakpointSyntaxItem bp => new CdsSidecarResult
+                {
+                    Kind    = "breakpoint",
+                    Address = bp.Address
+                },
+                WatchpointSyntaxItem wp => new CdsSidecarResult
+                {
+                    Kind       = "watchpoint",
+                    Address    = wp.Address,
+                    WatchSize  = wp.Size,
+                    AccessType = wp.AccessType.ToString().ToLowerInvariant()
+                },
+                LogSyntaxItem log => new CdsSidecarResult
+                {
+                    Kind        = "log",
+                    Address     = log.Address,
+                    Directive   = log.Directive,
+                    MessageText = log.MessageText
+                },
+                _ => throw new ArgumentException($"Unsupported CDS sidecar type: {sidecar.GetType().Name}", nameof(sidecar))
+            };
+
+        /// <summary>
+        /// Handle VALIDATECDS command — parse a CDS source without assembling or emitting any
+        /// codes.  Returns all diagnostics (errors and warnings) produced by the preprocessor
+        /// and parser, or a success message if no issues were found.
+        /// </summary>
+        private string HandleValidateCds(string? sourceCode, List<LabelEntry>? externalLabels = null)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(sourceCode))
+                    return CreateErrorResponse("No source code provided");
+
+                // ── Build external label dictionary ──────────────────────────────
+                var extDict = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+                if (externalLabels != null)
+                {
+                    foreach (var entry in externalLabels)
+                    {
+                        if (string.IsNullOrWhiteSpace(entry.Label) ||
+                            string.IsNullOrWhiteSpace(entry.Address)) continue;
+                        var addrStr = entry.Address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                            ? entry.Address[2..]
+                            : entry.Address;
+                        if (uint.TryParse(addrStr, System.Globalization.NumberStyles.HexNumber,
+                                null, out uint addr))
+                            extDict[entry.Label] = addr;
+                    }
+                }
+                foreach (var kv in _labels)
+                    extDict[kv.Value.Label] = kv.Key;
+
+                // ── Parse (no compile step) ──────────────────────────────────────
+                var parser = new CdsParser();
+                parser.Parse(sourceCode, basePath: "", externalLabels: extDict);
+
+                var diagnostics = parser.Diagnostics.ToList();
+                var results = new List<InstructionResult>();
+                foreach (var diag in diagnostics)
+                {
+                    results.Add(new InstructionResult
+                    {
+                        Success    = diag.Severity != CdsDiagnosticSeverity.Error,
+                        Error      = diag.Severity == CdsDiagnosticSeverity.Error ? diag.Message : null,
+                        Assembly   = diag.Severity == CdsDiagnosticSeverity.Warning ? diag.Message : null,
+                        LineNumber = diag.LineNumber
+                    });
+                }
+
+                bool hasErrors   = diagnostics.Any(d => d.Severity == CdsDiagnosticSeverity.Error);
+                bool hasWarnings = diagnostics.Any(d => d.Severity == CdsDiagnosticSeverity.Warning);
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = !hasErrors,
+                    Command  = "VALIDATECDS",
+                    Message  = hasErrors
+                        ? $"Validation failed — {diagnostics.Count(d => d.Severity == CdsDiagnosticSeverity.Error)} error(s), {diagnostics.Count(d => d.Severity == CdsDiagnosticSeverity.Warning)} warning(s)"
+                        : hasWarnings
+                            ? $"Validation passed with {diagnostics.Count(d => d.Severity == CdsDiagnosticSeverity.Warning)} warning(s)"
+                            : "Validation passed — no errors or warnings",
+                    Results  = results.Count > 0 ? results : null,
+                    Diagnostics = diagnostics.Count > 0 ? diagnostics : null
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"VALIDATECDS error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Install a software breakpoint at the given EE virtual address.
+        /// Delegates to PineClient in PINE mode or to Scheduler.Breakpoints in internal mode.
+        /// </summary>
+        private void SetBreakpointInternal(uint address)
+        {
+            if (IsPineMode)
+            {
+                if (PineClient == null)
+                    throw new InvalidOperationException("PINE client not connected");
+                PineClient.SetBreakpoint(NormalizePcToKseg0(address));
+            }
+            else if (Scheduler != null)
+            {
+                Scheduler.Breakpoints.Add(NormalizeBreakpointToPhysical(address));
+            }
+            else
+            {
+                throw new InvalidOperationException("No live backend for breakpoint installation");
+            }
+        }
+
+        /// <summary>
+        /// Install a hardware watchpoint at the given EE virtual address range.
+        /// In PINE mode delegates to <see cref="PineClient.AddWatch"/>; PINE-only feature.
+        /// </summary>
+        private void SetWatchpointInternal(uint address, uint size, WatchpointAccessType accessType)
+        {
+            if (!IsPineMode)
+                throw new InvalidOperationException("Watchpoints via CDSPATCH require PINE mode (connect to PCSX2 first)");
+            if (PineClient == null)
+                throw new InvalidOperationException("PINE client not connected");
+
+            uint cond = accessType switch
+            {
+                WatchpointAccessType.Read      => 1u,
+                WatchpointAccessType.ReadWrite => 3u,
+                _                              => 2u   // Write
+            };
+            uint physStart = address & 0x1FFFFFFF;
+            // Guard against physStart + size wrapping past the 29-bit physical address space
+            if (size > 0x1FFFFFFF - physStart)
+                throw new ArgumentOutOfRangeException(nameof(size),
+                    $"Watchpoint range overflow: physStart=0x{physStart:X8} + size={size} exceeds physical address space");
+            uint physEnd   = physStart + size;
+            PineClient.AddWatch(cpu: 0, physStart, physEnd, (byte)cond);
+        }
+
+        /// <summary>
+        /// Build a flat dictionary mapping compiled output address → (lineNumber, lineText)
+        /// by walking the syntax item tree recursively.  When multiple items map to the same
+        /// address (shouldn't happen but is safe), the first one wins.
+        /// </summary>
+        private static Dictionary<uint, (int lineNumber, string lineText)> BuildLineAnnotations(
+            IEnumerable<CdsSyntaxItem> items)
+        {
+            var dict = new Dictionary<uint, (int, string)>();
+            CollectAnnotations(items, dict);
+            return dict;
+
+            static void CollectAnnotations(
+                IEnumerable<CdsSyntaxItem> src,
+                Dictionary<uint, (int, string)> d)
+            {
+                foreach (var item in src)
+                {
+                    switch (item)
+                    {
+                        case OperationSyntaxItem op:
+                            d.TryAdd(op.Address, (op.LineNumber, op.LineText));
+                            break;
+
+                        case HexCodeSyntaxItem hex:
+                            d.TryAdd(hex.Address, (hex.LineNumber, hex.LineText));
+                            break;
+
+                        case SetRegSyntaxItem sr:
+                            d.TryAdd(sr.LuiOp.Address,   (sr.LineNumber, sr.LineText));
+                            d.TryAdd(sr.AddiuOp.Address, (sr.LineNumber, sr.LineText));
+                            break;
+
+                        case MemorySyntaxItem mem:
+                            foreach (var op in mem.Operations)
+                                d.TryAdd(op.Address, (mem.LineNumber, mem.LineText));
+                            break;
+
+                        case LoadMemorySyntaxItem load:
+                            d.TryAdd(load.Operation.Address, (load.LineNumber, load.LineText));
+                            break;
+
+                        case StoreMemorySyntaxItem store:
+                            d.TryAdd(store.Operation.Address, (store.LineNumber, store.LineText));
+                            break;
+
+                        case StringSyntaxItem str:
+                            foreach (var w in str.Words)
+                                d.TryAdd(w.Address, (str.LineNumber, str.LineText));
+                            break;
+
+                        case ScopeSyntaxItem scope:
+                            CollectAnnotations(scope.Body, d);
+                            break;
+                    }
+                }
             }
         }
 
@@ -590,74 +806,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
-        /// <summary>
-        /// Strip inline comments from a CDS source line, finding the earliest
-        /// occurrence of //, ;, or # and cutting from there.
-        /// Lines that are entirely a comment (start with the marker) are left empty.
-        /// </summary>
-        private static string StripCdsComments(string line)
-        {
-            if (string.IsNullOrWhiteSpace(line)) { return line; }
-
-            // Skip entirely-comment lines fast
-            if (line.StartsWith("//", StringComparison.Ordinal)
-                || line.StartsWith(";",  StringComparison.Ordinal)
-                || line.StartsWith("#",  StringComparison.Ordinal))
-            {
-                return string.Empty;
-            }
-
-            int cutAt = int.MaxValue;
-            foreach (var marker in new[] { "//", ";", "#" })
-            {
-                int ci = line.IndexOf(marker, StringComparison.Ordinal);
-                if (ci > 0 && ci < cutAt) { cutAt = ci; }
-            }
-
-            return cutAt != int.MaxValue ? line[..cutAt].TrimEnd() : line;
-        }
-
-        /// <summary>
-        /// Strip an optional leading '@' from a CDS label token, so both
-        /// "EE_BIOS_PUTS" and "@EE_BIOS_PUTS" resolve to the same label name.
-        /// </summary>
-        private static string StripLabelPrefix(string token) =>
-            token.Length > 0 && token[0] == '@' ? token[1..] : token;
-
-        /// <summary>
-        /// Parse a CDS numeric literal that may be prefixed with $, 0x, or neither.
-        ///   $XXXX  → hexadecimal (CDS / PS2 assembler style)
-        ///   0xXXXX → hexadecimal
-        ///   DDDDD  → decimal
-        /// Returns false if the string cannot be parsed.
-        /// </summary>
-        private static bool TryParseCdsUInt32(string s, out uint value)
-        {
-            value = 0;
-            if (string.IsNullOrWhiteSpace(s)) { return false; }
-            s = s.Trim();
-            try
-            {
-                if (s.StartsWith("$", StringComparison.Ordinal))
-                {
-                    value = Convert.ToUInt32(s[1..], 16);
-                    return true;
-                }
-                if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                {
-                    value = Convert.ToUInt32(s, 16);
-                    return true;
-                }
-                value = uint.Parse(s);
-                return true;
-            }
-            catch { return false; }
-        }
-
-        /// <summary>
-        /// Format a 32-bit address/value pair as a PS2 GameShark type-2 (32-bit write) code.
-        /// Format: 2AAAAAAA VVVVVVVV  (address low 28 bits, value 32 bits).
-        /// </summary>
+        /// <summary>Format a (address, word) pair as a GameShark type-2 code.</summary>
         private static string FormatGameSharkCode(uint address, uint value)
         {
             // Type-2 prefix (0x20000000) ORed with the low 28 bits of the target address.

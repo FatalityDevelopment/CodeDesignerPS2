@@ -858,6 +858,9 @@ namespace CodeDesigner.Ps2.Bridge
                     case "COMPILECDS":
                         return HandleCompileCds(command.Data, command.Labels);
                     
+                    case "VALIDATECDS":
+                        return HandleValidateCds(command.Data, command.Labels);
+                    
                     case "DISASSEMBLE":
                         return HandleDisassemble(command.Data, command.Address);
 
@@ -909,11 +912,14 @@ namespace CodeDesigner.Ps2.Bridge
                     case "APPLYCHEATS":
                         return HandleApplyCheats(command.Data);
 
+                    case "CDSPATCH":
+                        return HandleCdsPatch(command.Data, command.Labels);
+
                     case "INJECTCHEATENGINE":
-                        return HandleInjectCheatEngine(command.Data, command.HookAddress, command.EngineBase);
+                        return HandleInjectCheatEngine(command.Data, command.HookAddress, command.EngineBase, command.CdsSource);
 
                     case "UPDATECHEATENGINE":
-                        return HandleUpdateCheatEngine(command.Data);
+                        return HandleUpdateCheatEngine(command.Data, command.CdsSource);
 
                     case "REMOVECHEATENGINE":
                         return HandleRemoveCheatEngine();

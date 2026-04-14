@@ -25,6 +25,7 @@
 //      0x00 - 8-bit write        (sb)
 //      0x10 - 16-bit write       (sh)
 //      0x20 - 32-bit write       (sw)
+//      0xB0 - timer gate         (body count in low 24 bits, frame interval in word 1)
 //      0xD0 - 16-bit conditional (skip next entry if mem != value)
 //      0xE0 - 32-bit conditional (skip next entry if mem != value)
 //
@@ -56,6 +57,14 @@ scope CheatEngine {
     loadTableBase:
         lui s0, $000C
         ori s0, s0, $0300
+        addu t0, s0, zero
+
+        // Increment persistent frame counter at EngineData.frameCounter.
+        // Relative to the cheat table base, frameCounter lives at -0x00F4 (0xFF0C as a signed immediate).
+        addiu v0, t0, $FF0C
+        lw v1, $0000(v0)
+        addiu v1, v1, $0001
+        sw v1, $0000(v0)
 
     ////////////////////////////////////////////////////////////////////////////
     //  Main processing loop
@@ -73,14 +82,12 @@ scope CheatEngine {
         // Extract type byte (upper 8 bits of s1)
         srl s3, s1, $18
 
-        // Extract address offset (lower 24 bits of s1)
+        // Extract payload (lower 24 bits of s1):
+        // - write/cond entries: address offset
+        // - timer entries: guarded body-entry count
         lui at, $00FF
         ori at, at, $FFFF
         and s4, s1, at
-
-        // Add EE user-space base (0x20000000)
-        lui at, $2000
-        or s4, s4, at
 
         // Dispatch: type 0x00 = 8-bit write
         beq s3, zero, :write8bit
@@ -94,6 +101,11 @@ scope CheatEngine {
         // Dispatch: type 0x20 = 32-bit write
         addiu at, zero, $0020
         beq s3, at, :write32bit
+        nop
+
+        // Dispatch: type 0xB0 = timer gate
+        addiu at, zero, $00B0
+        beq s3, at, :timerGate
         nop
 
         // Dispatch: type 0xD0 = 16-bit conditional
@@ -115,16 +127,22 @@ scope CheatEngine {
     ////////////////////////////////////////////////////////////////////////////
 
     write8bit:
+        lui at, $2000
+        or s4, s4, at
         sb s2, $0000(s4)
         j :nextEntry
         nop
 
     write16bit:
+        lui at, $2000
+        or s4, s4, at
         sh s2, $0000(s4)
         j :nextEntry
         nop
 
     write32bit:
+        lui at, $2000
+        or s4, s4, at
         sw s2, $0000(s4)
         j :nextEntry
         nop
@@ -133,7 +151,25 @@ scope CheatEngine {
     //  Conditional handlers
     ////////////////////////////////////////////////////////////////////////////
 
+    timerGate:
+        // s4 = guarded body-entry count, s2 = frame interval
+        beq s2, zero, :nextEntry
+        nop
+        addiu v0, t0, $FF0C
+        lw v1, $0000(v0)
+        divu v1, s2
+        mfhi v0
+        beq v0, zero, :nextEntry
+        nop
+        // Interval not met: skip the guarded body entries
+        sll s4, s4, $03
+        addu s0, s0, s4
+        j :nextEntry
+        nop
+
     cond16bit:
+        lui at, $2000
+        or s4, s4, at
         lhu v0, $0000(s4)
         andi v1, s2, $FFFF
         // Condition met: process next entry normally
@@ -145,6 +181,8 @@ scope CheatEngine {
         nop
 
     cond32bit:
+        lui at, $2000
+        or s4, s4, at
         lw v0, $0000(s4)
         // Condition met: process next entry normally
         beq v0, s2, :nextEntry
@@ -201,6 +239,8 @@ scope EngineData {
     origWord1:
         hexcode $00000000
     returnAddr:
+        hexcode $00000000
+    frameCounter:
         hexcode $00000000
 }
 

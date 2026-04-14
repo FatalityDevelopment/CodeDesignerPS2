@@ -478,6 +478,10 @@ interface CommandResponse {
     CapturedPackets?: CapturedPacketInfo[];
     DissectionText?: string;
     InjectionSuccess?: boolean;
+    // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
+    Sidecars?: CdsSidecarResult[];
+    // Structured CDS diagnostics from VALIDATECDS / COMPILECDS.
+    Diagnostics?: CdsDiagnostic[];
 }
 
 /**
@@ -647,6 +651,48 @@ interface InstructionResult {
     Comment?: string;
     Label?: string;
     LineNumber?: number;
+}
+
+export interface CdsDiagnostic {
+    Severity: 'Info' | 'Warning' | 'Error' | string;
+    LineNumber: number;
+    ColumnNumber?: number;
+    EndLineNumber?: number;
+    EndColumnNumber?: number;
+    Code?: string;
+    Message: string;
+    SourceLine?: string;
+}
+
+/**
+ * One sidecar command from a compiled CDS source file.
+ * Sidecar items (assert, breakpoint, watchpoint, log) do not emit MIPS code words
+ * but carry instructions for the bridge to act on alongside the patch.
+ */
+export interface CdsSidecarResult {
+    /** Type: "assert", "breakpoint", "watchpoint", or "log". */
+    Kind: string;
+    /** PS2 virtual address referenced by the sidecar directive. */
+    Address: number;
+    // Assert fields
+    /** Comparison operator: "==" or "!=". Present for assert sidecars. */
+    Operator?: string;
+    /** Expected memory value for assert. */
+    ExpectedValue?: number;
+    /** Actual value read from live memory (null if no live backend). */
+    ActualValue?: number;
+    /** true = passed, false = failed, undefined = not checked. */
+    AssertPassed?: boolean;
+    // Watchpoint fields
+    /** Number of bytes to watch (typically 1, 2, or 4). */
+    WatchSize?: number;
+    /** Access type: "read", "write", or "readwrite". */
+    AccessType?: string;
+    // Log/print fields
+    /** Original CDS directive keyword: "log" or "print". */
+    Directive?: string;
+    /** Message text to surface for log/print sidecars. */
+    MessageText?: string;
 }
 
 /**
@@ -1156,7 +1202,7 @@ export class SocketClient {
      * @param labels Optional pre-resolved pointer-manager labels (e.g. from PointerManagerProvider.getResolvedLabels()).
      *               These are injected into the compiler so CDS source can reference them as `:seal.health` or `@seal.health`.
      */
-    public async compileCds(sourceCode: string, labels?: LabelEntry[]): Promise<InstructionResult[]> {
+    public async compileCds(sourceCode: string, labels?: LabelEntry[]): Promise<{ results: InstructionResult[]; sidecars: CdsSidecarResult[] }> {
         const command: CommandMessage = {
             Command: 'COMPILECDS',
             Data: sourceCode
@@ -1167,11 +1213,34 @@ export class SocketClient {
 
         const response = await this.sendCommand(command);
 
-        if (!response.Success) {
+        // Assert failures return Success=false but still populate Results (with error entries)
+        // and Sidecars (with assert metadata). Only throw when no Results are present — that
+        // indicates a hard protocol or parse error with nothing for the caller to inspect.
+        if (!response.Success && !response.Results) {
             throw new Error(response.Error || 'Compilation failed');
         }
 
-        return response.Results || [];
+        return {
+            results:  response.Results  ?? [],
+            sidecars: response.Sidecars ?? [],
+        };
+    }
+
+    public async validateCds(sourceCode: string, labels?: LabelEntry[]): Promise<{ success: boolean; message?: string; diagnostics: CdsDiagnostic[] }> {
+        const command: CommandMessage = {
+            Command: 'VALIDATECDS',
+            Data: sourceCode
+        };
+        if (labels && labels.length > 0) {
+            command.Labels = labels;
+        }
+
+        const response = await this.sendCommand(command);
+        return {
+            success: response.Success,
+            message: response.Message || response.Error,
+            diagnostics: response.Diagnostics ?? [],
+        };
     }
 
     /**
@@ -3244,4 +3313,3 @@ export interface CapturedPacketInfo {
     length: number;
     data: string;
 }
-

@@ -4,6 +4,15 @@ CodeDesigner is a complete C# toolset for the Sony PlayStation 2 **Emotion Engin
 
 ---
 
+## Feature guides
+
+For the recently expanded scripting and cheat workflows, start here:
+
+- [`CodeDesigner.Ps2.CdsLanguage/README.md`](CodeDesigner.Ps2.CdsLanguage/README.md) — CDS control flow, macros, typed memory, diagnostics, sidecars, and examples
+- [`CodeDesigner.Ps2.CheatEngine/README.md`](CodeDesigner.Ps2.CheatEngine/README.md) — raw cheat codes, persistent CDS cheat engine, inject/update/remove workflow, and examples
+
+---
+
 ## Dev environment
 
 Clone repository and sub-repositories(i.e pcsx2 and CheatCodeArchive)
