@@ -20,6 +20,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
         /// <summary>32-bit write — GameShark type 0x20.</summary>
         Word = 0x20,
 
+        /// <summary>Timer gate — CDS cheat-engine type 0xB0.</summary>
+        Timer = 0xB0,
+
         /// <summary>32-bit conditional — GameShark type 0xC0.  Body entries execute only when condition is true.</summary>
         Condition32 = 0xC0,
     }

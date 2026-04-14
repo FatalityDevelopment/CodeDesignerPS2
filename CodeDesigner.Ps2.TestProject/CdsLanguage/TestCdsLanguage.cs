@@ -732,6 +732,26 @@ hexcode $DEADBEEF
                 d.Message.Contains("malformed pointer directive")));
         }
 
+        [TestMethod]
+        public void Diagnostics_UnterminatedTimerBlock_EmitsError()
+        {
+            var parser = new CdsParser();
+            parser.Parse("timer 60\n  freeze word $00123456 = 00000001");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Error &&
+                d.Message.Contains("unterminated timer block")));
+        }
+
+        [TestMethod]
+        public void Diagnostics_UnexpectedEndtimer_EmitsError()
+        {
+            var parser = new CdsParser();
+            parser.Parse("endtimer");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Error &&
+                d.Message.Contains("unexpected 'endtimer'")));
+        }
+
         // -----------------------------------------------------------------------
         // P0: const / alias directives (via CdsPreprocessor)
         // -----------------------------------------------------------------------
@@ -1630,6 +1650,73 @@ endcond
             // Freeze entry
             Assert.AreEqual(0x20347A54u, entries[1].TypeAddr);
             Assert.AreEqual(0xFFu,       entries[1].Value);
+        }
+
+        // -----------------------------------------------------------------------
+        // P1: timer/endtimer directive
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Timer_ParsedCorrectly()
+        {
+            var src = @"
+timer 60
+  freeze word $20347A54 = FF
+endtimer
+";
+            var items = Parse(src);
+            var timer = FindItem<TimerSyntaxItem>(items);
+            Assert.AreEqual(60u, timer.IntervalFrames);
+            Assert.AreEqual(1, timer.Body.Count);
+            Assert.IsInstanceOfType(timer.Body[0], typeof(FreezeSyntaxItem));
+        }
+
+        [TestMethod]
+        public void Timer_DoesNotEmitCodeWords()
+        {
+            var src = @"
+timer 60
+  freeze word $20347A54 = FF
+endtimer
+";
+            var pairs = Compile(src);
+            Assert.AreEqual(0, pairs.Count);
+        }
+
+        [TestMethod]
+        public void GetCheatTableEntries_TimerBlock()
+        {
+            var src = @"
+timer 60
+  freeze word $20347A54 = FF
+endtimer
+";
+            var items = Parse(src);
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            Assert.AreEqual(2, entries.Count);
+            Assert.AreEqual(0xB0000001u, entries[0].TypeAddr);
+            Assert.AreEqual(60u, entries[0].Value);
+            Assert.AreEqual(0x20347A54u, entries[1].TypeAddr);
+            Assert.AreEqual(0xFFu, entries[1].Value);
+        }
+
+        [TestMethod]
+        public void GetCheatTableEntries_TimerWithNestedCond_CountsBodyEntries()
+        {
+            var src = @"
+timer 30
+  cond mem[$20347A50] == 0001
+    freeze word $20347A54 = FF
+  endcond
+endtimer
+";
+            var items = Parse(src);
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            Assert.AreEqual(3, entries.Count);
+            Assert.AreEqual(0xB0000002u, entries[0].TypeAddr);
+            Assert.AreEqual(30u, entries[0].Value);
+            Assert.AreEqual(0xC0347A50u, entries[1].TypeAddr);
+            Assert.AreEqual(0x20347A54u, entries[2].TypeAddr);
         }
 
         [TestMethod]

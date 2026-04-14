@@ -52,7 +52,7 @@ public sealed partial class CodeDesignerPs2Tools
     [Description("Compile a Code Designer Script (.cds) source into PS2 GameShark/Action Replay cheat codes and MIPS memory patches. " +
                  "The language supports: MIPS instructions, address directives, hexcode, setreg, mem.b/h/w/d typed writes, pointer-chain writes, string embedding, " +
                  "scope blocks, labels, const/alias/macro preprocessor, if/while/repeat control flow, " +
-                 "and sidecar directives (assert, breakpoint, watchpoint, log/print). " +
+                 "cheat-engine blocks (freeze, cond, timer), and sidecar directives (assert, breakpoint, watchpoint, log/print). " +
                  "assert directives are checked against live memory when a backend is connected — a failing assert aborts code output. " +
                  "breakpoint and watchpoint sidecars are returned as metadata for the caller to install, and log/print sidecars are returned as metadata for the caller to surface. " +
                  "Server-registered labels are automatically available in CDS source.")]
@@ -266,6 +266,10 @@ public sealed partial class CodeDesignerPs2Tools
                 case CondSyntaxItem cond:
                     sb.AppendLine($"{indent}- conditional cheat if memory 0x{cond.Address:X8} == 0x{cond.ConditionValue:X8}:");
                     AppendCdsExplanation(cond.Body, sb, depth + 1);
+                    break;
+                case TimerSyntaxItem timer:
+                    sb.AppendLine($"{indent}- execute the following cheat entries every {timer.IntervalFrames} frame(s):");
+                    AppendCdsExplanation(timer.Body, sb, depth + 1);
                     break;
             }
         }

@@ -373,6 +373,27 @@ endcond";
         }
 
         [TestMethod]
+        public void InjectFromCds_TimerBlock_WritesTimerAndBodyEntries()
+        {
+            var editor = CreateEditor();
+            var engine = new CdsCheatEngine(editor);
+
+            var cds = @"
+timer 60
+  freeze word $00123456 = FFFFFFFF
+endtimer";
+
+            engine.InjectFromCds(0x00100000, cds);
+
+            uint tableBase = 0x000C0000 + 0x0300;
+            Assert.AreEqual(0xB0000001u, editor.ReadWord(tableBase));
+            Assert.AreEqual(60u, editor.ReadWord(tableBase + 4));
+            Assert.AreEqual(0x20123456u, editor.ReadWord(tableBase + 8));
+            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 12));
+            Assert.AreEqual(0xFFFFFFFFu, editor.ReadWord(tableBase + 16));
+        }
+
+        [TestMethod]
         public void InjectFromCds_SetsIsInjected()
         {
             var editor = CreateEditor();

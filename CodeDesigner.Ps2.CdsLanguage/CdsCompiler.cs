@@ -43,7 +43,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
         }
 
         /// <summary>
-        /// Flatten all <see cref="FreezeSyntaxItem"/> and <see cref="CondSyntaxItem"/> items
+        /// Flatten all <see cref="FreezeSyntaxItem"/>, <see cref="CondSyntaxItem"/>, and
+        /// <see cref="TimerSyntaxItem"/> items
         /// in the syntax tree into a list of raw cheat-table entries compatible with
         /// <c>CodeDesigner.Ps2.CheatEngine.CdsCheatEngine</c>.
         ///
@@ -55,7 +56,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
         ///
         /// <para>
         /// A <see cref="CondSyntaxItem"/> emits a condition entry first (type 0xC0), then
-        /// the entries for its body; this matches the engine's evaluation order.
+        /// the entries for its body; a <see cref="TimerSyntaxItem"/> emits a timer entry first
+        /// (type 0xB0, lower 24 bits = guarded body-entry count), then the entries for its body.
         /// </para>
         /// </summary>
         public static List<(uint TypeAddr, uint Value)> GetCheatTableEntries(IEnumerable<CdsSyntaxItem> items)
@@ -87,11 +89,46 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         break;
                     }
 
+                    case TimerSyntaxItem timer:
+                    {
+                        uint bodyEntryCount = CountCheatEntries(timer.Body);
+                        uint typeAddr = ((uint)timer.FreezeType << 24) | (bodyEntryCount & 0x00FFFFFF);
+                        result.Add((typeAddr, timer.IntervalFrames));
+                        CollectCheatEntries(timer.Body, result);
+                        break;
+                    }
+
                     case ScopeSyntaxItem scope:
                         CollectCheatEntries(scope.Body, result);
                         break;
                 }
             }
+        }
+
+        private static uint CountCheatEntries(IEnumerable<CdsSyntaxItem> items)
+        {
+            uint count = 0;
+
+            foreach (var item in items)
+            {
+                switch (item)
+                {
+                    case FreezeSyntaxItem:
+                        count++;
+                        break;
+                    case CondSyntaxItem cond:
+                        count += 1 + CountCheatEntries(cond.Body);
+                        break;
+                    case TimerSyntaxItem timer:
+                        count += 1 + CountCheatEntries(timer.Body);
+                        break;
+                    case ScopeSyntaxItem scope:
+                        count += CountCheatEntries(scope.Body);
+                        break;
+                }
+            }
+
+            return count;
         }
 
         private static void Collect(IEnumerable<CdsSyntaxItem> items, List<(uint, uint)> result)

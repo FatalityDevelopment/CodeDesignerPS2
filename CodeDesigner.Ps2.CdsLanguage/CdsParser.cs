@@ -33,6 +33,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
     ///   <item><c>breakpoint</c> – sidecar hardware breakpoint at current address</item>
     ///   <item><c>watchpoint (write|read|rw) $ADDR SIZE</c> – sidecar memory watchpoint</item>
     ///   <item><c>log "message"</c> / <c>print "message"</c> – sidecar compile/apply log message</item>
+    ///   <item><c>timer N</c> / <c>endtimer</c> – cheat-engine timer block gated by frame interval</item>
     /// </list>
     ///
     /// <para><b>Scope support:</b> Labels defined inside a <c>scope</c> block are automatically
@@ -115,6 +116,14 @@ namespace CodeDesigner.Ps2.CdsLanguage
         // endcond
         private static readonly Regex EndCondRegex =
             new(@"^endcond$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // timer N
+        private static readonly Regex TimerRegex =
+            new(@"^timer\s+(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // endtimer
+        private static readonly Regex EndTimerRegex =
+            new(@"^endtimer$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Branch mnemonics that use a PC-relative 16-bit offset
         private static readonly HashSet<string> BranchMnemonics = new(StringComparer.OrdinalIgnoreCase)
@@ -570,6 +579,23 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     continue;
                 }
 
+                // ---- Timer block sidecar ----
+                var timerMatch = TimerRegex.Match(trimmed);
+                if (timerMatch.Success)
+                {
+                    uint intervalFrames = uint.Parse(timerMatch.Groups[1].Value);
+                    var timerItem = new TimerSyntaxItem
+                    {
+                        LineNumber = lineNumber,
+                        LineText = trimmed,
+                        IntervalFrames = intervalFrames
+                    };
+                    current.Add(timerItem);
+                    itemsStack.Push(timerItem.Body);
+                    itemsKindStack.Push("timer");
+                    continue;
+                }
+
                 // ---- Endcond ----
                 if (EndCondRegex.IsMatch(trimmed))
                 {
@@ -582,6 +608,22 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     {
                         AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
                             "unexpected 'endcond' with no open cond block", trimmed, "endcond");
+                    }
+                    continue;
+                }
+
+                // ---- Endtimer ----
+                if (EndTimerRegex.IsMatch(trimmed))
+                {
+                    if (itemsKindStack.Count > 0 && itemsKindStack.Peek() == "timer")
+                    {
+                        itemsStack.Pop();
+                        itemsKindStack.Pop();
+                    }
+                    else
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            "unexpected 'endtimer' with no open timer block", trimmed, "endtimer");
                     }
                     continue;
                 }
@@ -608,6 +650,12 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 AddDiagnostic(CdsDiagnosticSeverity.Error, rawLines.Length > 0 ? rawLines.Length : 1,
                     "unterminated cond block — missing 'endcond'", rawLines.LastOrDefault() ?? string.Empty,
                     "cond", "CDS0005");
+            }
+            if (itemsKindStack.Any(k => k == "timer"))
+            {
+                AddDiagnostic(CdsDiagnosticSeverity.Error, rawLines.Length > 0 ? rawLines.Length : 1,
+                    "unterminated timer block — missing 'endtimer'", rawLines.LastOrDefault() ?? string.Empty,
+                    "timer", "CDS0011");
             }
 
             AddDelaySlotDiagnostics(rootItems);
@@ -712,8 +760,10 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 if (BreakpointRegex.IsMatch(t)) continue;
                 if (WatchpointRegex.IsMatch(t)) continue;
                 if (FreezeRegex.IsMatch(t))     continue;
-                if (CondRegex.IsMatch(t))        continue;
-                if (EndCondRegex.IsMatch(t))     continue;
+                if (CondRegex.IsMatch(t))       continue;
+                if (EndCondRegex.IsMatch(t))    continue;
+                if (TimerRegex.IsMatch(t))      continue;
+                if (EndTimerRegex.IsMatch(t))   continue;
 
                 // Everything else that emits an instruction takes 4 bytes
                 if (!t.StartsWith("include") && !t.StartsWith("//"))
