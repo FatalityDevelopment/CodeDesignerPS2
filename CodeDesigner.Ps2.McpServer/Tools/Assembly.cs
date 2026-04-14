@@ -50,7 +50,7 @@ public sealed partial class CodeDesignerPs2Tools
     [McpServerTool(Name = "compile_cds")]
     [DynamicDescription("compile_cds_desc")]
     [Description("Compile a Code Designer Script (.cds) source into PS2 GameShark/Action Replay cheat codes and MIPS memory patches. " +
-                 "The language supports: MIPS instructions, address directives, hexcode, setreg, mem.b/h/w/d typed writes, pointer-chain writes, string embedding, " +
+                 "The language supports: MIPS instructions, address directives, hexcode, setreg, mem.b/h/w/d typed writes, load.b/h/w/d typed loads, pointer-chain writes, string embedding, " +
                  "scope blocks, labels, const/alias/macro preprocessor, if/while/repeat control flow, " +
                  "cheat-engine blocks (freeze, cond, timer), and sidecar directives (assert, breakpoint, watchpoint, log/print). " +
                  "assert directives are checked against live memory when a backend is connected — a failing assert aborts code output. " +
@@ -242,6 +242,9 @@ public sealed partial class CodeDesignerPs2Tools
                 case MemorySyntaxItem mem:
                     sb.AppendLine($"{indent}- {DescribeMemoryItem(mem)}");
                     break;
+                case LoadMemorySyntaxItem load:
+                    sb.AppendLine($"{indent}- {DescribeLoadItem(load)}");
+                    break;
                 case PointerSyntaxItem pointer:
                     sb.AppendLine($"{indent}- follow pointer at 0x{pointer.BaseAddress:X8} via offsets {DescribeOffsets(pointer.Offsets)} and store 0x{pointer.Value:X8}");
                     break;
@@ -289,6 +292,12 @@ public sealed partial class CodeDesignerPs2Tools
         };
 
         return $"{op} {size} memory at offset 0x{mem.MemoryOffset:X4} from ${mem.Register} using 0x{mem.Operand:X8}";
+    }
+
+    private static string DescribeLoadItem(LoadMemorySyntaxItem load)
+    {
+        string size = load.MemorySize.ToString().ToLowerInvariant();
+        return $"load {size} memory at offset 0x{load.MemoryOffset:X4} from ${load.BaseRegister} into ${load.TargetRegister}";
     }
 
     private static string DescribeOffsets(IEnumerable<ushort> offsets) =>

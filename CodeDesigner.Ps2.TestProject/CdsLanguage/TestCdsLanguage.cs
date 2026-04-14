@@ -905,6 +905,50 @@ setreg tmp, BASE
         }
 
         // -----------------------------------------------------------------------
+        // P0: Typed memory loads (load[.b/.h/.w/.d])
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Load_DefaultSize_IsWord()
+        {
+            var items = Parse("address $00100000\nload t0, mem[0x0100] s0");
+            var load = FindItem<LoadMemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Word, load.MemorySize);
+            Assert.AreEqual("lw", load.Operation.Mnemonic, StringComparer.OrdinalIgnoreCase);
+        }
+
+        [TestMethod]
+        public void Load_Half_Size_HasLhInstruction()
+        {
+            var items = Parse("address $00100000\nload.h t0, mem[0x0100] s0");
+            var load = FindItem<LoadMemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Half, load.MemorySize);
+            Assert.AreEqual("lh", load.Operation.Mnemonic, StringComparer.OrdinalIgnoreCase);
+            Assert.AreEqual("t0", load.TargetRegister);
+            Assert.AreEqual("s0", load.BaseRegister);
+        }
+
+        [TestMethod]
+        public void Load_Doubleword_Size_HasLdInstruction()
+        {
+            var items = Parse("address $00100000\nload.d t1, mem[0x0120] s2");
+            var load = FindItem<LoadMemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Doubleword, load.MemorySize);
+            Assert.AreEqual("ld", load.Operation.Mnemonic, StringComparer.OrdinalIgnoreCase);
+            Assert.AreEqual(0x0120u, load.MemoryOffset);
+        }
+
+        [TestMethod]
+        public void Load_CompileAdvancesAddresses()
+        {
+            var pairs = Compile("address $00100000\nload.w t0, mem[0x0100] s0\nhexcode $DEADBEEF");
+            Assert.AreEqual(2, pairs.Count);
+            Assert.AreEqual(0x00100000u, pairs[0].Address);
+            Assert.AreEqual(0x00100004u, pairs[1].Address);
+            Assert.AreEqual(0xDEADBEEFu, pairs[1].Word);
+        }
+
+        // -----------------------------------------------------------------------
         // P1: pointer directive
         // -----------------------------------------------------------------------
 

@@ -599,6 +599,10 @@ namespace CodeDesigner.Ps2.Bridge
                                 d.TryAdd(op.Address, (mem.LineNumber, mem.LineText));
                             break;
 
+                        case LoadMemorySyntaxItem load:
+                            d.TryAdd(load.Operation.Address, (load.LineNumber, load.LineText));
+                            break;
+
                         case StringSyntaxItem str:
                             foreach (var w in str.Words)
                                 d.TryAdd(w.Address, (str.LineNumber, str.LineText));
