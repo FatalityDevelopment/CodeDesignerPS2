@@ -24,6 +24,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
     ///   <item><c>mem[0xOFFSET] reg = 0xVAL</c> – 32-bit memory write (default)</item>
     ///   <item><c>mem.b / mem.h / mem.w / mem.d</c> – sized memory operations (8/16/32/64-bit)</item>
     ///   <item><c>load[.b/.h/.w/.d] dst, mem[0xOFFSET] base</c> – typed memory loads</item>
+    ///   <item><c>store[.b/.h/.w/.d] src, mem[0xOFFSET] base</c> – typed memory stores</item>
     ///   <item><c>pointer $BASE + $OFF1 [+ $OFF2 ...] = $VALUE</c> – pointer-chain write expansion</item>
     ///   <item><c>string "text"</c> – null-terminated ASCII string data</item>
     ///   <item><c>name:</c> – label definition</item>
@@ -79,6 +80,10 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
         private static readonly Regex LoadRegex =
             new(@"^load(?:\.(b|h|w|d))?\s+\$?(\w+)\s*,\s*mem\[(0x[0-9A-Fa-f]+)\]\s+\$?(\w+)$",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static readonly Regex StoreRegex =
+            new(@"^store(?:\.(b|h|w|d))?\s+\$?(\w+)\s*,\s*mem\[(0x[0-9A-Fa-f]+)\]\s+\$?(\w+)$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex PointerRegex =
@@ -413,6 +418,21 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     string baseReg = loadMatch.Groups[4].Value;
                     var memSz = ParseMemSize(sizeSuffix);
                     var item = BuildLoadOp(lineNumber, trimmed, targetReg, offset, baseReg, currentAddress, memSz);
+                    current.Add(item);
+                    currentAddress += 4;
+                    continue;
+                }
+
+                // ---- Typed memory store ----
+                var storeMatch = StoreRegex.Match(trimmed);
+                if (storeMatch.Success)
+                {
+                    string sizeSuffix = storeMatch.Groups[1].Value;
+                    string sourceReg = storeMatch.Groups[2].Value;
+                    uint offset = Convert.ToUInt32(storeMatch.Groups[3].Value, 16);
+                    string baseReg = storeMatch.Groups[4].Value;
+                    var memSz = ParseMemSize(sizeSuffix);
+                    var item = BuildStoreOp(lineNumber, trimmed, sourceReg, offset, baseReg, currentAddress, memSz);
                     current.Add(item);
                     currentAddress += 4;
                     continue;
@@ -759,6 +779,12 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     continue;
                 }
 
+                if (StoreRegex.IsMatch(t))
+                {
+                    currentAddress += 4;
+                    continue;
+                }
+
                 if (TryParsePointerDirective(t, out _, out var pointerOffsets, out _))
                 {
                     currentAddress += (uint)(pointerOffsets.Count + 5) * 4;
@@ -1041,6 +1067,42 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     Address = address,
                     EncodedWord = encoded,
                     Mnemonic = loadMnem
+                }
+            };
+        }
+
+        private static StoreMemorySyntaxItem BuildStoreOp(
+            int lineNumber, string lineText,
+            string sourceReg, uint memOffset, string baseReg,
+            uint address,
+            CdsMemorySize memSize = CdsMemorySize.Word)
+        {
+            string offsetStr = $"${(ushort)memOffset:X4}";
+            string storeMnem = memSize switch
+            {
+                CdsMemorySize.Byte       => "sb",
+                CdsMemorySize.Half       => "sh",
+                CdsMemorySize.Doubleword => "sd",
+                _                        => "sw"
+            };
+
+            uint encoded = TryAssemble($"{storeMnem} ${sourceReg}, {offsetStr}(${baseReg})");
+            return new StoreMemorySyntaxItem
+            {
+                LineNumber = lineNumber,
+                LineText = lineText,
+                Address = address,
+                SourceRegister = sourceReg,
+                BaseRegister = baseReg,
+                MemoryOffset = memOffset,
+                MemorySize = memSize,
+                Operation = new OperationSyntaxItem
+                {
+                    LineNumber = lineNumber,
+                    LineText = lineText,
+                    Address = address,
+                    EncodedWord = encoded,
+                    Mnemonic = storeMnem
                 }
             };
         }
@@ -1400,6 +1462,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         break;
                     case LoadMemorySyntaxItem load:
                         result.Add((load, load.Address));
+                        break;
+                    case StoreMemorySyntaxItem store:
+                        result.Add((store, store.Address));
                         break;
                     case StringSyntaxItem str:
                         result.Add((str, str.Address));

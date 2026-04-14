@@ -603,6 +603,10 @@ namespace CodeDesigner.Ps2.Bridge
                             d.TryAdd(load.Operation.Address, (load.LineNumber, load.LineText));
                             break;
 
+                        case StoreMemorySyntaxItem store:
+                            d.TryAdd(store.Operation.Address, (store.LineNumber, store.LineText));
+                            break;
+
                         case StringSyntaxItem str:
                             foreach (var w in str.Words)
                                 d.TryAdd(w.Address, (str.LineNumber, str.LineText));

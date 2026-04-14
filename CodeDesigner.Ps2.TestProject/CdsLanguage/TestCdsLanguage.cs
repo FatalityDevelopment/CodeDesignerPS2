@@ -949,6 +949,50 @@ setreg tmp, BASE
         }
 
         // -----------------------------------------------------------------------
+        // P0: Typed memory stores (store[.b/.h/.w/.d])
+        // -----------------------------------------------------------------------
+
+        [TestMethod]
+        public void Store_DefaultSize_IsWord()
+        {
+            var items = Parse("address $00100000\nstore t0, mem[0x0100] s0");
+            var store = FindItem<StoreMemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Word, store.MemorySize);
+            Assert.AreEqual("sw", store.Operation.Mnemonic, StringComparer.OrdinalIgnoreCase);
+        }
+
+        [TestMethod]
+        public void Store_Byte_Size_HasSbInstruction()
+        {
+            var items = Parse("address $00100000\nstore.b t0, mem[0x0100] s0");
+            var store = FindItem<StoreMemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Byte, store.MemorySize);
+            Assert.AreEqual("sb", store.Operation.Mnemonic, StringComparer.OrdinalIgnoreCase);
+            Assert.AreEqual("t0", store.SourceRegister);
+            Assert.AreEqual("s0", store.BaseRegister);
+        }
+
+        [TestMethod]
+        public void Store_Doubleword_Size_HasSdInstruction()
+        {
+            var items = Parse("address $00100000\nstore.d t1, mem[0x0120] s2");
+            var store = FindItem<StoreMemorySyntaxItem>(items);
+            Assert.AreEqual(CdsMemorySize.Doubleword, store.MemorySize);
+            Assert.AreEqual("sd", store.Operation.Mnemonic, StringComparer.OrdinalIgnoreCase);
+            Assert.AreEqual(0x0120u, store.MemoryOffset);
+        }
+
+        [TestMethod]
+        public void Store_CompileAdvancesAddresses()
+        {
+            var pairs = Compile("address $00100000\nstore.h t0, mem[0x0100] s0\nhexcode $DEADBEEF");
+            Assert.AreEqual(2, pairs.Count);
+            Assert.AreEqual(0x00100000u, pairs[0].Address);
+            Assert.AreEqual(0x00100004u, pairs[1].Address);
+            Assert.AreEqual(0xDEADBEEFu, pairs[1].Word);
+        }
+
+        // -----------------------------------------------------------------------
         // P1: pointer directive
         // -----------------------------------------------------------------------
 
