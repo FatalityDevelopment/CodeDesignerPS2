@@ -221,6 +221,90 @@ namespace CodeDesigner.Ps2.TestProject
                 "LastBreakpointHit must be the physical address 0x00010004");
         }
 
+        [TestMethod]
+        public void DualCpuScheduler_Watchpoint_RunSlice_PausesAndCapturesHitInfo()
+        {
+            var sched = new DualCpuScheduler();
+
+            sched.EE.LoadProgram(0x00000000u, new uint[] { 0xAC080100u, 0x00000000u });
+            sched.EE.Cpu.RegsLo[8] = 0xDEADBEEFu;
+            sched.EE.Cpu.PC = 0;
+            sched.WriteWatchpoints.Add(new MemoryWatchpoint
+            {
+                Id = "wp-0",
+                VirtualAddress = 0x00000100u,
+                PhysStart = 0x00000100u,
+                PhysEnd = 0x00000104u,
+                Size = 4,
+                Type = WatchpointType.Write,
+            });
+
+            sched.RunSlice(1);
+
+            Assert.IsTrue(sched.Paused, "Scheduler must pause after a watchpoint hit");
+            Assert.IsNotNull(sched.LastWatchpointHit, "Watchpoint hit details must be captured");
+            Assert.AreEqual("wp-0", sched.LastWatchpointHit!.WatchpointId);
+            Assert.AreEqual(0x00000100u, sched.LastWatchpointHit.PhysAddress);
+            Assert.AreEqual(4, sched.LastWatchpointHit.Size);
+            Assert.AreEqual(0u, sched.LastWatchpointHit.PC);
+            Assert.AreEqual(WatchpointType.Write, sched.LastWatchpointHit.Type);
+            Assert.AreEqual(0xDEADBEEFu, sched.EE.Bus.ReadWord(0x00000100u));
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_Watchpoint_StepOne_DetectsOverlappingWrite()
+        {
+            var sched = new DualCpuScheduler();
+
+            sched.EE.LoadProgram(0x00000000u, new uint[] { 0xAC080100u });
+            sched.EE.Cpu.RegsLo[8] = 0x01234567u;
+            sched.EE.Cpu.PC = 0;
+            sched.Paused = true;
+            sched.WriteWatchpoints.Add(new MemoryWatchpoint
+            {
+                Id = "wp-overlap",
+                VirtualAddress = 0x00000103u,
+                PhysStart = 0x00000103u,
+                PhysEnd = 0x00000104u,
+                Size = 1,
+                Type = WatchpointType.Write,
+            });
+
+            sched.StepOne();
+
+            Assert.IsNotNull(sched.LastWatchpointHit, "Overlapping writes must trigger the watchpoint");
+            Assert.AreEqual("wp-overlap", sched.LastWatchpointHit!.WatchpointId);
+            Assert.AreEqual(0x00000100u, sched.LastWatchpointHit.PhysAddress);
+            Assert.AreEqual(4, sched.LastWatchpointHit.Size);
+        }
+
+        [TestMethod]
+        public void DualCpuScheduler_Resume_ClearsLastWatchpointHit()
+        {
+            var sched = new DualCpuScheduler();
+
+            sched.EE.LoadProgram(0x00000000u, new uint[] { 0xAC080100u, 0x00000000u });
+            sched.EE.Cpu.RegsLo[8] = 0xCAFEBABEu;
+            sched.EE.Cpu.PC = 0;
+            sched.WriteWatchpoints.Add(new MemoryWatchpoint
+            {
+                Id = "wp-1",
+                VirtualAddress = 0x00000100u,
+                PhysStart = 0x00000100u,
+                PhysEnd = 0x00000104u,
+                Size = 4,
+                Type = WatchpointType.Write,
+            });
+
+            sched.RunSlice(1);
+            Assert.IsNotNull(sched.LastWatchpointHit, "Watchpoint must fire before resume");
+
+            sched.Paused = false;
+
+            Assert.IsFalse(sched.Paused, "Scheduler must resume when Paused is cleared");
+            Assert.IsNull(sched.LastWatchpointHit, "Resuming must clear the previous watchpoint hit");
+        }
+
         // =====================================================================
         // SIF DMA transfer (IOP↔EE handshake) tests
         // =====================================================================
