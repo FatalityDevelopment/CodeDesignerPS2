@@ -584,6 +584,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 if (timerMatch.Success)
                 {
                     uint intervalFrames = uint.Parse(timerMatch.Groups[1].Value);
+                    if (intervalFrames == 0)
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Warning, lineNumber,
+                            "timer interval 0 will never execute its body", trimmed, "timer", "CDS0012");
+                    }
                     var timerItem = new TimerSyntaxItem
                     {
                         LineNumber = lineNumber,

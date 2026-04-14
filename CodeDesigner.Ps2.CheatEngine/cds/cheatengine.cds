@@ -59,7 +59,8 @@ scope CheatEngine {
         ori s0, s0, $0300
         addu t0, s0, zero
 
-        // Increment persistent frame counter at base + 0x020C.
+        // Increment persistent frame counter at EngineData.frameCounter.
+        // Relative to the cheat table base, frameCounter lives at -0x00F4 (0xFF0C as a signed immediate).
         addiu v0, t0, $FF0C
         lw v1, $0000(v0)
         addiu v1, v1, $0001

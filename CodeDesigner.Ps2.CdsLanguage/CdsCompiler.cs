@@ -92,6 +92,9 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     case TimerSyntaxItem timer:
                     {
                         uint bodyEntryCount = CountCheatEntries(timer.Body);
+                        if (bodyEntryCount > 0x00FFFFFF)
+                            throw new InvalidOperationException(
+                                $"timer block contains too many cheat entries ({bodyEntryCount}); maximum encodable count is 16777215.");
                         uint typeAddr = ((uint)timer.FreezeType << 24) | (bodyEntryCount & 0x00FFFFFF);
                         result.Add((typeAddr, timer.IntervalFrames));
                         CollectCheatEntries(timer.Body, result);

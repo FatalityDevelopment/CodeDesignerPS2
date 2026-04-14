@@ -752,6 +752,16 @@ hexcode $DEADBEEF
                 d.Message.Contains("unexpected 'endtimer'")));
         }
 
+        [TestMethod]
+        public void Diagnostics_TimerZeroInterval_EmitsWarning()
+        {
+            var parser = new CdsParser();
+            parser.Parse("timer 0\n  freeze word $00123456 = 00000001\nendtimer");
+            Assert.IsTrue(parser.Diagnostics.Any(d =>
+                d.Severity == CdsDiagnosticSeverity.Warning &&
+                d.Message.Contains("timer interval 0")));
+        }
+
         // -----------------------------------------------------------------------
         // P0: const / alias directives (via CdsPreprocessor)
         // -----------------------------------------------------------------------
@@ -1717,6 +1727,28 @@ endtimer
             Assert.AreEqual(30u, entries[0].Value);
             Assert.AreEqual(0xC0347A50u, entries[1].TypeAddr);
             Assert.AreEqual(0x20347A54u, entries[2].TypeAddr);
+        }
+
+        [TestMethod]
+        public void GetCheatTableEntries_MultipleTimerBlocks_PreserveOrder()
+        {
+            var src = @"
+timer 30
+  freeze word $00123456 = 00000001
+endtimer
+timer 60
+  freeze half $00AABBCC = 0002
+endtimer
+";
+            var items = Parse(src);
+            var entries = CdsCompiler.GetCheatTableEntries(items);
+            Assert.AreEqual(4, entries.Count);
+            Assert.AreEqual(0xB0000001u, entries[0].TypeAddr);
+            Assert.AreEqual(30u, entries[0].Value);
+            Assert.AreEqual(0x20123456u, entries[1].TypeAddr);
+            Assert.AreEqual(0xB0000001u, entries[2].TypeAddr);
+            Assert.AreEqual(60u, entries[2].Value);
+            Assert.AreEqual(0x10AABBCCu, entries[3].TypeAddr);
         }
 
         [TestMethod]
