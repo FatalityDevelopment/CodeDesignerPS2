@@ -358,6 +358,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'addPatch':
                     await this.handleAddPatch(msg.codes ?? '');
                     break;
+                case 'openMarkdownHelp':
+                    await this.handleOpenMarkdownHelp(msg.file ?? '');
+                    break;
                 case 'focusRegion':
                     this.editorProvider.focusLivePanelByLabel(msg.label ?? '');
                     break;
@@ -2373,6 +2376,34 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         return { game, cheatType, cheats };
+    }
+
+    /**
+     * Open a markdown help file (located in the workspace root) as a VS Code
+     * markdown preview panel.  `fileName` should be a bare filename such as
+     * "CODE_DESIGNER_SOURCE.md" or "CHEAT_ENGINE.md".
+     */
+    private async handleOpenMarkdownHelp(fileName: string): Promise<void> {
+        if (!fileName) { return; }
+
+        // Prefer the workspace root; fall back to the first workspace folder.
+        const root = this.workspaceRoot
+            || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+            || '';
+
+        if (!root) {
+            vscode.window.showWarningMessage('Cannot locate help file: no workspace folder is open.');
+            return;
+        }
+
+        const filePath = path.join(root, fileName);
+        if (!fs.existsSync(filePath)) {
+            vscode.window.showWarningMessage(`Help file not found: ${filePath}`);
+            return;
+        }
+
+        const uri = vscode.Uri.file(filePath);
+        await vscode.commands.executeCommand('markdown.showPreview', uri);
     }
 
     /** Compile the active .cds file and return GameShark codes to the CDS tab. */
