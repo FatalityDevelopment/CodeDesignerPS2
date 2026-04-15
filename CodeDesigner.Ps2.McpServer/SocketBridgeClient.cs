@@ -109,7 +109,11 @@ public sealed class SocketBridgeClient : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
+        // Acquire the lock to ensure no concurrent SendAsync is in flight before
+        // we tear down the connection.  Time-box so Dispose never hangs.
+        bool locked = _lock.Wait(TimeSpan.FromSeconds(5));
         ResetConnection();
+        if (locked) _lock.Release();
         _lock.Dispose();
     }
 
@@ -135,12 +139,14 @@ public sealed class SocketBridgeClient : IDisposable
 
     /// <summary>
     /// Close and null out the current TCP connection.
-    /// Must be called while holding <see cref="_lock"/> (or from <see cref="Dispose"/>).
+    /// Must be called while holding <see cref="_lock"/> (or from <see cref="Dispose"/>
+    /// after acquiring the lock).  Exceptions during cleanup are intentionally
+    /// suppressed — disposal code must not throw.
     /// </summary>
     private void ResetConnection()
     {
-        try { _stream?.Dispose(); } catch { /* ignore */ }
-        try { _tcp?.Dispose();    } catch { /* ignore */ }
+        try { _stream?.Dispose(); } catch (Exception) { /* intentionally suppressed during cleanup */ }
+        try { _tcp?.Dispose();    } catch (Exception) { /* intentionally suppressed during cleanup */ }
         _stream = null;
         _tcp    = null;
     }
