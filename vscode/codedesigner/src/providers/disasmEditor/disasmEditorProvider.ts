@@ -800,6 +800,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           }));
         }
         webviewPanel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
+      } else if (message.type === "getAddressRefs") {
+        await this.handleGetAddressRefs(webviewPanel, message.address as number,
+          DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
       } else if (message.type === "assembleInstr") {
         if (this.socketClient?.isConnected()) {
           try {
@@ -1546,6 +1549,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     }));
                 }
                 panel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
+            } else if (message.type === 'getAddressRefs') {
+                await this.handleGetAddressRefs(panel, message.address as number,
+                    baseAddress, totalBytes, region);
             } else if (message.type === 'convertCheat') {
                 try {
                     const result = await this.socketClient!.convertCheat(
@@ -1974,9 +1980,76 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Parse a hex byte pattern string (e.g. "0x12 34 AB CD" or "12,34,AB").
-   * Returns null if the pattern is invalid.
+   * Handle a `getAddressRefs` message from the webview.
+   * Runs a refs search for `targetAddress` and returns enriched results
+   * (address + instruction text) via an `addressRefsResult` message.
    */
+  private async handleGetAddressRefs(
+    panel: vscode.WebviewPanel,
+    targetAddress: number,
+    baseAddress: number,
+    length: number,
+    region?: string,
+    fileData?: Buffer
+  ): Promise<void> {
+    try {
+      const addrHex = targetAddress.toString(16).toUpperCase().padStart(8, '0');
+      let matches: Array<{ instructionIndex: number; address: number }> = [];
+
+      if (fileData) {
+        // File panel: use C# backend for refs search when connected, else return empty.
+        if (this.socketClient?.isConnected()) {
+          try {
+            matches = await this.socketClient.search(baseAddress, length, addrHex, 'refs', undefined, fileData);
+          } catch {
+            matches = [];
+          }
+        }
+      } else if (this.socketClient?.isConnected()) {
+        // Live panel: delegate to C# backend.
+        try {
+          matches = await this.socketClient.search(baseAddress, length, addrHex, 'refs', region);
+        } catch {
+          matches = [];
+        }
+      }
+
+      // Enrich each match with disassembled instruction text.
+      const refs: Array<{ address: string; instruction: string }> = await Promise.all(
+        matches.map(async m => {
+          const matchAddrHex = m.address.toString(16).toUpperCase().padStart(8, '0');
+          let instruction = '';
+          try {
+            if (fileData) {
+              // Extract 4 bytes from fileData at the match offset.
+              const offset = m.address - baseAddress;
+              if (offset >= 0 && offset + 4 <= fileData.length) {
+                const word = fileData.readUInt32LE(offset);
+                const wordHex = `0x${word.toString(16).padStart(8, '0')}`;
+                const results = await this.socketClient!.disassemble(wordHex, m.address);
+                if (results?.[0]?.Assembly) { instruction = results[0].Assembly; }
+              }
+            } else if (this.socketClient?.isConnected()) {
+              // Live panel: read 4 bytes from emulator memory.
+              const buf = await this.socketClient!.readMemory(m.address, 4, region ?? 'ee');
+              const word = buf.readUInt32LE(0);
+              const wordHex = `0x${word.toString(16).padStart(8, '0')}`;
+              const results = await this.socketClient!.disassemble(wordHex, m.address);
+              if (results?.[0]?.Assembly) { instruction = results[0].Assembly; }
+            }
+          } catch { /* ignore enrichment failures — address is still shown */ }
+          return { address: matchAddrHex, instruction };
+        })
+      );
+
+      panel.webview.postMessage({ type: 'addressRefsResult', refs });
+    } catch (err: any) {
+      console.error(`[REFS] handleGetAddressRefs failed: ${err?.message ?? err}`);
+      panel.webview.postMessage({ type: 'addressRefsResult', refs: [] });
+    }
+  }
+
+
   private parseBytePattern(pattern: string): number[] | null {
     const cleaned = pattern.replace(/0x/gi, '').replace(/[,\s]+/g, ' ').trim();
     if (!cleaned) { return null; }
@@ -2505,11 +2578,23 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const { workspaceDir, gameDiscId } = ctx;
         const setName = this._activeSetName ?? gameDiscId;
         const addrHex = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
-        await this.socketClient.addLabelEntry(workspaceDir, gameDiscId, setName, {
+        const updatedSet = await this.socketClient.addLabelEntry(workspaceDir, gameDiscId, setName, {
           address: addrHex,
           name: labelName,
           comment: comment,
         });
+        // Convert set entries to the LabelEntry format expected by the webview.
+        const setLabels: LabelEntry[] = updatedSet.entries
+          .filter(e => e.name && !e.hidden)
+          .map(e => ({ address: e.address, label: e.name, comment: e.comment }));
+        // Broadcast merged labels so the newly saved entry is visible immediately.
+        // Merge order: server global < set entries (set entries take priority).
+        let labels = await this.socketClient.getLabels().catch(() => [] as LabelEntry[]);
+        labels = this._mergeLabels(labels, setLabels);
+        labels = this._mergeLabels(labels, this._gameLabels);
+        if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
+        panel.webview.postMessage({ type: 'labelsUpdated', labels });
+        return;
       } else if (this._gameLabelsPath()) {
         // Offline fallback: socket not connected — save to per-game labels.json.
         this._saveGameLabel(address, labelName, comment);
@@ -2548,7 +2633,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const { workspaceDir, gameDiscId } = ctx;
         const setName = this._activeSetName ?? gameDiscId;
         const addrHex = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
-        await this.socketClient.deleteLabelEntry(workspaceDir, gameDiscId, setName, addrHex);
+        const updatedSet = await this.socketClient.deleteLabelEntry(workspaceDir, gameDiscId, setName, addrHex);
+        // Convert set entries to the LabelEntry format expected by the webview.
+        const setLabels: LabelEntry[] = updatedSet.entries
+          .filter(e => e.name && !e.hidden)
+          .map(e => ({ address: e.address, label: e.name, comment: e.comment }));
+        let labels = await this.socketClient.getLabels().catch(() => [] as LabelEntry[]);
+        labels = this._mergeLabels(labels, setLabels);
+        labels = this._mergeLabels(labels, this._gameLabels);
+        if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
+        panel.webview.postMessage({ type: 'labelsUpdated', labels });
+        return;
       } else if (this._gameLabelsPath()) {
         // Offline fallback: socket not connected — remove from per-game labels.json.
         this._deleteGameLabel(address);

@@ -157,6 +157,13 @@ export interface HistoryEntry {
   disasm?: string;
 }
 
+export interface RefEntry {
+  /** Hex address of the instruction that references the target (e.g. "00123456"). */
+  address: string;
+  /** Human-readable instruction text, e.g. "JAL 0x00567890". Empty when unavailable. */
+  instruction: string;
+}
+
 // ── Panel Visibility ──────────────────────────────────────────────────────────
 
 export interface PanelVisibility {

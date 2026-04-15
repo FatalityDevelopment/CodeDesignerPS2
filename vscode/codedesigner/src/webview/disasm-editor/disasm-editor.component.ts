@@ -496,6 +496,10 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.vscode.postMessage({ type: 'getAddressHistory', address });
   }
 
+  protected onRequestRefs(address: number): void {
+    this.vscode.postMessage({ type: 'getAddressRefs', address });
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Converter Overlay Event Handlers (Phase 10)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1539,6 +1543,13 @@ export class DisasmEditorComponent implements AfterViewInit {
       const history = data['history'] as Array<{ name: string; date: string; value: string; disasm?: string }> | undefined;
       this.zone.run(() => {
         this.editOverlayRef()?.setHistory(history ?? []);
+      });
+    }
+
+    if (data['type'] === 'addressRefsResult') {
+      const refs = data['refs'] as Array<{ address: string; instruction: string }> | undefined;
+      this.zone.run(() => {
+        this.editOverlayRef()?.setRefs(refs ?? []);
       });
     }
   }

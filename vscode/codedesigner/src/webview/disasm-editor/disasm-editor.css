@@ -1628,6 +1628,84 @@ app-bottom-panel {
     white-space: pre;
 }
 
+/* Disabled address input field */
+.edit-overlay-input--disabled {
+    opacity: 0.7;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+    background: #2d2d30;
+}
+
+/* ── Refs tab content ── */
+.edit-overlay-refs-list {
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 6px 0;
+}
+
+.edit-overlay-refs-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.edit-overlay-refs-list::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
+}
+
+.edit-overlay-refs-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: #858585;
+    font-style: italic;
+}
+
+.edit-overlay-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #3e3e42;
+    border-top-color: #007acc;
+    border-radius: 50%;
+    animation: edit-overlay-spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes edit-overlay-spin {
+    to { transform: rotate(360deg); }
+}
+
+.edit-overlay-refs-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 12px;
+    font-family: monospace;
+    font-size: 11px;
+    border-bottom: 1px solid #2d2d30;
+}
+
+.edit-overlay-refs-row:last-child {
+    border-bottom: none;
+}
+
+.edit-overlay-refs-addr {
+    color: #9cdcfe;
+    flex-shrink: 0;
+    font-weight: bold;
+}
+
+.edit-overlay-refs-instr {
+    flex: 1;
+    color: #cccccc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Register value editable indicator */
 .dbg-editable {
     cursor: pointer;
