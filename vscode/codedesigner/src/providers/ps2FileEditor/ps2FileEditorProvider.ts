@@ -46,13 +46,16 @@ export class Ps2FileEditorProvider implements vscode.CustomReadonlyEditorProvide
             return;
         }
 
-        // Close this placeholder tab — openFileMode opens the real live
-        // memory panels via the DisasmEditorProvider.
-        webviewPanel.dispose();
-
         // Delegate entirely to the panel provider which sends the
         // STARTFILEMODE socket command and opens live memory panels.
-        await this._panelProvider.openFileMode(filePath);
+        try {
+            await this._panelProvider.openFileMode(filePath);
+            // Close this placeholder tab — the live memory panels are the real UI.
+            webviewPanel.dispose();
+        } catch {
+            webviewPanel.webview.html = this._getHtml(fileName,
+                'Failed to load file. Check the CodeDesigner output channel for details.');
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -86,6 +89,7 @@ export class Ps2FileEditorProvider implements vscode.CustomReadonlyEditorProvide
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 }
