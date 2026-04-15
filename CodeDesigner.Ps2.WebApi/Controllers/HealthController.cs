@@ -25,7 +25,6 @@ public class HealthController : ControllerBase
         var host = _config["MultiplayerServers:Host"] ?? "127.0.0.1";
         var serverConfigs = _config.GetSection("MultiplayerServers:Servers").GetChildren().ToList();
 
-        var results = new List<ServerHealthDto>();
         var checkTasks = serverConfigs.Select(async s =>
         {
             var name = s["Name"] ?? "Unknown";
@@ -72,11 +71,10 @@ public class HealthController : ControllerBase
         if (port <= 0)
             return (false, "Port not configured");
 
-        // UDP servers (NAT, DNS) are connectionless — attempt a socket connect
-        // which on UDP just sets the remote endpoint without a real handshake.
-        // A successful connect indicates the local network stack can route to the
-        // address; the server itself may not respond without a valid payload.
-        // For a richer check we fall back to TCP probing where possible.
+        // UDP servers (NAT, DNS) are connectionless — a UDP socket Connect() only sets
+        // the remote endpoint without sending or receiving data, so it verifies network
+        // routability but cannot confirm whether the service is actually listening.
+        // This is documented as a best-effort check for UDP servers.
         if (protocol.Equals("UDP", StringComparison.OrdinalIgnoreCase))
         {
             try
