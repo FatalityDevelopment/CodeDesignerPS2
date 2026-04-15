@@ -394,3 +394,6 @@ appsettings.Local.json
 # ── VSCode extension user-specific settings ────────────────────────────────
 vscode/codedesigner/codedesigner-settings.json
 vscode/codedesigner/emu-settings.json
+
+# ── Build artifacts with literal backslashes (Windows path remnants) ────────
+website/obj\\Debug/
