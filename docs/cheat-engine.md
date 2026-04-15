@@ -1,3 +1,5 @@
+[← Back to Documentation Index](README.md)
+
 # Cheat Engine — User Guide
 
 The CodeDesigner cheat engine lets you apply cheat codes to a running PS2 game, either as a one-time write or as a persistent routine that re-applies the cheat every game frame.

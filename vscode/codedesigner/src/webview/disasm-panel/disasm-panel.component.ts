@@ -267,7 +267,11 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   openDocs(): void {
-    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'DISASSEMBLER.md' });
+    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'docs/README.md' });
+  }
+
+  openArchiveDocs(): void {
+    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'CheatCodeArchive/consoles/README.md' });
   }
 
   importBin(): void {

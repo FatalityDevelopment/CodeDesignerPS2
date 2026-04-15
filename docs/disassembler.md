@@ -1,3 +1,5 @@
+[← Back to Documentation Index](README.md)
+
 # Disassembler — User Guide
 
 CodeDesigner's disassembler gives you a live, scrollable view of PS2 Emotion Engine memory while a game is running. This guide covers everything from opening your first view to using breakpoints and the hex panel.

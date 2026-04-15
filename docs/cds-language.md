@@ -1,3 +1,5 @@
+[← Back to Documentation Index](README.md)
+
 # CDS Language — User Guide
 
 Code Designer Script (CDS) is a patch scripting language for PS2 games. You write short scripts that describe what you want to change in game memory, then compile them to MIPS machine code, GameShark cheat codes, or a persistent cheat-engine table.

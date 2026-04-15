@@ -2390,17 +2390,32 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private async handleOpenMarkdownHelp(fileName: string): Promise<void> {
         if (!fileName) { return; }
 
-        // Prefer the extension directory so bundled help files always work,
-        // regardless of which workspace the user has open.
-        const candidates: string[] = [];
-        if (this.extensionPath) {
-            candidates.push(path.join(this.extensionPath, fileName));
+        // Build a list of directories to probe, in priority order:
+        //   1. Extension install directory (bundled help files like CHEAT_ENGINE.md)
+        //   2. workspaceRoot (where codedesigner-settings.json was found)
+        //   3. Every open workspace folder
+        //   4. Walk up from extensionPath to find the repo root (handles F5 dev
+        //      host where the repo root isn't an open workspace folder)
+        const roots = new Set<string>();
+        if (this.extensionPath) { roots.add(this.extensionPath); }
+        if (this.workspaceRoot) { roots.add(this.workspaceRoot); }
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+            roots.add(folder.uri.fsPath);
         }
-        const wsRoot = this.workspaceRoot || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (wsRoot) {
-            candidates.push(path.join(wsRoot, fileName));
+        // Walk up from the extension directory — the extension lives at
+        // <repo>/vscode/codedesigner/, so ancestor directories may contain
+        // the target file (e.g. <repo>/docs/README.md).
+        if (this.extensionPath) {
+            let dir = this.extensionPath;
+            for (let i = 0; i < 5; i++) {
+                const parent = path.dirname(dir);
+                if (parent === dir) { break; }
+                roots.add(parent);
+                dir = parent;
+            }
         }
 
+        const candidates = [...roots].map(r => path.join(r, fileName));
         const filePath = candidates.find(p => fs.existsSync(p));
         if (!filePath) {
             vscode.window.showWarningMessage(`Help file not found: ${fileName}`);

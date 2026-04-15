@@ -1,3 +1,5 @@
+[← Back to Documentation Index](README.md)
+
 # CodeDesigner — Project Reference
 
 This document describes every project in the `CodeDesigner.sln` solution and the VS Code extension.

@@ -139,6 +139,7 @@ const SNAP_PREVIEW = 5;
               }
 
               <button id="docsBtn" (click)="docsClick.emit()">📖 Docs</button>
+              <button id="archiveDocsBtn" (click)="archiveDocsClick.emit()">📚 Archive</button>
 
             </div>
           </div>
@@ -285,6 +286,7 @@ export class SettingsTabComponent {
   readonly snapshotPcsx2Click = output<void>();
   readonly saveScreenshotClick = output<void>();
   readonly docsClick           = output<void>();
+  readonly archiveDocsClick    = output<void>();
   readonly importBinClick     = output<void>();
   readonly emulatorChange     = output<string>();
   readonly biosChange         = output<string>();
