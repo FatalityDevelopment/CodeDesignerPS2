@@ -65,6 +65,24 @@ public class ServerStatusDto
     public string? Region { get; set; }
 }
 
+public class ServerHealthDto
+{
+    public required string Name { get; set; }
+    public required string Description { get; set; }
+    public required string Host { get; set; }
+    public int Port { get; set; }
+    public required string Protocol { get; set; }
+    public required string Status { get; set; }
+    public string? Detail { get; set; }
+}
+
+public class MultiplayerHealthDto
+{
+    public required string OverallStatus { get; set; }
+    public required List<ServerHealthDto> Servers { get; set; }
+    public DateTime CheckedAt { get; set; }
+}
+
 public class ApiResponse<T>
 {
     public bool Success { get; set; }
