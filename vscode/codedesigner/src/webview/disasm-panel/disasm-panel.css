@@ -694,6 +694,30 @@ button:disabled {
     margin: 12px 0 4px;
 }
 
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.section-header .section-label {
+    margin: 12px 0 4px;
+}
+
+.help-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    cursor: pointer;
+    background: var(--vscode-button-secondaryBackground, transparent);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+    border-radius: 2px;
+}
+
+.help-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+}
+
 /* ── Memories section (embedded in Settings tab accordion) ──────────────── */
 
 app-mcp-memory-overlay {

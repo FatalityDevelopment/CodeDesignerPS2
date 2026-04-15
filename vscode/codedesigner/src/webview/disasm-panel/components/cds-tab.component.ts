@@ -32,7 +32,10 @@ interface CdsCompileResultMsg {
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="cds-container">
-      <div class="section-label">Compiled GameShark Codes</div>
+      <div class="section-header">
+        <div class="section-label">Compiled GameShark Codes</div>
+        <button class="help-btn" title="Open CDS guide" (click)="onOpenHelp()">? Help</button>
+      </div>
       <textarea id="cds-output" readonly
         [value]="cdsOutput()"
         placeholder="Compiled GameShark codes will appear here after pressing Compile.&#10;&#10;Add an address directive in your .cds file:&#10;  address 0x20123456&#10;  nop&#10;  add $t0, $s0, $s1"></textarea>
@@ -77,6 +80,10 @@ export class CdsTabComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());
+  }
+
+  onOpenHelp(): void {
+    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'CODE_DESIGNER_SOURCE.md' });
   }
 
   onCompileCds(): void {

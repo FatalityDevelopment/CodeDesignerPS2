@@ -70,6 +70,9 @@ interface ArchiveCheatsUpdatedMsg {
           <button class="cheats-tool-btn" id="jokerMakerBtn" (click)="openJokerMaker()" title="Build a Joker/button-combo code">
             🕹️ Joker
           </button>
+          <button class="cheats-tool-btn" (click)="onOpenHelp()" title="Open the Cheat Engine guide">
+            ? Help
+          </button>
         </div>
       </div>
 
@@ -229,5 +232,9 @@ export class CheatsTabComponent implements OnDestroy {
 
   openJokerMaker(): void {
     this.jokerOverlay().open();
+  }
+
+  onOpenHelp(): void {
+    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'CHEAT_ENGINE.md' });
   }
 }
