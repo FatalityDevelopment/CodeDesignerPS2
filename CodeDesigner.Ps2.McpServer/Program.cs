@@ -53,10 +53,13 @@ connectionString ??= DatabasePaths.GetDefaultConnectionString();
 // ── Connect to the database (already initialised by the Database tool) ─────
 var dbOptions = DatabaseInitialiser.BuildDbOptions(connectionString);
 
-// Register the socket bridge client as a singleton so all tools share it.
-// Construct the instance via factory so the DI container does not attempt to
-// resolve primitive constructor parameters (string, int) which would fail.
-builder.Services.AddSingleton(sp => new SocketBridgeClient(host, port));
+// Create a single shared bridge client.  All tools and DI-resolved services
+// share this one instance so only ONE persistent TCP connection is maintained
+// to the bridge server, eliminating the per-request connect/disconnect spam
+// that appeared in the logs during packet-capture sessions.
+// SocketBridgeClient is IDisposable; the DI container disposes it on shutdown.
+var sharedBridge = new SocketBridgeClient(host, port);
+builder.Services.AddSingleton(sharedBridge);
 
 // Register DbContextOptions as singleton so McpDatabaseService can create
 // short-lived DbContext instances per operation without needing a scoped lifetime.
@@ -70,9 +73,9 @@ builder.Services.AddSingleton<McpDatabaseService>(sp =>
 
 // Build tool instances with descriptions loaded from the database so that
 // descriptions can be edited at runtime without recompiling the server.
-var bridgeForLoader  = new SocketBridgeClient(host, port);
-var dbSvcForLoader   = new McpDatabaseService(dbOptions, bridgeForLoader);
-var toolsInstance    = new CodeDesignerPs2Tools(bridgeForLoader, dbSvcForLoader);
+// Reuse sharedBridge — no second client instance is needed.
+var dbSvcForLoader   = new McpDatabaseService(dbOptions, sharedBridge);
+var toolsInstance    = new CodeDesignerPs2Tools(sharedBridge, dbSvcForLoader);
 var dynamicTools     = McpToolLoader.Build(toolsInstance, dbOptions).ToList();
 
 // Register the MCP server with stdio transport and pre-built dynamic tools.

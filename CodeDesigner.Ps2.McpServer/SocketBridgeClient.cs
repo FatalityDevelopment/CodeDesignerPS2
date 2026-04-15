@@ -7,7 +7,13 @@ namespace CodeDesigner.Ps2.McpServer;
 /// <summary>
 /// Thin TCP client that forwards JSON commands to the CodeDesigner.Ps2
 /// socket server running on localhost:8765 and returns the raw JSON response.
-/// Each call opens a fresh connection so there is no shared mutable state.
+///
+/// A single persistent TCP connection is reused across all calls.  The
+/// connection is established lazily on the first call and is automatically
+/// re-established if the server closes it or a transport error occurs.
+/// A <see cref="SemaphoreSlim"/> serialises concurrent callers so that only
+/// one command is in flight at a time, which matches the server's
+/// newline-delimited request/response protocol.
 ///
 /// Port 8765 is the embedded socket server started by the emulator's --run
 /// mode, which the VS Code extension also uses.  Both clients (extension and
@@ -17,10 +23,15 @@ namespace CodeDesigner.Ps2.McpServer;
 /// The port can be overridden via the CODEDESIGNER_PORT environment variable
 /// to support connecting to test instances or alternative emulator sessions.
 /// </summary>
-public sealed class SocketBridgeClient
+public sealed class SocketBridgeClient : IDisposable
 {
     private readonly string _host;
     private readonly int _port;
+
+    // Persistent connection — lazily created, reset on error.
+    private TcpClient? _tcp;
+    private NetworkStream? _stream;
+    private readonly SemaphoreSlim _lock = new(1, 1);
 
     public SocketBridgeClient(string? host = null, int? port = null)
     {
@@ -51,23 +62,22 @@ public sealed class SocketBridgeClient
     /// </summary>
     public async Task<string> SendAsync(object command, CancellationToken cancellationToken = default)
     {
+        await _lock.WaitAsync(cancellationToken);
         try
         {
-            using var tcp = new TcpClient();
-            await tcp.ConnectAsync(_host, _port, cancellationToken);
+            await EnsureConnectedAsync(cancellationToken);
 
             var payload = JsonSerializer.Serialize(command) + "\n";
             var sendBytes = Encoding.UTF8.GetBytes(payload);
 
-            var stream = tcp.GetStream();
-            await stream.WriteAsync(sendBytes, cancellationToken);
+            await _stream!.WriteAsync(sendBytes, cancellationToken);
 
             // Read until we see a newline — the server always terminates responses with \n
             var sb = new StringBuilder();
             var buffer = new byte[16384];
             while (true)
             {
-                var n = await stream.ReadAsync(buffer, cancellationToken);
+                var n = await _stream.ReadAsync(buffer, cancellationToken);
                 if (n == 0)
                     break;
                 sb.Append(Encoding.UTF8.GetString(buffer, 0, n));
@@ -78,8 +88,11 @@ public sealed class SocketBridgeClient
 
             return sb.ToString().Trim();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Drop the connection so the next call gets a fresh one.
+            ResetConnection();
+
             return JsonSerializer.Serialize(new
             {
                 Success = false,
@@ -87,5 +100,48 @@ public sealed class SocketBridgeClient
                         $"start the emulator with `dotnet run -- --run` in `CodeDesigner.Ps2/`. Detail: {ex.Message}"
             });
         }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        ResetConnection();
+        _lock.Dispose();
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Ensure <see cref="_tcp"/> and <see cref="_stream"/> are connected.
+    /// Creates a new <see cref="TcpClient"/> if the current one is null or no
+    /// longer connected.  Must be called while holding <see cref="_lock"/>.
+    /// </summary>
+    private async Task EnsureConnectedAsync(CancellationToken ct)
+    {
+        if (_tcp != null && _tcp.Connected)
+            return;
+
+        ResetConnection();
+
+        var tcp = new TcpClient();
+        await tcp.ConnectAsync(_host, _port, ct);
+        _tcp    = tcp;
+        _stream = tcp.GetStream();
+    }
+
+    /// <summary>
+    /// Close and null out the current TCP connection.
+    /// Must be called while holding <see cref="_lock"/> (or from <see cref="Dispose"/>).
+    /// </summary>
+    private void ResetConnection()
+    {
+        try { _stream?.Dispose(); } catch { /* ignore */ }
+        try { _tcp?.Dispose();    } catch { /* ignore */ }
+        _stream = null;
+        _tcp    = null;
     }
 }
