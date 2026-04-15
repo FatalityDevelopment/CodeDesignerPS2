@@ -3,6 +3,7 @@
 import * as vscode from 'vscode';
 import { DisasmEditorProvider } from './providers/disasmEditor/disasmEditorProvider';
 import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider';
+import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorProvider';
 import { PointerManagerProvider, PointerTreeItem } from './providers/pointerManager/pointerManagerProvider';
 import { SocketClient } from './socketClient';
 
@@ -56,6 +57,14 @@ export function activate(context: vscode.ExtensionContext) {
 	// Register webview panels — pass socketClient so the panel can auto-connect
 	const disasmPanelProvider = new DisasmPanelProvider(socketClient, editorProvider, context.extensionUri);
 	disasmPanelProvider.register(context);
+
+	// Register custom editor for PS2 binary files (.elf, .bin, .raw).
+	// This makes VS Code route File → Open for these extensions through
+	// CodeDesigner instead of showing a raw text/hex view.
+	const ps2FileEditor = new Ps2FileEditorProvider(socketClient, disasmPanelProvider, context.extensionUri);
+	context.subscriptions.push(
+		vscode.window.registerCustomEditorProvider(Ps2FileEditorProvider.viewType, ps2FileEditor)
+	);
 
 	// ── Pointer Manager tree view (commented out — will be expanded later) ────
 	const pointerManagerProvider = new PointerManagerProvider(context);
@@ -293,7 +302,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// ── File mode: open .elf / .bin / .raw in the internal emulator ──────────
 	// Registered as a command so it can be invoked from the command palette
-	// or from the onDidOpenTextDocument handler below.
+	// or from the command palette.
 	const openElfFileCommand = vscode.commands.registerCommand(
 		'codedesigner.openElfFile',
 		async (uri?: vscode.Uri) => {
@@ -304,21 +313,11 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(openElfFileCommand);
 
-	// Intercept opens of registered PS2 binary file types so the user can use
-	// the standard File → Open menu.  When VS Code opens one of these files as
-	// a text document we close it immediately and load it into the emulator
-	// via STARTFILEMODE instead.
-	const FILE_MODE_EXTENSIONS = new Set(['.elf', '.bin', '.raw']);
-	context.subscriptions.push(
-		vscode.workspace.onDidOpenTextDocument(async (doc) => {
-			const ext = doc.uri.fsPath.slice(doc.uri.fsPath.lastIndexOf('.')).toLowerCase();
-			if (!FILE_MODE_EXTENSIONS.has(ext)) { return; }
-			// Close the raw text editor VS Code opened.
-			await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-			// Load the file into the internal emulator.
-			await disasmPanelProvider.openFileMode(doc.uri.fsPath);
-		})
-	);
+	// NOTE: File → Open for .elf/.bin/.raw is now handled by the
+	// Ps2FileEditorProvider custom editor registered above (via
+	// contributes.customEditors in package.json).  The previous
+	// onDidOpenTextDocument handler was removed because VS Code does not
+	// fire that event for binary files.
 
 	// Auto-connect on activation — try to reach an already-running server first;
 	// if that fails, auto-start the CodeDesigner console app with --server.
