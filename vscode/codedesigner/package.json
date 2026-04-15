@@ -164,6 +164,18 @@
         "path": "./syntaxes/cds.tmLanguage.json"
       }
     ],
+    "customEditors": [
+      {
+        "viewType": "codedesigner.ps2File",
+        "displayName": "CodeDesigner: PS2 File",
+        "selector": [
+          { "filenamePattern": "*.elf" },
+          { "filenamePattern": "*.bin" },
+          { "filenamePattern": "*.raw" }
+        ],
+        "priority": "default"
+      }
+    ],
     "configurationDefaults": {
       "editor.tokenColorCustomizations": {
         "textMateRules": [
