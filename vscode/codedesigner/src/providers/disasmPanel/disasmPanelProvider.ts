@@ -2379,26 +2379,31 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Open a markdown help file (located in the workspace root) as a VS Code
-     * markdown preview panel.  `fileName` should be a bare filename such as
-     * "CODE_DESIGNER_SOURCE.md" or "CHEAT_ENGINE.md".
+     * Open a markdown help file as a VS Code markdown preview panel.
+     * `fileName` should be a bare filename such as "CODE_DESIGNER_SOURCE.md"
+     * or "CHEAT_ENGINE.md".
+     *
+     * Resolution order:
+     *   1. Extension installation directory (bundled help files).
+     *   2. Workspace root / first workspace folder (user-provided overrides).
      */
     private async handleOpenMarkdownHelp(fileName: string): Promise<void> {
         if (!fileName) { return; }
 
-        // Prefer the workspace root; fall back to the first workspace folder.
-        const root = this.workspaceRoot
-            || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-            || '';
-
-        if (!root) {
-            vscode.window.showWarningMessage('Cannot locate help file: no workspace folder is open.');
-            return;
+        // Prefer the extension directory so bundled help files always work,
+        // regardless of which workspace the user has open.
+        const candidates: string[] = [];
+        if (this.extensionPath) {
+            candidates.push(path.join(this.extensionPath, fileName));
+        }
+        const wsRoot = this.workspaceRoot || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (wsRoot) {
+            candidates.push(path.join(wsRoot, fileName));
         }
 
-        const filePath = path.join(root, fileName);
-        if (!fs.existsSync(filePath)) {
-            vscode.window.showWarningMessage(`Help file not found: ${filePath}`);
+        const filePath = candidates.find(p => fs.existsSync(p));
+        if (!filePath) {
+            vscode.window.showWarningMessage(`Help file not found: ${fileName}`);
             return;
         }
 
