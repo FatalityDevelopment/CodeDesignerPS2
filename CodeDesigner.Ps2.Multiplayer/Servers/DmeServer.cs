@@ -213,7 +213,7 @@ public class DmeServer : BaseMediusTcpServer
             sessionKey, world.WorldId, dmeClient.DmeId);
 
         // Send SERVER_CONNECT_ACCEPT_TCP with the assigned DME id.
-        var accept = ScertPacket.CreateConnectAcceptTcp(state.ScertId, (uint)dmeClient.DmeId, (ushort)world.Clients.Count, null);
+        var accept = ScertPacket.CreateConnectAcceptTcp(state.ScertId, (ushort)dmeClient.DmeId, (ushort)world.Clients.Count, null);
         await SendPacketAsync(tcp, accept, ct);
 
         // Notify other world members that this player has joined.

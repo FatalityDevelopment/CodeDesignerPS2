@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CodeDesigner.Ps2.Multiplayer
@@ -19,9 +20,11 @@ builder.Configuration
     .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("config.json", optional: true, reloadOnChange: false);
 
-// Console logging
+// Console logging + file logging
+var logFile = Path.Combine(AppContext.BaseDirectory, "multiplayer.log");
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
+builder.Logging.AddProvider(new FileLoggerProvider(logFile));
 builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
 // Load server config
@@ -122,5 +125,49 @@ public class MultiplayerHostedService : IHostedService
         _dme.Stop();
         _nat.Stop();
         return Task.CompletedTask;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Simple append-to-file logger — no extra NuGet packages required.
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class FileLoggerProvider : ILoggerProvider
+{
+    private readonly StreamWriter _writer;
+    private readonly object _lock = new();
+
+    public FileLoggerProvider(string path)
+    {
+        _writer = new StreamWriter(path, append: false) { AutoFlush = true };
+    }
+
+    public ILogger CreateLogger(string categoryName) => new FileLogger(categoryName, _writer, _lock);
+
+    public void Dispose() => _writer.Dispose();
+}
+
+public sealed class FileLogger : ILogger
+{
+    private readonly string _category;
+    private readonly StreamWriter _writer;
+    private readonly object _lock;
+
+    public FileLogger(string category, StreamWriter writer, object @lock)
+    {
+        _category = category;
+        _writer   = writer;
+        _lock     = @lock;
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+    public bool IsEnabled(LogLevel level) => level >= LogLevel.Debug;
+
+    public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        if (!IsEnabled(level)) return;
+        var line = $"{DateTime.Now:HH:mm:ss.fff} [{level.ToString()[..4]}] {_category.Split('.').Last()}: {formatter(state, exception)}";
+        if (exception != null) line += Environment.NewLine + exception;
+        lock (_lock) _writer.WriteLine(line);
     }
 }

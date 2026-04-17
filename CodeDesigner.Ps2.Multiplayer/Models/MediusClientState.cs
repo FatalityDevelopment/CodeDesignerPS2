@@ -1,3 +1,5 @@
+using CodeDesigner.Ps2.Multiplayer.Crypto;
+
 namespace CodeDesigner.Ps2.Multiplayer.Models;
 
 public enum PlayerStatus
@@ -48,6 +50,9 @@ public class MediusClientState
 
     /// <summary>Raw bytes the client sent in CLIENT_CRYPTKEY_PUBLIC.</summary>
     public byte[] ClientCryptKey { get; set; } = Array.Empty<byte>();
+
+    /// <summary>RSA cipher constructed from the client's public key (for hash verification).</summary>
+    public Ps2Rsa? ClientRsa { get; set; }
 
     /// <summary>SCERT client counter used in SERVER_CONNECT_ACCEPT_TCP.</summary>
     public uint ScertId { get; set; }

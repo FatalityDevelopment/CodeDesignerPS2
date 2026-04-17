@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using CodeDesigner.Ps2.Multiplayer.Crypto;
 
 namespace CodeDesigner.Ps2.Multiplayer.Protocol;
 
@@ -24,24 +25,29 @@ public class ScertPacket
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// SERVER_HELLO — carries the server's 128-byte RSA public modulus N (little-endian).
-    /// Pass null / all-zeros to signal "no encryption" to the client.
+    /// SERVER_HELLO — PS2 format: [N_server: 64 bytes LE][ARG1: ushort = 0x006E][ARG2: ushort = 0x0001].
+    /// The PS2 reads the server's RSA public key N from the first 64 bytes to use for:
+    ///   1) RSA-decrypting SERVER_CRYPTKEY_PEER payload
+    ///   2) RSA-encrypting the CLIENT_CONNECT_TCP RSA_KEY field
+    /// Sending only the 4 version bytes (no RSA N) causes the PS2 to use a garbage key,
+    /// breaking both directions of the handshake.
     /// </summary>
-    public static ScertPacket CreateHello(byte[]? rsaN = null) => new()
+    public static ScertPacket CreateHello() => new()
     {
         MessageType = RT_MSG_TYPE.RT_MSG_SERVER_HELLO,
-        // 128-byte RSA modulus; all-zero means no encryption
-        Payload = rsaN ?? new byte[128],
+        Payload = [.. Ps2Rsa.ServerKey.GetPublicKey(), 0x6E, 0x00, 0x01, 0x00],
     };
 
     /// <summary>
     /// SERVER_CRYPTKEY_PEER — server's RC4 session key (64 bytes).
-    /// Send all-zero when encryption is disabled.
+    /// Pass a non-null <paramref name="hash"/> (4 bytes) to send as an encrypted packet
+    /// (0x80 flag set) with the payload RSA-encrypted using the client's public key.
     /// </summary>
-    public static ScertPacket CreateCryptKeyPeer(byte[] key) => new()
+    public static ScertPacket CreateCryptKeyPeer(byte[] key, byte[]? hash = null) => new()
     {
         MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CRYPTKEY_PEER,
         Payload     = key,
+        Hash        = hash,
     };
 
     /// <summary>
@@ -55,33 +61,59 @@ public class ScertPacket
 
     /// <summary>
     /// SERVER_CONNECT_ACCEPT_TCP — completes the SCERT connect handshake.
-    /// clientIp is the client's remote IPv4 address (sent back in network byte order).
+    /// Format depends on Medius version:
+    ///   v &lt;= 108 (PS2 old): [UNK_07: 3 bytes][PlayerId: ushort][PlayerCount: ushort][IP: 4 bytes] = 11 bytes
+    ///   v &gt; 108 (newer):    [PlayerId: ushort][ScertId: uint][PlayerCount: ushort][IP: 4 bytes] = 12 bytes
     /// </summary>
-    public static ScertPacket CreateConnectAcceptTcp(uint scertId, uint playerId, ushort playerCount, IPAddress? clientIp)
+    public static ScertPacket CreateConnectAcceptTcp(uint scertId, ushort playerId, ushort playerCount, IPAddress? clientIp, int mediusVersion = 108)
     {
-        using var ms = new MemoryStream(14);
-        using var bw = new BinaryWriter(ms, Encoding.ASCII, leaveOpen: true);
-        bw.Write(scertId);      // 4 bytes
-        bw.Write(playerId);     // 4 bytes
-        bw.Write(playerCount);  // 2 bytes
-        // Client's IP in network (big-endian) byte order
         byte[] ip = (clientIp ?? IPAddress.Any).MapToIPv4().GetAddressBytes();
-        ms.Write(ip, 0, 4);     // 4 bytes NBO
-        return new ScertPacket
+
+        if (mediusVersion <= 108)
         {
-            MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_ACCEPT_TCP,
-            Payload     = ms.ToArray(),
-        };
+            // Old PS2 format per Horizon RT_MSG_SERVER_CONNECT_ACCEPT_TCP
+            using var ms = new MemoryStream(11);
+            using var bw = new BinaryWriter(ms, Encoding.ASCII, leaveOpen: true);
+            bw.Write(new byte[] { 0x01, 0x08, 0x10 }); // UNK_07
+            bw.Write(playerId);                         // 2 bytes LE
+            bw.Write(playerCount);                      // 2 bytes LE
+            ms.Write(ip, 0, 4);                         // 4 bytes NBO
+            return new ScertPacket
+            {
+                MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_ACCEPT_TCP,
+                Payload     = ms.ToArray(),
+            };
+        }
+        else
+        {
+            // New format
+            using var ms = new MemoryStream(12);
+            using var bw = new BinaryWriter(ms, Encoding.ASCII, leaveOpen: true);
+            bw.Write(playerId);     // 2 bytes LE
+            bw.Write(scertId);      // 4 bytes LE
+            bw.Write(playerCount);  // 2 bytes LE
+            ms.Write(ip, 0, 4);     // 4 bytes NBO
+            return new ScertPacket
+            {
+                MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_ACCEPT_TCP,
+                Payload     = ms.ToArray(),
+            };
+        }
     }
 
     /// <summary>SERVER_CONNECT_COMPLETE — signals session is fully open.</summary>
     public static ScertPacket CreateConnectComplete() => new()
     {
         MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_COMPLETE,
-        Payload     = BitConverter.GetBytes((uint)0x0001),
+        Payload     = BitConverter.GetBytes((ushort)0x0001),  // ARG1: ushort per Horizon
     };
 
-    /// <summary>SERVER_CONNECT_REQUIRE — used in newer Medius (>108) handshake.</summary>
+    /// <summary>
+    /// SERVER_CONNECT_REQUIRE — triggers CLIENT_CONNECT_TCP from the PS2 SCERT overlay.
+    /// Old protocol (v &lt;= 108): sent from the CLIENT_CONNECT_TCP handler (new-proto path only).
+    /// New protocol (v &gt; 108): sent after CLIENT_CONNECT_TCP; client replies with CLIENT_CONNECT_READY_REQUIRE.
+    /// Payload is empty; the PS2 SCERT overlay reads only its global state, not the packet.
+    /// </summary>
     public static ScertPacket CreateConnectRequire() => new()
     {
         MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_REQUIRE,
@@ -118,9 +150,26 @@ public class ScertPacket
     // Serialization
     // -------------------------------------------------------------------------
 
-    /// <summary>Serialize this packet to a byte array (unencrypted).</summary>
+    /// <summary>
+    /// Serialize this packet to bytes.
+    /// If <see cref="Hash"/> is set (4 bytes), the packet is sent encrypted:
+    ///   [type|0x80][len_lo][len_hi][hash:4][payload]
+    /// Otherwise it is sent plaintext:
+    ///   [type][len_lo][len_hi][payload]
+    /// </summary>
     public byte[] Serialize()
     {
+        if (Hash is { Length: EncryptedHashSize })
+        {
+            var enc = new byte[HeaderSize + EncryptedHashSize + Payload.Length];
+            enc[0] = (byte)((byte)MessageType | 0x80);
+            enc[1] = (byte)(Payload.Length & 0xFF);
+            enc[2] = (byte)((Payload.Length >> 8) & 0xFF);
+            Buffer.BlockCopy(Hash, 0, enc, HeaderSize, EncryptedHashSize);
+            Buffer.BlockCopy(Payload, 0, enc, HeaderSize + EncryptedHashSize, Payload.Length);
+            return enc;
+        }
+
         var result = new byte[HeaderSize + Payload.Length];
         result[0] = (byte)MessageType;
         result[1] = (byte)(Payload.Length & 0xFF);

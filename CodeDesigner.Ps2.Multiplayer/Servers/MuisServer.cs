@@ -36,6 +36,9 @@ public class MuisServer : BaseMediusTcpServer
     public Task StartAsync(CancellationToken ct) =>
         StartAsync(_config.BindAddress, _config.MuisPort, ct);
 
+    // MUIS does NOT send CRYPTKEY_GAME — matches Horizon's per-server behaviour.
+    protected override bool SendCryptKeyGameOnConnect => false;
+
     // =========================================================================
     // Medius message dispatch
     // =========================================================================

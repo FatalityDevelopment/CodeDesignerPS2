@@ -82,7 +82,7 @@ public sealed partial class CodeDesignerPs2Tools
 
     [McpServerTool(Name = "net_recv_capture")]
     [DynamicDescription("net_recv_capture_desc")]
-    [Description("Drain captured packets from the DEV9 capture queue. Returns packet metadata (direction, timestamp, length) and base64-encoded frame data. Requires PCSX2 PINE mode.")]
+    [Description("Drain captured packets from the DEV9 capture queue. Returns packet metadata (direction, timestamp, length) and hex dump of frame data. Requires PCSX2 PINE mode.")]
     public async Task<string> NetRecvCapture(
         [Description("Maximum number of packets to drain from the queue.")] int maxPackets = 50,
         CancellationToken cancellationToken = default)
@@ -111,6 +111,21 @@ public sealed partial class CodeDesignerPs2Tools
                 ulong ts = p.TryGetProperty("timestampUs", out var t) ? t.GetUInt64() : 0;
                 int len = p.TryGetProperty("length", out var l) ? l.GetInt32() : 0;
                 sb.AppendLine($"  [{count}] {dir} ts={ts}µs len={len}B");
+
+                // Show hex dump of full frame so packets can be analysed inline
+                if (p.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.String)
+                {
+                    byte[] bytes = Convert.FromBase64String(dataEl.GetString()!);
+                    int dumpLen = bytes.Length;
+                    for (int off = 0; off < dumpLen; off += 16)
+                    {
+                        int chunk = Math.Min(16, dumpLen - off);
+                        sb.Append("       ");
+                        for (int j = 0; j < chunk; j++)
+                            sb.Append($"{bytes[off + j]:X2} ");
+                        sb.AppendLine();
+                    }
+                }
             }
 
             if (count == 0)

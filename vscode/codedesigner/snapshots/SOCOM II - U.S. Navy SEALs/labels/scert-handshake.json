@@ -1,0 +1,327 @@
+{
+  "setName": "scert-handshake",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "entries": [
+    {
+      "address": "0x0061E7B8",
+      "name": "SCERT_NewConn",
+      "comment": "TCP conn entry",
+      "type": "Function"
+    },
+    {
+      "address": "0x00623EE0",
+      "name": "SCERT_RecvPkt",
+      "comment": "Inbound packet resolver",
+      "type": "Function"
+    },
+    {
+      "address": "0x00623DC0",
+      "name": "SCERT_GetConnByIndex",
+      "comment": "Conn slot lookup",
+      "type": "Function"
+    },
+    {
+      "address": "0x00624C00",
+      "name": "SCERT_CheckSocketState",
+      "comment": "Socket flag checker",
+      "type": "Function"
+    },
+    {
+      "address": "0x00623F68",
+      "name": "SCERT_ResolvePktNode",
+      "comment": "Resolves or allocates a packet node from the connection recv ring. a0=connIndex, a1=reqType(\u003C0x100), a2=outPktPtr. If nothing found returns 0xA. Used by SCERT_RecvPkt and SCERT_NewConn.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AA30",
+      "name": "SCERT_RecvDispatch_State1",
+      "comment": "Type dispatch state=1; jump table at 0x006639D0",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AC40",
+      "name": "SCERT_RecvDispatch_State2",
+      "comment": "Type dispatch state=2; jump table at 0x00663A50",
+      "type": "Function"
+    },
+    {
+      "address": "0x006639D0",
+      "name": "gSCERT_JumpTable_State1",
+      "comment": "Handler table state=1; types 0x21-0x3F",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00663A50",
+      "name": "gSCERT_JumpTable_State2",
+      "comment": "Handler table state=2",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0061ADF0",
+      "name": "SCERT_Handler_Type21_Error",
+      "comment": "OOO disconnect if type=0x21 received out of order",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AAC0",
+      "name": "SCERT_Handler_ConnReq_S1",
+      "comment": "Type 0x22 state-1; calls SCERT_BuildConnectTCP",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AB40",
+      "name": "SCERT_Handler_Type23_S1",
+      "comment": "Type 0x23 state-1",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AC70",
+      "name": "SCERT_Handler_ConnReq_S2",
+      "comment": "Type 0x22 state-2",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061ACF0",
+      "name": "SCERT_Handler_Type23_S2",
+      "comment": "Type 0x23 state-2",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AE88",
+      "name": "SCERT_Handler_Ignore",
+      "comment": "Types 0x25-0x3E silently discarded",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AEC8",
+      "name": "SCERT_PktFree",
+      "comment": "Free packet node",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636E70",
+      "name": "SCERT_KeyExchange",
+      "comment": "64-byte RC4 key install",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636738",
+      "name": "SCERT_GetKeyCtx",
+      "comment": "Get key context",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636788",
+      "name": "SCERT_AllocKeyCtx",
+      "comment": "Alloc key context",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636870",
+      "name": "SCERT_KeyCtxInstall",
+      "comment": "Install key ctx",
+      "type": "Function"
+    },
+    {
+      "address": "0x006368A8",
+      "name": "SCERT_SetConnRemoteAddr",
+      "comment": "Store remote addr",
+      "type": "Function"
+    },
+    {
+      "address": "0x006366B8",
+      "name": "SCERT_AllocSendPkt",
+      "comment": "Alloc outbound packet",
+      "type": "Function"
+    },
+    {
+      "address": "0x001959B8",
+      "name": "FNC_memset",
+      "comment": "Likely memset or bclear; called with a2=0x40 to zero a 64-byte key buffer.",
+      "type": "Function"
+    },
+    {
+      "address": "0x00639CA8",
+      "name": "SCERT_CopyKey",
+      "comment": "Copy 0x40-byte RC4 key",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061D7A4",
+      "name": "SCERT_ConnCleanup",
+      "comment": "Full conn cleanup",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061C640",
+      "name": "SCERT_RecvPktCore",
+      "comment": "Core recv processing",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061B710",
+      "name": "SCERT_ErrorDisconnect",
+      "comment": "Conn teardown",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061C000",
+      "name": "SCERT_HeapFree",
+      "comment": "Internal heap free",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061BFC0",
+      "name": "SCERT_HeapAlloc",
+      "comment": "Internal heap alloc",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AA94",
+      "name": "SCERT_TypeDispatch_Core",
+      "comment": "Jump table indexer",
+      "type": "Function"
+    },
+    {
+      "address": "0x00624C38",
+      "name": "SCERT_ParseTypeFlags",
+      "comment": "Parse raw SCERT type",
+      "type": "Function"
+    },
+    {
+      "address": "0x00624CA8",
+      "name": "SCERT_QueueSend",
+      "comment": "Queue outbound TCP packet",
+      "type": "Function"
+    },
+    {
+      "address": "0x002FDAF0",
+      "name": "MUIS_AddUniverseEntry",
+      "comment": "Adds entry to display list",
+      "type": "Function"
+    },
+    {
+      "address": "0x00453168",
+      "name": "gMUIS_ConnObjPtr",
+      "comment": "Global ptr to 0x3C-byte MUIS conn object",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x003C62C0",
+      "name": "MUIS_WaitForUniverseData",
+      "comment": "Job callback; polls [a0\u002B0x2C] via lbu",
+      "type": "Function"
+    },
+    {
+      "address": "0x003C6370",
+      "name": "MUIS_UniverseDataReady",
+      "comment": "Fires when DataReadyFlag set",
+      "type": "Function"
+    },
+    {
+      "address": "0x001828A0",
+      "name": "SCERT_VtableThunk",
+      "comment": "Vtable dispatcher; called with a1=2",
+      "type": "Function"
+    },
+    {
+      "address": "0x003C6220",
+      "name": "MUIS_SetupUniversePoll",
+      "comment": "Register async universe poll job",
+      "type": "Function"
+    },
+    {
+      "address": "0x003C6620",
+      "name": "MUIS_ConnObj_Ctor",
+      "comment": "Ctor for 0x3C-byte MUIS conn obj",
+      "type": "Function"
+    },
+    {
+      "address": "0x00318408",
+      "name": "MUIS_Connect",
+      "comment": "Top-level MUIS connection entry",
+      "type": "Function"
+    },
+    {
+      "address": "0x002FB1AC",
+      "name": "MUIS_ProcessUniverseResponse",
+      "comment": "Parses server response; sets DataReadyFlag",
+      "type": "Function"
+    },
+    {
+      "address": "0x002CC670",
+      "name": "MUIS_UniverseFilter",
+      "comment": "Validates universe entry",
+      "type": "Function"
+    },
+    {
+      "address": "0x00453168:\u002B0x0000",
+      "name": "VTable",
+      "comment": "VTable ptr; 0x00432FC0 at runtime",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00453168:\u002B0x0004",
+      "name": "JobHandle",
+      "comment": "Set by MUIS_SetupUniversePoll via 0x001A3920"
+    },
+    {
+      "address": "0x00453168:\u002B0x002c",
+      "name": "DataReadyFlag",
+      "comment": "Polled via lbu; non-zero = server response parsed; stays 0 = hang"
+    },
+    {
+      "address": "0x00453168:\u002B0x0030",
+      "name": "JobPtr",
+      "comment": "Async job struct",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00453168:\u002B0x0034",
+      "name": "TimeoutParam",
+      "comment": "Set from a2=6 at call site 0x003184A4"
+    },
+    {
+      "address": "0x00453168:\u002B0x0038",
+      "name": "SCERTStreamPtr",
+      "comment": "Live SCERT TCP stream",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0061ABC0",
+      "name": "SCERT_Handler_Type24_S1",
+      "comment": "Type 0x24 state-1",
+      "type": "Function"
+    },
+    {
+      "address": "0x00650000",
+      "name": "SCERT_Overlay_Fn0",
+      "comment": "First fn at overlay base; calls 0x0034C6F0 0x003EFBD0 0x0034AD00 0x00180E10",
+      "type": "Function"
+    },
+    {
+      "address": "0x006500A0",
+      "name": "SCERT_Overlay_Fn1",
+      "comment": "Reads gSCERT_GlobalStruct; a0=0x28C; calls 0x00180E10",
+      "type": "Function"
+    },
+    {
+      "address": "0x0064DAE8",
+      "name": "SCERT_BuildConnectTCP",
+      "comment": "STUB in r0004 static ELF; real overlay code confirmed in server dump 0x00634000-0x00664A4E",
+      "type": "Function"
+    },
+    {
+      "address": "0x0064DB10",
+      "name": "SCERT_BuildType23Response",
+      "comment": "Stubbed in static ELF; real overlay code confirmed",
+      "type": "Function"
+    },
+    {
+      "address": "0x0040C768",
+      "name": "gSCERT_GlobalStruct",
+      "comment": "8-byte ld \u002B lh at \u002B8; read by SCERT_Overlay_Fn1"
+    }
+  ]
+}
