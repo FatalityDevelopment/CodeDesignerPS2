@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -12,6 +13,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_progress_reports")]
+    [DynamicDescription("list_progress_reports_desc")]
     [Description("List all progress reports stored in the database. Call this at the start of a session to check for reports from previous sessions.")]
     public async Task<string> ListProgressReports(CancellationToken cancellationToken = default)
     {
@@ -27,6 +29,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_progress_report")]
+    [DynamicDescription("get_progress_report_desc")]
     [Description("Read a previously saved progress report from the database. Load this at the start of a session to resume work from where it was left off.")]
     public async Task<string> GetProgressReport(
         [Description(
@@ -48,7 +51,8 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "save_progress_report")]
-    [Description("Create or overwrite a progress report in the database. The name should be a short identifier for the current task (e.g. 'god-of-war-health').")]
+    [DynamicDescription("save_progress_report_desc")]
+    [Description("Create or overwrite a progress report in the database. The name should be a short identifier for the current task (e.g. 'god-of-war-health'). Optionally scope the report to a specific agent by supplying the agent's database ID.")]
     public async Task<string> SaveProgressReport(
         [Description(
             "Short unique name for this report. Use hyphens as separators. " +
@@ -57,13 +61,17 @@ public sealed partial class CodeDesignerPs2Tools
             "Full Markdown content of the progress report. Include: game name, current objective, " +
             "all discovered addresses with their labels, structure maps, watchpoint findings, " +
             "confirmed cheat codes, and a clear list of next steps.")] string content,
+        [Description(
+            "Optional agent database ID to scope this report to a specific agent. " +
+            "When omitted (or null) the report is shared across all agents.")] int? agentId = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            await db.SaveMemoryAsync(name, content, cancellationToken);
+            await db.SaveMemoryAsync(name, content, agentId, cancellationToken);
             var sanitised = McpDatabaseService.SanitiseName(name);
-            return WithRules($"Progress report '{sanitised}' saved to the database.");
+            var scope = agentId.HasValue ? $" (agent {agentId})" : " (shared)";
+            return WithRules($"Progress report '{sanitised}'{scope} saved to the database.");
         }
         catch (ArgumentException ex)
         {
@@ -72,6 +80,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "delete_progress_report")]
+    [DynamicDescription("delete_progress_report_desc")]
     [Description("Delete a progress report from the database. Use only when a task is fully complete and the report is no longer needed.")]
     public async Task<string> DeleteProgressReport(
         [Description("The report name to delete (as returned by list_progress_reports).")] string name,
@@ -90,11 +99,46 @@ public sealed partial class CodeDesignerPs2Tools
         }
     }
 
+    [McpServerTool(Name = "get_agent_memories")]
+    [DynamicDescription("get_agent_memories_desc")]
+    [Description("List all memory entries that are scoped to a specific agent (i.e. private to that agent). Returns report names; call get_progress_report to load the content of any entry.")]
+    public async Task<string> GetAgentMemories(
+        [Description("The database ID of the agent whose memories to retrieve.")] int agentId,
+        CancellationToken cancellationToken = default)
+    {
+        var names = await db.ListAgentMemoriesAsync(agentId, cancellationToken);
+        if (names.Count == 0)
+            return $"No agent-specific memories found for agent {agentId}.";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Agent {agentId} memories ({names.Count}):");
+        foreach (var n in names)
+            sb.AppendLine($"  {n}");
+        return sb.ToString().TrimEnd();
+    }
+
+    [McpServerTool(Name = "get_shared_memories")]
+    [DynamicDescription("get_shared_memories_desc")]
+    [Description("List all shared memory entries (not scoped to any specific agent). Returns report names; call get_progress_report to load the content of any entry.")]
+    public async Task<string> GetSharedMemories(CancellationToken cancellationToken = default)
+    {
+        var names = await db.ListSharedMemoriesAsync(cancellationToken);
+        if (names.Count == 0)
+            return "No shared memories found.";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Shared memories ({names.Count}):");
+        foreach (var n in names)
+            sb.AppendLine($"  {n}");
+        return sb.ToString().TrimEnd();
+    }
+
     // -------------------------------------------------------------------------
     // Settings — application configuration via the socket server database
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_setting")]
+    [DynamicDescription("get_setting_desc")]
     [Description("Read a single application setting from the database by key. Well-known keys include 'BiosPath', 'DiscPath', and 'ui.selectedGame'.")]
     public async Task<string> GetSetting(
         [Description("Setting key to retrieve (e.g. 'BiosPath', 'DiscPath', 'ui.selectedGame').")] string key,
@@ -105,6 +149,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "set_setting")]
+    [DynamicDescription("set_setting_desc")]
     [Description("Insert or update an application setting in the database. Pass an empty string as value to clear the setting without deleting its key.")]
     public async Task<string> SetSetting(
         [Description("Setting key to insert or update (e.g. 'BiosPath', 'ui.selectedGame').")] string key,
@@ -118,6 +163,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_all_settings")]
+    [DynamicDescription("get_all_settings_desc")]
     [Description("Return all application settings from the database as a key=value list. Optionally supply a prefix (e.g. 'ui.') to filter to a specific category.")]
     public async Task<string> GetAllSettings(
         [Description("Optional key prefix to filter results (e.g. 'ui.' returns only UI settings). Leave blank for all settings.")] string? prefix = null,
@@ -155,6 +201,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "delete_setting")]
+    [DynamicDescription("delete_setting_desc")]
     [Description("Remove an application setting from the database by key.")]
     public async Task<string> DeleteSetting(
         [Description("Setting key to remove (e.g. 'ui.selectedGame').")] string key,
@@ -171,6 +218,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "get_nav_history")]
+    [DynamicDescription("get_nav_history_desc")]
     [Description("Return the server-side navigation history: the list of EE addresses recently visited by navigate_to calls during the current session.")]
     public async Task<string> GetNavHistory(CancellationToken cancellationToken)
     {
@@ -204,6 +252,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "clear_nav_history")]
+    [DynamicDescription("clear_nav_history_desc")]
     [Description("Clear the server-side navigation history. Works in both internal emulator and PINE/PCSX2 modes.")]
     public async Task<string> ClearNavHistory(CancellationToken cancellationToken)
     {
@@ -212,6 +261,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "navigate_to")]
+    [DynamicDescription("navigate_to_desc")]
     [Description("Tell the VS Code disasm editor to jump to a specific EE virtual address. When the editor is open, the view scrolls to and highlights the given address.")]
     public async Task<string> NavigateTo(
         [Description("EE virtual address to navigate to (hex or decimal, e.g. '0x8054ABCD').")] string address,
@@ -231,6 +281,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_address_snapshot_history")]
+    [DynamicDescription("get_address_snapshot_history_desc")]
     [Description("Read the historical 4-byte value at a specific EE virtual address across every memory snapshot saved to the snapshot directory. Useful for tracking value changes over time.")]
     public async Task<string> GetAddressSnapshotHistory(
         [Description("EE virtual address to look up (hex or decimal, e.g. '0x80200000').")] string address,
@@ -281,15 +332,20 @@ public sealed partial class CodeDesignerPs2Tools
     private const int QueryDbTruncatedCellWidth = 57; // MaxCellWidth - 3 for the "…" suffix
 
     [McpServerTool(Name = "query_db")]
+    [DynamicDescription("query_db_desc")]
     [Description("""
-        Execute a read-only SELECT query against the CodeDesigner SQLite database and return the results as a formatted table.
-        Only SELECT and CTE (WITH … SELECT) statements are permitted — INSERT/UPDATE/DELETE/DROP/CREATE are blocked.
+        Execute a SQL statement against the CodeDesigner SQL Server database.
+
+        SELECT and CTE (WITH … SELECT) statements return the full result set as a formatted table.
+        DML statements (INSERT, UPDATE, DELETE) are committed immediately and return the number of rows affected —
+        use these for bulk-importing memory entries, cheat codes, or other data without going through the seeder pipeline.
+        DDL operations (DROP, CREATE, ALTER) are blocked to prevent accidental schema damage.
 
         Available tables:
           Settings          (Key, Value, Description, UpdatedAt)
           LabelSets         (Id, SetName, GameId, IsBuiltIn)
-          Labels            (Id, LabelSetId, Address, Name, Type, Hidden, Comment)
-          LabelMembers      (Id, LabelId, Offset, Name)
+          Labels            (Id, LabelSetId, ParentId, Address, Name, Type, Offset, ValueType, Hidden, Dynamic, Comment)
+          LabelMembers      (Id, LabelId, Offset, Name, ValueType, Dynamic, Hidden) — view over child Labels where ParentId IS NOT NULL
           Games             (Id, Title, Description)
           GameRegions       (Id, Name)
           GameDiscs         (Id, GameId, GameRegionId, Serial, CRC, IsoPath)
@@ -298,7 +354,7 @@ public sealed partial class CodeDesignerPs2Tools
           Cheats            (Id, CheatListId, Label, Description, Author, IsEnabled, SortOrder)
           CheatLines        (Id, CheatId, Code, SortOrder)
           McpConfig         (Id, Key, Value)
-          McpMemory         (Id, Name, Content)
+          McpMemories       (Id, Name, Content, GameId, CreatedAt, UpdatedAt)
           McpAgents         (Id, Name, Status, IsAgentLead, Objective, Rules, Guidelines, SessionBegin, ConcurrentTasks, SessionEnd, Research, RecommendedWorkflow, CreatedAt, UpdatedAt)
           McpAgentTasks     (Id, McpAgentId, Phase, SortOrder, Description)
           McpOrchestrations (Id, Name, Description, Strategy, Roles, Workflow, Rules, Notes, CreatedAt, UpdatedAt)
@@ -307,9 +363,12 @@ public sealed partial class CodeDesignerPs2Tools
           SELECT * FROM Settings WHERE Key LIKE 'theme%'
           SELECT g.Title, d.Serial, d.IsoPath FROM Games g JOIN GameDiscs d ON d.GameId = g.Id
           SELECT l.Address, l.Name, l.Type FROM Labels l JOIN LabelSets ls ON ls.Id = l.LabelSetId WHERE ls.SetName = 'MyGame'
+          INSERT INTO McpMemories (Name, Content, GameId, CreatedAt, UpdatedAt) VALUES ('my-note', '# Note\nContent here.', NULL, GETUTCDATE(), GETUTCDATE())
+          UPDATE McpMemories SET Content = '# Updated' WHERE Name = 'my-note'
+          DELETE FROM McpMemories WHERE Name = 'old-note'
         """)]
     public async Task<string> QueryDb(
-        [Description("A read-only SQL SELECT statement to execute against the CodeDesigner database.")] string sql,
+        [Description("A SQL statement to execute against the CodeDesigner database. SELECT/CTE returns rows; INSERT/UPDATE/DELETE commits and returns rows affected.")] string sql,
         [Description("Maximum number of rows to display in the formatted output (default 200, max 1000). Full data is still returned in JSON.")] int maxDisplayRows = 200,
         CancellationToken cancellationToken = default)
     {

@@ -182,6 +182,19 @@ export class VirtualGridComponent implements AfterViewInit {
     this.viewport()?.nativeElement.focus();
   }
 
+  /**
+   * Adjust the current scroll offset by a pixel delta.
+   * Used when the grid's page-start changes (merge/de-merge) to keep
+   * the same rows visible without a visual jump.
+   */
+  adjustScroll(pixelDelta: number): void {
+    const viewport = this.viewport()?.nativeElement;
+    if (!viewport) { return; }
+    const newScroll = Math.max(0, viewport.scrollTop + pixelDelta);
+    viewport.scrollTop = newScroll;
+    this.scrollTop.set(newScroll);
+  }
+
   /** Scroll to show a specific row index without always pinning it to the top. */
   scrollToIndex(index: number, block: ScrollLogicalPosition = 'nearest'): void {
     const viewport = this.viewport()?.nativeElement;
@@ -198,6 +211,19 @@ export class VirtualGridComponent implements AfterViewInit {
       const centeredOffset = Math.max(0, rowTop - ((viewportSize - this.rowHeight) / 2));
       viewport.scrollTop = centeredOffset;
       this.scrollTop.set(centeredOffset);
+      return;
+    }
+
+    if (block === 'start') {
+      viewport.scrollTop = rowTop;
+      this.scrollTop.set(rowTop);
+      return;
+    }
+
+    if (block === 'end') {
+      const endOffset = Math.max(0, rowBottom - viewportSize);
+      viewport.scrollTop = endOffset;
+      this.scrollTop.set(endOffset);
       return;
     }
 

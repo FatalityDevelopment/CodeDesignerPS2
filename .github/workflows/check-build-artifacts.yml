@@ -1,0 +1,36 @@
+name: Reject Build Artifacts
+
+on:
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  check-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for build artifacts in PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject obj/bin directories
+        run: |
+          # Check for build artifacts using both glob AND grep to catch backslash paths
+          BAD_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null | grep -iE '[\\/](obj|bin)[\\/]' || true)
+          if [ -n "$BAD_FILES" ]; then
+            echo "::error::BUILD ARTIFACTS DETECTED! The following files under obj/ or bin/ must not be committed:"
+            echo "$BAD_FILES"
+            echo ""
+            echo "These are build outputs covered by .gitignore. Remove them with:"
+            echo "  git rm --cached <file>"
+            exit 1
+          fi
+
+          # Also check the full tree for files with backslash in paths (Windows corruption)
+          BAD_PATHS=$(git ls-tree -r HEAD --name-only | grep '\\\\' || true)
+          if [ -n "$BAD_PATHS" ]; then
+            echo "::error::FILES WITH BACKSLASH PATHS DETECTED! These cause checkout failures on Windows:"
+            echo "$BAD_PATHS"
+            exit 1
+          fi
+          echo "No build artifacts or invalid paths found."

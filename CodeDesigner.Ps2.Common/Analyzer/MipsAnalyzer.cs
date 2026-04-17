@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using CodeDesigner.Ps2.Common.Interfaces;
 using CodeDesigner.Ps2.Common.CPU;
 
@@ -12,6 +13,116 @@ namespace CodeDesigner.Ps2.Common
     /// </summary>
     public class MipsAnalyzer
     {
+        // -----------------------------------------------------------------------
+        // Memory-mapped I/O register name table (PS2 EE address space)
+        // -----------------------------------------------------------------------
+        private static readonly Dictionary<uint, string> s_mmioNames = new()
+        {
+            // INTC
+            [0x1000F000] = "INTC_STAT",
+            [0x1000F010] = "INTC_MASK",
+            // EE Timers
+            [0x10000000] = "T0_COUNT",
+            [0x10000010] = "T0_MODE",
+            [0x10000020] = "T0_COMP",
+            [0x10000030] = "T0_HOLD",
+            [0x10000800] = "T1_COUNT",
+            [0x10000810] = "T1_MODE",
+            [0x10000820] = "T1_COMP",
+            [0x10000830] = "T1_HOLD",
+            [0x10001000] = "T2_COUNT",
+            [0x10001010] = "T2_MODE",
+            [0x10001020] = "T2_COMP",
+            [0x10001800] = "T3_COUNT",
+            [0x10001810] = "T3_MODE",
+            [0x10001820] = "T3_COMP",
+            // GIF
+            [0x10003000] = "GIF_CTRL",
+            [0x10003010] = "GIF_MODE",
+            [0x10003020] = "GIF_STAT",
+            [0x10003040] = "GIF_TAG0",
+            [0x10003050] = "GIF_TAG1",
+            [0x10003060] = "GIF_TAG2",
+            [0x10003070] = "GIF_TAG3",
+            [0x10003080] = "GIF_CNT",
+            [0x10003090] = "GIF_P3CNT",
+            [0x100030A0] = "GIF_P3TAG",
+            // VIF0
+            [0x10003800] = "VIF0_STAT",
+            [0x10003810] = "VIF0_FBRST",
+            [0x10003820] = "VIF0_ERR",
+            [0x10003830] = "VIF0_MARK",
+            [0x10003840] = "VIF0_CYCLE",
+            [0x10003850] = "VIF0_MODE",
+            [0x10003860] = "VIF0_NUM",
+            [0x10003870] = "VIF0_MASK",
+            [0x10003880] = "VIF0_CODE",
+            [0x10003890] = "VIF0_ITOPS",
+            [0x100038D0] = "VIF0_ITOP",
+            // VIF1
+            [0x10003C00] = "VIF1_STAT",
+            [0x10003C10] = "VIF1_FBRST",
+            [0x10003C20] = "VIF1_ERR",
+            [0x10003C30] = "VIF1_MARK",
+            [0x10003C40] = "VIF1_CYCLE",
+            [0x10003C50] = "VIF1_MODE",
+            [0x10003C60] = "VIF1_NUM",
+            [0x10003C70] = "VIF1_MASK",
+            [0x10003C80] = "VIF1_CODE",
+            [0x10003C90] = "VIF1_ITOPS",
+            [0x10003CC0] = "VIF1_BASE",
+            [0x10003CD0] = "VIF1_OFST",
+            [0x10003CE0] = "VIF1_TOPS",
+            [0x10003CF0] = "VIF1_ITOP",
+            [0x10003D00] = "VIF1_TOP",
+            // DMAC channels (first word = CHCR for each channel)
+            [0x10008000] = "D0_CHCR",  // VIF0
+            [0x10009000] = "D1_CHCR",  // VIF1
+            [0x1000A000] = "D2_CHCR",  // GIF
+            [0x1000B000] = "D3_CHCR",  // fromIPU
+            [0x1000B400] = "D4_CHCR",  // toIPU
+            [0x1000C000] = "D5_CHCR",  // SIF0
+            [0x1000C400] = "D6_CHCR",  // SIF1
+            [0x1000C800] = "D7_CHCR",  // SIF2
+            [0x1000D000] = "D8_CHCR",  // fromSPR
+            [0x1000D400] = "D9_CHCR",  // toSPR
+            // DMAC global
+            [0x1000E000] = "D_CTRL",
+            [0x1000E010] = "D_STAT",
+            [0x1000E020] = "D_PCR",
+            [0x1000E030] = "D_SQWC",
+            [0x1000E040] = "D_RBSR",
+            [0x1000E050] = "D_RBOR",
+            [0x1000E060] = "D_STADR",
+            // SIF
+            [0x1000F200] = "SIF_MSCOM",
+            [0x1000F210] = "SIF_SMCOM",
+            [0x1000F220] = "SIF_MSFLAG",
+            [0x1000F230] = "SIF_SMFLAG",
+            [0x1000F240] = "SIF_BD6",
+            [0x1000F250] = "SIF_F250",
+            [0x1000F260] = "SIF_F260",
+            // GS privileged registers
+            [0x12000000] = "GS_PMODE",
+            [0x12000010] = "GS_SMODE1",
+            [0x12000020] = "GS_SMODE2",
+            [0x12000030] = "GS_SRFSH",
+            [0x12000040] = "GS_SYNCH1",
+            [0x12000050] = "GS_SYNCH2",
+            [0x12000060] = "GS_SYNCV",
+            [0x12000070] = "GS_DISPFB1",
+            [0x12000080] = "GS_DISPLAY1",
+            [0x12000090] = "GS_DISPFB2",
+            [0x120000A0] = "GS_DISPLAY2",
+            [0x120000B0] = "GS_EXTBUF",
+            [0x120000C0] = "GS_EXTDATA",
+            [0x120000D0] = "GS_EXTWRITE",
+            [0x120000E0] = "GS_BGCOLOR",
+            [0x12001000] = "GS_CSR",
+            [0x12001010] = "GS_IMR",
+            [0x12001040] = "GS_BUSDIR",
+            [0x12001080] = "GS_SIGLBLID",
+        };
         /// <summary>
         /// Analyze instructions and generate comments using the instruction's built-in Analyze() method
         /// </summary>
@@ -76,6 +187,9 @@ namespace CodeDesigner.Ps2.Common
                                     analysis += $" => {hint}";
                             }
 
+                            // Append hints for any other addresses referenced in the comment
+                            analysis = AppendAddressHints(analysis, bus, lookupLabel);
+
                             comments[address] = $"; {analysis}";
                         }
                     }
@@ -127,16 +241,18 @@ namespace CodeDesigner.Ps2.Common
                     }
                 }
 
-                // Check for LUI+ADDIU or LUI+ORI patterns and append pointer target hint
+                // Check for LUI+ADDIU or LUI+ORI patterns and append a label/string hint when available
                 uint? pointerTarget = TryGetPointerLoadTarget(instruction, cpu);
                 if (pointerTarget.HasValue && (lookupLabel != null || bus != null))
                 {
                     string? hint = BuildTargetHint(pointerTarget.Value, bus, lookupLabel);
                     if (hint != null)
-                        analysis += $" → 0x{pointerTarget.Value:X8} {hint}";
-                    else
-                        analysis += $" → 0x{pointerTarget.Value:X8}";
+                        analysis += $" {hint}";
+                    // No hint: the instruction's own Analyze() already shows the computed address
                 }
+
+                // Append hints (MMIO names, live values, string data) for any addresses in the comment
+                analysis = AppendAddressHints(analysis, bus, lookupLabel);
 
                 return $"; {analysis}";
             }
@@ -262,6 +378,117 @@ namespace CodeDesigner.Ps2.Common
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Scans <paramref name="analysis"/> for hex address patterns (<c>0x{8 hex}</c> and
+        /// <c>[0x{8 hex}]</c>) and appends the first useful hint found. Priority:
+        /// label lookup → MMIO register name → ASCII string peek → raw word value.
+        /// Addresses that are already followed by a <c>"…"</c> hint are skipped.
+        /// </summary>
+        private static string AppendAddressHints(string analysis, IPs2MemoryBus? bus, Func<uint, string?>? lookupLabel)
+        {
+            // Regex matches both [0x1234ABCD] and bare 0x1234ABCD forms.
+            // We only process addresses not already immediately followed by a quote.
+            var matches = Regex.Matches(analysis, @"\[?0x([0-9A-Fa-f]{8})\]?");
+            foreach (Match m in matches)
+            {
+                // Skip if this address is already immediately followed by an annotation quote
+                int afterMatch = m.Index + m.Length;
+                bool alreadyAnnotated = afterMatch + 1 < analysis.Length
+                    && analysis[afterMatch] == ' '
+                    && analysis[afterMatch + 1] == '"';
+                if (alreadyAnnotated)
+                    continue;
+
+                uint addr = Convert.ToUInt32(m.Groups[1].Value, 16);
+
+                // 1. Label lookup (highest priority)
+                if (lookupLabel != null)
+                {
+                    string? label = lookupLabel(addr);
+                    if (!string.IsNullOrWhiteSpace(label))
+                    {
+                        analysis += $" \"{label}\"";
+                        return analysis;
+                    }
+                }
+
+                // 2. MMIO register name (does not require a bus)
+                if (s_mmioNames.TryGetValue(addr, out string? mmioName))
+                {
+                    analysis += $" [{mmioName}]";
+                    return analysis;
+                }
+
+                if (bus == null)
+                    continue;
+
+                // 3. ASCII string peek (only for addresses in RAM-like regions)
+                if (IsValidStringAddress(addr))
+                {
+                    string? str = TryPeekStringAtAddress(bus, addr);
+                    if (str != null)
+                    {
+                        analysis += $" \"{str}\"";
+                        return analysis;
+                    }
+                }
+
+                // 4. Raw word value (only for load addresses, denoted by [0x...] in the comment)
+                if (m.Value.StartsWith('[') && IsValidStringAddress(addr))
+                {
+                    string? rawVal = TryPeekWordValueAtAddress(bus, addr);
+                    if (rawVal != null)
+                    {
+                        analysis += $" = {rawVal}";
+                        return analysis;
+                    }
+                }
+            }
+
+            return analysis;
+        }
+
+        /// <summary>
+        /// Returns true when <paramref name="addr"/> is in a region that may be safely
+        /// read as data (main RAM, BIOS, scratchpad). Excludes I/O register space.
+        /// </summary>
+        private static bool IsValidStringAddress(uint addr)
+        {
+            // Main RAM: 0x00000000–0x01FFFFFF (32 MB) and KSEG0/KSEG1 mirrors
+            if (addr < 0x02000000u)
+                return true;
+            if (addr >= 0x80000000u && addr < 0x82000000u)
+                return true;
+            if (addr >= 0xA0000000u && addr < 0xA2000000u)
+                return true;
+            // Scratchpad: 0x70000000–0x70003FFF
+            if (addr >= 0x70000000u && addr < 0x70004000u)
+                return true;
+            // BIOS ROM: 0x1FC00000–0x1FFFFFFF and mirrors
+            if (addr >= 0x1FC00000u && addr < 0x20000000u)
+                return true;
+            if (addr >= 0xBFC00000u && addr < 0xC0000000u)
+                return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Tries to peek a single 32-bit word at <paramref name="address"/> and
+        /// return it as a hex string. Returns <c>null</c> on failure.
+        /// </summary>
+        private static string? TryPeekWordValueAtAddress(IPs2MemoryBus bus, uint address)
+        {
+            try
+            {
+                uint word = bus.ReadWord(address);
+                return $"0x{word:X8}";
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>

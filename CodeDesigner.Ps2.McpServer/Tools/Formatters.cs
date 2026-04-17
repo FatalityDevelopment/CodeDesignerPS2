@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 
@@ -101,32 +102,101 @@ public sealed partial class CodeDesignerPs2Tools
                 errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
                 return $"Error: {errProp.GetString()}";
 
-            if (!root.TryGetProperty("Results", out var results))
-                return SimpleMessage(json);
-
             var sb = new StringBuilder();
             bool hasErrors = false;
-            foreach (var item in results.EnumerateArray())
+
+            // ── Main instruction results ──────────────────────────────────────────
+            if (root.TryGetProperty("Results", out var results))
             {
-                bool success = item.TryGetProperty("Success", out var s) && s.GetBoolean();
-                int line = item.TryGetProperty("LineNumber", out var ln) ? ln.GetInt32() : 0;
-
-                if (!success)
+                foreach (var item in results.EnumerateArray())
                 {
-                    hasErrors = true;
-                    string errMsg = item.TryGetProperty("Error",    out var e) ? (e.GetString() ?? "?") : "?";
-                    string srcAsm = item.TryGetProperty("Assembly", out var a) ? (a.GetString() ?? "") : "";
-                    sb.AppendLine($"  [line {line} error] {srcAsm}: {errMsg}");
-                    continue;
-                }
+                    bool success = item.TryGetProperty("Success", out var s) && s.GetBoolean();
 
-                string hex = item.TryGetProperty("Hex",      out var h) ? (h.GetString() ?? "") : "";
-                string asm = item.TryGetProperty("Assembly", out var aa) ? (aa.GetString() ?? "") : "";
-                sb.AppendLine($"  {hex}  ; {asm}");
+                    // LineNumber is int? — may be JSON null or absent
+                    int line = item.TryGetProperty("LineNumber", out var ln) &&
+                               ln.ValueKind == JsonValueKind.Number
+                               ? ln.GetInt32() : 0;
+
+                    if (!success)
+                    {
+                        hasErrors = true;
+                        string errMsg = item.TryGetProperty("Error",    out var e) ? (e.GetString() ?? "?") : "?";
+                        string srcAsm = item.TryGetProperty("Assembly", out var a) ? (a.GetString() ?? "") : "";
+                        string prefix = line > 0 ? $"[line {line}] " : "";
+                        sb.AppendLine(string.IsNullOrEmpty(srcAsm)
+                            ? $"  {prefix}error: {errMsg}"
+                            : $"  {prefix}error: {srcAsm}: {errMsg}");
+                        continue;
+                    }
+
+                    string hex = item.TryGetProperty("Hex",      out var h)  ? (h.GetString()  ?? "") : "";
+                    string asm = item.TryGetProperty("Assembly", out var aa) ? (aa.GetString() ?? "") : "";
+                    sb.AppendLine(string.IsNullOrEmpty(asm)
+                        ? $"  {hex}"
+                        : $"  {hex}  ; {asm}");
+                }
             }
 
             if (hasErrors)
                 sb.Insert(0, "Compiled with errors:\n");
+
+            // ── Sidecar commands ──────────────────────────────────────────────────
+            if (root.TryGetProperty("Sidecars", out var sidecars) &&
+                sidecars.ValueKind == JsonValueKind.Array)
+            {
+                var sidecarSb = new StringBuilder();
+                foreach (var sc in sidecars.EnumerateArray())
+                {
+                    string kind = sc.TryGetProperty("Kind", out var k) ? (k.GetString() ?? "") : "";
+                    uint   addr = sc.TryGetProperty("Address", out var a) ? a.GetUInt32() : 0;
+
+                    switch (kind)
+                    {
+                        case "assert":
+                        {
+                            bool?   passed = sc.TryGetProperty("AssertPassed", out var p) && p.ValueKind != JsonValueKind.Null
+                                             ? p.GetBoolean() : null;
+                            uint?   expected = sc.TryGetProperty("ExpectedValue", out var ev) && ev.ValueKind == JsonValueKind.Number
+                                               ? ev.GetUInt32() : null;
+                            uint?   actual   = sc.TryGetProperty("ActualValue",   out var av) && av.ValueKind == JsonValueKind.Number
+                                               ? av.GetUInt32() : null;
+                            string  op       = sc.TryGetProperty("Operator", out var op2) ? (op2.GetString() ?? "==") : "==";
+
+                            string passStr = passed.HasValue ? (passed.Value ? "✓ passed" : "✗ FAILED") : "(not checked — no live backend)";
+                            string expected_ = expected.HasValue ? $"0x{expected.Value:X8}" : "?";
+                            string actual_   = actual.HasValue   ? $"0x{actual.Value:X8}"   : "";
+                            string actualPart = actual.HasValue ? $", got {actual_}" : "";
+                            sidecarSb.AppendLine($"  assert 0x{addr:X8} {op} {expected_}{actualPart} — {passStr}");
+                            break;
+                        }
+                        case "breakpoint":
+                            sidecarSb.AppendLine($"  breakpoint @ 0x{addr:X8}");
+                            break;
+                        case "watchpoint":
+                        {
+                            string access = sc.TryGetProperty("AccessType", out var at) ? (at.GetString() ?? "write") : "write";
+                            uint   size   = sc.TryGetProperty("WatchSize",   out var ws) && ws.ValueKind == JsonValueKind.Number
+                                            ? ws.GetUInt32() : 4;
+                            sidecarSb.AppendLine($"  watchpoint {access} @ 0x{addr:X8} ({size} bytes)");
+                            break;
+                        }
+                        case "log":
+                        {
+                            string directive = sc.TryGetProperty("Directive", out var dir) ? (dir.GetString() ?? "log") : "log";
+                            string text = sc.TryGetProperty("MessageText", out var mt) ? (mt.GetString() ?? "") : "";
+                            sidecarSb.AppendLine($"  {directive} @ 0x{addr:X8}: {text}");
+                            break;
+                        }
+                    }
+                }
+
+                if (sidecarSb.Length > 0)
+                {
+                    sb.AppendLine();
+                    sb.Append("Sidecars:\n");
+                    sb.Append(sidecarSb);
+                }
+            }
 
             return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no output)");
         }
@@ -735,6 +805,284 @@ public sealed partial class CodeDesignerPs2Tools
                 sb.AppendLine($"  {addr}  size={size,6}  {name}");
             }
             return WithRules(sb.Length > 0 ? sb.ToString().TrimEnd() : $"(no {label.ToLowerInvariant()} found)");
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    /// <summary>
+    /// Format the JSON response from VALIDATECDS into a human-readable diagnostics list.
+    /// </summary>
+    private static string FormatValidateCdsResult(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            bool   success = root.TryGetProperty("Success", out var s) && s.GetBoolean();
+            string message = root.TryGetProperty("Message", out var m) ? (m.GetString() ?? "") : "";
+            string error   = root.TryGetProperty("Error",   out var e) ? (e.GetString() ?? "") : "";
+
+            var sb = new StringBuilder();
+            sb.AppendLine(success ? $"✓ {message}" : $"✗ {(string.IsNullOrEmpty(error) ? message : error)}");
+
+            if (root.TryGetProperty("Diagnostics", out var diagnostics) &&
+                diagnostics.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in diagnostics.EnumerateArray())
+                {
+                    string severity = item.TryGetProperty("Severity", out var sev) ? sev.ToString().ToLowerInvariant() : "info";
+                    string itemMsg  = item.TryGetProperty("Message", out var im) ? (im.GetString() ?? "") : "";
+                    int?   lineNo   = item.TryGetProperty("LineNumber", out var il) && il.ValueKind == JsonValueKind.Number
+                        ? il.GetInt32() : (int?)null;
+                    int?   colNo    = item.TryGetProperty("ColumnNumber", out var ic) && ic.ValueKind == JsonValueKind.Number
+                        ? ic.GetInt32() : (int?)null;
+
+                    string loc = lineNo.HasValue
+                        ? colNo.HasValue ? $" (line {lineNo}, col {colNo})" : $" (line {lineNo})"
+                        : "";
+                    sb.AppendLine($"  {severity}{loc}: {itemMsg}");
+                }
+            }
+            else if (root.TryGetProperty("Results", out var results) &&
+                     results.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in results.EnumerateArray())
+                {
+                    bool   itemSuccess = item.TryGetProperty("Success", out var is_) && is_.GetBoolean();
+                    string itemError   = item.TryGetProperty("Error",   out var ie) ? (ie.GetString() ?? "") : "";
+                    string itemAsm     = item.TryGetProperty("Assembly", out var ia) ? (ia.GetString() ?? "") : "";
+                    int?   lineNo      = item.TryGetProperty("LineNumber", out var il) && il.ValueKind == JsonValueKind.Number
+                        ? il.GetInt32() : (int?)null;
+
+                    string prefix = itemSuccess ? "  warning" : "  error  ";
+                    string loc    = lineNo.HasValue ? $" (line {lineNo})" : "";
+                    string msg    = !string.IsNullOrEmpty(itemError) ? itemError : itemAsm;
+                    sb.AppendLine($"{prefix}{loc}: {msg}");
+                }
+            }
+
+            return WithRules(sb.ToString().TrimEnd());
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    /// <summary>
+    /// Format the JSON response from CDSPATCH into a human-readable summary for MCP callers.
+    /// </summary>
+    private static string FormatCdsPatchResult(string json)
+    {
+        try
+        {
+            using var doc  = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            bool   success = root.TryGetProperty("Success", out var s) && s.GetBoolean();
+            string message = root.TryGetProperty("Message", out var m) ? (m.GetString() ?? "") : "";
+            string error   = root.TryGetProperty("Error",   out var e) ? (e.GetString() ?? "") : "";
+
+            var sb = new StringBuilder();
+            sb.AppendLine(success ? "CDS patch applied successfully." : $"CDS patch failed: {error}");
+
+            if (!string.IsNullOrEmpty(message) && message != error)
+                sb.AppendLine(message);
+
+            // Report any parse/compile errors
+            if (root.TryGetProperty("Results", out var results) && results.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in results.EnumerateArray())
+                {
+                    bool ok  = item.TryGetProperty("Success", out var rs) && rs.GetBoolean();
+                    if (!ok)
+                    {
+                        int    ln  = item.TryGetProperty("LineNumber", out var ln2) && ln2.ValueKind == JsonValueKind.Number
+                                     ? ln2.GetInt32() : 0;
+                        string err = item.TryGetProperty("Error", out var er) ? (er.GetString() ?? "?") : "?";
+                        sb.AppendLine($"  [line {ln}] {err}");
+                    }
+                }
+            }
+
+            // Report sidecars
+            if (root.TryGetProperty("Sidecars", out var sidecars) && sidecars.ValueKind == JsonValueKind.Array)
+            {
+                var sidecarSb = new StringBuilder();
+                foreach (var sc in sidecars.EnumerateArray())
+                {
+                    string kind = sc.TryGetProperty("Kind",    out var k) ? (k.GetString() ?? "") : "";
+                    uint   addr = sc.TryGetProperty("Address", out var ad) && ad.ValueKind == JsonValueKind.Number
+                                  ? ad.GetUInt32() : 0;
+
+                    switch (kind)
+                    {
+                        case "assert":
+                        {
+                            bool?   passed   = sc.TryGetProperty("AssertPassed", out var p) && p.ValueKind != JsonValueKind.Null
+                                               ? p.GetBoolean() : null;
+                            uint?   expected = sc.TryGetProperty("ExpectedValue", out var ev) && ev.ValueKind == JsonValueKind.Number
+                                               ? ev.GetUInt32() : null;
+                            uint?   actual   = sc.TryGetProperty("ActualValue",   out var av) && av.ValueKind == JsonValueKind.Number
+                                               ? av.GetUInt32() : null;
+                            string  op       = sc.TryGetProperty("Operator", out var op2) ? (op2.GetString() ?? "==") : "==";
+                            string passStr   = passed.HasValue ? (passed.Value ? "✓ passed" : "✗ FAILED") : "(not checked)";
+                            string exp_      = expected.HasValue ? $"0x{expected.Value:X8}" : "?";
+                            string act_      = actual.HasValue   ? $", got 0x{actual.Value:X8}" : "";
+                            sidecarSb.AppendLine($"  assert 0x{addr:X8} {op} {exp_}{act_} — {passStr}");
+                            break;
+                        }
+                        case "breakpoint":
+                            sidecarSb.AppendLine($"  breakpoint installed @ 0x{addr:X8}");
+                            break;
+                        case "watchpoint":
+                        {
+                            string access = sc.TryGetProperty("AccessType", out var at) ? (at.GetString() ?? "write") : "write";
+                            uint   size   = sc.TryGetProperty("WatchSize",  out var ws) && ws.ValueKind == JsonValueKind.Number
+                                            ? ws.GetUInt32() : 4;
+                            sidecarSb.AppendLine($"  watchpoint {access} @ 0x{addr:X8} ({size} bytes) installed");
+                            break;
+                        }
+                        case "log":
+                        {
+                            string directive = sc.TryGetProperty("Directive", out var dir) ? (dir.GetString() ?? "log") : "log";
+                            string text = sc.TryGetProperty("MessageText", out var mt) ? (mt.GetString() ?? "") : "";
+                            sidecarSb.AppendLine($"  {directive} @ 0x{addr:X8}: {text}");
+                            break;
+                        }
+                    }
+                }
+
+                if (sidecarSb.Length > 0)
+                {
+                    sb.AppendLine();
+                    sb.Append("Sidecars:\n");
+                    sb.Append(sidecarSb);
+                }
+            }
+
+            return WithRules(sb.ToString().TrimEnd());
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // decompile_to_cds formatter
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Regular expression that matches the offset hint appended by the disassembler to
+    /// branch / jump instructions, e.g. <c>(+5▼)</c> or <c>(-2▲)</c>.
+    /// The full match is the trailing hint portion including surrounding whitespace;
+    /// group 1 captures the signed offset with direction arrow (e.g. <c>+5▼</c>).
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex BranchHintRegex =
+        new(@"\s*\(([+-]\d+[▼▲])\)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Matches a CDS-style hex address token in a disassembled instruction line, e.g. <c>$00100020</c>.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex HexAddrRegex =
+        new(@"\$([0-9A-Fa-f]{8})\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static string FormatDecompileToCds(string json, uint startAddress)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Error", out var errProp) &&
+                errProp.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(errProp.GetString()))
+                return $"Error: {errProp.GetString()}";
+
+            if (!root.TryGetProperty("Results", out var results))
+                return SimpleMessage(json);
+
+            // ── First pass: collect all instructions ────────────────────────────
+            var instructions = new List<(uint Address, string Assembly, bool Success)>();
+            uint pc = startAddress;
+            foreach (var item in results.EnumerateArray())
+            {
+                bool success = item.TryGetProperty("Success", out var s) && s.GetBoolean();
+                string asm = item.TryGetProperty("Assembly", out var a) ? (a.GetString() ?? "") : "";
+                instructions.Add((pc, asm, success));
+                pc += 4;
+            }
+
+            uint endAddress = pc;
+
+            // ── Second pass: collect branch targets within the range ─────────────
+            var branchTargets = new HashSet<uint>();
+            foreach (var (_, asm, success) in instructions)
+            {
+                if (!success) continue;
+                foreach (System.Text.RegularExpressions.Match m in HexAddrRegex.Matches(asm))
+                {
+                    if (uint.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, null, out uint target))
+                    {
+                        if (target >= startAddress && target < endAddress && (target & 3) == 0)
+                            branchTargets.Add(target);
+                    }
+                }
+            }
+
+            // ── Third pass: build CDS source ────────────────────────────────────
+            var sb = new StringBuilder();
+            sb.AppendLine($"address ${ startAddress:X8}");
+            sb.AppendLine();
+
+            foreach (var (addr, asm, success) in instructions)
+            {
+                // Emit a label if this address is a branch target
+                if (branchTargets.Contains(addr))
+                    sb.AppendLine($":target_{addr:X8}:");
+
+                if (!success)
+                {
+                    sb.AppendLine($"// [disassembly error at 0x{addr:X8}]");
+                    continue;
+                }
+
+                string line = asm;
+
+                // Strip disassembler hints like " (+5▼)" or " (-2▲)"
+                line = BranchHintRegex.Replace(line, "");
+
+                // Convert '.word 0xXXXXXXXX' → 'hexcode $XXXXXXXX'
+                if (line.StartsWith(".word ", StringComparison.OrdinalIgnoreCase))
+                {
+                    string hex = line[".word ".Length..].Trim();
+                    if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                        hex = hex[2..];
+                    // Also strip trailing comment (e.g., "  # Unknown R-type ...")
+                    int commentIdx = hex.IndexOf(' ');
+                    if (commentIdx > 0) hex = hex[..commentIdx];
+                    sb.AppendLine($"hexcode ${hex.ToUpperInvariant().PadLeft(8, '0')}");
+                    continue;
+                }
+
+                // Replace $XXXXXXXX branch target addresses with :target_ labels
+                // Only replace if the address is a known branch target in our range
+                line = HexAddrRegex.Replace(line, m =>
+                {
+                    if (uint.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, null, out uint target)
+                        && branchTargets.Contains(target))
+                        return $":target_{target:X8}";
+                    return m.Value;  // leave addresses outside range as-is
+                });
+
+                sb.AppendLine(line);
+            }
+
+            return WithRules(sb.ToString().TrimEnd());
         }
         catch
         {

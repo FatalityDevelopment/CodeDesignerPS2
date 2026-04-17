@@ -38,7 +38,10 @@ public class DatabaseSeeder
     {
         await SeedToolDescriptionsAsync(ct);
         await SeedSettingsAsync(ct);
-        await SeedGameDataAsync(ct);
+        await SeedGamesAsync(ct);
+        await SeedMcpAgentsAsync(ct);
+        await SeedMcpOrchestrationsAsync(ct);
+        await SeedMemoriesAsync(ct);
         await SeedLabelSetsAsync(ct);
 
         if (!string.IsNullOrWhiteSpace(archiveRoot))
@@ -107,63 +110,307 @@ public class DatabaseSeeder
         }
     }
 
-    // ── Game data ─────────────────────────────────────────────────────────────
+    // ── Games (GameRegion / Game / GameDisc) ──────────────────────────────────
 
     /// <summary>
-    /// Seeds the canonical SOCOM II game, its NTSC-U region, and the SCUS-97275
-    /// disc entry.  All three rows are inserted only when they don't already exist.
+    /// Seeds <see cref="GameRegion"/>, <see cref="Game"/>, and <see cref="GameDisc"/> rows
+    /// from <c>Resources/SeedData/seed_games.json</c>.  All inserts are idempotent.
     /// </summary>
-    private async Task SeedGameDataAsync(CancellationToken ct)
+    private async Task SeedGamesAsync(CancellationToken ct)
     {
-        // GameRegion — NTSC-U
-        var ntscU = await _db.GameRegions.FirstOrDefaultAsync(r => r.Name == "NTSC-U", ct);
-        if (ntscU is null)
+        await using var stream = OpenEmbeddedResource("seed_games.json");
+        if (stream is null) return;
+
+        using var doc  = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        var root = doc.RootElement;
+
+        // ── Regions ───────────────────────────────────────────────────────────
+        var regionCache = await _db.GameRegions
+            .ToDictionaryAsync(r => r.Name, StringComparer.OrdinalIgnoreCase, ct);
+
+        if (root.TryGetProperty("regions", out var regionsEl))
         {
-            ntscU = new GameRegion { Name = "NTSC-U" };
-            _db.GameRegions.Add(ntscU);
-            await _db.SaveChangesAsync(ct);
+            foreach (var el in regionsEl.EnumerateArray())
+            {
+                var name = el.GetString();
+                if (string.IsNullOrWhiteSpace(name) || regionCache.ContainsKey(name))
+                    continue;
+
+                var region = new GameRegion { Name = name };
+                _db.GameRegions.Add(region);
+                regionCache[name] = region;
+            }
+            await _db.SaveChangesAsync(ct); // flush so regions have IDs
         }
 
-        // Game — SOCOM II: U.S. Navy SEALs
-        // Note: Game.Title uses the official colon-separated title.
-        // LabelSet.GameId (used in SeedLabelSetsAsync) is derived from the ISO
-        // filename ("SOCOM II - U.S. Navy SEALs") and is intentionally different.
-        const string socomGameTitle = "SOCOM II: U.S. Navy SEALs";
-        var socomGame = await _db.Games.FirstOrDefaultAsync(g => g.Title == socomGameTitle, ct);
-        if (socomGame is null)
+        // ── Games + Discs ─────────────────────────────────────────────────────
+        if (!root.TryGetProperty("games", out var gamesEl)) return;
+
+        var gameCache = await _db.Games
+            .ToDictionaryAsync(g => g.Title, StringComparer.OrdinalIgnoreCase, ct);
+
+        foreach (var gameEl in gamesEl.EnumerateArray())
         {
-            socomGame = new Game
+            var title       = gameEl.TryGetProperty("title",       out var tp) ? tp.GetString() : null;
+            var description = gameEl.TryGetProperty("description", out var dp) ? dp.GetString() : null;
+
+            if (string.IsNullOrWhiteSpace(title)) continue;
+
+            if (!gameCache.TryGetValue(title, out var game))
             {
-                Title       = socomGameTitle,
-                Description = "PlayStation 2 online third-person shooter published by Sony Computer Entertainment America (SCEA). NTSC-U, serial SCUS-97275.",
+                game = new Game { Title = title, Description = description };
+                _db.Games.Add(game);
+                gameCache[title] = game;
+                await _db.SaveChangesAsync(ct); // flush so game has an ID
+            }
+
+            if (!gameEl.TryGetProperty("discs", out var discsEl)) continue;
+
+            foreach (var discEl in discsEl.EnumerateArray())
+            {
+                var serial  = discEl.TryGetProperty("serial",  out var sp) ? sp.GetString() : null;
+                var region  = discEl.TryGetProperty("region",  out var rp) ? rp.GetString() : null;
+                var crc     = discEl.TryGetProperty("crc",     out var cp) && cp.ValueKind == JsonValueKind.String ? cp.GetString() : null;
+                var isoPath = discEl.TryGetProperty("isoPath", out var ip) && ip.ValueKind == JsonValueKind.String ? ip.GetString() : null;
+
+                if (string.IsNullOrWhiteSpace(region) || !regionCache.TryGetValue(region, out var gameRegion))
+                    continue;
+
+                // Uniqueness: match by game + region + serial (serial may be null for region-only discs).
+                bool exists = string.IsNullOrWhiteSpace(serial)
+                    ? await _db.GameDiscs.AnyAsync(
+                        d => d.GameId == game.Id && d.GameRegionId == gameRegion.Id && d.Serial == null, ct)
+                    : await _db.GameDiscs.AnyAsync(
+                        d => d.GameId == game.Id && d.Serial == serial, ct);
+
+                if (!exists)
+                {
+                    _db.GameDiscs.Add(new GameDisc
+                    {
+                        GameId       = game.Id,
+                        GameRegionId = gameRegion.Id,
+                        Serial       = string.IsNullOrWhiteSpace(serial)  ? null : serial,
+                        CRC          = string.IsNullOrWhiteSpace(crc)     ? null : crc,
+                        IsoPath      = string.IsNullOrWhiteSpace(isoPath) ? null : isoPath,
+                    });
+                }
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    // ── MCP agents ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Seeds <see cref="McpAgent"/> and <see cref="McpAgentTask"/> rows from
+    /// <c>Resources/SeedData/seed_mcp_agents.json</c>.  Idempotent — skips agents
+    /// whose <c>Name</c> already exists.
+    /// </summary>
+    private async Task SeedMcpAgentsAsync(CancellationToken ct)
+    {
+        await using var stream = OpenEmbeddedResource("seed_mcp_agents.json");
+        if (stream is null) return;
+
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+        foreach (var agentEl in doc.RootElement.EnumerateArray())
+        {
+            var name = agentEl.TryGetProperty("name", out var np) ? np.GetString() : null;
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            bool exists = await _db.McpAgents.AnyAsync(a => a.Name == name, ct);
+            if (exists) continue;
+
+            var agent = new McpAgent
+            {
+                Name                = name,
+                IsAgentLead         = agentEl.TryGetProperty("isAgentLead",         out var ilp) && ilp.GetBoolean(),
+                Status              = agentEl.TryGetProperty("status",              out var stp) && stp.ValueKind == JsonValueKind.String ? stp.GetString() : null,
+                Description         = agentEl.TryGetProperty("description",         out var dep) && dep.ValueKind == JsonValueKind.String ? dep.GetString() : null,
+                Rules               = agentEl.TryGetProperty("rules",               out var rup) && rup.ValueKind == JsonValueKind.String ? rup.GetString() : null,
+                Guidelines          = agentEl.TryGetProperty("guidelines",          out var gup) && gup.ValueKind == JsonValueKind.String ? gup.GetString() : null,
+                RecommendedWorkflow = agentEl.TryGetProperty("recommendedWorkflow", out var rwp) && rwp.ValueKind == JsonValueKind.String ? rwp.GetString() : null,
+                Objective           = agentEl.TryGetProperty("objective",           out var obp) && obp.ValueKind == JsonValueKind.String ? obp.GetString() : null,
+                SessionBegin        = agentEl.TryGetProperty("sessionBegin",        out var sbp) && sbp.ValueKind == JsonValueKind.String ? sbp.GetString() : null,
+                ConcurrentTasks     = agentEl.TryGetProperty("concurrentTasks",     out var ctp) && ctp.ValueKind == JsonValueKind.String ? ctp.GetString() : null,
+                SessionEnd          = agentEl.TryGetProperty("sessionEnd",          out var sep) && sep.ValueKind == JsonValueKind.String ? sep.GetString() : null,
+                Research            = agentEl.TryGetProperty("research",            out var rep) && rep.ValueKind == JsonValueKind.String ? rep.GetString() : null,
+                CreatedAt           = DateTime.UtcNow,
+                UpdatedAt           = DateTime.UtcNow,
             };
-            _db.Games.Add(socomGame);
-            await _db.SaveChangesAsync(ct);
-        }
 
-        // GameDisc — SCUS-97275 (CRC left blank for the user to fill in later)
-        const string socomSerial = "SCUS-97275";
-        bool discExists = await _db.GameDiscs.AnyAsync(
-            d => d.Serial == socomSerial && d.GameId == socomGame.Id, ct);
-
-        if (!discExists)
-        {
-            _db.GameDiscs.Add(new GameDisc
+            if (agentEl.TryGetProperty("tasks", out var tasksEl))
             {
-                GameId       = socomGame.Id,
-                GameRegionId = ntscU.Id,
-                Serial       = socomSerial,
-                CRC          = null,   // populated by the user once known
-                IsoPath      = null,
-            });
-            await _db.SaveChangesAsync(ct);
+                foreach (var taskEl in tasksEl.EnumerateArray())
+                {
+                    var phase       = taskEl.TryGetProperty("phase",       out var php) ? php.GetInt32() : 0;
+                    var sortOrder   = taskEl.TryGetProperty("sortOrder",   out var sop) ? sop.GetInt32() : 0;
+                    var description = taskEl.TryGetProperty("description", out var dsp) && dsp.ValueKind == JsonValueKind.String ? dsp.GetString() : null;
+
+                    if (string.IsNullOrWhiteSpace(description)) continue;
+
+                    agent.Tasks.Add(new McpAgentTask
+                    {
+                        Phase       = (McpAgentTaskPhase)phase,
+                        SortOrder   = sortOrder,
+                        Description = description,
+                    });
+                }
+            }
+
+            _db.McpAgents.Add(agent);
         }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    // ── MCP orchestrations ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Seeds <see cref="McpOrchestration"/> rows from
+    /// <c>Resources/SeedData/seed_mcp_orchestrations.json</c>.  Idempotent — skips
+    /// orchestrations whose <c>Name</c> already exists.
+    /// </summary>
+    private async Task SeedMcpOrchestrationsAsync(CancellationToken ct)
+    {
+        await using var stream = OpenEmbeddedResource("seed_mcp_orchestrations.json");
+        if (stream is null) return;
+
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            var name = el.TryGetProperty("name", out var np) ? np.GetString() : null;
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            bool exists = await _db.McpOrchestrations.AnyAsync(o => o.Name == name, ct);
+            if (exists) continue;
+
+            _db.McpOrchestrations.Add(new McpOrchestration
+            {
+                Name        = name,
+                IsActive    = el.TryGetProperty("isActive",    out var iap) && iap.GetBoolean(),
+                Description = el.TryGetProperty("description", out var dep) && dep.ValueKind == JsonValueKind.String ? dep.GetString() : null,
+                Strategy    = el.TryGetProperty("strategy",    out var stp) && stp.ValueKind == JsonValueKind.String ? stp.GetString() : null,
+                Roles       = el.TryGetProperty("roles",       out var rop) && rop.ValueKind == JsonValueKind.String ? rop.GetString() : null,
+                Workflow    = el.TryGetProperty("workflow",    out var wfp) && wfp.ValueKind == JsonValueKind.String ? wfp.GetString() : null,
+                Rules       = el.TryGetProperty("rules",       out var rup) && rup.ValueKind == JsonValueKind.String ? rup.GetString() : null,
+                Notes       = el.TryGetProperty("notes",       out var nop) && nop.ValueKind == JsonValueKind.String ? nop.GetString() : null,
+                CreatedAt   = DateTime.UtcNow,
+                UpdatedAt   = DateTime.UtcNow,
+            });
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    // ── Memories ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Seeds <see cref="McpMemory"/> rows from <c>Resources/SeedData/seed_memories.json</c>.
+    /// Idempotent — skips memories whose <c>Name</c> already exists.
+    /// </summary>
+    private async Task SeedMemoriesAsync(CancellationToken ct)
+    {
+        await using var stream = OpenEmbeddedResource("seed_memories.json");
+        if (stream is null) return;
+
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        await ImportMemoriesFromDocumentAsync(doc, overwrite: false, ct);
+    }
+
+    /// <summary>
+    /// Imports <see cref="McpMemory"/> rows from a <see cref="JsonDocument"/> that contains a
+    /// JSON array of memory objects.  Used by both the seeder and the CLI import command.
+    /// </summary>
+    /// <param name="doc">Parsed JSON document whose root element is an array of memory objects.</param>
+    /// <param name="overwrite">
+    /// When <see langword="true"/>, existing memories with the same <c>Name</c> are updated.
+    /// When <see langword="false"/>, existing memories are left untouched (idempotent seed mode).
+    /// </param>
+    public async Task ImportMemoriesFromDocumentAsync(
+        JsonDocument doc, bool overwrite, CancellationToken ct = default)
+    {
+        int inserted = 0, updated = 0, skipped = 0;
+
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            var name    = el.TryGetProperty("name",    out var np) ? np.GetString()    : null;
+            var content = el.TryGetProperty("content", out var cp) ? cp.GetString()    : null;
+            var gameId  = el.TryGetProperty("gameId",  out var gp) && gp.ValueKind == JsonValueKind.String ? gp.GetString() : null;
+
+            if (string.IsNullOrWhiteSpace(name) || content is null) continue;
+
+            var existing = await _db.McpMemories.FirstOrDefaultAsync(m => m.Name == name, ct);
+            if (existing is null)
+            {
+                _db.McpMemories.Add(new McpMemory
+                {
+                    Name      = name,
+                    Content   = content,
+                    GameId    = gameId,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+                inserted++;
+            }
+            else if (overwrite)
+            {
+                existing.Content   = content;
+                existing.GameId    = gameId;
+                existing.UpdatedAt = DateTime.UtcNow;
+                updated++;
+            }
+            else
+            {
+                skipped++;
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+        Console.WriteLine($"  Memories: {inserted} inserted, {updated} updated, {skipped} skipped.");
+    }
+
+    /// <summary>
+    /// Exports all <see cref="McpMemory"/> rows to a JSON file at <paramref name="path"/>.
+    /// </summary>
+    public async Task ExportMemoriesAsync(string path, CancellationToken ct = default)
+    {
+        var memories = await _db.McpMemories
+            .OrderBy(m => m.Name)
+            .ToListAsync(ct);
+
+        var items = memories.Select(m => new
+        {
+            name    = m.Name,
+            gameId  = m.GameId,
+            content = m.Content,
+        });
+
+        var json = JsonSerializer.Serialize(items, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(path, json, ct);
+        Console.WriteLine($"  Exported {memories.Count} memories to: {path}");
+    }
+
+    // ── Shared helpers ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Opens an embedded resource from <c>Resources/SeedData/</c> by its file name suffix.
+    /// Returns <see langword="null"/> when the resource is not found.
+    /// </summary>
+    private static Stream? OpenEmbeddedResource(string fileSuffix)
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        var name = asm.GetManifestResourceNames()
+                      .FirstOrDefault(n => n.EndsWith(fileSuffix, StringComparison.OrdinalIgnoreCase));
+        return name is null ? null : asm.GetManifestResourceStream(name);
     }
 
     // ── Label sets ────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Seeds the two default label sets for "SOCOM II - U.S. Navy SEALs":
+    /// Seeds the two default label sets for SOCOM II: U.S. Navy SEALs (NTSC-U, serial SCUS-97275):
     /// <list type="bullet">
     ///   <item><description>
     ///     <b>CodeDesigner labels</b> — the standard PS2 system register / memory-map
@@ -174,29 +421,31 @@ public class DatabaseSeeder
     ///     (functions, globals, AES/ZDB crypto symbols, and struct definitions).
     ///   </description></item>
     /// </list>
-    /// Rows are only inserted when the set does not already exist for the game.
+    /// Rows are only inserted when the set does not already exist for the game disc.
     /// </summary>
     private async Task SeedLabelSetsAsync(CancellationToken ct)
     {
-        const string socomGameId = "SOCOM II - U.S. Navy SEALs";
+        // Use the disc serial so we resolve the GameDiscId FK correctly.
+        // The serial must match a GameDisc row seeded by SeedGamesAsync.
+        const string socomSerial = "SCUS-97275";
 
         await SeedLabelSetFromResourceAsync(
-            gameId:      socomGameId,
-            setName:     "CodeDesigner labels",
+            gameSerial:     socomSerial,
+            setName:        "CodeDesigner labels",
             resourceSuffix: "codedesigner_labels.json",
             ct);
 
         await SeedLabelSetFromResourceAsync(
-            gameId:      socomGameId,
-            setName:     "patch_labels",
+            gameSerial:     socomSerial,
+            setName:        "patch_labels",
             resourceSuffix: "socom_patch_labels.json",
             ct);
     }
 
     /// <summary>
-    /// Inserts a <see cref="LabelSet"/> and its child <see cref="Label"/> /
-    /// <see cref="LabelMember"/> rows by reading a JSON seed file embedded in
-    /// this assembly under <c>Resources/SeedData/&lt;resourceSuffix&gt;</c>.
+    /// Inserts a <see cref="LabelSet"/> and its child <see cref="Label"/> rows by reading
+    /// a JSON seed file embedded in this assembly under
+    /// <c>Resources/SeedData/&lt;resourceSuffix&gt;</c>.
     /// </summary>
     /// <remarks>
     /// The JSON format supports two optional top-level arrays:
@@ -212,30 +461,35 @@ public class DatabaseSeeder
     /// </list>
     /// </remarks>
     private async Task SeedLabelSetFromResourceAsync(
-        string gameId, string setName, string resourceSuffix, CancellationToken ct)
+        string gameSerial, string setName, string resourceSuffix, CancellationToken ct)
     {
+        // Resolve the GameDisc.Id from the serial so the LabelSet is linked via
+        // the FK that DbLabelRepository queries — not the legacy GameId string.
+        // Pre-normalise to uppercase dash form before hitting the DB so that the
+        // predicate is a simple equality check (index-friendly, no per-row transforms).
+        var normalizedSerial = gameSerial.Trim().ToUpperInvariant().Replace('_', '-');
+        var disc = await _db.GameDiscs.FirstOrDefaultAsync(
+            d => d.Serial == normalizedSerial, ct);
+        if (disc is null) return; // disc not yet seeded — skip silently
+
         // Skip when the set already exists — idempotent.
         bool exists = await _db.LabelSets.AnyAsync(
-            ls => ls.GameId == gameId && ls.SetName == setName, ct);
+            ls => ls.GameDiscId == disc.Id && ls.SetName == setName, ct);
         if (exists) return;
 
         // Load the embedded JSON resource.
-        var asm          = Assembly.GetExecutingAssembly();
-        var resourceName = asm.GetManifestResourceNames()
-                              .FirstOrDefault(n => n.EndsWith(resourceSuffix,
-                                  StringComparison.OrdinalIgnoreCase));
-        if (resourceName is null)
+        await using var stream = OpenEmbeddedResource(resourceSuffix);
+        if (stream is null)
             return; // resource missing — skip silently
 
-        await using var stream = asm.GetManifestResourceStream(resourceName)!;
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
         var root = doc.RootElement;
 
         var labelSet = new LabelSet
         {
-            SetName   = setName,
-            GameId    = gameId,
-            IsBuiltIn = false,
+            SetName    = setName,
+            GameDiscId = disc.Id,
+            IsBuiltIn  = false,
         };
         _db.LabelSets.Add(labelSet);
         await _db.SaveChangesAsync(ct); // obtain labelSet.Id

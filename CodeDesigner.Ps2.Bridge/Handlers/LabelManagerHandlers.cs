@@ -63,10 +63,10 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Convert a LabelManager set to the wire payload.</summary>
         private static LabelSetPayload ToWireSet(MgrSet s) => new()
         {
-            SetName   = s.SetName,
-            GameId    = s.GameId,
-            IsBuiltIn = s.IsBuiltIn,
-            Entries   = s.Entries.Select(ToWireEntry).ToList(),
+            SetName    = s.SetName,
+            GameDiscId = s.GameId,
+            IsBuiltIn  = s.IsBuiltIn,
+            Entries    = s.Entries.Select(ToWireEntry).ToList(),
         };
 
         // ── GETLABELSETS ──────────────────────────────────────────────────────
@@ -279,6 +279,50 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
+        // ── RENAMELABELSET ────────────────────────────────────────────────────
+
+        private string HandleRenameLabelSet(string? workspaceDir, string? gameId, string? setName, string? newSetName)
+        {
+            gameId     = RequireParam(gameId,     "GameId",     out var e2);
+            setName    = RequireParam(setName,    "SetName",    out var e3);
+            newSetName = RequireParam(newSetName, "NewSetName", out var e4);
+            if (gameId is null)     return CreateErrorResponse(e2!);
+            if (setName is null)    return CreateErrorResponse(e3!);
+            if (newSetName is null) return CreateErrorResponse(e4!);
+
+            try
+            {
+                var set = LabelRepo.RenameSetAsync(gameId, setName, newSetName).GetAwaiter().GetResult();
+
+                // Keep the LabelMgr in-memory state in sync with the new name.
+                LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
+                if (!string.IsNullOrWhiteSpace(workspaceDir))
+                {
+                    LabelMgr.SaveSet(set, workspaceDir, gameId);
+                    LabelMgr.SetActiveSet(workspaceDir, gameId, newSetName);
+                }
+                else
+                {
+                    var tempDir = Path.Combine(Path.GetTempPath(), "codedesigner_labels");
+                    Directory.CreateDirectory(tempDir);
+                    LabelMgr.SaveSet(set, tempDir, gameId);
+                    LabelMgr.SetActiveSet(tempDir, gameId, newSetName);
+                }
+                SyncLegacyDictsFromLabelManager();
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "RENAMELABELSET",
+                    LabelSet = ToWireSet(set),
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"RENAMELABELSET failed: {ex.Message}");
+            }
+        }
+
         // ── ADDLABELENTRY ─────────────────────────────────────────────────────
 
         private string HandleAddLabelEntry(string? workspaceDir, string? gameId, string? setName, LabelManagerEntry? entry)
@@ -327,6 +371,57 @@ namespace CodeDesigner.Ps2.Bridge
             catch (Exception ex)
             {
                 return CreateErrorResponse($"ADDLABELENTRY failed: {ex.Message}");
+            }
+        }
+
+        // ── ADDLABELENTRIES (batch) ───────────────────────────────────────
+
+        private string HandleAddLabelEntries(string? workspaceDir, string? gameId, string? setName, List<LabelManagerEntry>? entries)
+        {
+            gameId  = RequireParam(gameId,  "GameId",  out var e2);
+            setName = RequireParam(setName, "SetName", out var e3);
+            if (gameId is null)  return CreateErrorResponse(e2!);
+            if (setName is null) return CreateErrorResponse(e3!);
+            if (entries is null || entries.Count == 0)
+                return CreateErrorResponse("LabelEntries is required and must contain at least one entry for ADDLABELENTRIES");
+
+            // Validate all entries have required fields.
+            for (int i = 0; i < entries.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(entries[i].Address))
+                    return CreateErrorResponse($"LabelEntries[{i}].Address is required");
+                if (string.IsNullOrWhiteSpace(entries[i].Name))
+                    return CreateErrorResponse($"LabelEntries[{i}].Name is required");
+            }
+
+            try
+            {
+                var mgrEntries = entries.Select(FromWireEntry).ToList();
+                var set = LabelRepo.AddOrUpdateEntriesAsync(gameId, setName, mgrEntries).GetAwaiter().GetResult();
+
+                bool isActiveSet = string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
+                bool noActiveSet = string.IsNullOrEmpty(LabelMgr.ActiveSetName);
+
+                if (isActiveSet || noActiveSet)
+                {
+                    EnsureWorkspaceDirectory(workspaceDir, gameId, setName);
+                    PersistActiveSetToDisk(set);
+                    if (string.IsNullOrEmpty(LabelMgr.ActiveSetName) && !string.IsNullOrWhiteSpace(LabelMgr.WorkspaceDir))
+                        LabelMgr.SetActiveSet(LabelMgr.WorkspaceDir, gameId, setName);
+                    SyncLegacyDictsFromLabelManager();
+                }
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success  = true,
+                    Command  = "ADDLABELENTRIES",
+                    Message  = $"Added/updated {entries.Count} label entries.",
+                    LabelSet = ToWireSet(set),
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ADDLABELENTRIES failed: {ex.Message}");
             }
         }
 

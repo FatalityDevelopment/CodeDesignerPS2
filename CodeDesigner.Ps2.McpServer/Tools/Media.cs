@@ -5,6 +5,7 @@ using System.Text.Json;
 
 
 
+using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -16,6 +17,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_disc_elfs")]
+    [DynamicDescription("list_disc_elfs_desc")]
     [Description("Open a PS2 disc image (ISO/BIN or ZIP containing one) and list all ELF and IRX files found on the disc. Returns file names and sizes.")]
     public async Task<string> ListDiscElfs(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip archive containing an ISO/BIN).")] string isoPath,
@@ -29,6 +31,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "recompile_elf")]
+    [DynamicDescription("recompile_elf_desc")]
     [Description("Extract a named ELF from a PS2 disc image and statically recompile it to C++ source code. Translates MIPS64 EE instructions to equivalent C++ statements.")]
     public async Task<string> RecompileElf(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
@@ -48,6 +51,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "mc_list")]
+    [DynamicDescription("mc_list_desc")]
     [Description("List all save-game directories on a PS2 memory card image file. Returns save name, product code, description, and size for each entry.")]
     public async Task<string> McList(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
@@ -71,7 +75,7 @@ public sealed partial class CodeDesignerPs2Tools
                 uint   files   = item.TryGetProperty("FileCount",  out var fc) ? fc.GetUInt32()           : 0u;
                 string created = item.TryGetProperty("Created",    out var cr) ? (cr.GetString() ?? "?") : "?";
                 string modif   = item.TryGetProperty("Modified",   out var mo) ? (mo.GetString() ?? "?") : "?";
-                uint   bytes   = item.TryGetProperty("TotalBytes", out var tb) ? tb.GetUInt32()           : 0u;
+                long   bytes   = item.TryGetProperty("TotalBytes", out var tb) ? tb.GetInt64()            : 0L;
                 sb.AppendLine($"  {name,-32}  {files} file(s)  {bytes / 1024} KB  created={created}  modified={modif}");
             }
             return sb.Length > 0 ? sb.ToString().TrimEnd() : "(no saves found)";
@@ -80,6 +84,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_export")]
+    [DynamicDescription("mc_export_desc")]
     [Description("Export a single save-game directory from a PS2 memory card image to a folder on disk. Creates one file per memory card file within the save directory.")]
     public async Task<string> McExport(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
@@ -94,6 +99,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_import")]
+    [DynamicDescription("mc_import_desc")]
     [Description("Import a save-game directory into a PS2 memory card image. The save directory must have been exported with mc_export.")]
     public async Task<string> McImport(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
@@ -108,6 +114,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_delete")]
+    [DynamicDescription("mc_delete_desc")]
     [Description("Delete a single save-game directory from a PS2 memory card image. This operation cannot be undone.")]
     public async Task<string> McDelete(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
@@ -121,6 +128,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_format")]
+    [DynamicDescription("mc_format_desc")]
     [Description("Create a new blank PS2 memory card image file (8 MB). If a file already exists at the path it is overwritten.")]
     public async Task<string> McFormat(
         [Description("Absolute path where the new memory card image should be created.")] string mcPath,
@@ -131,6 +139,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "mc_read_file")]
+    [DynamicDescription("mc_read_file_desc")]
     [Description("Read the raw bytes of a specific file inside a PS2 memory card save directory. Returns the file contents as a base64-encoded string.")]
     public async Task<string> McReadFile(
         [Description("Absolute path to the PS2 memory card image file (.ps2).")] string mcPath,
@@ -159,6 +168,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "hdd_list")]
+    [DynamicDescription("hdd_list_desc")]
     [Description("Open a PS2 HDD image file and list all APA partitions on it. Returns partition ID, name, type, and size for each partition.")]
     public async Task<string> HddList(
         [Description("Absolute path to the PS2 HDD image file (e.g. 'hdd.raw').")] string hddPath,
@@ -181,7 +191,7 @@ public sealed partial class CodeDesignerPs2Tools
                 string id       = item.TryGetProperty("Id",         out var idProp)  ? (idProp.GetString()      ?? "?") : "?";
                 string name     = item.TryGetProperty("Name",       out var n)       ? (n.GetString()           ?? "?") : "?";
                 string type     = item.TryGetProperty("TypeName",   out var t)       ? (t.GetString()           ?? "?") : "?";
-                ulong  bytes    = item.TryGetProperty("TotalBytes", out var tb)      ? tb.GetUInt64()                    : 0ul;
+                long   bytes    = item.TryGetProperty("TotalBytes", out var tb)      ? tb.GetInt64()                     : 0L;
                 string created  = item.TryGetProperty("Created",    out var cr)      ? (cr.GetString()          ?? "?") : "?";
                 uint   files    = item.TryGetProperty("FileCount",  out var fc)      ? fc.GetUInt32()                    : 0u;
                 sb.AppendLine($"  {id,-20}  {name,-30}  [{type}]  {bytes / (1024 * 1024)} MB  {files} file(s)  created={created}");
@@ -192,6 +202,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_list_files")]
+    [DynamicDescription("hdd_list_files_desc")]
     [Description("List all files in a specific partition on a PS2 HDD image. Returns file name, size, and inode information.")]
     public async Task<string> HddListFiles(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
@@ -215,7 +226,7 @@ public sealed partial class CodeDesignerPs2Tools
             foreach (var item in arr.EnumerateArray())
             {
                 string name   = item.TryGetProperty("Name",        out var n)  ? (n.GetString()  ?? "?") : "?";
-                ulong  size   = item.TryGetProperty("Size",        out var s)  ? s.GetUInt64()            : 0ul;
+                long   size   = item.TryGetProperty("Size",        out var s)  ? s.GetInt64()             : 0L;
                 bool   isDir  = item.TryGetProperty("IsDirectory", out var d)  && d.GetBoolean();
                 string modif  = item.TryGetProperty("Modified",    out var mo) ? (mo.GetString() ?? "?") : "?";
                 string tag    = isDir ? "[DIR]" : "     ";
@@ -227,6 +238,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_export")]
+    [DynamicDescription("hdd_export_desc")]
     [Description("Export a single file from a PS2 HDD partition to a directory on disk. Does not require the emulator to be running.")]
     public async Task<string> HddExport(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
@@ -242,7 +254,8 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_import")]
-    [Description("Import a file into a specific partition on a PS2 HDD image. Does not require the emulator to be running.")]
+    [DynamicDescription("hdd_import_desc")]
+    [Description("Import a file into a specific partition on a PS2 HDD image. NOTE: Direct PFS write support is not yet implemented — this operation will return an error. Use PCSX2's built-in HDD tools or the pfsshell utility instead.")]
     public async Task<string> HddImport(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
         [Description("Partition ID to import the file into (as shown by hdd_list).")] string partitionId,
@@ -257,6 +270,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_delete")]
+    [DynamicDescription("hdd_delete_desc")]
     [Description("Delete a partition from a PS2 HDD image. This operation cannot be undone.")]
     public async Task<string> HddDelete(
         [Description("Absolute path to the PS2 HDD image file.")] string hddPath,
@@ -270,6 +284,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "hdd_create")]
+    [DynamicDescription("hdd_create_desc")]
     [Description("Create a new blank PS2 HDD image file with an initialised APA partition table. If the file already exists it is overwritten.")]
     public async Task<string> HddCreate(
         [Description("Absolute path where the new HDD image should be created.")] string hddPath,
@@ -287,6 +302,7 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "iso_list_files")]
+    [DynamicDescription("iso_list_files_desc")]
     [Description("Open a PS2 disc image (ISO/BIN or ZIP containing one) and list all files and directories on the disc in ISO-9660 format.")]
     public async Task<string> IsoListFiles(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip archive containing an ISO/BIN).")] string isoPath,
@@ -322,6 +338,7 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "iso_read_file")]
+    [DynamicDescription("iso_read_file_desc")]
     [Description("Extract a file from a PS2 disc image to disk or return its contents as base64. Use the path returned by iso_list_files to identify the target file.")]
     public async Task<string> IsoReadFile(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,
@@ -332,10 +349,27 @@ public sealed partial class CodeDesignerPs2Tools
         var json = await bridge.SendAsync(
             new { Command = "ISO_READ_FILE", IsoPath = isoPath, FilePath = filePath, OutputPath = outputPath },
             cancellationToken);
-        return SimpleMessage(json);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            string message = root.TryGetProperty("Message", out var msg) ? (msg.GetString() ?? "") : "";
+            // When outputPath is specified the Message already contains the destination path.
+            // When outputPath is omitted the file data is returned as base64 in the Data field.
+            if (string.IsNullOrEmpty(outputPath))
+            {
+                string data = root.TryGetProperty("Data", out var dat) ? (dat.GetString() ?? "") : "";
+                return WithRules($"{message}\nbase64: {data}");
+            }
+            return WithRules(message);
+        }
+        catch { return json; }
     }
 
     [McpServerTool(Name = "iso_get_info")]
+    [DynamicDescription("iso_get_info_desc")]
     [Description("Get metadata about a PS2 disc image: format (cooked/raw), sector count, size, and the primary volume descriptor title.")]
     public async Task<string> IsoGetInfo(
         [Description("Absolute path to the PS2 disc image (.iso, .bin, or .zip).")] string isoPath,

@@ -29,11 +29,14 @@
     [currentGameName]="currentGameName"
     (connectClick)="connect()"
     (runClick)="run()"
+    (startNetworkClick)="startNetwork()"
     (startPcsx2Click)="startPcsx2()"
     (restartClick)="restart()"
     (snapshotClick)="snapshot()"
     (snapshotPcsx2Click)="snapshotPcsx2()"
     (saveScreenshotClick)="saveScreenshot()"
+    (docsClick)="openDocs()"
+    (archiveDocsClick)="openArchiveDocs()"
     (importBinClick)="importBin()"
     (emulatorChange)="onSelectedEmulatorChange($event)"
     (biosChange)="onSelectedBiosChange($event)"
@@ -44,8 +47,11 @@
     (openSnapshotClick)="openSnapshot($event)"
     (reloadSnapshotClick)="reloadSnapshot($event)"
     (openAiConfigClick)="onOpenAiConfig()"
-  />
-  <app-mcp-memory-overlay
+    (openPacketViewerClick)="onOpenPacketViewer()"
+    (openLabelManagerClick)="onOpenLabelManager()"
+    (openMemoryCardClick)="onOpenMemoryCard()"
+    (openHddClick)="onOpenHdd()"
+    (openMemoryViewClick)="onOpenMemoryView($event)"
     (listEntries)="onMcpMemoryList()"
     (addEntry)="onMcpMemoryAdd($event)"
     (editEntry)="onMcpMemoryEdit($event)"
@@ -60,6 +66,9 @@
     [isConnected]="isConnected"
     [isPcsx2]="isPcsx2"
     [(cheatText)]="cheatText"
+    (openConverterClick)="onOpenConverter()"
+    (openPorterClick)="onOpenPorter()"
+    (openScannerClick)="onOpenScanner()"
   />
 </div>
 
@@ -76,4 +85,3 @@
     [selectedGame]="selectedGame"
   />
 </div>
-

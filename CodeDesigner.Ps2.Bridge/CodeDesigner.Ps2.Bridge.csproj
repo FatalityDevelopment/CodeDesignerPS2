@@ -68,4 +68,32 @@
     <PackageReference Include="SharpCompress" Version="0.38.0" />
   </ItemGroup>
 
+  <!--
+    After every build, copy all output artefacts to the CodeDesigner install
+    directory (the same folder that holds codedesigner.db).  This makes the
+    Bridge executable available at a fixed, well-known path so the VS Code
+    extension can auto-detect it without any user configuration.
+
+    Install directory mirrors the C# DatabasePaths.GetInstallDirectory() logic:
+      Windows  →  %LOCALAPPDATA%\CodeDesigner\
+      Linux/macOS →  $HOME/.local/share/CodeDesigner/
+  -->
+  <Target Name="DeployToInstallDir" AfterTargets="Build">
+    <PropertyGroup>
+      <_LocalAppData Condition="'$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)</_LocalAppData>
+      <_LocalAppData Condition="'$(LOCALAPPDATA)' == '' AND '$(HOME)' != ''">$(HOME)/.local/share</_LocalAppData>
+      <_InstallDir Condition="'$(_LocalAppData)' != ''">$(_LocalAppData)/CodeDesigner</_InstallDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_InstallDir)" Condition="'$(_InstallDir)' != ''" />
+    <ItemGroup Condition="'$(_InstallDir)' != ''">
+      <_DeployFiles Include="$(OutputPath)**\*" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(_DeployFiles)"
+      DestinationFiles="@(_DeployFiles->'$(_InstallDir)/%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true"
+      Condition="'$(_InstallDir)' != ''" />
+    <Message Text="[CodeDesigner] Deployed to $(_InstallDir)" Importance="high" Condition="'$(_InstallDir)' != ''" />
+  </Target>
+
 </Project>

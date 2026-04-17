@@ -575,3 +575,264 @@ body, html {
 .aic-tab-panel.hidden {
   display: none;
 }
+
+/* ── Tools tab ───────────────────────────────────────────────────────────── */
+
+.aic-tools-panel {
+  flex-direction: column;
+  padding: 16px 20px;
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.aic-tools-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.aic-tools-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.aic-tools-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.aic-tools-hint {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  margin: 0 0 12px;
+}
+
+.aic-tools-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.1));
+  border-radius: 4px;
+}
+
+.aic-tools-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.aic-tools-table thead th {
+  background: var(--vscode-sideBarSectionHeader-background, rgba(255,255,255,0.04));
+  padding: 6px 10px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.1));
+  white-space: nowrap;
+}
+
+.aic-tools-table tbody tr {
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.06));
+}
+
+.aic-tools-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.aic-tools-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.aic-tools-row.aic-tools-editing {
+  background: var(--vscode-editor-selectionBackground, rgba(0,120,212,0.1));
+}
+
+.aic-tools-col-key {
+  width: 220px;
+  min-width: 160px;
+}
+
+.aic-tools-col-desc {
+  width: 100%;
+}
+
+.aic-tools-col-actions {
+  width: 130px;
+  min-width: 110px;
+  white-space: nowrap;
+}
+
+.aic-tools-key-cell {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  padding: 8px 10px;
+  color: var(--vscode-symbolIcon-variableForeground, #9cdcfe);
+  vertical-align: top;
+}
+
+.aic-tools-table td {
+  padding: 6px 10px;
+  vertical-align: top;
+}
+
+.aic-tools-desc-text {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.aic-tools-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 12px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+  padding: 4px 6px;
+  resize: vertical;
+  outline: none;
+}
+
+.aic-tools-textarea:focus {
+  border-color: var(--vscode-focusBorder, #0078d4);
+}
+
+/* ── Memories tab ────────────────────────────────────────────────────────── */
+
+.aic-memories-tab-panel {
+  flex-direction: column;
+  padding: 16px 20px;
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.aic-memories-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 900px;
+}
+
+.aic-memories-tab-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.aic-memories-tab-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.aic-memories-tab-header-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.aic-memories-tab-hint {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  margin: 0 0 6px;
+}
+
+/* ── Memory filter bar ───────────────────────────────────────────────────── */
+
+.aic-mem-filter-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.aic-mem-filter-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border-radius: 3px;
+  font-family: var(--vscode-font-family, sans-serif);
+}
+
+.aic-mem-filter-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.aic-mem-filter-active {
+  background: var(--vscode-button-background) !important;
+  color: var(--vscode-button-foreground) !important;
+}
+
+/* ── Memory badge ────────────────────────────────────────────────────────── */
+
+.aic-mem-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+.aic-mem-badge-shared {
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+
+.aic-mem-badge-agent {
+  background: var(--vscode-statusBarItem-warningBackground, #f0a500);
+  color: var(--vscode-statusBarItem-warningForeground, #fff);
+}
+
+/* ── Global memory add form (with scope selector) ────────────────────────── */
+
+.aic-global-mem-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.aic-mem-add-scope-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aic-mem-scope-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+}
+
+.aic-mem-scope-select {
+  flex: 1;
+  max-width: 280px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, #555);
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: var(--vscode-font-family, sans-serif);
+  outline: none;
+}
+
+.aic-mem-scope-select:focus {
+  border-color: var(--vscode-focusBorder, #0078d4);
+}
+
+/* ── Global memory list ──────────────────────────────────────────────────── */
+
+.aic-global-mem-list {
+  border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.1));
+  border-radius: 4px;
+  overflow-y: auto;
+  max-height: 500px;
+}

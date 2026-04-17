@@ -1,4 +1,4 @@
-﻿using CodeDesigner.Ps2.Common.Cpu.InstrArgs;
+using CodeDesigner.Ps2.Common.Cpu.InstrArgs;
 using CodeDesigner.Ps2.Common.CPU;
 using System;
 
@@ -71,28 +71,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                ulong rsVal = cpu.RegsLo[args.Rs];
-                ulong rtVal = cpu.RegsLo[args.Rt];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal == rtVal;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = cpu.RegsLo[args.Rs] == cpu.RegsLo[args.Rt];
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -147,28 +135,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                ulong rsVal = cpu.RegsLo[args.Rs];
-                ulong rtVal = cpu.RegsLo[args.Rt];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal != rtVal;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = cpu.RegsLo[args.Rs] != cpu.RegsLo[args.Rt];
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -222,25 +198,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal <= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] <= 0;
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -294,25 +261,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal > 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] > 0;
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -366,25 +324,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal < 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] < 0;
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -438,25 +387,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal >= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] >= 0;
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -512,28 +452,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                ulong rsVal = cpu.RegsLo[args.Rs];
-                ulong rtVal = cpu.RegsLo[args.Rt];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal == rtVal;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (delay slot nullified)")}]";
+                bool taken = cpu.RegsLo[args.Rs] == cpu.RegsLo[args.Rt];
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -589,28 +517,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                ulong rsVal = cpu.RegsLo[args.Rs];
-                ulong rtVal = cpu.RegsLo[args.Rt];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal != rtVal;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{rsVal:X16}, {CpuHelpers.RegName(args.Rt)}=0x{rtVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (delay slot nullified)")}]";
+                bool taken = cpu.RegsLo[args.Rs] != cpu.RegsLo[args.Rt];
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -654,14 +570,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_J args, CpuState? cpu = null, uint? pc = null)
         {
-            if (pc.HasValue)
-            {
-                uint pcUpper = (pc.Value + 4) & 0xF0000000;
-                uint target = pcUpper | (args.Addr << 2);
-                return $"jump to ${target:X8}";
-            }
-
-            return $"jump to target 0x{args.Addr:X}";
+            if (!pc.HasValue) return $"→ 0x{args.Addr << 2:X8}";
+            uint pcUpper = (pc.Value + 4) & 0xF0000000;
+            uint target = pcUpper | (args.Addr << 2);
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -709,15 +621,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_J args, CpuState? cpu = null, uint? pc = null)
         {
-            if (pc.HasValue)
+            if (!pc.HasValue) return $"call 0x{args.Addr << 2:X8}";
+            uint pcUpper = (pc.Value + 4) & 0xF0000000;
+            uint target = pcUpper | (args.Addr << 2);
+            if (cpu != null)
             {
-                uint pcUpper = (pc.Value + 4) & 0xF0000000;
-                uint target = pcUpper | (args.Addr << 2);
-                uint returnAddr = pc.Value + 8;
-                return $"call to function at ${target:X8} ($ra=0x{returnAddr:X8})";
+                uint a0 = (uint)cpu.RegsLo[4];
+                uint a1 = (uint)cpu.RegsLo[5];
+                uint a2 = (uint)cpu.RegsLo[6];
+                uint a3 = (uint)cpu.RegsLo[7];
+                return $"call 0x{target:X8} ($a0=0x{a0:X8} $a1=0x{a1:X8} $a2=0x{a2:X8} $a3=0x{a3:X8})";
             }
-
-            return $"call to function at target 0x{args.Addr:X}";
+            return $"call 0x{target:X8}";
         }
     }
 
@@ -754,13 +669,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             if (cpu != null)
-            {
-                ulong target = cpu.RegsLo[args.Rs];
-                // Cast to uint: MIPS uses 32-bit addresses even in 64-bit mode
-                return $"jump to ${(uint)target:X8} (ptr)";
-            }
-
-            return $"jump to {CpuHelpers.RegName(args.Rs)} (ptr)";
+                return $"→ 0x{(uint)cpu.RegsLo[args.Rs]:X8}";
+            return $"→ {CpuHelpers.RegName(args.Rs)}";
         }
     }
 
@@ -805,15 +715,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu != null && pc.HasValue)
+            if (cpu != null)
             {
-                ulong target = cpu.RegsLo[args.Rs];
-                uint returnAddr = pc.Value + 8;
-                // Cast to uint: MIPS uses 32-bit addresses even in 64-bit mode
-                return $"call to function at ${(uint)target:X8} ({CpuHelpers.RegName(args.Rd)}=0x{returnAddr:X8})";
+                uint target = (uint)cpu.RegsLo[args.Rs];
+                uint a0 = (uint)cpu.RegsLo[4];
+                uint a1 = (uint)cpu.RegsLo[5];
+                uint a2 = (uint)cpu.RegsLo[6];
+                uint a3 = (uint)cpu.RegsLo[7];
+                return $"call 0x{target:X8} ($a0=0x{a0:X8} $a1=0x{a1:X8} $a2=0x{a2:X8} $a3=0x{a3:X8})";
             }
-
-            return $"call to function at {CpuHelpers.RegName(args.Rs)} (ptr)";
+            return $"call {CpuHelpers.RegName(args.Rs)}";
         }
     }
 
@@ -871,26 +782,15 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                uint returnAddr = pc.Value + 8;
-                bool taken = rsVal < 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] < 0;
+                return $"call 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"call 0x{target:X8}";
         }
     }
 
@@ -948,26 +848,15 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                uint returnAddr = pc.Value + 8;
-                bool taken = rsVal >= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] >= 0;
+                return $"call 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"call 0x{target:X8}";
         }
     }
 
@@ -1025,26 +914,15 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                uint returnAddr = pc.Value + 8;
-                bool taken = rsVal < 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] < 0;
+                return $"call 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"call 0x{target:X8}";
         }
     }
 
@@ -1102,26 +980,15 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                uint returnAddr = pc.Value + 8;
-                bool taken = rsVal >= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8}, $ra=0x{returnAddr:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] >= 0;
+                return $"call 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]";
             }
-
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-
-            return eq;
+            return $"call 0x{target:X8}";
         }
     }
 
@@ -1170,22 +1037,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal < 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] < 0;
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -1234,22 +1095,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal >= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] >= 0;
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -1298,22 +1153,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal <= 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] <= 0;
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 
@@ -1362,22 +1211,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation.Replace("rs", CpuHelpers.RegName(args.Rs));
-            if (cpu != null && pc.HasValue)
+            if (!pc.HasValue) return string.Empty;
+            int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
+            uint target = (uint)((int)pc.Value + 4 + offset);
+            if (cpu != null)
             {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                bool taken = rsVal > 0;
-                return $"{eq} => {CpuHelpers.RegName(args.Rs)}=0x{(ulong)rsVal:X16}, target=${target:X8} [{(taken ? "TAKEN" : "NOT TAKEN (nullified)")}]";
+                bool taken = (long)cpu.RegsLo[args.Rs] > 0;
+                string loopHint = pc.HasValue && target < pc.Value ? " [loop]" : string.Empty;
+                return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
-            if (pc.HasValue)
-            {
-                int offset = CpuHelpers.SignExtend16(args.Imm) << 2;
-                uint target = (uint)((int)pc.Value + 4 + offset);
-                return $"{eq.Replace("PC + 4 + (offset << 2)", $"${target:X8}")}";
-            }
-            return eq;
+            return $"→ 0x{target:X8}";
         }
     }
 }

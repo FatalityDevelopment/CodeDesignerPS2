@@ -4,7 +4,7 @@ using System.Text;
 
 namespace CodeDesigner.Ps2.ZDBManager
 {
-    internal class CA_Checksum
+    public class CA_Checksum
     {
         private uint[] seedTable = {
             0x00000000, 0x77073096, 0xEE0E612C, 0x990951BA,

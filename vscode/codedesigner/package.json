@@ -52,6 +52,10 @@
         "title": "CodeDesigner: Recompile Game ELF from Disc"
       },
       {
+        "command": "codedesigner.openElfFile",
+        "title": "CodeDesigner: Open in Emulator (File Mode)"
+      },
+      {
         "command": "codedesigner.pointerManager.addPointer",
         "title": "Add Struct",
         "icon": "$(add)"
@@ -139,6 +143,18 @@
           ".cds"
         ],
         "configuration": "./dist/language-configuration.json"
+      },
+      {
+        "id": "ps2-elf",
+        "aliases": [
+          "PS2 Executable",
+          "PS2 ELF"
+        ],
+        "extensions": [
+          ".elf",
+          ".bin",
+          ".raw"
+        ]
       }
     ],
     "grammars": [
@@ -146,6 +162,18 @@
         "language": "cds",
         "scopeName": "source.cds",
         "path": "./syntaxes/cds.tmLanguage.json"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "codedesigner.ps2File",
+        "displayName": "CodeDesigner: PS2 File",
+        "selector": [
+          { "filenamePattern": "*.elf" },
+          { "filenamePattern": "*.bin" },
+          { "filenamePattern": "*.raw" }
+        ],
+        "priority": "default"
       }
     ],
     "configurationDefaults": {

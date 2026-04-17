@@ -1,5 +1,12 @@
 # Copilot Instructions for CodeDesigner
 
+## CRITICAL — Build Artifacts (MUST READ)
+
+**NEVER commit files under `obj/`, `bin/`, or `Debug/` directories.** These are build outputs.
+Before EVERY commit, run: `git diff --cached --name-only | grep -iE '[\\/](obj|bin)[\\/]'` — if it outputs anything, run `git reset HEAD` on those files.
+The `website/obj/` path contains literal backslashes that break Windows. A CI check will reject any PR containing these files.
+**Do NOT use `git add .` or `git add -A`** — always add specific files or directories excluding build outputs.
+
 ## Project Overview
 
 This is a C# library and toolset for the **Sony PlayStation 2 Emotion Engine (EE)** MIPS64 architecture. It provides a complete assembler, disassembler, instruction decoder/encoder, and execution engine, verified against [PCSX2](https://pcsx2.net/) reference behaviour.
@@ -98,7 +105,7 @@ cd CodeDesigner.Ps2 && dotnet run -- --server
 - **DMAC**: `0x10008000–0x1000DFFF` (10 channels) + `0x1000E000–0x1000E0FF` (global D_CTRL/D_STAT/PCR/SQWC/RBSR/RBOR/STADR). Normal-mode DMA executes synchronously on CHCR STR=1 write. `PS2Emulator.DmaChannelComplete` event fires when a channel completes with its enable bit set.
 - **SIF**: `0x1000F200–0x1000F26F` (MSCOM/SMCOM/MSFLAG/SMFLAG/F240/F250/F260). Accessible via `Bus.Sif`.
 - **VIF0/VIF1**: `VifUnit` in `Emulator/Hardware/VifUnit.cs`. Supports all 14 UNPACK formats, MPG, MSCAL/MSCNT, STROW/STCOL/STMASK. VIF0 base = `0x10003800`, VIF1 base = `0x10003C00` (0x200-byte register window each). VIF0's `VuDataMem` is wired to `VU0State.DataMem`. DMAC CH0/CH1 feeds data to VIF0/VIF1 respectively.
-- **GIF**: registers at `0x10003000` (0x100-byte window): GIF_CTRL/MODE/STAT/TAG0–3/CNT/P3CNT/P3TAG. Supports full GIFtag processing: PACKED (A+D), REGLIST, IMAGE. PATH2 = VIF1.GifOutput, PATH3 = DMAC CH2 DataConsumer.
+- **GIF**: registers at `0x10003000` (0x100-byte window): GIF_CTRL/MODE/STAT/TAG0–3/CNT/P3CNT/P3TAG. Supports full GIFtag processing: PACKED (A+D), REGLIST, IMAGE. PATH2 = VIF1.GifOutput, PATH3 = DMAC Ch2 DataConsumer.
 - **GS**: `GS.cs` manages 128×64-bit internal registers + privileged registers at `0x12000000` (16-byte aligned, 32/64-bit access).
 
 ### IOP Subsystem

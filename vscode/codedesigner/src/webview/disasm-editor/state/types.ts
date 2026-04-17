@@ -15,7 +15,7 @@ export interface DisasmRow {
 
 // ── Search ────────────────────────────────────────────────────────────────────
 
-export type SearchMode = 'text' | 'bytes' | 'string' | 'regex';
+export type SearchMode = 'text' | 'bytes' | 'string' | 'regex' | 'refs';
 
 export interface SearchMatch {
   instructionIndex: number;
@@ -157,13 +157,19 @@ export interface HistoryEntry {
   disasm?: string;
 }
 
+export interface RefEntry {
+  /** Hex address of the instruction that references the target (e.g. "00123456"). */
+  address: string;
+  /** Human-readable instruction text, e.g. "JAL 0x00567890". Empty when unavailable. */
+  instruction: string;
+}
+
 // ── Panel Visibility ──────────────────────────────────────────────────────────
 
 export interface PanelVisibility {
   search: boolean;
   goto: boolean;
   setpc: boolean;
-  symbols: boolean;
   registers: boolean;
   bottom: boolean;
 }

@@ -1,0 +1,19 @@
+# Build output
+/dist
+/obj
+
+# Dependencies
+/node_modules
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
+
+# Angular cache
+.angular

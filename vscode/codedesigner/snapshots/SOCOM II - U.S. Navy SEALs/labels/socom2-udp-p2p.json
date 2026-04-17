@@ -1,0 +1,331 @@
+{
+  "setName": "socom2-udp-p2p",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "entries": [
+    {
+      "address": "0x002BC950",
+      "name": "UDP_BroadcastLobbyPacket",
+      "comment": "Broadcasts 64-byte buf at 0x0045D480 to all peers (peerID=0xFFFF). Args: a0=usr_val0, a1=usr_byte, a2=usr_val1. Calls UDPSendRaw with t1=6.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0032A420",
+      "name": "UDPSendRaw",
+      "comment": "Raw UDP send. a0=pktBuf, a1=size, a2=socket, a3=peerID (0xFFFF=broadcast), t0=srcParam, t1=msgType, t2=extraData, t3=flags. Calls 0x00628D48 (libnetb send).",
+      "type": "Function"
+    },
+    {
+      "address": "0x00628D48",
+      "name": "libnetb_SendTo",
+      "comment": "libnetb sendto wrapper \u2014 actual network I/O. Called by UDPSendRaw. High-addr = IOP/libnetb export thunk.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0036F520",
+      "name": "FindObjectByName",
+      "comment": "Hashtable lookup by name string. a0=name_str. Returns object ptr or NULL. Used by packet senders to resolve UI var recipients (e.g. ChatRecipient). List head at 0x004A1BC4.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002BC480",
+      "name": "UDPSend_Chat",
+      "comment": "Builds and sends UDP chat packet. Resolves ChatRecipient UI var (0x0041DB28) for peer ID. Allocates 6-byte packet, writes type\u002Brecipient into header, calls UDP_SendToPeer.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0045D480",
+      "name": "gLobbyUDPPacketBuf",
+      "comment": "Shared 64-byte UDP P2P lobby packet buffer. All send functions write packet payload here before calling UDPSendRaw. Byte[0] = init flag, Byte[1] = peer count."
+    },
+    {
+      "address": "0x0045D574",
+      "name": "gPeerSocketHandle",
+      "comment": "UDP P2P session socket/connection handle. Passed as a2 to UDPSendRaw. Points to the active peer connection struct.",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x002BE260",
+      "name": "UDP_LobbyPacketProcessor",
+      "comment": "Main UDP lobby packet processor (2560 bytes). Processes outbound queue, checks Medius connection via 0x00321950, filters loopback IPs (7F000000), dispatches to type-1/type-2 handlers. Calls UDPSendRaw.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002BF280",
+      "name": "UDP_InboundPacketProcessor",
+      "comment": "Secondary UDP packet processor (1888 bytes). Processes inbound packets from peers. Checks gPeerCount (0x0045D481), calls 0x002C4C40. Handles ping/packet-loss calc with FP (val*0.001).",
+      "type": "Function"
+    },
+    {
+      "address": "0x002C2440",
+      "name": "UDP_RouteIncomingByPeerID",
+      "comment": "Route incoming packet by sender peer ID (2352 bytes). a2=peerID. Checks peerID against player slot IDs at 0x0044DC78-0x0044DCB0 and 0xFFFF/0xFFFE. Triages to join/disconnect handlers.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002C7030",
+      "name": "Lobby_RefreshPeerState",
+      "comment": "Checks gPeerCount (0x0045D481), calls UDP_GetPeerByBuffer, Lobby_SyncPeerData (0x002C5960), and UDP_BroadcastLobbyState (0x00307E80). Refreshes peer session state after network event.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002C1CD0",
+      "name": "Lobby_UpdateLoop",
+      "comment": "Main lobby state update loop. Called with session object ptr after peer count changes. Updates lobby timers, syncs state to peers, processes join/leave queue.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002C4FA0",
+      "name": "Lobby_OnPeerCountChange",
+      "comment": "Called from UDP_OnPlayerSessionChange when peer count changes. a0=TeamId. Notifies lobby system of peer join/leave and triggers state sync.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0032AB60",
+      "name": "UDP_GetPeerByBuffer",
+      "comment": "Gets peer connection record from packet buffer at gLobbyUDPPacketBuf (0x0045D480). Returns peer context ptr used by Lobby_RefreshPeerState.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002BF110",
+      "name": "UDP_GetSocketForPeer",
+      "comment": "Returns socket struct for a given peer address. Calls UDP_EnumPeerSockets (0x0062A108). a0=peerAddr. Used before UDPSendRaw to get the socket handle.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002BC850",
+      "name": "UDP_SendToPeer",
+      "comment": "Loads peer socket via UDP_GetSocketForPeer, dispatches by peer ID: 0xFFFF=broadcast-all, 0xFFFE=host-relay, 0xFFFD=?, specific=targeted send. Calls UDPSendRaw.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002BC9E0",
+      "name": "UDP_SendToSpecificPeer",
+      "comment": "Targeted UDP send variant. Uses UDP_ProcessPeerPacket_A (0x0032AAD0) and UDP_ProcessPeerPacket_B (0x0032AA90) to route to specific peer rather than broadcast.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002C4E10",
+      "name": "UDP_BroadcastToPeers",
+      "comment": "Iterates all peers and sends UDP packet to each. Called from UDPSend_Chat when peerID=0xFFFF. Loops over peer ID table at 0x0044DC78 (8 entries, stride 8).",
+      "type": "Function"
+    },
+    {
+      "address": "0x002BEC60",
+      "name": "UDP_GetPktBuf_ConnState",
+      "comment": "State accessor stub (64 bytes). Returns 0x0044D800 if connected state, else 0x0044D760. Selects between two packet buffer regions based on current connection state.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002BECA0",
+      "name": "UDP_GetPktBuf_ConnState2",
+      "comment": "Second state accessor stub. Returns 0x0044D7F0 if connected, else 0x0044D750. Paired with UDP_GetPktBuf_ConnState for alternate buffer region selection.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002C1C80",
+      "name": "UDP_OnPlayerSessionChange",
+      "comment": "Stores session byte in gLocalPlayerSessionByte (0x0044DCF8), then calls Lobby_OnPeerCountChange, Lobby_UpdateLoop, Lobby_RefreshPeerState. Triggered on player session state change.",
+      "type": "Function"
+    },
+    {
+      "address": "0x002C5960",
+      "name": "Lobby_SyncPeerData",
+      "comment": "Syncs peer data to all connected peers after state change. Called from Lobby_RefreshPeerState. Writes peer table entries and broadcasts updated lobby state.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0062A108",
+      "name": "UDP_EnumPeerSockets",
+      "comment": "libnetb/sceNet peer socket enumeration. Called by UDP_GetSocketForPeer to retrieve the socket struct for a peer connection. Returns ptr to peer socket record. High-addr = IOP/libnetb export thunk.",
+      "type": "Function"
+    },
+    {
+      "address": "0x00307E80",
+      "name": "UDP_BroadcastLobbyState",
+      "comment": "Broadcasts updated lobby state to all peers. Called from Lobby_RefreshPeerState with gLobbyStateCounter (0x00452730) and peerID=0xFFFF.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0044DC78",
+      "name": "gPlayerPeerID_table",
+      "comment": "Player peer ID table. 8 entries, 8-byte stride: [0]=0x0044DC78, [1]=0x0044DC80 ... [7]=0x0044DCB0. Each entry is a 16-bit peer ID for that player slot. Iterated by UDP_BroadcastToPeers."
+    },
+    {
+      "address": "0x0044DCF8",
+      "name": "gLocalPlayerSessionByte",
+      "comment": "Local player session byte. Written by UDP_OnPlayerSessionChange. Used to track if local player is spectator vs active player in the P2P lobby."
+    },
+    {
+      "address": "0x004446F8",
+      "name": "gLobbySessionPtr",
+      "comment": "Pointer to the active lobby session object. Object layout: \u002B0xC0=vtable, \u002B0xC8=field32, \u002B0xE4=pktCounter, \u002B0xF9=flag, \u002B0x10C=innerObjPtr, \u002B0x118/\u002B0x119=team bytes, \u002B0x0E4=packet counter.",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004A1BC4",
+      "name": "gObjectNameHashList",
+      "comment": "Head of linked list used by FindObjectByName hashtable. Stores named UI variable objects (e.g., ChatRecipient, other game UI vars). Traversed by 0x0036F520."
+    },
+    {
+      "address": "0x00452730",
+      "name": "gLobbyStateCounter",
+      "comment": "Lobby state version counter. Passed to UDP_BroadcastLobbyState. Zero when not in a lobby. Incremented on lobby state changes to detect stale/updated state across peers."
+    },
+    {
+      "address": "0x0041D7F0",
+      "name": "STR_PKT_Reject",
+      "comment": "UDP packet type name string. Type index 0. Used in packet type dispatch table.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D7F8",
+      "name": "STR_PKT_Message",
+      "comment": "UDP packet type name string. Type index 1.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D800",
+      "name": "STR_PKT_Chat",
+      "comment": "UDP packet type name string. Type index 2.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D808",
+      "name": "STR_PKT_WeaponPickup",
+      "comment": "UDP pkt type str. Index 3. \u0022Wep PU\u0022 = Weapon Pickup.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D810",
+      "name": "STR_PKT_AmmoPickup",
+      "comment": "UDP pkt type str. Index 4. \u0022Wep Ammo PU\u0022 = Weapon Ammo Pickup.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D820",
+      "name": "STR_PKT_PickupReq",
+      "comment": "UDP pkt type str. Index 5. \u0022PU May I\u0022 = Pickup Request (ask host permission).",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D830",
+      "name": "STR_PKT_PickupOK",
+      "comment": "UDP pkt type str. Index 6. \u0022PU OK\u0022 = Pickup Approved by host.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D838",
+      "name": "STR_PKT_ClimbAsk",
+      "comment": "UDP pkt type str. Index 7. \u0022ClimbAsk\u0022 = request to climb an object/ladder.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D848",
+      "name": "STR_PKT_ClimbOK",
+      "comment": "UDP pkt type str. Index 8. \u0022ClimbOK\u0022 = climb request approved.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D850",
+      "name": "STR_PKT_Names",
+      "comment": "UDP pkt type str. Index 9. \u0022Names\u0022 = Player name sync packet.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D858",
+      "name": "STR_PKT_Voter",
+      "comment": "UDP pkt type str. Index 10. \u0022Voter\u0022 = host votes to kick/change game option.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D860",
+      "name": "STR_PKT_SpecVote",
+      "comment": "UDP pkt type str. Index 11. \u0022Spec Vote\u0022 = spectator vote packet.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D870",
+      "name": "STR_PKT_TeamSwitch",
+      "comment": "UDP pkt type str. Index 12. \u0022Team Switch\u0022 = player team switch request/notify.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D880",
+      "name": "STR_PKT_AllSwitch",
+      "comment": "UDP pkt type str. Index 13. \u0022All Switch\u0022 = all-team/all-player switch broadcast.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D890",
+      "name": "STR_PKT_Bomb",
+      "comment": "UDP pkt type str. Index 14. \u0022Bomb\u0022 = bomb plant/defuse/explode event.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D898",
+      "name": "STR_PKT_Alert",
+      "comment": "UDP pkt type str. Index 15. \u0022Alert\u0022 = server/host alert broadcast to peers.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D8A0",
+      "name": "STR_PKT_GameSignal",
+      "comment": "UDP pkt type str. Index 16. \u0022Game Signal\u0022 = generic game-state signal (round end, start, etc).",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D8B8",
+      "name": "STR_ERR_PasswordError",
+      "comment": "Reject reason string. \u0022Password Error\u0022 \u2014 sent in STR_PKT_Reject payload when password mismatch.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D8D0",
+      "name": "STR_ERR_TooManySpecs",
+      "comment": "Reject reason string. \u0022Too many spectators\u0022 \u2014 sent in STR_PKT_Reject when spectator slots full.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D8F0",
+      "name": "STR_ERR_TooManyPlayers",
+      "comment": "Reject reason string. \u0022Too many players\u0022 \u2014 player slots full.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D910",
+      "name": "STR_ERR_ClosedClanGame",
+      "comment": "Reject reason string. \u0022Closed clan game\u0022 \u2014 non-clan member tried to join a clan-locked game.",
+      "type": "String"
+    },
+    {
+      "address": "0x0041D930",
+      "name": "STR_ERR_TotallyUnknown",
+      "comment": "Reject reason string. \u0022Totally unknown error\u0022 \u2014 catch-all fallback reject reason.",
+      "type": "String"
+    },
+    {
+      "address": "0x0044DD08",
+      "name": "gConnectionCounter1",
+      "comment": "Peer connection counter 1. Incremented on peer connect events. Paired with gConnectionCounter2 at 0x0044DD18."
+    },
+    {
+      "address": "0x0044DD18",
+      "name": "gConnectionCounter2",
+      "comment": "Peer connection counter 2. Second connect event counter. Paired with gConnectionCounter1 at 0x0044DD08."
+    },
+    {
+      "address": "0x0045D568",
+      "name": "gLocalIPMask",
+      "comment": "Local IP loopback mask. Used by UDP_LobbyPacketProcessor to filter own packets. Checked: srcIP \u0026 0x7F0000FE == gLocalIPMask."
+    },
+    {
+      "address": "0063225c",
+      "name": "Packet Encryption Disable[1]"
+    },
+    {
+      "address": "006322f8",
+      "name": "Packet Encryption Disable[2]"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using CodeDesigner.Ps2.CheatEngine;
+using CodeDesigner.Ps2.CdsLanguage;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -113,6 +114,10 @@ namespace CodeDesigner.Ps2.Bridge
         public List<ScanValueResult>? ScanResults { get; set; }
         // GETSTRUCTS results
         public List<StructEntry>? Structs { get; set; }
+        // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
+        public List<CdsSidecarResult>? Sidecars { get; set; }
+        // Structured CDS diagnostics returned by VALIDATECDS / COMPILECDS / CDSPATCH.
+        public List<CdsDiagnostic>? Diagnostics { get; set; }
         // New PINE extended command response fields
         public float? FPS { get; set; }
         public string? SymbolAddress { get; set; }
@@ -183,10 +188,29 @@ namespace CodeDesigner.Ps2.Bridge
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public LabelSetPayload? LabelSet { get; set; }
 
+        // MCP Config results (MCPCONFIG_LIST / MCPCONFIG_UPDATE)
+        /// <summary>List of MCP config entries returned by MCPCONFIG_LIST.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<McpConfigInfo>? McpConfigs { get; set; }
+        /// <summary>Single MCP config entry returned by MCPCONFIG_UPDATE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public McpConfigInfo? McpConfig { get; set; }
+
         // GETSNAPSHOTS results
         /// <summary>List of snapshot metadata entries returned by GETSNAPSHOTS.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<SnapshotInfo>? Snapshots { get; set; }
+
+        // GETGAMECHEATS results
+        /// <summary>List of cheat entries returned by GETGAMECHEATS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CheatInfo>? GameCheats { get; set; }
+        /// <summary>Game title returned alongside cheats by GETGAMECHEATS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? GameTitle { get; set; }
+        /// <summary>Cheat list title returned alongside cheats by GETGAMECHEATS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? CheatListTitle { get; set; }
 
         // QUERYDB results
         /// <summary>
@@ -199,6 +223,31 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Number of rows returned by the last QUERYDB statement.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public int? DbRowCount { get; set; }
+
+        // Pad / controller input results (PADGETSTATE / PADGETTYPE)
+        /// <summary>Full pad state returned by PADGETSTATE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public PadStateInfo? PadState { get; set; }
+        /// <summary>Controller type value returned by PADGETTYPE (0=NotConnected, 1=DualShock2, etc.).</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public byte? PadControllerType { get; set; }
+
+        // DEV9 network bridge results (NETGETSTATUS / NETGETSTATS / NETRECVCAPTURE / NETDISASSEMBLE)
+        /// <summary>Network adapter status returned by NETGETSTATUS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public NetStatusInfo? NetStatus { get; set; }
+        /// <summary>Network statistics returned by NETGETSTATS.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public NetStatsInfo? NetStats { get; set; }
+        /// <summary>Captured packets returned by NETRECVCAPTURE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<CapturedPacketInfo>? CapturedPackets { get; set; }
+        /// <summary>Packet dissection text returned by NETDISASSEMBLE.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? DissectionText { get; set; }
+        /// <summary>Injection success flag returned by NETINJECT / NETINJECTTX.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public bool? InjectionSuccess { get; set; }
     }
 
     /// <summary>Snapshot metadata wire payload returned by GETSNAPSHOTS.</summary>
@@ -221,11 +270,182 @@ namespace CodeDesigner.Ps2.Bridge
     {
         [System.Text.Json.Serialization.JsonPropertyName("setName")]
         public string SetName { get; set; } = string.Empty;
-        [System.Text.Json.Serialization.JsonPropertyName("gameId")]
-        public string? GameId { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("gameDiscId")]
+        public string? GameDiscId { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("isBuiltIn")]
         public bool IsBuiltIn { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("entries")]
         public List<LabelManagerEntry> Entries { get; set; } = [];
+    }
+
+    /// <summary>Wire payload for a single MCP config entry returned by MCPCONFIG_LIST / MCPCONFIG_UPDATE.</summary>
+    public class McpConfigInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public int Id { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("key")]
+        public string Key { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public string? Value { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("description")]
+        public string? Description { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("updatedAt")]
+        public string UpdatedAt { get; set; } = string.Empty;
+    }
+
+    /// <summary>Wire payload for a single cheat entry returned by GETGAMECHEATS.</summary>
+    public class CheatInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("author")]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? Author { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("notes")]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? Notes { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("codes")]
+        public List<string> Codes { get; set; } = [];
+    }
+
+    /// <summary>Wire payload for a pad state snapshot returned by PADGETSTATE.</summary>
+    public class PadStateInfo
+    {
+        /// <summary>PS2 button bitmask; a bit that is <b>clear</b> means pressed.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("buttons")]
+        public uint Buttons { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("lx")]
+        public byte Lx { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("ly")]
+        public byte Ly { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("rx")]
+        public byte Rx { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("ry")]
+        public byte Ry { get; set; }
+        /// <summary>16 pressure values (0–255) in PadDualshock2::Inputs order.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("pressures")]
+        public byte[] Pressures { get; set; } = [];
+    }
+
+    /// <summary>Wire payload for network adapter status returned by NETGETSTATUS.</summary>
+    public class NetStatusInfo
+    {
+        /// <summary>True when EthEnable is set and the adapter has been opened.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("enabled")]
+        public bool Enabled { get; set; }
+        /// <summary>Adapter type (0=Unset, 1=PCAP_Bridged, 2=PCAP_Switched, 3=TAP, 4=Sockets).</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("adapterType")]
+        public byte AdapterType { get; set; }
+        /// <summary>PS2 MAC address as colon-separated hex string.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("ps2Mac")]
+        public string PS2Mac { get; set; } = string.Empty;
+        /// <summary>Last known PS2 IPv4 address as dotted decimal string.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("ps2IP")]
+        public string PS2IP { get; set; } = string.Empty;
+    }
+
+    /// <summary>Wire payload for network statistics returned by NETGETSTATS.</summary>
+    public class NetStatsInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("txPackets")]
+        public uint TxPackets { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("rxPackets")]
+        public uint RxPackets { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("txBytes")]
+        public ulong TxBytes { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("rxBytes")]
+        public ulong RxBytes { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("captureQueueSize")]
+        public ushort CaptureQueueSize { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("droppedCount")]
+        public uint DroppedCount { get; set; }
+    }
+
+    /// <summary>Wire payload for a single captured packet returned by NETRECVCAPTURE.</summary>
+    public class CapturedPacketInfo
+    {
+        /// <summary>0 = TX (PS2→Host), 1 = RX (Host→PS2).</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("direction")]
+        public byte Direction { get; set; }
+        /// <summary>Direction as human-readable string.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("directionName")]
+        public string DirectionName { get; set; } = string.Empty;
+        /// <summary>Monotonic timestamp in microseconds.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("timestampUs")]
+        public ulong TimestampUs { get; set; }
+        /// <summary>Length of the raw Ethernet frame in bytes.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("length")]
+        public int Length { get; set; }
+        /// <summary>Raw Ethernet frame bytes as base64-encoded string.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("data")]
+        public string Data { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// A sidecar command from a compiled CDS source file.
+    /// Sidecar items (<c>assert</c>, <c>breakpoint</c>, <c>watchpoint</c>, <c>log</c>) do not emit
+    /// MIPS code words but carry instructions for the bridge to act on alongside the patch.
+    /// </summary>
+    public class CdsSidecarResult
+    {
+        /// <summary>
+        /// Type of the sidecar: <c>"assert"</c>, <c>"breakpoint"</c>, <c>"watchpoint"</c>,
+        /// or <c>"log"</c>.
+        /// </summary>
+        public string Kind { get; set; } = string.Empty;
+
+        /// <summary>The PS2 virtual address referenced by the sidecar directive.</summary>
+        public uint Address { get; set; }
+
+        // ── Assert fields ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Comparison operator for an <c>assert</c> sidecar: <c>"=="</c> or <c>"!="</c>.
+        /// </summary>
+        public string? Operator { get; set; }
+
+        /// <summary>The value that the memory location was expected to contain.</summary>
+        public uint? ExpectedValue { get; set; }
+
+        /// <summary>
+        /// The value actually read from live memory, if a live backend was available.
+        /// <see langword="null"/> when no backend was connected during compilation.
+        /// </summary>
+        public uint? ActualValue { get; set; }
+
+        /// <summary>
+        /// <see langword="true"/> when the assertion passed, <see langword="false"/> when it
+        /// failed, and <see langword="null"/> when the assertion could not be checked (no live
+        /// memory backend was available).
+        /// </summary>
+        public bool? AssertPassed { get; set; }
+
+        // ── Watchpoint fields ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Number of bytes to watch for a <c>watchpoint</c> sidecar (typically 1, 2, or 4).
+        /// </summary>
+        public uint? WatchSize { get; set; }
+
+        /// <summary>
+        /// Access type for a <c>watchpoint</c> sidecar: <c>"read"</c>, <c>"write"</c>, or
+        /// <c>"readwrite"</c>.
+        /// </summary>
+        public string? AccessType { get; set; }
+
+        // ── Log/print fields ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Original CDS directive keyword for a log sidecar: <c>"log"</c> or <c>"print"</c>.
+        /// </summary>
+        public string? Directive { get; set; }
+
+        /// <summary>
+        /// Message text carried by a <c>log</c> / <c>print</c> sidecar.
+        /// </summary>
+        public string? MessageText { get; set; }
     }
 }

@@ -5,9 +5,9 @@ using System.Text;
 
 namespace CodeDesigner.Ps2.pis2map
 {
-    class Program
+    public class Program
     {
-        static int Main(string[] args)
+        public static int Main(string[] args)
         {
             int i = 0;
             int i2 = 0;

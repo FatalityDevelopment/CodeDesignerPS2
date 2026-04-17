@@ -81,6 +81,7 @@ interface CommandMessage {
     WorkspaceDir?: string;
     GameId?: string;
     SetName?: string;
+    NewSetName?: string;
     LabelEntry?: { address: string; name: string; comment?: string; parentAddress?: string; offset?: number; valueType?: string };
     /** String address for DELETELABELENTRY (supports synthetic child paths like "0x80010000:+0x0010"). */
     LabelEntryAddress?: string;
@@ -94,6 +95,8 @@ interface CommandMessage {
     McpMemoryId?: number;
     McpMemoryName?: string;
     McpMemoryContent?: string;
+    /** Optional agent ID — when set the memory is scoped to that agent; null/omitted means shared. */
+    McpMemoryAgentId?: number;
     // Agent Profile (MCPAGENT_LIST / MCPAGENT_GET / MCPAGENT_ADD / MCPAGENT_UPDATE / MCPAGENT_DELETE / MCPAGENT_IMPORT / MCPAGENT_EXPORT)
     McpAgentId?: number;
     McpAgentName?: string;
@@ -117,6 +120,42 @@ interface CommandMessage {
     McpOrchestrationWorkflow?: string;
     McpOrchestrationRules?: string;
     McpOrchestrationNotes?: string;
+    // MCP Config (MCPCONFIG_LIST / MCPCONFIG_UPDATE)
+    McpConfigKey?: string;
+    McpConfigValue?: string;
+    // Game Disc (UPDATEGAMEDISC)
+    GameSerial?: string;
+    GameCrc?: string;
+    GameTitle?: string;
+    // Pad / controller input (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
+    /** Unified pad slot index (0–7). */
+    PadSlot?: number;
+    /** Button index in PadDualshock2::Inputs (0–25) for PADSETBUTTON. */
+    PadButtonIndex?: number;
+    /** Normalized button value (0.0–1.0) for PADSETBUTTON. */
+    PadButtonValue?: number;
+    /** Left stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadLx?: number;
+    /** Left stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadLy?: number;
+    /** Right stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadRx?: number;
+    /** Right stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred). */
+    PadRy?: number;
+    /** PS2 button bitmask for PADSETSTATE (reserved; button state derived from pressures). */
+    PadButtons?: number;
+    /** 16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order). */
+    PadPressures?: number[];
+    // DEV9 Network (NETCAPTURE / NETRECVCAPTURE / NETINJECT / NETINJECTTX / NETDISASSEMBLE / NETSETFILTER)
+    NetCaptureEnable?: boolean;
+    NetCaptureDirection?: number;
+    NetCaptureMaxQueue?: number;
+    NetMaxPackets?: number;
+    NetFrameData?: string;
+    NetFilterType?: number;
+    NetFilterProtocol?: number;
+    NetFilterPort?: number;
+    NetFilterIP?: string;
 }
 
 /**
@@ -198,7 +237,7 @@ export interface StructEntry {
 // ── Label Manager (unified label/struct) ──────────────────────────────────────
 
 /** One member of a label that acts as a struct pointer. */
-export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'LinkedList' | 'String';
+export type LabelType = 'Address' | 'Struct' | 'Function' | 'Array' | 'LinkedList' | 'String' | 'Pointer' | 'Float' | 'Value' | 'Hex';
 
 /**
  * A unified label entry covering all supported label types.
@@ -236,10 +275,10 @@ export interface LabelManagerEntry {
 
 /** A named collection of LabelManagerEntry records for a specific game. */
 export interface LabelSetPayload {
-    setName:   string;
-    gameId?:   string;
-    isBuiltIn: boolean;
-    entries:   LabelManagerEntry[];
+    setName:      string;
+    gameDiscId?:  string;
+    isBuiltIn:    boolean;
+    entries:      LabelManagerEntry[];
 }
 
 /**
@@ -425,6 +464,34 @@ interface CommandResponse {
     // MCPORCHESTRATION_LIST / MCPORCHESTRATION_ADD / MCPORCHESTRATION_GET / MCPORCHESTRATION_UPDATE results
     McpOrchestrations?: McpOrchestrationInfo[];
     McpOrchestration?: McpOrchestrationInfo;
+    // GETGAMECHEATS results
+    GameCheats?: GameCheatInfo[];
+    GameTitle?: string;
+    CheatListTitle?: string;
+    // PADGETSTATE result
+    PadState?: PadStateInfo;
+    // PADGETTYPE result
+    PadControllerType?: number;
+    // NETGETSTATUS / NETGETSTATS / NETRECVCAPTURE / NETDISASSEMBLE results
+    NetStatus?: NetStatusInfo;
+    NetStats?: NetStatsInfo;
+    CapturedPackets?: CapturedPacketInfo[];
+    DissectionText?: string;
+    InjectionSuccess?: boolean;
+    // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
+    Sidecars?: CdsSidecarResult[];
+    // Structured CDS diagnostics from VALIDATECDS / COMPILECDS.
+    Diagnostics?: CdsDiagnostic[];
+}
+
+/**
+ * A single cheat entry returned by GETGAMECHEATS.
+ */
+export interface GameCheatInfo {
+    name:    string;
+    author?: string;
+    notes?:  string;
+    codes:   string[];
 }
 
 /**
@@ -496,6 +563,24 @@ export interface CallTraceEntry {
 }
 
 /**
+ * Full pad state snapshot returned by PADGETSTATE.
+ */
+export interface PadStateInfo {
+    /** PS2 button bitmask; a bit that is clear means the button is pressed. */
+    buttons: number;
+    /** Left stick X axis (0–255, 0x7F = centred). */
+    lx: number;
+    /** Left stick Y axis (0–255, 0x7F = centred). */
+    ly: number;
+    /** Right stick X axis (0–255, 0x7F = centred). */
+    rx: number;
+    /** Right stick Y axis (0–255, 0x7F = centred). */
+    ry: number;
+    /** 16 pressure values (0–255) in PadDualshock2::Inputs order. */
+    pressures: number[];
+}
+
+/**
  * A MCP Memory Manager entry stored in the database as Markdown.
  */
 export interface McpMemoryInfo {
@@ -503,6 +588,8 @@ export interface McpMemoryInfo {
     name:       string;
     content:    string;
     gameId?:    string;
+    /** Agent database ID when the memory is agent-specific; undefined/null means shared. */
+    agentId?:   number;
     createdAt:  string;
     updatedAt:  string;
 }
@@ -545,6 +632,14 @@ export interface McpOrchestrationInfo {
     updatedAt:    string;
 }
 
+export interface McpConfigEntry {
+    id:           number;
+    key:          string;
+    value?:       string;
+    description?: string;
+    updatedAt:    string;
+}
+
 /**
  * Result for individual instruction assembly/disassembly
  */
@@ -556,6 +651,48 @@ interface InstructionResult {
     Comment?: string;
     Label?: string;
     LineNumber?: number;
+}
+
+export interface CdsDiagnostic {
+    Severity: 'Info' | 'Warning' | 'Error' | string;
+    LineNumber: number;
+    ColumnNumber?: number;
+    EndLineNumber?: number;
+    EndColumnNumber?: number;
+    Code?: string;
+    Message: string;
+    SourceLine?: string;
+}
+
+/**
+ * One sidecar command from a compiled CDS source file.
+ * Sidecar items (assert, breakpoint, watchpoint, log) do not emit MIPS code words
+ * but carry instructions for the bridge to act on alongside the patch.
+ */
+export interface CdsSidecarResult {
+    /** Type: "assert", "breakpoint", "watchpoint", or "log". */
+    Kind: string;
+    /** PS2 virtual address referenced by the sidecar directive. */
+    Address: number;
+    // Assert fields
+    /** Comparison operator: "==" or "!=". Present for assert sidecars. */
+    Operator?: string;
+    /** Expected memory value for assert. */
+    ExpectedValue?: number;
+    /** Actual value read from live memory (null if no live backend). */
+    ActualValue?: number;
+    /** true = passed, false = failed, undefined = not checked. */
+    AssertPassed?: boolean;
+    // Watchpoint fields
+    /** Number of bytes to watch (typically 1, 2, or 4). */
+    WatchSize?: number;
+    /** Access type: "read", "write", or "readwrite". */
+    AccessType?: string;
+    // Log/print fields
+    /** Original CDS directive keyword: "log" or "print". */
+    Directive?: string;
+    /** Message text to surface for log/print sidecars. */
+    MessageText?: string;
 }
 
 /**
@@ -660,6 +797,27 @@ export interface AiActivityEvent {
 }
 
 /**
+ * Pushed unsolicited by the server when the MCP client calls session_start.
+ * Used by the VSCode extension to automatically enable "Follow AI" mode.
+ */
+export interface AiSessionStartEvent {
+    type: 'ai_session_start';
+}
+
+/**
+ * Pushed unsolicited by the server when the MCP client modifies labels
+ * (ADDLABELENTRY, ADDLABELENTRIES, CREATELABELSET, DELETELABELENTRY, DELETELABELSET).
+ * Used by the VSCode extension to refresh the label manager UI and navigate to the
+ * label set the AI is working with.
+ */
+export interface AiLabelUpdateEvent {
+    type:     'ai_label_update';
+    command:  string;
+    setName?: string;
+    gameId?:  string;
+}
+
+/**
  * Socket client for communication with C# server
  */
 export class SocketClient {
@@ -677,6 +835,16 @@ export class SocketClient {
      * pushes an unsolicited AI-activity event (type === "ai_activity").
      */
     private _activityHandlers: Array<(event: AiActivityEvent) => void> = [];
+    /**
+     * Handlers registered via onSessionStart() — invoked when the server
+     * pushes an unsolicited ai_session_start event.
+     */
+    private _sessionStartHandlers: Array<(event: AiSessionStartEvent) => void> = [];
+    /**
+     * Handlers registered via onLabelUpdate() — invoked when the server
+     * pushes an unsolicited ai_label_update event.
+     */
+    private _labelUpdateHandlers: Array<(event: AiLabelUpdateEvent) => void> = [];
     /**
      * FIFO queue of one-time response handlers added by sendCommand().
      * Using a dedicated queue (with shift()) avoids the Array.forEach +
@@ -772,6 +940,12 @@ export class SocketClient {
                             if (parsed['type'] === 'ai_activity') {
                                 const evt = parsed as unknown as AiActivityEvent;
                                 this._activityHandlers.forEach(h => h(evt));
+                            } else if (parsed['type'] === 'ai_session_start') {
+                                const evt = parsed as unknown as AiSessionStartEvent;
+                                this._sessionStartHandlers.forEach(h => h(evt));
+                            } else if (parsed['type'] === 'ai_label_update') {
+                                const evt = parsed as unknown as AiLabelUpdateEvent;
+                                this._labelUpdateHandlers.forEach(h => h(evt));
                             }
                             this.messageHandlers.forEach(handler => handler(message));
                             continue;
@@ -907,6 +1081,25 @@ export class SocketClient {
     }
 
     /**
+     * Register a handler for server-pushed AI session-start notifications.
+     * Called when the MCP server calls session_start, signalling that an AI
+     * session is beginning and Follow AI mode should be enabled.
+     */
+    public onSessionStart(handler: (event: AiSessionStartEvent) => void): void {
+        this._sessionStartHandlers.push(handler);
+    }
+
+    /**
+     * Register a handler for server-pushed AI label-update notifications.
+     * Called when the MCP server modifies labels (add/delete entry, create/delete set).
+     * The front end can use this to refresh the label manager and navigate to the
+     * label set the AI is working with.
+     */
+    public onLabelUpdate(handler: (event: AiLabelUpdateEvent) => void): void {
+        this._labelUpdateHandlers.push(handler);
+    }
+
+    /**
      * Send a SUBSCRIBE_ACTIVITY command to opt-in to AI-activity push notifications.
      * After calling this, the server will push {"type":"ai_activity",...} messages
      * whenever another client (e.g. the MCP server) performs an address-based operation.
@@ -1009,7 +1202,7 @@ export class SocketClient {
      * @param labels Optional pre-resolved pointer-manager labels (e.g. from PointerManagerProvider.getResolvedLabels()).
      *               These are injected into the compiler so CDS source can reference them as `:seal.health` or `@seal.health`.
      */
-    public async compileCds(sourceCode: string, labels?: LabelEntry[]): Promise<InstructionResult[]> {
+    public async compileCds(sourceCode: string, labels?: LabelEntry[]): Promise<{ results: InstructionResult[]; sidecars: CdsSidecarResult[] }> {
         const command: CommandMessage = {
             Command: 'COMPILECDS',
             Data: sourceCode
@@ -1020,11 +1213,34 @@ export class SocketClient {
 
         const response = await this.sendCommand(command);
 
-        if (!response.Success) {
+        // Assert failures return Success=false but still populate Results (with error entries)
+        // and Sidecars (with assert metadata). Only throw when no Results are present — that
+        // indicates a hard protocol or parse error with nothing for the caller to inspect.
+        if (!response.Success && !response.Results) {
             throw new Error(response.Error || 'Compilation failed');
         }
 
-        return response.Results || [];
+        return {
+            results:  response.Results  ?? [],
+            sidecars: response.Sidecars ?? [],
+        };
+    }
+
+    public async validateCds(sourceCode: string, labels?: LabelEntry[]): Promise<{ success: boolean; message?: string; diagnostics: CdsDiagnostic[] }> {
+        const command: CommandMessage = {
+            Command: 'VALIDATECDS',
+            Data: sourceCode
+        };
+        if (labels && labels.length > 0) {
+            command.Labels = labels;
+        }
+
+        const response = await this.sendCommand(command);
+        return {
+            success: response.Success,
+            message: response.Message || response.Error,
+            diagnostics: response.Diagnostics ?? [],
+        };
     }
 
     /**
@@ -1287,6 +1503,40 @@ export class SocketClient {
     }
 
     /**
+     * Load a PS2 ELF32 executable into the internal emulator's memory bus.
+     * PT_LOAD segments are written to EE RAM at their virtual addresses and
+     * the EE program counter is set to the ELF entry point.  The emulator is
+     * left paused so the caller can set breakpoints before resuming.
+     *
+     * Only works with the internal emulator (not PCSX2 PINE mode).
+     *
+     * @param filePath  Absolute path to the ELF32 file.
+     * @returns The ELF entry-point address and loaded region descriptors.
+     */
+    public async loadElf(filePath: string): Promise<{ entryPoint: number; regions: SnapshotRegion[] }> {
+        const command: CommandMessage = {
+            Command: 'LOADELF',
+            InputPath: filePath,
+        };
+
+        const response = await this.sendCommand(command);
+
+        if (!response.Success) {
+            throw new Error(response.Error || 'LoadElf failed');
+        }
+
+        return { entryPoint: response.PC ?? 0, regions: response.Regions || [] };
+    }
+
+    /**
+     * Set the EE program counter to a specific virtual address.
+     * The emulator must be paused; this does not resume execution.
+     */
+    public async setPC(address: number): Promise<void> {
+        await this.setRegister('PC', 0, `0x${address.toString(16).toUpperCase().padStart(8, '0')}`);
+    }
+
+    /**
      * Pause emulator execution
      */
     public async pause(): Promise<void> {
@@ -1424,6 +1674,90 @@ export class SocketClient {
     }
 
     /**
+     * PCSX2 PINE: read the full input state of a PS2 controller pad (opcode 0x33).
+     * Returns buttons bitmask, analog stick positions, and 16 pressure values.
+     */
+    public async padGetState(padSlot: number = 0): Promise<PadStateInfo> {
+        const response = await this.sendCommand({ Command: 'PADGETSTATE', PadSlot: padSlot });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadGetState failed');
+        }
+        if (!response.PadState) {
+            throw new Error('PadGetState: no pad state returned');
+        }
+        return response.PadState;
+    }
+
+    /**
+     * PCSX2 PINE: set a single button/axis on a pad by index and normalized value (opcode 0x34).
+     * Routes through deadzone/pressure pipeline.
+     */
+    public async padSetButton(padSlot: number, buttonIndex: number, value: number): Promise<void> {
+        const response = await this.sendCommand({
+            Command: 'PADSETBUTTON',
+            PadSlot: padSlot,
+            PadButtonIndex: buttonIndex,
+            PadButtonValue: value,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadSetButton failed');
+        }
+    }
+
+    /**
+     * PCSX2 PINE: set raw analog stick positions, bypassing deadzone (opcode 0x35).
+     * Values are 0–255 with 0x7F = centred.
+     */
+    public async padSetAnalog(padSlot: number, lx: number = 0x7F, ly: number = 0x7F, rx: number = 0x7F, ry: number = 0x7F): Promise<void> {
+        const response = await this.sendCommand({
+            Command: 'PADSETANALOG',
+            PadSlot: padSlot,
+            PadLx: lx,
+            PadLy: ly,
+            PadRx: rx,
+            PadRy: ry,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadSetAnalog failed');
+        }
+    }
+
+    /**
+     * PCSX2 PINE: atomically replace the complete input state of a pad (opcode 0x36).
+     * pressures must be 16 bytes in PadDualshock2::Inputs order; pressure > 0 means pressed.
+     */
+    public async padSetState(padSlot: number, lx: number = 0x7F, ly: number = 0x7F, rx: number = 0x7F, ry: number = 0x7F, pressures: number[] = new Array(16).fill(0), buttons: number = 0xFFFF): Promise<void> {
+        if (pressures.length !== 16) {
+            throw new Error('padSetState: pressures must be exactly 16 elements');
+        }
+        const response = await this.sendCommand({
+            Command: 'PADSETSTATE',
+            PadSlot: padSlot,
+            PadButtons: buttons,
+            PadLx: lx,
+            PadLy: ly,
+            PadRx: rx,
+            PadRy: ry,
+            PadPressures: pressures,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadSetState failed');
+        }
+    }
+
+    /**
+     * PCSX2 PINE: query the controller type installed in a pad slot (opcode 0x37).
+     * Returns the numeric controller type (0=NotConnected, 1=DualShock2, 2=Guitar, etc.).
+     */
+    public async padGetType(padSlot: number = 0): Promise<number> {
+        const response = await this.sendCommand({ Command: 'PADGETTYPE', PadSlot: padSlot });
+        if (!response.Success) {
+            throw new Error(response.Error || 'PadGetType failed');
+        }
+        return response.PadControllerType ?? 0;
+    }
+
+    /**
      * Restart the emulator (reset both CPUs to power-on state, then pause)
      */
     public async restart(): Promise<void> {
@@ -1461,6 +1795,26 @@ export class SocketClient {
         if (!response.Success) {
             throw new Error(response.Error || 'STARTPCSX2 failed');
         }
+    }
+
+    /**
+     * Runtime mode switch: start internal emulator in file mode (no BIOS, no disc).
+     * Loads an ELF32, BIN, or RAW binary into a bare scheduler and leaves it paused
+     * at the file's entry point.  The VS Code extension calls this when the user opens
+     * a registered file type (.elf, .bin, .raw) via File → Open.
+     *
+     * @param filePath  Absolute path to the file to load.
+     * @param address   Optional load address for flat binaries (defaults to 0x00000000).
+     */
+    public async startFileMode(filePath: string, address?: number): Promise<{ entryPoint: number }> {
+        const command: CommandMessage = { Command: 'STARTFILEMODE', InputPath: filePath };
+        if (address !== undefined) { command.Address = address; }
+
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'STARTFILEMODE failed');
+        }
+        return { entryPoint: response.PC ?? 0 };
     }
 
     /**
@@ -1956,6 +2310,31 @@ export class SocketClient {
     }
 
     /**
+     * GETGAMECHEATS — fetch cheat entries for a game by its PS2 serial from the database.
+     * Returns the list of cheats and the game/list titles; returns an empty array when
+     * no cheats are found for the given serial.
+     * @param serial  PS2 disc serial, e.g. "SCUS-97275".
+     */
+    public async getGameCheats(serial: string): Promise<{
+        cheats: GameCheatInfo[];
+        gameTitle: string | null;
+        cheatListTitle: string | null;
+    }> {
+        const response = await this.sendCommand({
+            Command:    'GETGAMECHEATS',
+            GameSerial: serial,
+        });
+        if (!response.Success) {
+            throw new Error(response.Error || 'GETGAMECHEATS failed');
+        }
+        return {
+            cheats:         (response.GameCheats ?? []) as GameCheatInfo[],
+            gameTitle:      response.GameTitle      ?? null,
+            cheatListTitle: response.CheatListTitle ?? null,
+        };
+    }
+
+    /**
      * PCSX2 PINE: query the currently running game's metadata.
      * Returns the game title, serial ID (e.g. "SLUS-20265"), UUID, and version.
      * Only available when the server is in PINE bridge mode (--pcsx2).
@@ -2441,6 +2820,45 @@ export class SocketClient {
         return (response as any).Data ?? '';
     }
 
+    /** Rename a label set. Returns the updated set payload with the new name. */
+    public async renameLabelSet(workspaceDir: string, gameId: string, oldName: string, newName: string): Promise<LabelSetPayload> {
+        const response = await this.sendCommand({ Command: 'RENAMELABELSET', WorkspaceDir: workspaceDir, GameId: gameId, SetName: oldName, NewSetName: newName });
+        if (!response.Success) { throw new Error(response.Error || 'RENAMELABELSET failed'); }
+        return (response as any).LabelSet as LabelSetPayload;
+    }
+
+    // ── MCP Config (tool descriptions) ───────────────────────────────────────
+
+    /** Return all MCP config entries (tool descriptions). */
+    public async mcpConfigList(): Promise<McpConfigEntry[]> {
+        const response = await this.sendCommand({ Command: 'MCPCONFIG_LIST' });
+        if (!response.Success) { throw new Error(response.Error || 'MCPCONFIG_LIST failed'); }
+        return (response as any).McpConfigs ?? [];
+    }
+
+    /** Update the value (tool description) for the given config key. */
+    public async mcpConfigUpdate(key: string, value: string): Promise<McpConfigEntry> {
+        const response = await this.sendCommand({ Command: 'MCPCONFIG_UPDATE', McpConfigKey: key, McpConfigValue: value });
+        if (!response.Success) { throw new Error(response.Error || 'MCPCONFIG_UPDATE failed'); }
+        return (response as any).McpConfig as McpConfigEntry;
+    }
+
+    /**
+     * UPDATEGAMEDISC — upsert an IsoPath and/or CRC for a GameDisc row
+     * identified by its serial (e.g. "SCUS-97275").
+     * Creates the Game, GameRegion, and GameDisc rows automatically when missing.
+     * Both isoPath, crc, and gameTitle are optional; only non-null values are used.
+     */
+    public async updateGameDisc(serial: string, isoPath?: string, crc?: string, gameTitle?: string): Promise<void> {
+        await this.sendCommand({
+            Command:    'UPDATEGAMEDISC',
+            GameSerial: serial,
+            IsoPath:    isoPath,
+            GameCrc:    crc,
+            GameTitle:  gameTitle,
+        });
+    }
+
     /**
      * RESOLVESTRINGS — reads each String-typed label from live PCSX2 memory and
      * updates the server-side display text to include the ASCII content.
@@ -2530,6 +2948,24 @@ export class SocketClient {
     }
 
     /**
+     * MCPMEMORY_LIST_FOR_AGENT — returns all memory entries scoped to the given agent.
+     */
+    public async mcpMemoryListForAgent(agentId: number): Promise<McpMemoryInfo[]> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_LIST_FOR_AGENT', McpMemoryAgentId: agentId });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_LIST_FOR_AGENT failed'); }
+        return response.McpMemories ?? [];
+    }
+
+    /**
+     * MCPMEMORY_LIST_SHARED — returns all shared memory entries (not scoped to any agent).
+     */
+    public async mcpMemoryListShared(): Promise<McpMemoryInfo[]> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_LIST_SHARED' });
+        if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_LIST_SHARED failed'); }
+        return response.McpMemories ?? [];
+    }
+
+    /**
      * MCPMEMORY_GET — returns a single MCP memory entry by id.
      */
     public async mcpMemoryGet(id: number): Promise<McpMemoryInfo> {
@@ -2540,9 +2976,10 @@ export class SocketClient {
 
     /**
      * MCPMEMORY_ADD — creates a new MCP memory entry.
+     * @param agentId When provided the entry is scoped to that agent; omit for a shared entry.
      */
-    public async mcpMemoryAdd(name: string, content: string, gameId?: string): Promise<McpMemoryInfo> {
-        const response = await this.sendCommand({ Command: 'MCPMEMORY_ADD', McpMemoryName: name, McpMemoryContent: content, GameId: gameId });
+    public async mcpMemoryAdd(name: string, content: string, gameId?: string, agentId?: number): Promise<McpMemoryInfo> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_ADD', McpMemoryName: name, McpMemoryContent: content, GameId: gameId, McpMemoryAgentId: agentId });
         if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_ADD failed'); }
         return response.McpMemory!;
     }
@@ -2550,9 +2987,10 @@ export class SocketClient {
     /**
      * MCPMEMORY_UPDATE — updates name and/or content of an existing MCP memory entry.
      * Pass undefined to leave a field unchanged.
+     * @param agentId Pass 0 to clear the agent association (make shared); omit to leave unchanged.
      */
-    public async mcpMemoryUpdate(id: number, name?: string, content?: string, gameId?: string): Promise<McpMemoryInfo> {
-        const response = await this.sendCommand({ Command: 'MCPMEMORY_UPDATE', McpMemoryId: id, McpMemoryName: name, McpMemoryContent: content, GameId: gameId });
+    public async mcpMemoryUpdate(id: number, name?: string, content?: string, gameId?: string, agentId?: number): Promise<McpMemoryInfo> {
+        const response = await this.sendCommand({ Command: 'MCPMEMORY_UPDATE', McpMemoryId: id, McpMemoryName: name, McpMemoryContent: content, GameId: gameId, McpMemoryAgentId: agentId });
         if (!response.Success) { throw new Error(response.Error || 'MCPMEMORY_UPDATE failed'); }
         return response.McpMemory!;
     }
@@ -2766,6 +3204,76 @@ export class SocketClient {
         const response = await this.sendCommand({ Command: 'MCPORCHESTRATION_EXPORT', McpOrchestrationId: id, OutputPath: outputPath });
         if (!response.Success) { throw new Error(response.Error || 'MCPORCHESTRATION_EXPORT failed'); }
     }
+
+    // ── DEV9 Network commands ────────────────────────────────────────────────
+
+    /** NETGETSTATUS — queries the DEV9 network adapter status. */
+    public async netGetStatus(): Promise<NetStatusInfo> {
+        const r = await this.sendCommand({ Command: 'NETGETSTATUS' });
+        if (!r.Success) { throw new Error(r.Error || 'NETGETSTATUS failed'); }
+        return r.NetStatus!;
+    }
+
+    /**
+     * NETCAPTURE — enables or disables packet capture.
+     * @param enable Whether to enable (true) or disable (false) packet capture.
+     * @param direction Capture direction filter: 0 = both, 1 = TX only, 2 = RX only.
+     * @param maxQueue Maximum ring-buffer size (0 = server default of 1000).
+     */
+    public async netCapture(enable: boolean, direction?: number, maxQueue?: number): Promise<void> {
+        const r = await this.sendCommand({
+            Command: 'NETCAPTURE',
+            NetCaptureEnable: enable,
+            NetCaptureDirection: direction,
+            NetCaptureMaxQueue: maxQueue,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETCAPTURE failed'); }
+    }
+
+    /** NETRECVCAPTURE — drains captured packets from the ring buffer. */
+    public async netRecvCapture(maxPackets?: number): Promise<CapturedPacketInfo[]> {
+        const r = await this.sendCommand({
+            Command: 'NETRECVCAPTURE',
+            NetMaxPackets: maxPackets,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETRECVCAPTURE failed'); }
+        return r.CapturedPackets ?? [];
+    }
+
+    /** NETDISASSEMBLE — dissects a raw Ethernet frame and returns human-readable text. */
+    public async netDisassemble(frameBase64: string): Promise<string> {
+        const r = await this.sendCommand({
+            Command: 'NETDISASSEMBLE',
+            NetFrameData: frameBase64,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETDISASSEMBLE failed'); }
+        return r.DissectionText ?? '';
+    }
+
+    /** NETGETSTATS — returns TX/RX counters and capture queue statistics. */
+    public async netGetStats(): Promise<NetStatsInfo> {
+        const r = await this.sendCommand({ Command: 'NETGETSTATS' });
+        if (!r.Success) { throw new Error(r.Error || 'NETGETSTATS failed'); }
+        return r.NetStats!;
+    }
+
+    /**
+     * NETSETFILTER — sets the capture filter (protocol/port/IP).
+     * @param filterType Filter type: 0 = none, 1 = protocol, 2 = port, 3 = IP.
+     * @param protocol Protocol filter (type=1): 0=all, 1=TCP, 2=UDP, 3=ICMP, 4=ARP, 5=DNS, 6=DHCP.
+     * @param port Port number to filter on (type=2).
+     * @param ip IPv4 address as dotted-quad string to filter on (type=3).
+     */
+    public async netSetFilter(filterType: number, protocol?: number, port?: number, ip?: string): Promise<void> {
+        const r = await this.sendCommand({
+            Command: 'NETSETFILTER',
+            NetFilterType: filterType,
+            NetFilterProtocol: protocol,
+            NetFilterPort: port,
+            NetFilterIP: ip,
+        } as CommandMessage);
+        if (!r.Success) { throw new Error(r.Error || 'NETSETFILTER failed'); }
+    }
 }
 
 /** Snapshot metadata entry returned by GETSNAPSHOTS. */
@@ -2777,3 +3285,31 @@ export interface SnapshotInfo {
     snapshotDateTime: string;
 }
 
+// ── Network / DEV9 types ─────────────────────────────────────────────────────
+
+/** Network adapter status returned by NETGETSTATUS. */
+export interface NetStatusInfo {
+    enabled: boolean;
+    adapterType: number;
+    ps2Mac: string;
+    ps2IP: string;
+}
+
+/** Network statistics returned by NETGETSTATS. */
+export interface NetStatsInfo {
+    txPackets: number;
+    rxPackets: number;
+    txBytes: number;
+    rxBytes: number;
+    captureQueueSize: number;
+    droppedCount: number;
+}
+
+/** A single captured packet returned by NETRECVCAPTURE. */
+export interface CapturedPacketInfo {
+    direction: number;
+    directionName: string;
+    timestampUs: number;
+    length: number;
+    data: string;
+}

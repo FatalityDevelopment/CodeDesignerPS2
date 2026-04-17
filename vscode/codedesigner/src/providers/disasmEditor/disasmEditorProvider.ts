@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent, StructEntry, LabelManagerEntry, LabelSetPayload } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent, AiSessionStartEvent, AiLabelUpdateEvent, StructEntry, LabelManagerEntry, LabelSetPayload } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
@@ -33,6 +33,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private static readonly PAGE_SIZE = 1000;
   private static readonly BUFFER_PAGES = 2;
   private static readonly LIVE_READ_BACKOFF_MS = 5000;
+  /** Placeholder game ID used when no disc image is selected; the backend resolves
+   *  this to null and returns only the Built-in label set for all read operations. */
+  private static readonly NO_GAME_SELECTED = 'no-game-selected';
   private socketClient: SocketClient | null;
   /** All currently-open live memory panels. Used to broadcast pause/resume state. */
   private _livePanels: vscode.WebviewPanel[] = [];
@@ -74,12 +77,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   private _archiveLabels: LabelEntry[] = [];
   /** Current game (ISO) name — used to resolve the per-game labels.json path. */
   private _currentGameName: string = '';
+  /** Current game disc identifier for label manager DB queries — serial (e.g. "SCUS-97275") or full ISO path. */
+  private _currentGameSerial: string = '';
   /** Workspace root — used to resolve the per-game labels.json path. */
   private _workspaceRoot: string = '';
+  /** Name of the currently active label set on the server (e.g. "MyLabels"), or null when no user set is active. */
+  private _activeSetName: string | null = null;
   /** Suppress repeated live read retries after emulator-side connection failures. */
   private _liveReadBackoffUntil = 0;
   private _liveReadFailureActive = false;
   private _liveReadFailureMessage = '';
+  /** True while a live socket read is in-flight; prevents concurrent requests from piling up. */
+  private _liveReadInFlight = false;
 
   /**
    * When true, the editor automatically navigates to the address the AI (MCP
@@ -122,9 +131,39 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    * Called by external providers (e.g. the Pointer Manager tree view).
    */
   public openStructCalculator(): void {
+    this._revealAndPost('openStructCalculator');
+  }
+
+  /** Open the Cheat Code Converter overlay in the first live panel. */
+  public openConverterOverlay(): void {
+    this._revealAndPost('openConverterOverlay');
+  }
+
+  /** Open the Cheat Code Porter overlay in the first live panel. */
+  public openPorterOverlay(): void {
+    this._revealAndPost('openPorterOverlay');
+  }
+
+  /** Open the Memory Card Manager overlay in the first live panel. */
+  public openMemoryCardOverlay(): void {
+    this._revealAndPost('openMemoryCardOverlay');
+  }
+
+  /** Open the HDD Image Manager overlay in the first live panel. */
+  public openHddOverlay(): void {
+    this._revealAndPost('openHddOverlay');
+  }
+
+  /** Open the Memory Scanner overlay in the first live panel. */
+  public openScannerOverlay(): void {
+    this._revealAndPost('openScannerOverlay');
+  }
+
+  /** Reveal the first live panel and post a message to it. */
+  private _revealAndPost(messageType: string): void {
     if (this._livePanels.length === 0) { return; }
     this._livePanels[0].reveal(undefined, false);
-    this._livePanels[0].webview.postMessage({ type: 'openStructCalculator' });
+    this._livePanels[0].webview.postMessage({ type: messageType });
   }
 
   public navigateToAddress(address: number): void {
@@ -156,6 +195,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         if (this._followAiEnabled) {
           this.navigateToAddress(event.address);
         }
+      });
+      // Automatically enable Follow AI mode when the MCP server starts a session.
+      socketClient.onSessionStart((_event: AiSessionStartEvent) => {
+        this.setFollowAiEnabled(true);
+      });
+      // Refresh the label manager when the AI modifies labels.
+      socketClient.onLabelUpdate((event: AiLabelUpdateEvent) => {
+        this._handleAiLabelUpdate(event);
       });
     }
   }
@@ -360,13 +407,54 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
+   * Handle an AI label-update notification pushed by the server.
+   * Refreshes the label manager UI and navigates to the label set the AI
+   * is working with so the user can follow along.
+   */
+  private async _handleAiLabelUpdate(event: AiLabelUpdateEvent): Promise<void> {
+    if (!this.socketClient?.isConnected()) { return; }
+    const ctx = this._labelManagerCtx();
+    if (!ctx) { return; }
+    const { workspaceDir, gameDiscId } = ctx;
+    try {
+      // Determine which set to display — prefer the set from the notification,
+      // fall back to the currently active set.
+      const targetSetName = event.setName ?? this._activeSetName;
+      if (!targetSetName) { return; }
+
+      // Activate and load the label set.
+      const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, targetSetName);
+      this._activeSetName = targetSetName;
+
+      // Broadcast the updated set to all live panels and the standalone
+      // label manager tab (if open).
+      this._broadcastLabelSet(set);
+
+      // Also refresh the label set list so newly created sets appear.
+      const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
+      for (const p of this._livePanels) {
+        p.webview.postMessage({ type: 'labelManagerSets', sets });
+      }
+      this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSets', sets });
+    } catch {
+      // Non-fatal — the user can always manually refresh.
+    }
+  }
+
+  /**
    * Set the currently active game name and workspace root.
    * Called by DisasmPanelProvider when the selected game changes.
    * Used to resolve the per-game labels.json path for user-created labels.
    */
-  public setCurrentGame(gameName: string, workspaceRoot: string): void {
-    this._currentGameName = gameName;
-    this._workspaceRoot = workspaceRoot;
+  public setCurrentGame(gameName: string, workspaceRoot: string, gameSerial?: string): void {
+    this._currentGameName   = gameName;
+    this._workspaceRoot     = workspaceRoot;
+    // Always update the serial — clear it when not provided so a stale serial
+    // from a previously loaded game isn't used by _labelManagerCtx().
+    this._currentGameSerial = gameSerial ?? '';
+    // Reset the active label set when the game changes — it will be re-established
+    // when the label manager refreshes or the user selects a set.
+    this._activeSetName = null;
   }
 
   /**
@@ -712,6 +800,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           }));
         }
         webviewPanel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
+      } else if (message.type === "getAddressRefs") {
+        await this.handleGetAddressRefs(webviewPanel, message.address as number,
+          DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
       } else if (message.type === "assembleInstr") {
         if (this.socketClient?.isConnected()) {
           try {
@@ -1023,6 +1114,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             this._panelScanCache.delete(panel);
         });
 
+        // Pause/resume the webview's live-refresh timers based on panel
+        // visibility.  Hidden panels that keep polling waste socket bandwidth
+        // and cause the visible panel to receive placeholder zero-rows
+        // (flickering) when the in-flight guard blocks concurrent reads.
+        panel.onDidChangeViewState(e => {
+            panel.webview.postMessage({
+                type: 'panelVisibility',
+                visible: e.webviewPanel.visible,
+            });
+        });
+
         const totalInstructions = Math.floor(totalBytes / DisasmEditorProvider.INSTRUCTION_SIZE);
 
         // Register the message handler BEFORE setting html so 'ready' is never missed.
@@ -1180,6 +1282,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.stepAndBroadcast();
             } else if (message.type === 'getStatus') {
               if (!this._canIssueLiveBackendRequest()) { return; }
+                this._liveReadInFlight = true;
                 try {
                     const status = await this.socketClient!.getPC();
                 this._handleLiveReadSuccess();
@@ -1213,6 +1316,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     }
                 } catch (err: any) {
                     this._handleLiveReadFailure('getStatus', err);
+                } finally {
+                    this._liveReadInFlight = false;
                 }
             } else if (message.type === 'search') {
                 await this.handleSearch(panel, message.query, message.mode,
@@ -1444,6 +1549,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                     }));
                 }
                 panel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
+            } else if (message.type === 'getAddressRefs') {
+                await this.handleGetAddressRefs(panel, message.address as number,
+                    baseAddress, totalBytes, region);
             } else if (message.type === 'convertCheat') {
                 try {
                     const result = await this.socketClient!.convertCheat(
@@ -1636,7 +1744,19 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     private _canIssueLiveBackendRequest(): boolean {
-      return !!this.socketClient && this.socketClient.isConnected() && !this._isLiveReadBackoffActive();
+      return !!this.socketClient && this.socketClient.isConnected() && !this._isLiveReadBackoffActive() && !this._liveReadInFlight;
+    }
+
+    /**
+     * Returns true when a live read cannot proceed because the socket is
+     * simply busy with another in-flight request (as opposed to the backend
+     * being unavailable).  Callers should silently skip the refresh cycle
+     * instead of pushing placeholder zero-rows to the webview — sending
+     * placeholders in this case is the root cause of the memory view
+     * "flickering" between real data and zeroes.
+     */
+    private _isLiveReadBusy(): boolean {
+      return !!this.socketClient && this.socketClient.isConnected() && !this._isLiveReadBackoffActive() && this._liveReadInFlight;
     }
 
     private _buildPlaceholderRows(baseAddress: number, startOffset: number, readLength: number): DisassembledRow[] {
@@ -1691,7 +1811,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (!this._liveReadFailureActive) { return; }
       this._liveReadFailureActive = false;
       this._liveReadFailureMessage = '';
-      this._liveReadBackoffUntil = 0;
+      // Intentionally do NOT clear _liveReadBackoffUntil here.  Stale in-flight
+      // requests that happen to succeed can call this while the backoff window is
+      // still active.  Clearing the backoff at that point would immediately allow
+      // new requests, which would also fail, causing the rapid
+      // "unavailable → recovered → unavailable" oscillation seen in the logs.
+      // The backoff expires on its own; _liveReadBackoffUntil is only reset to 0
+      // in _handleLiveReadFailure (refreshed on each failure) and on socket reconnect.
       getOutputChannel().appendLine('[LIVE] Emulator memory reads recovered; resuming normal refresh.');
     }
 
@@ -1726,6 +1852,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         const readLength  = Math.min(totalBytes - startOffset, maxBytes);
         if (readLength <= 0) { return; }
 
+        // When the socket is merely busy with another in-flight read, silently
+        // skip this refresh cycle.  Pushing placeholder zero-rows while the
+        // previous read is still pending causes the visible "flickering" between
+        // real memory and zeroes.
+        if (this._isLiveReadBusy()) { return; }
+
         if (!this._canIssueLiveBackendRequest()) {
           panel.webview.postMessage({
             type: 'disasmPage',
@@ -1737,6 +1869,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
         const socketClient = this.socketClient!;
         const startAddr = baseAddress + startOffset;
+        this._liveReadInFlight = true;
         try {
             const buffer = await socketClient.readMemory(startAddr, readLength, region);
             const rows   = await this.disassembleWithBackend(startAddr, buffer);
@@ -1749,6 +1882,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
             rows: this._buildPlaceholderRows(baseAddress, startOffset, readLength),
             startIndex,
           });
+        } finally {
+          this._liveReadInFlight = false;
         }
     }
 
@@ -1759,6 +1894,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         highlightAddr: number,
         highlightLength: number
     ): Promise<void> {
+      // Silently skip when a read is already in-flight — see sendLiveDisasmPage.
+      if (this._isLiveReadBusy()) { return; }
+
       if (!this._canIssueLiveBackendRequest()) {
         this._postUnavailableHexView(panel, baseAddress, highlightAddr, highlightLength);
         return;
@@ -1766,6 +1904,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
         const socketClient = this.socketClient!;
         const alignedAddr = Math.max(baseAddress, ((highlightAddr & ~0xf) >>> 0) - 0x10);
+        this._liveReadInFlight = true;
         try {
             const buffer = await socketClient.readMemory(
                 alignedAddr, DisasmEditorProvider.HEX_VIEW_SIZE, region);
@@ -1780,6 +1919,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         } catch (err: any) {
         this._handleLiveReadFailure(`sendLiveHexView at 0x${alignedAddr.toString(16)}`, err);
         this._postUnavailableHexView(panel, baseAddress, highlightAddr, highlightLength);
+        } finally {
+          this._liveReadInFlight = false;
         }
     }
 
@@ -1803,9 +1944,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     fileData?: Buffer
   ): Promise<void> {
     if (fileData) {
-      // File-based panel: prefer the C# backend for text/regex (full disassembly
+      // File-based panel: prefer the C# backend for text/regex/refs (full disassembly
       // search) but fall back to pure TypeScript so search always works.
-      if ((mode === 'text' || mode === 'regex') && this.socketClient?.isConnected()) {
+      if ((mode === 'text' || mode === 'regex' || mode === 'refs') && this.socketClient?.isConnected()) {
         try {
           const matches = await this.socketClient.search(
             baseAddress, length, query, mode, undefined, fileData
@@ -1839,9 +1980,76 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   }
 
   /**
-   * Parse a hex byte pattern string (e.g. "0x12 34 AB CD" or "12,34,AB").
-   * Returns null if the pattern is invalid.
+   * Handle a `getAddressRefs` message from the webview.
+   * Runs a refs search for `targetAddress` and returns enriched results
+   * (address + instruction text) via an `addressRefsResult` message.
    */
+  private async handleGetAddressRefs(
+    panel: vscode.WebviewPanel,
+    targetAddress: number,
+    baseAddress: number,
+    length: number,
+    region?: string,
+    fileData?: Buffer
+  ): Promise<void> {
+    try {
+      const addrHex = targetAddress.toString(16).toUpperCase().padStart(8, '0');
+      let matches: Array<{ instructionIndex: number; address: number }> = [];
+
+      if (fileData) {
+        // File panel: use C# backend for refs search when connected, else return empty.
+        if (this.socketClient?.isConnected()) {
+          try {
+            matches = await this.socketClient.search(baseAddress, length, addrHex, 'refs', undefined, fileData);
+          } catch {
+            matches = [];
+          }
+        }
+      } else if (this.socketClient?.isConnected()) {
+        // Live panel: delegate to C# backend.
+        try {
+          matches = await this.socketClient.search(baseAddress, length, addrHex, 'refs', region);
+        } catch {
+          matches = [];
+        }
+      }
+
+      // Enrich each match with disassembled instruction text.
+      const refs: Array<{ address: string; instruction: string }> = await Promise.all(
+        matches.map(async m => {
+          const matchAddrHex = m.address.toString(16).toUpperCase().padStart(8, '0');
+          let instruction = '';
+          try {
+            if (fileData) {
+              // Extract 4 bytes from fileData at the match offset.
+              const offset = m.address - baseAddress;
+              if (offset >= 0 && offset + 4 <= fileData.length) {
+                const word = fileData.readUInt32LE(offset);
+                const wordHex = `0x${word.toString(16).padStart(8, '0')}`;
+                const results = await this.socketClient!.disassemble(wordHex, m.address);
+                if (results?.[0]?.Assembly) { instruction = results[0].Assembly; }
+              }
+            } else if (this.socketClient?.isConnected()) {
+              // Live panel: read 4 bytes from emulator memory.
+              const buf = await this.socketClient!.readMemory(m.address, 4, region ?? 'ee');
+              const word = buf.readUInt32LE(0);
+              const wordHex = `0x${word.toString(16).padStart(8, '0')}`;
+              const results = await this.socketClient!.disassemble(wordHex, m.address);
+              if (results?.[0]?.Assembly) { instruction = results[0].Assembly; }
+            }
+          } catch { /* ignore enrichment failures — address is still shown */ }
+          return { address: matchAddrHex, instruction };
+        })
+      );
+
+      panel.webview.postMessage({ type: 'addressRefsResult', refs });
+    } catch (err: any) {
+      console.error(`[REFS] handleGetAddressRefs failed: ${err?.message ?? err}`);
+      panel.webview.postMessage({ type: 'addressRefsResult', refs: [] });
+    }
+  }
+
+
   private parseBytePattern(pattern: string): number[] | null {
     const cleaned = pattern.replace(/0x/gi, '').replace(/[,\s]+/g, ' ').trim();
     if (!cleaned) { return null; }
@@ -1915,6 +2123,150 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           i += strBytes.length - 1;
         }
       }
+      return matches;
+    }
+
+    // refs — scan for MIPS instructions that reference the target address.
+    if (mode === 'refs') {
+      const cleaned = query.replace(/^0x/i, '');
+      const targetAddr = parseInt(cleaned, 16);
+      if (isNaN(targetAddr)) { return []; }
+
+      const signExt16 = (v: number): number => ((v & 0x8000) !== 0) ? (v | 0xFFFF0000) : v;
+
+      // Per-register LUI tracking (mirrors BuildCodeReferencedAddresses in C#).
+      const luiSlot = new Int32Array(32).fill(-1);
+      const luiImm  = new Uint32Array(32);
+
+      for (let i = 0; i + 3 < fileData.length; i += 4) {
+        const word      = fileData.readUInt32LE(i);
+        const opcode    = (word >>> 26) & 0x3F;
+        const rs        = (word >>> 21) & 0x1F;
+        const rt        = (word >>> 16) & 0x1F;
+        const instrAddr = (startAddress + i) >>> 0;
+
+        // J / JAL (opcode 2/3)
+        if (opcode === 0x02 || opcode === 0x03) {
+          const target = (((instrAddr + 4) & 0xF0000000) | ((word & 0x03FFFFFF) << 2)) >>> 0;
+          if (target === (targetAddr >>> 0)) {
+            matches.push({ instructionIndex: Math.floor(i / 4), address: instrAddr, field: 'op', start: 0, length: 3 });
+          }
+          if (opcode === 0x03) { luiSlot[31] = -1; } // JAL writes $ra
+          continue;
+        }
+
+        // I-type branches: BEQ/BNE/BLEZ/BGTZ (4-7) + BEQL/BNEL/BLEZL/BGTZL (0x14-0x17)
+        if ((opcode >= 0x04 && opcode <= 0x07) || (opcode >= 0x14 && opcode <= 0x17)) {
+          const target = (instrAddr + 4 + (signExt16(word & 0xFFFF) << 2)) >>> 0;
+          if (target === (targetAddr >>> 0)) {
+            matches.push({ instructionIndex: Math.floor(i / 4), address: instrAddr, field: 'op', start: 0, length: 3 });
+          }
+          continue;
+        }
+
+        // REGIMM (opcode 0x01): BLTZ/BGEZ/BLTZL/BGEZL/BLTZAL/BGEZAL/BLTZALL/BGEZALL
+        if (opcode === 0x01) {
+          const isBranch = rt === 0x00 || rt === 0x01 || rt === 0x02 || rt === 0x03
+                        || rt === 0x10 || rt === 0x11 || rt === 0x12 || rt === 0x13;
+          if (isBranch) {
+            const target = (instrAddr + 4 + (signExt16(word & 0xFFFF) << 2)) >>> 0;
+            if (target === (targetAddr >>> 0)) {
+              matches.push({ instructionIndex: Math.floor(i / 4), address: instrAddr, field: 'op', start: 0, length: 4 });
+            }
+          }
+          // BLTZAL/BGEZAL/BLTZALL/BGEZALL write $ra
+          if (rt === 0x10 || rt === 0x11 || rt === 0x12 || rt === 0x13) { luiSlot[31] = -1; }
+          continue;
+        }
+
+        // COP1 branches (opcode 0x11, rs=8): BC1F/BC1T/BC1FL/BC1TL
+        if (opcode === 0x11 && rs === 0x08) {
+          const target = (instrAddr + 4 + (signExt16(word & 0xFFFF) << 2)) >>> 0;
+          if (target === (targetAddr >>> 0)) {
+            matches.push({ instructionIndex: Math.floor(i / 4), address: instrAddr, field: 'op', start: 0, length: 4 });
+          }
+          continue;
+        }
+
+        // LUI (opcode 0x0F)
+        if (opcode === 0x0F) {
+          if (rt !== 0) { luiSlot[rt] = i; luiImm[rt] = word & 0xFFFF; }
+          continue;
+        }
+
+        // ADDIU (opcode 0x09): detect LUI+ADDIU pair
+        if (opcode === 0x09) {
+          if (rs !== 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= 128) {
+            const combined = ((luiImm[rs] << 16) + signExt16(word & 0xFFFF)) >>> 0;
+            if (combined === (targetAddr >>> 0)) {
+              const luiByteOffset = luiSlot[rs];
+              matches.push({ instructionIndex: Math.floor(luiByteOffset / 4), address: (startAddress + luiByteOffset) >>> 0, field: 'args', start: 0, length: 100 });
+              matches.push({ instructionIndex: Math.floor(i / 4),             address: instrAddr,                             field: 'args', start: 0, length: 100 });
+            }
+          }
+          if (rt !== 0) { luiSlot[rt] = -1; }
+          continue;
+        }
+
+        // ORI (opcode 0x0D): detect LUI+ORI pair
+        if (opcode === 0x0D) {
+          if (rs !== 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= 128) {
+            const combined = ((luiImm[rs] << 16) | (word & 0xFFFF)) >>> 0;
+            if (combined === (targetAddr >>> 0)) {
+              const luiByteOffset = luiSlot[rs];
+              matches.push({ instructionIndex: Math.floor(luiByteOffset / 4), address: (startAddress + luiByteOffset) >>> 0, field: 'args', start: 0, length: 100 });
+              matches.push({ instructionIndex: Math.floor(i / 4),             address: instrAddr,                             field: 'args', start: 0, length: 100 });
+            }
+          }
+          if (rt !== 0) { luiSlot[rt] = -1; }
+          continue;
+        }
+
+        // Loads (0x20-0x27): detect LUI+load pair
+        if (opcode >= 0x20 && opcode <= 0x27) {
+          if (rs !== 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= 128) {
+            const combined = ((luiImm[rs] << 16) + signExt16(word & 0xFFFF)) >>> 0;
+            if (combined === (targetAddr >>> 0)) {
+              const luiByteOffset = luiSlot[rs];
+              matches.push({ instructionIndex: Math.floor(luiByteOffset / 4), address: (startAddress + luiByteOffset) >>> 0, field: 'args', start: 0, length: 100 });
+              matches.push({ instructionIndex: Math.floor(i / 4),             address: instrAddr,                             field: 'args', start: 0, length: 100 });
+            }
+          }
+          if (rt !== 0) { luiSlot[rt] = -1; }
+          continue;
+        }
+
+        // Stores (0x28-0x2F): detect LUI+store pair
+        if (opcode >= 0x28 && opcode <= 0x2F) {
+          if (rs !== 0 && luiSlot[rs] >= 0 && i - luiSlot[rs] <= 128) {
+            const combined = ((luiImm[rs] << 16) + signExt16(word & 0xFFFF)) >>> 0;
+            if (combined === (targetAddr >>> 0)) {
+              const luiByteOffset = luiSlot[rs];
+              matches.push({ instructionIndex: Math.floor(luiByteOffset / 4), address: (startAddress + luiByteOffset) >>> 0, field: 'args', start: 0, length: 100 });
+              matches.push({ instructionIndex: Math.floor(i / 4),             address: instrAddr,                             field: 'args', start: 0, length: 100 });
+            }
+          }
+          // Stores don't write $rt — no LUI slot invalidation.
+          continue;
+        }
+
+        // Register-write invalidation for everything else.
+        if (opcode === 0x00) { // SPECIAL (R-type) writes $rd
+          const rd = (word >>> 11) & 0x1F;
+          if (rd !== 0) { luiSlot[rd] = -1; }
+          continue;
+        }
+        // All other I-type opcodes write $rt — invalidate its LUI slot.
+        if (opcode !== 0x02
+         && opcode !== 0x04 && opcode !== 0x05
+         && opcode !== 0x06 && opcode !== 0x07
+         && opcode !== 0x14 && opcode !== 0x15
+         && opcode !== 0x16 && opcode !== 0x17
+         && opcode !== 0x1C) {
+          if (rt !== 0) { luiSlot[rt] = -1; }
+        }
+      }
+
       return matches;
     }
 
@@ -2223,13 +2575,26 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (ctx && this.socketClient?.isConnected()) {
         // Primary path: route through the DB-backed label manager so that
         // inline label edits and the Label Manager tab share the same database.
-        const { workspaceDir, gameId } = ctx;
+        const { workspaceDir, gameDiscId } = ctx;
+        const setName = this._activeSetName ?? gameDiscId;
         const addrHex = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
-        await this.socketClient.addLabelEntry(workspaceDir, gameId, gameId, {
+        const updatedSet = await this.socketClient.addLabelEntry(workspaceDir, gameDiscId, setName, {
           address: addrHex,
           name: labelName,
           comment: comment,
         });
+        // Convert set entries to the LabelEntry format expected by the webview.
+        const setLabels: LabelEntry[] = updatedSet.entries
+          .filter(e => e.name && !e.hidden)
+          .map(e => ({ address: e.address, label: e.name, comment: e.comment }));
+        // Broadcast merged labels so the newly saved entry is visible immediately.
+        // Merge order: server global < set entries (set entries take priority).
+        let labels = await this.socketClient.getLabels().catch(() => [] as LabelEntry[]);
+        labels = this._mergeLabels(labels, setLabels);
+        labels = this._mergeLabels(labels, this._gameLabels);
+        if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
+        panel.webview.postMessage({ type: 'labelsUpdated', labels });
+        return;
       } else if (this._gameLabelsPath()) {
         // Offline fallback: socket not connected — save to per-game labels.json.
         this._saveGameLabel(address, labelName, comment);
@@ -2265,9 +2630,20 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       if (ctx && this.socketClient?.isConnected()) {
         // Primary path: route through the DB-backed label manager so that
         // inline label deletes and the Label Manager tab share the same database.
-        const { workspaceDir, gameId } = ctx;
+        const { workspaceDir, gameDiscId } = ctx;
+        const setName = this._activeSetName ?? gameDiscId;
         const addrHex = `0x${address.toString(16).toUpperCase().padStart(8, '0')}`;
-        await this.socketClient.deleteLabelEntry(workspaceDir, gameId, gameId, addrHex);
+        const updatedSet = await this.socketClient.deleteLabelEntry(workspaceDir, gameDiscId, setName, addrHex);
+        // Convert set entries to the LabelEntry format expected by the webview.
+        const setLabels: LabelEntry[] = updatedSet.entries
+          .filter(e => e.name && !e.hidden)
+          .map(e => ({ address: e.address, label: e.name, comment: e.comment }));
+        let labels = await this.socketClient.getLabels().catch(() => [] as LabelEntry[]);
+        labels = this._mergeLabels(labels, setLabels);
+        labels = this._mergeLabels(labels, this._gameLabels);
+        if (this._pointerLabels.length > 0) { labels = this._mergeLabels(labels, this._pointerLabels); }
+        panel.webview.postMessage({ type: 'labelsUpdated', labels });
+        return;
       } else if (this._gameLabelsPath()) {
         // Offline fallback: socket not connected — remove from per-game labels.json.
         this._deleteGameLabel(address);
@@ -2749,19 +3125,40 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
    */
   public onStructsChanged?: (structs: StructEntry[]) => void;
 
-  /** Helper — build workspaceDir and gameId from current context. */
-  private _labelManagerCtx(): { workspaceDir: string; gameId: string } | null {
-    if (!this._workspaceRoot || !this._currentGameName) { return null; }
-    return { workspaceDir: this._workspaceRoot, gameId: this._currentGameName };
+  /** Helper — build workspaceDir and gameDiscId from current context. */
+  private _labelManagerCtx(): { workspaceDir: string; gameDiscId: string } | null {
+    // Fall back to the first VS Code workspace folder when the cached root has
+    // not been set yet (e.g. on startup before resolveWebviewView fires).
+    const workspaceDir = this._workspaceRoot
+      || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+      || '';
+    if (!workspaceDir) { return null; }
+
+    // Use serial (e.g. "SCUS-97275") when available so the DB can resolve to
+    // the exact GameDisc row.  Fall back to the ISO filename for backward
+    // compatibility.  When no game is selected at all, use a placeholder so
+    // the label manager still opens and shows the Built-in set; the backend
+    // gracefully returns an empty user-set list for an unknown identifier.
+    const gameDiscId = this._currentGameSerial || this._currentGameName || DisasmEditorProvider.NO_GAME_SELECTED;
+    return { workspaceDir, gameDiscId };
   }
 
-  /** Broadcast the label set to all open panels and optionally notify struct listeners. */
-  private _broadcastLabelSet(set: LabelSetPayload): void {
+  /**
+   * Broadcast the label set to all open panels and optionally notify struct listeners.
+   * @param skipWebview When provided, skip posting to this webview (to avoid duplicate sends
+   *                    when the caller already posted directly to the originating webview).
+   */
+  private _broadcastLabelSet(set: LabelSetPayload, skipWebview?: vscode.Webview): void {
     for (const p of this._livePanels) {
-      p.webview.postMessage({ type: 'labelManagerSet', set });
+      if (p.webview !== skipWebview) {
+        p.webview.postMessage({ type: 'labelManagerSet', set });
+      }
     }
-    // Also notify the standalone label manager tab if open.
-    this._labelManagerPanel?.webview.postMessage({ type: 'labelManagerSet', set });
+    // Also notify the standalone label manager tab if open (unless it's the caller).
+    const lmWebview = this._labelManagerPanel?.webview;
+    if (lmWebview && lmWebview !== skipWebview) {
+      lmWebview.postMessage({ type: 'labelManagerSet', set });
+    }
     // Convert to StructEntry[] for backward-compat listeners (STRUCTS panel).
     // Children of each struct entry are now full label entries with parentAddress = struct's address.
     // Hidden children are excluded from the struct member display.
@@ -2794,7 +3191,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   /** Dispatch a LabelManagerAction received from the webview. */
   private async _handleLabelManagerAction(
     webview: vscode.Webview,
-    action: { type: string; setName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }> },
+    action: { type: string; setName?: string; newSetName?: string; activeSetName?: string; entry?: LabelManagerEntry; address?: string; json?: string; parentAddress?: string; offset?: number; addresses?: string[]; entries?: Array<{ address: string; entryType?: string; valueType?: string }>; members?: Array<{ parentAddress: string; offset: number; path: string; entryType?: string; valueType?: string }>; scannerKind?: string },
   ): Promise<void> {
     // Handle memory-read actions before connectivity/context checks — they fail
     // silently rather than surfacing an error banner.
@@ -2854,7 +3251,21 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
               }
             }
           } else if (entry.entryType === 'Function') {
-            // Function labels show static arg/ret info from the frontend — skip live memory read.
+            // Scan the function prolog/epilog to detect argument and return registers live.
+            try {
+              const funcBytes = await this.socketClient.readMemory(addr, 128, 'ee');
+              if (funcBytes.length >= 4) {
+                const hexWords = Array.from(
+                  { length: Math.floor(funcBytes.length / 4) },
+                  (_, i) => `0x${funcBytes.readUInt32LE(i * 4).toString(16).padStart(8, '0')}`,
+                ).join(' ');
+                const instructions = await this.socketClient.disassemble(hexWords, addr);
+                const analysis = analyzeFunctionPrologEpilog(instructions);
+                if (analysis) {
+                  values[addrHex] = analysis;
+                }
+              }
+            } catch { /* non-fatal: keep previous live value */ }
           } else {
             // Pointer, Address, Float, Value — read 4 bytes and format by type.
             const buf = await this.socketClient.readMemory(addr, 4, 'ee');
@@ -2875,19 +3286,17 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       }
       const members = action.members ?? [];
       const values: Record<string, string> = {};
+      const sc = this.socketClient;
       for (const m of members) {
-        const parentAddr = parseInt(m.parentAddress.replace(/^0x/i, ''), 16);
-        if (isNaN(parentAddr)) { continue; }
         try {
-          // Dereference the parent pointer to get the base address.
-          const ptrBuf = await this.socketClient.readMemory(parentAddr, 4, 'ee');
-          if (ptrBuf.length < 4) { continue; }
-          const baseAddr = ptrBuf.readUInt32LE(0);
-          if (baseAddr === 0) { continue; }
-          const resolved = (baseAddr + m.offset) >>> 0;
+          // Resolve the member address by walking the synthetic path chain.
+          // Path format: "0xROOT:+0xOFF1:+0xOFF2" — each segment means
+          // "dereference current address as uint32, then add the offset".
+          const resolved = await resolveMemberPath(m.path, sc);
+          if (resolved === null) { continue; }
           const entryType: string | undefined = m.entryType;
           if (entryType === 'String' || m.valueType?.toLowerCase() === 'string') {
-            const dataBuf = await this.socketClient.readMemory(resolved, 256, 'ee');
+            const dataBuf = await sc.readMemory(resolved, 256, 'ee');
             const firstByte = dataBuf.length > 0 ? dataBuf[0] : 0;
             if (firstByte >= 0x20 && firstByte < 0x7F) {
               const nullIdx = dataBuf.indexOf(0);
@@ -2896,14 +3305,14 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
               const strPtr = dataBuf.readUInt32LE(0);
               if (strPtr > 0) {
                 try {
-                  const strBuf = await this.socketClient.readMemory(strPtr, 256, 'ee');
+                  const strBuf = await sc.readMemory(strPtr, 256, 'ee');
                   const nullIdx = strBuf.indexOf(0);
                   values[m.path] = strBuf.slice(0, nullIdx !== -1 ? nullIdx : strBuf.length).toString('latin1');
                 } catch { /* ignore */ }
               }
             }
           } else {
-            const dataBuf = await this.socketClient.readMemory(resolved, 4, 'ee');
+            const dataBuf = await sc.readMemory(resolved, 4, 'ee');
             if (dataBuf.length >= 4) {
               values[m.path] = formatLiveValueByEntryType(dataBuf, entryType, m.valueType);
             }
@@ -2921,15 +3330,15 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
     const ctx = this._labelManagerCtx();
     if (!ctx) {
-      webview.postMessage({ type: 'labelManagerError', message: 'No game selected. Open a disc image first.' });
+      webview.postMessage({ type: 'labelManagerError', message: 'No workspace folder is open. Open a folder in VS Code to use the Label Manager.' });
       return;
     }
-    const { workspaceDir, gameId } = ctx;
+    const { workspaceDir, gameDiscId } = ctx;
 
     try {
       switch (action.type) {
         case 'refresh': {
-          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           // Use the set the client was already viewing if it still exists, otherwise
           // fall back to the first user set or Built-in.
@@ -2937,70 +3346,154 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const activeName = (requestedName && sets.includes(requestedName))
             ? requestedName
             : (sets.find(s => s !== 'Built-in') ?? 'Built-in');
-          const set = await this.socketClient.getLabelSet(workspaceDir, gameId, activeName);
+          // Activate the set on the server so labels appear in the disassembly view,
+          // not just in the Label Manager UI.
+          const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, activeName);
+          this._activeSetName = activeName;
           webview.postMessage({ type: 'labelManagerSet', set });
+          this._broadcastLabelSet(set, webview);
+          await this.refreshStructLabels();
           break;
         }
         case 'setActive': {
-          const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameId, action.setName!);
+          const set = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, action.setName!);
+          this._activeSetName = action.setName!;
           webview.postMessage({ type: 'labelManagerSet', set });
-          this._broadcastLabelSet(set);
+          this._broadcastLabelSet(set, webview);
           // Refresh labels in the disassembly view.
           await this.refreshStructLabels();
           break;
         }
         case 'createSet': {
-          const set = await this.socketClient.createLabelSet(workspaceDir, gameId, action.setName!);
+          const set = await this.socketClient.createLabelSet(workspaceDir, gameDiscId, action.setName!);
           // Activate the new set on the server side so the server's LabelMgr state
           // reflects the new set from the moment it is created.  Without this the
           // server would only activate the set the first time ADDLABELENTRY is called.
-          await this.socketClient.setActiveLabelSet(workspaceDir, gameId, action.setName!);
-          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, action.setName!);
+          this._activeSetName = action.setName!;
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           webview.postMessage({ type: 'labelManagerSet', set });
           webview.postMessage({ type: 'labelManagerStatus', message: `Created label set "${action.setName}".` });
           break;
         }
         case 'deleteSet': {
-          await this.socketClient.deleteLabelSet(workspaceDir, gameId, action.setName!);
-          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          await this.socketClient.deleteLabelSet(workspaceDir, gameDiscId, action.setName!);
+          this._activeSetName = null;
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           // Switch to Built-in after deletion.
-          const builtIn = await this.socketClient.getLabelSet(workspaceDir, gameId, 'Built-in');
+          const builtIn = await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, 'Built-in');
           webview.postMessage({ type: 'labelManagerSet', set: builtIn });
+          this._broadcastLabelSet(builtIn, webview);
+          await this.refreshStructLabels();
           webview.postMessage({ type: 'labelManagerStatus', message: `Deleted label set "${action.setName}".` });
+          break;
+        }
+        case 'renameSet': {
+          const set = await this.socketClient.renameLabelSet(workspaceDir, gameDiscId, action.setName!, action.newSetName!);
+          this._activeSetName = set.setName;
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
+          webview.postMessage({ type: 'labelManagerSets', sets });
+          webview.postMessage({ type: 'labelManagerSet', set });
+          webview.postMessage({ type: 'labelManagerStatus', message: `Renamed label set to "${set.setName}".` });
           break;
         }
         case 'addEntry': {
           const setName = action.setName!;
-          await this.socketClient.setActiveLabelSet(workspaceDir, gameId, setName);
-          const set = await this.socketClient.addLabelEntry(workspaceDir, gameId, setName, action.entry!);
+          await this.socketClient.setActiveLabelSet(workspaceDir, gameDiscId, setName);
+          this._activeSetName = setName;
+          const set = await this.socketClient.addLabelEntry(workspaceDir, gameDiscId, setName, action.entry!);
           webview.postMessage({ type: 'labelManagerSet', set });
-          this._broadcastLabelSet(set);
+          this._broadcastLabelSet(set, webview);
           await this.refreshStructLabels();
           break;
         }
         case 'deleteEntry': {
           const setName = action.setName!;
-          const set = await this.socketClient.deleteLabelEntry(workspaceDir, gameId, setName, action.address ?? '');
+          const set = await this.socketClient.deleteLabelEntry(workspaceDir, gameDiscId, setName, action.address ?? '');
           webview.postMessage({ type: 'labelManagerSet', set });
-          this._broadcastLabelSet(set);
+          this._broadcastLabelSet(set, webview);
           await this.refreshStructLabels();
           break;
         }
         case 'importSet': {
-          const set = await this.socketClient.importLabelSet(workspaceDir, gameId, action.setName ?? 'Imported', action.json!);
-          const sets = await this.socketClient.getLabelSets(workspaceDir, gameId);
+          const set = await this.socketClient.importLabelSet(workspaceDir, gameDiscId, action.setName ?? 'Imported', action.json!);
+          this._activeSetName = set.setName;
+          const sets = await this.socketClient.getLabelSets(workspaceDir, gameDiscId);
           webview.postMessage({ type: 'labelManagerSets', sets });
           webview.postMessage({ type: 'labelManagerSet', set });
           webview.postMessage({ type: 'labelManagerStatus', message: `Imported "${set.setName}" (${set.entries.length} entries).` });
           break;
         }
         case 'exportSet': {
-          const json = await this.socketClient.exportLabelSet(workspaceDir, gameId, action.setName!);
+          const json = await this.socketClient.exportLabelSet(workspaceDir, gameDiscId, action.setName!);
           webview.postMessage({ type: 'labelManagerExport', json, setName: action.setName });
           break;
         }
+        case 'runScanner': {
+          const kind = action.scannerKind as string;
+          // Default to EE main RAM region for label manager scans.
+          const region = 'ee';
+          const baseAddress = 0x00000000;
+          const totalBytes = 32 * 1024 * 1024; // 32 MB EE Main RAM
+          try {
+            let entries: LabelManagerEntry[] = [];
+            if (kind === 'strings') {
+              const results = await this.socketClient.scanLiveStrings(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: r.value.length > 40 ? r.value.substring(0, 40) + '…' : r.value,
+                comment: r.value.length > 40 ? r.value : undefined,
+                type: 'String' as const,
+              }));
+            } else if (kind === 'functions') {
+              const results = await this.socketClient.scanLiveFunctions(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: r.label || `func_${r.address}`,
+                type: 'Function' as const,
+              }));
+            } else if (kind === 'pointers') {
+              const results = await this.socketClient.scanLivePointers(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: `ptr → ${r.pointsTo}`,
+                comment: `Points to ${r.pointsTo}`,
+                type: 'Pointer' as const,
+              }));
+            } else if (kind === 'floats') {
+              const results = await this.socketClient.scanLiveFloats(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: `${r.value}`,
+                comment: `raw: ${r.raw}`,
+                type: 'Float' as const,
+              }));
+            } else if (kind === 'hexValues') {
+              const results = await this.socketClient.scanLiveIntegers(baseAddress, totalBytes, region);
+              entries = results.map(r => ({
+                address: r.address,
+                name: r.hex,
+                comment: `dec: ${r.value}`,
+                type: 'Hex' as const,
+              }));
+            }
+            webview.postMessage({ type: 'labelManagerScanResults', scannerKind: kind, entries });
+          } catch (scanErr: unknown) {
+            const scanErrMsg = scanErr instanceof Error ? scanErr.message : String(scanErr);
+            webview.postMessage({ type: 'labelManagerScanResults', scannerKind: kind, entries: [] });
+            webview.postMessage({ type: 'labelManagerError', message: `Scan failed: ${scanErrMsg}` });
+          }
+          break;
+        }
+        case 'clearScanResults':
+          // Nothing to do server-side; the UI already cleared its state.
+          break;
+        case 'resolveStrings':
+          // Legacy: re-route to the scanner for strings.
+          await this._handleLabelManagerAction(webview, { type: 'runScanner', scannerKind: 'strings' });
+          break;
         default:
           webview.postMessage({ type: 'labelManagerError', message: `Unknown action: ${action.type}` });
       }
@@ -3070,6 +3563,39 @@ function formatLiveValue(buf: Buffer, valueType?: string): string {
 }
 
 /**
+ * Resolves a synthetic member path to a physical memory address by walking the
+ * pointer chain encoded in the path string.
+ *
+ * Path format: `"0xROOT:+0xOFF1:+0xOFF2"` where:
+ *   - The root segment (`0xROOT`) is a real PS2 address.
+ *   - Each subsequent segment (`:+0xOFF`) means: dereference the current
+ *     address as a 32-bit LE pointer, then add the offset to get the next address.
+ *
+ * Returns `null` when the path cannot be parsed or a null pointer is encountered.
+ */
+async function resolveMemberPath(
+  path: string,
+  socketClient: { readMemory(addr: number, length: number, region: string): Promise<Buffer> },
+): Promise<number | null> {
+  const parts = path.split(':');
+  let addr = parseInt(parts[0].replace(/^0x/i, ''), 16);
+  if (isNaN(addr)) { return null; }
+
+  for (let i = 1; i < parts.length; i++) {
+    const ptrBuf = await socketClient.readMemory(addr, 4, 'ee');
+    if (ptrBuf.length < 4) { return null; }
+    const base = ptrBuf.readUInt32LE(0);
+    if (base === 0) { return null; }
+    const offsetStr = parts[i].replace(/^\+0x/i, '').replace(/^\+/, '');
+    const offset = parseInt(offsetStr, 16);
+    if (isNaN(offset)) { return null; }
+    addr = (base + offset) >>> 0;
+  }
+
+  return addr;
+}
+
+/**
  * Formats a raw 4-byte memory buffer using the semantic label entry type first,
  * falling back to the legacy valueType annotation.
  * Entry type values are PascalCase strings matching the LabelType enum.
@@ -3089,4 +3615,95 @@ function formatLiveValueByEntryType(buf: Buffer, entryType?: string, valueType?:
     default:
       return formatLiveValue(buf, valueType);
   }
+}
+
+/**
+ * Analyze MIPS EE function prolog and epilog instructions to detect:
+ *   - Argument registers (a0–a3) that are read before being written in the first 16 instructions.
+ *   - Return registers (v0–v1) that are written before the terminal `jr ra` in the last 16 instructions.
+ *
+ * Returns a compact string like `"args[a0,a1] rets[v0]"` or an empty string when nothing is detected.
+ * Each InstructionResult is expected to carry the disassembly text in its `Assembly` field.
+ */
+function analyzeFunctionPrologEpilog(instructions: { Assembly?: string }[]): string {
+  const ARG_REGS = ['a0', 'a1', 'a2', 'a3'] as const;
+  const RET_REGS = ['v0', 'v1'] as const;
+
+  // Opcodes where the first operand token is a SOURCE register, not a destination.
+  // Stores: sw/sh/sb/sd/sq/swc1/sdc1 — first operand is the value being stored.
+  // Branches/jumps: beq/bne/bgez/bgtz/blez/bltz/jr/jalr — no destination register.
+  const SOURCE_FIRST_RE =
+    /^(sw|sh|sb|sd|sq|swl|swr|swc1|swc2|sdc1|sdc2|beq|bne|bgez|bgtz|blez|bltz|bgezal|bltzal|beql|bnel|bgezl|bgtzl|blezl|bltzl|jr|jalr|eret)\b/;
+
+  /**
+   * Return the destination register name for a disassembly line, or null when
+   * the first operand is a source (stores, branches, jr/jalr).
+   */
+  function destReg(asm: string): string | null {
+    if (SOURCE_FIRST_RE.test(asm)) { return null; }
+    // "opcode dest, ..." — first whitespace-separated token after the mnemonic.
+    const m = /^\S+\s+(\w+)/.exec(asm);
+    return m ? m[1] : null;
+  }
+
+  /**
+   * Return all register-name-sized alphanumeric tokens from the instruction text.
+   * Assumes `asm` has already been lowercased — the pattern intentionally uses
+   * only `[a-z0-9]` so that it matches the canonical lowercase register names
+   * (a0, v0, ra, sp, …) produced by the EE disassembler.
+   * Includes the destination token — the caller decides whether to treat it as source or dest.
+   */
+  function allTokens(asm: string): string[] {
+    return asm.split(/[^a-z0-9]+/).filter(Boolean);
+  }
+
+  const argFound   = new Set<string>();
+  const argWritten = new Set<string>();
+  const retFound   = new Set<string>();
+
+  // Find the last `jr ra` to mark the epilog boundary.
+  let jrRaIdx = -1;
+  for (let i = instructions.length - 1; i >= 0; i--) {
+    const asm = (instructions[i]?.Assembly ?? '').toLowerCase().trim();
+    if (/^jr\s+ra$/.test(asm)) { jrRaIdx = i; break; }
+  }
+
+  // ── Prolog scan: first 16 instructions (or up to jr ra) ─────────────────────
+  const prologEnd = Math.min(16, jrRaIdx >= 0 ? jrRaIdx : instructions.length);
+  for (let i = 0; i < prologEnd; i++) {
+    const asm = (instructions[i]?.Assembly ?? '').toLowerCase().trim();
+    if (!asm) { continue; }
+    const dest   = destReg(asm);
+    const tokens = allTokens(asm);
+    for (const reg of ARG_REGS) {
+      if (argFound.has(reg) || argWritten.has(reg)) { continue; }
+      if (dest === reg) {
+        // First occurrence is a write — register is not an argument.
+        argWritten.add(reg);
+      } else if (tokens.includes(reg)) {
+        // Register is read before any write — it's a passed argument.
+        argFound.add(reg);
+      }
+    }
+  }
+
+  // ── Epilog scan: 16 instructions before `jr ra` ──────────────────────────────
+  if (jrRaIdx >= 0) {
+    const epilogStart = Math.max(0, jrRaIdx - 16);
+    for (let i = epilogStart; i < jrRaIdx; i++) {
+      const asm = (instructions[i]?.Assembly ?? '').toLowerCase().trim();
+      if (!asm) { continue; }
+      const dest = destReg(asm);
+      for (const reg of RET_REGS) {
+        if (dest === reg) { retFound.add(reg); }
+      }
+    }
+  }
+
+  const parts: string[] = [];
+  const args = ARG_REGS.filter(r => argFound.has(r));
+  const rets = RET_REGS.filter(r => retFound.has(r));
+  if (args.length > 0) { parts.push(`args[${args.join(',')}]`); }
+  if (rets.length > 0) { parts.push(`rets[${rets.join(',')}]`); }
+  return parts.join(' ');
 }

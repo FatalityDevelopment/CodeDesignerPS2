@@ -68,18 +68,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
-            {
-                int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
-                int rtVal = CpuHelpers.GetReg32(cpu, args.Rt);
-                return $"{eq} => 0x{(uint)rsVal:X8} + 0x{(uint)rtVal:X8} = 0x{(uint)(rsVal + rtVal):X8}";
-            }
-            return eq;
+            if (cpu == null) return string.Empty;
+            int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
+            int rtVal = CpuHelpers.GetReg32(cpu, args.Rt);
+            return $"{CpuHelpers.RegName(args.Rd)} = 0x{(uint)(rsVal + rtVal):X8}";
         }
     }
 
@@ -117,18 +109,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
-            {
-                uint rsVal = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
-                uint rtVal = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
-                return $"{eq} => 0x{rsVal:X8} + 0x{rtVal:X8} = 0x{rsVal + rtVal:X8}";
-            }
-            return eq;
+            if (cpu == null) return string.Empty;
+            uint rsVal = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
+            uint rtVal = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
+            return $"{CpuHelpers.RegName(args.Rd)} = 0x{rsVal + rtVal:X8}";
         }
     }
 
@@ -168,18 +152,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
-            {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                long rtVal = (long)cpu.RegsLo[args.Rt];
-                return $"{eq} => 0x{(ulong)rsVal:X16} + 0x{(ulong)rtVal:X16} = 0x{(ulong)(rsVal + rtVal):X16}";
-            }
-            return eq;
+            if (cpu == null) return string.Empty;
+            long rsVal = (long)cpu.RegsLo[args.Rs];
+            long rtVal = (long)cpu.RegsLo[args.Rt];
+            return $"{CpuHelpers.RegName(args.Rd)} = 0x{(ulong)(rsVal + rtVal):X16}";
         }
     }
 
@@ -218,18 +194,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
-            {
-                ulong rsVal = cpu.RegsLo[args.Rs];
-                ulong rtVal = cpu.RegsLo[args.Rt];
-                return $"{eq} => 0x{rsVal:X16} + 0x{rtVal:X16} = 0x{rsVal + rtVal:X16}";
-            }
-            return eq;
+            if (cpu == null) return string.Empty;
+            ulong rsVal = cpu.RegsLo[args.Rs];
+            ulong rtVal = cpu.RegsLo[args.Rt];
+            return $"{CpuHelpers.RegName(args.Rd)} = 0x{rsVal + rtVal:X16}";
         }
     }
 
@@ -268,18 +236,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
-            {
-                int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
-                int rtVal = CpuHelpers.GetReg32(cpu, args.Rt);
-                return $"{eq} => 0x{(uint)rsVal:X8} - 0x{(uint)rtVal:X8} = 0x{(uint)(rsVal - rtVal):X8}";
-            }
-            return eq;
+            if (cpu == null) return string.Empty;
+            int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
+            int rtVal = CpuHelpers.GetReg32(cpu, args.Rt);
+            return $"{CpuHelpers.RegName(args.Rd)} = 0x{(uint)(rsVal - rtVal):X8}";
         }
     }
 
@@ -317,18 +277,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
-            {
-                uint rsVal = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
-                uint rtVal = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
-                return $"{eq} => 0x{rsVal:X8} - 0x{rtVal:X8} = 0x{rsVal - rtVal:X8}";
-            }
-            return eq;
+            if (cpu == null) return string.Empty;
+            uint rsVal = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
+            uint rtVal = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
+            return $"{CpuHelpers.RegName(args.Rd)} = 0x{rsVal - rtVal:X8}";
         }
     }
 
@@ -368,18 +320,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
-            {
-                long rsVal = (long)cpu.RegsLo[args.Rs];
-                long rtVal = (long)cpu.RegsLo[args.Rt];
-                return $"{eq} => 0x{(ulong)rsVal:X16} - 0x{(ulong)rtVal:X16} = 0x{(ulong)(rsVal - rtVal):X16}";
-            }
-            return eq;
+            if (cpu == null) return string.Empty;
+            long rsVal = (long)cpu.RegsLo[args.Rs];
+            long rtVal = (long)cpu.RegsLo[args.Rt];
+            return $"{CpuHelpers.RegName(args.Rd)} = 0x{(ulong)(rsVal - rtVal):X16}";
         }
     }
 
@@ -418,18 +362,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string eq = Equation
-                .Replace("rd", CpuHelpers.RegName(args.Rd))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("rt", CpuHelpers.RegName(args.Rt));
-            
-            if (cpu != null)
-            {
-                ulong rsVal = cpu.RegsLo[args.Rs];
-                ulong rtVal = cpu.RegsLo[args.Rt];
-                return $"{eq} => 0x{rsVal:X16} - 0x{rtVal:X16} = 0x{rsVal - rtVal:X16}";
-            }
-            return eq;
+            if (cpu == null) return string.Empty;
+            ulong rsVal = cpu.RegsLo[args.Rs];
+            ulong rtVal = cpu.RegsLo[args.Rt];
+            return $"{CpuHelpers.RegName(args.Rd)} = 0x{rsVal - rtVal:X16}";
         }
     }
 
@@ -468,18 +404,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
+            if (cpu == null) return string.Empty;
+            int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
             int imm = CpuHelpers.SignExtend16(args.Imm);
-            string eq = Equation
-                .Replace("rt", CpuHelpers.RegName(args.Rt))
-                .Replace("rs", CpuHelpers.RegName(args.Rs))
-                .Replace("SignExt(imm)", $"0x{(uint)imm:X8}");
-            
-            if (cpu != null)
-            {
-                int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
-                return $"{eq} => 0x{(uint)rsVal:X8} + 0x{(uint)imm:X8} = 0x{(uint)(rsVal + imm):X8}";
-            }
-            return eq;
+            return $"{CpuHelpers.RegName(args.Rt)} = 0x{(uint)(rsVal + imm):X8}";
         }
     }
 
@@ -517,7 +445,21 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"I-Type: {Disasm(args, pc)} [Unsigned add immediate, no overflow]";
+            if (cpu == null) return string.Empty;
+            int rsVal = CpuHelpers.GetReg32(cpu, args.Rs);
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            uint result = (uint)(rsVal + imm);
+
+            // Detect stack frame allocation/deallocation: ADDIU $sp, $sp, ±N
+            if (args.Rt == 29 && args.Rs == 29)
+            {
+                if (imm < 0)
+                    return $"allocate {-imm}-byte stack frame → $sp = 0x{result:X8}";
+                if (imm > 0)
+                    return $"free {imm}-byte stack frame → $sp = 0x{result:X8}";
+            }
+
+            return $"{CpuHelpers.RegName(args.Rt)} = 0x{result:X8}";
         }
     }
 
@@ -557,7 +499,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"I-Type: {Disasm(args, pc)} [64-bit signed add immediate with overflow trap]";
+            if (cpu == null) return string.Empty;
+            long rsVal = (long)cpu.RegsLo[args.Rs];
+            long imm = CpuHelpers.SignExtend16(args.Imm);
+            return $"{CpuHelpers.RegName(args.Rt)} = 0x{(ulong)(rsVal + imm):X16}";
         }
     }
 
@@ -596,7 +541,10 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"I-Type: {Disasm(args, pc)} [64-bit unsigned add immediate, no overflow]";
+            if (cpu == null) return string.Empty;
+            long rsVal = (long)cpu.RegsLo[args.Rs];
+            long imm = CpuHelpers.SignExtend16(args.Imm);
+            return $"{CpuHelpers.RegName(args.Rt)} = 0x{(ulong)(rsVal + imm):X16}";
         }
     }
 
@@ -637,7 +585,13 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [32-bit signed multiply, result in HI:LO]";
+            if (cpu == null) return string.Empty;
+            int rs = CpuHelpers.GetReg32(cpu, args.Rs);
+            int rt = CpuHelpers.GetReg32(cpu, args.Rt);
+            long product = (long)rs * rt;
+            uint lo = (uint)(product & 0xFFFFFFFF);
+            uint hi = (uint)(product >> 32);
+            return $"HI=0x{hi:X8}, LO=0x{lo:X8}";
         }
     }
 
@@ -678,7 +632,11 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [32-bit unsigned multiply, result in HI:LO]";
+            if (cpu == null) return string.Empty;
+            uint rs = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
+            uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
+            ulong product = (ulong)rs * rt;
+            return $"HI=0x{(uint)(product >> 32):X8}, LO=0x{(uint)(product & 0xFFFFFFFF):X8}";
         }
     }
 
@@ -719,7 +677,13 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [64-bit signed multiply, result in HI:LO]";
+            if (cpu == null) return string.Empty;
+            long rs = (long)cpu.RegsLo[args.Rs];
+            long rt = (long)cpu.RegsLo[args.Rt];
+            var product = (System.Numerics.BigInteger)rs * rt;
+            ulong lo = (ulong)(product & 0xFFFFFFFFFFFFFFFF);
+            ulong hi = (ulong)((product >> 64) & 0xFFFFFFFFFFFFFFFF);
+            return $"HI=0x{hi:X16}, LO=0x{lo:X16}";
         }
     }
 
@@ -760,7 +724,11 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [64-bit unsigned multiply, result in HI:LO]";
+            if (cpu == null) return string.Empty;
+            ulong rs = cpu.RegsLo[args.Rs];
+            ulong rt = cpu.RegsLo[args.Rt];
+            ulong high = Math.BigMul(rs, rt, out ulong low);
+            return $"HI=0x{high:X16}, LO=0x{low:X16}";
         }
     }
 
@@ -818,7 +786,11 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [32-bit signed divide, quotient in LO, remainder in HI]";
+            if (cpu == null) return string.Empty;
+            int rs = CpuHelpers.GetReg32(cpu, args.Rs);
+            int rt = CpuHelpers.GetReg32(cpu, args.Rt);
+            if (rt == 0) return "LO=?, HI=?  (div by 0)";
+            return $"LO=0x{(uint)(rs / rt):X8}, HI=0x{(uint)(rs % rt):X8}";
         }
     }
 
@@ -869,7 +841,11 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [32-bit unsigned divide, quotient in LO, remainder in HI]";
+            if (cpu == null) return string.Empty;
+            uint rs = (uint)CpuHelpers.GetReg32(cpu, args.Rs);
+            uint rt = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
+            if (rt == 0) return "LO=?, HI=?  (div by 0)";
+            return $"LO=0x{rs / rt:X8}, HI=0x{rs % rt:X8}";
         }
     }
 
@@ -925,7 +901,11 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [64-bit signed divide, quotient in LO, remainder in HI]";
+            if (cpu == null) return string.Empty;
+            long rs = (long)cpu.RegsLo[args.Rs];
+            long rt = (long)cpu.RegsLo[args.Rt];
+            if (rt == 0) return "LO=?, HI=?  (div by 0)";
+            return $"LO=0x{(ulong)(rs / rt):X16}, HI=0x{(ulong)(rs % rt):X16}";
         }
     }
 
@@ -975,7 +955,11 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [64-bit unsigned divide, quotient in LO, remainder in HI]";
+            if (cpu == null) return string.Empty;
+            ulong rs = cpu.RegsLo[args.Rs];
+            ulong rt = cpu.RegsLo[args.Rt];
+            if (rt == 0) return "LO=?, HI=?  (div by 0)";
+            return $"LO=0x{rs / rt:X16}, HI=0x{rs % rt:X16}";
         }
     }
 
@@ -1011,7 +995,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [Move from HI register]";
+            if (cpu == null) return string.Empty;
+            return $"{CpuHelpers.RegName(args.Rd)} = HI=0x{(uint)cpu.HI:X8}";
         }
     }
 
@@ -1047,7 +1032,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [Move from LO register]";
+            if (cpu == null) return string.Empty;
+            return $"{CpuHelpers.RegName(args.Rd)} = LO=0x{(uint)cpu.LO:X8}";
         }
     }
 
@@ -1082,7 +1068,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [Move to HI register]";
+            if (cpu == null) return string.Empty;
+            return $"HI = {CpuHelpers.RegName(args.Rs)}=0x{(uint)cpu.RegsLo[args.Rs]:X8}";
         }
     }
 
@@ -1117,7 +1104,8 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            return $"R-Type: {Disasm(args, pc)} [Move to LO register]";
+            if (cpu == null) return string.Empty;
+            return $"LO = {CpuHelpers.RegName(args.Rs)}=0x{(uint)cpu.RegsLo[args.Rs]:X8}";
         }
     }
 }

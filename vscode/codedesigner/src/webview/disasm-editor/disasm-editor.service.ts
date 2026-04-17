@@ -6,11 +6,6 @@ import {
   DisasmRow,
   SearchMatch,
   SymLabel,
-  SymString,
-  SymFunction,
-  SymPointer,
-  SymFloat,
-  SymInteger,
   ModuleEntry,
   ThreadEntry,
   RegisterData,
@@ -22,11 +17,6 @@ export type {
   DisasmRow,
   SearchMatch,
   SymLabel,
-  SymString,
-  SymFunction,
-  SymPointer,
-  SymFloat,
-  SymInteger,
   ThreadEntry,
   RegisterData,
   PineWatchInfo,
@@ -51,7 +41,6 @@ export interface DisasmEditorState {
   currentMatch: number;
   searchActive: boolean;
   gotoActive: boolean;
-  symbolsActive: boolean;
   isLive: boolean;
   breakpoints: Set<number>;
   breakpointHitAddress: number | undefined;
@@ -62,11 +51,6 @@ export interface DisasmEditorState {
    *  after the user navigates the cursor away from the paused instruction. */
   pcAddress: number | undefined;
   symLabels: SymLabel[];
-  symStrings: SymString[];
-  symFunctions: SymFunction[];
-  symPointers: SymPointer[];
-  symFloats: SymFloat[];
-  symIntegers: SymInteger[];
   /** Live-resolved labels from the Pointer Manager, keyed by normalised address. */
   pointerLabels: SymLabel[];
 }
@@ -125,18 +109,12 @@ export class DisasmEditorService implements OnDestroy {
     currentMatch: -1,
     searchActive: false,
     gotoActive: false,
-    symbolsActive: false,
     isLive: false,
     breakpoints: new Set<number>(),
     breakpointHitAddress: undefined,
     pineWatches: [],
     pcAddress: undefined,
     symLabels: [],
-    symStrings: [],
-    symFunctions: [],
-    symPointers: [],
-    symFloats: [],
-    symIntegers: [],
     pointerLabels: [],
   };
 
@@ -149,11 +127,6 @@ export class DisasmEditorService implements OnDestroy {
   readonly resetReceived$           = new Subject<void>();
   readonly symbolsReceived$         = new Subject<void>();
   readonly labelsUpdated$           = new Subject<void>();
-  readonly stringsUpdated$          = new Subject<void>();
-  readonly functionsUpdated$        = new Subject<void>();
-  readonly pointersUpdated$         = new Subject<void>();
-  readonly floatsUpdated$           = new Subject<void>();
-  readonly integersUpdated$         = new Subject<void>();
   /** Fired when live analysis comments arrive for one or more addresses. */
   readonly analysisUpdated$         = new Subject<Record<string, string>>();
   /** Fired when live-resolved Pointer Manager labels arrive. */
@@ -168,6 +141,8 @@ export class DisasmEditorService implements OnDestroy {
   readonly threadsReceived$ = new Subject<ThreadEntry[]>();
   /** Fired when the extension host returns the IOP module list. */
   readonly modulesReceived$ = new Subject<ModuleEntry[]>();
+  /** Fired when the extension host reports that the panel became visible or hidden. */
+  readonly panelVisibilityChanged$ = new Subject<{ visible: boolean }>();
 
   private readonly _subs: Subscription[] = [];
 
@@ -185,17 +160,13 @@ export class DisasmEditorService implements OnDestroy {
       this._bridge.on<Record<string, unknown>>('reset').subscribe(() => this._onReset()),
       this._bridge.on<Record<string, unknown>>('symbols').subscribe(msg => this._onSymbols(msg)),
       this._bridge.on<Record<string, unknown>>('labelsUpdated').subscribe(msg => this._onLabelsUpdated(msg)),
-      this._bridge.on<Record<string, unknown>>('stringsUpdated').subscribe(msg => this._onStringsUpdated(msg)),
-      this._bridge.on<Record<string, unknown>>('functionsUpdated').subscribe(msg => this._onFunctionsUpdated(msg)),
-      this._bridge.on<Record<string, unknown>>('pointersUpdated').subscribe(msg => this._onPointersUpdated(msg)),
-      this._bridge.on<Record<string, unknown>>('floatsUpdated').subscribe(msg => this._onFloatsUpdated(msg)),
-      this._bridge.on<Record<string, unknown>>('integersUpdated').subscribe(msg => this._onIntegersUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('pointerLabelsUpdated').subscribe(msg => this._onPointerLabelsUpdated(msg)),
       this._bridge.on<Record<string, unknown>>('gotoAddress').subscribe(msg => this.gotoAddressReceived$.next({ address: msg['address'] as number })),
       this._bridge.on<Record<string, unknown>>('syncGotoInput').subscribe(msg => this.syncGotoInputReceived$.next({ value: msg['value'] as string })),
       this._bridge.on<Record<string, unknown>>('gotoRegionNotFound').subscribe(msg => this.gotoRegionNotFoundReceived$.next({ address: msg['address'] as number })),
       this._bridge.on<Record<string, unknown>>('threads').subscribe(msg => this.threadsReceived$.next((msg['threads'] as ThreadEntry[] | undefined) ?? [])),
       this._bridge.on<Record<string, unknown>>('modules').subscribe(msg => this.modulesReceived$.next((msg['modules'] as ModuleEntry[] | undefined) ?? [])),
+      this._bridge.on<Record<string, unknown>>('panelVisibility').subscribe(msg => this.panelVisibilityChanged$.next({ visible: msg['visible'] as boolean })),
     );
   }
 
@@ -467,18 +438,12 @@ export class DisasmEditorService implements OnDestroy {
 
   private _onSymbols(msg: Record<string, unknown>): void {
     const labels = (msg['labels'] as SymLabel[] | undefined) ?? [];
-    const strings = (msg['strings'] as SymString[] | undefined) ?? [];
-    const functions = (msg['functions'] as SymFunction[] | undefined) ?? [];
 
     // Update mutable state (legacy)
     this.state.symLabels    = labels;
-    this.state.symStrings   = strings;
-    this.state.symFunctions = functions;
 
     // Update signals (new architecture)
     this.signals.symLabels.set(labels);
-    this.signals.symStrings.set(strings);
-    this.signals.symFunctions.set(functions);
 
     this.symbolsReceived$.next();
   }
@@ -488,41 +453,6 @@ export class DisasmEditorService implements OnDestroy {
     this.state.symLabels = labels;
     this.signals.symLabels.set(labels);
     this.labelsUpdated$.next();
-  }
-
-  private _onStringsUpdated(msg: Record<string, unknown>): void {
-    const strings = (msg['strings'] as SymString[] | undefined) ?? [];
-    this.state.symStrings = strings;
-    this.signals.symStrings.set(strings);
-    this.stringsUpdated$.next();
-  }
-
-  private _onFunctionsUpdated(msg: Record<string, unknown>): void {
-    const functions = (msg['functions'] as SymFunction[] | undefined) ?? [];
-    this.state.symFunctions = functions;
-    this.signals.symFunctions.set(functions);
-    this.functionsUpdated$.next();
-  }
-
-  private _onPointersUpdated(msg: Record<string, unknown>): void {
-    const pointers = (msg['pointers'] as SymPointer[] | undefined) ?? [];
-    this.state.symPointers = pointers;
-    this.signals.symPointers.set(pointers);
-    this.pointersUpdated$.next();
-  }
-
-  private _onFloatsUpdated(msg: Record<string, unknown>): void {
-    const floats = (msg['floats'] as SymFloat[] | undefined) ?? [];
-    this.state.symFloats = floats;
-    this.signals.symFloats.set(floats);
-    this.floatsUpdated$.next();
-  }
-
-  private _onIntegersUpdated(msg: Record<string, unknown>): void {
-    const integers = (msg['integers'] as SymInteger[] | undefined) ?? [];
-    this.state.symIntegers = integers;
-    this.signals.symIntegers.set(integers);
-    this.integersUpdated$.next();
   }
 
   private _onPointerLabelsUpdated(msg: Record<string, unknown>): void {

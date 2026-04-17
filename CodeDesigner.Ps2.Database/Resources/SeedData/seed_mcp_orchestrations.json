@@ -1,0 +1,22 @@
+[ 
+  {
+    "name": "Default",
+    "isActive": false,
+    "description": "Default single-agent orchestration for CodeDesigner. A single lead agent ([Fatality] Raiden) drives all reverse engineering tasks independently.",
+    "strategy": "Single lead agent - all tasks are handled sequentially by one agent. No parallel sub-agents are used unless the task explicitly requires it.",
+    "roles": "- **Lead Agent**: [Fatality] Raiden - responsible for all reverse engineering, memory analysis, label authoring, and cheat code development.",
+    "workflow": "1. Agent calls `session_start` to load guidelines and prior context.\n2. Agent executes requested tasks, saving progress along the way.\n3. Agent saves a final progress report before ending.",
+    "rules": "- Always start with `session_start`.\n- Only one agent is active at a time in this orchestration.\n- Handoff between sessions is achieved via progress reports, not live state.",
+    "notes": "Use this when a quick single-threaded investigation is preferred."
+  },
+  {
+    "name": "[Fatality] Team - CodeDesigner Master",
+    "isActive": true,
+    "description": "SQL Server-first multi-agent orchestration for complete CodeDesigner operations. Enforces navigate_to visibility, agent self-introduction, explicit handoffs, and full tool-family ownership.",
+    "strategy": "Lead + specialist squad model. Every tool family has a primary and backup owner. Execution follows Initialize -> Locate -> Verify -> Map -> Patch -> Persist. Agents must introduce themselves, post handoff messages, and keep user context visible with navigate_to.",
+    "roles": "- **Lead Coordinator**: [Fatality] Raiden\n- **Call Graph Hunter**: [Fatality] Scorpion\n- **Memory Scanner**: [Fatality] Sub-Zero\n- **Structure Architect**: [Fatality] Kitana\n- **CDS Patcher**: [Fatality] Kano\n- **Runtime Verifier**: [Fatality] Sonya\n- **Persistence Curator**: [Fatality] Liu Kang\n- **PCSX2 Navigator**: [Fatality] Johnny Cage",
+    "workflow": "1. Call `session_start`, load prior report, then `navigate_to` active anchor.\n2. Locate with scan + call graph + labeled candidates.\n3. Verify with watchpoints, register/memory checks, and screenshots.\n4. Map structures and pointer chains; label only confirmed findings.\n5. Patch with CDS/cheats under snapshot safety gates.\n6. Persist to SQL Server and refresh seed files.",
+    "rules": "- SQL Server is authoritative; do not use SQLite flows.\n- Snapshot before any write/patch/apply_cheats.\n- `navigate_to` before/after every major focus change.\n- Every agent introduces itself and includes handoff target + action.\n- No orphan tools: every new tool must be assigned a primary+backup owner.",
+    "notes": "Coverage matrix includes orchestration, agent management, progress/settings, SQL Server/db query, labels, disassembly, execution control, watch/register state, PCSX2 info, scanning, snapshots/save-states, cheat/CDS, disc/MC/HDD, recompilation/extraction, and thread introspection."
+  }
+]

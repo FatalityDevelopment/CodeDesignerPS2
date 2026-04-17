@@ -7,12 +7,12 @@ using System.Text;
 
 namespace CodeDesigner.Ps2.ZDBManager
 {
-    class Program
+    public class Program
     {
         static ZDBArchive zdb = new ZDBArchive();
         static string currentDir = "z:/";
 
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {
             if (args.Length > 0 && args[0].StartsWith("-"))
             {

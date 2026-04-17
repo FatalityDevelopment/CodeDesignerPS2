@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.VisualStudio.JavaScript.Sdk/1.0.1184077">
+  <PropertyGroup>
+    <StartupCommand>npm start</StartupCommand>
+    <JavaScriptTestRoot>.\</JavaScriptTestRoot>
+    <JavaScriptTestFramework>Mocha</JavaScriptTestFramework>
+    <!-- Command to run on project build -->
+    <BuildCommand>npm run build</BuildCommand>
+    <!-- Folder where production build objects will be placed -->
+    <BuildOutputFolder>$(MSBuildProjectDirectory)\dist</BuildOutputFolder>
+  </PropertyGroup>
+  <ItemGroup>
+    <Folder Include="dist\" />
+  </ItemGroup>
+</Project>

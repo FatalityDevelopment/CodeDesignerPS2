@@ -93,6 +93,23 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgClearAllWatches   = 0x31;
         private const byte MsgSaveScreenshot    = 0x32;
 
+        // ── Pad / controller input opcodes ────────────────────────────────────
+        private const byte MsgPadGetState       = 0x33;
+        private const byte MsgPadSetButton      = 0x34;
+        private const byte MsgPadSetAnalog      = 0x35;
+        private const byte MsgPadSetState       = 0x36;
+        private const byte MsgPadGetType        = 0x37;
+
+        // ── DEV9 network bridge opcodes ───────────────────────────────────────
+        private const byte MsgNetGetStatus      = 0x38;
+        private const byte MsgNetCapture        = 0x39;
+        private const byte MsgNetRecvCapture    = 0x3A;
+        private const byte MsgNetInject         = 0x3B;
+        private const byte MsgNetInjectTx       = 0x3C;
+        private const byte MsgNetDisassemble    = 0x3D;
+        private const byte MsgNetSetFilter      = 0x3E;
+        private const byte MsgNetGetStats       = 0x3F;
+
         // ── PINE result codes ─────────────────────────────────────────────────
         private const byte IPC_OK   = 0x00;
         private const byte IPC_FAIL = 0xFF;
@@ -1300,6 +1317,379 @@ namespace CodeDesigner.Ps2.Bridge
             if (rep[4] != IPC_OK) throw PineFail("MsgSaveScreenshot");
         }
 
+        // ── Pad / controller input ────────────────────────────────────────────
+
+        /// <summary>Full pad state snapshot returned by <see cref="PadGetState"/>.</summary>
+        public sealed class PadStateSnapshot
+        {
+            /// <summary>PS2 button bitmask; a bit that is <b>clear</b> means the button is <b>pressed</b>.</summary>
+            public uint Buttons { get; }
+            public byte Lx { get; }
+            public byte Ly { get; }
+            public byte Rx { get; }
+            public byte Ry { get; }
+            /// <summary>16 pressure values (0–255) in PadDualshock2::Inputs order.</summary>
+            public byte[] Pressures { get; }
+
+            internal PadStateSnapshot(uint buttons, byte lx, byte ly, byte rx, byte ry, byte[] pressures)
+            {
+                Buttons = buttons; Lx = lx; Ly = ly; Rx = rx; Ry = ry; Pressures = pressures;
+            }
+        }
+
+        /// <summary>
+        /// [Extended PINE] Read the full input state of one pad slot (opcode 0x33).
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        public PadStateSnapshot PadGetState(byte pad)
+        {
+            // Request: [6][0x33][pad]
+            var req = new byte[6];
+            WriteU32LE(req, 0, 6u);
+            req[4] = MsgPadGetState;
+            req[5] = pad;
+
+            // Reply: [size(4)][IPC_OK(1)][buttons(4)][lx][ly][rx][ry][pressure×16] = 29 bytes
+            byte[] rep = SendReceive(req, expectedReplySize: 29);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadGetState");
+
+            uint buttons = ReadU32LE(rep, 5);
+            byte lx = rep[9];
+            byte ly = rep[10];
+            byte rx = rep[11];
+            byte ry = rep[12];
+            var pressures = new byte[16];
+            Buffer.BlockCopy(rep, 13, pressures, 0, 16);
+            return new PadStateSnapshot(buttons, lx, ly, rx, ry, pressures);
+        }
+
+        /// <summary>
+        /// [Extended PINE] Set a single button/axis on a pad by index and normalized value (opcode 0x34).
+        /// Routes through Pad::SetControllerState() so deadzone/pressure logic applies.
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        /// <param name="buttonIndex">Index in PadDualshock2::Inputs (0–25).</param>
+        /// <param name="value">Normalized value 0.0 (released) – 1.0 (fully pressed).</param>
+        public void PadSetButton(byte pad, byte buttonIndex, float value)
+        {
+            // Request: [11][0x34][pad][button_index][value:f32 LE]
+            var req = new byte[11];
+            WriteU32LE(req, 0, 11u);
+            req[4] = MsgPadSetButton;
+            req[5] = pad;
+            req[6] = buttonIndex;
+            WriteFloatLE(req, 7, value);
+
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadSetButton");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Set raw analog stick positions, bypassing deadzone (opcode 0x35).
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        public void PadSetAnalog(byte pad, byte lx, byte ly, byte rx, byte ry)
+        {
+            // Request: [10][0x35][pad][lx][ly][rx][ry]
+            var req = new byte[10];
+            WriteU32LE(req, 0, 10u);
+            req[4] = MsgPadSetAnalog;
+            req[5] = pad;
+            req[6] = lx;
+            req[7] = ly;
+            req[8] = rx;
+            req[9] = ry;
+
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadSetAnalog");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Atomically replace the complete input state of one pad (opcode 0x36).
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        /// <param name="buttons">PS2 button bitmask (reserved; button state derived from pressures).</param>
+        /// <param name="pressures">16 pressure bytes in PadDualshock2::Inputs order. Pressure > 0 ⇒ pressed.</param>
+        public void PadSetState(byte pad, uint buttons, byte lx, byte ly, byte rx, byte ry, byte[] pressures)
+        {
+            if (pressures == null || pressures.Length != 16)
+                throw new ArgumentException("pressures must be exactly 16 bytes", nameof(pressures));
+
+            // Request: [30][0x36][pad][buttons:u32][lx][ly][rx][ry][pressure×16]
+            var req = new byte[30];
+            WriteU32LE(req, 0, 30u);
+            req[4] = MsgPadSetState;
+            req[5] = pad;
+            WriteU32LE(req, 6, buttons);
+            req[10] = lx;
+            req[11] = ly;
+            req[12] = rx;
+            req[13] = ry;
+            Buffer.BlockCopy(pressures, 0, req, 14, 16);
+
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadSetState");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Query the controller type installed in a pad slot (opcode 0x37).
+        /// </summary>
+        /// <param name="pad">Unified slot index (0–7).</param>
+        /// <returns>Controller type value (0=NotConnected, 1=DualShock2, 2=Guitar, 3=Jogcon, 4=Negcon, 5=Popn).</returns>
+        public byte PadGetType(byte pad)
+        {
+            // Request: [6][0x37][pad]
+            var req = new byte[6];
+            WriteU32LE(req, 0, 6u);
+            req[4] = MsgPadGetType;
+            req[5] = pad;
+
+            // Reply: [size(4)][IPC_OK(1)][controller_type(1)] = 6 bytes
+            byte[] rep = SendReceive(req, expectedReplySize: 6);
+            if (rep[4] != IPC_OK) throw PineFail("MsgPadGetType");
+            return rep[5];
+        }
+
+        // ── DEV9 network bridge ──────────────────────────────────────────────
+
+        /// <summary>Adapter status snapshot returned by <see cref="NetGetStatus"/>.</summary>
+        public sealed class NetStatusSnapshot
+        {
+            /// <summary>True when EthEnable is set and the adapter has been opened.</summary>
+            public bool Enabled { get; }
+            /// <summary>Pcsx2Config::DEV9Options::NetApi cast to int (0=Unset, 1=PCAP_Bridged, 2=PCAP_Switched, 3=TAP, 4=Sockets).</summary>
+            public byte AdapterType { get; }
+            /// <summary>PS2 MAC address (6 bytes, zeroed if adapter not active).</summary>
+            public byte[] PS2Mac { get; }
+            /// <summary>Last known PS2 IPv4 address (4 bytes, zeroed until a packet is seen).</summary>
+            public byte[] PS2IP { get; }
+
+            internal NetStatusSnapshot(bool enabled, byte adapterType, byte[] ps2Mac, byte[] ps2IP)
+            {
+                Enabled = enabled; AdapterType = adapterType; PS2Mac = ps2Mac; PS2IP = ps2IP;
+            }
+        }
+
+        /// <summary>Captured packet returned by <see cref="NetRecvCapture"/>.</summary>
+        public sealed class CapturedPacketSnapshot
+        {
+            /// <summary>0 = TX (PS2→Host), 1 = RX (Host→PS2).</summary>
+            public byte Direction { get; }
+            /// <summary>Monotonic timestamp in microseconds.</summary>
+            public ulong TimestampUs { get; }
+            /// <summary>Raw Ethernet frame bytes.</summary>
+            public byte[] Data { get; }
+
+            internal CapturedPacketSnapshot(byte direction, ulong timestampUs, byte[] data)
+            {
+                Direction = direction; TimestampUs = timestampUs; Data = data;
+            }
+        }
+
+        /// <summary>Network statistics snapshot returned by <see cref="NetGetStats"/>.</summary>
+        public sealed class NetStatsSnapshot
+        {
+            public uint TxPackets { get; }
+            public uint RxPackets { get; }
+            public ulong TxBytes { get; }
+            public ulong RxBytes { get; }
+            public ushort CaptureQueueSize { get; }
+            public uint DroppedCount { get; }
+
+            internal NetStatsSnapshot(uint txPkts, uint rxPkts, ulong txBytes, ulong rxBytes, ushort queueSize, uint dropped)
+            {
+                TxPackets = txPkts; RxPackets = rxPkts; TxBytes = txBytes; RxBytes = rxBytes;
+                CaptureQueueSize = queueSize; DroppedCount = dropped;
+            }
+        }
+
+        /// <summary>
+        /// [Extended PINE] Query DEV9 adapter status (opcode 0x38).
+        /// Returns enabled state, adapter type, MAC, and IP.
+        /// </summary>
+        public NetStatusSnapshot NetGetStatus()
+        {
+            // Request: [5][0x38]
+            byte[] rep = SendReceive(BuildSingleRequest(MsgNetGetStatus), expectedReplySize: 17);
+            if (rep[4] != IPC_OK) throw PineFail("MsgNetGetStatus");
+
+            bool enabled = rep[5] != 0;
+            byte adapterType = rep[6];
+            var mac = new byte[6];
+            Buffer.BlockCopy(rep, 7, mac, 0, 6);
+            var ip = new byte[4];
+            Buffer.BlockCopy(rep, 13, ip, 0, 4);
+            return new NetStatusSnapshot(enabled, adapterType, mac, ip);
+        }
+
+        /// <summary>
+        /// [Extended PINE] Enable/disable packet capture (opcode 0x39).
+        /// </summary>
+        /// <param name="enable">True to enable, false to disable.</param>
+        /// <param name="direction">0 = both TX and RX, 1 = TX only, 2 = RX only.</param>
+        /// <param name="maxQueue">Maximum capture queue size (0 → default 1000).</param>
+        public void NetCapture(bool enable, byte direction = 0, ushort maxQueue = 0)
+        {
+            // Request: [9][0x39][enable:u8][direction:u8][max_queue:u16 LE]
+            var req = new byte[9];
+            WriteU32LE(req, 0, 9u);
+            req[4] = MsgNetCapture;
+            req[5] = enable ? (byte)1 : (byte)0;
+            req[6] = direction;
+            WriteU16LE(req, 7, maxQueue);
+
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgNetCapture");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Drain captured packets from the ring buffer (opcode 0x3A).
+        /// </summary>
+        /// <param name="maxPackets">Maximum number of packets to drain.</param>
+        public CapturedPacketSnapshot[] NetRecvCapture(ushort maxPackets)
+        {
+            // Request: [7][0x3A][max_packets:u16 LE]
+            var req = new byte[7];
+            WriteU32LE(req, 0, 7u);
+            req[4] = MsgNetRecvCapture;
+            WriteU16LE(req, 5, maxPackets);
+
+            // Variable-length reply: [size(4)][IPC_OK(1)][count(2)][per-packet records…]
+            byte[] rep = SendReceiveVariable(req);
+            if (rep[4] != IPC_OK) throw PineFail("MsgNetRecvCapture");
+
+            ushort count = ReadU16LE(rep, 5);
+            var result = new CapturedPacketSnapshot[count];
+            int offset = 7;
+            for (int i = 0; i < count; i++)
+            {
+                byte dir = rep[offset]; offset += 1;
+                ulong ts = ReadU64LE(rep, offset); offset += 8;
+                ushort len = ReadU16LE(rep, offset); offset += 2;
+                var data = new byte[len];
+                Buffer.BlockCopy(rep, offset, data, 0, len);
+                offset += len;
+                result[i] = new CapturedPacketSnapshot(dir, ts, data);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Inject a raw Ethernet frame into the PS2 RX path (opcode 0x3B).
+        /// </summary>
+        /// <param name="frame">Raw Ethernet frame bytes.</param>
+        /// <returns>True if the frame was successfully injected.</returns>
+        public bool NetInject(byte[] frame)
+        {
+            // Request: [7+N][0x3B][length:u16 LE][data]
+            int totalSize = 5 + 2 + frame.Length;
+            var req = new byte[totalSize];
+            WriteU32LE(req, 0, (uint)totalSize);
+            req[4] = MsgNetInject;
+            WriteU16LE(req, 5, (ushort)frame.Length);
+            Buffer.BlockCopy(frame, 0, req, 7, frame.Length);
+
+            byte[] rep = SendReceive(req, expectedReplySize: 6);
+            if (rep[4] != IPC_OK) throw PineFail("MsgNetInject");
+            return rep[5] != 0;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Inject a raw Ethernet frame out through the TX adapter (opcode 0x3C).
+        /// </summary>
+        /// <param name="frame">Raw Ethernet frame bytes.</param>
+        /// <returns>True if the adapter accepted the frame.</returns>
+        public bool NetInjectTx(byte[] frame)
+        {
+            // Request: [7+N][0x3C][length:u16 LE][data]
+            int totalSize = 5 + 2 + frame.Length;
+            var req = new byte[totalSize];
+            WriteU32LE(req, 0, (uint)totalSize);
+            req[4] = MsgNetInjectTx;
+            WriteU16LE(req, 5, (ushort)frame.Length);
+            Buffer.BlockCopy(frame, 0, req, 7, frame.Length);
+
+            byte[] rep = SendReceive(req, expectedReplySize: 6);
+            if (rep[4] != IPC_OK) throw PineFail("MsgNetInjectTx");
+            return rep[5] != 0;
+        }
+
+        /// <summary>
+        /// [Extended PINE] Dissect a raw Ethernet frame and return a text summary (opcode 0x3D).
+        /// </summary>
+        /// <param name="frame">Raw Ethernet frame bytes.</param>
+        /// <returns>Human-readable dissection text.</returns>
+        public string NetDisassemble(byte[] frame)
+        {
+            // Request: [7+N][0x3D][length:u16 LE][data]
+            int totalSize = 5 + 2 + frame.Length;
+            var req = new byte[totalSize];
+            WriteU32LE(req, 0, (uint)totalSize);
+            req[4] = MsgNetDisassemble;
+            WriteU16LE(req, 5, (ushort)frame.Length);
+            Buffer.BlockCopy(frame, 0, req, 7, frame.Length);
+
+            // Variable-length reply: [size(4)][IPC_OK(1)][text_len:u16 LE][text]
+            byte[] rep = SendReceiveVariable(req);
+            if (rep[4] != IPC_OK) throw PineFail("MsgNetDisassemble");
+
+            ushort textLen = ReadU16LE(rep, 5);
+            return Encoding.UTF8.GetString(rep, 7, textLen);
+        }
+
+        /// <summary>
+        /// [Extended PINE] Set the capture filter (opcode 0x3E).
+        /// </summary>
+        /// <param name="filterType">0 = none, 1 = by protocol, 2 = by port, 3 = by IP.</param>
+        /// <param name="protocol">For filterType 1: 0=all, 1=TCP, 2=UDP, 3=ICMP, 4=ARP, 5=DNS, 6=DHCP.</param>
+        /// <param name="port">For filterType 2: TCP/UDP port number.</param>
+        /// <param name="ip">For filterType 3: IPv4 address (4 bytes, network byte order).</param>
+        public void NetSetFilter(byte filterType, byte protocol = 0, ushort port = 0, byte[]? ip = null)
+        {
+            int extraSize = filterType switch
+            {
+                1 => 1,  // protocol (u8)
+                2 => 2,  // port (u16 LE)
+                3 => 4,  // ip (4 bytes)
+                _ => 0,
+            };
+            int totalSize = 5 + 1 + extraSize;
+            var req = new byte[totalSize];
+            WriteU32LE(req, 0, (uint)totalSize);
+            req[4] = MsgNetSetFilter;
+            req[5] = filterType;
+
+            if (filterType == 1)
+                req[6] = protocol;
+            else if (filterType == 2)
+                WriteU16LE(req, 6, port);
+            else if (filterType == 3 && ip != null && ip.Length >= 4)
+                Buffer.BlockCopy(ip, 0, req, 6, 4);
+
+            byte[] rep = SendReceive(req, expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgNetSetFilter");
+        }
+
+        /// <summary>
+        /// [Extended PINE] Return TX/RX counters and capture queue statistics (opcode 0x3F).
+        /// </summary>
+        public NetStatsSnapshot NetGetStats()
+        {
+            // Request: [5][0x3F]
+            // Reply: [size(4)][IPC_OK(1)][tx_packets(4)][rx_packets(4)][tx_bytes(8)][rx_bytes(8)]
+            //        [capture_queue_size(2)][dropped_count(4)] = 35 bytes
+            byte[] rep = SendReceive(BuildSingleRequest(MsgNetGetStats), expectedReplySize: 35);
+            if (rep[4] != IPC_OK) throw PineFail("MsgNetGetStats");
+
+            uint txPkts     = ReadU32LE(rep, 5);
+            uint rxPkts     = ReadU32LE(rep, 9);
+            ulong txBytes   = ReadU64LE(rep, 13);
+            ulong rxBytes   = ReadU64LE(rep, 21);
+            ushort queueSz  = ReadU16LE(rep, 29);
+            uint dropped    = ReadU32LE(rep, 31);
+            return new NetStatsSnapshot(txPkts, rxPkts, txBytes, rxBytes, queueSz, dropped);
+        }
+
         // ── Bulk memory helpers ───────────────────────────────────────────────
 
         private byte ReadOneByte(uint address)
@@ -1513,6 +1903,26 @@ namespace CodeDesigner.Ps2.Bridge
                     | (buf[offset + 1] <<  8)
                     | (buf[offset + 2] << 16)
                     | (buf[offset + 3] << 24));
+
+        private static void WriteFloatLE(byte[] buf, int offset, float value)
+        {
+            byte[] bytes = BitConverter.GetBytes(value);
+            if (!BitConverter.IsLittleEndian) Array.Reverse(bytes);
+            Buffer.BlockCopy(bytes, 0, buf, offset, 4);
+        }
+
+        private static void WriteU16LE(byte[] buf, int offset, ushort value)
+        {
+            buf[offset]     = (byte)(value & 0xFF);
+            buf[offset + 1] = (byte)((value >> 8) & 0xFF);
+        }
+
+        private static ushort ReadU16LE(byte[] buf, int offset)
+            => (ushort)(buf[offset] | (buf[offset + 1] << 8));
+
+        private static ulong ReadU64LE(byte[] buf, int offset)
+            => (ulong)ReadU32LE(buf, offset)
+             | ((ulong)ReadU32LE(buf, offset + 4) << 32);
 
         private static void SplitU128(byte[] buf, out uint lo32, out uint hi32, out uint upLo32, out uint upHi32, out ulong lo64, out ulong hi64)
         {

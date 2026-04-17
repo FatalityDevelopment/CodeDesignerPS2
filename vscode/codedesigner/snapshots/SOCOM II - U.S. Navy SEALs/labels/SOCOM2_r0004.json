@@ -1,0 +1,731 @@
+{
+  "setName": "SOCOM2_r0004",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "entries": [
+    {
+      "address": "0x0019EB18",
+      "name": "MUL64",
+      "comment": "64-bit multiply",
+      "type": "Function"
+    },
+    {
+      "address": "0x001A0C18",
+      "name": "FloatMul",
+      "comment": "Float multiply",
+      "type": "Function"
+    },
+    {
+      "address": "0x001A1150",
+      "name": "IntToFloat",
+      "comment": "Integer to float conversion",
+      "type": "Function"
+    },
+    {
+      "address": "0x001A1330",
+      "name": "FloatToUInt",
+      "comment": "Float to unsigned int conversion",
+      "type": "Function"
+    },
+    {
+      "address": "0x001A2110",
+      "name": "GsVsyncWait",
+      "comment": "Polls GS_CSR (0x12001000) bit 13 for vsync",
+      "type": "Function"
+    },
+    {
+      "address": "0x001C4CC0",
+      "name": "GameInitEntry",
+      "comment": "Top-level init; argc/argv, calls kernel init",
+      "type": "Function"
+    },
+    {
+      "address": "0x001C60B0",
+      "name": "PatchLoaderEntry",
+      "comment": "Main patch loader entry point",
+      "type": "Function"
+    },
+    {
+      "address": "0x001E7000",
+      "name": "gMWo3FTScoreOutput",
+      "comment": "Confirmed decrypted FTScore output buffer"
+    },
+    {
+      "address": "0x001E7040",
+      "name": "GameMainTick",
+      "comment": "Top-level tick orchestrator; calls OnlineSystemUpdate",
+      "type": "Function"
+    },
+    {
+      "address": "0x001EBED0",
+      "name": "OnlineSystemUpdate",
+      "comment": "Online system main update",
+      "type": "Function"
+    },
+    {
+      "address": "0x00275850",
+      "name": "FNC_GetAvailableMPMissions",
+      "comment": "Gate for map list; patch 0x00275890 bne-\u003ENOP to unlock all maps cross-mode",
+      "type": "Function"
+    },
+    {
+      "address": "0x002B4F90",
+      "name": "GetGlobalPlayerPtr",
+      "comment": "Returns global player pointer",
+      "type": "Function"
+    },
+    {
+      "address": "0x002B4FA0",
+      "name": "SetGlobalPlayerPtr",
+      "comment": "Stores global player pointer",
+      "type": "Function"
+    },
+    {
+      "address": "0x002B5150",
+      "name": "PlayerContextFlagOp",
+      "comment": "Reads gPlayerPtr, manipulates nested flags via \u002B0xC0 and \u002B0x171",
+      "type": "Function"
+    },
+    {
+      "address": "0x002B5290",
+      "name": "PlayerFlag1060Check",
+      "comment": "Reads gPlayerPtr and tests flag at \u002B0x1060",
+      "type": "Function"
+    },
+    {
+      "address": "0x002B553C",
+      "name": "PlayerAllocInit",
+      "comment": "Writes allocation result into gPlayerPtr",
+      "type": "Function"
+    },
+    {
+      "address": "0x002CF330",
+      "name": "MediusCmd_DNASAuthenticate",
+      "comment": "cmd 0xC7 handler; 2-phase state machine",
+      "type": "Function"
+    },
+    {
+      "address": "0x002CF480",
+      "name": "DNASCtx_DeliverResult",
+      "comment": "delivers hardcoded a1=1 (DNAS always passes)",
+      "type": "Function"
+    },
+    {
+      "address": "0x002CF4E0",
+      "name": "DNASCtx_Trigger",
+      "comment": "vtable[2]; allocates DNAS context",
+      "type": "Function"
+    },
+    {
+      "address": "0x002EB8F0",
+      "name": "EntitySystemUpdate",
+      "comment": "Entity/component list updater",
+      "type": "Function"
+    },
+    {
+      "address": "0x0036EC00",
+      "name": "ZdbModuleDispatch",
+      "comment": "type 3 (DNAS) skips PatchLoaderEntry; loads DNAS.BIN",
+      "type": "Function"
+    },
+    {
+      "address": "0x003C6460",
+      "name": "DNASCtx_GetStatus",
+      "comment": "checks field_2C of DNAS context",
+      "type": "Function"
+    },
+    {
+      "address": "0x003D2080",
+      "name": "GameFrameTick",
+      "comment": "Per-frame float-timed update; calls GsVsyncWait",
+      "type": "Function"
+    },
+    {
+      "address": "0x00408F80",
+      "name": "gMediusDispatchTable",
+      "comment": "Medius msg ID-\u003Ehandler table; [id:4][fnPtr:4][dataPtr:4][pad:4] IDs 0x90\u002B",
+      "dynamic": true,
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0041F590",
+      "name": "szSocomOnlineState",
+      "comment": "socom_online_state debug string",
+      "type": "String"
+    },
+    {
+      "address": "0x00420000",
+      "name": "gMediusFuncStrTable",
+      "comment": "Medius function name string table"
+    },
+    {
+      "address": "0x00422120",
+      "name": "szSocomPss",
+      "comment": "socom.pss online startup video filename",
+      "type": "String"
+    },
+    {
+      "address": "0x00422128",
+      "name": "szMpMediusError",
+      "comment": "MP_MEDIUS_ERROR network failure string",
+      "type": "String"
+    },
+    {
+      "address": "0x00422140",
+      "name": "szNetCableDisconnected",
+      "comment": "The network cable is disconnected.",
+      "type": "String"
+    },
+    {
+      "address": "0x00422180",
+      "name": "szIrxEznetctl",
+      "comment": "run/irx/eznetctl.irx",
+      "type": "String"
+    },
+    {
+      "address": "0x004221E0",
+      "name": "szIrxNetcnf",
+      "comment": "run/irx/netcnf.irx",
+      "type": "String"
+    },
+    {
+      "address": "0x00422210",
+      "name": "szIrxInet",
+      "comment": "run/irx/inet.irx",
+      "type": "String"
+    },
+    {
+      "address": "0x00422240",
+      "name": "szIrxInetctl",
+      "comment": "run/irx/inetctl.irx",
+      "type": "String"
+    },
+    {
+      "address": "0x00422260",
+      "name": "szIrxPpp",
+      "comment": "run/irx/ppp.irx",
+      "type": "String"
+    },
+    {
+      "address": "0x00422270",
+      "name": "szIrxPppoe",
+      "comment": "run/irx/pppoe.irx",
+      "type": "String"
+    },
+    {
+      "address": "0x00422290",
+      "name": "szIrxSmap",
+      "comment": "run/irx/smap.irx",
+      "type": "String"
+    },
+    {
+      "address": "0x004222B0",
+      "name": "szIrxMsifrpc",
+      "comment": "run/irx/msifrpc.irx",
+      "type": "String"
+    },
+    {
+      "address": "0x004222D0",
+      "name": "szIrxLibnetb",
+      "comment": "run/irx/libnetb.irx",
+      "type": "String"
+    },
+    {
+      "address": "0x00422530",
+      "name": "gPdOnlineHostname",
+      "comment": "socom2-prod.pdonline.scea.com",
+      "type": "String"
+    },
+    {
+      "address": "0x00422550",
+      "name": "gMuisHostname",
+      "comment": "socom2-prod.muis.pdonline.scea.com \u2014 DNS redirect target",
+      "type": "String"
+    },
+    {
+      "address": "0x00432E30",
+      "name": "DNASCtx_Vtable",
+      "comment": "[2]=0x002CF4E0 [4]=0x002CF480",
+      "dynamic": true,
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0044D648",
+      "name": "Player Pointer",
+      "dynamic": true,
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0044E2D0",
+      "name": "gDNASCtxPtr",
+      "comment": "Global DNAS context pointer",
+      "dynamic": true,
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0045d480",
+      "name": "Game Session State"
+    },
+    {
+      "address": "0x004b8a50",
+      "name": "Weapon List Index"
+    },
+    {
+      "address": "0x004b8a54",
+      "name": "Weapon List Start",
+      "dynamic": true,
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004b8a58",
+      "name": "Weapon List End",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004b8a60",
+      "name": "Current Weapon Pointer",
+      "hidden": true,
+      "type": "Pointer"
+    },
+    {
+      "address": "0x005153C0",
+      "name": "PatchDecrypt",
+      "comment": "Patch section decrypt",
+      "type": "Function"
+    },
+    {
+      "address": "0x005153F0",
+      "name": "AES_CBC_Wrapper",
+      "comment": "Patch Decrypt / AES_CBC_Wrapper",
+      "type": "Function"
+    },
+    {
+      "address": "0x00531730",
+      "name": "AES_BlockPrimitive",
+      "comment": "Core AES block transform primitive",
+      "type": "Function"
+    },
+    {
+      "address": "0x00534758",
+      "name": "AESTransform_Slot4",
+      "comment": "vtable[4]: TBD",
+      "type": "Function"
+    },
+    {
+      "address": "0x00534848",
+      "name": "ZDBSectionParser",
+      "comment": "PATCH DECRYPT / ZDBSectionParser (DNAS handler)",
+      "type": "Function"
+    },
+    {
+      "address": "0x005348BC",
+      "name": "ZDB_ReadSeedFromDNAS_Call",
+      "comment": "jal to ZDBSectionDecrypt (cipher setup) after ReadSeedFromDNAS",
+      "type": "Function"
+    },
+    {
+      "address": "0x00534A5C",
+      "name": "FTScoreChunkDecryptCall",
+      "comment": "Call site to FTScoreChunkDecryptor per chunk",
+      "type": "Function"
+    },
+    {
+      "address": "0x00534B14",
+      "name": "afterOrchestratorReturn",
+      "comment": "Code after BlockCipherOrchestrator returns",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053D3B8",
+      "name": "StorePRNGSeed",
+      "comment": "Stores LCG PRNG seed; FTScore seed=0x02291104",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053D3D0",
+      "name": "LCGPRNGStep",
+      "comment": "LCG PRNG step function",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053D438",
+      "name": "ReadSeedFromDNAS",
+      "comment": "Reads DNAS seed into PRNG state",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053E038",
+      "name": "KeyEntryVerify",
+      "comment": "Verifies key entry integrity",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053E448",
+      "name": "KeyEntryDecrypt",
+      "comment": "Decrypts key entry",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053E6F8",
+      "name": "DecryptKeyEntry",
+      "comment": "Full key entry decrypt handler",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053F768",
+      "name": "DeriveKeySchedule",
+      "comment": "Derives AES key schedule",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053F8F0",
+      "name": "BlockCipherOrchestrator",
+      "comment": "Block cipher orchestrator (~0x5348DC area)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053FC60",
+      "name": "AES_CBC_Core",
+      "comment": "Real AES-128 CBC core",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053FEC0",
+      "name": "AES_Thunk_CBC",
+      "comment": "AES CBC thunk; jumps into core with key size=16",
+      "type": "Function"
+    },
+    {
+      "address": "0x005408D0",
+      "name": "DispatchEncodingFunc",
+      "comment": "Encodes dispatch word -\u003E vtable call sequence",
+      "type": "Function"
+    },
+    {
+      "address": "0x00540A10",
+      "name": "StreamTable",
+      "comment": "Per-chunk stream data table (13 entries)"
+    },
+    {
+      "address": "0x005412A0",
+      "name": "ZDBSectionDecrypt",
+      "comment": "Cipher setup / outer transform setup for ZDB sections",
+      "type": "Function"
+    },
+    {
+      "address": "0x00541658",
+      "name": "FTScoreChunkDecryptor",
+      "comment": "Dispatches chunk decrypt path to AES thunk",
+      "type": "Function"
+    },
+    {
+      "address": "0x00560A10",
+      "name": "gPRNGState",
+      "comment": "64-bit LE PRNG state"
+    },
+    {
+      "address": "0x00560A20",
+      "name": "gKeyTable",
+      "comment": "AES key table global"
+    },
+    {
+      "address": "0x00560F98",
+      "name": "gFTScoreKeyEntry",
+      "comment": "FTScore key entry"
+    },
+    {
+      "address": "0x00560FA8",
+      "name": "gSonyKey2_FTScore",
+      "comment": "Sony key 2 for FTScore"
+    },
+    {
+      "address": "0x00561458",
+      "name": "gSonyKey1",
+      "comment": "Sony key 1"
+    },
+    {
+      "address": "0x005676A8",
+      "name": "gMediusAuthTokenTable",
+      "comment": "Medius auth token table"
+    },
+    {
+      "address": "0x0057DB80",
+      "name": "gCipherCtx",
+      "comment": "Cipher context global (512-byte region)"
+    },
+    {
+      "address": "0x0057DC00",
+      "name": "gDNASKeySchedule",
+      "comment": "DNAS AES key schedule"
+    },
+    {
+      "address": "0x0057EA80",
+      "name": "gFTScoreKeySchedule",
+      "comment": "FTScore AES key schedule"
+    },
+    {
+      "address": "0x00C439A0",
+      "name": "gOnlineStateName",
+      "comment": "Current online state machine name global",
+      "type": "String"
+    },
+    {
+      "address": "0x0040A4B0",
+      "name": "gDefaultServerNameEntry",
+      "comment": "Default server selection entry/string pointer used in GetServerList success path"
+    },
+    {
+      "address": "0x00318420",
+      "name": "MediusCmd_GetServerList",
+      "comment": "Cmd 0x97; 2-phase state machine for MUIS server list request/response",
+      "type": "Function"
+    },
+    {
+      "address": "0x003185C8",
+      "name": "GetServerList_ResponseState1",
+      "comment": "State=1 handler; checks gServerCount and default server id then dispatches result",
+      "type": "Function"
+    },
+    {
+      "address": "0x00432FC0",
+      "name": "GetServerList_Vtable",
+      "comment": "Vtable for GetServerList context object"
+    },
+    {
+      "address": "0x00453168",
+      "name": "gServerListCtxPtr",
+      "comment": "Global pointer to active GetServerList context object"
+    },
+    {
+      "address": "0x00453160",
+      "name": "gServerCount",
+      "comment": "Byte count of servers parsed from MUIS response",
+      "type": "Value"
+    },
+    {
+      "address": "0x003C6220",
+      "name": "MediusRequestTimerSetup",
+      "comment": "Request timeout/retry scheduler used by GetServerList and related state machines",
+      "type": "Function"
+    },
+    {
+      "address": "0x0026D690",
+      "name": "TcpSendWrapper",
+      "comment": "Tail-jumps to low-level TCP send path at 0x00269D00",
+      "type": "Function"
+    },
+    {
+      "address": "0x0026AD40",
+      "name": "GetConnectionByIndex",
+      "comment": "Returns connection struct for index; used by Medius command send path",
+      "type": "Function"
+    },
+    {
+      "address": "0x0040A4D0",
+      "name": "gDefaultServerId",
+      "comment": "Default server id used after GetServerList; -1 means unset",
+      "type": "Value"
+    },
+    {
+      "address": "0x0026FC70",
+      "name": "GetConnectionForServerList",
+      "comment": "GetServerList connection helper; resolves slot index then sends packet",
+      "type": "Function"
+    },
+    {
+      "address": "0x00269770",
+      "name": "SendOnConnection",
+      "comment": "Medius send helper; forwards payload to TCP send wrapper",
+      "type": "Function"
+    },
+    {
+      "address": "0x00441570",
+      "name": "gMediusConnectionTable",
+      "comment": "Connection table base used by GetConnectionByIndex; includes MUIS connection structs"
+    },
+    {
+      "address": "0x00714F80",
+      "name": "FindingsSummary_r0004",
+      "comment": "Summary: DNAS cmd 0xC7 bypassed in deliver path; GetServerList cmd 0x97 mapped (ctx ptr/server count/default id); MUIS hostname identified for DNS redirect; FTScore/ZDB decrypt pipeline mapped through AES_CBC_Core with session-derived key/IV and outer pre-AES transform",
+      "type": "String"
+    },
+    {
+      "address": "0x0044D648:\u002B0x0000",
+      "parentAddress": "0x0044D648",
+      "offset": 0,
+      "name": "Player Pointer Begin",
+      "dynamic": true
+    },
+    {
+      "address": "0x0044D648:\u002B0x0014",
+      "parentAddress": "0x0044D648",
+      "offset": 20,
+      "name": "Name",
+      "comment": "player name",
+      "dynamic": true,
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0044D648:\u002B0x0014:\u002B0x0000",
+      "parentAddress": "0x0044D648:\u002B0x0014",
+      "offset": 0,
+      "name": "Specter",
+      "dynamic": true,
+      "type": "String"
+    },
+    {
+      "address": "0x0044D648:\u002B0x001C",
+      "parentAddress": "0x0044D648",
+      "offset": 28,
+      "name": "X",
+      "comment": "X coord",
+      "dynamic": true,
+      "type": "Float"
+    },
+    {
+      "address": "0x0044D648:\u002B0x0020",
+      "parentAddress": "0x0044D648",
+      "offset": 32,
+      "name": "Y",
+      "dynamic": true,
+      "type": "Float"
+    },
+    {
+      "address": "0x0044D648:\u002B0x0024",
+      "parentAddress": "0x0044D648",
+      "offset": 36,
+      "name": "Z",
+      "dynamic": true,
+      "type": "Float"
+    },
+    {
+      "address": "0x0044D648:\u002B0x0028",
+      "parentAddress": "0x0044D648",
+      "offset": 40,
+      "name": "Player CZWorld Pointer",
+      "dynamic": true,
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0044D648:\u002B0x0180",
+      "parentAddress": "0x0044D648",
+      "offset": 384,
+      "name": "CZWeapon",
+      "dynamic": true,
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008",
+      "parentAddress": "0x004b8a54",
+      "offset": 8,
+      "name": "Weapon Pointer",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0000",
+      "parentAddress": "0x004b8a54:\u002B0x0008",
+      "offset": 0,
+      "name": "((CTFSWeapon))",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0000:\u002B0x0000",
+      "parentAddress": "0x004b8a54:\u002B0x0008:\u002B0x0000",
+      "offset": 0,
+      "name": "(CTFSWeapon)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0000:\u002B0x0000:\u002B0x0000",
+      "parentAddress": "0x004b8a54:\u002B0x0008:\u002B0x0000:\u002B0x0000",
+      "offset": 0,
+      "name": "CTFSWeapon",
+      "type": "String"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0000:\u002B0x0008",
+      "parentAddress": "0x004b8a54:\u002B0x0008:\u002B0x0000",
+      "offset": 8,
+      "name": "FNC_CTFSWeapon[1]",
+      "type": "Function"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0000:\u002B0x000C",
+      "parentAddress": "0x004b8a54:\u002B0x0008:\u002B0x0000",
+      "offset": 12,
+      "name": "FNC_CTFSWeapon[2]",
+      "comment": "projectile spawn",
+      "type": "Function"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0000:\u002B0x0010",
+      "parentAddress": "0x004b8a54:\u002B0x0008:\u002B0x0000",
+      "offset": 16,
+      "name": "FNC_CTFSWeapon[3]",
+      "type": "Function"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0004",
+      "parentAddress": "0x004b8a54:\u002B0x0008",
+      "offset": 4,
+      "name": "Weapon Name",
+      "type": "String"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0008",
+      "parentAddress": "0x004b8a54:\u002B0x0008",
+      "offset": 8,
+      "name": "Weapon Name 2",
+      "type": "String"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0014",
+      "parentAddress": "0x004b8a54:\u002B0x0008",
+      "offset": 20,
+      "name": "Weapon Image File",
+      "type": "String"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0018",
+      "parentAddress": "0x004b8a54:\u002B0x0008",
+      "offset": 24,
+      "name": "Weapon Slot",
+      "type": "String"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x001C",
+      "parentAddress": "0x004b8a54:\u002B0x0008",
+      "offset": 28,
+      "name": "Weapon Type",
+      "type": "String"
+    },
+    {
+      "address": "0x004b8a54:\u002B0x0008:\u002B0x0020",
+      "parentAddress": "0x004b8a54:\u002B0x0008",
+      "offset": 32,
+      "name": "Weapon Effect",
+      "type": "String"
+    },
+    {
+      "address": "0x004b8a60:\u002B0x0000",
+      "parentAddress": "0x004b8a60",
+      "offset": 0,
+      "name": "CTFSWeapon",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004b8a60:\u002B0x0000:\u002B0x000C",
+      "parentAddress": "0x004b8a60:\u002B0x0000",
+      "offset": 12,
+      "name": "CTFS Weapon",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004b8a60:\u002B0x0000:\u002B0x000C:\u002B0x000C",
+      "parentAddress": "0x004b8a60:\u002B0x0000:\u002B0x000C",
+      "offset": 12,
+      "name": "Weapon Name",
+      "type": "String"
+    }
+  ]
+}
