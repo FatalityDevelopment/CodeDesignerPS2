@@ -132,16 +132,8 @@ export class AiConfigProvider {
                 await this._sendMemoryList(webview);
                 break;
 
-            case 'memoryListForAgent':
-                await this._sendMemoryListForAgent(msg['agentId'] as number, webview);
-                break;
-
-            case 'memoryListAll':
-                await this._sendMemoryListAll(webview);
-                break;
-
             case 'memoryAdd':
-                await this._handleMemoryAdd(msg['name'] as string, msg['agentId'] as number | undefined, webview);
+                await this._handleMemoryAdd(msg['name'] as string, webview);
                 break;
 
             case 'memoryEdit':
@@ -165,15 +157,6 @@ export class AiConfigProvider {
 
             case 'memoryDelete':
                 await this._handleMemoryDelete(msg['id'] as number, webview);
-                break;
-
-            // ── Tool description handlers ─────────────────────────────────────
-            case 'toolList':
-                await this._sendToolList(webview);
-                break;
-
-            case 'toolUpdate':
-                await this._handleToolUpdate(msg['key'] as string, msg['value'] as string, webview);
                 break;
 
             default:
@@ -292,27 +275,9 @@ export class AiConfigProvider {
         }
     }
 
-    private async _sendMemoryListForAgent(agentId: number, webview: vscode.Webview): Promise<void> {
+    private async _handleMemoryAdd(name: string, webview: vscode.Webview): Promise<void> {
         try {
-            const entries = await this.socketClient.mcpMemoryListForAgent(agentId);
-            webview.postMessage({ type: 'memoryListResult', entries });
-        } catch (err: any) {
-            webview.postMessage({ type: 'memoryListResult', entries: [], error: err?.message ?? String(err) });
-        }
-    }
-
-    private async _sendMemoryListAll(webview: vscode.Webview): Promise<void> {
-        try {
-            const entries = await this.socketClient.mcpMemoryList();
-            webview.postMessage({ type: 'memoryListAllResult', entries });
-        } catch (err: any) {
-            webview.postMessage({ type: 'memoryListAllResult', entries: [], error: err?.message ?? String(err) });
-        }
-    }
-
-    private async _handleMemoryAdd(name: string, agentId: number | undefined, webview: vscode.Webview): Promise<void> {
-        try {
-            const entry = await this.socketClient.mcpMemoryAdd(name, '', undefined, agentId);
+            const entry = await this.socketClient.mcpMemoryAdd(name, '');
             webview.postMessage({ type: 'memoryActionResult', entry, message: `Created '${entry.name}'` });
         } catch (err: any) {
             webview.postMessage({ type: 'memoryActionResult', error: err?.message ?? String(err) });
@@ -530,26 +495,6 @@ export class AiConfigProvider {
             vscode.window.showInformationMessage('Full orchestration plan exported.');
         } catch (err: any) {
             webview.postMessage({ type: 'exportAllResult', error: err?.message ?? String(err) });
-        }
-    }
-
-    // ── Tool description handlers ─────────────────────────────────────────────
-
-    private async _sendToolList(webview: vscode.Webview): Promise<void> {
-        try {
-            const tools = await this.socketClient.mcpConfigList();
-            webview.postMessage({ type: 'toolListResult', tools });
-        } catch (err: any) {
-            webview.postMessage({ type: 'toolListResult', tools: [], error: err?.message ?? String(err) });
-        }
-    }
-
-    private async _handleToolUpdate(key: string, value: string, webview: vscode.Webview): Promise<void> {
-        try {
-            await this.socketClient.mcpConfigUpdate(key, value);
-            webview.postMessage({ type: 'toolUpdateResult', message: `Updated description for '${key}'.` });
-        } catch (err: any) {
-            webview.postMessage({ type: 'toolUpdateResult', error: err?.message ?? String(err) });
         }
     }
 

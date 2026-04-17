@@ -29,13 +29,6 @@ namespace CodeDesigner.Ps2.CdsLanguage
         // -----------------------------------------------------------------------
 
         /// <summary>
-        /// Diagnostics (errors and warnings) produced during the most recent parse.
-        /// Populated after any call to <see cref="Read"/>, <see cref="ParseSource"/>,
-        /// <see cref="Compile"/>, or <see cref="CompileSource"/>.
-        /// </summary>
-        public IReadOnlyList<CdsDiagnostic> Diagnostics => _parser.Diagnostics;
-
-        /// <summary>
         /// Parse the <c>.cds</c> file at <see cref="_path"/> and return the syntax-item tree.
         /// </summary>
         /// <exception cref="FileNotFoundException">If the file does not exist.</exception>
@@ -74,25 +67,6 @@ namespace CodeDesigner.Ps2.CdsLanguage
         public List<(uint Address, uint Word)> CompileSource(string sourceCode)
         {
             return CdsCompiler.Compile(ParseSource(sourceCode));
-        }
-
-        /// <summary>
-        /// Parse and compile the file, returning any sidecar commands (e.g. breakpoints,
-        /// watchpoints, assert results, log messages) produced by <see langword="assert"/>,
-        /// <see langword="breakpoint"/>, <see langword="watchpoint"/>, and
-        /// <see langword="log"/> / <see langword="print"/> directives.
-        /// </summary>
-        public List<CdsSyntaxItem> GetSidecarCommands()
-        {
-            return CdsCompiler.GetSidecarCommands(Read());
-        }
-
-        /// <summary>
-        /// Parse and compile in-memory source, returning sidecar commands.
-        /// </summary>
-        public List<CdsSyntaxItem> GetSidecarCommandsFromSource(string sourceCode)
-        {
-            return CdsCompiler.GetSidecarCommands(ParseSource(sourceCode));
         }
 
         /// <summary>

@@ -20,24 +20,6 @@ using System;
 */
 namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 {
-    /// <summary>Symbolic names for the 32 COP0 registers on the PS2 Emotion Engine.</summary>
-    internal static class Cop0RegNames
-    {
-        private static readonly string[] Names =
-        {
-            "Index",    "Random",   "EntryLo0", "EntryLo1",
-            "Context",  "PageMask", "Wired",    "Reserved7",
-            "BadVAddr", "Count",    "EntryHi",  "Compare",
-            "Status",   "Cause",    "EPC",      "PRId",
-            "Config",   "Reserved17","Reserved18","Reserved19",
-            "Reserved20","Reserved21","Reserved22","BadPAddr",
-            "Debug",    "Perf",     "Reserved26","Reserved27",
-            "TagLo",    "TagHi",    "ErrorEPC", "Reserved31"
-        };
-
-        public static string Get(int reg) =>
-            (uint)reg < (uint)Names.Length ? Names[reg] : $"${reg}";
-    }
     // MFC0 - Move from COP0 register to GPR (32-bit)
     public sealed class MFC0 : Instruction<Args_R>
     {
@@ -84,13 +66,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string regName = Cop0RegNames.Get(args.Rd);
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rd", $"${args.Rd}");
+            
             if (cpu != null)
             {
                 uint value = cpu.COP0.ReadRegister32(args.Rd);
-                return $"{CpuHelpers.RegName(args.Rt)} ← COP0[{args.Rd}]={regName} = 0x{value:X8}";
+                return $"{eq} => COP0[{args.Rd}] = 0x{value:X8}";
             }
-            return $"{CpuHelpers.RegName(args.Rt)} ← COP0[{args.Rd}]={regName}";
+            return eq;
         }
     }
 
@@ -135,13 +120,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string regName = Cop0RegNames.Get(args.Rd);
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rd", $"${args.Rd}");
+            
             if (cpu != null)
             {
                 uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-                return $"COP0[{args.Rd}]={regName} ← {CpuHelpers.RegName(args.Rt)} = 0x{value:X8}";
+                return $"{eq} => write 0x{value:X8} to COP0[{args.Rd}]";
             }
-            return $"COP0[{args.Rd}]={regName} ← {CpuHelpers.RegName(args.Rt)}";
+            return eq;
         }
     }
 
@@ -179,13 +167,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string regName = Cop0RegNames.Get(args.Rd);
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rd", $"${args.Rd}");
+            
             if (cpu != null)
             {
                 ulong value = cpu.COP0.ReadRegister64(args.Rd);
-                return $"{CpuHelpers.RegName(args.Rt)} ← COP0[{args.Rd}]={regName} = 0x{value:X16}";
+                return $"{eq} => COP0[{args.Rd}] = 0x{value:X16}";
             }
-            return $"{CpuHelpers.RegName(args.Rt)} ← COP0[{args.Rd}]={regName}";
+            return eq;
         }
     }
 
@@ -222,13 +213,16 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.COP0
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            string regName = Cop0RegNames.Get(args.Rd);
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rd", $"${args.Rd}");
+            
             if (cpu != null)
             {
                 ulong value = cpu.RegsLo[args.Rt];
-                return $"COP0[{args.Rd}]={regName} ← {CpuHelpers.RegName(args.Rt)} = 0x{value:X16}";
+                return $"{eq} => write 0x{value:X16} to COP0[{args.Rd}]";
             }
-            return $"COP0[{args.Rd}]={regName} ← {CpuHelpers.RegName(args.Rt)}";
+            return eq;
         }
     }
 

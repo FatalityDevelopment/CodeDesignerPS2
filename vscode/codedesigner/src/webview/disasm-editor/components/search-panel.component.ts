@@ -96,8 +96,6 @@ export class SearchPanelComponent {
         return 'String in binary (case-sensitive)';
       case 'regex':
         return 'Regular expression';
-      case 'refs':
-        return 'Target address (hex): 0x00100000';
       default:
         return 'Search text';
     }
@@ -105,11 +103,10 @@ export class SearchPanelComponent {
 
   /** Search mode options */
   protected readonly modes: ReadonlyArray<{ id: SearchMode; label: string; title: string }> = [
-    { id: 'text',   label: 'Aa',   title: 'Text Search' },
-    { id: 'bytes',  label: '0x',   title: 'Byte Pattern Search' },
+    { id: 'text', label: 'Aa', title: 'Text Search' },
+    { id: 'bytes', label: '0x', title: 'Byte Pattern Search' },
     { id: 'string', label: '"ab"', title: 'String Search (ASCII/UTF-8)' },
-    { id: 'regex',  label: '.*',   title: 'Regular Expression' },
-    { id: 'refs',   label: 'ref',  title: 'Instruction Reference Search' },
+    { id: 'regex', label: '.*', title: 'Regular Expression' },
   ];
 
   /** Output events */
@@ -201,15 +198,6 @@ export class SearchPanelComponent {
     if (mode === 'bytes') {
       const pattern = this.parseBytePattern(query);
       if (!pattern) {
-        this.hasError.set(true);
-        return;
-      }
-    }
-
-    // Validate hex address for refs mode
-    if (mode === 'refs') {
-      const cleaned = query.replace(/^0x/i, '');
-      if (!/^[0-9a-fA-F]{1,8}$/.test(cleaned)) {
         this.hasError.set(true);
         return;
       }

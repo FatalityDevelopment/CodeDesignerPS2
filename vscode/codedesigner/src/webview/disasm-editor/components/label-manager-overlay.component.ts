@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 
 export type LabelType =
-  | 'Address' | 'Function' | 'String' | 'Pointer' | 'Float' | 'Value' | 'Hex'
+  | 'Address' | 'Function' | 'String' | 'Pointer' | 'Float' | 'Value'
   /** Legacy — mapped to Pointer at display time. */
   | 'Struct' | 'Array' | 'ArrayOfPointers' | 'LinkedList';
 
@@ -48,11 +48,11 @@ export interface LabelManagerEntry {
   nodeSize?:       number;
 }
 export interface LabelSetPayload {
-  setName:      string;
-  gameDiscId?:  string;
-  isBuiltIn:    boolean;
+  setName:   string;
+  gameId?:   string;
+  isBuiltIn: boolean;
   /** Flat list of ALL labels (roots + children at all depths). */
-  entries:      LabelManagerEntry[];
+  entries:   LabelManagerEntry[];
 }
 
 /** One row in the recursive label-manager tree view. */
@@ -81,16 +81,10 @@ export interface TreeRow {
   ancestorLines: boolean[];
 }
 
-type LabelSortColumn = 'type' | 'address' | 'live' | 'name' | 'comment';
-type LabelSortDirection = 'asc' | 'desc';
-
-export type ScannerKind = 'functions' | 'pointers' | 'strings' | 'floats' | 'hexValues';
-
 export type LabelManagerAction =
   | { type: 'setActive';         setName: string }
   | { type: 'createSet';         setName: string }
   | { type: 'deleteSet';         setName: string }
-  | { type: 'renameSet';         setName: string; newSetName: string }
   | { type: 'addEntry';          setName: string; entry: LabelManagerEntry }
   | { type: 'deleteEntry';       setName: string; address: string }
   | { type: 'importSet';         setName: string; json: string }
@@ -105,11 +99,7 @@ export type LabelManagerAction =
   /** Poll live values at each address (handled by provider). String entries read as null-terminated strings. */
   | { type: 'readLiveValues';    entries: { address: string; entryType?: LabelType; valueType?: string }[] }
   /** Poll live values at resolved member addresses (handled by provider). */
-  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string; entryType?: LabelType; valueType?: string }[] }
-  /** Run a memory scanner and display results as entries in the tree. */
-  | { type: 'runScanner';        scannerKind: ScannerKind }
-  /** Clear scanner results. */
-  | { type: 'clearScanResults' };
+  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string; entryType?: LabelType; valueType?: string }[] };
 
 const TYPE_BADGE: Record<string, string> = {
   Address:  '[Addr]',
@@ -118,7 +108,6 @@ const TYPE_BADGE: Record<string, string> = {
   Float:    '[Float]',
   Value:    '[Value]',
   String:   '[Str]',
-  Hex:      '[Hex]',
   // legacy back-compat
   Struct:         '[Ptr]',
   Array:          '[Array]',
@@ -133,7 +122,6 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
   Float:    'lm-badge-float',
   Value:    'lm-badge-value',
   String:   'lm-badge-str',
-  Hex:      'lm-badge-value',
   // legacy
   Struct:         'lm-badge-ptr',
   Array:          'lm-badge-array',
@@ -187,7 +175,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       </select>
 
       <!-- Set management buttons -->
-      @if (!showNewSetInput() && !showRenameSetInput()) {
+      @if (!showNewSetInput()) {
         <button class="lm-tool-btn" title="Create a new label set (JSON file) for the current game" (click)="onNewSet()">&#43; New</button>
       }
       <!-- Inline new-set input (replaces prompt()) -->
@@ -200,25 +188,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                (keydown.escape)="onCancelNewSet()" />
         <button class="lm-tool-btn" [disabled]="!newSetNameInput().trim()" (click)="onConfirmNewSet()" title="Create set">&#x2713;</button>
         <button class="lm-tool-btn" (click)="onCancelNewSet()" title="Cancel">&#xD7;</button>
-      }
-      <!-- Inline rename-set input -->
-      @if (showRenameSetInput()) {
-        <input class="lm-rename-set-input" type="text" spellcheck="false"
-               placeholder="New name…"
-               [value]="renameSetInput()"
-               (input)="renameSetInput.set(asInput($event).value)"
-               (keydown.enter)="onConfirmRenameSet()"
-               (keydown.escape)="onCancelRenameSet()" />
-        <button class="lm-tool-btn" [disabled]="!renameSetInput().trim()" (click)="onConfirmRenameSet()" title="Rename set">&#x2713;</button>
-        <button class="lm-tool-btn" (click)="onCancelRenameSet()" title="Cancel">&#xD7;</button>
-      }
-      @if (!showNewSetInput() && !showRenameSetInput()) {
-        <button class="lm-tool-btn"
-                title="Rename this label set"
-                [disabled]="activeSetIsBuiltIn()"
-                (click)="onRenameSet()">
-          &#x270F; Rename
-        </button>
       }
       <button class="lm-tool-btn lm-danger-btn"
               title="Delete this label set"
@@ -234,43 +203,8 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
 
       <span class="lm-spacer"></span>
 
-      <!-- Scanners -->
-      <span class="lm-scanner-group">
-        <span class="lm-scanner-label">Scan:</span>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'functions'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for function entry points"
-                (click)="onRunScanner('functions')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'functions') { ⏳ } @else { &#x2699; } FNC
-        </button>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'pointers'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for pointer values"
-                (click)="onRunScanner('pointers')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'pointers') { ⏳ } @else { &#x2699; } Ptr
-        </button>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'strings'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for null-terminated strings"
-                (click)="onRunScanner('strings')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'strings') { ⏳ } @else { <svg class="lm-search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.5"/><line x1="10" y1="10" x2="14" y2="14"/></svg> } Str
-        </button>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'floats'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for IEEE-754 float values"
-                (click)="onRunScanner('floats')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'floats') { ⏳ } @else { &#x2699; } Float
-        </button>
-        <button class="lm-tool-btn" [class.lm-scan-active]="activeScannerKind() === 'hexValues'"
-                [disabled]="scannerStatus() === 'scanning'"
-                title="Scan memory for non-zero hex values (integers)"
-                (click)="onRunScanner('hexValues')">
-          @if (scannerStatus() === 'scanning' && activeScannerKind() === 'hexValues') { ⏳ } @else { &#x2699; } Hex
-        </button>
-        @if (scanResultEntries().length > 0) {
-          <button class="lm-tool-btn lm-danger-btn" title="Clear scan results" (click)="onClearScanResults()">&#xD7;</button>
-        }
-      </span>
+      <!-- Runtime resolution (PINE only) -->
+      <button class="lm-tool-btn" title="Resolve String labels from live PCSX2 memory (PINE mode)" (click)="action$.emit({ type: 'resolveStrings' })">&#x1F50D; Strings</button>
 
       <!-- Import / Export -->
       <button class="lm-tool-btn" title="Import labels from a JSON file" (click)="triggerImport()">&#x2B06; Import</button>
@@ -278,14 +212,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       <input #fileInput type="file" accept=".json" style="display:none" (change)="onFileSelected($event)" />
 
       <button class="lm-tool-btn lm-refresh-btn" title="Refresh" (click)="action$.emit({ type: 'refresh', activeSetName: activeSetName() })">&#x21BB;</button>
-
-      <!-- Live polling toggle -->
-      <label class="lm-live-toggle" title="Enable continuous live-value polling (500ms). When off, values are fetched once on open.">
-        <input type="checkbox"
-               [checked]="livePollingEnabled()"
-               (change)="setLivePolling(asInput($event).checked)" />
-        Live
-      </label>
     </div>
 
     <!-- Filter / type-filter row -->
@@ -295,45 +221,18 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
              placeholder="Filter by address or name…"
              spellcheck="false"
              [value]="filterText()"
-             (input)="onFilterTextChange(asInput($event).value)" />
+             (input)="filterText.set(asInput($event).value)" />
       @if (filterText()) {
-        <button class="lm-clear-filter" (click)="onFilterTextChange('')">&#xD7;</button>
+        <button class="lm-clear-filter" (click)="filterText.set('')">&#xD7;</button>
       }
-      <select id="lm-type-filter" [value]="typeFilter()" (change)="onTypeFilterChange(asSelect($event).value)">
+      <select id="lm-type-filter" [value]="typeFilter()" (change)="typeFilter.set(asSelect($event).value)">
         <option value="">All types</option>
         @for (t of unifiedTypes; track t.value) {
           <option [value]="t.value">{{ t.label }}</option>
         }
       </select>
-      <span id="lm-count">{{ filteredEntries().length }} / {{ totalEntryCount() }}</span>
+      <span id="lm-count">{{ filteredEntries().length }} / {{ currentSet()?.entries?.length ?? 0 }}</span>
     </div>
-
-    <!-- Pagination controls -->
-    @if (totalPages() > 1 || totalRootEntries() > pageSizeOptions[0]) {
-      <div class="lm-pagination">
-        <button class="lm-page-btn" [disabled]="currentPage() === 0" title="First page" (click)="goToPage(0)">&#x23EE;</button>
-        <button class="lm-page-btn" [disabled]="currentPage() === 0" title="Previous page" (click)="goToPage(currentPage() - 1)">&#x25C0;</button>
-        <span class="lm-page-info">
-          Page {{ currentPage() + 1 }} of {{ totalPages() }}
-          <span class="lm-muted">({{ totalRootEntries() }} entries)</span>
-        </span>
-        <button class="lm-page-btn" [disabled]="currentPage() >= totalPages() - 1" title="Next page" (click)="goToPage(currentPage() + 1)">&#x25B6;</button>
-        <button class="lm-page-btn" [disabled]="currentPage() >= totalPages() - 1" title="Last page" (click)="goToPage(totalPages() - 1)">&#x23ED;</button>
-        <select class="lm-page-size-select" [value]="pageSize()" (change)="onPageSizeChange(asSelect($event).value)" title="Entries per page">
-          @for (opt of pageSizeOptions; track opt) {
-            <option [value]="opt" [selected]="pageSize() === opt">{{ opt }} / page</option>
-          }
-        </select>
-      </div>
-    }
-
-    <!-- Scanning progress indicator -->
-    @if (scannerStatus() === 'scanning') {
-      <div class="lm-scanning-bar">
-        <div class="lm-scanning-bar-inner"></div>
-        <span class="lm-scanning-text">Scanning {{ activeScannerKind() }}… this may take a moment</span>
-      </div>
-    }
 
     <!-- Table -->
     <div id="lm-table-wrap">
@@ -341,7 +240,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
         <thead>
           <tr>
             <th class="lm-col-vis" title="Toggle all visibility">
-              @if (!isScannerView()) {
               <button class="lm-vis-btn lm-vis-all-btn"
                       [class.lm-is-hidden]="!allVisible()"
                       [disabled]="activeSetIsBuiltIn() || filteredEntries().length === 0"
@@ -355,35 +253,16 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   }
                 </svg>
               </button>
-              }
             </th>
             <th class="lm-col-expand"></th>
-            <th class="lm-col-type">
-              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'type'" (click)="onSort('type')">
-                <span>Type</span><span class="lm-sort-indicator">{{ sortIndicator('type') }}</span>
-              </button>
-            </th>
-            <th class="lm-col-addr">
-              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'address'" (click)="onSort('address')">
-                <span>Address</span><span class="lm-sort-indicator">{{ sortIndicator('address') }}</span>
-              </button>
-            </th>
-            <th class="lm-col-live">
-              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'live'" (click)="onSort('live')">
-                <span>Live Value</span><span class="lm-sort-indicator">{{ sortIndicator('live') }}</span>
-              </button>
-            </th>
-            <th class="lm-col-name">
-              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'name'" (click)="onSort('name')">
-                <span>Name</span><span class="lm-sort-indicator">{{ sortIndicator('name') }}</span>
-              </button>
-            </th>
-            <th class="lm-col-comment">
-              <button type="button" class="lm-sort-btn" [class.lm-sort-active]="sortColumn() === 'comment'" (click)="onSort('comment')">
-                <span>Comment</span><span class="lm-sort-indicator">{{ sortIndicator('comment') }}</span>
-              </button>
-            </th>
-            <th class="lm-col-actions"></th>
+            <th class="lm-col-type">Type</th>
+            <th class="lm-col-addr">Address</th>
+            <th class="lm-col-live">Live Value</th>
+            <th class="lm-col-name">Name</th>
+            <th class="lm-col-comment">Comment</th>
+            @if (!activeSetIsBuiltIn()) {
+              <th class="lm-col-actions"></th>
+            }
           </tr>
         </thead>
         <tbody>
@@ -394,7 +273,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   [class.lm-fnc-row]="effectiveType(row.entry!) === 'Function'"
                   [class.lm-hidden-row]="row.entry!.hidden">
                 <td class="lm-col-vis">
-                  @if (!isScannerView()) {
                   <button class="lm-vis-btn"
                           [class.lm-is-hidden]="row.entry!.hidden"
                           [title]="row.entry!.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
@@ -408,7 +286,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                       }
                     </svg>
                   </button>
-                  }
                 </td>
                 <td class="lm-col-expand">
                   @if (row.expandable) {
@@ -425,42 +302,41 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                   {{ row.entry!.address }}@if (entryDetails(row.entry!) !== '—') { <span class="lm-addr-details lm-muted">({{ entryDetails(row.entry!) }})</span> }
                 </td>
                 <td class="lm-col-live">
-                  @if (shouldShowLive(row.entry!)) {
-                    @if (effectiveType(row.entry!) === 'Function') {
-                      <span class="lm-live-fnc">{{ fncLiveDisplay(row.entry!) }}</span>
-                    } @else if (effectiveType(row.entry!) === 'String') {
-                      <span class="lm-live-string">{{ liveValue(row.entry!) }}</span>
-                    } @else {
-                      <span [class]="liveValueClass(row.entry!)">{{ liveValue(row.entry!) }}</span>
-                    }
+                  @if (effectiveType(row.entry!) === 'Function') {
+                    <span class="lm-live-fnc">{{ fncLiveDisplay(row.entry!) }}</span>
+                  } @else if (effectiveType(row.entry!) === 'String') {
+                    <span class="lm-live-string">{{ liveValue(row.entry!) }}</span>
+                  } @else if (shouldShowLive(row.entry!)) {
+                    <span [class]="liveValueClass(row.entry!)">{{ liveValue(row.entry!) }}</span>
                   }
                 </td>
                 <td class="lm-col-name">{{ displayName(row.entry!) }}</td>
                 <td class="lm-col-comment lm-muted">{{ entryComment(row.entry!) }}</td>
-                <td class="lm-col-actions">
-                  <button class="lm-row-btn lm-live-toggle-btn"
-                          [class.lm-is-dynamic]="row.entry!.dynamic"
-                          [title]="row.entry!.dynamic ? 'Pause live polling' : 'Start live polling'"
-                          (click)="onToggleDynamic(row.entry!)">
-                    @if (row.entry!.dynamic) {
-                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
-                    } @else {
-                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
+                @if (!activeSetIsBuiltIn()) {
+                  <td class="lm-col-actions">
+                    @if (effectiveType(row.entry!) !== 'String' && effectiveType(row.entry!) !== 'Function' && effectiveType(row.entry!) !== 'Pointer') {
+                      <button class="lm-row-btn lm-live-toggle-btn"
+                              [class.lm-is-dynamic]="row.entry!.dynamic"
+                              [title]="row.entry!.dynamic ? 'Pause live polling' : 'Start live polling'"
+                              (click)="onToggleDynamic(row.entry!)">
+                        @if (row.entry!.dynamic) {
+                          <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
+                        } @else {
+                          <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
+                        }
+                      </button>
                     }
-                  </button>
-                  @if (!activeSetIsBuiltIn()) {
                     <button class="lm-row-btn" title="Edit" (click)="onEdit(row.entry!)">&#x270E;</button>
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry!)">
                       <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
-                  }
-                </td>
+                  </td>
+                }
               </tr>
             } @else {
               <!-- Child label sub-row (recursive; entry = the child LabelManagerEntry) -->
               <tr class="lm-member-sub-row" [class.lm-hidden-row]="row.entry.hidden">
                 <td class="lm-col-vis">
-                  @if (!isScannerView()) {
                   <button class="lm-vis-btn"
                           [class.lm-is-hidden]="row.entry.hidden"
                           [title]="row.entry.hidden ? 'Hidden — click to show' : 'Visible — click to hide'"
@@ -474,7 +350,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                       }
                     </svg>
                   </button>
-                  }
                 </td>
                 <td class="lm-col-expand lm-member-tree-indent">
                   @for (hasLine of row.ancestorLines; track $index) {
@@ -497,32 +372,20 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                 <td class="lm-col-addr lm-mono lm-child-offset">
                   +0x{{ (row.entry.offset ?? 0).toString(16).toUpperCase().padStart(4, '0') }}
                 </td>
-                <!-- Live value column: formatted by child type, only when dynamic -->
+                <!-- Live value column: formatted by child type -->
                 <td class="lm-col-live">
-                  @if (row.entry.dynamic) {
-                    @if (childEffectiveType(row.entry) === 'String') {
-                      <span class="lm-live-string">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
-                    } @else if (memberLiveValues().has(row.path)) {
-                      <span [class]="childLiveClass(row.entry)">{{ memberLiveValues().get(row.path) }}</span>
-                    } @else {
-                      <span class="lm-live-placeholder">…</span>
-                    }
+                  @if (childEffectiveType(row.entry) === 'String') {
+                    <span class="lm-live-string">{{ memberLiveValues().get(row.path) ?? '…' }}</span>
+                  } @else if (memberLiveValues().has(row.path)) {
+                    <span [class]="childLiveClass(row.entry)">{{ memberLiveValues().get(row.path) }}</span>
+                  } @else if (hasLiveChild(row.entry)) {
+                    <span class="lm-live-placeholder">…</span>
                   }
                 </td>
                 <td class="lm-col-name lm-member-sub-name">{{ row.entry.name }}</td>
                 <td class="lm-col-comment lm-muted">{{ row.entry.comment ?? '' }}</td>
-                <td class="lm-col-actions">
-                  <button class="lm-row-btn lm-live-toggle-btn"
-                          [class.lm-is-dynamic]="row.entry.dynamic"
-                          [title]="row.entry.dynamic ? 'Pause live polling' : 'Start live polling'"
-                          (click)="onToggleChildDynamic(row.entry)">
-                    @if (row.entry.dynamic) {
-                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><rect x="0" y="0" width="2.5" height="10"/><rect x="5.5" y="0" width="2.5" height="10"/></svg>
-                    } @else {
-                      <svg viewBox="0 0 8 10" fill="currentColor" class="lm-play-icon" aria-hidden="true"><path d="M0 0l8 5-8 5z"/></svg>
-                    }
-                  </button>
-                  @if (!activeSetIsBuiltIn()) {
+                @if (!activeSetIsBuiltIn()) {
+                  <td class="lm-col-actions">
                     @if (row.entry.parentAddress != null) {
                       <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
@@ -530,12 +393,14 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                     <button class="lm-row-btn lm-danger-btn" title="Delete" (click)="onDeleteEntry(row.entry)">
                       <svg viewBox="0 0 10 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="lm-trash-icon" aria-hidden="true"><path d="M1 3h8M4 1.5h2M2 3l.7 7.5h4.6L8 3"/></svg>
                     </button>
-                  } @else {
+                  </td>
+                } @else {
+                  <td class="lm-col-actions">
                     @if (row.entry.parentAddress != null) {
                       <button class="lm-row-btn lm-goto-btn" title="Navigate to resolved address" (click)="onGotoChild(row.entry)">&#x2192;</button>
                     }
-                  }
-                </td>
+                  </td>
+                }
               </tr>
             }
           }
@@ -562,34 +427,19 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
         <!-- Type selector -->
         <div class="lm-form-row">
           <label class="lm-form-label">Type</label>
-          <select class="lm-form-input" (change)="editType.set(asSelect($event).value)">
+          <select class="lm-form-input" [value]="editType()" (change)="editType.set(asSelect($event).value)">
             @for (t of unifiedTypes; track t.value) {
-              <option [value]="t.value" [selected]="editType() === t.value">{{ t.label }}</option>
+              <option [value]="t.value">{{ t.label }}</option>
             }
           </select>
         </div>
-        @if (editParentAddress()) {
-          <!-- Editing a child entry: show parent context + editable offset -->
-          <div class="lm-form-row">
-            <label class="lm-form-label">Parent</label>
-            <span class="lm-form-input lm-mono lm-readonly-addr">{{ editParentAddress() }}</span>
-          </div>
-          <div class="lm-form-row">
-            <label class="lm-form-label">Offset</label>
-            <input class="lm-form-input lm-mono" type="text" spellcheck="false"
-                   placeholder="0x0000"
-                   [value]="editOffsetStr()"
-                   (input)="editOffsetStr.set(asInput($event).value)" />
-          </div>
-        } @else {
-          <div class="lm-form-row">
-            <label class="lm-form-label">Address</label>
-            <input class="lm-form-input lm-mono" type="text" spellcheck="false"
-                   placeholder="0x80010000"
-                   [value]="editAddress()"
-                   (input)="editAddress.set(asInput($event).value)" />
-          </div>
-        }
+        <div class="lm-form-row">
+          <label class="lm-form-label">Address</label>
+          <input class="lm-form-input lm-mono" type="text" spellcheck="false"
+                 placeholder="0x80010000"
+                 [value]="editAddress()"
+                 (input)="editAddress.set(asInput($event).value)" />
+        </div>
         <div class="lm-form-row">
           <label class="lm-form-label">Name</label>
           <input class="lm-form-input" type="text" spellcheck="false"
@@ -615,7 +465,7 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
         </div>
 
         <!-- Child entries editor (for Pointer type — children hang off dereferenced base) -->
-        @if (editType() === 'Pointer') {
+        @if (editType() === 'Pointer' || editType() === 'Struct') {
           <div class="lm-form-row lm-members-row">
             <label class="lm-form-label">Children</label>
             <div class="lm-members-list">
@@ -629,11 +479,11 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
                          placeholder="field name"
                          [value]="m.name"
                          (input)="updateMemberName($index, asInput($event).value)" />
-                  <select class="lm-member-type"
+                  <select class="lm-member-type" [value]="m.type ?? ''"
                           (change)="updateMemberType($index, asSelect($event).value)">
-                    <option value="" [selected]="!m.type || m.type === ''">type…</option>
+                    <option value="">type…</option>
                     @for (t of unifiedTypes; track t.value) {
-                      <option [value]="t.value" [selected]="m.type === t.value">{{ t.label }}</option>
+                      <option [value]="t.value">{{ t.label }}</option>
                     }
                   </select>
                   <input class="lm-member-comment" type="text" spellcheck="false"
@@ -720,43 +570,6 @@ const SEMANTIC_LABEL_TYPES = new Set(UNIFIED_TYPES.map(t => t.value));
       <div id="lm-status" [class.lm-status-error]="statusIsError()">{{ statusMsg() }}</div>
     }
 
-    <!-- Inline delete-entry confirmation (replaces window.confirm which is blocked in webviews) -->
-    @if (pendingDeleteEntry()) {
-      <div class="lm-confirm-backdrop" (click)="cancelDeleteEntry()">
-        <div class="lm-confirm-dialog" (click)="$event.stopPropagation()">
-          <p class="lm-confirm-title">&#x26A0; Delete label?</p>
-          <p class="lm-confirm-body">
-            <strong>{{ pendingDeleteEntry()!.name }}</strong>
-            @if (pendingDeleteEntry()!.parentAddress) {
-              &nbsp;at offset {{ pendingDeleteEntry()!.address.split(':').slice(1).join(':') }}
-            } @else {
-              &nbsp;at {{ pendingDeleteEntry()!.address }}
-            }
-          </p>
-          <p class="lm-confirm-note lm-muted">This action cannot be undone.</p>
-          <div class="lm-confirm-actions">
-            <button class="lm-tool-btn lm-danger-btn" (click)="confirmDeleteEntry()">Delete</button>
-            <button class="lm-tool-btn" (click)="cancelDeleteEntry()">Cancel</button>
-          </div>
-        </div>
-      </div>
-    }
-
-    <!-- Inline delete-set confirmation -->
-    @if (pendingDeleteSet()) {
-      <div class="lm-confirm-backdrop" (click)="cancelDeleteSet()">
-        <div class="lm-confirm-dialog" (click)="$event.stopPropagation()">
-          <p class="lm-confirm-title">&#x26A0; Delete label set?</p>
-          <p class="lm-confirm-body">Set: <strong>{{ activeSetName() }}</strong></p>
-          <p class="lm-confirm-note lm-muted">All labels in this set will be permanently deleted.</p>
-          <div class="lm-confirm-actions">
-            <button class="lm-tool-btn lm-danger-btn" (click)="confirmDeleteSet()">Delete Set</button>
-            <button class="lm-tool-btn" (click)="cancelDeleteSet()">Cancel</button>
-          </div>
-        </div>
-      </div>
-    }
-
   </div>
 </div>
   `,
@@ -782,16 +595,10 @@ export class LabelManagerOverlayComponent {
 
   // Tree view — track expanded paths by their unique path string
   readonly expandedPaths = signal<Set<string>>(new Set());
-  readonly sortColumn    = signal<LabelSortColumn | null>(null);
-  readonly sortDirection = signal<LabelSortDirection>('asc');
 
   // Inline new-set creation (replaces window.prompt)
   readonly showNewSetInput = signal(false);
   readonly newSetNameInput = signal('');
-
-  // Inline rename-set
-  readonly showRenameSetInput = signal(false);
-  readonly renameSetInput     = signal('');
 
   // Edit form state
   readonly editAddress       = signal('');
@@ -813,12 +620,6 @@ export class LabelManagerOverlayComponent {
   readonly editParentAddress = signal<string | undefined>(undefined);
   /** When editing a child entry, this preserves its byte offset from the parent pointer. */
   readonly editParentOffset  = signal<number | undefined>(undefined);
-  /** When editing a child entry, the user-editable offset string (hex). */
-  readonly editOffsetStr     = signal('');
-
-  // Inline confirmation state (replaces window.confirm which doesn't work in VS Code webviews)
-  readonly pendingDeleteEntry = signal<LabelManagerEntry | null>(null);
-  readonly pendingDeleteSet   = signal(false);
 
   /** Addresses of original children tracked when the edit form is opened, for deletion on save. */
   private _editingOriginalChildAddresses: string[] = [];
@@ -831,29 +632,6 @@ export class LabelManagerOverlayComponent {
 
   /** Polling timer handle (setInterval id). */
   private _pollTimer: ReturnType<typeof setInterval> | null = null;
-
-  /**
-   * Whether continuous live-value polling is enabled.  Defaults to false —
-   * the label manager fetches values once on open and then stops.  The user
-   * can toggle this to true via a checkbox to enable continuous 500ms polling.
-   */
-  readonly livePollingEnabled = signal(false);
-
-  // ── Scanner state ──────────────────────────────────────────────────────────
-  /** Which scanner is currently active/running. */
-  readonly activeScannerKind = signal<ScannerKind | null>(null);
-  /** 'idle', 'scanning', or 'done'. */
-  readonly scannerStatus = signal<'idle' | 'scanning' | 'done'>('idle');
-  /** Scanner results converted to LabelManagerEntry items. */
-  readonly scanResultEntries = signal<LabelManagerEntry[]>([]);
-
-  // ── Pagination state ─────────────────────────────────────────────────────────
-  /** Current page index (0-based). */
-  readonly currentPage = signal(0);
-  /** Number of root entries displayed per page. */
-  readonly pageSize = signal(100);
-  /** Available page-size options. */
-  readonly pageSizeOptions = [50, 100, 250, 500];
 
   /**
    * Normalised address (no "0x" prefix, uppercase) that should be pre-filled
@@ -870,15 +648,8 @@ export class LabelManagerOverlayComponent {
     this.activeSetName() === 'Built-in' || (this.currentSet()?.isBuiltIn ?? false)
   );
 
-  /** True when scanner results are being displayed instead of a label set. */
-  readonly isScannerView = computed(() => this.scanResultEntries().length > 0);
-
   readonly filteredEntries = computed(() => {
-    const scanEntries = this.scanResultEntries();
-    // When scanner results are present, show only scan results (not the label set).
-    const entries = scanEntries.length > 0
-      ? scanEntries
-      : (this.currentSet()?.entries ?? []);
+    const entries = this.currentSet()?.entries ?? [];
     const f  = this.filterText().trim().toLowerCase();
     const tf = this.typeFilter().trim();
     return entries.filter(e => {
@@ -890,36 +661,9 @@ export class LabelManagerOverlayComponent {
     });
   });
 
-  readonly sortedRootEntries = computed(() => {
-    const roots = this.filteredEntries().filter(entry => !entry.parentAddress);
-    const sortColumn = this.sortColumn();
-    if (!sortColumn) {
-      return roots;
-    }
-
-    const direction = this.sortDirection() === 'asc' ? 1 : -1;
-    return [...roots].sort((a, b) => {
-      const compare = this.compareEntries(a, b, sortColumn);
-      if (compare !== 0) {
-        return compare * direction;
-      }
-      return this.compareEntries(a, b, 'address');
-    });
-  });
-
-  readonly canSave = computed(() => {
-    const hasName = this.editName().trim() !== '';
-    if (this.editParentAddress()) {
-      return hasName && this.editOffsetStr().trim() !== '';
-    }
-    return hasName && this.editAddress().trim() !== '';
-  });
-
-  /** Total entry count: scan results when scanning, otherwise label set entries. */
-  readonly totalEntryCount = computed(() => {
-    const scan = this.scanResultEntries();
-    return scan.length > 0 ? scan.length : (this.currentSet()?.entries?.length ?? 0);
-  });
+  readonly canSave = computed(() =>
+    this.editAddress().trim() !== '' && this.editName().trim() !== ''
+  );
 
   /** True when all filtered visible entries have hidden=false (or undefined). */
   readonly allVisible = computed(() => {
@@ -932,29 +676,33 @@ export class LabelManagerOverlayComponent {
     this.filteredEntries().some(e => e.dynamic),
   );
 
-  /** Root entries to poll: entries with dynamic===true from the active set OR scanner results. */
-  private readonly _dynamicAddresses = computed(() => {
-    const scanEntries = this.scanResultEntries();
-    const source = scanEntries.length > 0
-      ? scanEntries
-      : (this.currentSet()?.entries ?? []);
-    return source
-      .filter(e => !e.parentAddress && e.dynamic)
-      .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType }));
-  });
+  /** Root entries to poll: auto-polled types (Pointer/Float/Value/String) plus Address when dynamic=true. */
+  private readonly _dynamicAddresses = computed(() =>
+    this.filteredEntries()
+      .filter(e => !e.parentAddress)
+      .filter(e => {
+        const t = this.effectiveType(e);
+        if (t === 'Function') return false; // FNC shows static info only
+        if (t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
+        return e.dynamic; // Address: only when explicitly toggled
+      })
+      .map(e => ({ address: e.address, entryType: e.type ?? 'Address' as LabelType, valueType: e.valueType })),
+  );
 
   /**
-   * Visible child rows to poll: only expanded member rows with dynamic===true.
-   * The `path` (synthetic address) encodes the full resolution chain.
+   * Visible child rows to poll (depth >= 1, with parentAddress set at depth 1).
+   * All visible children are always polled — their type drives the format.
    */
   private readonly _dynamicMemberRows = computed(() =>
     this.treeRows().filter(
-      r => r.kind === 'member' && r.entry.parentAddress != null && r.entry.dynamic,
+      r => r.kind === 'member' && r.depth === 1 && r.entry.parentAddress != null,
     ),
   );
 
-  /** Colspan for the "no entries" empty row. Actions column is always present. */
-  readonly emptyColspan = computed(() => 7);
+  /** Colspan for the "no entries" empty row. Live Value column is always shown. */
+  readonly emptyColspan = computed(() =>
+    this.activeSetIsBuiltIn() ? 6 : 7
+  );
 
   /**
    * A name → entry map for Struct-type labels only, recomputed only when the
@@ -987,16 +735,9 @@ export class LabelManagerOverlayComponent {
    * if they have children — fully recursive with cycle detection.
    */
   readonly treeRows = computed<TreeRow[]>(() => {
-    const roots = this.sortedRootEntries();
-    const size = this.pageSize();
-    const maxPage = Math.max(0, Math.ceil(roots.length / size) - 1);
-    const page = Math.min(this.currentPage(), maxPage);
-    const start = page * size;
-    const end = start + size;
-    const pagedRoots = roots.slice(start, end);
-
     const rows: TreeRow[] = [];
-    for (const entry of pagedRoots) {
+    for (const entry of this.filteredEntries()) {
+      if (entry.parentAddress) { continue; } // skip children — they appear under their parent
       const path = entry.address;
       const children = this._childrenOf(path);
       rows.push({
@@ -1015,25 +756,13 @@ export class LabelManagerOverlayComponent {
     return rows;
   });
 
-  /** Total number of root entries (before paging). */
-  readonly totalRootEntries = computed(() => this.sortedRootEntries().length);
-
-  /** Total number of pages. */
-  readonly totalPages = computed(() =>
-    Math.max(1, Math.ceil(this.totalRootEntries() / this.pageSize()))
-  );
-
 
   // ── Public API ────────────────────────────────────────────────────────────────
 
   open(): void {
     this.visible.set(true);
     this.action$.emit({ type: 'refresh' });
-    // Fetch values once; continuous polling only if user enables it.
-    this._emitOnePoll();
-    if (this.livePollingEnabled()) {
-      this._updatePolling();
-    }
+    this._startPolling();
   }
 
   /**
@@ -1048,11 +777,7 @@ export class LabelManagerOverlayComponent {
     this._pendingPrefillAddress = addressHex.toUpperCase().replace(/^0x/i, '');
     this.visible.set(true);
     this.action$.emit({ type: 'refresh' });
-    // Fetch values once; continuous polling only if user enables it.
-    this._emitOnePoll();
-    if (this.livePollingEnabled()) {
-      this._updatePolling();
-    }
+    this._startPolling();
   }
 
   close(): void {
@@ -1064,16 +789,14 @@ export class LabelManagerOverlayComponent {
   }
 
   setSets(names: string[]): void {
-    // Ensure "Built-in" is always first and deduplicate set names.
-    const rest = [...new Set(names.filter(n => n !== 'Built-in'))];
+    // Ensure "Built-in" is always first.
+    const rest = names.filter(n => n !== 'Built-in');
     this.setNames.set(['Built-in', ...rest]);
   }
 
   setActiveSet(set: LabelSetPayload): void {
     this.activeSetName.set(set.setName);
-    // Ensure entries is always an array to avoid downstream null-reference errors.
-    const safeSet: LabelSetPayload = set.entries ? set : { ...set, entries: [] };
-    this.currentSet.set(safeSet);
+    this.currentSet.set(set);
 
     const pending = this._pendingPrefillAddress;
 
@@ -1081,7 +804,7 @@ export class LabelManagerOverlayComponent {
       // A context-menu "Add Label" was triggered — apply the prefill.
       this.clearForm();
       this.editAddress.set('0x' + pending);
-      const existing = safeSet.entries.find(
+      const existing = set.entries.find(
         e => e.address.toUpperCase().replace(/^0x/i, '') === pending,
       );
       if (existing) {
@@ -1089,7 +812,7 @@ export class LabelManagerOverlayComponent {
       }
       // If the active set is read-only, keep the pending address so it is
       // reapplied automatically when the user switches to (or creates) a user set.
-      if (safeSet.isBuiltIn) {
+      if (set.isBuiltIn) {
         this.statusMsg.set('Create or select a user label set (via + New) to add this address.');
         this.statusIsError.set(false);
       } else {
@@ -1103,12 +826,6 @@ export class LabelManagerOverlayComponent {
       this.clearForm();
       this.statusMsg.set('');
     }
-
-    // Now that entries are loaded, fetch live values for any dynamic entries.
-    this._emitOnePoll();
-    if (this.livePollingEnabled()) {
-      this._updatePolling();
-    }
   }
 
   showStatus(msg: string, isError = false): void {
@@ -1119,78 +836,9 @@ export class LabelManagerOverlayComponent {
     }
   }
 
-  // ── Scanner public API ───────────────────────────────────────────────────────
-
-  /** Called by the toolbar scan buttons. */
-  onRunScanner(kind: ScannerKind): void {
-    // Stop any active polling to avoid socket FIFO conflicts during the scan.
-    this._stopPolling();
-    this.activeScannerKind.set(kind);
-    this.scannerStatus.set('scanning');
-    this.scanResultEntries.set([]);
-    this.currentPage.set(0);
-    this.action$.emit({ type: 'runScanner', scannerKind: kind });
-  }
-
-  /** Clear scanner results from the view. */
-  onClearScanResults(): void {
-    this.activeScannerKind.set(null);
-    this.scannerStatus.set('idle');
-    this.scanResultEntries.set([]);
-    this.currentPage.set(0);
-    this.action$.emit({ type: 'clearScanResults' });
-  }
-
-  /**
-   * Called by the host when scanner results arrive from the provider.
-   * Converts raw scanner entries into LabelManagerEntry format for the tree.
-   */
-  setScanResults(kind: ScannerKind, entries: LabelManagerEntry[]): void {
-    this.activeScannerKind.set(kind);
-    this.scannerStatus.set('done');
-    this.scanResultEntries.set(entries);
-    this.currentPage.set(0);
-    const count = entries.length;
-    this.showStatus(`Scan complete: ${count} ${kind} found.`);
-    // Restart polling if the user had live polling enabled before the scan.
-    if (this.livePollingEnabled()) {
-      this._updatePolling();
-    }
-  }
-
-  // ── Pagination ──────────────────────────────────────────────────────────────
-
-  /** Navigate to the given page (clamped to valid range). */
-  goToPage(page: number): void {
-    const clamped = Math.max(0, Math.min(page, this.totalPages() - 1));
-    this.currentPage.set(clamped);
-  }
-
-  /** Handle page-size dropdown change. */
-  onPageSizeChange(value: string): void {
-    const size = parseInt(value, 10);
-    if (!Number.isNaN(size) && size > 0) {
-      this.pageSize.set(size);
-      this.currentPage.set(0);
-    }
-  }
-
   // ── Event Handlers ────────────────────────────────────────────────────────────
 
-  /** Update filter text and reset to first page. */
-  onFilterTextChange(value: string): void {
-    this.filterText.set(value);
-    this.currentPage.set(0);
-  }
-
-  /** Update type filter and reset to first page. */
-  onTypeFilterChange(value: string): void {
-    this.typeFilter.set(value);
-    this.currentPage.set(0);
-  }
-
   onSetChange(name: string): void {
-    this.currentPage.set(0);
     this.action$.emit({ type: 'setActive', setName: name });
   }
 
@@ -1215,41 +863,10 @@ export class LabelManagerOverlayComponent {
     this.newSetNameInput.set('');
   }
 
-  onRenameSet(): void {
-    this.renameSetInput.set(this.activeSetName());
-    this.showRenameSetInput.set(true);
-    requestAnimationFrame(() => {
-      const input = document.querySelector('.lm-rename-set-input') as HTMLInputElement | null;
-      input?.focus();
-      input?.select();
-    });
-  }
-
-  onConfirmRenameSet(): void {
-    const newName = this.renameSetInput().trim();
-    if (!newName) { return; }
-    const oldName = this.activeSetName();
-    this.showRenameSetInput.set(false);
-    this.renameSetInput.set('');
-    this.action$.emit({ type: 'renameSet', setName: oldName, newSetName: newName });
-  }
-
-  onCancelRenameSet(): void {
-    this.showRenameSetInput.set(false);
-    this.renameSetInput.set('');
-  }
-
   onDeleteSet(): void {
-    this.pendingDeleteSet.set(true);
-  }
-
-  confirmDeleteSet(): void {
-    this.pendingDeleteSet.set(false);
-    this.action$.emit({ type: 'deleteSet', setName: this.activeSetName() });
-  }
-
-  cancelDeleteSet(): void {
-    this.pendingDeleteSet.set(false);
+    const name = this.activeSetName();
+    if (!confirm(`Delete label set "${name}"? This cannot be undone.`)) { return; }
+    this.action$.emit({ type: 'deleteSet', setName: name });
   }
 
   onAddLabel(): void {
@@ -1287,21 +904,6 @@ export class LabelManagerOverlayComponent {
 
   isExpanded(path: string): boolean {
     return this.expandedPaths().has(path);
-  }
-
-  onSort(column: LabelSortColumn): void {
-    if (this.sortColumn() === column) {
-      this.sortDirection.update(direction => direction === 'asc' ? 'desc' : 'asc');
-    } else {
-      this.sortColumn.set(column);
-      this.sortDirection.set('asc');
-    }
-    this.currentPage.set(0);
-  }
-
-  sortIndicator(column: LabelSortColumn): string {
-    if (this.sortColumn() !== column) { return ''; }
-    return this.sortDirection() === 'asc' ? '▲' : '▼';
   }
 
   /** Recursively appends member rows to `rows`, with cycle detection via `visited`. */
@@ -1393,26 +995,11 @@ export class LabelManagerOverlayComponent {
     this.editingAddress.set(entry.address);
     this.editParentAddress.set(entry.parentAddress);
     this.editParentOffset.set(entry.offset);
-    this.editOffsetStr.set(
-      entry.parentAddress != null
-        ? '0x' + (entry.offset ?? 0).toString(16).toUpperCase().padStart(4, '0')
-        : '',
-    );
   }
 
   onDeleteEntry(entry: LabelManagerEntry): void {
-    this.pendingDeleteEntry.set(entry);
-  }
-
-  confirmDeleteEntry(): void {
-    const entry = this.pendingDeleteEntry();
-    if (!entry) { return; }
-    this.pendingDeleteEntry.set(null);
+    if (!confirm(`Delete label "${entry.name}" at ${entry.address}?`)) { return; }
     this.action$.emit({ type: 'deleteEntry', setName: this.activeSetName(), address: entry.address });
-  }
-
-  cancelDeleteEntry(): void {
-    this.pendingDeleteEntry.set(null);
   }
 
   onWalkList(entry: LabelManagerEntry): void {
@@ -1424,27 +1011,15 @@ export class LabelManagerOverlayComponent {
     // Use undefined (not false) so the field is omitted from the JSON payload when disabled,
     // matching the WhenWritingDefault serialisation convention on the C# side.
     const updated: LabelManagerEntry = { ...entry, dynamic: entry.dynamic ? undefined : true };
-    if (this.isScannerView()) {
-      // Scanner entries are ephemeral — update only the local scan results signal.
-      this.scanResultEntries.update(entries =>
-        entries.map(e => e.address === entry.address ? updated : e),
-      );
-    } else {
-      // Optimistic local update so the toggle feels instant.
-      const set = this.currentSet();
-      if (set) {
-        this.currentSet.set({
-          ...set,
-          entries: set.entries.map(e => e.address === entry.address ? updated : e),
-        });
-      }
-      // Persist only for user (non-built-in) sets.
-      if (!this.activeSetIsBuiltIn()) {
-        this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
-      }
+    // Optimistic local update so the toggle feels instant.
+    const set = this.currentSet();
+    if (set) {
+      this.currentSet.set({
+        ...set,
+        entries: set.entries.map(e => e.address === entry.address ? updated : e),
+      });
     }
-    // Start or stop polling based on whether any dynamic entries remain.
-    this._updatePolling();
+    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
   }
 
   /** Toggle dynamic flag on a child entry directly. */
@@ -1457,12 +1032,7 @@ export class LabelManagerOverlayComponent {
         entries: set.entries.map(e => e.address === child.address ? updated : e),
       });
     }
-    // Persist only for user (non-built-in) sets.
-    if (!this.activeSetIsBuiltIn()) {
-      this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
-    }
-    // Start or stop polling based on whether any dynamic entries remain.
-    this._updatePolling();
+    this.action$.emit({ type: 'addEntry', setName: this.activeSetName(), entry: updated });
   }
 
   /** Toggle hidden flag on a child entry directly. */
@@ -1486,18 +1056,7 @@ export class LabelManagerOverlayComponent {
   }
 
   onSave(): void {
-    const parentAddr = this.editParentAddress();
-
-    // When editing a child entry, derive address from parent + offset.
-    let addr: string;
-    let childOffset: number | undefined;
-    if (parentAddr) {
-      childOffset = parseInt(this.editOffsetStr().replace(/^0x/i, ''), 16) || 0;
-      addr = parentAddr + ':+0x' + childOffset.toString(16).toUpperCase().padStart(4, '0');
-    } else {
-      addr = this.editAddress().trim();
-    }
-
+    const addr = this.editAddress().trim();
     const name = this.editName().trim();
     if (!addr || !name) { return; }
 
@@ -1522,8 +1081,8 @@ export class LabelManagerOverlayComponent {
 
     const entry: LabelManagerEntry = {
       address: addr,
-      parentAddress: parentAddr,
-      offset: parentAddr != null ? childOffset : this.editParentOffset(),
+      parentAddress: this.editParentAddress(),
+      offset: this.editParentOffset(),
       name,
       comment: this.editComment().trim() || undefined,
       type,
@@ -1539,8 +1098,8 @@ export class LabelManagerOverlayComponent {
     };
     this.action$.emit({ type: 'addEntry', setName, entry });
 
-    // For Pointer type: save children as separate label entries.
-    if (type === 'Pointer') {
+    // For Pointer type (and legacy Struct): save children as separate label entries.
+    if (type === 'Pointer' || type === 'Struct' as LabelType) {
       const newChildren = this.editMembers()
         .filter(m => m.name.trim())
         .map(m => {
@@ -1644,7 +1203,6 @@ export class LabelManagerOverlayComponent {
     this.editingAddress.set('');
     this.editParentAddress.set(undefined);
     this.editParentOffset.set(undefined);
-    this.editOffsetStr.set('');
   }
 
   // ── Display helpers ───────────────────────────────────────────────────────────
@@ -1672,14 +1230,18 @@ export class LabelManagerOverlayComponent {
     return 'Address';
   }
 
-  /** True when this entry's live value should be shown (requires dynamic===true). */
+  /** True when this entry's live value should be shown (non-Address auto-poll; Address only when dynamic). */
   shouldShowLive(entry: LabelManagerEntry): boolean {
+    const t = this.effectiveType(entry);
+    if (t === 'Function') return false;
+    if (t === 'String' || t === 'Pointer' || t === 'Float' || t === 'Value') return true;
     return entry.dynamic ?? false;
   }
 
-  /** True when this child entry should show a live value (requires dynamic===true). */
+  /** True when this child entry always shows a live value. */
   hasLiveChild(entry: LabelManagerEntry): boolean {
-    return entry.dynamic ?? false;
+    const t = this.childEffectiveType(entry);
+    return t !== 'Address' && t !== 'Function';
   }
 
   liveValueClass(entry: LabelManagerEntry): string {
@@ -1701,14 +1263,8 @@ export class LabelManagerOverlayComponent {
     }
   }
 
-  /** Build the FNC live display: live-scanned prolog/epilog result when connected, else saved arg/ret annotations. */
+  /** Build the static FNC label: "args[a0,a1] rets[v0]" or empty string. */
   fncLiveDisplay(entry: LabelManagerEntry): string {
-    // Prefer live-scanned value from provider (prolog/epilog analysis) if available.
-    const live = this.liveValues().get(entry.address);
-    if (live !== undefined && live !== '…') {
-      return live;
-    }
-    // Fall back to saved static arg/ret register annotations.
     const parts: string[] = [];
     if (entry.argRegs?.length) {
       parts.push(`args[${entry.argRegs.map(r => r.split('=')[0].trim()).join(',')}]`);
@@ -1731,11 +1287,7 @@ export class LabelManagerOverlayComponent {
   }
 
   displayName(entry: LabelManagerEntry): string {
-    if (this.effectiveType(entry) === 'Function') {
-      // Avoid double-prefixing — the backend may already return FNC_ names.
-      return entry.name.startsWith('FNC_') ? entry.name : 'FNC_' + entry.name;
-    }
-    return entry.name;
+    return this.effectiveType(entry) === 'Function' ? 'FNC_' + entry.name : entry.name;
   }
 
   /** Returns the comment text for an entry. */
@@ -1766,27 +1318,6 @@ export class LabelManagerOverlayComponent {
       .sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0))
       .map(c => `+0x${(c.offset ?? 0).toString(16).toUpperCase().padStart(2, '0')}: ${c.name}`)
       .join('\n');
-  }
-
-  private compareEntries(a: LabelManagerEntry, b: LabelManagerEntry, column: LabelSortColumn): number {
-    switch (column) {
-      case 'address':
-        return this.parseSortAddress(a.address) - this.parseSortAddress(b.address);
-      case 'type':
-        return this.effectiveType(a).localeCompare(this.effectiveType(b));
-      case 'live':
-        return this.liveValue(a).localeCompare(this.liveValue(b), undefined, { numeric: true, sensitivity: 'base' });
-      case 'name':
-        return this.displayName(a).localeCompare(this.displayName(b), undefined, { numeric: true, sensitivity: 'base' });
-      case 'comment':
-        return this.entryComment(a).localeCompare(this.entryComment(b), undefined, { numeric: true, sensitivity: 'base' });
-    }
-  }
-
-  private parseSortAddress(address: string): number {
-    const normalized = address.split(':')[0].replace(/^0x/i, '');
-    const parsed = parseInt(normalized, 16);
-    return Number.isNaN(parsed) ? 0 : parsed;
   }
 
   asInput(event: Event): HTMLInputElement { return event.target as HTMLInputElement; }
@@ -1821,49 +1352,9 @@ export class LabelManagerOverlayComponent {
     return this.liveValues().get(entry.address) ?? '…';
   }
 
-  /**
-   * Start live-value polling if there are dynamic entries. Called by the
-   * page-mode host.  In the default mode (`livePollingEnabled === false`),
-   * this performs a single fetch and then stops.  When live polling is
-   * enabled, it starts the 500ms interval timer.
-   */
+  /** Start live-value polling. Called by the overlay itself and by the page-mode host. */
   startPolling(): void {
-    // Always do a single immediate fetch so values are populated on open.
-    this._emitOnePoll();
-    if (this.livePollingEnabled()) {
-      this._updatePolling();
-    }
-  }
-
-  /** Toggle continuous live-value polling on/off. */
-  setLivePolling(enabled: boolean): void {
-    this.livePollingEnabled.set(enabled);
-    if (enabled) {
-      this._updatePolling();
-    } else {
-      this._stopPolling();
-    }
-  }
-
-  /**
-   * Start or stop the poll timer based on whether any dynamic entries exist.
-   * If no entries have `dynamic === true`, polling is stopped to avoid
-   * unnecessary socket traffic.
-   */
-  private _updatePolling(): void {
-    if (!this.livePollingEnabled()) {
-      this._stopPolling();
-      return;
-    }
-    const hasDynamic =
-      this._dynamicAddresses().length > 0 || this._dynamicMemberRows().length > 0;
-    if (hasDynamic) {
-      if (this._pollTimer === null) {
-        this._startPolling();
-      }
-    } else {
-      this._stopPolling();
-    }
+    this._startPolling();
   }
 
   private _startPolling(): void {
@@ -1893,27 +1384,6 @@ export class LabelManagerOverlayComponent {
     if (this._pollTimer !== null) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
-    }
-  }
-
-  /** Emit a single poll cycle without starting the interval timer. */
-  private _emitOnePoll(): void {
-    const entries = this._dynamicAddresses();
-    if (entries.length > 0) {
-      this.action$.emit({ type: 'readLiveValues', entries });
-    }
-    const dynMembers = this._dynamicMemberRows();
-    if (dynMembers.length > 0) {
-      this.action$.emit({
-        type: 'readMemberLiveValues',
-        members: dynMembers.map(r => ({
-          parentAddress: r.entry.parentAddress!,
-          offset: r.entry.offset ?? 0,
-          path: r.path,
-          entryType: this.childEffectiveType(r.entry) as LabelType,
-          valueType: r.entry.valueType,
-        })),
-      });
     }
   }
 }

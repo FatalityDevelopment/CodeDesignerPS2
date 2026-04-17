@@ -8,13 +8,4 @@
     <AssemblyName>CodeDesigner.Ps2.CheatEngine</AssemblyName>
   </PropertyGroup>
 
-  <!-- Embed the CDS cheat-engine template as a manifest resource -->
-  <ItemGroup>
-    <EmbeddedResource Include="cds\cheatengine.cds" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\CodeDesigner.Ps2.CdsLanguage\CodeDesigner.Ps2.CdsLanguage.csproj" />
-  </ItemGroup>
-
 </Project>

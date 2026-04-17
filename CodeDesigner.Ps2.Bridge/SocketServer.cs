@@ -241,16 +241,19 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Creates a <see cref="CodeDesignerDbContext"/> connected to the
-        /// canonical SQL Server LocalDB instance (used when the caller does not
+        /// Creates a SQLite <see cref="CodeDesignerDbContext"/> pointing at the
+        /// canonical application-data database path (used when the caller does not
         /// supply a context).
         /// </summary>
         private static CodeDesignerDbContext CreateLocalDbContext()
         {
-            string connectionString = DatabasePaths.GetDefaultConnectionString();
-            var opts = DatabaseInitialiser.BuildDbOptions(connectionString);
+            string dbPath = DatabasePaths.GetDefaultDbPath();
+            var opts = new DbContextOptionsBuilder<CodeDesignerDbContext>()
+                .UseSqlite($"Data Source={dbPath}")
+                .Options;
             var ctx = new CodeDesignerDbContext(opts);
             ctx.Database.Migrate();
+            ctx.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
             return ctx;
         }
 
@@ -771,27 +774,6 @@ namespace CodeDesigner.Ps2.Bridge
                         });
                     }
                 }
-                else if (cmdUpper == "SESSION_START")
-                {
-                    // Notify subscribers that an AI session has started so the
-                    // front end can automatically enable Follow AI mode.
-                    notificationJson = JsonSerializer.Serialize(new
-                    {
-                        type = "ai_session_start",
-                    });
-                }
-                else if (cmdUpper is "ADDLABELENTRY" or "ADDLABELENTRIES" or "CREATELABELSET" or "DELETELABELENTRY" or "DELETELABELSET")
-                {
-                    // Notify subscribers that the label set has changed so the
-                    // front end can refresh the label manager UI.
-                    notificationJson = JsonSerializer.Serialize(new
-                    {
-                        type    = "ai_label_update",
-                        command = command.Command,
-                        setName = command.SetName,
-                        gameId  = command.GameId,
-                    });
-                }
 
                 if (notificationJson == null) { return; }
 
@@ -846,8 +828,6 @@ namespace CodeDesigner.Ps2.Bridge
                     case "START_BUILTIN_EMULATOR":
                     case "STARTEMULATORMODE":
                     case "START_EMULATOR_MODE":
-                    case "STARTFILEMODE":
-                    case "START_FILE_MODE":
                         if (RuntimeCommandHandler == null)
                             return CreateErrorResponse("Runtime mode switching is not enabled in this server instance");
                         return RuntimeCommandHandler(command);
@@ -857,9 +837,6 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "COMPILECDS":
                         return HandleCompileCds(command.Data, command.Labels);
-                    
-                    case "VALIDATECDS":
-                        return HandleValidateCds(command.Data, command.Labels);
                     
                     case "DISASSEMBLE":
                         return HandleDisassemble(command.Data, command.Address);
@@ -872,9 +849,6 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "LOADSNAPSHOT":
                         return HandleLoadSnapshot(command.InputPath);
-
-                    case "LOADELF":
-                        return HandleLoadElf(command.InputPath);
                     
                     case "PAUSE":
                         return HandlePause();
@@ -911,22 +885,6 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "APPLYCHEATS":
                         return HandleApplyCheats(command.Data);
-
-                    case "CDSPATCH":
-                        return HandleCdsPatch(command.Data, command.Labels);
-
-                    case "INJECTCHEATENGINE":
-                        return HandleInjectCheatEngine(command.Data, command.HookAddress, command.EngineBase, command.CdsSource);
-
-                    case "UPDATECHEATENGINE":
-                        return HandleUpdateCheatEngine(command.Data, command.CdsSource);
-
-                    case "REMOVECHEATENGINE":
-                        return HandleRemoveCheatEngine();
-
-                    case "GETGAMECHEATS":
-                    case "GET_GAME_CHEATS":
-                        return HandleGetGameCheats(command.GameSerial);
 
                     case "RESTART":
                         return HandleRestart();
@@ -1037,9 +995,6 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "DELETELABELSET":
                         return HandleDeleteLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "RENAMELABELSET":
-                        return HandleRenameLabelSet(command.WorkspaceDir, command.GameId, command.SetName, command.NewSetName);
 
                     case "ADDLABELENTRY":
                         return HandleAddLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntry);
@@ -1274,71 +1229,10 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PINE_SAVE_SCREENSHOT":
                         return HandlePineSaveScreenshot();
 
-                    // ── Pad / controller input ────────────────────────────────
-                    case "PADGETSTATE":
-                    case "PAD_GET_STATE":
-                        return HandlePadGetState(command.PadSlot);
-
-                    case "PADSETBUTTON":
-                    case "PAD_SET_BUTTON":
-                        return HandlePadSetButton(command.PadSlot, command.PadButtonIndex, command.PadButtonValue);
-
-                    case "PADSETANALOG":
-                    case "PAD_SET_ANALOG":
-                        return HandlePadSetAnalog(command.PadSlot, command.PadLx, command.PadLy, command.PadRx, command.PadRy);
-
-                    case "PADSETSTATE":
-                    case "PAD_SET_STATE":
-                        return HandlePadSetState(command.PadSlot, command.PadButtons,
-                            command.PadLx, command.PadLy, command.PadRx, command.PadRy,
-                            command.PadPressures);
-
-                    case "PADGETTYPE":
-                    case "PAD_GET_TYPE":
-                        return HandlePadGetType(command.PadSlot);
-
-                    // ── DEV9 network bridge ───────────────────────────────────
-                    case "NETGETSTATUS":
-                    case "NET_GET_STATUS":
-                        return HandleNetGetStatus();
-
-                    case "NETCAPTURE":
-                    case "NET_CAPTURE":
-                        return HandleNetCapture(command.NetCaptureEnable, command.NetCaptureDirection, command.NetCaptureMaxQueue);
-
-                    case "NETRECVCAPTURE":
-                    case "NET_RECV_CAPTURE":
-                        return HandleNetRecvCapture(command.NetMaxPackets);
-
-                    case "NETINJECT":
-                    case "NET_INJECT":
-                        return HandleNetInject(command.NetFrameData);
-
-                    case "NETINJECTTX":
-                    case "NET_INJECT_TX":
-                        return HandleNetInjectTx(command.NetFrameData);
-
-                    case "NETDISASSEMBLE":
-                    case "NET_DISASSEMBLE":
-                        return HandleNetDisassemble(command.NetFrameData);
-
-                    case "NETSETFILTER":
-                    case "NET_SET_FILTER":
-                        return HandleNetSetFilter(command.NetFilterType, command.NetFilterProtocol, command.NetFilterPort, command.NetFilterIP);
-
-                    case "NETGETSTATS":
-                    case "NET_GET_STATS":
-                        return HandleNetGetStats();
-
                     // ── Database query (read-only) ────────────────────────────
                     case "QUERYDB":
                     case "QUERY_DB":
                         return HandleQueryDb(command.SqlQuery);
-
-                    // ── Game Disc ─────────────────────────────────────────────
-                    case "UPDATEGAMEDISC":
-                    case "UPDATE_GAME_DISC":
-                        return HandleUpdateGameDisc(command.GameSerial, command.IsoPath, command.GameCrc, command.GameTitle);
 
                     // ── Navigation history ────────────────────────────────────
                     case "GETNAVHISTORY":
@@ -1396,11 +1290,11 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "MCPMEMORY_ADD":
                     case "MCPMEMORYADD":
-                        return HandleMcpMemoryAdd(command.McpMemoryName, command.McpMemoryContent, command.GameId, command.McpMemoryAgentId);
+                        return HandleMcpMemoryAdd(command.McpMemoryName, command.McpMemoryContent, command.GameId);
 
                     case "MCPMEMORY_UPDATE":
                     case "MCPMEMORYUPDATE":
-                        return HandleMcpMemoryUpdate(command.McpMemoryId, command.McpMemoryName, command.McpMemoryContent, command.GameId, command.McpMemoryAgentId);
+                        return HandleMcpMemoryUpdate(command.McpMemoryId, command.McpMemoryName, command.McpMemoryContent, command.GameId);
 
                     case "MCPMEMORY_DELETE":
                     case "MCPMEMORYDELETE":
@@ -1413,22 +1307,6 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MCPMEMORY_EXPORT":
                     case "MCPMEMORYEXPORT":
                         return HandleMcpMemoryExport(command.McpMemoryId, command.OutputPath);
-
-                    case "MCPMEMORY_UPSERT":
-                    case "MCPMEMORYUPSERT":
-                        return HandleMcpMemoryUpsert(command.McpMemoryName, command.McpMemoryContent, command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_DELETE_BY_NAME":
-                    case "MCPMEMORYDELETEBYNAME":
-                        return HandleMcpMemoryDeleteByName(command.McpMemoryName);
-
-                    case "MCPMEMORY_LIST_FOR_AGENT":
-                    case "MCPMEMORYLISTFORAGENT":
-                        return HandleMcpMemoryListForAgent(command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_LIST_SHARED":
-                    case "MCPMEMORYLISTSHARED":
-                        return HandleMcpMemoryListShared();
 
                     // ── MCP Agent Profiles (DB-backed) ───────────────────────
                     case "MCPAGENT_LIST":
@@ -1489,21 +1367,6 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "MCPORCHESTRATION_SETACTIVE":
                         return HandleMcpOrchestrationSetActive(command.McpOrchestrationId);
-
-                    // ── MCP Config commands ───────────────────────────────────────────
-                    case "MCPCONFIG_LIST":
-                        return HandleMcpConfigList();
-
-                    case "MCPCONFIG_UPDATE":
-                        return HandleMcpConfigUpdate(command.McpConfigKey, command.McpConfigValue);
-
-                    // ── AI session lifecycle ───────────────────────────────────────────
-                    case "SESSION_START":
-                        return CreateSuccessResponse("AI session started");
-
-                    // ── Batch label entry ──────────────────────────────────────────────
-                    case "ADDLABELENTRIES":
-                        return HandleAddLabelEntries(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntries);
 
                     default:
                         // Echo for unknown commands

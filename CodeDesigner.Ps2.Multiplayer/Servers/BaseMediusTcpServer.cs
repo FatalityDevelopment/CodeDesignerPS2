@@ -119,8 +119,6 @@ public abstract class BaseMediusTcpServer
                 if (read == 0) break;
 
                 state.Touch();
-                _log.LogDebug("[{Name}] RAW recv {Len} bytes: {Hex}", ServerName, read,
-                    BitConverter.ToString(buffer, 0, read).Replace("-", " "));
                 pending.AddRange(buffer[..read]);
 
                 // Parse as many complete packets as possible
@@ -131,13 +129,6 @@ public abstract class BaseMediusTcpServer
                     if (packet == null || consumed == 0) break;
 
                     pending.RemoveRange(0, consumed);
-
-                    // Decrypt payload in-place using per-packet stateless PS2 RC4.
-                    // Only applies AFTER the key exchange completes (CLIENT_CRYPTKEY_PUBLIC
-                    // itself is RSA-encrypted, not RC4 — don't decrypt it).
-                    if (packet.IsEncrypted && packet.Hash != null && state.CryptKeyReceived)
-                        PS2_RC4.Decrypt(state.SessionRc4Key, packet.Hash, packet.Payload);
-
                     await DispatchPacketAsync(packet, state, tcp, ct);
                 }
             }
@@ -149,10 +140,6 @@ public abstract class BaseMediusTcpServer
         }
         finally
         {
-            if (pending.Count > 0)
-                _log.LogWarning("[{Name}] Client {Id} disconnected with {N} unparsed bytes: {Hex}",
-                    ServerName, state.ConnectionId, pending.Count,
-                    BitConverter.ToString(pending.ToArray()).Replace("-", " "));
             Clients.TryRemove(state.ConnectionId, out _);
             await OnClientDisconnectedAsync(state);
             tcp.Close();
@@ -166,9 +153,7 @@ public abstract class BaseMediusTcpServer
 
     private async Task DispatchPacketAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        _log.LogDebug("[{Name}] <- {Id} {Type} ({Len} bytes) {Hex}",
-            ServerName, state.ConnectionId, packet.MessageType, packet.Payload.Length,
-            BitConverter.ToString(packet.Payload).Replace("-", " "));
+        _log.LogDebug("[{Name}] <- {Id} {Type} ({Len} bytes)", ServerName, state.ConnectionId, packet.MessageType, packet.Payload.Length);
 
         switch (packet.MessageType)
         {
@@ -218,9 +203,7 @@ public abstract class BaseMediusTcpServer
                 break;
 
             default:
-                _log.LogInformation("[{Name}] Unhandled SCERT type {Type} payload={Hex}",
-                    ServerName, packet.MessageType,
-                    BitConverter.ToString(packet.Payload).Replace("-", " "));
+                _log.LogDebug("[{Name}] Unhandled SCERT type {Type}", ServerName, packet.MessageType);
                 break;
         }
     }
@@ -229,7 +212,7 @@ public abstract class BaseMediusTcpServer
     // SCERT handshake — common to all servers
     // -------------------------------------------------------------------------
 
-    private Task HandleHelloAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    private async Task HandleHelloAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         // CLIENT_HELLO payload: [MediusVersion: 2 bytes LE][reserved: ...]
         if (packet.Payload.Length >= 2)
@@ -238,8 +221,9 @@ public abstract class BaseMediusTcpServer
         state.HelloReceived = true;
         _log.LogInformation("[{Name}] CLIENT_HELLO ver={Ver} from {Ep}", ServerName, state.MediusVersion, state.RemoteEndpoint);
 
-        // SERVER_HELLO was already sent proactively in OnClientConnectedAsync.
-        return Task.CompletedTask;
+        // Send SERVER_HELLO with 128-byte RSA modulus N.
+        // All-zero = no encryption. Encryption is enabled via config.EnableEncryption.
+        await SendPacketAsync(tcp, ScertPacket.CreateHello(), ct);
     }
 
     private async Task HandleCryptKeyPublicAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
@@ -249,43 +233,26 @@ public abstract class BaseMediusTcpServer
         // Store the client's public key bytes (used when encryption is implemented)
         state.ClientCryptKey = packet.Payload;
 
-        // Use all-zero RC4 key for testing. Either the client will see zeros and skip
-        // RC4 entirely (IsEncrypted=0) or it will use all-zero key — both are deterministic.
-        state.SessionRc4Key = new byte[64];
+        // Generate a 64-byte RC4 session key.
+        // When encryption is disabled we still generate a key but never apply it.
+        state.SessionRc4Key = PS2_RC4.GenerateKey();
 
         _log.LogDebug("[{Name}] CLIENT_CRYPTKEY_PUBLIC ({Len} bytes key)", ServerName, packet.Payload.Length);
 
-        // Reply with server's RC4 session key.
+        // Reply with our RC4 session key.
+        // With encryption disabled the game ignores / discards the key contents.
         await SendPacketAsync(tcp, ScertPacket.CreateCryptKeyPeer(state.SessionRc4Key), ct);
-
-        // For new protocol (v > 108), SERVER_CONNECT_REQUIRE prompts CLIENT_CONNECT_TCP.
-        // For old protocol (SOCOM II, v <= 108), the client sends CLIENT_CONNECT_TCP
-        // automatically after receiving SERVER_CRYPTKEY_PEER — no prompt needed.
-        // Sending SERVER_CONNECT_REQUIRE to an old-protocol client triggers a handler
-        // that calls an uninitialised stub (0x0064DAE8) which returns 0, causing the
-        // SCERT state machine to run the cleanup/teardown path instead of proceeding.
-        if (state.MediusVersion > 108)
-            await SendPacketAsync(tcp, ScertPacket.CreateConnectRequire(), ct);
-
-        // No persistent decryptor needed — PS2_RC4.Decrypt is stateless per-packet.
     }
 
     private async Task HandleConnectTcpAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         state.ConnectReceived = true;
 
-        // Decrypted payload layout (per Medius protocol):
-        //   Old Medius (version < 109):  [TargetWorldId: 4][UNK0: 1][AppId: 4][RSA_KEY: ...]
-        //   New Medius (version >= 109): [TargetWorldId: 4][AppId: 4][RSA_KEY: ...]
-        // Note: MediusVersion is NOT in this packet — it was established from CLIENT_HELLO.
+        // Payload: [AppId: 4 bytes LE][MediusVersion: 2 bytes LE (optional)]
         if (packet.Payload.Length >= 4)
-        {
-            int pos = 4; // skip TargetWorldId
-            if (state.MediusVersion < 109)
-                pos += 1; // skip UNK0 (old protocol only)
-            if (packet.Payload.Length >= pos + 4)
-                state.AppId = BitConverter.ToInt32(packet.Payload, pos);
-        }
+            state.AppId = BitConverter.ToInt32(packet.Payload, 0);
+        if (packet.Payload.Length >= 6)
+            state.MediusVersion = BitConverter.ToUInt16(packet.Payload, 4);
 
         _log.LogInformation("[{Name}] CLIENT_CONNECT_TCP AppId={AppId} ver={Ver}", ServerName, state.AppId, state.MediusVersion);
 
@@ -361,13 +328,8 @@ public abstract class BaseMediusTcpServer
     // Abstract / virtual
     // -------------------------------------------------------------------------
 
-    protected virtual async Task OnClientConnectedAsync(MediusClientState state, TcpClient tcp)
-    {
-        // Send SERVER_HELLO immediately so clients that skip CLIENT_HELLO still get it.
-        // All-zero RSA modulus signals "no RSA encryption" to the client.
-        await SendPacketAsync(tcp, ScertPacket.CreateHello(), default);
-        state.HelloReceived = true;
-    }
+    protected virtual Task OnClientConnectedAsync(MediusClientState state, TcpClient tcp)
+        => Task.CompletedTask;
 
     protected virtual Task OnClientDisconnectedAsync(MediusClientState state)
         => Task.CompletedTask;

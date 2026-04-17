@@ -134,12 +134,8 @@ namespace CodeDesigner.Ps2.Bridge
         public string? GameId { get; set; }
         /// <summary>Label set name for GETLABELSET / SETACTIVELABELSET / CREATELABELSET etc.</summary>
         public string? SetName { get; set; }
-        /// <summary>New label set name for RENAMELABELSET.</summary>
-        public string? NewSetName { get; set; }
         /// <summary>Unified label entry payload for ADDLABELENTRY.</summary>
         public LabelManagerEntry? LabelEntry { get; set; }
-        /// <summary>Batch label entries payload for ADDLABELENTRIES.</summary>
-        public List<LabelManagerEntry>? LabelEntries { get; set; }
         /// <summary>
         /// String address for DELETELABELENTRY.
         /// Supports both real addresses ("0x80010000") and synthetic child addresses
@@ -159,14 +155,6 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>ISO / game name for GETSNAPSHOTS and SNAPSHOT (used to link the snapshot to a game in the DB).</summary>
         public string? IsoName { get; set; }
 
-        // Game Disc fields (UPDATEGAMEDISC)
-        /// <summary>PS2 disc serial, e.g. "SCUS-97275". Used to identify the GameDisc row.</summary>
-        public string? GameSerial { get; set; }
-        /// <summary>PCSX2 CRC hash of the game executable (e.g. "EF123456"). Used to update GameDiscs.CRC.</summary>
-        public string? GameCrc { get; set; }
-        /// <summary>Human-readable game title (e.g. "SOCOM II"). Used when creating a new Game row.</summary>
-        public string? GameTitle { get; set; }
-
         // Memory Manager fields (MCPMEMORY_LIST / MCPMEMORY_GET / MCPMEMORY_ADD / MCPMEMORY_UPDATE / MCPMEMORY_DELETE / MCPMEMORY_IMPORT / MCPMEMORY_EXPORT)
         /// <summary>Database row ID of the MCP memory entry to operate on.</summary>
         public int? McpMemoryId { get; set; }
@@ -174,12 +162,6 @@ namespace CodeDesigner.Ps2.Bridge
         public string? McpMemoryName { get; set; }
         /// <summary>Markdown content of the MCP memory entry (MCPMEMORY_ADD / MCPMEMORY_UPDATE).</summary>
         public string? McpMemoryContent { get; set; }
-        /// <summary>
-        /// Optional agent ID to scope the memory entry to a specific agent.
-        /// Null (or omitted) means the memory is shared across all agents.
-        /// Use 0 to explicitly clear the agent association (convert to shared).
-        /// </summary>
-        public int? McpMemoryAgentId { get; set; }
 
         // Agent Profile fields (MCPAGENT_LIST / MCPAGENT_GET / MCPAGENT_ADD / MCPAGENT_UPDATE / MCPAGENT_DELETE / MCPAGENT_IMPORT / MCPAGENT_EXPORT)
         /// <summary>Database row ID of the MCP agent to operate on.</summary>
@@ -230,63 +212,6 @@ namespace CodeDesigner.Ps2.Bridge
         public string? Title { get; set; }
         /// <summary>Optional free-text description for SNAPSHOT (stored in DB metadata).</summary>
         public string? Description { get; set; }
-
-        // MCP Config fields (MCPCONFIG_LIST / MCPCONFIG_UPDATE)
-        /// <summary>Configuration key for MCPCONFIG_UPDATE.</summary>
-        public string? McpConfigKey { get; set; }
-        /// <summary>New value (tool description) for MCPCONFIG_UPDATE.</summary>
-        public string? McpConfigValue { get; set; }
-
-        // Pad / controller input fields (PADGETSTATE / PADSETBUTTON / PADSETANALOG / PADSETSTATE / PADGETTYPE)
-        /// <summary>Unified pad slot index (0–7).</summary>
-        public byte? PadSlot { get; set; }
-        /// <summary>Button index in PadDualshock2::Inputs (0–25) for PADSETBUTTON.</summary>
-        public byte? PadButtonIndex { get; set; }
-        /// <summary>Normalized button value (0.0–1.0) for PADSETBUTTON.</summary>
-        public float? PadButtonValue { get; set; }
-        /// <summary>Left stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
-        public byte? PadLx { get; set; }
-        /// <summary>Left stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
-        public byte? PadLy { get; set; }
-        /// <summary>Right stick X for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
-        public byte? PadRx { get; set; }
-        /// <summary>Right stick Y for PADSETANALOG / PADSETSTATE (0–255, 0x7F = centred).</summary>
-        public byte? PadRy { get; set; }
-        /// <summary>PS2 button bitmask for PADSETSTATE (reserved; button state derived from pressures).</summary>
-        public uint? PadButtons { get; set; }
-        /// <summary>16 pressure bytes for PADSETSTATE (in PadDualshock2::Inputs order).</summary>
-        public List<byte>? PadPressures { get; set; }
-
-        // DEV9 network bridge fields (NETCAPTURE / NETRECVCAPTURE / NETINJECT / NETINJECTTX / NETDISASSEMBLE / NETSETFILTER)
-        /// <summary>Enable flag for NETCAPTURE (true = enable, false = disable).</summary>
-        public bool? NetCaptureEnable { get; set; }
-        /// <summary>Direction filter for NETCAPTURE: 0 = both, 1 = TX only, 2 = RX only.</summary>
-        public byte? NetCaptureDirection { get; set; }
-        /// <summary>Maximum capture queue size for NETCAPTURE (0 → default 1000).</summary>
-        public ushort? NetCaptureMaxQueue { get; set; }
-        /// <summary>Maximum packets to drain for NETRECVCAPTURE.</summary>
-        public ushort? NetMaxPackets { get; set; }
-        /// <summary>Raw Ethernet frame bytes as base64 string for NETINJECT / NETINJECTTX / NETDISASSEMBLE.</summary>
-        public string? NetFrameData { get; set; }
-        /// <summary>Filter type for NETSETFILTER: 0=none, 1=protocol, 2=port, 3=IP.</summary>
-        public byte? NetFilterType { get; set; }
-        /// <summary>Protocol value for NETSETFILTER type 1: 0=all, 1=TCP, 2=UDP, 3=ICMP, 4=ARP, 5=DNS, 6=DHCP.</summary>
-        public byte? NetFilterProtocol { get; set; }
-        /// <summary>Port number for NETSETFILTER type 2.</summary>
-        public ushort? NetFilterPort { get; set; }
-        /// <summary>IPv4 address for NETSETFILTER type 3 (dotted decimal, e.g. "192.168.1.1").</summary>
-        public string? NetFilterIP { get; set; }
-        // CDS Cheat Engine fields (INJECTCHEATENGINE / UPDATECHEATENGINE / REMOVECHEATENGINE)
-        /// <summary>Hook address — the instruction to replace with a jump to the cheat engine.</summary>
-        public uint? HookAddress { get; set; }
-        /// <summary>Base address where the cheat engine code is placed in EE RAM (default 0x000C0000).</summary>
-        public uint? EngineBase { get; set; }
-        /// <summary>
-        /// CDS source text containing <c>freeze</c> / <c>cond</c> directives for use with
-        /// INJECTCHEATENGINE / UPDATECHEATENGINE.  When provided, takes precedence over
-        /// the GameShark-format <see cref="Data"/> field.
-        /// </summary>
-        public string? CdsSource { get; set; }
     }
 
     /// <summary>

@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -13,7 +12,6 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "list_agent_profiles")]
-    [DynamicDescription("list_agent_profiles_desc")]
     [Description("List all AI agent profiles stored in the CodeDesigner database. Returns id, name, status, isAgentLead, createdAt, and updatedAt for each profile.")]
     public async Task<string> ListAgentProfiles(CancellationToken cancellationToken = default)
     {
@@ -50,7 +48,6 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "get_agent_profile")]
-    [DynamicDescription("get_agent_profile_desc")]
     [Description("Get the full details of an agent profile by its database ID, including all Markdown fields (rules, guidelines, objective, session tasks, research).")]
     public async Task<string> GetAgentProfile(
         [Description("The integer ID of the agent profile (from list_agent_profiles).")] int id,
@@ -106,7 +103,6 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "create_agent_profile")]
-    [DynamicDescription("create_agent_profile_desc")]
     [Description("Create a new AI agent profile in the database. All Markdown text fields are optional and can be updated later with update_agent_profile.")]
     public async Task<string> CreateAgentProfile(
         [Description("Display name for the agent profile (must be unique).")] string name,
@@ -119,8 +115,6 @@ public sealed partial class CodeDesignerPs2Tools
         [Description("Tasks to run continuously throughout a session (Markdown).")] string? concurrentTasks = null,
         [Description("Tasks to execute at the end of each session (Markdown).")] string? sessionEnd = null,
         [Description("Research sources or knowledge bases to consult (Markdown).")] string? research = null,
-        [Description("Description of the agent's role and purpose (Markdown).")] string? description = null,
-        [Description("Recommended workflow steps for this agent (Markdown).")] string? recommendedWorkflow = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -139,15 +133,12 @@ public sealed partial class CodeDesignerPs2Tools
             McpAgentConcurrentTasks    = concurrentTasks,
             McpAgentSessionEnd         = sessionEnd,
             McpAgentResearch           = research,
-            McpAgentDescription        = description,
-            McpAgentRecommendedWorkflow = recommendedWorkflow,
         }, cancellationToken);
 
         return SimpleMessage(json);
     }
 
     [McpServerTool(Name = "update_agent_profile")]
-    [DynamicDescription("update_agent_profile_desc")]
     [Description("Update one or more fields of an existing agent profile. Pass null for any field you want to leave unchanged. Fields are replaced with the supplied values.")]
     public async Task<string> UpdateAgentProfile(
         [Description("The integer ID of the agent profile to update (from list_agent_profiles).")] int id,
@@ -160,8 +151,6 @@ public sealed partial class CodeDesignerPs2Tools
         [Description("New concurrent-tasks Markdown (or null to leave unchanged).")] string? concurrentTasks = null,
         [Description("New session-end Markdown (or null to leave unchanged).")] string? sessionEnd = null,
         [Description("New research Markdown (or null to leave unchanged).")] string? research = null,
-        [Description("Description of the agent's role and purpose (Markdown).")] string? description = null,
-        [Description("Recommended workflow steps for this agent (Markdown).")] string? recommendedWorkflow = null,
         CancellationToken cancellationToken = default)
     {
         var json = await bridge.SendAsync(new
@@ -177,15 +166,12 @@ public sealed partial class CodeDesignerPs2Tools
             McpAgentConcurrentTasks    = concurrentTasks,
             McpAgentSessionEnd         = sessionEnd,
             McpAgentResearch           = research,
-            McpAgentDescription        = description,
-            McpAgentRecommendedWorkflow = recommendedWorkflow,
         }, cancellationToken);
 
         return SimpleMessage(json);
     }
 
     [McpServerTool(Name = "delete_agent_profile")]
-    [DynamicDescription("delete_agent_profile_desc")]
     [Description("Permanently delete an agent profile from the database by ID. This action cannot be undone.")]
     public async Task<string> DeleteAgentProfile(
         [Description("The integer ID of the agent profile to delete (from list_agent_profiles).")] int id,

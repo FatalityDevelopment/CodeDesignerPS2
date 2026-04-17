@@ -4,13 +4,12 @@ import {
   ViewEncapsulation,
   ElementRef,
   signal,
-  computed,
   input,
   output,
   viewChild,
   effect,
 } from '@angular/core';
-import { HistoryEntry, RefEntry } from '../state/types';
+import { HistoryEntry } from '../state/types';
 
 /**
  * Data needed to open the edit overlay for a specific instruction.
@@ -57,7 +56,7 @@ export interface EditOverlaySaveEvent {
      (keydown.escape)="close()">
   <div id="edit-overlay-box">
     <div id="edit-overlay-header">
-      <span id="edit-overlay-title">Edit Address</span>
+      <span id="edit-overlay-title">{{ title() }}</span>
       <button id="edit-overlay-close" title="Close (Escape)" (click)="close()">&#xD7;</button>
     </div>
     <div id="edit-overlay-tabs">
@@ -67,21 +66,10 @@ export interface EditOverlaySaveEvent {
       <button class="edit-overlay-tab"
               [class.active]="activeTab() === 'history'"
               (click)="activeTab.set('history')">History</button>
-      <button class="edit-overlay-tab"
-              [class.active]="activeTab() === 'refs'"
-              (click)="onRefsTabClick()">References</button>
     </div>
     <div id="edit-overlay-tab-edit"
          class="edit-overlay-tab-content"
          [class.active]="activeTab() === 'edit'">
-      <div class="edit-overlay-field">
-        <label class="edit-overlay-label" for="edit-overlay-addr">Address</label>
-        <input type="text" id="edit-overlay-addr"
-               class="edit-overlay-input edit-overlay-input--disabled"
-               [value]="'0x' + addressHex()"
-               disabled
-               readonly />
-      </div>
       <div class="edit-overlay-field">
         <label class="edit-overlay-label" for="edit-overlay-instr-in">Instruction</label>
         <input type="text" id="edit-overlay-instr-in"
@@ -106,9 +94,7 @@ export interface EditOverlaySaveEvent {
                (keydown.enter)="focusLabel()"
                (keydown.escape)="close()" />
       </div>
-      <div id="edit-overlay-disasm-preview"
-           class="edit-overlay-preview"
-           [innerHTML]="colorizedDisasmPreview()"></div>
+      <div id="edit-overlay-disasm-preview" class="edit-overlay-preview">{{ disasmPreview() }}</div>
       <div class="edit-overlay-field">
         <label class="edit-overlay-label" for="edit-overlay-label-input">Label</label>
         <input type="text" id="edit-overlay-label-input"
@@ -149,35 +135,10 @@ export interface EditOverlaySaveEvent {
             <div class="edit-overlay-history-row">
               <span class="edit-overlay-history-value">{{ h.value }}</span>
               @if (h.disasm) {
-                <span class="edit-overlay-history-disasm"
-                      [innerHTML]="colorizeRegisters(h.disasm)"></span>
+                <span class="edit-overlay-history-disasm">{{ h.disasm }}</span>
               }
               <span class="edit-overlay-history-name">{{ h.name }}</span>
               <span class="edit-overlay-history-date">{{ h.date }}</span>
-            </div>
-          }
-        }
-      </div>
-    </div>
-    <div id="edit-overlay-tab-refs"
-         class="edit-overlay-tab-content"
-         [class.active]="activeTab() === 'refs'">
-      <div class="edit-overlay-refs-list">
-        @if (refsLoading()) {
-          <div class="edit-overlay-refs-loading">
-            <span class="edit-overlay-spinner"></span>
-            Searching references&hellip;
-          </div>
-        } @else if (refs().length === 0) {
-          <div class="edit-overlay-history-empty">No references found.</div>
-        } @else {
-          @for (r of refs(); track r.address) {
-            <div class="edit-overlay-refs-row">
-              <span class="edit-overlay-refs-addr">0x{{ r.address }}</span>
-              @if (r.instruction) {
-                <span class="edit-overlay-refs-instr"
-                      [innerHTML]="colorizeRegisters(r.instruction)"></span>
-              }
             </div>
           }
         }
@@ -213,15 +174,12 @@ export class EditOverlayComponent {
   /** Emitted when the overlay opens to request history. */
   readonly requestHistory = output<number>();
 
-  /** Emitted when the references tab is first activated. */
-  readonly requestRefs = output<number>();
-
   // ── State ───────────────────────────────────────────────────────────────────
 
   readonly visible = signal(false);
-  readonly activeTab = signal<'edit' | 'history' | 'refs'>('edit');
+  readonly activeTab = signal<'edit' | 'history'>('edit');
+  readonly title = signal('Edit Address');
 
-  readonly addressHex = signal('');
   readonly instrValue = signal('');
   readonly bytesValue = signal('');
   readonly labelValue = signal('');
@@ -231,17 +189,9 @@ export class EditOverlayComponent {
   readonly history = signal<HistoryEntry[]>([]);
   readonly historyLoading = signal(true);
 
-  readonly refs = signal<RefEntry[]>([]);
-  readonly refsLoading = signal(false);
-
-  /** Colorized version of disasmPreview for innerHTML binding. */
-  readonly colorizedDisasmPreview = computed(() => this.colorizeRegisters(this.disasmPreview()));
-
   private _address = 0;
+  private _addressHex = '';
   private _originalBytes = '';
-
-  /** Whether refs have been requested for the current overlay session. */
-  private _refsRequested = false;
 
   /** Tracks which field is focused to avoid feedback loops. */
   private _instrFocused = false;
@@ -283,7 +233,8 @@ export class EditOverlayComponent {
   /** Opens the overlay with the given instruction data. */
   open(data: EditOverlayOpenData): void {
     this._address = data.address;
-    this.addressHex.set(data.addressHex.toUpperCase());
+    this._addressHex = data.addressHex;
+    this.title.set('Edit Address — 0x' + data.addressHex.toUpperCase());
 
     const instrStr = (data.op || '') + (data.args ? '  ' + data.args : '');
     this.instrValue.set(instrStr);
@@ -299,10 +250,6 @@ export class EditOverlayComponent {
     this.activeTab.set('edit');
     this.historyLoading.set(true);
     this.history.set([]);
-
-    this.refs.set([]);
-    this.refsLoading.set(false);
-    this._refsRequested = false;
 
     this.requestHistory.emit(data.address);
     this.visible.set(true);
@@ -326,12 +273,6 @@ export class EditOverlayComponent {
   setHistory(entries: HistoryEntry[]): void {
     this.history.set(entries);
     this.historyLoading.set(false);
-  }
-
-  /** Sets the references list (called by parent when addressRefsResult arrives). */
-  setRefs(entries: RefEntry[]): void {
-    this.refs.set(entries);
-    this.refsLoading.set(false);
   }
 
   // ── Event Handlers ──────────────────────────────────────────────────────────
@@ -362,23 +303,13 @@ export class EditOverlayComponent {
     }
   }
 
-  onRefsTabClick(): void {
-    this.activeTab.set('refs');
-    if (!this._refsRequested) {
-      this._refsRequested = true;
-      this.refsLoading.set(true);
-      this.refs.set([]);
-      this.requestRefs.emit(this._address);
-    }
-  }
-
   save(): void {
     const newLabel = this.labelValue().trim();
     const newComment = this.commentValue().trim();
     const newBytes = this.bytesValue().replace(/\s+/g, '').toUpperCase();
     this.save$.emit({
       address: this._address,
-      addressHex: this.addressHex(),
+      addressHex: this._addressHex,
       newLabel,
       newComment,
       newBytes,
@@ -408,36 +339,8 @@ export class EditOverlayComponent {
     if (el) { el.focus(); el.select(); }
   }
 
-  /** Wrap GPR register tokens with color class spans. */
-  colorizeRegisters(text: string): string {
-    if (!text) return text;
-    return text.replace(this._GPR_REGEX, (match, name) => {
-      const cls = this._GPR_NAME_TO_CAT[name];
-      if (!cls) return match;
-      const dollar = match.startsWith('$') ? '$' : '';
-      return `<span class="${cls}">${dollar}${name}</span>`;
-    });
-  }
-
   /** Helper for template: cast Event.target to HTMLInputElement. */
   asInput(event: Event): HTMLInputElement {
     return event.target as HTMLInputElement;
   }
-
-  // ── Private ─────────────────────────────────────────────────────────────────
-
-  private readonly _GPR_NAME_TO_CAT: Readonly<Record<string, string>> = {
-    zero: 'dbg-reg-zero', at: 'dbg-reg-at',
-    v0: 'dbg-reg-v', v1: 'dbg-reg-v',
-    a0: 'dbg-reg-a', a1: 'dbg-reg-a', a2: 'dbg-reg-a', a3: 'dbg-reg-a',
-    t0: 'dbg-reg-t', t1: 'dbg-reg-t', t2: 'dbg-reg-t', t3: 'dbg-reg-t',
-    t4: 'dbg-reg-t', t5: 'dbg-reg-t', t6: 'dbg-reg-t', t7: 'dbg-reg-t',
-    t8: 'dbg-reg-t', t9: 'dbg-reg-t',
-    s0: 'dbg-reg-s', s1: 'dbg-reg-s', s2: 'dbg-reg-s', s3: 'dbg-reg-s',
-    s4: 'dbg-reg-s', s5: 'dbg-reg-s', s6: 'dbg-reg-s', s7: 'dbg-reg-s',
-    k0: 'dbg-reg-k', k1: 'dbg-reg-k',
-    gp: 'dbg-reg-special', sp: 'dbg-reg-special', fp: 'dbg-reg-special', ra: 'dbg-reg-special',
-  };
-
-  private readonly _GPR_REGEX = /\$?(zero|at|v[01]|a[0-3]|t[0-9]|s[0-7]|k[01]|gp|sp|fp|ra)(?![A-Za-z0-9_])/g;
 }

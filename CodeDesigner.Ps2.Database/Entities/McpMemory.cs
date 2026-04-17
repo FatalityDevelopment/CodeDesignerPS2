@@ -20,16 +20,6 @@ public class McpMemory
     /// </summary>
     public string? GameId { get; set; }
 
-    /// <summary>
-    /// Optional FK to the <see cref="McpAgent"/> this memory belongs to.
-    /// When set the memory is agent-specific and only visible to that agent.
-    /// When null the memory is shared across all agents.
-    /// </summary>
-    public int? AgentId { get; set; }
-
-    /// <summary>Navigation property to the owning agent (null for shared memories).</summary>
-    public McpAgent? Agent { get; set; }
-
     /// <summary>UTC timestamp when the memory was first created.</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

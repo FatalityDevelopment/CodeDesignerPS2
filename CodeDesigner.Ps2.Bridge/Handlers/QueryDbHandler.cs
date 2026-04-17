@@ -11,27 +11,41 @@ namespace CodeDesigner.Ps2.Bridge
     {
         // ── QUERYDB ───────────────────────────────────────────────────────────
 
-        // DDL blocklist — prevent destructive schema operations.
-        // DML (INSERT / UPDATE / DELETE) is intentionally allowed so the MCP
-        // agent can bulk-import data directly via the query_db tool.
-        private static readonly string[] _queryDbDdlBlocklist =
+        // First-pass blocklist: reject obvious non-SELECT statements early with a
+        // friendly error, before the transaction safety net kicks in.
+        private static readonly string[] _queryDbBlocklist =
         [
-            "DROP ", "CREATE ", "ALTER ", "ATTACH ", "DETACH ", "VACUUM",
+            "INSERT ", "UPDATE ", "DELETE ", "DROP ", "CREATE ", "ALTER ",
+            "ATTACH ", "DETACH ", "VACUUM",
         ];
 
         /// <summary>
-        /// Handle QUERYDB — execute a SQL statement against the CodeDesigner
-        /// SQL Server database and return the results as JSON.
+        /// Handle QUERYDB — execute a read-only SELECT statement against the
+        /// CodeDesigner SQLite database and return the results as JSON rows.
         /// <para>
-        /// SELECT / CTE statements return the full result set as row objects.
-        /// DML statements (INSERT / UPDATE / DELETE) are committed and return the
-        /// number of rows affected — useful for bulk-importing memory entries or
-        /// cheat data without going through the seeder pipeline.
+        /// Only SELECT and WITH … SELECT (CTE) statements are permitted.
+        /// Every query runs inside a transaction that is unconditionally rolled
+        /// back, ensuring no mutations can persist even if the blocklist is
+        /// somehow bypassed.
         /// </para>
-        /// <para>
-        /// DDL operations (DROP, CREATE, ALTER, ATTACH, DETACH, VACUUM) are
-        /// blocked to prevent accidental schema destruction.
-        /// </para>
+        /// <para>Available tables:</para>
+        /// <list type="bullet">
+        ///   <item><description>Settings (Key, Value, Description, UpdatedAt)</description></item>
+        ///   <item><description>LabelSets (Id, SetName, GameId, IsBuiltIn)</description></item>
+        ///   <item><description>Labels (Id, LabelSetId, Address, Name, Type, Hidden, Comment)</description></item>
+        ///   <item><description>LabelMembers (Id, LabelId, Offset, Name)</description></item>
+        ///   <item><description>Games (Id, Title, Description)</description></item>
+        ///   <item><description>GameRegions (Id, Name)</description></item>
+        ///   <item><description>GameDiscs (Id, GameId, GameRegionId, Serial, CRC, IsoPath)</description></item>
+        ///   <item><description>Snapshots (Id, GameId, Title, Description, SnapshotPath, SnapshotDateTime)</description></item>
+        ///   <item><description>CheatLists (Id, GameId, GameDiscId, Title, Description, CreatedAt, UpdatedAt)</description></item>
+        ///   <item><description>Cheats (Id, CheatListId, Label, Description, Author, IsEnabled, SortOrder)</description></item>
+        ///   <item><description>CheatLines (Id, CheatId, Code, SortOrder)</description></item>
+        ///   <item><description>McpConfig (Id, Key, Value)</description></item>
+        ///   <item><description>McpMemory (Id, Name, Content)</description></item>
+        ///   <item><description>McpAgents (Id, Name)</description></item>
+        ///   <item><description>McpAgentTasks (Id, McpAgentId, Phase, SortOrder)</description></item>
+        /// </list>
         /// </summary>
         private string HandleQueryDb(string? sql)
         {
@@ -40,19 +54,22 @@ namespace CodeDesigner.Ps2.Bridge
             if (string.IsNullOrWhiteSpace(sql))
                 return CreateErrorResponse("SqlQuery is required for QUERYDB");
 
-            // Block DDL — schema mutations are never permitted via this path.
-            var upper = sql.ToUpperInvariant();
-            foreach (var ddl in _queryDbDdlBlocklist)
-            {
-                if (upper.Contains(ddl, StringComparison.Ordinal))
-                    return CreateErrorResponse(
-                        $"QUERYDB does not permit '{ddl.TrimEnd()}' statements — use EF Core migrations for schema changes");
-            }
-
-            // Determine whether this is a read (SELECT/CTE) or write (DML) statement.
             var trimmed = sql.TrimStart();
-            bool isSelect = trimmed.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
-                         || trimmed.StartsWith("WITH",   StringComparison.OrdinalIgnoreCase);
+
+            // Only allow SELECT or WITH … SELECT (CTEs).
+            if (!trimmed.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) &&
+                !trimmed.StartsWith("WITH",   StringComparison.OrdinalIgnoreCase))
+                return CreateErrorResponse(
+                    "QUERYDB only supports read-only SELECT queries (or CTEs starting with WITH … SELECT)");
+
+            // Quick blocklist check for obvious mutating statements.
+            var upper = sql.ToUpperInvariant();
+            foreach (var bad in _queryDbBlocklist)
+            {
+                if (upper.Contains(bad, StringComparison.Ordinal))
+                    return CreateErrorResponse(
+                        $"QUERYDB does not permit '{bad.TrimEnd()}' statements — only SELECT is allowed");
+            }
 
             try
             {
@@ -60,11 +77,16 @@ namespace CodeDesigner.Ps2.Bridge
                 if (conn.State != ConnectionState.Open)
                     conn.Open();
 
-                if (isSelect)
+                // Run inside a transaction that is always rolled back.
+                // This is the primary safety mechanism: even if a mutating statement
+                // somehow passes the blocklist above, the rollback guarantees that
+                // the database is never modified.
+                using DbTransaction txn = conn.BeginTransaction();
+                try
                 {
-                    // ── Read path: no transaction needed ─────────────────────
                     using DbCommand cmd = conn.CreateCommand();
-                    cmd.CommandText = sql;
+                    cmd.CommandText  = sql;
+                    cmd.Transaction  = txn;
 
                     var rows = new List<Dictionary<string, object?>>();
                     using DbDataReader reader = cmd.ExecuteReader();
@@ -89,32 +111,10 @@ namespace CodeDesigner.Ps2.Bridge
                         DbRowCount = rows.Count,
                     });
                 }
-                else
+                finally
                 {
-                    // ── Write path: commit on success, rollback on error ──────
-                    using DbTransaction txn = conn.BeginTransaction();
-                    try
-                    {
-                        using DbCommand cmd = conn.CreateCommand();
-                        cmd.CommandText = sql;
-                        cmd.Transaction = txn;
-
-                        int affected = cmd.ExecuteNonQuery();
-                        txn.Commit();
-
-                        return JsonSerializer.Serialize(new CommandResponse
-                        {
-                            Success    = true,
-                            Command    = "QUERYDB",
-                            Message    = $"{affected} row(s) affected",
-                            DbRowCount = affected,
-                        });
-                    }
-                    catch
-                    {
-                        try { txn.Rollback(); } catch { /* connection already closed */ }
-                        throw;
-                    }
+                    // Always roll back — this is the key safety guarantee.
+                    try { txn.Rollback(); } catch { /* connection already closed, ignore */ }
                 }
             }
             catch (Exception ex)

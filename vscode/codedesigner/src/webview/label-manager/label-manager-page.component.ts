@@ -11,8 +11,6 @@ import {
   LabelManagerOverlayComponent,
   LabelManagerAction,
   LabelSetPayload,
-  LabelManagerEntry,
-  ScannerKind,
 } from '../disasm-editor/components/label-manager-overlay.component';
 import '../disasm-editor/disasm-editor.css';
 import './label-manager-page.css';
@@ -71,12 +69,6 @@ export class LabelManagerPageComponent implements AfterViewInit {
             break;
           case 'labelManagerExport':
             this._handleExport(data['json'] as string, data['setName'] as string);
-            break;
-          case 'labelManagerScanResults':
-            lm.setScanResults(
-              data['scannerKind'] as ScannerKind,
-              (data['entries'] as LabelManagerEntry[]) ?? [],
-            );
             break;
           case 'prefillAddress':
             lm.openWithAddress(data['address'] as string);

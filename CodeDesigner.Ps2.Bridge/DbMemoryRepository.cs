@@ -35,69 +35,16 @@ namespace CodeDesigner.Ps2.Bridge
             return await query.OrderBy(m => m.Name).ToListAsync();
         }
 
-        /// <summary>Returns all memories belonging to the specified agent.</summary>
-        internal async Task<List<McpMemory>> ListForAgentAsync(int agentId)
-            => await _db.McpMemories
-                .Where(m => m.AgentId == agentId)
-                .OrderBy(m => m.Name)
-                .ToListAsync();
-
-        /// <summary>Returns all shared memories (AgentId is null).</summary>
-        internal async Task<List<McpMemory>> ListSharedAsync()
-            => await _db.McpMemories
-                .Where(m => m.AgentId == null)
-                .OrderBy(m => m.Name)
-                .ToListAsync();
-
         /// <summary>Returns the entry with the given <paramref name="id"/>, or <c>null</c> if not found.</summary>
         internal async Task<McpMemory?> GetAsync(int id)
             => await _db.McpMemories.FindAsync(id);
-
-        /// <summary>Returns the entry with the given slug <paramref name="name"/>, or <c>null</c> if not found.</summary>
-        internal async Task<McpMemory?> FindByNameAsync(string name)
-            => await _db.McpMemories.FirstOrDefaultAsync(m => m.Name == name);
-
-        /// <summary>
-        /// Creates or overwrites a memory entry by slug name.
-        /// This is an atomic upsert used by the Bridge socket's MCPMEMORY_UPSERT command
-        /// so all MCP agent writes are serialized through the Bridge's shared
-        /// <see cref="CodeDesignerDbContext"/>.
-        /// </summary>
-        internal async Task<McpMemory> UpsertAsync(string name, string content, string? gameId = null, int? agentId = null)
-        {
-            var existing = await _db.McpMemories.FirstOrDefaultAsync(m => m.Name == name);
-            if (existing is null)
-            {
-                var entry = new McpMemory
-                {
-                    Name      = name,
-                    Content   = content,
-                    GameId    = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim(),
-                    AgentId   = NormalizeAgentId(agentId),
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                };
-                _db.McpMemories.Add(entry);
-                await _db.SaveChangesAsync();
-                return entry;
-            }
-
-            existing.Content   = content;
-            existing.UpdatedAt = DateTime.UtcNow;
-            if (gameId is not null)
-                existing.GameId = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim();
-            if (agentId.HasValue)
-                existing.AgentId = NormalizeAgentId(agentId);
-            await _db.SaveChangesAsync();
-            return existing;
-        }
 
         /// <summary>
         /// Creates a new memory entry.
         /// Throws <see cref="InvalidOperationException"/> when a entry with the same
         /// <paramref name="name"/> already exists.
         /// </summary>
-        internal async Task<McpMemory> AddAsync(string name, string content, string? gameId = null, int? agentId = null)
+        internal async Task<McpMemory> AddAsync(string name, string content, string? gameId = null)
         {
             bool exists = await _db.McpMemories.AnyAsync(m => m.Name == name);
             if (exists)
@@ -108,7 +55,6 @@ namespace CodeDesigner.Ps2.Bridge
                 Name      = name,
                 Content   = content,
                 GameId    = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim(),
-                AgentId   = NormalizeAgentId(agentId),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };
@@ -123,7 +69,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// Pass <c>null</c> to leave a field unchanged.
         /// Throws <see cref="KeyNotFoundException"/> when the entry does not exist.
         /// </summary>
-        internal async Task<McpMemory> UpdateAsync(int id, string? name = null, string? content = null, string? gameId = null, int? agentId = null)
+        internal async Task<McpMemory> UpdateAsync(int id, string? name = null, string? content = null, string? gameId = null)
         {
             var entry = await _db.McpMemories.FindAsync(id)
                 ?? throw new KeyNotFoundException($"Memory entry {id} not found.");
@@ -144,9 +90,6 @@ namespace CodeDesigner.Ps2.Bridge
             if (gameId is not null)
                 entry.GameId = string.IsNullOrWhiteSpace(gameId) ? null : gameId.Trim();
 
-            if (agentId.HasValue)
-                entry.AgentId = NormalizeAgentId(agentId);
-
             entry.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
             return entry;
@@ -165,13 +108,6 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         // ── Import / export ────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Normalizes an agent ID: returns null when the caller passes null or the
-        /// sentinel value 0 (used by callers that want to clear an agent association).
-        /// </summary>
-        private static int? NormalizeAgentId(int? agentId)
-            => agentId is null or 0 ? null : agentId;
 
         /// <summary>
         /// Imports a Markdown file from disk.

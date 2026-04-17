@@ -1,15 +1,13 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as child_process from 'child_process';
 import { getOutputChannel, getDebugChannel } from '../../extension';
-import { SocketClient, LabelEntry, DiscElfEntry, CdsSidecarResult, CdsDiagnostic } from '../../socketClient';
+import { SocketClient, LabelEntry, DiscElfEntry } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { AiConfigProvider } from '../aiConfig/aiConfigProvider';
 import { McpMemoryEditorProvider } from '../mcpMemoryEditor/mcpMemoryEditorProvider';
-import { PacketViewerProvider } from '../packetViewer/packetViewerProvider';
 import { ArchiveCheat } from '../../webview/disasm-panel/types';
 
 interface EmuSettings {
@@ -41,23 +39,14 @@ interface SnapshotInfoFile {
     regions: Array<{ Label: string; File: string; BaseAddress: number; Size: number }>;
 }
 
-/**
- * Memory regions that are always opened as live views on emulator connect.
- * Rarely-used regions (IOP RAM, BIOS ROM, Scratchpad) are kept in a separate
- * list so they can be opened on-demand via the sidebar menu without adding
- * constant socket traffic and causing flickering in the primary EE view.
- */
-const LIVE_REGIONS_DEFAULT = [
+/** Memory regions exposed as separate editor windows when the emulator is running. */
+const LIVE_REGIONS = [
     // EE Main RAM: shown at the physical base (0x00000000–0x01FFFFFF, 32 MB).
     // Using physical addresses keeps rows consistent with the memory map table
     // regardless of which virtual alias the CPU uses (KSEG0 0x80000000, uncached
     // 0x20100000, or uncached+accelerated 0x30100000).  HandleReadMem accepts
     // physical addresses for the EE region directly.
     { region: 'ee',  address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
-];
-
-/** Rarely-used memory regions available on-demand via the sidebar menu. */
-const LIVE_REGIONS_OPTIONAL = [
     // IOP RAM: shown at the EE physical base (0x1C000000–0x1DFFFFFF, 4 MB).
     // Per the PS2 memory map, IOP RAM is mirrored into EE address space at
     // 0xBC000000 (logical) → 0x1C000000 (physical).  Using the physical base
@@ -73,9 +62,6 @@ const LIVE_REGIONS_OPTIONAL = [
     { region: 'ee',  address: 0x1FC00000, size:  4 * 1024 * 1024, label: 'BIOS ROM'      },
     { region: 'ee',  address: 0x70000000, size:       16 * 1024,  label: 'Scratchpad'    },
 ];
-
-/** All memory regions combined — used when the user explicitly opens all views (restart, etc.). */
-const LIVE_REGIONS = [...LIVE_REGIONS_DEFAULT, ...LIVE_REGIONS_OPTIONAL];
 
 /** URL and branch for the cheat code archive repository. */
 const ARCHIVE_REPO_URL    = 'https://github.com/TylerDev888/CheatCodeArchive.git';
@@ -104,22 +90,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _archiveCheatType: string = '';
     private _activeCdsFilePath: string = '';
     private _activeCdsContent: string = '';
-    /** Sidecar commands (assert/breakpoint/watchpoint) from the most recent successful CDS compilation. */
-    private _lastCdsSidecars: CdsSidecarResult[] = [];
     /** Diagnostic collection for CDS compilation errors — shows red squiggles in the editor. */
     private _cdsDiagnostics!: vscode.DiagnosticCollection;
-    /** Debounce timer for background CDS validation. */
-    private _cdsValidationTimer: ReturnType<typeof setTimeout> | undefined;
-    /** Monotonic token used to ignore stale async CDS validation responses. */
-    private _cdsValidationVersion = 0;
     /** Path to the extension's global storage directory (set in register()). */
     private _globalStoragePath: string = '';
     /** In-flight archive sync promise — reused so concurrent callers don't start duplicate clones. */
     private _archiveSyncPromise: Promise<void> | null = null;
-    /** Interval timer for live Joker pad-status polling (cleared on close/disconnect). */
-    private _jokerPadPollTimer: ReturnType<typeof setInterval> | undefined;
-    /** Last pad button bitmask sent to the webview — used to skip duplicate messages. */
-    private _lastJokerPadButtons: number | undefined;
 
     /** Returns the workspace root directory (used by DisasmEditorProvider for history lookup). */
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
@@ -139,23 +115,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     ) {
         this._mcpMemoryEditorProvider = new McpMemoryEditorProvider(socketClient);
         this._aiConfigProvider        = new AiConfigProvider(_extensionUri, socketClient);
-        this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient);
     }
 
     private readonly _mcpMemoryEditorProvider: McpMemoryEditorProvider;
     private readonly _aiConfigProvider: AiConfigProvider;
-    private readonly _packetViewerProvider: PacketViewerProvider;
 
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
         this.extensionPath = context.extensionPath;
         this._globalStoragePath = context.globalStorageUri.fsPath;
-
-        // Initialise workspaceRoot early so that any feature relying on it
-        // (label manager, snapshots, settings persistence) works even before
-        // resolveWebviewView is called — e.g. when the socket auto-connects
-        // at startup before the sidebar becomes visible.
-        this.loadEmuSettings();
 
         // Sync the CheatCodeArchive repo in the background so cheats are
         // available without blocking the UI.
@@ -200,7 +168,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         context.subscriptions.push(
             vscode.window.onDidChangeActiveTextEditor(editor => {
                 this._syncActiveCdsEditor(editor);
-                this._scheduleValidateCds(50);
             })
         );
         // Sync content when the document is modified
@@ -208,7 +175,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             vscode.workspace.onDidChangeTextDocument(e => {
                 if (e.document.uri.fsPath === this._activeCdsFilePath) {
                     this._activeCdsContent = e.document.getText();
-                    this._scheduleValidateCds();
                 }
             })
         );
@@ -222,15 +188,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         this._activeCdsFilePath = '';
                         this._activeCdsContent  = '';
                     }
-                    if (this._cdsValidationTimer) {
-                        clearTimeout(this._cdsValidationTimer);
-                        this._cdsValidationTimer = undefined;
-                    }
                 }
             })
         );
-
-        this._syncActiveCdsEditor(vscode.window.activeTextEditor);
     }
 
     resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -277,9 +237,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                         msg.biosPath ?? this.selectedBiosPath,
                         msg.gamePath ?? this.selectedGamePath
                     );
-                    break;
-                case 'startNetwork':
-                    this.handleStartNetwork();
                     break;
                 case 'startPcsx2':
                     this.handleStartPcsx2(
@@ -346,26 +303,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'applyAllArchiveCheats':
                     await this.handleApplyAllArchiveCheats();
                     break;
-                case 'startJokerPadPoll':
-                    this.startJokerPadPoll();
-                    break;
-                case 'stopJokerPadPoll':
-                    this.stopJokerPadPoll();
-                    break;
                 case 'compileCds':
                     await this.handleCompileCds();
                     break;
                 case 'addPatch':
                     await this.handleAddPatch(msg.codes ?? '');
                     break;
-                case 'openMarkdownHelp':
-                    await this.handleOpenMarkdownHelp(msg.file ?? '');
-                    break;
                 case 'focusRegion':
                     this.editorProvider.focusLivePanelByLabel(msg.label ?? '');
-                    break;
-                case 'openMemoryView':
-                    await this.openOptionalMemoryView(msg.label ?? '');
                     break;
                 case 'listDiscElfs':
                     await this.handleListDiscElfs(msg.gamePath ?? this.selectedGamePath);
@@ -412,34 +357,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'openAiConfig':
                     this._aiConfigProvider.open();
                     break;
-                // ── Packet Viewer ─────────────────────────────────────────
-                case 'openPacketViewer':
-                    this._packetViewerProvider.open();
-                    break;
-                // ── Label Manager ─────────────────────────────────────────
-                case 'openLabelManager':
-                    this.editorProvider.openLabelManagerTab();
-                    break;
-                // ── Memory Card Manager ───────────────────────────────────
-                case 'openMemoryCard':
-                    this.editorProvider.openMemoryCardOverlay();
-                    break;
-                // ── HDD Image Manager ─────────────────────────────────────
-                case 'openHdd':
-                    this.editorProvider.openHddOverlay();
-                    break;
-                // ── Cheat Code Converter ──────────────────────────────────
-                case 'openConverter':
-                    this.editorProvider.openConverterOverlay();
-                    break;
-                // ── Cheat Code Porter ─────────────────────────────────────
-                case 'openPorter':
-                    this.editorProvider.openPorterOverlay();
-                    break;
-                // ── Memory Scanner ────────────────────────────────────────
-                case 'openScanner':
-                    this.editorProvider.openScannerOverlay();
-                    break;
                 // ── Follow-AI mode toggle ─────────────────────────────────
                 case 'toggleFollowAi': {
                     const enabled = !!msg.enabled;
@@ -458,115 +375,22 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /** Maximum number of parent directories to climb when searching for emu-settings.json. */
     private static readonly MAX_PARENT_SEARCH_DEPTH = 6;
 
-    /**
-     * Returns the CodeDesigner install directory — the same location as the
-     * SQLite database.  Mirrors the C# DatabasePaths.GetInstallDirectory() logic.
-     *
-     * Windows  → %LOCALAPPDATA%\CodeDesigner\
-     * Linux/macOS → ~/.local/share/CodeDesigner/
-     */
-    private static getInstallDirectory(): string {
-        if (process.platform === 'win32') {
-            const localAppData = process.env.LOCALAPPDATA
-                ?? path.join(os.homedir(), 'AppData', 'Local');
-            return path.join(localAppData, 'CodeDesigner');
-        }
-        return path.join(os.homedir(), '.local', 'share', 'CodeDesigner');
-    }
-
-    /**
-     * Returns the path to CodeDesigner.Ps2.Bridge.exe in the install directory,
-     * or null if it does not exist.
-     */
-    private static findBridgeExe(): string | null {
-        const installDir = DisasmPanelProvider.getInstallDirectory();
-        const exeName = process.platform === 'win32'
-            ? 'CodeDesigner.Ps2.Bridge.exe'
-            : 'CodeDesigner.Ps2.Bridge';
-        const candidate = path.join(installDir, exeName);
-        return fs.existsSync(candidate) ? candidate : null;
-    }
-
-    /**
-     * Returns BIOS files discovered in the install directory's Resources/Bios
-     * sub-folder (populated when Bridge is built and deployed).
-     */
-    private static detectBiosFiles(): Array<{ name: string; path: string }> {
-        const biosDir = path.join(DisasmPanelProvider.getInstallDirectory(), 'Resources', 'Bios');
-        const results: Array<{ name: string; path: string }> = [];
-        try {
-            if (!fs.existsSync(biosDir)) { return results; }
-            for (const file of fs.readdirSync(biosDir)) {
-                if (/\.bin$/i.test(file)) {
-                    results.push({
-                        name: path.basename(file, path.extname(file)),
-                        path: path.join(biosDir, file),
-                    });
-                }
-            }
-        } catch { /* ignore read errors */ }
-        return results;
-    }
-
-    /**
-     * Tries to locate a PCSX2 executable.
-     * Resolution order:
-     * 1. `pcsx2` subfolder inside the CodeDesigner install directory
-     *    (e.g. `%LOCALAPPDATA%\CodeDesigner\pcsx2\pcsx2-qt.exe`).
-     * 2. Standard OS-specific installation paths.
-     * Returns the first path found, or null if PCSX2 is not detected.
-     */
-    private static detectPcsx2Exe(): string | null {
-        const installDir = DisasmPanelProvider.getInstallDirectory();
-        const candidates: string[] = [];
-
-        if (process.platform === 'win32') {
-            // 1. pcsx2 subfolder inside the install directory (preferred)
-            candidates.push(path.join(installDir, 'pcsx2', 'pcsx2-qt.exe'));
-            // 2. Standard Windows installation paths
-            const pf    = process.env.PROGRAMFILES         ?? 'C:\\Program Files';
-            const pf86  = process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)';
-            const local = process.env.LOCALAPPDATA         ?? '';
-            candidates.push(
-                path.join(pf,   'PCSX2', 'pcsx2-qt.exe'),
-                path.join(pf86, 'PCSX2', 'pcsx2-qt.exe'),
-                ...(local ? [path.join(local, 'Programs', 'PCSX2', 'pcsx2-qt.exe')] : []),
-            );
-        } else if (process.platform === 'darwin') {
-            candidates.push(
-                path.join(installDir, 'pcsx2', 'PCSX2'),
-                '/Applications/PCSX2.app/Contents/MacOS/PCSX2',
-            );
-        } else {
-            candidates.push(
-                path.join(installDir, 'pcsx2', 'pcsx2'),
-                '/usr/bin/pcsx2',
-                '/usr/local/bin/pcsx2',
-                '/snap/bin/pcsx2',
-            );
-        }
-        return candidates.find(c => c && fs.existsSync(c)) ?? null;
-    }
-
     private loadEmuSettings(): void {
-        let settingsFound = false;
-
         // 1. Try every open workspace folder
         for (const folder of vscode.workspace.workspaceFolders ?? []) {
             if (this.tryLoadSettingsFrom(path.join(folder.uri.fsPath, 'emu-settings.json'))) {
-                settingsFound = true;
-                break;
+                return;
             }
         }
 
         // 2. Walk up from the extension install directory (handles the case where
         //    the developer opens vscode/codedesigner directly and the repo root is
         //    a few levels above).
-        if (!settingsFound && this.extensionPath) {
+        if (this.extensionPath) {
             let dir = this.extensionPath;
             for (let i = 0; i < DisasmPanelProvider.MAX_PARENT_SEARCH_DEPTH; i++) {
                 if (this.tryLoadSettingsFrom(path.join(dir, 'emu-settings.json'))) {
-                    break;
+                    return;
                 }
                 const parent = path.dirname(dir);
                 if (parent === dir) { break; }   // reached filesystem root
@@ -574,39 +398,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // 2b. If no settings file was found anywhere, still set workspaceRoot so
-        //     that features depending on it (label manager, snapshot loading, save
-        //     preferences) can function.  The settings file will be created here
-        //     once the user saves settings.  Prefer the first open workspace folder;
-        //     fall back to the extension install directory.
-        if (!this.workspaceRoot) {
-            const firstFolder = vscode.workspace.workspaceFolders?.[0];
-            if (firstFolder) {
-                this.workspaceRoot = firstFolder.uri.fsPath;
-            } else if (this.extensionPath) {
-                this.workspaceRoot = this.extensionPath;
-            }
-        }
-
-        // 3. Auto-detect the PCSX2 executable and add it to the emulators list.
-        //    Only PCSX2 entries appear in the selector; the Bridge is always
-        //    resolved from the install directory, never from this list.
-        //    BIOS files must be provided and configured by the user.
-        const pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe();
-        if (pcsx2Exe) {
-            const existing = (this.settings.emulators ?? []).filter(e => this.isPcsx2Entry(e));
-            if (!existing.some(e => e.path === pcsx2Exe)) {
-                this.settings.emulators = [
-                    { type: 'PCSX2', path: pcsx2Exe },
-                    ...existing,
-                ];
-            } else {
-                this.settings.emulators = existing;
-            }
-        } else {
-            // Keep only PCSX2 entries — CodeDesigner Bridge is auto-detected.
-            this.settings.emulators = (this.settings.emulators ?? []).filter(e => this.isPcsx2Entry(e));
-        }
+        getOutputChannel().warn('Could not find emu-settings.json in any workspace folder or extension directory tree.');
+        this.settings = {};
     }
 
     /** Attempt to load settings from a specific file path. Returns true on success. */
@@ -649,7 +442,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             this.selectedEmulatorPath = prefs.selectedEmulator ?? '';
             this.selectedBiosPath     = prefs.selectedBios     ?? '';
             this.selectedGamePath     = prefs.selectedGame     ?? '';
-            this.selectedGameName = this.selectedGamePath
+            this.selectedGameName     = this.selectedGamePath
                 ? path.basename(this.selectedGamePath, path.extname(this.selectedGamePath))
                 : '';
             this.loadSnapshotsForGame(this.selectedGameName);
@@ -661,20 +454,23 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /**
-     * Persist the current emulator settings (games list, BIOS list, emulators list,
-     * and PCSX2 connection settings).
-     *
-     * Strategy:
-     *  - Connected  → write to the DB only (DB is the authoritative store).
-     *  - Disconnected → write to emu-settings.json as a local fallback.
-     */
+    /** Save the current emu-settings.json back to the workspace root directory. */
     private async saveEmuSettings(): Promise<void> {
+        if (!this.workspaceRoot) { return; }
+        const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
+        try {
+            await fs.promises.writeFile(settingsPath, JSON.stringify(this.settings, null, 2), 'utf-8');
+        } catch (err: any) {
+            getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
+        }
+
+        // Also persist to the DB so the server can serve them via GETALLSETTINGS.
+        // These are written here and read back in loadUserPreferencesFromDb() so the
+        // in-memory state stays consistent with the DB on subsequent connections.
         if (this.socketClient.isConnected()) {
-            // DB is authoritative — persist there only.
             try {
-                await this.socketClient.setSetting('emu.games',     JSON.stringify(this.settings.games     ?? []));
                 await this.socketClient.setSetting('emu.bios',      JSON.stringify(this.settings.bios      ?? []));
+                await this.socketClient.setSetting('emu.games',     JSON.stringify(this.settings.games     ?? []));
                 await this.socketClient.setSetting('emu.emulators', JSON.stringify(this.settings.emulators ?? []));
                 if (this.settings.pcsx2?.host != null)
                     await this.socketClient.setSetting('emu.pcsx2.host', String(this.settings.pcsx2.host));
@@ -683,40 +479,26 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             } catch (err: any) {
                 getOutputChannel().debug(`Could not persist emu-settings to DB: ${err?.message ?? err}`);
             }
-        } else {
-            // Offline fallback — write to the JSON file only.
-            if (!this.workspaceRoot) { return; }
-            const settingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
-            const toSave = {
-                bios:      this.settings.bios,
-                games:     this.settings.games,
-                emulators: this.settings.emulators,
-                pcsx2:     this.settings.pcsx2,
-            };
-            try {
-                await fs.promises.writeFile(settingsPath, JSON.stringify(toSave, null, 2), 'utf-8');
-            } catch (err: any) {
-                getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
-            }
         }
     }
 
-    /**
-     * Persist the currently selected emulator, bios, and game paths.
-     *
-     * Strategy (mirrors saveEmuSettings):
-     *  - Connected  → write to DB only.
-     *  - Disconnected → write to codedesigner-settings.json as a local fallback.
-     */
+    /** Save current dropdown selections to codedesigner-settings.json in the workspace root. */
     private async saveUserPreferences(): Promise<void> {
+        const settingsPath = this.settingsJsonPath;
+        if (!settingsPath) { return; }
         const prefs: UserPreferences = {
             selectedEmulator: this.selectedEmulatorPath,
             selectedBios:     this.selectedBiosPath,
             selectedGame:     this.selectedGamePath,
         };
+        try {
+            await fs.promises.writeFile(settingsPath, JSON.stringify(prefs, null, 2), 'utf-8');
+        } catch (err: any) {
+            getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
+        }
 
+        // Also persist to the DB so the server can recall them on next startup.
         if (this.socketClient.isConnected()) {
-            // DB is authoritative — persist there only.
             try {
                 await this.socketClient.setSetting('ui.selectedEmulator', this.selectedEmulatorPath);
                 await this.socketClient.setSetting('ui.selectedBios',     this.selectedBiosPath);
@@ -724,40 +506,25 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             } catch (err: any) {
                 getOutputChannel().debug(`Could not persist preferences to DB: ${err?.message ?? err}`);
             }
-        } else {
-            // Offline fallback — write to the JSON file only.
-            const settingsPath = this.settingsJsonPath;
-            if (!settingsPath) { return; }
-            try {
-                await fs.promises.writeFile(settingsPath, JSON.stringify(prefs, null, 2), 'utf-8');
-            } catch (err: any) {
-                getOutputChannel().debug(`Could not save ${settingsPath}: ${err?.message ?? err}`);
-            }
         }
     }
 
     /**
-     * Pull user preferences and emulator settings from the server-side DB after connect.
-     * DB values take priority over any local JSON file values because they represent the
-     * most recently saved state.
+     * Pull user preferences and emulator settings from the server-side DB after connect
+     * and merge them into the local state.  DB values take priority over the JSON file
+     * values because they represent the most recently saved state.
      */
     private async loadUserPreferencesFromDb(): Promise<void> {
         try {
             const settings = await this.socketClient.getAllSettings();
-            const emulator = settings['ui.selectedEmulator'];
-            const bios     = settings['ui.selectedBios'];
-            const game     = settings['ui.selectedGame'];
+            const emu  = settings['ui.selectedEmulator'];
+            const bios = settings['ui.selectedBios'];
+            const game = settings['ui.selectedGame'];
 
             let changed = false;
-            if (emulator != null && emulator !== this.selectedEmulatorPath) {
-                this.selectedEmulatorPath = emulator;
-                changed = true;
-            }
-            if (bios != null && bios !== this.selectedBiosPath) {
-                this.selectedBiosPath = bios;
-                changed = true;
-            }
-            if (game && game !== this.selectedGamePath) {
+            if (emu  && emu  !== this.selectedEmulatorPath) { this.selectedEmulatorPath = emu;  changed = true; }
+            if (bios && bios !== this.selectedBiosPath)     { this.selectedBiosPath = bios;      changed = true; }
+            if (game && game !== this.selectedGamePath)     {
                 this.selectedGamePath = game;
                 this.selectedGameName = game
                     ? path.basename(game, path.extname(game))
@@ -767,75 +534,23 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 changed = true;
             }
 
-            // Merge game list from DB if present.
-            const rawGames = settings['emu.games'];
-            if (rawGames) {
-                try { this.settings.games = JSON.parse(rawGames); changed = true; } catch { /* ignore */ }
-            }
+            // Merge emulator-settings arrays from DB if present.
+            const rawBios      = settings['emu.bios'];
+            const rawGames     = settings['emu.games'];
+            const rawEmulators = settings['emu.emulators'];
 
-            // Merge BIOS list from DB if present.
-            const rawBios = settings['emu.bios'];
             if (rawBios) {
                 try { this.settings.bios = JSON.parse(rawBios); changed = true; } catch { /* ignore */ }
             }
-
-            // Merge emulator list from DB if present, adding any DB entries not
-            // already in the auto-detected list.
-            const rawEmulators = settings['emu.emulators'];
+            if (rawGames) {
+                try { this.settings.games = JSON.parse(rawGames); changed = true; } catch { /* ignore */ }
+            }
             if (rawEmulators) {
-                try {
-                    const dbEmulators: Array<{ type: string; path: string }> = JSON.parse(rawEmulators);
-                    const existing = this.settings.emulators ?? [];
-                    const merged = [...existing];
-                    for (const e of dbEmulators) {
-                        if (!merged.some(x => x.path === e.path)) {
-                            merged.push(e);
-                        }
-                    }
-                    if (merged.length !== existing.length) {
-                        this.settings.emulators = merged;
-                        changed = true;
-                    }
-                } catch { /* ignore */ }
+                try { this.settings.emulators = JSON.parse(rawEmulators); changed = true; } catch { /* ignore */ }
             }
 
             if (changed) {
                 this.postInitMessage();
-
-                // Write the authoritative DB data back to the local JSON file so
-                // it stays in sync and offline sessions load the correct settings.
-                if (this.workspaceRoot) {
-                    const emuSettingsPath = path.join(this.workspaceRoot, 'emu-settings.json');
-                    const toSave = {
-                        bios:      this.settings.bios,
-                        games:     this.settings.games,
-                        emulators: this.settings.emulators,
-                        pcsx2:     this.settings.pcsx2,
-                    };
-                    try {
-                        await fs.promises.writeFile(
-                            emuSettingsPath,
-                            JSON.stringify(toSave, null, 2),
-                            'utf-8'
-                        );
-                    } catch (err: any) {
-                        getOutputChannel().debug(`Could not sync emu-settings.json from DB: ${err?.message ?? err}`);
-                    }
-                }
-
-                const prefsPath = this.settingsJsonPath;
-                if (prefsPath) {
-                    const prefs: UserPreferences = {
-                        selectedEmulator: this.selectedEmulatorPath,
-                        selectedBios:     this.selectedBiosPath,
-                        selectedGame:     this.selectedGamePath,
-                    };
-                    try {
-                        await fs.promises.writeFile(prefsPath, JSON.stringify(prefs, null, 2), 'utf-8');
-                    } catch (err: any) {
-                        getOutputChannel().debug(`Could not sync codedesigner-settings.json from DB: ${err?.message ?? err}`);
-                    }
-                }
             }
         } catch (err: any) {
             getOutputChannel().debug(`Could not load preferences from DB: ${err?.message ?? err}`);
@@ -844,9 +559,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     private postInitMessage(): void {
         if (!this.webview) { return; }
-        // Only PCSX2 entries appear in the emulator selector; Bridge is auto-detected.
         const emulators = (this.settings.emulators ?? []).map(e => ({ label: e.type, value: e.path }));
-        // BIOS options come from user configuration only (BIOS files must be provided by the user).
         const biosOptions = (this.settings.bios ?? []).map(b => ({ label: b.name, value: b.path }));
         const gameOptions = (this.settings.games ?? []).map(g => ({ label: g.name, value: g.path }));
         this.webview.postMessage({
@@ -909,12 +622,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private getControlServerExecutablePath(selectedEmulatorPath?: string): string | null {
-        // Primary: Bridge deployed to the install directory (no user configuration needed).
-        const installExe = DisasmPanelProvider.findBridgeExe();
-        if (installExe) { return installExe; }
-
-        // Fallback: a non-PCSX2 emulator entry the user may have configured manually.
-        if (selectedEmulatorPath && !this.isPcsx2Selection(selectedEmulatorPath)) {
+        if (selectedEmulatorPath) {
             const selectedEntry = (this.settings.emulators ?? []).find(e =>
                 this.resolvePath(e.path).toLowerCase() === this.resolvePath(selectedEmulatorPath).toLowerCase()
             );
@@ -924,9 +632,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         const fallback = (this.settings.emulators ?? []).find(e => !this.isPcsx2Entry(e));
-        if (fallback) { return this.resolvePath(fallback.path); }
-
-        return null;
+        if (!fallback) { return null; }
+        return this.resolvePath(fallback.path);
     }
 
     private handleConnect(emulatorPath: string, biosPath: string, gamePath: string): void {
@@ -949,6 +656,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        if (!emulatorPath) {
+            vscode.window.showWarningMessage('Please select an emulator.');
+            return;
+        }
+
         out.show(true);
         this._pendingRunMode = null;
         this.launchControlServerAndConnect(emulatorPath);
@@ -961,6 +673,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.selectedEmulatorPath = emulatorPath;
         this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
+
+        if (!emulatorPath) {
+            vscode.window.showWarningMessage('Please select an emulator.');
+            return;
+        }
 
         out.show(true);
         const runMode: 'emulator' | 'pcsx2' = this.isPcsx2Selection(emulatorPath) ? 'pcsx2' : 'emulator';
@@ -976,45 +693,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.launchControlServerAndConnect(emulatorPath);
     }
 
-    /** Launch the Multiplayer server executable in a VSCode terminal. */
-    private handleStartNetwork(): void {
-        const out = getOutputChannel();
-        const installDir = DisasmPanelProvider.getInstallDirectory();
-        const exeName = process.platform === 'win32'
-            ? 'CodeDesigner.Ps2.Multiplayer.exe'
-            : 'CodeDesigner.Ps2.Multiplayer';
-        const exePath = path.join(installDir, 'Multiplayer', exeName);
-
-        if (!fs.existsSync(exePath)) {
-            const multiDir = path.join(installDir, 'Multiplayer');
-            out.error(`Multiplayer server not found: ${exePath}. Build the project first to deploy it.`);
-            vscode.window.showErrorMessage(
-                `CodeDesigner.Ps2.Multiplayer not found in ${multiDir}. ` +
-                'Build the Multiplayer project (dotnet build CodeDesigner.Ps2.Multiplayer) to deploy it.'
-            );
-            return;
-        }
-
-        out.info(`Starting Multiplayer server: ${exePath}`);
-
-        const terminal = vscode.window.createTerminal({
-            name: 'CodeDesigner Multiplayer',
-            shellPath: exePath,
-            shellArgs: [],
-        });
-        terminal.show(true);
-    }
-
     /** Launch CodeDesigner control server with no mode args, then connect socket/views. */
     private launchControlServerAndConnect(selectedEmulatorPath: string): void {
         const out = getOutputChannel();
         const resolvedExe = this.getControlServerExecutablePath(selectedEmulatorPath);
         if (!resolvedExe) {
-            const installDir = DisasmPanelProvider.getInstallDirectory();
-            out.error(`CodeDesigner.Ps2.Bridge not found in the install directory (${installDir}). Build the project first to deploy it.`);
+            out.error('Connect requires CodeDesigner.MipsR9500.exe in emu-settings.json.');
             vscode.window.showErrorMessage(
-                `CodeDesigner.Ps2.Bridge not found in ${installDir}. ` +
-                'Build the Bridge project (dotnet build CodeDesigner.Ps2.Bridge) to deploy it.'
+                'Connect requires CodeDesigner.MipsR9500.exe in emu-settings.json. Add it and try again.'
             );
             this.cleanupProcess();
             return;
@@ -1031,7 +717,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             out.error(`CodeDesigner executable not found: ${resolvedExe}`);
             vscode.window.showErrorMessage(
                 `CodeDesigner not found: ${resolvedExe}\n` +
-                'Build the Bridge project first: dotnet build CodeDesigner.Ps2.Bridge'
+                'Build the project first: cd CodeDesigner.MipsR9500 && dotnet build'
             );
             this.cleanupProcess();
             return;
@@ -1071,7 +757,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.socketClient.connect();
                 }
                 out.info('Socket connected to emulator. Opening memory views…');
-                for (const r of LIVE_REGIONS_DEFAULT) {
+                for (const r of LIVE_REGIONS) {
                     await this.editorProvider.openLiveMemoryView(
                         r.region, r.address, r.size, r.label);
                 }
@@ -1089,50 +775,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private cleanupProcess(): void {
-        this.stopJokerPadPoll();
         this.emulatorTerminal = undefined;
         this._paused = false;
         this._bridgeMode = false;
         this._pendingRunMode = null;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
-    }
-
-    // ── Joker live pad polling ──────────────────────────────────────────────
-
-    private startJokerPadPoll(): void {
-        this.stopJokerPadPoll();
-        if (!this.socketClient.isConnected()) { return; }
-
-        let errorCount = 0;
-        this._lastJokerPadButtons = undefined;
-        const poll = async () => {
-            try {
-                const state = await this.socketClient.padGetState(0);
-                errorCount = 0;
-                // Only post to webview when the pad state actually changed.
-                if (state.buttons !== this._lastJokerPadButtons) {
-                    this._lastJokerPadButtons = state.buttons;
-                    this.webview?.postMessage({ command: 'jokerPadState', buttons: state.buttons });
-                }
-            } catch {
-                errorCount++;
-                if (errorCount >= 5) {
-                    getOutputChannel().warn('Joker pad poll: too many consecutive failures, stopping.');
-                    this.stopJokerPadPoll();
-                }
-            }
-        };
-        // Fire immediately, then every 500ms.
-        void poll();
-        this._jokerPadPollTimer = setInterval(() => void poll(), 500);
-    }
-
-    private stopJokerPadPoll(): void {
-        if (this._jokerPadPollTimer !== undefined) {
-            clearInterval(this._jokerPadPollTimer);
-            this._jokerPadPollTimer = undefined;
-        }
-        this._lastJokerPadButtons = undefined;
     }
 
     private startRuntimeMode(mode: 'emulator' | 'pcsx2', biosPath: string, gamePath: string): void {
@@ -1173,8 +820,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
      * Launch the external PCSX2 application using CLI arguments from panel selections.
      * This does not connect sockets by itself; Connect/Run still control CodeDesigner.
-     * PCSX2 is located from the emulators list, then auto-detected from the install
-     * directory's `pcsx2` subfolder, then standard OS paths — no manual path config needed.
      */
     private handleStartPcsx2(emulatorPath: string, biosPath: string, gamePath: string): void {
         const out = getOutputChannel();
@@ -1183,26 +828,26 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
 
-        // Resolve PCSX2 path: prefer the passed value (from emulator selector if PCSX2 entry),
-        // then fall back to auto-detection.
-        let pcsx2Exe = '';
-        if (emulatorPath && this.isPcsx2Selection(emulatorPath)) {
-            pcsx2Exe = this.resolvePath(emulatorPath);
-        }
-        if (!pcsx2Exe || !fs.existsSync(pcsx2Exe)) {
-            pcsx2Exe = DisasmPanelProvider.detectPcsx2Exe() ?? '';
+        if (!emulatorPath || !this.isPcsx2Selection(emulatorPath)) {
+            vscode.window.showWarningMessage('Please select a PCSX2 emulator entry first.');
+            return;
         }
 
-        if (!pcsx2Exe || !fs.existsSync(pcsx2Exe)) {
-            out.error('PCSX2 executable not found. Place PCSX2 in the pcsx2 subfolder of the install directory, install it to a standard location, or add it via the emulator selector.');
-            vscode.window.showErrorMessage(
-                'PCSX2 not found. Place PCSX2 in the pcsx2 subfolder of the CodeDesigner install directory, or add it via the emulator selector.'
-            );
+        const pcsx2Exe = this.resolvePath(emulatorPath);
+        if (!fs.existsSync(pcsx2Exe)) {
+            out.error(`PCSX2 executable not found: ${pcsx2Exe}`);
+            vscode.window.showErrorMessage(`PCSX2 executable not found: ${pcsx2Exe}`);
             return;
         }
 
         const args: string[] = [];
         const resolvedDisc = gamePath ? this.resolvePath(gamePath) : '';
+        const resolvedBios = biosPath ? this.resolvePath(biosPath) : '';
+
+        /* if (resolvedBios && fs.existsSync(resolvedBios)) {
+            out.info(`PCSX2 BIOS selection: ${resolvedBios}`);
+            args.push('-bios', resolvedBios);
+        } */
 
         if (resolvedDisc && fs.existsSync(resolvedDisc)) {
             out.info(`PCSX2 game selection: ${resolvedDisc}`);
@@ -1705,29 +1350,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         this.loadSnapshotsForGame(this.selectedGameName);
         this.loadGameLabels(this.selectedGameName);
-
-        // Persist the ISO path in the database so label sets can be resolved
-        // by GameDisc. Try to get the serial from a running PINE session first;
-        // if unavailable just update the path with an empty serial placeholder.
-        if (gamePath && this._bridgeMode) {
-            try {
-                const info = await this.socketClient.getPcsx2GameInfo();
-                const serial    = (info.ID    ?? '').replace(/\0/g, '').trim();
-                const gameTitle = (info.Title ?? '').replace(/\0/g, '').trim() || this.selectedGameName;
-                if (serial) {
-                    // Upsert Game/GameRegion/GameDisc in the database with IsoPath,
-                    // serial, and title so the game appears in the DB immediately.
-                    await this.socketClient.updateGameDisc(serial, gamePath, undefined, gameTitle);
-                    this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, serial);
-                } else {
-                    // Serial unavailable — just store IsoPath; use filename for DB fallback.
-                    this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, gamePath);
-                }
-            } catch {
-                // Not in PINE mode or PCSX2 not running — fall back to ISO path.
-                this.editorProvider.setCurrentGame(this.selectedGameName, this.workspaceRoot, gamePath);
-            }
-        }
     }
 
     /**
@@ -1846,12 +1468,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private loadGameLabels(isoName: string): void {
         // Always update the editor provider's current game context so user-created
         // labels are saved to the correct per-game file.
-        // Pass the full ISO path (when available) so that _labelManagerCtx() can
-        // resolve the GameDisc even when PINE is not connected.  Without this the
-        // serial stays empty after a settings-restore and ResolveGameDiscIdAsync
-        // only receives the bare filename — which may fail to match an IsoPath
-        // that is stored as a full path in the database.
-        this.editorProvider.setCurrentGame(isoName, this.workspaceRoot, this.selectedGamePath || undefined);
+        this.editorProvider.setCurrentGame(isoName, this.workspaceRoot);
 
         if (!isoName || !this.workspaceRoot) {
             this.editorProvider.setGameLabels([]);
@@ -2074,40 +1691,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         out.info(`Archive cheats: searching for serial "${serial}" (${gameTitle})…`);
 
         try {
-            // ── 1. Try the database first ──────────────────────────────────────
-            let dbResult: Awaited<ReturnType<typeof this.socketClient.getGameCheats>> | null = null;
-            try {
-                dbResult = await this.socketClient.getGameCheats(serial);
-            } catch (dbErr: any) {
-                out.warn(`Archive cheats: DB query failed — ${dbErr?.message ?? dbErr}`);
-            }
-
-            if (dbResult && dbResult.cheats.length > 0) {
-                const displayTitle = dbResult.gameTitle || gameTitle;
-                this._archiveCheats = dbResult.cheats.map(c => ({
-                    name:    c.name,
-                    author:  c.author,
-                    notes:   c.notes,
-                    codes:   c.codes,
-                    enabled: false,
-                }));
-                this._archiveCheatType = dbResult.cheatListTitle ?? '';
-
-                out.info(`Archive cheats: loaded ${this._archiveCheats.length} cheats from database for "${displayTitle}".`);
-                this.webview?.postMessage({
-                    command:   'archiveCheatsLoaded',
-                    cheats:    this._archiveCheats,
-                    game:      displayTitle,
-                    serial,
-                    cheatType: this._archiveCheatType,
-                });
-
-                this.editorProvider.setArchiveLabels(this._buildArchiveLabels());
-                return;
-            }
-
-            // ── 2. Fall back to local YAML archive ────────────────────────────
-            out.info(`Archive cheats: no DB results for "${serial}", trying local YAML archive…`);
             const result = await this._fetchArchiveForSerial(serial);
             if (!result) {
                 out.warn(`Archive cheats: no entry found for serial "${serial}".`);
@@ -2120,7 +1703,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             this._archiveCheats    = result.cheats;
             this._archiveCheatType = result.cheatType;
 
-            out.info(`Archive cheats: loaded ${result.cheats.length} cheats from YAML for "${result.game}".`);
+            out.info(`Archive cheats: loaded ${result.cheats.length} cheats for "${result.game}".`);
             this.webview?.postMessage({
                 command:   'archiveCheatsLoaded',
                 cheats:    this._archiveCheats,
@@ -2378,54 +1961,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         return { game, cheatType, cheats };
     }
 
-    /**
-     * Open a markdown help file as a VS Code markdown preview panel.
-     * `fileName` should be a bare filename such as "CODE_DESIGNER_SOURCE.md"
-     * or "CHEAT_ENGINE.md".
-     *
-     * Resolution order:
-     *   1. Extension installation directory (bundled help files).
-     *   2. Workspace root / first workspace folder (user-provided overrides).
-     */
-    private async handleOpenMarkdownHelp(fileName: string): Promise<void> {
-        if (!fileName) { return; }
-
-        // Build a list of directories to probe, in priority order:
-        //   1. Extension install directory (bundled help files like CHEAT_ENGINE.md)
-        //   2. workspaceRoot (where codedesigner-settings.json was found)
-        //   3. Every open workspace folder
-        //   4. Walk up from extensionPath to find the repo root (handles F5 dev
-        //      host where the repo root isn't an open workspace folder)
-        const roots = new Set<string>();
-        if (this.extensionPath) { roots.add(this.extensionPath); }
-        if (this.workspaceRoot) { roots.add(this.workspaceRoot); }
-        for (const folder of vscode.workspace.workspaceFolders ?? []) {
-            roots.add(folder.uri.fsPath);
-        }
-        // Walk up from the extension directory — the extension lives at
-        // <repo>/vscode/codedesigner/, so ancestor directories may contain
-        // the target file (e.g. <repo>/docs/README.md).
-        if (this.extensionPath) {
-            let dir = this.extensionPath;
-            for (let i = 0; i < 5; i++) {
-                const parent = path.dirname(dir);
-                if (parent === dir) { break; }
-                roots.add(parent);
-                dir = parent;
-            }
-        }
-
-        const candidates = [...roots].map(r => path.join(r, fileName));
-        const filePath = candidates.find(p => fs.existsSync(p));
-        if (!filePath) {
-            vscode.window.showWarningMessage(`Help file not found: ${fileName}`);
-            return;
-        }
-
-        const uri = vscode.Uri.file(filePath);
-        await vscode.commands.executeCommand('markdown.showPreview', uri);
-    }
-
     /** Compile the active .cds file and return GameShark codes to the CDS tab. */
     private async handleCompileCds(): Promise<void> {
         const out = getOutputChannel();
@@ -2481,7 +2016,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 try { pointerLabels = await this.getPointerLabels(); } catch { /* ignore — not connected */ }
             }
 
-            const { results, sidecars } = await this.socketClient.compileCds(
+            const results = await this.socketClient.compileCds(
                 sourceCode,
                 pointerLabels.length > 0 ? pointerLabels : undefined
             );
@@ -2526,39 +2061,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 }
             }
 
-            // ── Log sidecar commands to the Debug channel ─────────────────────
-            for (const sc of sidecars) {
-                const addrHex = `0x${sc.Address.toString(16).toUpperCase().padStart(8, '0')}`;
-                switch (sc.Kind) {
-                    case 'assert': {
-                        const expHex = sc.ExpectedValue !== undefined
-                            ? `0x${sc.ExpectedValue.toString(16).toUpperCase().padStart(8, '0')}` : '?';
-                        if (sc.AssertPassed === true) {
-                            out.info(`CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} — passed`);
-                        } else if (sc.AssertPassed === false) {
-                            const actHex = sc.ActualValue !== undefined
-                                ? `0x${sc.ActualValue.toString(16).toUpperCase().padStart(8, '0')}` : '?';
-                            getDebugChannel().error(
-                                `CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} FAILED (got ${actHex})`);
-                        } else {
-                            out.info(`CDS assert @ ${addrHex} ${sc.Operator ?? '=='} ${expHex} (not checked — no live backend)`);
-                        }
-                        break;
-                    }
-                    case 'breakpoint':
-                        out.info(`CDS breakpoint requested @ ${addrHex} — use SETBP to install`);
-                        break;
-                    case 'watchpoint':
-                        out.info(`CDS watchpoint requested: ${sc.AccessType ?? 'write'} @ ${addrHex} (${sc.WatchSize ?? 4} bytes) — use PINEADDWATCH to install`);
-                        break;
-                    case 'log': {
-                        const directive = sc.Directive ?? 'log';
-                        out.info(`CDS ${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
-                        break;
-                    }
-                }
-            }
-
             // Push all diagnostics to VS Code so squiggles and gutter icons appear
             if (fileUri) {
                 this._cdsDiagnostics.set(fileUri, diagnostics.length > 0 ? diagnostics : []);
@@ -2568,13 +2070,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 out.warn(`CDS compilation finished with ${errors.length} error(s).`);
                 // Reveal the Debug channel so the user sees the red error entries
                 getDebugChannel().show(true);
-                // Clear any stored sidecars — the patch is not valid when there are errors
-                this._lastCdsSidecars = [];
                 this.webview?.postMessage({ command: 'cdsCompileResult', success: false, errors });
             } else {
                 const codes = codeLines.join('\n');
-                // Cache sidecars so handleAddPatch can install breakpoints/watchpoints
-                this._lastCdsSidecars = sidecars;
                 out.info(`CDS compilation succeeded — ${codeLines.length} code(s) generated.`);
                 this.webview?.postMessage({ command: 'cdsCompileResult', success: true, codes, errors: [] });
             }
@@ -2590,79 +2088,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private _scheduleValidateCds(delayMs = 250): void {
-        if (this._cdsValidationTimer) {
-            clearTimeout(this._cdsValidationTimer);
-        }
-
-        const validationVersion = ++this._cdsValidationVersion;
-        this._cdsValidationTimer = setTimeout(() => {
-            void this._runValidateCds(validationVersion);
-        }, delayMs);
-    }
-
-    private async _runValidateCds(validationVersion: number): Promise<void> {
-        const filePath = this._activeCdsFilePath;
-        const sourceCode = this._activeCdsContent;
-        if (!filePath || !sourceCode || !filePath.toLowerCase().endsWith('.cds')) { return; }
-        if (!this.socketClient.isConnected()) { return; }
-
-        const fileUri = vscode.Uri.file(filePath);
-        const openDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === fileUri.toString());
-
-        try {
-            let pointerLabels: LabelEntry[] = [];
-            if (this.getPointerLabels) {
-                try { pointerLabels = await this.getPointerLabels(); } catch { /* ignore */ }
-            }
-
-            const { diagnostics } = await this.socketClient.validateCds(
-                sourceCode,
-                pointerLabels.length > 0 ? pointerLabels : undefined
-            );
-
-            if (validationVersion !== this._cdsValidationVersion) { return; }
-            this._cdsDiagnostics.set(fileUri, this._mapCdsDiagnostics(diagnostics, openDoc));
-        } catch {
-            // Ignore background validation failures; explicit compile still surfaces errors.
-        }
-    }
-
-    private _mapCdsDiagnostics(
-        diagnostics: CdsDiagnostic[],
-        openDoc: vscode.TextDocument | undefined
-    ): vscode.Diagnostic[] {
-        return diagnostics.map(diag => {
-            const startLine = Math.max(0, (diag.LineNumber || 1) - 1);
-            const endLineRaw = (diag.EndLineNumber || diag.LineNumber || 1) - 1;
-            const endLine = Math.max(startLine, endLineRaw);
-
-            const startChar = Math.max(0, (diag.ColumnNumber || 1) - 1);
-            const fallbackEndChar = openDoc && startLine < openDoc.lineCount
-                ? openDoc.lineAt(startLine).text.length
-                : startChar + 1;
-            const endChar = Math.max(
-                startChar + 1,
-                diag.EndColumnNumber ? diag.EndColumnNumber - 1 : fallbackEndChar
-            );
-
-            const range = new vscode.Range(startLine, startChar, endLine, endChar);
-            const severity = diag.Severity === 'Error'
-                ? vscode.DiagnosticSeverity.Error
-                : diag.Severity === 'Warning'
-                    ? vscode.DiagnosticSeverity.Warning
-                    : vscode.DiagnosticSeverity.Information;
-
-            const vscodeDiagnostic = new vscode.Diagnostic(range, diag.Message, severity);
-            vscodeDiagnostic.source = 'CDS';
-            if (diag.Code) {
-                vscodeDiagnostic.code = diag.Code;
-            }
-            return vscodeDiagnostic;
-        });
-    }
-
-    /** Apply compiled GameShark codes to live memory (Add Patch), then install any sidecar breakpoints/watchpoints. */
+    /** Apply compiled GameShark codes to live memory (Add Patch). */
     private async handleAddPatch(codes: string): Promise<void> {
         const out = getOutputChannel();
         if (!this.socketClient.isConnected()) {
@@ -2670,51 +2096,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             return;
         }
         try {
-            // 1 — Apply the GameShark memory-patch codes
             await this.socketClient.applyCheats(codes);
             out.info('CDS patch applied to memory successfully.');
-
-            // 2 — Install sidecar commands from the most recent compilation
-            const sidecars = this._lastCdsSidecars;
-            for (const sc of sidecars) {
-                const addrHex = `0x${sc.Address.toString(16).toUpperCase().padStart(8, '0')}`;
-                try {
-                    switch (sc.Kind) {
-                        case 'breakpoint':
-                            await this.socketClient.setBreakpoint(sc.Address);
-                            out.info(`CDS breakpoint installed @ ${addrHex}`);
-                            break;
-
-                        case 'watchpoint': {
-                            // Watchpoint covers [Address, Address + WatchSize)
-                            const size    = sc.WatchSize ?? 4;
-                            // Guard against address + size wrapping past 0xFFFFFFFF
-                            if (sc.Address > 0xFFFFFFFF - size) {
-                                throw new Error(`Watchpoint range overflow: 0x${sc.Address.toString(16).toUpperCase()} + ${size} exceeds 32-bit address space`);
-                            }
-                            const endAddr = sc.Address + size;
-                            // Condition: 1=read, 2=write, 3=readwrite
-                            const cond = sc.AccessType === 'read'      ? 1
-                                       : sc.AccessType === 'readwrite' ? 3
-                                       : 2; // default: write
-                            await this.socketClient.addPineWatch(sc.Address, endAddr, cond);
-                            out.info(`CDS watchpoint installed: ${sc.AccessType ?? 'write'} @ ${addrHex} (${size} bytes)`);
-                            break;
-                        }
-
-                        case 'log': {
-                            const directive = sc.Directive ?? 'log';
-                            out.info(`CDS ${directive} @ ${addrHex}: ${sc.MessageText ?? ''}`);
-                            break;
-                        }
-                    }
-                } catch (sidecarErr: any) {
-                    // Log but do not abort — sidecar install is best-effort (e.g. breakpoints
-                    // require PINE debugger extension; watchpoints require PINE mode).
-                    out.warn(`CDS sidecar install failed for ${sc.Kind} @ ${addrHex}: ${sidecarErr?.message ?? sidecarErr}`);
-                }
-            }
-
             this.webview?.postMessage({ command: 'cdsPatchApplied', success: true });
         } catch (err: any) {
             const msg = err?.message ?? String(err);
@@ -2945,8 +2328,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public async onSocketConnected(): Promise<void> {
         this._setPauseState(false);
         this.webview?.postMessage({ command: 'connectionStatus', connected: true });
-        this._scheduleValidateCds(50);
-        for (const r of LIVE_REGIONS_DEFAULT) {
+        for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
 
@@ -2965,63 +2347,66 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Open the default live memory view panels immediately, even if not connected.
+     * Open all live memory view panels immediately, even if not connected.
      * Panels will show placeholder content until the socket connects.
-     * Called at extension activation so the EE Main RAM tab is always visible.
-     * Rarely-used regions (IOP, BIOS, Scratchpad) can be opened on-demand via
-     * the sidebar menu to reduce socket traffic and prevent flickering.
+     * Called at extension activation so tabs are always visible.
      */
     public async openAllLivePanels(): Promise<void> {
-        for (const r of LIVE_REGIONS_DEFAULT) {
+        for (const r of LIVE_REGIONS) {
             await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
         }
         this.editorProvider.openIntroPanel();
     }
 
     /**
-     * Open an optional memory view by label name.
-     * Called from the sidebar when the user chooses to open IOP/BIOS/Scratchpad.
-     */
-    public async openOptionalMemoryView(label: string): Promise<void> {
-        const r = LIVE_REGIONS_OPTIONAL.find(r => r.label === label);
-        if (r) {
-            await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
-        } else {
-            getOutputChannel().warn(`Unknown optional memory view: '${label}'`);
-        }
-    }
-
-    /**
     * Auto-start the CodeDesigner console app in default control-server mode.
      * Called at extension activation when auto-connect fails.
-     * Looks for CodeDesigner.Ps2.Bridge in the install directory first, then
-     * falls back to any non-PCSX2 emulator configured in emu-settings.json.
+     * Looks for the first non-PCSX2 emulator configured in emu-settings.json.
      * Returns true if a terminal was spawned (or was already running), false otherwise.
      */
     public async autoStartServer(): Promise<boolean> {
+        // Load settings if not yet done (workspaceRoot is set by loadEmuSettings)
+        if (!this.workspaceRoot) {
+            this.loadEmuSettings();
+        }
+
+        const emulators = this.settings.emulators ?? [];
+        if (emulators.length === 0) {
+            return false;
+        }
+
+        // Prefer the CodeDesigner app over PCSX2
+        const emu = emulators.find(e =>
+            !e.path.toLowerCase().includes('pcsx2') &&
+            !e.type?.toLowerCase().includes('pcsx2')
+        );
+
+        if (!emu) {
+            getOutputChannel().warn('Auto-start: no CodeDesigner emulator found in emu-settings.json (only PCSX2 entries). Use the Run button to start manually.');
+            return false;
+        }
+
+        const resolvedExe = this.resolvePath(emu.path);
+
+        if (!fs.existsSync(resolvedExe)) {
+            getOutputChannel().warn(`Auto-start: CodeDesigner executable not found at ${resolvedExe}`);
+            return false;
+        }
+
         // Don't spawn a second terminal if one is already open
         if (this.emulatorTerminal) {
             getOutputChannel().info('Auto-start: server terminal is already running.');
             return true;
         }
 
-        // Primary: Bridge deployed to the install directory.
-        const resolvedExe = DisasmPanelProvider.findBridgeExe();
-        if (!resolvedExe) {
-            const installDir = DisasmPanelProvider.getInstallDirectory();
-            getOutputChannel().warn(
-                `Auto-start: CodeDesigner.Ps2.Bridge not found in ${installDir}. ` +
-                'Build the Bridge project (dotnet build CodeDesigner.Ps2.Bridge) to deploy it automatically.'
-            );
-            return false;
-        }
+        const cliArgs: string[] = [];
 
         getOutputChannel().info(`Auto-starting CodeDesigner control server: ${resolvedExe}`);
 
         const terminal = vscode.window.createTerminal({
             name: 'CodeDesigner',
             shellPath: resolvedExe,
-            shellArgs: [],
+            shellArgs: cliArgs,
         });
         terminal.show(false);   // reveal terminal but keep editor focus
         this.emulatorTerminal = terminal;
@@ -3088,43 +2473,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             vscode.window.showInformationMessage(`MCP Memory '${name}' exported to ${uri.fsPath}`);
         } catch (err: any) {
             vscode.window.showErrorMessage(`MCP Memory export failed: ${err?.message ?? err}`);
-        }
-    }
-
-    // ── File mode (internal emulator, no BIOS) ────────────────────────────────
-
-    /**
-     * Load a PS2 ELF, BIN, or RAW file into the internal emulator in file mode
-     * (STARTFILEMODE command).  The emulator is initialised with a bare scheduler —
-     * no BIOS, no disc — and left paused at the file's entry point.  All default
-     * live memory panels are opened so the user can inspect memory immediately.
-     *
-     * Called from extension.ts when the user opens a registered file type
-     * (.elf, .bin, .raw) via the standard VS Code File → Open menu.
-     */
-    public async openFileMode(filePath: string): Promise<void> {
-        const out = getOutputChannel();
-        if (!this.socketClient.isConnected()) {
-            vscode.window.showWarningMessage('Not connected to emulator. Cannot open file.');
-            return;
-        }
-
-        out.info(`Opening file in internal emulator (file mode): ${filePath}`);
-        try {
-            const result = await this.socketClient.startFileMode(filePath);
-            const entryHex = result.entryPoint.toString(16).toUpperCase().padStart(8, '0');
-            out.info(`File mode started — entry point 0x${entryHex}`);
-
-            for (const r of LIVE_REGIONS_DEFAULT) {
-                await this.editorProvider.openLiveMemoryView(r.region, r.address, r.size, r.label);
-            }
-
-            vscode.window.showInformationMessage(
-                `File loaded. Entry point: 0x${entryHex}. Emulator is paused — set breakpoints then press Run.`
-            );
-        } catch (err: any) {
-            out.error(`File mode failed: ${err?.message ?? err}`);
-            vscode.window.showErrorMessage(`File mode failed: ${err?.message ?? err}`);
         }
     }
 }

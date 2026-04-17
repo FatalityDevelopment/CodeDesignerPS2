@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 
 namespace CodeDesigner.Ps2.McpServer.Tools;
@@ -13,7 +12,6 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "pause_emulator")]
-    [DynamicDescription("pause_emulator_desc")]
     [Description("Pause PS2 emulator execution. The emulator must be running via `dotnet run -- --server` or PCSX2 via PINE.")]
     public async Task<string> PauseEmulator(CancellationToken cancellationToken)
     {
@@ -22,7 +20,6 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "resume_emulator")]
-    [DynamicDescription("resume_emulator_desc")]
     [Description("Resume PS2 emulator execution after a pause or breakpoint hit. If stopped at a breakpoint, execution continues until the next breakpoint or pause.")]
     public async Task<string> ResumeEmulator(CancellationToken cancellationToken)
     {
@@ -31,7 +28,6 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "step")]
-    [DynamicDescription("step_desc")]
     [Description("Execute exactly one EE instruction while keeping the emulator paused. The emulator must be paused before calling this tool.")]
     public async Task<string> Step(CancellationToken cancellationToken)
     {
@@ -66,7 +62,6 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "restart_emulator")]
-    [DynamicDescription("restart_emulator_desc")]
     [Description("Perform a full hardware reset of the PS2 emulator without dropping the socket connection. Reloads the BIOS and restarts game execution from the beginning.")]
     public async Task<string> RestartEmulator(CancellationToken cancellationToken)
     {
@@ -75,7 +70,6 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "set_breakpoint")]
-    [DynamicDescription("set_breakpoint_desc")]
     [Description("Set a breakpoint at a virtual address in the PS2 emulator. Execution pauses when the EE program counter reaches this address.")]
     public async Task<string> SetBreakpoint(
         [Description("Virtual address for the breakpoint (hex or decimal).")] string address,
@@ -93,7 +87,6 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "clear_breakpoint")]
-    [DynamicDescription("clear_breakpoint_desc")]
     [Description("Remove a previously set breakpoint at a virtual address.")]
     public async Task<string> ClearBreakpoint(
         [Description("Virtual address of the breakpoint to remove (hex or decimal).")] string address,
@@ -111,7 +104,6 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "clear_all_breakpoints")]
-    [DynamicDescription("clear_all_breakpoints_desc")]
     [Description("Remove all breakpoints currently set in the PS2 emulator.")]
     public async Task<string> ClearAllBreakpoints(CancellationToken cancellationToken)
     {
@@ -124,7 +116,6 @@ public sealed partial class CodeDesignerPs2Tools
     // -------------------------------------------------------------------------
 
     [McpServerTool(Name = "trace_calls")]
-    [DynamicDescription("trace_calls_desc")]
     [Description("Step the emulator instruction-by-instruction from the current PC to end_pc and record every JAL/JALR call encountered. Returns a call trace with addresses and symbol names.")]
     public async Task<string> TraceCalls(
         [Description("Exclusive end EE virtual address at which tracing stops (hex or decimal).")] string endPc,
@@ -167,7 +158,6 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "run_until_pc")]
-    [DynamicDescription("run_until_pc_desc")]
     [Description("Resume the emulator and block until the EE program counter reaches target_pc, then pause. Returns the number of instructions executed and the final CPU state.")]
     public async Task<string> RunUntilPc(
         [Description("Target EE virtual address to run to (hex or decimal).")] string targetPc,

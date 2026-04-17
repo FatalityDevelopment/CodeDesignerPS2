@@ -4,51 +4,58 @@ namespace CodeDesigner.Ps2.Database;
 
 /// <summary>
 /// Shared helpers for initialising, migrating, and seeding the CodeDesigner
-/// SQL Server database.  Called by both the standalone Database CLI tool and by
+/// SQLite database.  Called by both the standalone Database CLI tool and by
 /// the MCP server at start-up.
 /// </summary>
 public static class DatabaseInitialiser
 {
     /// <summary>
-    /// Creates <see cref="DbContextOptions{TContext}"/> for the given SQL Server
-    /// connection string.
-    ///
-    /// Use this factory at every call site that needs a <see cref="CodeDesignerDbContext"/>
-    /// to ensure consistent SQL Server configuration across the Bridge, the MCP server,
-    /// and the Database CLI tool.
-    /// </summary>
-    /// <param name="connectionString">SQL Server connection string.</param>
-    public static DbContextOptions<CodeDesignerDbContext> BuildDbOptions(string connectionString)
-        => new DbContextOptionsBuilder<CodeDesignerDbContext>()
-            .UseSqlServer(connectionString, options =>
-                options.EnableRetryOnFailure(
-                    maxRetryCount: 5,
-                    maxRetryDelay: TimeSpan.FromSeconds(10),
-                    errorNumbersToAdd: null))
-            .Options;
-
-    /// <summary>
-    /// Builds <see cref="DbContextOptions{TContext}"/> for the given SQL Server
-    /// connection string, applies any pending EF Core migrations, and seeds initial
+    /// Builds <see cref="DbContextOptions{TContext}"/> for the given SQLite
+    /// file path, applies any pending EF Core migrations, and seeds initial
     /// data via <see cref="DatabaseSeeder"/>.
     /// </summary>
-    /// <param name="connectionString">SQL Server connection string.</param>
+    /// <param name="path">Absolute path to the SQLite database file.</param>
     /// <param name="archiveRoot">
     /// Optional path to the root of the CheatCodeArchive checkout.
     /// When supplied, the bulk cheat importer runs as part of seeding.
     /// </param>
     public static async Task<DbContextOptions<CodeDesignerDbContext>> InitialiseDatabaseAsync(
-        string connectionString,
+        string path,
         string? archiveRoot = null)
     {
-        var options = BuildDbOptions(connectionString);
+        // WAL mode allows multiple readers and one writer concurrently, preventing
+        // "database is locked" errors when the MCP server and the main app share the file.
+        var connectionString = $"Data Source={path}";
 
-        await using var db = new CodeDesignerDbContext(options);
-        await db.Database.MigrateAsync();
+        var options = new DbContextOptionsBuilder<CodeDesignerDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
 
-        // Seed initial data (idempotent — only inserts missing rows).
-        var seeder = new DatabaseSeeder(db);
-        await seeder.SeedAsync(archiveRoot);
+        // Retry MigrateAsync to handle the brief window where the main app holds a
+        // write lock while changing the journal mode on first open.
+        const int maxAttempts = 5;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await using var db = new CodeDesignerDbContext(options);
+                await db.Database.MigrateAsync();
+
+                // Enable WAL mode via PRAGMA (not supported as a connection string keyword
+                // in Microsoft.Data.Sqlite; must be set after the connection is open).
+                await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+
+                // Seed initial data (idempotent — only inserts missing rows).
+                var seeder = new DatabaseSeeder(db);
+                await seeder.SeedAsync(archiveRoot);
+                break;
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException ex)
+                when (ex.SqliteErrorCode == 5 && attempt < maxAttempts) // SQLITE_LOCKED
+            {
+                await Task.Delay(200 * attempt);
+            }
+        }
 
         return options;
     }

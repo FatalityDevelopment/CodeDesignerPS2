@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Text;
-using CodeDesigner.Ps2.McpServer;
 using ModelContextProtocol.Server;
 using CodeDesigner.Ps2.McpServer.Prompts;
 
@@ -9,7 +8,6 @@ namespace CodeDesigner.Ps2.McpServer.Tools;
 public sealed partial class CodeDesignerPs2Tools
 {
     [McpServerTool(Name = "ping")]
-    [DynamicDescription("ping_desc")]
     [Description("Test connectivity to the Code Designer emulator backend. Returns PONG when the socket server is reachable on localhost:8765.")]
     public async Task<string> Ping(CancellationToken cancellationToken)
     {
@@ -18,10 +16,8 @@ public sealed partial class CodeDesignerPs2Tools
     }
 
     [McpServerTool(Name = "session_start")]
-    [DynamicDescription("session_start_desc")]
     [Description(
         "CALL THIS FIRST at the beginning of every session. " +
-        "YOU MAY SKIP THIS AND INTRODUCE YOURSELF IF YOU HAVE MEMORY OF THE ORCHASTRATION PLAN" +
         "Returns the full Code Designer operational guidelines, the complete agent team roster (including who is the lead), " +
         "and the orchestration plan so every agent is properly configured before taking any other action. " +
         "Sub-agents MUST also call session_start at the start of their own session and then call get_agent_profile " +
@@ -31,16 +27,6 @@ public sealed partial class CodeDesignerPs2Tools
         "This tool is the primary way to load guidelines — do not rely on prompts/get.")]
     public async Task<string> SessionStart(CancellationToken cancellationToken = default)
     {
-        // Notify the front end that an AI session has started.  The bridge
-        // pushes this as an "ai_session_start" notification to subscribers,
-        // which allows the VS Code extension to automatically enable
-        // Follow AI mode.
-        try
-        {
-            await bridge.SendAsync(new { Command = "SESSION_START" }, cancellationToken);
-        }
-        catch { /* non-fatal — the session_start tool still works offline */ }
-
         var sb = new StringBuilder();
 
         // Load all agent definitions so we can build a team roster and identify the lead.

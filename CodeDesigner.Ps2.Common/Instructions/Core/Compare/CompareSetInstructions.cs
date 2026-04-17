@@ -47,11 +47,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            long rsVal = (long)cpu.RegsLo[args.Rs];
-            long rtVal = (long)cpu.RegsLo[args.Rt];
-            int result = rsVal < rtVal ? 1 : 0;
-            return $"{CpuHelpers.RegName(args.Rd)} = {result}  ({CpuHelpers.RegName(args.Rs)} < {CpuHelpers.RegName(args.Rt)})";
+            string eq = Equation
+                .Replace("rd", CpuHelpers.RegName(args.Rd))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("rt", CpuHelpers.RegName(args.Rt));
+            
+            if (cpu != null)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                long rtVal = (long)cpu.RegsLo[args.Rt];
+                bool result = rsVal < rtVal;
+                return $"{eq} => {rsVal} < {rtVal} = {result} ({(result ? 1 : 0)})";
+            }
+            return eq;
         }
     }
 
@@ -90,11 +98,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            ulong rsVal = cpu.RegsLo[args.Rs];
-            ulong rtVal = cpu.RegsLo[args.Rt];
-            int result = rsVal < rtVal ? 1 : 0;
-            return $"{CpuHelpers.RegName(args.Rd)} = {result}  ({CpuHelpers.RegName(args.Rs)} < {CpuHelpers.RegName(args.Rt)})";
+            string eq = Equation
+                .Replace("rd", CpuHelpers.RegName(args.Rd))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("rt", CpuHelpers.RegName(args.Rt));
+            
+            if (cpu != null)
+            {
+                ulong rsVal = cpu.RegsLo[args.Rs];
+                ulong rtVal = cpu.RegsLo[args.Rt];
+                bool result = rsVal < rtVal;
+                return $"{eq} => 0x{rsVal:X16} < 0x{rtVal:X16} = {result} ({(result ? 1 : 0)})";
+            }
+            return eq;
         }
     }
 
@@ -133,11 +149,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            long rsVal = (long)cpu.RegsLo[args.Rs];
-            long imm = CpuHelpers.SignExtend16(args.Imm);
-            int result = rsVal < imm ? 1 : 0;
-            return $"{CpuHelpers.RegName(args.Rt)} = {result}  ({CpuHelpers.RegName(args.Rs)} < {imm})";
+            int imm = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("SignExt(imm)", imm.ToString());
+            
+            if (cpu != null)
+            {
+                long rsVal = (long)cpu.RegsLo[args.Rs];
+                bool result = rsVal < imm;
+                return $"{eq} => {rsVal} < {imm} = {result} ({(result ? 1 : 0)})";
+            }
+            return eq;
         }
     }
 
@@ -177,11 +201,20 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            ulong rsVal = cpu.RegsLo[args.Rs];
-            ulong imm = (ulong)(long)CpuHelpers.SignExtend16(args.Imm);
-            int result = rsVal < imm ? 1 : 0;
-            return $"{CpuHelpers.RegName(args.Rt)} = {result}  ({CpuHelpers.RegName(args.Rs)} < 0x{imm:X8})";
+            int immSigned = CpuHelpers.SignExtend16(args.Imm);
+            ulong imm = (ulong)(long)immSigned;
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("SignExt(imm)", $"0x{imm:X16}");
+            
+            if (cpu != null)
+            {
+                ulong rsVal = cpu.RegsLo[args.Rs];
+                bool result = rsVal < imm;
+                return $"{eq} => 0x{rsVal:X16} < 0x{imm:X16} = {result} ({(result ? 1 : 0)})";
+            }
+            return eq;
         }
     }
 }

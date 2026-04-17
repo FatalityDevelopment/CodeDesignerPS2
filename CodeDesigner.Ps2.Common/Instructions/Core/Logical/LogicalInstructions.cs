@@ -49,10 +49,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            ulong rsVal = cpu.RegsLo[args.Rs];
-            ulong rtVal = cpu.RegsLo[args.Rt];
-            return $"{CpuHelpers.RegName(args.Rd)} = 0x{(uint)(rsVal & rtVal):X8}";
+            string eq = Equation
+                .Replace("rd", CpuHelpers.RegName(args.Rd))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("rt", CpuHelpers.RegName(args.Rt));
+            
+            if (cpu != null)
+            {
+                ulong rsVal = cpu.RegsLo[args.Rs];
+                ulong rtVal = cpu.RegsLo[args.Rt];
+                return $"{eq} => 0x{rsVal:X8} & 0x{rtVal:X8} = 0x{rsVal & rtVal:X8}";
+            }
+            return eq;
         }
     }
 
@@ -90,10 +98,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            ulong rsVal = cpu.RegsLo[args.Rs];
-            ulong rtVal = cpu.RegsLo[args.Rt];
-            return $"{CpuHelpers.RegName(args.Rd)} = 0x{(uint)(rsVal | rtVal):X8}";
+            string eq = Equation
+                .Replace("rd", CpuHelpers.RegName(args.Rd))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("rt", CpuHelpers.RegName(args.Rt));
+            
+            if (cpu != null)
+            {
+                ulong rsVal = cpu.RegsLo[args.Rs];
+                ulong rtVal = cpu.RegsLo[args.Rt];
+                return $"{eq} => 0x{rsVal:X8} | 0x{rtVal:X8} = 0x{rsVal | rtVal:X8}";
+            }
+            return eq;
         }
     }
 
@@ -131,10 +147,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            ulong rsVal = cpu.RegsLo[args.Rs];
-            ulong rtVal = cpu.RegsLo[args.Rt];
-            return $"{CpuHelpers.RegName(args.Rd)} = 0x{(uint)(rsVal ^ rtVal):X8}";
+            string eq = Equation
+                .Replace("rd", CpuHelpers.RegName(args.Rd))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("rt", CpuHelpers.RegName(args.Rt));
+            
+            if (cpu != null)
+            {
+                ulong rsVal = cpu.RegsLo[args.Rs];
+                ulong rtVal = cpu.RegsLo[args.Rt];
+                return $"{eq} => 0x{rsVal:X8} ^ 0x{rtVal:X8} = 0x{rsVal ^ rtVal:X8}";
+            }
+            return eq;
         }
     }
 
@@ -172,10 +196,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            ulong rsVal = cpu.RegsLo[args.Rs];
-            ulong rtVal = cpu.RegsLo[args.Rt];
-            return $"{CpuHelpers.RegName(args.Rd)} = 0x{(uint)~(rsVal | rtVal):X8}";
+            string eq = Equation
+                .Replace("rd", CpuHelpers.RegName(args.Rd))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("rt", CpuHelpers.RegName(args.Rt));
+            
+            if (cpu != null)
+            {
+                ulong rsVal = cpu.RegsLo[args.Rs];
+                ulong rtVal = cpu.RegsLo[args.Rt];
+                return $"{eq} => ~(0x{rsVal:X8} | 0x{rtVal:X8}) = 0x{~(rsVal | rtVal):X8}";
+            }
+            return eq;
         }
     }
 
@@ -213,10 +245,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            ulong rsVal = cpu.RegsLo[args.Rs];
-            ulong imm = (ushort)args.Imm;
-            return $"{CpuHelpers.RegName(args.Rt)} = 0x{(uint)(rsVal & imm):X8}";
+            ushort imm = (ushort)args.Imm;
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("ZeroExt(imm)", $"0x{imm:X4}");
+            
+            if (cpu != null)
+            {
+                ulong rsVal = cpu.RegsLo[args.Rs];
+                return $"{eq} => 0x{rsVal:X8} & 0x{imm:X4} = 0x{rsVal & imm:X8}";
+            }
+            return eq;
         }
     }
 
@@ -255,10 +295,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            ulong rsVal = cpu.RegsLo[args.Rs];
-            ulong imm = (ushort)args.Imm;
-            return $"{CpuHelpers.RegName(args.Rt)} = 0x{(uint)(rsVal | imm):X8}";
+            ushort imm = (ushort)args.Imm;
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("ZeroExt(imm)", $"0x{imm:X4}");
+            
+            if (cpu != null)
+            {
+                ulong rsVal = cpu.RegsLo[args.Rs];
+                return $"{eq} => 0x{rsVal:X8} | 0x{imm:X4} = 0x{rsVal | imm:X8}";
+            }
+            return eq;
         }
     }
 
@@ -296,10 +344,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
-            ulong rsVal = cpu.RegsLo[args.Rs];
-            ulong imm = (ushort)args.Imm;
-            return $"{CpuHelpers.RegName(args.Rt)} = 0x{(uint)(rsVal ^ imm):X8}";
+            ushort imm = (ushort)args.Imm;
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("ZeroExt(imm)", $"0x{imm:X4}");
+            
+            if (cpu != null)
+            {
+                ulong rsVal = cpu.RegsLo[args.Rs];
+                return $"{eq} => 0x{rsVal:X8} ^ 0x{imm:X4} = 0x{rsVal ^ imm:X8}";
+            }
+            return eq;
         }
     }
 }

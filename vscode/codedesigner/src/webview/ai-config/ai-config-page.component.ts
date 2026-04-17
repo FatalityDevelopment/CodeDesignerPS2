@@ -47,18 +47,8 @@ export interface McpMemoryEntry {
   name:      string;
   content:   string;
   gameId?:   string;
-  /** Agent database ID when scoped to a specific agent; undefined/null means shared. */
-  agentId?:  number;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface McpConfigEntry {
-  id:           number;
-  key:          string;
-  value?:       string;
-  description?: string;
-  updatedAt:    string;
 }
 
 // ── Markdown field descriptors ────────────────────────────────────────────────
@@ -109,12 +99,6 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
     </button>
     <button class="aic-tab" [class.active]="activeTab() === 'agents'" (click)="activeTab.set('agents')">
       Agents
-    </button>
-    <button class="aic-tab" [class.active]="activeTab() === 'memories'" (click)="onOpenMemoriesTab()">
-      Memories
-    </button>
-    <button class="aic-tab" [class.active]="activeTab() === 'tools'" (click)="onOpenToolsTab()">
-      Tools
     </button>
   </div>
 
@@ -397,7 +381,7 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
 
               <div class="aic-mem-list">
                 @if (memories().length === 0) {
-                  <div class="aic-empty">No memories scoped to this agent. Click "+ New Memory" to create one, or manage shared memories from the Memories tab.</div>
+                  <div class="aic-empty">No memories yet for this agent.</div>
                 }
                 @for (mem of memories(); track mem.id) {
                   <div class="aic-mem-item">
@@ -425,167 +409,6 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
       </main>
     </div>
 
-    <!-- ═══════════════════════════════ MEMORIES TAB ═══════════════════════ -->
-    <div class="aic-tab-panel aic-memories-tab-panel" [class.hidden]="activeTab() !== 'memories'">
-      <div class="aic-memories-tab-content">
-
-        <!-- Header -->
-        <div class="aic-memories-tab-header">
-          <h2 class="aic-memories-tab-title">&#x1F9E0; Memories</h2>
-          <div class="aic-memories-tab-header-actions">
-            <button class="aic-icon-btn" title="Refresh" (click)="loadAllMemories()">&#x21BB;</button>
-            <button class="aic-small-btn" title="Import from .md file" (click)="onImportGlobalMemory()">&#x2B06; Import</button>
-            <button class="aic-small-btn aic-primary-btn" (click)="onAddGlobalMemory()">+ New Memory</button>
-          </div>
-        </div>
-
-        <p class="aic-memories-tab-hint">Manage all memories across agents. Shared memories are available to every agent; agent-specific memories belong to a single agent.</p>
-
-        <!-- Filter bar -->
-        <div class="aic-mem-filter-bar">
-          <button class="aic-mem-filter-btn" [class.aic-mem-filter-active]="globalMemFilter() === 'all'" (click)="globalMemFilter.set('all')">All</button>
-          <button class="aic-mem-filter-btn" [class.aic-mem-filter-active]="globalMemFilter() === 'shared'" (click)="globalMemFilter.set('shared')">Shared</button>
-          <button class="aic-mem-filter-btn" [class.aic-mem-filter-active]="globalMemFilter() === 'agent'" (click)="globalMemFilter.set('agent')">Agent-specific</button>
-        </div>
-
-        <!-- Status -->
-        @if (globalMemStatusMessage()) {
-          <div class="aic-status"
-               [class.aic-status-ok]="globalMemStatusOk()"
-               [class.aic-status-error]="globalMemStatusError()">
-            {{ globalMemStatusMessage() }}
-          </div>
-        }
-
-        <!-- Inline add form -->
-        @if (showGlobalMemAddForm()) {
-          <div class="aic-mem-add-form aic-global-mem-add-form">
-            <input class="aic-mem-name-input"
-                   type="text"
-                   placeholder="Memory name…"
-                   autocomplete="off"
-                   spellcheck="false"
-                   [value]="newGlobalMemName()"
-                   (input)="newGlobalMemName.set($any($event.target).value)"
-                   (keydown.enter)="doAddGlobalMemory()"
-                   (keydown.escape)="showGlobalMemAddForm.set(false)" />
-            <div class="aic-mem-add-scope-row">
-              <label class="aic-mem-scope-label">Scope:</label>
-              <select class="aic-mem-scope-select"
-                      (change)="newGlobalMemAgentId.set($any($event.target).value === '' ? null : +$any($event.target).value)">
-                <option value="">Shared (all agents)</option>
-                @for (agent of agents(); track agent.id) {
-                  <option [value]="agent.id">{{ agent.name }}</option>
-                }
-              </select>
-            </div>
-            <div class="aic-mem-add-row">
-              <button class="aic-small-btn aic-primary-btn"
-                      [disabled]="!newGlobalMemName().trim()"
-                      (click)="doAddGlobalMemory()">Create</button>
-              <button class="aic-small-btn" (click)="showGlobalMemAddForm.set(false)">Cancel</button>
-            </div>
-          </div>
-        }
-
-        <!-- Entries list -->
-        <div class="aic-global-mem-list">
-          @if (filteredGlobalMemories().length === 0 && !globalMemLoading()) {
-            <div class="aic-empty">
-              @if (globalMemFilter() === 'all')    { No memories yet. Click "+ New Memory" to create one. }
-              @if (globalMemFilter() === 'shared') { No shared memories found. }
-              @if (globalMemFilter() === 'agent')  { No agent-specific memories found. }
-            </div>
-          }
-          @for (mem of filteredGlobalMemories(); track mem.id) {
-            <div class="aic-mem-item">
-              <div class="aic-mem-item-info">
-                <span class="aic-mem-name" [title]="mem.name">{{ mem.name }}</span>
-                <span class="aic-mem-badge"
-                      [class.aic-mem-badge-agent]="mem.agentId != null"
-                      [class.aic-mem-badge-shared]="mem.agentId == null">
-                  {{ mem.agentId != null ? getAgentName(mem.agentId) : 'Shared' }}
-                </span>
-                <span class="aic-mem-date">{{ formatDate(mem.updatedAt) }}</span>
-              </div>
-              <div class="aic-mem-item-actions">
-                @if (pendingGlobalMemDelete() === mem.id) {
-                  <span class="aic-confirm-text">Delete?</span>
-                  <button class="aic-item-btn aic-danger-btn" (click)="doDeleteGlobalMemory(mem.id)">Yes</button>
-                  <button class="aic-item-btn" (click)="pendingGlobalMemDelete.set(null)">No</button>
-                } @else {
-                  <button class="aic-item-btn" title="Edit in editor" (click)="onEditMemory(mem)">Edit</button>
-                  <button class="aic-item-btn" title="Export to .md" (click)="onExportMemory(mem)">&#x2B07;</button>
-                  <button class="aic-item-btn aic-danger-btn" title="Delete" (click)="pendingGlobalMemDelete.set(mem.id)">&#x2715;</button>
-                }
-              </div>
-            </div>
-          }
-        </div>
-
-      </div>
-    </div>
-
-    <!-- ══════════════════════════════ TOOLS TAB ══════════════════════════ -->
-    <div class="aic-tab-panel aic-tools-panel" [class.hidden]="activeTab() !== 'tools'">
-      <div class="aic-tools-header">
-        <h2 class="aic-tools-title">&#x1F6E0; MCP Tool Descriptions</h2>
-        <div class="aic-tools-actions">
-          <button class="aic-icon-btn" title="Refresh tool list" (click)="loadTools()">&#x21BB;</button>
-        </div>
-      </div>
-      @if (toolStatusMessage()) {
-        <div class="aic-status"
-             [class.aic-status-ok]="toolStatusOk()"
-             [class.aic-status-error]="toolStatusError()">
-          {{ toolStatusMessage() }}
-        </div>
-      }
-      <p class="aic-tools-hint">Edit the description for each MCP tool below. Descriptions are used by AI agents to understand tool purpose and usage.</p>
-      <div class="aic-tools-table-wrap">
-        <table class="aic-tools-table">
-          <thead>
-            <tr>
-              <th class="aic-tools-col-key">Tool Key</th>
-              <th class="aic-tools-col-desc">Description</th>
-              <th class="aic-tools-col-actions"></th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (tool of tools(); track tool.key) {
-              <tr class="aic-tools-row" [class.aic-tools-editing]="editingToolKey() === tool.key">
-                <td class="aic-tools-col-key aic-tools-key-cell">{{ tool.key }}</td>
-                <td class="aic-tools-col-desc">
-                  @if (editingToolKey() === tool.key) {
-                    <textarea class="aic-tools-textarea"
-                              rows="4"
-                              spellcheck="false"
-                              [value]="editingToolValue()"
-                              (input)="editingToolValue.set($any($event.target).value)"></textarea>
-                  } @else {
-                    <span class="aic-tools-desc-text">{{ tool.value || '—' }}</span>
-                  }
-                </td>
-                <td class="aic-tools-col-actions">
-                  @if (editingToolKey() === tool.key) {
-                    <button class="aic-item-btn aic-primary-btn" (click)="onSaveTool(tool.key)" title="Save">&#x2713; Save</button>
-                    <button class="aic-item-btn" (click)="onCancelEditTool()" title="Cancel">&#xD7;</button>
-                  } @else {
-                    <button class="aic-item-btn" (click)="onEditTool(tool)" title="Edit description">&#x270F; Edit</button>
-                  }
-                </td>
-              </tr>
-            }
-            @if (tools().length === 0) {
-              <tr>
-                <td colspan="3" class="aic-empty">No tool descriptions found. Make sure the server is running.</td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
-    </div>
-
   </div>
 </div>
   `,
@@ -598,7 +421,7 @@ export class AiConfigPageComponent implements AfterViewInit {
   readonly orchFields = ORCHESTRATION_FIELDS;
 
   // ── Tab state ──────────────────────────────────────────────────────────────
-  readonly activeTab = signal<'orchestration' | 'agents' | 'memories' | 'tools'>('orchestration');
+  readonly activeTab = signal<'orchestration' | 'agents'>('orchestration');
 
   // ── Orchestration list state ──────────────────────────────────────────────
   readonly orchestrations     = signal<OrchestrationProfile[]>([]);
@@ -652,36 +475,6 @@ export class AiConfigPageComponent implements AfterViewInit {
   readonly showMemAddForm   = signal(false);
   readonly newMemName       = signal('');
   readonly pendingMemDelete = signal<number | null>(null);
-
-  // ── Global memories tab state ─────────────────────────────────────────────
-  readonly allMemories             = signal<McpMemoryEntry[]>([]);
-  readonly globalMemFilter         = signal<'all' | 'shared' | 'agent'>('all');
-  readonly globalMemStatusMessage  = signal('');
-  readonly globalMemStatusOk       = signal(false);
-  readonly globalMemStatusError    = signal(false);
-  readonly globalMemLoading        = signal(false);
-  readonly showGlobalMemAddForm    = signal(false);
-  readonly newGlobalMemName        = signal('');
-  readonly newGlobalMemAgentId     = signal<number | null>(null);
-  readonly pendingGlobalMemDelete  = signal<number | null>(null);
-
-  readonly filteredGlobalMemories = computed(() => {
-    const f   = this.globalMemFilter();
-    const all = this.allMemories();
-    // eslint-disable-next-line eqeqeq
-    if (f === 'shared') { return all.filter(e => e.agentId == null); }
-    // eslint-disable-next-line eqeqeq
-    if (f === 'agent')  { return all.filter(e => e.agentId != null); }
-    return all;
-  });
-
-  // ── Tools state ───────────────────────────────────────────────────────────
-  readonly tools            = signal<McpConfigEntry[]>([]);
-  readonly toolStatusMessage = signal('');
-  readonly toolStatusOk     = signal(false);
-  readonly toolStatusError  = signal(false);
-  readonly editingToolKey   = signal<string | null>(null);
-  readonly editingToolValue = signal('');
 
   private _pendingAgentDelete = false;
 
@@ -1006,13 +799,8 @@ export class AiConfigPageComponent implements AfterViewInit {
   // ── Memory actions ────────────────────────────────────────────────────────
 
   loadMemories(): void {
-    const agentId = this.selectedId();
-    if (agentId === null) {
-      this.setMemStatus('', false);
-      return;
-    }
     this.memStatusMessage.set('Loading…');
-    this.vscode.postMessage({ type: 'memoryListForAgent', agentId });
+    this.vscode.postMessage({ type: 'memoryList' });
   }
 
   onAddMemory(): void {
@@ -1023,10 +811,9 @@ export class AiConfigPageComponent implements AfterViewInit {
   doAddMemory(): void {
     const name = this.newMemName().trim();
     if (!name) { return; }
-    const agentId = this.selectedId();
     this.showMemAddForm.set(false);
     this.memStatusMessage.set('Creating…');
-    this.vscode.postMessage({ type: 'memoryAdd', name, agentId: agentId ?? undefined });
+    this.vscode.postMessage({ type: 'memoryAdd', name });
   }
 
   onEditMemory(mem: McpMemoryEntry): void {
@@ -1047,52 +834,6 @@ export class AiConfigPageComponent implements AfterViewInit {
     this.vscode.postMessage({ type: 'memoryDelete', id });
   }
 
-  // ── Global memories tab actions ──────────────────────────────────────────
-
-  onOpenMemoriesTab(): void {
-    this.activeTab.set('memories');
-    if (this.allMemories().length === 0) {
-      this.loadAllMemories();
-    }
-  }
-
-  loadAllMemories(): void {
-    this.globalMemLoading.set(true);
-    this.setGlobalMemStatus('Loading…', false);
-    this.vscode.postMessage({ type: 'memoryListAll' });
-  }
-
-  onAddGlobalMemory(): void {
-    this.newGlobalMemName.set('');
-    this.newGlobalMemAgentId.set(null);
-    this.showGlobalMemAddForm.set(true);
-  }
-
-  doAddGlobalMemory(): void {
-    const name = this.newGlobalMemName().trim();
-    if (!name) { return; }
-    this.showGlobalMemAddForm.set(false);
-    this.setGlobalMemStatus('Creating…', false);
-    const agentId = this.newGlobalMemAgentId();
-    this.vscode.postMessage({ type: 'memoryAdd', name, agentId: agentId ?? undefined });
-  }
-
-  onImportGlobalMemory(): void {
-    this.vscode.postMessage({ type: 'memoryImport' });
-  }
-
-  doDeleteGlobalMemory(id: number): void {
-    this.pendingGlobalMemDelete.set(null);
-    this.setGlobalMemStatus('Deleting…', false);
-    this.vscode.postMessage({ type: 'memoryDelete', id });
-  }
-
-  /** Look up an agent name by ID from the loaded agents list. */
-  getAgentName(agentId: number): string {
-    const agent = this.agents().find(a => a.id === agentId);
-    return agent ? agent.name : `Agent ${agentId}`;
-  }
-
   formatDate(iso: string): string {
     try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
   }
@@ -1111,51 +852,7 @@ export class AiConfigPageComponent implements AfterViewInit {
     this.memStatusError.set(isError);
   }
 
-  private setGlobalMemStatus(msg: string, isError: boolean): void {
-    this.globalMemStatusMessage.set(msg);
-    this.globalMemStatusOk.set(!isError && msg !== '');
-    this.globalMemStatusError.set(isError);
-  }
-
-  // ── Tools actions ─────────────────────────────────────────────────────────
-
-  onOpenToolsTab(): void {
-    this.activeTab.set('tools');
-    if (this.tools().length === 0) {
-      this.loadTools();
-    }
-  }
-
-  loadTools(): void {
-    this.setToolStatus('Loading…', false);
-    this.vscode.postMessage({ type: 'toolList' });
-  }
-
-  onEditTool(tool: McpConfigEntry): void {
-    this.editingToolKey.set(tool.key);
-    this.editingToolValue.set(tool.value ?? '');
-  }
-
-  onCancelEditTool(): void {
-    this.editingToolKey.set(null);
-    this.editingToolValue.set('');
-  }
-
-  onSaveTool(key: string): void {
-    const value = this.editingToolValue();
-    this.editingToolKey.set(null);
-    this.editingToolValue.set('');
-    this.setToolStatus('Saving…', false);
-    this.vscode.postMessage({ type: 'toolUpdate', key, value });
-  }
-
-  private setToolStatus(msg: string, isError: boolean): void {
-    this.toolStatusMessage.set(msg);
-    this.toolStatusOk.set(!isError && msg !== '');
-    this.toolStatusError.set(isError);
-  }
-
-
+  // ── Message handler ───────────────────────────────────────────────────────
 
   private _handleMessage(data: Record<string, unknown>): void {
     switch (data['type']) {
@@ -1273,60 +970,14 @@ export class AiConfigPageComponent implements AfterViewInit {
         }
         break;
       }
-      case 'memoryListAllResult': {
-        const entries = (data['entries'] as McpMemoryEntry[] | undefined) ?? [];
-        const error   = data['error'] as string | undefined;
-        this.globalMemLoading.set(false);
-        this.pendingGlobalMemDelete.set(null);
-        if (error) {
-          this.setGlobalMemStatus('Error: ' + error, true);
-          this.allMemories.set([]);
-        } else {
-          this.allMemories.set(entries);
-          this.setGlobalMemStatus(entries.length === 0 ? '' : `${entries.length} memor${entries.length === 1 ? 'y' : 'ies'}`, false);
-        }
-        break;
-      }
       case 'memoryActionResult': {
         const error = data['error'] as string | undefined;
         const msg   = data['message'] as string | undefined;
-        if (this.activeTab() === 'memories') {
-          if (error) {
-            this.setGlobalMemStatus('Error: ' + error, true);
-          } else {
-            this.setGlobalMemStatus(msg ?? 'Done.', false);
-            this.loadAllMemories();
-          }
-        } else {
-          if (error) {
-            this.setMemStatus('Error: ' + error, true);
-          } else {
-            this.setMemStatus(msg ?? 'Done.', false);
-            this.loadMemories();
-          }
-        }
-        break;
-      }
-
-      case 'toolListResult': {
-        const error = data['error'] as string | undefined;
         if (error) {
-          this.setToolStatus('Error: ' + error, true);
+          this.setMemStatus('Error: ' + error, true);
         } else {
-          this.tools.set((data['tools'] as McpConfigEntry[]) ?? []);
-          this.setToolStatus('', false);
-        }
-        break;
-      }
-
-      case 'toolUpdateResult': {
-        const error = data['error'] as string | undefined;
-        const msg   = data['message'] as string | undefined;
-        if (error) {
-          this.setToolStatus('Error: ' + error, true);
-        } else {
-          this.setToolStatus(msg ?? 'Saved.', false);
-          this.loadTools();
+          this.setMemStatus(msg ?? 'Done.', false);
+          this.loadMemories();
         }
         break;
       }

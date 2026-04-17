@@ -5,7 +5,7 @@ namespace CodeDesigner.Ps2.Database;
 
 /// <summary>
 /// Entity Framework Core database context for CodeDesigner.
-/// Uses SQL Server (Express LocalDB by default) as the underlying storage engine.
+/// Uses SQLite as the underlying storage engine.
 /// </summary>
 public class CodeDesignerDbContext : DbContext
 {
@@ -81,16 +81,8 @@ public class CodeDesignerDbContext : DbContext
         {
             entity.HasKey(ls => ls.Id);
             entity.Property(ls => ls.SetName).HasMaxLength(256).IsRequired();
-            entity.Property(ls => ls.GameId).HasMaxLength(64);   // legacy, kept for compat
-
-            // New FK: each label set belongs to a specific disc release.
-            entity.HasOne(ls => ls.GameDisc)
-                  .WithMany(d => d.LabelSets)
-                  .HasForeignKey(ls => ls.GameDiscId)
-                  .OnDelete(DeleteBehavior.Cascade);
-
-            // Non-unique index for fast lookup by disc + name.
-            entity.HasIndex(ls => new { ls.GameDiscId, ls.SetName });
+            entity.Property(ls => ls.GameId).HasMaxLength(64);
+            entity.HasIndex(ls => new { ls.GameId, ls.SetName }).IsUnique();
         });
 
         // ── Label ──────────────────────────────────────────────────────────────
@@ -107,13 +99,10 @@ public class CodeDesignerDbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
 
             // Self-referencing parent / child relationship.
-            // SQL Server does not allow two CASCADE paths into the same table
-            // (Labels←LabelSets and Labels←Labels), so cascade is handled by
-            // EF Core on the client side instead of at the database level.
             entity.HasOne(l => l.Parent)
                   .WithMany(l => l.Children)
                   .HasForeignKey(l => l.ParentId)
-                  .OnDelete(DeleteBehavior.ClientCascade);
+                  .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(l => new { l.LabelSetId, l.Address });
         });
@@ -137,10 +126,6 @@ public class CodeDesignerDbContext : DbContext
             entity.HasIndex(m => m.Name).IsUnique();
             entity.Property(m => m.Name).HasMaxLength(512).IsRequired();
             entity.Property(m => m.GameId).HasMaxLength(64);
-            entity.HasOne(m => m.Agent)
-                  .WithMany()
-                  .HasForeignKey(m => m.AgentId)
-                  .OnDelete(DeleteBehavior.SetNull);
         });
 
         // ── McpAgent ───────────────────────────────────────────────────────────
@@ -230,7 +215,7 @@ public class CodeDesignerDbContext : DbContext
             entity.HasOne(cl => cl.Game)
                   .WithMany(g => g.CheatLists)
                   .HasForeignKey(cl => cl.GameId)
-                  .OnDelete(DeleteBehavior.ClientSetNull);
+                  .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasOne(cl => cl.GameDisc)
                   .WithMany(d => d.CheatLists)

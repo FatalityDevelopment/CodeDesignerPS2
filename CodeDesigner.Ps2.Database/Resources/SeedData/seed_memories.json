@@ -1,7 +1,0 @@
-[
-  {
-    "name": "codedesigner-getting-started",
-    "gameId": null,
-    "content": "# CodeDesigner — Getting Started\n\n## Overview\n\nCodeDesigner is a PS2 Emotion Engine reverse engineering toolkit. It provides:\n\n- **Assembler / Disassembler** — encode and decode MIPS64 EE instructions\n- **Emulator** — step-debug PS2 code against the EE/IOP hardware model\n- **Label system** — annotate addresses with names, types, and struct definitions\n- **Cheat engine** — apply and author GameShark / Action Replay cheat codes\n- **MCP server** — GitHub Copilot tools for interactive reverse engineering sessions\n\n## First steps\n\n1. Start a session by calling the `session_start` MCP tool — it loads the full operational guidelines.\n2. Use `ping` to confirm the socket server is reachable.\n3. Load a game in PCSX2 with PINE enabled, then call `pcsx2_game_info` to confirm connectivity.\n4. Begin analysis with `disassemble_memory`, `scan_functions`, and `scan_strings`.\n\n## Key tool groups\n\n| Group | Tools |\n|-------|-------|\n| Emulator control | `pause_emulator`, `resume_emulator`, `step`, `step_into`, `step_over`, `step_out` |\n| Memory | `read_memory`, `write_memory`, `scan_value`, `scan_pattern`, `scan_strings`, `scan_functions` |\n| Labels | `get_labels`, `add_label`, `delete_label`, `get_function_labels` |\n| Cheats | `apply_cheats`, `convert_cheat`, `detect_cheat_format`, `compile_cds` |\n| Progress | `session_start`, `save_progress_report`, `get_progress_report`, `list_progress_reports` |\n"
-  }
-]

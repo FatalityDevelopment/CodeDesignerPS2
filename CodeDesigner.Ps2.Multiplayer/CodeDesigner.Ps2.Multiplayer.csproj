@@ -10,7 +10,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
   </ItemGroup>
@@ -26,29 +25,5 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
-
-  <!--
-    Deploy build output to a 'Multiplayer' subdirectory inside the CodeDesigner
-    install directory so the VSCode extension can locate the Multiplayer server
-    without user configuration.  The subdirectory keeps Multiplayer assemblies
-    isolated from the Bridge deployment to avoid DLL contamination.
-
-    Install directory mirrors the C# DatabasePaths.GetInstallDirectory() logic:
-      Windows  →  %LOCALAPPDATA%\CodeDesigner\Multiplayer\
-      Linux/macOS →  $HOME/.local/share/CodeDesigner/Multiplayer/
-  -->
-  <Target Name="DeployToInstallDir" AfterTargets="Build">
-    <PropertyGroup>
-      <_LocalAppData Condition="'$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)</_LocalAppData>
-      <_LocalAppData Condition="'$(LOCALAPPDATA)' == '' AND '$(HOME)' != ''">$(HOME)/.local/share</_LocalAppData>
-      <_InstallDir Condition="'$(_LocalAppData)' != ''">$(_LocalAppData)/CodeDesigner/Multiplayer</_InstallDir>
-    </PropertyGroup>
-    <MakeDir Directories="$(_InstallDir)" Condition="'$(_InstallDir)' != ''" />
-    <ItemGroup Condition="'$(_InstallDir)' != ''">
-      <_DeployFiles Include="$(OutputPath)**\*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(_DeployFiles)" DestinationFiles="@(_DeployFiles->'$(_InstallDir)/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'$(_InstallDir)' != ''" />
-    <Message Text="[CodeDesigner.Multiplayer] Deployed to $(_InstallDir)" Importance="high" Condition="'$(_InstallDir)' != ''" />
-  </Target>
 
 </Project>

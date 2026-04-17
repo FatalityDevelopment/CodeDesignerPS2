@@ -16,6 +16,11 @@ import {
   SearchMatch,
   SearchMode,
   SymLabel,
+  SymString,
+  SymFunction,
+  SymPointer,
+  SymFloat,
+  SymInteger,
   RegisterData,
   ThreadEntry,
   CallStackEntry,
@@ -167,6 +172,7 @@ export class EditorState {
     search: signal(false),
     goto: signal(false),
     setpc: signal(false),
+    symbols: signal(false),
     registers: signal(false),
     bottom: signal(false),
     editOverlay: signal(false),
@@ -198,6 +204,11 @@ export class EditorState {
   // ═══════════════════════════════════════════════════════════════════════════
 
   readonly symLabels = signal<SymLabel[]>([]);
+  readonly symStrings = signal<SymString[]>([]);
+  readonly symFunctions = signal<SymFunction[]>([]);
+  readonly symPointers = signal<SymPointer[]>([]);
+  readonly symFloats = signal<SymFloat[]>([]);
+  readonly symIntegers = signal<SymInteger[]>([]);
 
   /** Live-resolved labels from the Pointer Manager. */
   readonly pointerLabels = signal<SymLabel[]>([]);

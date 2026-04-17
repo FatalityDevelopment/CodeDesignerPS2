@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Database.Entities;
@@ -12,45 +11,17 @@ namespace CodeDesigner.Ps2.McpServer;
 /// managed by <see cref="McpMemoryService"/>.
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>Concurrency design:</b> reads open their own short-lived
-/// <see cref="CodeDesignerDbContext"/> directly (SQL Server handles concurrent readers
-/// natively via its row-versioning / MVCC isolation).  Write operations
-/// (<see cref="SaveMemoryAsync"/>, <see cref="DeleteMemoryAsync"/>) are routed through
-/// the Bridge socket server when a <see cref="SocketBridgeClient"/> is available, so the
-/// Bridge's single <see cref="CodeDesignerDbContext"/> becomes the sole writer and all
-/// cross-process concurrency is eliminated.
-/// </para>
-/// <para>
-/// When the socket bridge is unavailable (e.g. during tests or offline runs),
-/// the service falls back to direct DB writes, which are serialized within this
-/// process by <see cref="_writeLock"/>.
-/// </para>
+/// Each public method creates its own short-lived <see cref="CodeDesignerDbContext"/>
+/// and disposes it immediately after the operation completes, so this class is safe
+/// to register as a singleton even though <see cref="DbContext"/> is ordinarily scoped.
 /// </remarks>
 public sealed class McpDatabaseService
 {
     private readonly DbContextOptions<CodeDesignerDbContext> _dbOptions;
-    private readonly SocketBridgeClient? _bridge;
 
-    /// <summary>
-    /// Per-process write serializer.  Prevents concurrent writes from multiple
-    /// async callers within the same MCP server process when falling back to
-    /// direct DB access.
-    /// </summary>
-    private static readonly SemaphoreSlim _writeLock = new(1, 1);
-
-    /// <param name="dbOptions">Options used for direct DB access (reads open a short-lived context per operation; writes use <see cref="_writeLock"/> when the Bridge is unavailable).</param>
-    /// <param name="bridge">
-    /// Optional socket bridge client.  When provided, writes are routed through
-    /// the Bridge socket server rather than directly to SQL Server, guaranteeing
-    /// single-writer semantics across all concurrent MCP agent processes.
-    /// </param>
-    public McpDatabaseService(
-        DbContextOptions<CodeDesignerDbContext> dbOptions,
-        SocketBridgeClient? bridge = null)
+    public McpDatabaseService(DbContextOptions<CodeDesignerDbContext> dbOptions)
     {
         _dbOptions = dbOptions;
-        _bridge = bridge;
     }
 
     // ── Memories / progress reports ───────────────────────────────────────────
@@ -60,28 +31,6 @@ public sealed class McpDatabaseService
     {
         await using var db = new CodeDesignerDbContext(_dbOptions);
         return await db.McpMemories
-            .OrderBy(m => m.Name)
-            .Select(m => m.Name)
-            .ToListAsync(ct);
-    }
-
-    /// <summary>Returns the names of memories belonging to the specified agent.</summary>
-    public async Task<IReadOnlyList<string>> ListAgentMemoriesAsync(int agentId, CancellationToken ct = default)
-    {
-        await using var db = new CodeDesignerDbContext(_dbOptions);
-        return await db.McpMemories
-            .Where(m => m.AgentId == agentId)
-            .OrderBy(m => m.Name)
-            .Select(m => m.Name)
-            .ToListAsync(ct);
-    }
-
-    /// <summary>Returns the names of all shared memories (AgentId is null).</summary>
-    public async Task<IReadOnlyList<string>> ListSharedMemoriesAsync(CancellationToken ct = default)
-    {
-        await using var db = new CodeDesignerDbContext(_dbOptions);
-        return await db.McpMemories
-            .Where(m => m.AgentId == null)
             .OrderBy(m => m.Name)
             .Select(m => m.Name)
             .ToListAsync(ct);
@@ -101,60 +50,28 @@ public sealed class McpDatabaseService
 
     /// <summary>Creates or overwrites a memory entry with the given Markdown content.</summary>
     public async Task SaveMemoryAsync(string name, string content, CancellationToken ct = default)
-        => await SaveMemoryAsync(name, content, agentId: null, ct);
-
-    /// <summary>Creates or overwrites a memory entry with the given Markdown content, optionally scoped to an agent.</summary>
-    public async Task SaveMemoryAsync(string name, string content, int? agentId, CancellationToken ct = default)
     {
         var slug = SanitiseName(name);
+        await using var db = new CodeDesignerDbContext(_dbOptions);
 
-        // ── Route through Bridge socket when available ─────────────────────────
-        if (_bridge is not null)
+        var existing = await db.McpMemories.FirstOrDefaultAsync(m => m.Name == slug, ct);
+        if (existing is null)
         {
-            var response = await _bridge.SendAsync(new
+            db.McpMemories.Add(new McpMemory
             {
-                Command              = "MCPMEMORY_UPSERT",
-                McpMemoryName        = slug,
-                McpMemoryContent     = content,
-                McpMemoryAgentId     = agentId,
-            }, ct);
-
-            EnsureBridgeSuccess(response, "MCPMEMORY_UPSERT");
-            return;
+                Name      = slug,
+                Content   = content,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        else
+        {
+            existing.Content   = content;
+            existing.UpdatedAt = DateTime.UtcNow;
         }
 
-        // ── Fallback: direct DB write (serialized within this process) ─────────
-        await _writeLock.WaitAsync(ct);
-        try
-        {
-            await using var db = new CodeDesignerDbContext(_dbOptions);
-
-            var existing = await db.McpMemories.FirstOrDefaultAsync(m => m.Name == slug, ct);
-            if (existing is null)
-            {
-                db.McpMemories.Add(new McpMemory
-                {
-                    Name      = slug,
-                    Content   = content,
-                    AgentId   = NormalizeAgentId(agentId),
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                });
-            }
-            else
-            {
-                existing.Content   = content;
-                existing.UpdatedAt = DateTime.UtcNow;
-                if (agentId.HasValue)
-                    existing.AgentId = NormalizeAgentId(agentId);
-            }
-
-            await db.SaveChangesAsync(ct);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -165,48 +82,14 @@ public sealed class McpDatabaseService
     public async Task<bool> DeleteMemoryAsync(string name, CancellationToken ct = default)
     {
         var slug = SanitiseName(name);
+        await using var db = new CodeDesignerDbContext(_dbOptions);
 
-        // ── Route through Bridge socket when available ─────────────────────────
-        if (_bridge is not null)
-        {
-            var response = await _bridge.SendAsync(new
-            {
-                Command       = "MCPMEMORY_DELETE_BY_NAME",
-                McpMemoryName = slug,
-            }, ct);
+        var existing = await db.McpMemories.FirstOrDefaultAsync(m => m.Name == slug, ct);
+        if (existing is null) return false;
 
-            var doc = JsonDocument.Parse(response);
-            var root = doc.RootElement;
-
-            // Success=true means the command ran; Data="true"/"false" tells us if the
-            // row was actually found and deleted (mirrors the direct-DB return value).
-            if (root.TryGetProperty("success", out var s) && !s.GetBoolean())
-                return false;
-
-            if (root.TryGetProperty("data", out var d)
-                && bool.TryParse(d.GetString(), out var deleted))
-                return deleted;
-
-            return false; // no data field — treat as not-found to avoid false positives
-        }
-
-        // ── Fallback: direct DB write (serialized within this process) ─────────
-        await _writeLock.WaitAsync(ct);
-        try
-        {
-            await using var db = new CodeDesignerDbContext(_dbOptions);
-
-            var existing = await db.McpMemories.FirstOrDefaultAsync(m => m.Name == slug, ct);
-            if (existing is null) return false;
-
-            db.McpMemories.Remove(existing);
-            await db.SaveChangesAsync(ct);
-            return true;
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        db.McpMemories.Remove(existing);
+        await db.SaveChangesAsync(ct);
+        return true;
     }
 
     // ── McpAgent ──────────────────────────────────────────────────────────────
@@ -254,13 +137,6 @@ public sealed class McpDatabaseService
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Normalizes an agent ID for storage: returns null when the caller passes
-    /// null or the sentinel value 0 (used to clear an agent association).
-    /// </summary>
-    private static int? NormalizeAgentId(int? agentId)
-        => agentId is null or 0 ? null : agentId;
-
-    /// <summary>
     /// Converts an arbitrary string into a file/DB-safe slug.
     /// Keeps letters, digits, hyphens, and underscores; collapses all other
     /// characters into a single hyphen and strips leading/trailing hyphens.
@@ -278,30 +154,4 @@ public sealed class McpDatabaseService
 
         return sanitised;
     }
-
-    /// <summary>
-    /// Parses a Bridge JSON response and throws <see cref="InvalidOperationException"/>
-    /// when the <c>success</c> field is <see langword="false"/>.
-    /// </summary>
-    private static void EnsureBridgeSuccess(string json, string command)
-    {
-        try
-        {
-            var doc  = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("success", out var s) && !s.GetBoolean())
-            {
-                var msg = root.TryGetProperty("error", out var e) ? e.GetString() : null;
-                throw new InvalidOperationException(
-                    $"{command} failed via Bridge: {msg ?? json}");
-            }
-        }
-        catch (JsonException)
-        {
-            // Non-JSON response — Bridge is unavailable; surface the raw text.
-            throw new InvalidOperationException(
-                $"{command} Bridge returned non-JSON: {json}");
-        }
-    }
 }
-

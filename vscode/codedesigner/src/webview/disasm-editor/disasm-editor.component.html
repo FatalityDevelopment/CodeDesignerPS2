@@ -1,12 +1,18 @@
 <div id="header">
 <div id="header-toolbar">
+    <button class="header-tool-btn" id="symbols-toggle-btn" title="Toggle Symbols Panel (Ctrl+Alt+S)">&#8862; Symbols</button>
     <button class="header-tool-btn" id="registers-toggle-btn" title="Toggle Registers Panel (Ctrl+Alt+R)">&#8863; Regs</button>
     <button class="header-tool-btn" id="bottom-panel-toggle-btn" title="Toggle Bottom Panel (Ctrl+Alt+T)">&#8693; Debug Tools</button>
     <button class="header-tool-btn" id="search-toggle-btn" title="Search (Ctrl+F)">&#8853; Search</button>
     <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
     <button class="header-tool-btn live-only" id="setpc-toggle-btn" title="Set PC to Address (Ctrl+Alt+P)">&#9655; Set PC</button>
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
-
+    <button class="header-tool-btn" id="converter-btn" title="Cheat Code Converter">&#8645; Converter</button>
+    <button class="header-tool-btn" id="porter-btn" title="Cheat Code Porter">&#8651; Port</button>
+    <button class="header-tool-btn" id="mc-btn" title="Memory Card Manager">&#x1F4BE; Memory Card</button>
+    <button class="header-tool-btn" id="hdd-btn" title="HDD Image Manager">&#x1F4BF; HDD</button>
+    <button class="header-tool-btn" id="scanner-btn" title="Memory Value Scanner">&#128269; Scanner</button>
+    <button class="header-tool-btn" id="labels-btn" title="Label Manager">&#128211; Labels</button>
 
 </div>
 <!-- New Angular component-based panels -->
@@ -67,10 +73,34 @@
     (addWatch)="onCtxAddWatch()"
     (removeWatch)="onCtxRemoveWatch()"
     (gotoTarget)="onCtxGotoTarget()"
-    (findReferences)="onCtxFindReferences()"
-    (findCodeReferences)="onCtxFindCodeReferences()"
     (addToLabelManager)="onCtxAddToLabelManager()"
     (closed)="onCtxClosed()"
+  />
+<!-- Angular SymbolsPanel (Phase 9) -->
+<app-symbols-panel
+    [visible]="symbolsPanelVisible()"
+    [regionLabel]="symbolsPanelRegionLabel()"
+    [labels]="symbolsPanelLabels()"
+    [strings]="symbolsPanelStrings()"
+    [functions]="symbolsPanelFunctions()"
+    [pointers]="symbolsPanelPointers()"
+    [floats]="symbolsPanelFloats()"
+    [integers]="symbolsPanelIntegers()"
+    [stringsStatus]="symbolsPanelStringsStatus()"
+    [functionsStatus]="symbolsPanelFunctionsStatus()"
+    [pointersStatus]="symbolsPanelPointersStatus()"
+    [floatsStatus]="symbolsPanelFloatsStatus()"
+    [integersStatus]="symbolsPanelIntegersStatus()"
+    (close)="onSymbolsPanelClose()"
+    (refresh)="onSymbolsPanelRefresh()"
+    (navigateToAddress)="onSymbolsPanelNavigate($event)"
+    (addLabel)="onSymbolsPanelAddLabel($event)"
+    (deleteLabel)="onSymbolsPanelDeleteLabel($event)"
+    (scanStrings)="onSymbolsPanelScanStrings()"
+    (scanFunctions)="onSymbolsPanelScanFunctions()"
+    (scanPointers)="onSymbolsPanelScanPointers()"
+    (scanFloats)="onSymbolsPanelScanFloats()"
+    (scanIntegers)="onSymbolsPanelScanIntegers()"
   />
 <!-- Angular DebugPanel (Phase 7) -->
 <app-debug-panel
@@ -111,8 +141,7 @@
     (close$)="onEditOverlayClose()"
     (assembleInstr)="onAssembleInstr($event)"
     (disasmBytes)="onDisasmBytes($event)"
-    (requestHistory)="onRequestHistory($event)"
-    (requestRefs)="onRequestRefs($event)" />
+    (requestHistory)="onRequestHistory($event)" />
 <app-converter-overlay #converterOverlayComp
     (close$)="onConverterOverlayClose()"
     (convert$)="onConvertCheat($event)" />

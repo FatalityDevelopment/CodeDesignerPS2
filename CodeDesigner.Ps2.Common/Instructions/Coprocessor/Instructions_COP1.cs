@@ -168,15 +168,21 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
 
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("fs", $"$f{args.Rd}");
+            
             if (cpu != null)
             {
                 uint bits = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
                 float value = BitConverter.UInt32BitsToSingle(bits);
-                return $"$f{args.Rd} ← {CpuHelpers.RegName(args.Rt)} = 0x{bits:X8} ({value})";
+                return $"{eq} => write 0x{bits:X8} ({value}) to FPR[{args.Rd}]";
             }
-            return $"$f{args.Rd} ← {CpuHelpers.RegName(args.Rt)}";
+            return eq;
         }
     }
+
+    // DMTC1 - Move from GPR to COP1 register (64-bit)
     public sealed class DMTC1 : Instruction<Args_R>
     {
         public DMTC1()
@@ -371,12 +377,17 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation
+                .Replace("ft", $"$f{args.Rt}")
+                .Replace("base", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
             if (cpu != null)
             {
-                uint addr = (uint)((long)cpu.RegsLo[args.Rs] + offset);
-                return $"$f{args.Rt} ← [0x{addr:X8}]";
+                ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
+                return $"{eq} => load from addr 0x{addr:X16}";
             }
-            return $"$f{args.Rt} ← [{CpuHelpers.RegName(args.Rs)} + {offset}]";
+            return eq;
         }
     }
 
@@ -430,14 +441,18 @@ namespace CodeDesigner.Ps2.Common.Instructions.CoprocessorInstructions
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
             int offset = CpuHelpers.SignExtend16(args.Imm);
+            string eq = Equation
+                .Replace("ft", $"$f{args.Rt}")
+                .Replace("base", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
             if (cpu != null)
             {
-                uint addr = (uint)((long)cpu.RegsLo[args.Rs] + offset);
+                ulong addr = (ulong)((long)cpu.RegsLo[args.Rs] + offset);
                 float value = cpu.FPR[args.Rt];
-                uint bits = BitConverter.SingleToUInt32Bits(value);
-                return $"[0x{addr:X8}] ← $f{args.Rt} = {value} (0x{bits:X8})";
+                return $"{eq} => store {value} to addr 0x{addr:X16}";
             }
-            return $"[{CpuHelpers.RegName(args.Rs)} + {offset}] ← $f{args.Rt}";
+            return eq;
         }
     }
 

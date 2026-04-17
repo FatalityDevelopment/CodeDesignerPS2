@@ -3,7 +3,6 @@ import {
   ChangeDetectionStrategy,
   ViewEncapsulation,
   input,
-  output,
   signal,
   model,
   OnDestroy,
@@ -51,30 +50,6 @@ interface ArchiveCheatsUpdatedMsg {
   encapsulation: ViewEncapsulation.None,
   template: `
     <div class="cheats-container">
-
-      <!-- ── Cheat tools ──────────────────────────────────────────────────── -->
-      <div class="cheats-tools">
-        <div class="btn-grid">
-          <button class="cheats-tool-btn" (click)="openConverterClick.emit()"
-                  title="Open the Cheat Code Converter to encrypt/decrypt cheat codes">
-            ↕ Converter
-          </button>
-          <button class="cheats-tool-btn" (click)="openPorterClick.emit()"
-                  title="Open the Cheat Code Porter to port cheats between game revisions">
-            ⇋ Porter
-          </button>
-          <button class="cheats-tool-btn" (click)="openScannerClick.emit()"
-                  title="Open the Memory Scanner to search for values in memory">
-            🔍 Scanner
-          </button>
-          <button class="cheats-tool-btn" id="jokerMakerBtn" (click)="openJokerMaker()" title="Build a Joker/button-combo code">
-            🕹️ Joker
-          </button>
-          <button class="cheats-tool-btn" (click)="onOpenHelp()" title="Open the Cheat Engine guide">
-            ? Help
-          </button>
-        </div>
-      </div>
 
       <!-- ── Archive cheats section (PCSX2 mode) ─────────────────────────── -->
       @if (isPcsx2()) {
@@ -138,13 +113,16 @@ interface ArchiveCheatsUpdatedMsg {
         <button id="cheatsUpdateBtn" (click)="onApplyCheats()" [disabled]="!isConnected()">
           Update
         </button>
+        <button id="jokerMakerBtn" (click)="openJokerMaker()" title="Build a Joker/button-combo code">
+          🕹️ Joker Maker
+        </button>
       </div>
       @if (cheatMessage()) {
         <div class="cheat-message" [class.cheat-error]="cheatError()">{{cheatMessage()}}</div>
       }
     </div>
 
-    <app-joker-maker-overlay #jokerOverlay [isConnected]="isConnected()" />
+    <app-joker-maker-overlay #jokerOverlay />
   `,
 })
 export class CheatsTabComponent implements OnDestroy {
@@ -154,11 +132,6 @@ export class CheatsTabComponent implements OnDestroy {
   readonly isConnected = input(false);
   /** True when the sidebar is connected in PCSX2 PINE bridge mode. */
   readonly isPcsx2 = input(false);
-
-  // ── Tool outputs (relayed to panel parent → panel provider) ────────────────
-  readonly openConverterClick = output<void>();
-  readonly openPorterClick    = output<void>();
-  readonly openScannerClick   = output<void>();
 
   private readonly jokerOverlay = viewChild.required<JokerMakerOverlayComponent>('jokerOverlay');
 
@@ -232,9 +205,5 @@ export class CheatsTabComponent implements OnDestroy {
 
   openJokerMaker(): void {
     this.jokerOverlay().open();
-  }
-
-  onOpenHelp(): void {
-    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'CHEAT_ENGINE.md' });
   }
 }

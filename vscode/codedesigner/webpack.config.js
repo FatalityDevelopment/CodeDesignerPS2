@@ -88,7 +88,6 @@ const webviewConfig = {
     'disasm-editor':   './src/webview/disasm-editor/main.ts',
     'label-manager':   './src/webview/label-manager/main.ts',
     'ai-config':       './src/webview/ai-config/main.ts',
-    'packet-viewer':   './src/webview/packet-viewer/main.ts',
   },
   output: {
     path: path.resolve(__dirname, 'dist/webview'),

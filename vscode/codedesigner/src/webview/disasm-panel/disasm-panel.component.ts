@@ -7,6 +7,7 @@ import {
   CheatsTabComponent,
   CdsTabComponent,
   RecompileTabComponent,
+  McpMemoryOverlayComponent,
 } from './components';
 import type { McpMemoryEntry, McpMemoryListResult, McpMemoryActionResult } from './components';
 import { EmuOption, SnapshotEntry } from './types';
@@ -83,6 +84,7 @@ interface Pcsx2ModeChangedMsg {
     CheatsTabComponent,
     CdsTabComponent,
     RecompileTabComponent,
+    McpMemoryOverlayComponent,
   ],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-panel.component.html',
@@ -106,7 +108,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   currentGameName = '';
   private subs: Subscription[] = [];
 
-  @ViewChild(SettingsTabComponent) private settingsTab?: SettingsTabComponent;
+  @ViewChild(McpMemoryOverlayComponent) private mcpMemoryOverlay?: McpMemoryOverlayComponent;
 
   constructor(private bridge: VsCodeBridgeService) {}
 
@@ -117,7 +119,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
         this.isPaused = false;
         if (!msg.connected) { this.isPcsx2 = false; }
         // Reload memories when the socket connects (in case the first load failed while disconnected)
-        if (msg.connected) { this.settingsTab?.load(); }
+        if (msg.connected) { this.mcpMemoryOverlay?.load(); }
       }),
       this.bridge.on<Pcsx2ModeChangedMsg>('pcsx2ModeChanged').subscribe(msg => {
         this.isPcsx2 = msg.isPcsx2;
@@ -167,10 +169,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
       }),
       // MCP Memory Manager messages from the provider
       this.bridge.on<{ command: 'mcpMemoryListResult'; entries?: McpMemoryEntry[]; error?: string }>('mcpMemoryListResult').subscribe(msg => {
-        this.settingsTab?.setListResult({ entries: msg.entries, error: msg.error });
+        this.mcpMemoryOverlay?.setListResult({ entries: msg.entries, error: msg.error });
       }),
       this.bridge.on<{ command: 'mcpMemoryActionResult'; entry?: McpMemoryEntry; error?: string; message?: string }>('mcpMemoryActionResult').subscribe(msg => {
-        this.settingsTab?.setActionResult({ entry: msg.entry, error: msg.error, message: msg.message });
+        this.mcpMemoryOverlay?.setActionResult({ entry: msg.entry, error: msg.error, message: msg.message });
       }),
       // Follow-AI state sync from the extension host
       this.bridge.on<{ enabled: boolean }>('followAiState').subscribe(msg => {
@@ -182,7 +184,7 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     // Load memories list after the view (and child components) are fully initialized
-    this.settingsTab?.load();
+    this.mcpMemoryOverlay?.load();
   }
 
   ngOnDestroy(): void {
@@ -237,10 +239,6 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  startNetwork(): void {
-    this.bridge.postMessage({ command: 'startNetwork' });
-  }
-
   startPcsx2(): void {
     this.bridge.postMessage({
       command: 'startPcsx2',
@@ -264,14 +262,6 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   saveScreenshot(): void {
     this.bridge.postMessage({ command: 'saveScreenshot' });
-  }
-
-  openDocs(): void {
-    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'docs/README.md' });
-  }
-
-  openArchiveDocs(): void {
-    this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'CheatCodeArchive/consoles/README.md' });
   }
 
   importBin(): void {
@@ -351,37 +341,5 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onOpenAiConfig(): void {
     this.bridge.postMessage({ command: 'openAiConfig' });
-  }
-
-  onOpenPacketViewer(): void {
-    this.bridge.postMessage({ command: 'openPacketViewer' });
-  }
-
-  onOpenLabelManager(): void {
-    this.bridge.postMessage({ command: 'openLabelManager' });
-  }
-
-  onOpenMemoryCard(): void {
-    this.bridge.postMessage({ command: 'openMemoryCard' });
-  }
-
-  onOpenHdd(): void {
-    this.bridge.postMessage({ command: 'openHdd' });
-  }
-
-  onOpenMemoryView(label: string): void {
-    this.bridge.postMessage({ command: 'openMemoryView', label });
-  }
-
-  onOpenConverter(): void {
-    this.bridge.postMessage({ command: 'openConverter' });
-  }
-
-  onOpenPorter(): void {
-    this.bridge.postMessage({ command: 'openPorter' });
-  }
-
-  onOpenScanner(): void {
-    this.bridge.postMessage({ command: 'openScanner' });
   }
 }

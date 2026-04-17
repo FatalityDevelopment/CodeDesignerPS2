@@ -39,7 +39,4 @@ public class GameDisc
 
     /// <summary>Cheat lists targeting this specific disc version.</summary>
     public List<CheatList> CheatLists { get; set; } = [];
-
-    /// <summary>Label sets scoped to this disc.</summary>
-    public List<LabelSet> LabelSets { get; set; } = [];
 }

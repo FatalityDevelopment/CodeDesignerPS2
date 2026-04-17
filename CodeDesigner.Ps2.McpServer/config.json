@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "codedesigner": {
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "C:\\Users\\tholu\\Desktop\\CodeDesigner\\CodeDesigner.Ps2.McpServer\\CodeDesigner.Ps2.McpServer.csproj"
+      ]
+    }
+  }
+}

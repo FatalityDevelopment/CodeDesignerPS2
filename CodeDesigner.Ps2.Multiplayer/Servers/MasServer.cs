@@ -81,8 +81,7 @@ public class MasServer : BaseMediusTcpServer
                     break;
 
                 default:
-                    _log.LogInformation("[MAS] Unhandled lobby msg 0x{Type:X2} payload={Hex}",
-                        packet.MessageType, BitConverter.ToString(packet.Payload).Replace("-", " "));
+                    _log.LogDebug("[MAS] Unhandled lobby msg 0x{Type:X2}", packet.MessageType);
                     break;
             }
         }
@@ -103,15 +102,9 @@ public class MasServer : BaseMediusTcpServer
                     break;
 
                 default:
-                    _log.LogInformation("[MAS] Unhandled lobbyExt msg 0x{Type:X2} payload={Hex}",
-                        packet.MessageType, BitConverter.ToString(packet.Payload).Replace("-", " "));
+                    _log.LogDebug("[MAS] Unhandled lobbyExt msg 0x{Type:X2}", packet.MessageType);
                     break;
             }
-        }
-        else
-        {
-            _log.LogInformation("[MAS] Unknown msg class=0x{Class:X2} type=0x{Type:X2} payload={Hex}",
-                (byte)packet.MessageClass, packet.MessageType, BitConverter.ToString(packet.Payload).Replace("-", " "));
         }
     }
 

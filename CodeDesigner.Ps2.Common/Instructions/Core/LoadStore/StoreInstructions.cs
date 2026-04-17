@@ -58,11 +58,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            byte value = (byte)(cpu.RegsLo[args.Rt] & 0xFF);
-            return $"[0x{addr:X8}] ← {CpuHelpers.RegName(args.Rt)}=0x{value:X2}";
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
+                byte value = (byte)(cpu.RegsLo[args.Rt] & 0xFF);
+                return $"{eq} => addr = 0x{addr:X8}, value = 0x{value:X2}";
+            }
+            return eq;
         }
     }
 
@@ -116,11 +124,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            ushort value = (ushort)(cpu.RegsLo[args.Rt] & 0xFFFF);
-            return $"[0x{addr:X8}] ← {CpuHelpers.RegName(args.Rt)}=0x{value:X4}";
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
+                ushort value = (ushort)(cpu.RegsLo[args.Rt] & 0xFFFF);
+                return $"{eq} => addr = 0x{addr:X8}, value = 0x{value:X4}";
+            }
+            return eq;
         }
     }
 
@@ -176,11 +192,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
-            return $"[0x{addr:X8}] ← {CpuHelpers.RegName(args.Rt)}=0x{value:X8}";
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
+                uint value = (uint)(cpu.RegsLo[args.Rt] & 0xFFFFFFFF);
+                return $"{eq} => addr = 0x{addr:X8}, value = 0x{value:X8}";
+            }
+            return eq;
         }
     }
 
@@ -241,11 +265,19 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            ulong value = cpu.RegsLo[args.Rt];
-            return $"[0x{addr:X8}] ← {CpuHelpers.RegName(args.Rt)}=0x{value:X16}";
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
+                ulong value = cpu.RegsLo[args.Rt];
+                return $"{eq} => addr = 0x{addr:X8}, value = 0x{value:X16}";
+            }
+            return eq;
         }
     }
 
@@ -317,10 +349,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"[0x{addr:X8}] ← {CpuHelpers.RegName(args.Rt)}";
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
+                return $"{eq} => addr = 0x{addr:X8} (unaligned)";
+            }
+            return eq;
         }
     }
 
@@ -392,10 +432,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"[0x{addr:X8}] ← {CpuHelpers.RegName(args.Rt)}";
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
+                return $"{eq} => addr = 0x{addr:X8} (unaligned)";
+            }
+            return eq;
         }
     }
 
@@ -476,10 +524,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"[0x{addr:X8}] ← {CpuHelpers.RegName(args.Rt)}";
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
+                return $"{eq} => addr = 0x{addr:X8} (unaligned)";
+            }
+            return eq;
         }
     }
 
@@ -560,10 +616,18 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            return $"[0x{addr:X8}] ← {CpuHelpers.RegName(args.Rt)}";
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
+                return $"{eq} => addr = 0x{addr:X8} (unaligned)";
+            }
+            return eq;
         }
     }
 
@@ -631,12 +695,20 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
 
         public override string Analyze(Args_I args, CpuState? cpu = null, uint? pc = null)
         {
-            if (cpu == null) return string.Empty;
             int offset = CpuHelpers.SignExtend16(args.Imm);
-            uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
-            ulong lo = cpu.RegsLo[args.Rt];
-            ulong hi = cpu.RegsHi[args.Rt];
-            return $"[0x{addr:X8}] ← {CpuHelpers.RegName(args.Rt)}=0x{hi:X16}{lo:X16}";
+            string eq = Equation
+                .Replace("rt", CpuHelpers.RegName(args.Rt))
+                .Replace("rs", CpuHelpers.RegName(args.Rs))
+                .Replace("offset", offset.ToString());
+            
+            if (cpu != null)
+            {
+                uint addr = (uint)((int)cpu.RegsLo[args.Rs] + offset);
+                ulong lo = cpu.RegsLo[args.Rt];
+                ulong hi = cpu.RegsHi[args.Rt];
+                return $"{eq} => addr = 0x{addr:X8} (16-byte aligned), value = 0x{hi:X16}{lo:X16}";
+            }
+            return eq;
         }
     }
 }

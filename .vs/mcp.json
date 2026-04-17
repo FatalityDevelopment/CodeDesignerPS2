@@ -1,8 +1,13 @@
 {
   "servers": {
-    "CodeDesigner": {
+    "codedesigner": {
       "type": "stdio",
-      "command": "%LOCALAPPDATA%\\CodeDesigner\\McpServer\\CodeDesigner.Ps2.McpServer.exe"
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "${SolutionDir}\\CodeDesigner.Ps2.McpServer"
+      ]
     }
   }
 }

@@ -6,6 +6,9 @@ import {
   SearchMatch,
   RegisterData,
   ThreadEntry,
+  SymPointer,
+  SymFloat,
+  SymInteger,
 } from './disasm-editor.service';
 import { EditorState } from './state/editor.state';
 import { SearchMode, DisasmRow as DisasmRowType, HistoryEntry, CallStackEntry, ModuleEntry, PineWatchInfo } from './state/types';
@@ -16,6 +19,7 @@ import { VirtualGridComponent } from './components/virtual-grid.component';
 import { ContextMenuComponent, ContextMenuData } from './components/context-menu.component';
 import { DebugPanelComponent } from './components/debug-panel.component';
 import { BottomPanelComponent, BottomTab } from './components/bottom-panel.component';
+import { SymbolsPanelComponent, SymbolTab } from './components/symbols-panel.component';
 import { EditOverlayComponent, EditOverlayOpenData, EditOverlaySaveEvent } from './components/edit-overlay.component';
 import { ConverterOverlayComponent, ConvertRequest, ConvertResult } from './components/converter-overlay.component';
 import { PorterOverlayComponent, PortRequest, PortResultPayload } from './components/porter-overlay.component';
@@ -28,7 +32,7 @@ import './disasm-editor.css';
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, SymbolsPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -90,8 +94,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     addWatch: null as (() => void) | null,
     removeWatch: null as (() => void) | null,
     gotoTarget: null as (() => void) | null,
-    findReferences: null as (() => void) | null,
-    findCodeReferences: null as (() => void) | null,
     addToLabelManager: null as (() => void) | null,
   };
 
@@ -145,6 +147,54 @@ export class DisasmEditorComponent implements AfterViewInit {
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // Symbols Panel State (Phase 9)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Symbols panel visibility state */
+  protected readonly symbolsPanelVisible = signal(false);
+
+  /** Region label for symbols panel */
+  protected readonly symbolsPanelRegionLabel = signal('');
+
+  /** Labels for symbols panel */
+  protected readonly symbolsPanelLabels = signal<import('./state/types').SymLabel[]>([]);
+
+  /** Strings for symbols panel */
+  protected readonly symbolsPanelStrings = signal<import('./state/types').SymString[]>([]);
+
+  /** Functions for symbols panel */
+  protected readonly symbolsPanelFunctions = signal<import('./state/types').SymFunction[]>([]);
+
+  /** Pointers for symbols panel */
+  protected readonly symbolsPanelPointers = signal<SymPointer[]>([]);
+
+  /** Floats for symbols panel */
+  protected readonly symbolsPanelFloats = signal<SymFloat[]>([]);
+
+  /** Integers for symbols panel */
+  protected readonly symbolsPanelIntegers = signal<SymInteger[]>([]);
+
+  /** Scan status strings */
+  protected readonly symbolsPanelStringsStatus = signal('');
+  protected readonly symbolsPanelFunctionsStatus = signal('');
+  protected readonly symbolsPanelPointersStatus = signal('');
+  protected readonly symbolsPanelFloatsStatus = signal('');
+  protected readonly symbolsPanelIntegersStatus = signal('');
+
+  // Symbols panel actions (set by initEditorLogic)
+  private readonly symbolsPanelRuntime = {
+    close: null as (() => void) | null,
+    refresh: null as (() => void) | null,
+    navigate: null as ((addr: string) => void) | null,
+    addLabel: null as ((address: string, name: string, comment: string) => void) | null,
+    deleteLabel: null as ((addr: string) => void) | null,
+    scanStrings: null as (() => void) | null,
+    scanFunctions: null as (() => void) | null,
+    scanPointers: null as (() => void) | null,
+    scanFloats: null as (() => void) | null,
+    scanIntegers: null as (() => void) | null,
+  };
+
   private readonly liveRuntime = {
     refreshTimer: null as ReturnType<typeof setInterval> | null,
     statusTimer: null as ReturnType<typeof setInterval> | null,
@@ -364,9 +414,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const hasBreakpoint = this.svc.state.breakpoints.has(addr);
     const hasWatch = this.svc.state.pineWatches.some((w: PineWatchInfo) => parseInt(w.Start, 16) === addr);
     const hasTarget = !!(event.row.args.match(/\$([0-9A-F]{8})/i) ||
-                          event.row.args.match(/0x([0-9A-F]{8})/i) ||
-                          this._bytesLookLikePointer(event.row.bytes) ||
-                          this._commentHasAddress(event.row.comment));
+                          event.row.args.match(/0x([0-9A-F]{8})/i));
 
     // Open the context menu
     const menuData: ContextMenuData = {
@@ -397,14 +445,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onCtxGotoTarget(): void {
     this.contextMenuRuntime.gotoTarget?.();
-  }
-
-  protected onCtxFindReferences(): void {
-    this.contextMenuRuntime.findReferences?.();
-  }
-
-  protected onCtxFindCodeReferences(): void {
-    this.contextMenuRuntime.findCodeReferences?.();
   }
 
   protected onCtxAddToLabelManager(): void {
@@ -469,6 +509,50 @@ export class DisasmEditorComponent implements AfterViewInit {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // Symbols Panel Event Handlers (Phase 9)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  protected onSymbolsPanelClose(): void {
+    this.symbolsPanelRuntime.close?.();
+  }
+
+  protected onSymbolsPanelRefresh(): void {
+    this.symbolsPanelRuntime.refresh?.();
+  }
+
+  protected onSymbolsPanelNavigate(addr: string): void {
+    this.symbolsPanelRuntime.navigate?.(addr);
+  }
+
+  protected onSymbolsPanelAddLabel(event: { address: string; name: string; comment: string }): void {
+    this.symbolsPanelRuntime.addLabel?.(event.address, event.name, event.comment);
+  }
+
+  protected onSymbolsPanelDeleteLabel(addr: string): void {
+    this.symbolsPanelRuntime.deleteLabel?.(addr);
+  }
+
+  protected onSymbolsPanelScanStrings(): void {
+    this.symbolsPanelRuntime.scanStrings?.();
+  }
+
+  protected onSymbolsPanelScanFunctions(): void {
+    this.symbolsPanelRuntime.scanFunctions?.();
+  }
+
+  protected onSymbolsPanelScanPointers(): void {
+    this.symbolsPanelRuntime.scanPointers?.();
+  }
+
+  protected onSymbolsPanelScanFloats(): void {
+    this.symbolsPanelRuntime.scanFloats?.();
+  }
+
+  protected onSymbolsPanelScanIntegers(): void {
+    this.symbolsPanelRuntime.scanIntegers?.();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // Edit Overlay Event Handlers (Phase 10)
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -494,10 +578,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onRequestHistory(address: number): void {
     this.vscode.postMessage({ type: 'getAddressHistory', address });
-  }
-
-  protected onRequestRefs(address: number): void {
-    this.vscode.postMessage({ type: 'getAddressRefs', address });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -709,6 +789,20 @@ export class DisasmEditorComponent implements AfterViewInit {
     }
   }
 
+  private toggleSymbolsPanel(params: {
+    state: DisasmEditorService['state'];
+    signals: EditorState;
+    symbolsPanelVisible: WritableSignal<boolean>;
+    vscode: ReturnType<typeof getVsCodeApi>;
+  }): void {
+    params.state.symbolsActive = !params.state.symbolsActive;
+    params.signals.panels.symbols.set(params.state.symbolsActive);
+    params.symbolsPanelVisible.set(params.state.symbolsActive);
+    if (params.state.symbolsActive) {
+      params.vscode.postMessage({ type: 'getSymbols' });
+    }
+  }
+
   private toggleRegistersPanel(params: {
     signals: EditorState;
     registersToggleBtn: HTMLElement;
@@ -756,6 +850,7 @@ export class DisasmEditorComponent implements AfterViewInit {
   private bindGlobalShortcuts(params: {
     state: DisasmEditorService['state'];
     toggleGoto: () => void;
+    toggleSymbolsPanel: () => void;
     toggleRegistersPanel: () => void;
     toggleBottomPanel: () => void;
     toggleSetPc: () => void;
@@ -764,6 +859,9 @@ export class DisasmEditorComponent implements AfterViewInit {
     window.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyA') {
         e.preventDefault(); e.stopPropagation(); params.toggleGoto();
+      }
+      if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyS') {
+        e.preventDefault(); e.stopPropagation(); params.toggleSymbolsPanel();
       }
       if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyR') {
         e.preventDefault(); e.stopPropagation(); params.toggleRegistersPanel();
@@ -1087,7 +1185,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     const row = params.state.disasmRows[localIndex];
     if (!row) { return; }
 
-    // Priority 1: jump / branch instruction target in the args field
     const branchMatch = row.args.match(/\$([0-9A-F]{8})/i);
     if (branchMatch) {
       params.navigateToAddress(parseInt(branchMatch[1], 16));
@@ -1100,23 +1197,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       return;
     }
 
-    // Priority 2: raw bytes at this address could be a pointer
-    if (row.bytes) {
-      const rawHex = row.bytes.replace(/\s+/g, '');
-      if (rawHex.length === 8) {
-        const dataValue = parseInt(rawHex, 16);
-        if (!isNaN(dataValue) && dataValue !== 0) {
-          const isPhysical = dataValue > 0 && dataValue <= 0x1FFFFFFF;
-          const isKseg = dataValue >= 0x80000000 && dataValue <= 0xBFFFFFFF;
-          if (isPhysical || isKseg) {
-            params.navigateToAddress(dataValue);
-            return;
-          }
-        }
-      }
-    }
-
-    // Priority 3: comment resolved an address
     if (row.comment) {
       const commentMatch = row.comment.match(/0x([0-9A-F]{8})/i) || row.comment.match(/\b([0-9A-F]{8})\b/i);
       if (commentMatch) {
@@ -1124,7 +1204,7 @@ export class DisasmEditorComponent implements AfterViewInit {
         // Validate address is in valid EE address ranges:
         // Physical: 0x00000000-0x1FFFFFFF (512MB)
         // KSEG0/1: 0x80000000-0xBFFFFFFF
-        const isPhysical = address > 0 && address <= 0x1FFFFFFF;
+        const isPhysical = address <= 0x1FFFFFFF;
         const isKseg = address >= 0x80000000 && address <= 0xBFFFFFFF;
         if (isPhysical || isKseg) {
           params.navigateToAddress(address);
@@ -1132,36 +1212,23 @@ export class DisasmEditorComponent implements AfterViewInit {
         }
       }
     }
-  }
 
-  /**
-   * Returns true when the raw bytes column (big-endian hex, e.g. "80123456")
-   * represents a 32-bit value that falls within a valid PS2 EE address range.
-   * Used by both the ArrowRight navigation and the context-menu "Go to Target".
-   */
-  private _bytesLookLikePointer(bytes: string | undefined): boolean {
-    if (!bytes) { return false; }
-    const rawHex = bytes.replace(/\s+/g, '');
-    if (rawHex.length !== 8) { return false; }
-    const value = parseInt(rawHex, 16);
-    if (isNaN(value) || value === 0) { return false; }
-    const isPhysical = value > 0 && value <= 0x1FFFFFFF;
-    const isKseg = value >= 0x80000000 && value <= 0xBFFFFFFF;
-    return isPhysical || isKseg;
-  }
-
-  /**
-   * Returns true when the comment field contains a valid PS2 EE address.
-   * Used by both the ArrowRight navigation and the context-menu "Go to Target".
-   */
-  private _commentHasAddress(comment: string | undefined): boolean {
-    if (!comment) { return false; }
-    const match = comment.match(/0x([0-9A-F]{8})/i) || comment.match(/\b([0-9A-F]{8})\b/i);
-    if (!match) { return false; }
-    const address = parseInt(match[1], 16);
-    const isPhysical = address > 0 && address <= 0x1FFFFFFF;
-    const isKseg = address >= 0x80000000 && address <= 0xBFFFFFFF;
-    return isPhysical || isKseg;
+    // Check if the current row's address matches a known pointer entry, and if
+    // so navigate to the pointsTo address (pointer dereference navigation).
+    if (params.state.symPointers && params.state.symPointers.length > 0) {
+      const rowAddrNorm = row.addr.replace(/^0x/i, '').toUpperCase().padStart(8, '0');
+      const ptrEntry = params.state.symPointers.find(p => {
+        const pAddrNorm = p.address.replace(/^0x/i, '').toUpperCase().padStart(8, '0');
+        return pAddrNorm === rowAddrNorm;
+      });
+      if (ptrEntry) {
+        const target = parseInt(ptrEntry.pointsTo.replace(/^0x/i, ''), 16);
+        if (!isNaN(target) && target !== 0) {
+          params.navigateToAddress(target);
+          return;
+        }
+      }
+    }
   }
 
   private toggleBreakpointAtCursor(params: {
@@ -1220,67 +1287,17 @@ export class DisasmEditorComponent implements AfterViewInit {
     pointerLabelMap: Map<string, string>;
   }): void {
     if (!this.useVirtualGrid()) { return; }
-    const state = params.state;
-    const currentPageStart = params.getPageStart(state.cursor);
-    const pageRows = state.loadedPages.get(currentPageStart) as DisasmRowType[] | undefined;
-
-    // ── Multi-page merge for smooth boundary scrolling ──────────────────
-    // When the cursor is near the start or end of the current page, merge
-    // with the adjacent cached page so the virtual grid has continuous data
-    // across the boundary.  This prevents the cursor from jumping to the
-    // top of a freshly loaded page.
-    const localIndex = state.cursor - currentPageStart;
-    const pageSize = state.pageSize;
-    const BOUNDARY_THRESHOLD = 60; // rows from edge to trigger merge
-
-    let effectivePageStart = currentPageStart;
-    let p1: DisasmRowType[] | undefined = pageRows;
-    let p2: DisasmRowType[] | undefined;
-
-    if (localIndex < BOUNDARY_THRESHOLD && currentPageStart > 0) {
-      // Near the start of the current page — prepend the previous page
-      const prevStart = currentPageStart - pageSize;
-      const prevRows = state.loadedPages.get(prevStart) as DisasmRowType[] | undefined;
-      if (prevRows) {
-        effectivePageStart = prevStart;
-        p1 = prevRows;
-        p2 = pageRows;
-      }
-    } else if (pageRows && localIndex >= pageSize - BOUNDARY_THRESHOLD) {
-      // Near the end of the current page — append the next page
-      const nextStart = currentPageStart + pageSize;
-      const nextRows = state.loadedPages.get(nextStart) as DisasmRowType[] | undefined;
-      if (nextRows) {
-        p1 = pageRows;
-        p2 = nextRows;
-      }
-    }
+    const currentPageStart = params.getPageStart(params.state.cursor);
+    const pageRows = params.state.loadedPages.get(currentPageStart) as DisasmRowType[] | undefined;
 
     const last = this.lastGridState;
-    if (!last || last.pageStart !== effectivePageStart || last.p1 !== p1 || last.p2 !== p2) {
-      let gridRows: DisasmRowType[];
-      if (p1 && p2) {
-        gridRows = [...p1, ...p2];
-      } else if (p1 && p1.length > 0) {
-        gridRows = p1;
-      } else {
-        gridRows = (state.disasmRows as DisasmRowType[]);
-      }
-
-      // When the effective page start changes (merge ↔ de-merge),
-      // adjust the virtual grid's scroll position so the same physical
-      // rows stay visible and the user sees no jump.
-      const oldPageStart = last?.pageStart ?? effectivePageStart;
-      if (oldPageStart !== effectivePageStart && last) {
-        const grid = this.virtualGridRef();
-        if (grid) {
-          grid.adjustScroll((oldPageStart - effectivePageStart) * grid.rowHeight);
-        }
-      }
-
+    if (!last || last.pageStart !== currentPageStart || last.p1 !== pageRows) {
+      const gridRows = pageRows && pageRows.length > 0
+        ? pageRows
+        : (params.state.disasmRows as DisasmRowType[]);
       this.gridRows.set(gridRows);
-      this.gridPageStart.set(effectivePageStart);
-      this.lastGridState = { pageStart: effectivePageStart, p1, p2 };
+      this.gridPageStart.set(currentPageStart);
+      this.lastGridState = { pageStart: currentPageStart, p1: pageRows, p2: undefined };
     }
 
     // Pass the same map reference so the signal only changes when rebuildPointerLabelMap() fires
@@ -1369,13 +1386,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const cachedRows = params.state.loadedPages.get(startIndex)!;
     if (params.state.disasmRows !== cachedRows) {
       params.state.disasmRows = cachedRows;
-      // Only sync grid data without scrolling — the caller is responsible for
-      // calling updateCursor with the correct scroll position. Using
-      // renderDisassembly('nearest') here caused a double-render: the first
-      // scroll to 'nearest' visually jumped the cursor to the wrong position
-      // before the caller's scroll corrected it, producing a flicker at page
-      // boundaries.
-      params.renderDisassembly(null);
+      params.renderDisassembly('nearest');
     }
     return true;
   }
@@ -1545,13 +1556,6 @@ export class DisasmEditorComponent implements AfterViewInit {
         this.editOverlayRef()?.setHistory(history ?? []);
       });
     }
-
-    if (data['type'] === 'addressRefsResult') {
-      const refs = data['refs'] as Array<{ address: string; instruction: string }> | undefined;
-      this.zone.run(() => {
-        this.editOverlayRef()?.setRefs(refs ?? []);
-      });
-    }
   }
 
   private openConverterOverlay(): void {
@@ -1686,29 +1690,9 @@ export class DisasmEditorComponent implements AfterViewInit {
   }
 
   private handleWindowMessage(data: Record<string, unknown>): void {
-    // Handle extension-driven overlay open requests (e.g. from sidebar panel buttons).
+    // Handle extension-driven overlay open requests (e.g. from tree-view header button).
     if (data['type'] === 'openStructCalculator') {
       this.zone.run(() => this.openStructOverlay());
-      return;
-    }
-    if (data['type'] === 'openConverterOverlay') {
-      this.zone.run(() => this.openConverterOverlay());
-      return;
-    }
-    if (data['type'] === 'openPorterOverlay') {
-      this.zone.run(() => this.openPorterOverlay());
-      return;
-    }
-    if (data['type'] === 'openMemoryCardOverlay') {
-      this.zone.run(() => this.openMemoryCardOverlay());
-      return;
-    }
-    if (data['type'] === 'openHddOverlay') {
-      this.zone.run(() => this.openHddOverlay());
-      return;
-    }
-    if (data['type'] === 'openScannerOverlay') {
-      this.zone.run(() => this.openScannerOverlay());
       return;
     }
     if (data['type'] === 'pineWatches') {
@@ -1918,9 +1902,44 @@ export class DisasmEditorComponent implements AfterViewInit {
       });
     });
 
+    params.svc.symbolsReceived$.subscribe(() => {
+      this.symbolsPanelLabels.set(params.state.symLabels ?? []);
+      this.symbolsPanelStrings.set(params.state.symStrings ?? []);
+      this.symbolsPanelFunctions.set(params.state.symFunctions ?? []);
+      this.symbolsPanelPointers.set(params.state.symPointers ?? []);
+      this.symbolsPanelFloats.set(params.state.symFloats ?? []);
+      this.symbolsPanelIntegers.set(params.state.symIntegers ?? []);
+    });
+
     params.svc.labelsUpdated$.subscribe(() => {
+      this.symbolsPanelLabels.set(params.state.symLabels ?? []);
       params.state.loadedPages.delete(params.getPageStart(params.state.cursor));
       params.checkAndLoadPage();
+    });
+
+    params.svc.stringsUpdated$.subscribe(() => {
+      this.symbolsPanelStringsStatus.set(params.state.symStrings.length > 0 ? `${params.state.symStrings.length} found` : 'None found');
+      this.symbolsPanelStrings.set(params.state.symStrings ?? []);
+    });
+
+    params.svc.functionsUpdated$.subscribe(() => {
+      this.symbolsPanelFunctionsStatus.set(params.state.symFunctions.length > 0 ? `${params.state.symFunctions.length} found` : 'None found');
+      this.symbolsPanelFunctions.set(params.state.symFunctions ?? []);
+    });
+
+    params.svc.pointersUpdated$.subscribe(() => {
+      this.symbolsPanelPointersStatus.set(params.state.symPointers.length > 0 ? `${params.state.symPointers.length} found` : 'None found');
+      this.symbolsPanelPointers.set(params.state.symPointers ?? []);
+    });
+
+    params.svc.floatsUpdated$.subscribe(() => {
+      this.symbolsPanelFloatsStatus.set(params.state.symFloats.length > 0 ? `${params.state.symFloats.length} found` : 'None found');
+      this.symbolsPanelFloats.set(params.state.symFloats ?? []);
+    });
+
+    params.svc.integersUpdated$.subscribe(() => {
+      this.symbolsPanelIntegersStatus.set(params.state.symIntegers.length > 0 ? `${params.state.symIntegers.length} found` : 'None found');
+      this.symbolsPanelIntegers.set(params.state.symIntegers ?? []);
     });
 
     params.svc.analysisUpdated$.subscribe(() => {
@@ -1930,17 +1949,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     params.svc.pointerLabelsUpdated$.subscribe(() => {
       params.rebuildPointerLabelMap();
       params.renderDisassembly(null);
-    });
-
-    // Pause/resume the live-refresh timers when the VS Code tab becomes
-    // hidden/visible.  Hidden panels that keep polling waste socket bandwidth
-    // and cause the visible panel to see placeholder zero-rows (flickering).
-    params.svc.panelVisibilityChanged$.subscribe(({ visible }) => {
-      if (visible) {
-        this.restartLiveRefresh(params.vscode, params.requestRefresh);
-      } else {
-        this.stopLiveRefresh();
-      }
     });
   }
 
@@ -1953,7 +1961,6 @@ export class DisasmEditorComponent implements AfterViewInit {
     prevSearchMatch: () => void;
     nextSearchMatch: () => void;
     pushNavHistory: () => void;
-    getPageStart: (index: number) => number;
     checkAndLoadPage: () => boolean;
     updateCursor: (scrollBlock?: ScrollLogicalPosition | null) => void;
     renderDisassembly: (scrollBlock?: ScrollLogicalPosition | null) => void;
@@ -2001,11 +2008,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.state.cursor = instrIndex;
       params.state.searchActive = false;
       params.signals.panels.search.set(false);
-      // Invalidate the cached hex window so updateHexForRow always fetches
-      // fresh bytes for the destination address instead of reusing stale data
-      // that may happen to cover the new address.
-      params.state.hexData = [];
-      params.state.hexOffset = 0;
       this.pendingPageScrollBlock = 'center';
       if (params.checkAndLoadPage()) {
         this.pendingPageScrollBlock = null;
@@ -2034,26 +2036,9 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
     };
     this.gridRuntime.cursorMove = (delta: number) => {
-      const previousCursor = params.state.cursor;
-      const nextCursor = params.clamp(previousCursor + delta, 0, params.state.totalInstructions - 1);
-      if (nextCursor === previousCursor) { return; }
-
-      const previousPageStart = params.getPageStart(previousCursor);
-      const nextPageStart = params.getPageStart(nextCursor);
-      const crossedPageBoundary = previousPageStart !== nextPageStart;
-      const boundaryScrollBlock: ScrollLogicalPosition = crossedPageBoundary
-        ? (delta > 0 ? 'end' : 'start')
-        : 'nearest';
-
-      params.state.cursor = nextCursor;
-      if (crossedPageBoundary) {
-        this.pendingPageScrollBlock = boundaryScrollBlock;
-      }
+      params.state.cursor = params.clamp(params.state.cursor + delta, 0, params.state.totalInstructions - 1);
       if (params.checkAndLoadPage()) {
-        if (crossedPageBoundary) {
-          this.pendingPageScrollBlock = null;
-        }
-        params.updateCursor(boundaryScrollBlock);
+        params.updateCursor();
       }
     };
 
@@ -2104,37 +2089,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       if (this._ctxGlobalIndex < 0) { return; }
       params.state.cursor = this._ctxGlobalIndex;
       params.navigateToCurrentRowTarget();
-    };
-
-    this.contextMenuRuntime.findReferences = () => {
-      if (!this._ctxRow) { return; }
-      // Reverse the address bytes for little-endian search.
-      // e.g. address "00123456" → "56 34 12 00"
-      const addr = this._ctxRow.addr.padStart(8, '0');
-      const reversed = `${addr.slice(6, 8)} ${addr.slice(4, 6)} ${addr.slice(2, 4)} ${addr.slice(0, 2)}`;
-      // Open the search panel in bytes mode and populate the query
-      params.state.searchActive = true;
-      params.signals.panels.search.set(true);
-      params.state.searchMode = 'bytes';
-      params.signals.searchMode.set('bytes');
-      params.state.searchQuery = reversed;
-      params.signals.searchQuery.set(reversed);
-      this.vscode.postMessage({ type: 'search', query: reversed, mode: 'bytes' });
-    };
-
-    this.contextMenuRuntime.findCodeReferences = () => {
-      if (!this._ctxRow) { return; }
-      // Open the search panel in refs mode with the instruction's address.
-      // The backend will scan for all instructions that target this address
-      // (J/JAL, branches, LUI+ADDIU/ORI/load/store pairs).
-      const addr = this._ctxRow.addr.padStart(8, '0');
-      params.state.searchActive = true;
-      params.signals.panels.search.set(true);
-      params.state.searchMode = 'refs';
-      params.signals.searchMode.set('refs');
-      params.state.searchQuery = addr;
-      params.signals.searchQuery.set(addr);
-      this.vscode.postMessage({ type: 'search', query: addr, mode: 'refs' });
     };
 
     this.contextMenuRuntime.addToLabelManager = () => {
@@ -2197,6 +2151,66 @@ export class DisasmEditorComponent implements AfterViewInit {
       params.bottomPanelBreakpoints.set(new Set(params.state.breakpoints));
       params.renderDisassembly();
     };
+
+    this.symbolsPanelRuntime.close = () => {
+      params.state.symbolsActive = false;
+      params.signals.panels.symbols.set(false);
+      this.symbolsPanelVisible.set(false);
+    };
+
+    this.symbolsPanelRuntime.refresh = () => {
+      params.vscode.postMessage({ type: 'getSymbols' });
+    };
+
+    this.symbolsPanelRuntime.navigate = (addrHex: string) => {
+      const addr = params.parseHexAddress(addrHex.replace(/^0x/i, ''));
+      if (addr === null) { return; }
+      const physAddr = params.toPhysicalAddress(addr);
+      const physBase = params.toPhysicalAddress(params.state.baseAddress);
+      const instrIndex = Math.floor((physAddr - physBase) / 4);
+      if (instrIndex < 0 || instrIndex >= params.state.totalInstructions) { return; }
+      params.pushNavHistory();
+      params.state.cursor = instrIndex;
+      if (params.checkAndLoadPage()) {
+        params.updateCursor();
+      }
+    };
+
+    this.symbolsPanelRuntime.addLabel = (address: string, name: string, comment: string) => {
+      const addr = params.parseHexAddress(address);
+      if (addr === null) { return; }
+      params.vscode.postMessage({ type: 'addLabel', address: addr, label: name, comment });
+    };
+
+    this.symbolsPanelRuntime.deleteLabel = (addrStr: string) => {
+      const addrNum = parseInt(addrStr.replace(/^0x/i, ''), 16);
+      params.vscode.postMessage({ type: 'deleteLabel', address: addrNum });
+    };
+
+    this.symbolsPanelRuntime.scanStrings = () => {
+      this.symbolsPanelStringsStatus.set('Scanning...');
+      params.vscode.postMessage({ type: 'scanStrings' });
+    };
+
+    this.symbolsPanelRuntime.scanFunctions = () => {
+      this.symbolsPanelFunctionsStatus.set('Scanning...');
+      params.vscode.postMessage({ type: 'scanFunctions' });
+    };
+
+    this.symbolsPanelRuntime.scanPointers = () => {
+      this.symbolsPanelPointersStatus.set('Scanning...');
+      params.vscode.postMessage({ type: 'scanPointers' });
+    };
+
+    this.symbolsPanelRuntime.scanFloats = () => {
+      this.symbolsPanelFloatsStatus.set('Scanning...');
+      params.vscode.postMessage({ type: 'scanFloats' });
+    };
+
+    this.symbolsPanelRuntime.scanIntegers = () => {
+      this.symbolsPanelIntegersStatus.set('Scanning...');
+      params.vscode.postMessage({ type: 'scanIntegers' });
+    };
   }
 
   ngAfterViewInit(): void {
@@ -2224,6 +2238,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const setpcToggleBtn = document.getElementById('setpc-toggle-btn')!;
     const headerToolbar  = document.getElementById('header-toolbar')!;
 
+    const symbolsToggleBtn     = document.getElementById('symbols-toggle-btn')!;
     const registersToggleBtn   = document.getElementById('registers-toggle-btn')!;
     const bottomPanelToggleBtn = document.getElementById('bottom-panel-toggle-btn')!;
     const searchToggleBtn      = document.getElementById('search-toggle-btn')!;
@@ -2236,6 +2251,7 @@ export class DisasmEditorComponent implements AfterViewInit {
     const debugPanelStackBase = this.debugPanelStackBase;
     const debugPanelWatches = this.debugPanelWatches;
     const bottomPanelVisible = this.bottomPanelVisible;
+    const symbolsPanelVisible = this.symbolsPanelVisible;
     const bottomPanelCallStack = this.bottomPanelCallStack;
     const bottomPanelThreads = this.bottomPanelThreads;
     const bottomPanelModules = this.bottomPanelModules;
@@ -2257,6 +2273,7 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     runInInjectionContext(this.injector, () => {
       effect(() => {
+        symbolsToggleBtn.classList.toggle('active', signals.panels.symbols());
         registersToggleBtn.classList.toggle('active', signals.panels.registers());
         bottomPanelToggleBtn.classList.toggle('active', signals.panels.bottom());
         searchToggleBtn.classList.toggle('active', signals.panels.search());
@@ -2459,8 +2476,38 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.handleWindowMessage((e.data as Record<string, unknown>) ?? {});
     });
 
-    // Overlay open triggers are now driven by extension-host messages
-    // (routed from the sidebar panel) rather than local header buttons.
+    // ── Converter overlay (Angular-only) ─────────────────────────────────────
+    const converterBtn = document.getElementById('converter-btn')!;
+
+    converterBtn.addEventListener('click', () => this.openConverterOverlay());
+
+    // ── Porter overlay (Angular-only) ────────────────────────────────────────
+    const porterBtn = document.getElementById('porter-btn')!;
+
+    porterBtn.addEventListener('click', () => this.openPorterOverlay());
+
+    // ── Memory Card overlay (Angular-only) ───────────────────────────────────
+    const mcBtn = document.getElementById('mc-btn')!;
+
+    mcBtn.addEventListener('click', () => this.openMemoryCardOverlay());
+
+    // ── HDD overlay (Angular-only) ──────────────────────────────────────────
+    const hddBtn = document.getElementById('hdd-btn');
+    if (hddBtn) {
+      hddBtn.addEventListener('click', () => this.openHddOverlay());
+    }
+
+    // ── Scanner overlay (Angular-only) ───────────────────────────────────────
+    const scannerBtn = document.getElementById('scanner-btn');
+    if (scannerBtn) {
+      scannerBtn.addEventListener('click', () => this.openScannerOverlay());
+    }
+
+    // ── Label Manager overlay (Angular-only) ─────────────────────────────────
+    const labelsBtn = document.getElementById('labels-btn');
+    if (labelsBtn) {
+      labelsBtn.addEventListener('click', () => this.openLabelManager());
+    }
 
     // ── Search ────────────────────────────────────────────────────────────────
     const clearSearchMatches = () => this.clearSearchMatches({
@@ -2516,6 +2563,13 @@ export class DisasmEditorComponent implements AfterViewInit {
       setpcStatus,
     });
 
+    const toggleSymbolsPanel = () => this.toggleSymbolsPanel({
+      state,
+      signals,
+      symbolsPanelVisible,
+      vscode,
+    });
+
     const toggleRegistersPanel = () => this.toggleRegistersPanel({
       signals,
       registersToggleBtn,
@@ -2565,13 +2619,12 @@ export class DisasmEditorComponent implements AfterViewInit {
         clamp,
         toPhysicalAddress,
         parseHexAddress,
-      prevSearchMatch,
-      nextSearchMatch,
-      pushNavHistory,
-      getPageStart,
-      checkAndLoadPage,
-      updateCursor,
-      renderDisassembly,
+        prevSearchMatch,
+        nextSearchMatch,
+        pushNavHistory,
+        checkAndLoadPage,
+        updateCursor,
+        renderDisassembly,
         navigateBack,
         navigateToCurrentRowTarget,
         toggleBreakpointAtCursor,
@@ -2623,11 +2676,6 @@ export class DisasmEditorComponent implements AfterViewInit {
       state.searchActive = false;
       signals.panels.search.set(false);
       searchToggleBtn.classList.remove('active');
-      // Invalidate the cached hex window so updateHexForRow always fetches
-      // fresh bytes for the destination address instead of reusing stale data
-      // that may happen to cover the new address.
-      state.hexData = [];
-      state.hexOffset = 0;
       this.pendingPageScrollBlock = 'center';
       const pageReady = checkAndLoadPage();
       if (pageReady) {
@@ -2645,12 +2693,14 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.bindGlobalShortcuts({
       state,
       toggleGoto,
+      toggleSymbolsPanel,
       toggleRegistersPanel,
       toggleBottomPanel,
       toggleSetPc,
       navigateBack,
     });
 
+    symbolsToggleBtn.addEventListener('click', () => toggleSymbolsPanel());
     registersToggleBtn.addEventListener('click', () => toggleRegistersPanel());
     bottomPanelToggleBtn.addEventListener('click', () => toggleBottomPanel());
     searchToggleBtn.addEventListener('click', () => toggleSearch());
@@ -2672,4 +2722,6 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   }
 }
+
+
 
