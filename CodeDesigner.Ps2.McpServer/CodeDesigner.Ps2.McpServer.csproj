@@ -18,6 +18,8 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.Pis2Map\CodeDesigner.Ps2.Pis2Map.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.ZdbArchive\CodeDesigner.Ps2.ZdbArchive.csproj" />
   </ItemGroup>
 
   <!--

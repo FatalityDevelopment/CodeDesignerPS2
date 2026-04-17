@@ -3,7 +3,7 @@ using System.IO;
 using System.Collections.Generic;
 using System.Text;
 
-namespace CodeDesigner.Ps2.ZDBManager
+namespace CodeDesigner.Ps2.ZdbArchive
 {
     public class ZDBArchive
     {
