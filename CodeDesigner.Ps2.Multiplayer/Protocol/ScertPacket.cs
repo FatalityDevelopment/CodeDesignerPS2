@@ -25,17 +25,15 @@ public class ScertPacket
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// SERVER_HELLO — PS2 format: [N_server: 64 bytes LE][ARG1: ushort = 0x006E][ARG2: ushort = 0x0001].
-    /// The PS2 reads the server's RSA public key N from the first 64 bytes to use for:
-    ///   1) RSA-decrypting SERVER_CRYPTKEY_PEER payload
-    ///   2) RSA-encrypting the CLIENT_CONNECT_TCP RSA_KEY field
-    /// Sending only the 4 version bytes (no RSA N) causes the PS2 to use a garbage key,
-    /// breaking both directions of the handshake.
+    /// SERVER_HELLO — PS2 format: exactly 4 bytes [ARG1: ushort = 0x006E][ARG2: ushort = 0x0001].
+    /// (Matches Horizon: RT_MSG_SERVER_HELLO.Serialize writes only ARG1+ARG2 for MediusVersion ≤ 111.
+    ///  The RSA public key is NOT embedded in SERVER_HELLO for PS2; it is only sent for PS3
+    ///  MediusVersion 112/113 inside a full certificate blob.)
     /// </summary>
     public static ScertPacket CreateHello() => new()
     {
         MessageType = RT_MSG_TYPE.RT_MSG_SERVER_HELLO,
-        Payload = [.. Ps2Rsa.ServerKey.GetPublicKey(), 0x6E, 0x00, 0x01, 0x00],
+        Payload = [0x6E, 0x00, 0x01, 0x00],
     };
 
     /// <summary>
@@ -62,22 +60,28 @@ public class ScertPacket
     /// <summary>
     /// SERVER_CONNECT_ACCEPT_TCP — completes the SCERT connect handshake.
     /// Format depends on Medius version:
-    ///   v &lt;= 108 (PS2 old): [UNK_07: 3 bytes][PlayerId: ushort][PlayerCount: ushort][IP: 4 bytes] = 11 bytes
+    ///   v &lt;= 108 (PS2 old): [UNK_07: 3 bytes][PlayerId: ushort][PlayerCount: ushort][IP: 4 bytes]
+    ///                         [ScertId: uint][Port: uint][Pad: uint] = 23 bytes
+    ///     (2012 SOCOM II MUIS capture confirms plen=23 for this version)
     ///   v &gt; 108 (newer):    [PlayerId: ushort][ScertId: uint][PlayerCount: ushort][IP: 4 bytes] = 12 bytes
     /// </summary>
-    public static ScertPacket CreateConnectAcceptTcp(uint scertId, ushort playerId, ushort playerCount, IPAddress? clientIp, int mediusVersion = 108)
+    public static ScertPacket CreateConnectAcceptTcp(uint scertId, ushort playerId, ushort playerCount, IPAddress? clientIp, int mediusVersion = 108, ushort serverPort = 0)
     {
         byte[] ip = (clientIp ?? IPAddress.Any).MapToIPv4().GetAddressBytes();
 
         if (mediusVersion <= 108)
         {
-            // Old PS2 format per Horizon RT_MSG_SERVER_CONNECT_ACCEPT_TCP
-            using var ms = new MemoryStream(11);
+            // Old PS2 format — 2012 MUIS capture shows plen=23 for this version.
+            // Layout: UNK_07(3) + PlayerId(2) + PlayerCount(2) + IP(4) + ScertId(4) + Port(4) + Pad(4) = 23
+            using var ms = new MemoryStream(23);
             using var bw = new BinaryWriter(ms, Encoding.ASCII, leaveOpen: true);
-            bw.Write(new byte[] { 0x01, 0x08, 0x10 }); // UNK_07
-            bw.Write(playerId);                         // 2 bytes LE
-            bw.Write(playerCount);                      // 2 bytes LE
-            ms.Write(ip, 0, 4);                         // 4 bytes NBO
+            bw.Write(new byte[] { 0x01, 0x08, 0x10 }); // UNK_07          3 bytes
+            bw.Write(playerId);                         // PlayerId         2 bytes LE
+            bw.Write(playerCount);                      // PlayerCount      2 bytes LE
+            ms.Write(ip, 0, 4);                         // IP               4 bytes NBO
+            bw.Write(scertId);                          // ScertId          4 bytes LE
+            bw.Write((uint)serverPort);                 // Port             4 bytes LE
+            bw.Write((uint)0);                          // Pad              4 bytes
             return new ScertPacket
             {
                 MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CONNECT_ACCEPT_TCP,
@@ -144,6 +148,27 @@ public class ScertPacket
     {
         MessageType = RT_MSG_TYPE.RT_MSG_SERVER_APP,
         Payload     = mediusPayload,
+    };
+
+    /// <summary>
+    /// RT_MSG_SERVER_CHEAT_QUERY (0x1D) — 13-byte challenge payload.
+    /// The PS2 responds with a matching 0x1D packet; we ignore the response.
+    /// </summary>
+    public static ScertPacket CreateCheatQuery(byte[]? payload = null) => new()
+    {
+        MessageType = RT_MSG_TYPE.RT_MSG_SERVER_CHEAT_QUERY,
+        Payload     = payload ?? new byte[13],
+    };
+
+    /// <summary>
+    /// RT_MSG_SERVER_MEMORY_POKE (0x1E) — 14-byte payload.
+    /// Sent once during the MUIS anti-cheat exchange (round 2), followed immediately
+    /// by another CHEAT_QUERY in the same TCP write.
+    /// </summary>
+    public static ScertPacket CreateMemoryPoke(byte[]? payload = null) => new()
+    {
+        MessageType = RT_MSG_TYPE.RT_MSG_SERVER_MEMORY_POKE,
+        Payload     = payload ?? new byte[14],
     };
 
     // -------------------------------------------------------------------------

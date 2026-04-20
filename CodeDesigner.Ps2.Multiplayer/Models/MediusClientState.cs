@@ -73,6 +73,17 @@ public class MediusClientState
     public int? WorldId          { get; set; }
 
     // -------------------------------------------------------------------------
+    // MUIS anti-cheat exchange state
+    // -------------------------------------------------------------------------
+
+    /// <summary>Round counter for the MUIS CHEAT_QUERY/MEMORY_POKE exchange (0=not started, 1-3=rounds, 4=done).</summary>
+    public int    MuisCheatRound  { get; set; } = 0;
+    /// <summary>MessageID from the PS2's GetUniverseInfo request; echoed back in the universe response.</summary>
+    public byte[] MuisMsgId       { get; set; } = new byte[21];
+    public uint   MuisInfoType    { get; set; } = 0xFFFFFFFF;
+    public bool   MuisUseLobbyExt { get; set; } = true;
+
+    // -------------------------------------------------------------------------
     // DME game server state
     // -------------------------------------------------------------------------
 

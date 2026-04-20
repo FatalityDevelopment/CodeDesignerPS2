@@ -72,6 +72,19 @@ public class Ps2Rsa
     /// <summary>Get the public key N as a 64-byte little-endian array.</summary>
     public byte[] GetPublicKey() => ToLE(N, 64);
 
+    /// <summary>
+    /// Generate a random 64-byte value m such that m &lt; N (as a 512-bit LE integer).
+    /// Required before RSA-encrypting: if m &gt;= N, m^E mod N is not a bijection and
+    /// the PS2 cannot recover m with its private key.
+    /// </summary>
+    public static byte[] GenerateMessageLessThan(BigInteger n)
+    {
+        var buf = new byte[64];
+        do { RandomNumberGenerator.Fill(buf); }
+        while (FromLE(buf) >= n);
+        return buf;
+    }
+
     /// <summary>RSA encrypt: cipher = m^E mod N</summary>
     public byte[] Encrypt(byte[] input)
         => ToLE(BigInteger.ModPow(FromLE(input), E, N), input.Length);
@@ -135,7 +148,7 @@ public class Ps2Rsa
             Array.Copy(bytes, result, len);
             return result;
         }
-        return bytes[..len];
+        return bytes[..Math.Min(len, minLen)];
     }
 
     // -- Prime generation --

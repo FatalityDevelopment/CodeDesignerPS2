@@ -205,8 +205,13 @@ public static class PS2_RC4
     }
 
     /// <summary>A hash of all-zeros (or only context bits) means "plaintext, no decryption".</summary>
-    public static bool IsHashValid(byte[] hash) =>
-        !(hash[0] == 0 && hash[1] == 0 && hash[2] == 0 && (hash[3] & 0x1F) == 0);
+    public static bool IsHashValid(byte[]? hash)
+    {
+        if (hash == null || hash.Length < 4)
+            return false;
+
+        return !(hash[0] == 0 && hash[1] == 0 && hash[2] == 0 && (hash[3] & 0x1F) == 0);
+    }
 }
 
 /// <summary>

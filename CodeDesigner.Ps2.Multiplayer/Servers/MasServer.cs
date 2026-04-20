@@ -121,30 +121,42 @@ public class MasServer : BaseMediusTcpServer
 
     private async Task HandleSessionBeginAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        // Payload: [messageId: 4 bytes reserved/tick][reserved bytes]
-        // We just generate a new unique session key and return it.
+        // Old Medius payload: [messageId: 21][sessionType: 4][sessionFlags: 4][appId: 4][...]
+        // Echo messageId back in response (required by old Medius protocol).
+        byte[] msgId = packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
+            ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
+
         state.SessionKey = GenerateSessionKey();
         state.Status     = PlayerStatus.InAuthWorld;
 
-        _log.LogInformation("[MAS] SessionBegin -> key={Key}", state.SessionKey);
+        _log.LogInformation("[MAS] SessionBegin msgId={MsgId} -> key={Key}",
+            BitConverter.ToString(msgId).Replace("-", ""), state.SessionKey);
 
+        // Old Medius SessionBeginResponse: [messageId: 21][status: 4][sessionKey: 17]
         var w = new MediusWriter();
-        w.Write((int)MediusCallbackStatus.MediusSuccess);  // StatusCode
-        w.WriteString(state.SessionKey, 64);                // SessionKey (64-char max)
+        w.Write(msgId);                                                       // messageId echo (21 bytes)
+        w.Write((int)MediusCallbackStatus.MediusSuccess);                     // StatusCode (4 bytes)
+        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);  // SessionKey (17 bytes)
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.SessionBeginResponse, w.ToArray()), ct);
     }
 
     private async Task HandleExtendedSessionBeginAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        byte[] msgId = packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
+            ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
+
         state.SessionKey = GenerateSessionKey();
         state.Status     = PlayerStatus.InAuthWorld;
 
         _log.LogInformation("[MAS] ExtendedSessionBegin -> key={Key}", state.SessionKey);
 
         var w = new MediusWriter();
+        w.Write(msgId);                                                       // messageId echo (21 bytes)
         w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.WriteString(state.SessionKey, 64);
+        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);  // SessionKey (17 bytes)
 
         // ExtendedSessionBeginResponse reuses SessionBeginResponse message ID
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.SessionBeginResponse, w.ToArray()), ct);
@@ -157,10 +169,11 @@ public class MasServer : BaseMediusTcpServer
     private async Task HandleAccountLoginAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         var r = new MediusReader(packet.Payload);
-        // Layout: sessionKey(64) username(64) password(64) [optional fields]
-        string sessionKey = r.ReadString(64);
-        string username   = r.ReadString(64);
-        string password   = r.ReadString(64);
+        // Old Medius layout: [messageId: 21][sessionKey: 17][username: 32][password: 32]
+        byte[] msgId      = r.ReadBytes(MediusConstants.MESSAGEID_MAXLEN);
+        string sessionKey = r.ReadString(MediusConstants.SESSIONKEY_MAXLEN);
+        string username   = r.ReadString(MediusConstants.ACCOUNTNAME_MAXLEN);
+        string password   = r.ReadString(MediusConstants.PASSWORD_MAXLEN);
 
         _log.LogInformation("[MAS] AccountLogin: user={User}", username);
 
@@ -177,19 +190,19 @@ public class MasServer : BaseMediusTcpServer
             else
             {
                 status = MediusCallbackStatus.MediusAccountNotFound;
-                await SendLoginFailure(tcp, status, ct);
+                await SendLoginFailure(tcp, status, msgId, ct);
                 return;
             }
         }
         else if (account.PasswordHash != HashPassword(password))
         {
-            await SendLoginFailure(tcp, MediusCallbackStatus.MediusLoginFailed, ct);
+            await SendLoginFailure(tcp, MediusCallbackStatus.MediusLoginFailed, msgId, ct);
             return;
         }
 
         if (account.IsBanned)
         {
-            await SendLoginFailure(tcp, MediusCallbackStatus.MediusFail, ct);
+            await SendLoginFailure(tcp, MediusCallbackStatus.MediusFail, msgId, ct);
             return;
         }
 
@@ -198,12 +211,13 @@ public class MasServer : BaseMediusTcpServer
         state.Status      = PlayerStatus.InAuthWorld;
         status            = MediusCallbackStatus.MediusSuccess;
 
+        // Old Medius AccountLoginResponse: [messageId:21][status:4][accountId:4][accountName:32][sessionKey:17][mlsAddr:20]
         var w = new MediusWriter();
+        w.Write(msgId);
         w.Write((int)status);
-        w.Write(account.AccountId);           // AccountId
-        w.WriteString(account.AccountName, 64); // Username
-        w.WriteString(state.SessionKey, 64);    // SessionKey handed back
-        // MLS Connection Address info
+        w.Write(account.AccountId);
+        w.WriteString(account.AccountName, MediusConstants.ACCOUNTNAME_MAXLEN);
+        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);
         w.WriteMlsAddress(_config.ServerIp, _config.MlsPort);
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountLoginResponse, w.ToArray()), ct);
@@ -212,7 +226,8 @@ public class MasServer : BaseMediusTcpServer
     private async Task HandleAnonymousLoginAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         var r = new MediusReader(packet.Payload);
-        string sessionKey = r.ReadString(64);
+        // Old Medius layout: [messageId: 21][sessionKey: 17]
+        byte[] msgId = r.ReadBytes(MediusConstants.MESSAGEID_MAXLEN);
 
         _log.LogInformation("[MAS] AnonymousLogin");
 
@@ -220,11 +235,13 @@ public class MasServer : BaseMediusTcpServer
         state.AccountName = "Anonymous";
         state.Status      = PlayerStatus.InAuthWorld;
 
+        // Old Medius AnonymousLoginResponse: [messageId:21][status:4][accountId:4][accountName:32][sessionKey:17][mlsAddr:20]
         var w = new MediusWriter();
+        w.Write(msgId);
         w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write(0);                           // AccountId = 0 for anon
-        w.WriteString("Anonymous", 64);
-        w.WriteString(state.SessionKey, 64);
+        w.Write(0);                                                           // AccountId = 0 for anon
+        w.WriteString("Anonymous", MediusConstants.ACCOUNTNAME_MAXLEN);
+        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);
         w.WriteMlsAddress(_config.ServerIp, _config.MlsPort);
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AnonymousLoginResponse, w.ToArray()), ct);
@@ -233,16 +250,21 @@ public class MasServer : BaseMediusTcpServer
     private async Task HandleAccountRegistrationAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         var r = new MediusReader(packet.Payload);
-        string sessionKey = r.ReadString(64);
-        string username   = r.ReadString(64);
-        string password   = r.ReadString(64);
+        // Old Medius layout: [messageId: 21][sessionKey: 17][username: 32][password: 32]
+        byte[] msgId      = r.ReadBytes(MediusConstants.MESSAGEID_MAXLEN);
+        string sessionKey = r.ReadString(MediusConstants.SESSIONKEY_MAXLEN);
+        string username   = r.ReadString(MediusConstants.ACCOUNTNAME_MAXLEN);
+        string password   = r.ReadString(MediusConstants.PASSWORD_MAXLEN);
 
         _log.LogInformation("[MAS] AccountRegistration: user={User}", username);
 
         if (_store.GetAccountByName(username) != null)
         {
+            // Old Medius AccountRegistrationResponse: [messageId:21][status:4][accountId:4]
             var wFail = new MediusWriter();
+            wFail.Write(msgId);
             wFail.Write((int)MediusCallbackStatus.MediusAccountLoggedIn);
+            wFail.Write(0);  // accountId placeholder
             await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountRegistrationResponse, wFail.ToArray()), ct);
             return;
         }
@@ -251,6 +273,7 @@ public class MasServer : BaseMediusTcpServer
         _log.LogInformation("[MAS] Registered account '{User}' id={Id}", username, account.AccountId);
 
         var w = new MediusWriter();
+        w.Write(msgId);
         w.Write((int)MediusCallbackStatus.MediusSuccess);
         w.Write(account.AccountId);
 
@@ -259,12 +282,18 @@ public class MasServer : BaseMediusTcpServer
 
     private async Task HandleAccountLogoutAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        byte[] msgId = packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
+            ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
+
         _log.LogInformation("[MAS] AccountLogout: {User}", state.AccountName);
         state.AccountId   = null;
         state.AccountName = string.Empty;
         state.Status      = PlayerStatus.Disconnected;
 
+        // Old Medius AccountLogoutResponse: [messageId:21][status:4]
         var w = new MediusWriter();
+        w.Write(msgId);
         w.Write((int)MediusCallbackStatus.MediusSuccess);
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountLogoutResponse, w.ToArray()), ct);
@@ -272,11 +301,12 @@ public class MasServer : BaseMediusTcpServer
 
     private async Task HandleTicketLoginAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        // TicketLogin payload: [sessionKey: 64][username: 64][ticketBlob: variable]
+        // Old Medius TicketLogin payload: [messageId:21][sessionKey:17][username:32][ticketBlob:rest]
         // We accept any ticket — no real DNAS/ticket validation.
         var r = new MediusReader(packet.Payload);
-        string sessionKey  = r.Remaining >= 64 ? r.ReadString(64) : string.Empty;
-        string username    = r.Remaining >= 64 ? r.ReadString(64) : "Player";
+        byte[] msgId      = r.ReadBytes(MediusConstants.MESSAGEID_MAXLEN);
+        string sessionKey = r.Remaining >= MediusConstants.SESSIONKEY_MAXLEN  ? r.ReadString(MediusConstants.SESSIONKEY_MAXLEN)  : string.Empty;
+        string username   = r.Remaining >= MediusConstants.ACCOUNTNAME_MAXLEN ? r.ReadString(MediusConstants.ACCOUNTNAME_MAXLEN) : "Player";
         // remaining bytes = ticket blob (ignored)
 
         _log.LogInformation("[MAS] TicketLogin: user={User}", username);
@@ -293,47 +323,54 @@ public class MasServer : BaseMediusTcpServer
         state.AccountName = account.AccountName;
         state.Status      = PlayerStatus.InAuthWorld;
 
-        // TicketLoginResponse layout (mirrors AccountLoginResponse with extra MLS address):
-        //   StatusCode:  int32  (4)
-        //   AccountID:   int32  (4)
-        //   AccountType: int32  (4)  = 0 (master)
-        //   AccessKey:   string (64) = session key (reused as access token)
-        //   SessionKey:  string (64)
-        //   MLS address block (IP string 16 + port 2 + pad 2)
-        //   WorldID:     int32  (4)
+        // Old Medius TicketLoginResponse: [messageId:21][status:4][accountId:4][accountType:4]
+        //   [accessKey:17][sessionKey:17][mlsAddr:20][worldId:4]
         var w = new MediusWriter();
+        w.Write(msgId);
         w.Write((int)MediusCallbackStatus.MediusSuccess);
         w.Write(account.AccountId);
-        w.Write((int)0);                      // AccountType = MasterAccount
-        w.WriteString(state.SessionKey, 64);  // AccessKey
-        w.WriteString(state.SessionKey, 64);  // SessionKey
+        w.Write((int)0);                                                       // AccountType = MasterAccount
+        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);  // AccessKey (17 bytes)
+        w.WriteString(state.SessionKey, MediusConstants.SESSIONKEY_MAXLEN);  // SessionKey (17 bytes)
         w.WriteMlsAddress(_config.ServerIp, _config.MlsPort);
-        w.Write((int)1);                      // WorldID = 1 (default lobby)
+        w.Write((int)1);                                                       // WorldID = 1
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.TicketLoginResponse, w.ToArray()), ct);
     }
 
     private async Task HandleGetMyIpAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        byte[] msgId = packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
+            ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
+
         var endpoint = state.RemoteEndpoint;
         // Strip port if present
         var ip = endpoint.Contains(':') ? endpoint[..endpoint.LastIndexOf(':')] : endpoint;
 
+        // Old Medius GetMyIPResponse: [messageId:21][status:4][ip:16]
         var w = new MediusWriter();
+        w.Write(msgId);
         w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.WriteString(ip, 16);
+        w.WriteString(ip, MediusConstants.IP_MAXLEN);
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.GetMyIPResponse, w.ToArray()), ct);
     }
 
     private async Task HandlePolicyAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        byte[] msgId = packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
+            ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
+
         const string policyText = "Welcome to CodeDesigner Medius Server.\r\nPlay fair, have fun!";
 
+        // Old Medius PolicyResponse: [messageId:21][status:4][endFlag:1][policy:256]
         var w = new MediusWriter();
+        w.Write(msgId);
         w.Write((int)MediusCallbackStatus.MediusSuccess);
         w.Write((byte)1);  // last = true
-        w.WriteString(policyText, 256);
+        w.WriteString(policyText, MediusConstants.POLICY_MAXLEN);
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PolicyResponse, w.ToArray()), ct);
     }
@@ -342,14 +379,15 @@ public class MasServer : BaseMediusTcpServer
     // Helpers
     // -------------------------------------------------------------------------
 
-    private async Task SendLoginFailure(TcpClient tcp, MediusCallbackStatus status, CancellationToken ct)
+    private async Task SendLoginFailure(TcpClient tcp, MediusCallbackStatus status, byte[]? msgId, CancellationToken ct)
     {
         var w = new MediusWriter();
+        w.Write(msgId ?? new byte[MediusConstants.MESSAGEID_MAXLEN]);   // messageId echo (21 bytes)
         w.Write((int)status);
-        w.Write(0);              // AccountId
-        w.WriteString("", 64);  // Username
-        w.WriteString("", 64);  // SessionKey
-        w.WritePadding(8);      // MLS address placeholder
+        w.Write(0);                                                       // AccountId
+        w.WriteString("", MediusConstants.ACCOUNTNAME_MAXLEN);           // AccountName
+        w.WriteString("", MediusConstants.SESSIONKEY_MAXLEN);            // SessionKey
+        w.WritePadding(20);                                               // MLS address placeholder
 
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.AccountLoginResponse, w.ToArray()), ct);
     }

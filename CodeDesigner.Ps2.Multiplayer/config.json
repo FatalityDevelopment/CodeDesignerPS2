@@ -2,9 +2,9 @@
   "Online": {
     "BindAddress": "0.0.0.0",
     "ServerIp": "192.168.2.89",
-    "MuisPort": 10075,
-    "MasPort": 10071,
-    "MlsPort": 10073,
+    "MuisPort": 10071,
+    "MasPort": 10078,
+    "MlsPort": 10075,
     "DmePort": 10070,
     "NatPort": 10069,
     "DnasPort": 10060,
@@ -14,7 +14,7 @@
     "DnasCertPath": "",
     "DnasKeyPath": "",
     "MaxClients": 1000,
-    "AllowedAppIds": [10683, 10684],
+    "AllowedAppIds": [10472],
     "AutoCreateAccounts": true,
     "ClientTimeoutSeconds": 60
   }

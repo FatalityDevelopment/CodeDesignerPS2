@@ -120,13 +120,13 @@
     {
       "address": "0x00636870",
       "name": "SCERT_KeyCtxInstall",
-      "comment": "Install key ctx",
+      "comment": "Installs key context into session; a0=session_ptr, a1=key_ctx. Called from SCERT_KeyExchange after RSA encrypt.",
       "type": "Function"
     },
     {
       "address": "0x006368A8",
-      "name": "SCERT_SetConnRemoteAddr",
-      "comment": "Store remote addr",
+      "name": "SCERT_RSA_Encrypt",
+      "comment": "RSA encrypt call \u2014 a0=session_ctx, a1=plain_ptr(N_ps2). Called from SCERT_KeyExchange 0x636E70.",
       "type": "Function"
     },
     {
@@ -257,33 +257,45 @@
     },
     {
       "address": "0x00453168:\u002B0x0000",
+      "parentAddress": "0x00453168",
+      "offset": 0,
       "name": "VTable",
       "comment": "VTable ptr; 0x00432FC0 at runtime",
       "type": "Pointer"
     },
     {
       "address": "0x00453168:\u002B0x0004",
+      "parentAddress": "0x00453168",
+      "offset": 4,
       "name": "JobHandle",
       "comment": "Set by MUIS_SetupUniversePoll via 0x001A3920"
     },
     {
       "address": "0x00453168:\u002B0x002c",
+      "parentAddress": "0x00453168",
+      "offset": 44,
       "name": "DataReadyFlag",
       "comment": "Polled via lbu; non-zero = server response parsed; stays 0 = hang"
     },
     {
       "address": "0x00453168:\u002B0x0030",
+      "parentAddress": "0x00453168",
+      "offset": 48,
       "name": "JobPtr",
       "comment": "Async job struct",
       "type": "Pointer"
     },
     {
       "address": "0x00453168:\u002B0x0034",
+      "parentAddress": "0x00453168",
+      "offset": 52,
       "name": "TimeoutParam",
       "comment": "Set from a2=6 at call site 0x003184A4"
     },
     {
       "address": "0x00453168:\u002B0x0038",
+      "parentAddress": "0x00453168",
+      "offset": 56,
       "name": "SCERTStreamPtr",
       "comment": "Live SCERT TCP stream",
       "type": "Pointer"
@@ -322,6 +334,99 @@
       "address": "0x0040C768",
       "name": "gSCERT_GlobalStruct",
       "comment": "8-byte ld \u002B lh at \u002B8; read by SCERT_Overlay_Fn1"
+    },
+    {
+      "address": "0x00654E38",
+      "name": "gN_server",
+      "comment": "Horizon RSA-512 N_server (64 bytes LE). PS2 uses this to RSA-encrypt CLIENT_CRYPTKEY_PUBLIC payload. Confirmed match with Horizon key via scan_pattern 2026-04-18."
+    },
+    {
+      "address": "0x00653D80",
+      "name": "gSCERT_ContextPtr",
+      "comment": "Global SCERT session context pointer. Read by SCERT_AllocSendPkt at 0x636738 to find active session by IP.",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00632200",
+      "name": "SCERT_RC4_DecryptLoop",
+      "comment": "PS2 RC4 decrypt loop \u2014 inner XOR at 0x63225C NOP\u0027d to bypass RC4 decryption for testing. Loop branch at bne \u2192 0x632200.",
+      "type": "Function"
+    },
+    {
+      "address": "0x006322A8",
+      "name": "SCERT_RC4_EncryptLoop",
+      "comment": "PS2 RC4 encrypt loop \u2014 inner XOR at 0x6322F8 NOP\u0027d to bypass RC4 encryption for testing. Loop branch at bne \u2192 0x6322A8.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063225C",
+      "name": "SCERT_RC4_DecryptXOR",
+      "comment": "RC4 decrypt XOR instruction. NOP\u0027d (00000000) for testing. Original: 00C53026 (xor a2,a2,a1). Write 2063225C 00000000 to bypass."
+    },
+    {
+      "address": "0x006322F8",
+      "name": "SCERT_RC4_EncryptXOR",
+      "comment": "RC4 encrypt XOR instruction. NOP\u0027d (00000000) for testing. Original: 00832026 (xor a0,a0,v1). Write 206322F8 00000000 to bypass."
+    },
+    {
+      "address": "0x00636318",
+      "name": "SCERT_RC4_SetKey",
+      "comment": "PS2 RC4 key setup: reversed table init, hash-scramble pass (cipherIndex\u002B=5), key schedule (cipherIndex\u002B=3, keyIdx wraps at 64). Entered at 0x00632318 preamble area.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D320",
+      "name": "SCERT_OuterRecvHandler",
+      "comment": "Checks [0x653D94]==1, calls SCERT_SocketValidator(0x0063D278)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D450",
+      "name": "SCERT_ConnectAcceptHandler",
+      "comment": "CRYPTKEY_PEER/CONNECT_ACCEPT handler. a1=incoming_len(0x49=73). Calls SCERT_ExpectedLenHelper(0x0063D6B0), validates length at bne s1,v1(0x0063D4DC), parses 3 bytes via 0x640668, writes response via 0x640A20/0x640AC8.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D278",
+      "name": "SCERT_SocketValidator",
+      "comment": "Returns error if a0 is 0, -0x50, or -0x68 (invalid socket values). Called from SCERT_OuterRecvHandler.",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640A20",
+      "name": "SCERT_WriteByteToPacketBuf",
+      "comment": "Writes a1 byte to a0 packet buffer ptr. Called at 0x0063D508, 0x0063D520, 0x0063D538.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D6B0",
+      "name": "SCERT_ExpectedLenHelper",
+      "comment": "Returns (a0 \u0026 0xFFFF) \u002B 0x49 \u2014 computes expected receive length for CONNECT_ACCEPT. Called from 0x0063D4C8.",
+      "type": "Function"
+    },
+    {
+      "address": "0x006405C8",
+      "name": "SCERT_ReadSessionStateByte",
+      "comment": "Reads session state byte into sp\u002B0x85 at 0x0063D57C. Returns nonzero on error \u2192 branch at 0x0063D584 to failure path.",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640668",
+      "name": "SCERT_ParsePacketBody3Bytes",
+      "comment": "Parses 3 bytes from packet body at offsets 0x82, 0x83, 0x84. Called at 0x0063D4F4.",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640AC8",
+      "name": "SCERT_WriteUInt16ToPacketBuf",
+      "comment": "Writes uint16 into packet buffer. Called at 0x0063D550.",
+      "type": "Function"
+    },
+    {
+      "address": "0x00637C48",
+      "name": "SCERT_SendConnectCompleteResp",
+      "comment": "Sends CONNECT_COMPLETE response. Called at 0x0063D56C from SCERT_ConnectAcceptHandler. Failure here \u2192 SCERT_ErrorDisconnect path.",
+      "type": "Function"
     }
   ]
 }

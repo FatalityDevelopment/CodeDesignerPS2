@@ -51,12 +51,25 @@ public abstract class BaseMediusTcpServer
     /// </summary>
     protected virtual bool SendCryptKeyGameOnConnect => true;
 
+    /// <summary>
+    /// If true, OnSessionEstablishedAsync is called immediately after sending SERVER_CONNECT_COMPLETE
+    /// in the old-protocol path, without waiting for CLIENT_CONNECT_READY_TCP.
+    /// MUIS requires this: the PS2 disconnects from MUIS right after receiving CONNECT_COMPLETE
+    /// and never sends CLIENT_CONNECT_READY_TCP.
+    /// </summary>
+    protected virtual bool PushDataAfterConnectComplete => false;
+
     // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
 
     public Task StartAsync(string bindAddress, int port, CancellationToken ct)
     {
+        if (port == 0)
+        {
+            _log.LogInformation("[{Name}] Port = 0 — disabled, not listening", ServerName);
+            return Task.CompletedTask;
+        }
         Port      = port;
         _listener = new TcpListener(IPAddress.Parse(bindAddress), port);
         _listener.Start();
@@ -141,9 +154,8 @@ public abstract class BaseMediusTcpServer
                     // Decrypt payload in-place using per-packet stateless PS2 RC4.
                     // Only applies AFTER the key exchange completes (CLIENT_CRYPTKEY_PUBLIC
                     // itself is RSA-encrypted, not RC4 — don't decrypt it).
-                    // DISABLED: RC4 XOR NOP'd in PS2 EE memory — payload is plaintext despite 0x80 flag.
-                    // if (packet.IsEncrypted && packet.Hash != null && state.CryptKeyReceived)
-                    //     PS2_RC4.Decrypt(state.SessionRc4Key, packet.Hash, packet.Payload);
+                    if (packet.IsEncrypted && packet.Hash != null && state.CryptKeyReceived)
+                        PS2_RC4.Decrypt(state.SessionRc4Key, packet.Hash, packet.Payload);
 
                     await DispatchPacketAsync(packet, state, tcp, ct);
                 }
@@ -211,11 +223,22 @@ public abstract class BaseMediusTcpServer
                 break;
 
             case RT_MSG_TYPE.RT_MSG_CLIENT_APP_TOSERVER:
+                _log.LogInformation("[{Name}] CLIENT_APP_TOSERVER ({Len} bytes): {Hex}",
+                    ServerName, packet.Payload.Length,
+                    BitConverter.ToString(packet.Payload).Replace("-", " "));
                 var mp = MediusPacket.Parse(packet.Payload);
                 if (mp != null)
                     await HandleMediusMessageAsync(mp, state, tcp, ct);
                 else
                     await HandleRtMessageAsync(RT_MSG_TYPE.RT_MSG_CLIENT_APP_TOSERVER, packet.Payload, state, tcp, ct);
+                break;
+
+            case RT_MSG_TYPE.RT_MSG_SERVER_CHEAT_QUERY:
+                // PS2 sends its anti-cheat response using the same 0x1D type byte.
+                _log.LogInformation("[{Name}] <- CHEAT_QUERY response ({Len} bytes): {Hex}",
+                    ServerName, packet.Payload.Length,
+                    BitConverter.ToString(packet.Payload).Replace("-", " "));
+                await HandleCheatQueryResponseAsync(packet, state, tcp, ct);
                 break;
 
             case RT_MSG_TYPE.RT_MSG_CLIENT_APP_BROADCAST:
@@ -265,52 +288,79 @@ public abstract class BaseMediusTcpServer
     {
         state.CryptKeyReceived = true;
 
+        // CLIENT_CRYPTKEY_PUBLIC payload is the raw RSA ciphertext — NOT outer-RC4-encrypted.
+        // The PS2 sets 0x80 flag + hash for authentication but does not apply RC4 to this
+        // packet (it has no session key yet).  Treat payload as RSA ciphertext directly.
+
         _log.LogDebug("[{Name}] CLIENT_CRYPTKEY_PUBLIC ({Len} bytes) hash={HashHex} payload={Hex}",
             ServerName, packet.Payload.Length,
             packet.Hash != null ? BitConverter.ToString(packet.Hash).Replace("-", " ") : "null",
             BitConverter.ToString(packet.Payload).Replace("-", " "));
 
-        // CLIENT_CRYPTKEY_PUBLIC payload is RSA(N_ps2, E=17, N_server) — the PS2's public modulus
-        // encrypted with our server key. Decrypt with D_server to recover N_ps2.
-        // The +N fallback (inside Decrypt) handles the case where N_ps2 >= N_server.
-        // This mirrors Horizon: BaseScertMessage.Instantiate → cipherService.Decrypt → Key → GenerateCipher.
-        if (!Ps2Rsa.ServerKey.Decrypt(packet.Payload, packet.Hash ?? Array.Empty<byte>(), out var ps2NBytes))
+        // The 64-byte payload is N_ps2 RSA-encrypted with Horizon's server public key
+        // (N_server hardcoded in the PS2 game binary — independent of SERVER_HELLO content).
+        // RSA-decrypt with D_server to recover N_ps2 in little-endian.
+        // Some clients may omit the encrypted-header hash; treat that as all-zero hash.
+        var hashForDecrypt = packet.Hash ?? new byte[4];
+
+        if (!Ps2Rsa.ServerKey.Decrypt(packet.Payload, hashForDecrypt, out var ps2NBytes))
         {
-            _log.LogWarning("[{Name}] CLIENT_CRYPTKEY_PUBLIC: RSA decrypt / hash verification failed — closing", ServerName);
-            tcp.Close();
-            return;
+            // Hash mismatch — log full diagnostic and continue without closing.
+            // This can happen if the deployed binary didn't parse Hash correctly (stale build).
+            // In that case treat the payload as plaintext N_ps2 as a fallback.
+            var rawDecrypted = Ps2Rsa.ServerKey.DecryptRaw(packet.Payload);
+            _log.LogWarning("[{Name}] CLIENT_CRYPTKEY_PUBLIC: hash mismatch. hash={H} rawDecrypt={D}",
+                ServerName,
+                BitConverter.ToString(hashForDecrypt).Replace("-", " "),
+                BitConverter.ToString(rawDecrypted).Replace("-", " "));
+            // Use the RSA-decrypted bytes even without hash verification.
+            ps2NBytes = rawDecrypted;
         }
 
-        _log.LogDebug("[{Name}] N_ps2 (decrypted, LE)={Hex}", ServerName,
+        _log.LogDebug("[{Name}] N_ps2 (LE)={Hex}", ServerName,
             BitConverter.ToString(ps2NBytes).Replace("-", " "));
 
-        state.ClientRsa = Ps2Rsa.FromClientPublicKey(ps2NBytes);
+        state.ClientCryptKey = ps2NBytes;
+        state.ClientRsa      = Ps2Rsa.FromClientPublicKey(ps2NBytes);
 
-        // Generate a random 64-byte RC4 session key.
-        state.SessionRc4Key = PS2_RC4.GenerateKey();
+        // Generate a random 64-byte RC4 session key, ensuring its value < N_ps2
+        // so RSA encryption m^E mod N_ps2 is a bijection the PS2 can invert with D_ps2.
+        state.SessionRc4Key = Ps2Rsa.GenerateMessageLessThan(state.ClientRsa.N);
 
         _log.LogDebug("[{Name}] SessionRc4Key={Hex}", ServerName,
             BitConverter.ToString(state.SessionRc4Key).Replace("-", " "));
 
-        // RSA-encrypt the RC4 key with N_ps2, E=17 so the PS2 can decrypt with D_ps2.
-        var encryptedKey = state.ClientRsa.Encrypt(state.SessionRc4Key);
-        var peerHash = PS2_RC4.ComputeHash(state.SessionRc4Key, CipherContext.RsaAuth);
+        // Send CRYPTKEY_PEER with the raw session key (no RSA encryption, no 0x80 flag).
+        // The PS2 SCERT overlay (old proto, type 0x13 without 0x80) uses the payload bytes
+        // directly as its RC4 working key — it does NOT apply RSA decryption for this path.
+        _log.LogDebug("[{Name}] CRYPTKEY_PEER payload={Hex}", ServerName,
+            BitConverter.ToString(state.SessionRc4Key).Replace("-", " "));
 
-        _log.LogDebug("[{Name}] CRYPTKEY_PEER hash={HashHex} payload={Hex}", ServerName,
-            BitConverter.ToString(peerHash).Replace("-", " "),
-            BitConverter.ToString(encryptedKey).Replace("-", " "));
-
-        await SendPacketAsync(tcp, ScertPacket.CreateCryptKeyPeer(encryptedKey, peerHash), ct);
+        await SendPacketAsync(tcp, ScertPacket.CreateCryptKeyPeer(state.SessionRc4Key), ct);
+        // CRYPTKEY_GAME is sent later, after the PS2 responds with its encrypted CLIENT_CONNECT_TCP.
     }
 
     private async Task HandleConnectTcpAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
+        // The PS2 sends CLIENT_CONNECT_TCP twice:
+        //   1st: plain, empty payload — the initial connect announcement (before key exchange).
+        //   2nd: encrypted, payload contains [TargetWorldId:4][UNK0:1][AppId:4][RSA_KEY:...]
+        //        This arrives after the PS2 has received CRYPTKEY_PEER.
+        // We distinguish them by whether the key exchange has completed yet.
+        if (!state.CryptKeyReceived)
+        {
+            // First CLIENT_CONNECT_TCP — plain, empty. Just acknowledge it internally.
+            _log.LogDebug("[{Name}] <- CLIENT_CONNECT_TCP (initial, plain) — no response yet", ServerName);
+            state.ConnectReceived = true;
+            return;
+        }
+
+        // Second CLIENT_CONNECT_TCP — encrypted, carries AppId.
         state.ConnectReceived = true;
 
-        // Decrypted payload layout (per Medius protocol):
+        // Payload layout (with RC4 NOP active on PS2, received as plaintext):
         //   Old Medius (version < 109):  [TargetWorldId: 4][UNK0: 1][AppId: 4][RSA_KEY: ...]
         //   New Medius (version >= 109): [TargetWorldId: 4][AppId: 4][RSA_KEY: ...]
-        // Note: MediusVersion is NOT in this packet — it was established from CLIENT_HELLO.
         if (packet.Payload.Length >= 4)
         {
             int pos = 4; // skip TargetWorldId
@@ -320,11 +370,9 @@ public abstract class BaseMediusTcpServer
                 state.AppId = BitConverter.ToInt32(packet.Payload, pos);
         }
 
-        _log.LogInformation("[{Name}] CLIENT_CONNECT_TCP AppId={AppId} ver={Ver}", ServerName, state.AppId, state.MediusVersion);
+        _log.LogInformation("[{Name}] CLIENT_CONNECT_TCP (encrypted) AppId={AppId} ver={Ver}", ServerName, state.AppId, state.MediusVersion);
 
-        // Allocate a scert ID for this client
         state.ScertId = Interlocked.Increment(ref _scertIdCounter);
-
         var clientIp = (tcp.Client.RemoteEndPoint as IPEndPoint)?.Address;
 
         if (state.MediusVersion > 108)
@@ -334,14 +382,22 @@ public abstract class BaseMediusTcpServer
         }
         else
         {
-            // Old protocol (SOCOM II era): complete the handshake immediately.
-            // MUIS omits CRYPTKEY_GAME; MAS/MLS send it (matches Horizon's per-server behaviour).
+            // Old protocol (SOCOM II era): send CRYPTKEY_GAME + CONNECT_ACCEPT + CONNECT_COMPLETE.
+            // 2012 capture confirms ctx=3 (RcClientSession) for CRYPTKEY_GAME; however
+            // CONNECT_ACCEPT and CONNECT_COMPLETE use ctx=1 (RcServerSession) in our implementation
+            // because that is what the PS2 accepts in practice (allows proceeding to GetUniverse).
+            // Session is established immediately — PS2 does NOT send CLIENT_CONNECT_READY_TCP on MUIS.
             if (SendCryptKeyGameOnConnect)
-                await SendPacketAsync(tcp, ScertPacket.CreateCryptKeyGame(state.SessionRc4Key), state, ct);
-            await SendPacketAsync(tcp, ScertPacket.CreateConnectAcceptTcp(state.ScertId, 0, 1, clientIp, state.MediusVersion), state, ct);
+            {
+                _log.LogDebug("[{Name}] -> RT_MSG_SERVER_CRYPTKEY_GAME", ServerName);
+                await SendPacketAsync(tcp, ScertPacket.CreateCryptKeyGame(state.SessionRc4Key), state, CipherContext.RcClientSession, ct);
+            }
+            await SendPacketAsync(tcp, ScertPacket.CreateConnectAcceptTcp(state.ScertId, (ushort)state.ScertId, 1, clientIp, state.MediusVersion), state, ct);
             await SendPacketAsync(tcp, ScertPacket.CreateConnectComplete(), state, ct);
             state.IsSessionEstablished = true;
-            _log.LogInformation("[{Name}] SCERT session established (old proto) for {Ep}", ServerName, state.RemoteEndpoint);
+            _log.LogInformation("[{Name}] Old-proto handshake complete for {Ep}", ServerName, state.RemoteEndpoint);
+            if (PushDataAfterConnectComplete)
+                await OnSessionEstablishedAsync(state, tcp, ct);
         }
     }
 
@@ -351,23 +407,33 @@ public abstract class BaseMediusTcpServer
         state.ScertId = Interlocked.Increment(ref _scertIdCounter);
         var clientIp = (tcp.Client.RemoteEndPoint as IPEndPoint)?.Address;
         if (SendCryptKeyGameOnConnect)
+        {
             await SendPacketAsync(tcp, ScertPacket.CreateCryptKeyGame(state.SessionRc4Key), state, ct);
-        await SendPacketAsync(tcp, ScertPacket.CreateConnectAcceptTcp(state.ScertId, 0, 1, clientIp, state.MediusVersion), state, ct);
+        }
+        await SendPacketAsync(tcp, ScertPacket.CreateConnectAcceptTcp(state.ScertId, (ushort)state.ScertId, 1, clientIp, state.MediusVersion), state, ct);
         await SendPacketAsync(tcp, ScertPacket.CreateConnectComplete(), state, ct);
         state.IsSessionEstablished = true;
         _log.LogInformation("[{Name}] SCERT session established (CONNECT_READY_REQUIRE path) for {Ep}", ServerName, state.RemoteEndpoint);
+        await OnSessionEstablishedAsync(state, tcp, ct);
     }
 
     private async Task HandleConnectReadyTcpAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         state.ConnectReadyReceived = true;
-        await SendPacketAsync(tcp, ScertPacket.CreateConnectComplete(), state, ct);
+        // Reply with plain SERVER_CONNECT_COMPLETE — same reasoning as the first one:
+        // the PS2 state machine checks for type byte 0x1A (plain), not 0x9A (encrypted).
+        await SendPacketAsync(tcp, ScertPacket.CreateConnectComplete(), ct);
         if (state.MediusVersion > 108)
             await SendPacketAsync(tcp, ScertPacket.CreateServerEcho(), state, ct);
         if (!state.IsSessionEstablished)
         {
             state.IsSessionEstablished = true;
             _log.LogInformation("[{Name}] SCERT session established for {Ep}", ServerName, state.RemoteEndpoint);
+            await OnSessionEstablishedAsync(state, tcp, ct);
+        }
+        else
+        {
+            _log.LogDebug("[{Name}] CLIENT_CONNECT_READY_TCP from already-established session {Id}", ServerName, state.ConnectionId);
         }
     }
 
@@ -393,22 +459,27 @@ public abstract class BaseMediusTcpServer
     }
 
     /// <summary>
-    /// Send a SCERT packet, RC4-encrypting the payload if the session key is established.
-    /// Packets whose <see cref="ScertPacket.Hash"/> is already set (e.g. RSA-encrypted CRYPTKEY_PEER)
-    /// are sent as-is without a second encryption pass.
+    /// Send a SCERT packet, RC4-encrypting the payload with <paramref name="context"/>.
+    /// Packets whose <see cref="ScertPacket.Hash"/> is already set are sent as-is.
     /// </summary>
-    protected Task SendPacketAsync(TcpClient tcp, ScertPacket packet, MediusClientState state, CancellationToken ct)
+    protected Task SendPacketAsync(TcpClient tcp, ScertPacket packet, MediusClientState state, CipherContext context, CancellationToken ct)
     {
-        // DISABLED: RC4 XOR NOP'd in PS2 EE memory — send plaintext so PS2 accepts without decrypt.
-        // if (state.SessionRc4Key != null && packet.Hash == null)
-        // {
-        //     PS2_RC4.Encrypt(state.SessionRc4Key, CipherContext.RcClientSession,
-        //         packet.Payload, out var cipher, out var hash);
-        //     packet.Hash    = hash;
-        //     packet.Payload = cipher;
-        // }
+        if (state.SessionRc4Key != null && packet.Hash == null)
+        {
+            PS2_RC4.Encrypt(state.SessionRc4Key, context,
+                packet.Payload, out var cipher, out var hash);
+            packet.Hash    = hash;
+            packet.Payload = cipher;
+        }
         return SendPacketAsync(tcp, packet, ct);
     }
+
+    /// <summary>
+    /// Send a SCERT packet encrypted with <see cref="CipherContext.RcServerSession"/>.
+    /// Used for all post-handshake SERVER_APP traffic.
+    /// </summary>
+    protected Task SendPacketAsync(TcpClient tcp, ScertPacket packet, MediusClientState state, CancellationToken ct)
+        => SendPacketAsync(tcp, packet, state, CipherContext.RcServerSession, ct);
 
     protected Task SendMediusAsync(TcpClient tcp, MediusPacket msg, MediusClientState state, CancellationToken ct)
     {
@@ -431,13 +502,19 @@ public abstract class BaseMediusTcpServer
     // Abstract / virtual
     // -------------------------------------------------------------------------
 
-    protected virtual async Task OnClientConnectedAsync(MediusClientState state, TcpClient tcp)
+    protected virtual Task OnClientConnectedAsync(MediusClientState state, TcpClient tcp)
     {
-        // SOCOM II (and other old-protocol PS2 games) expect SERVER_HELLO proactively
-        // on connect.  They never send CLIENT_HELLO — they go straight to
-        // CLIENT_CRYPTKEY_PUBLIC after receiving SERVER_HELLO.
-        await SendPacketAsync(tcp, ScertPacket.CreateHello(), default);
+        // Wait for the PS2 to initiate — it sends CLIENT_CONNECT_TCP (plain, empty) first,
+        // then CLIENT_CRYPTKEY_PUBLIC. Do NOT send SERVER_HELLO proactively.
+        return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Called immediately after the SCERT handshake completes and the session is established.
+    /// Override in server subclasses to push initial data to the client (e.g. MUIS universe info).
+    /// </summary>
+    protected virtual Task OnSessionEstablishedAsync(MediusClientState state, TcpClient tcp, CancellationToken ct)
+        => Task.CompletedTask;
 
     protected virtual Task OnClientDisconnectedAsync(MediusClientState state)
         => Task.CompletedTask;
@@ -448,6 +525,13 @@ public abstract class BaseMediusTcpServer
     /// </summary>
     protected virtual Task HandleRtMessageAsync(
         RT_MSG_TYPE msgType, byte[] payload, MediusClientState state, TcpClient tcp, CancellationToken ct)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// Called when the PS2 sends an anti-cheat response (RT_MSG_SERVER_CHEAT_QUERY 0x1D).
+    /// Override in MUIS to drive the 3-round cheat exchange before sending universe data.
+    /// </summary>
+    protected virtual Task HandleCheatQueryResponseAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
         => Task.CompletedTask;
 
     protected abstract Task HandleMediusMessageAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct);

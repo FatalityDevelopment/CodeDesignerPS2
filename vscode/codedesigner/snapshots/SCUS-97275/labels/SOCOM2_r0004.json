@@ -545,12 +545,6 @@
       "comment": "Connection table base used by GetConnectionByIndex; includes MUIS connection structs"
     },
     {
-      "address": "0x00714F80",
-      "name": "FindingsSummary_r0004",
-      "comment": "Summary: DNAS cmd 0xC7 bypassed in deliver path; GetServerList cmd 0x97 mapped (ctx ptr/server count/default id); MUIS hostname identified for DNS redirect; FTScore/ZDB decrypt pipeline mapped through AES_CBC_Core with session-derived key/IV and outer pre-AES transform",
-      "type": "String"
-    },
-    {
       "address": "0x0044D648:\u002B0x0000",
       "parentAddress": "0x0044D648",
       "offset": 0,

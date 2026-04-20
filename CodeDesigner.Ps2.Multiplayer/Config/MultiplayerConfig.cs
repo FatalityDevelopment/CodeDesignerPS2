@@ -13,13 +13,13 @@ public class MultiplayerConfig
     // ── Medius ports ─────────────────────────────────────────────────────────
 
     /// <summary>MUIS (Universe Information) server TCP port. PS2 games connect here first.</summary>
-    public int MuisPort { get; set; } = 10075;
+    public int MuisPort { get; set; } = 10071;
 
     /// <summary>MAS (Authentication) server TCP port.</summary>
-    public int MasPort { get; set; } = 10071;
+    public int MasPort { get; set; } = 10073;
 
     /// <summary>MLS (Lobby) server TCP port.</summary>
-    public int MlsPort { get; set; } = 10073;
+    public int MlsPort { get; set; } = 10075;
 
     /// <summary>DME (Demonware Multiplayer Engine) in-game relay TCP port.</summary>
     public int DmePort { get; set; } = 10070;

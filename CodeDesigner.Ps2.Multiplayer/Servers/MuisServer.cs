@@ -8,21 +8,26 @@ using Microsoft.Extensions.Logging;
 namespace CodeDesigner.Ps2.Multiplayer.Servers;
 
 /// <summary>
-/// MUIS — Medius Universe Information Server.
+/// MUIS - Medius Universe Information Server.
 ///
 /// This is the very first server SOCOM II contacts during boot. It returns the
 /// MAS IP address and port so the game knows where to authenticate.
 ///
-/// Default port: 10075 (TCP)
+/// Default port: 10071 (TCP)
 ///
-/// Protocol:
+/// Protocol (old Medius v108):
 ///   Full standard SCERT handshake (handled by base class)
-///   Client sends LobbyExt:GetUniverse_ExtraInfo (0x03)
-///   Server replies LobbyExt:UniverseStatusList_ExtraInfoResponse (0x04)
+///   Server PUSHES LobbyExt:UniverseStatusList_ExtraInfoResponse immediately
+///   after CONNECT_COMPLETE - PS2 does NOT send GetUniverse_ExtraInfo first.
+///   PS2 reads the pushed universe info and connects to MAS.
+///
+///   Binary layout reverse-engineered from SOCOM II handler at 0x0031AE88:
+///     lw(payload+0x18) MUST be 0 (StatusCode=0) → long parse path
+///     lb(payload+0x2B4) MUST be non-zero          → triggers MAS connection
 /// </summary>
 public class MuisServer : BaseMediusTcpServer
 {
-    private readonly MultiplayerConfig       _config;
+    private readonly MultiplayerConfig   _config;
     private readonly ILogger<MuisServer> _log;
 
     public MuisServer(MultiplayerConfig config, ILogger<MuisServer> log)
@@ -36,11 +41,19 @@ public class MuisServer : BaseMediusTcpServer
     public Task StartAsync(CancellationToken ct) =>
         StartAsync(_config.BindAddress, _config.MuisPort, ct);
 
-    // MUIS does NOT send CRYPTKEY_GAME — matches Horizon's per-server behaviour.
-    protected override bool SendCryptKeyGameOnConnect => false;
+    // MUIS sends CRYPTKEY_GAME — the PS2 uses the payload bytes directly as its RC4
+    // working key.  Required: without it the PS2 cannot decrypt subsequent CHEAT_QUERY
+    // and SERVER_APP packets.
+    protected override bool SendCryptKeyGameOnConnect => true;
+
+    // SOCOM II v108 flow (confirmed from 2012 live capture):
+    //   After CONNECT_COMPLETE the PS2 sends GetUniverse_ExtraInfo.
+    //   Server responds with CHEAT_QUERY (3 rounds), then encrypted universe info.
+    //   PS2 never sends CLIENT_CONNECT_READY_TCP on MUIS.
+    //   Do NOT push proactively — wait for the PS2's request.
 
     // =========================================================================
-    // Medius message dispatch
+    // Medius message dispatch (handles explicit requests as fallback)
     // =========================================================================
 
     protected override async Task HandleMediusMessageAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
@@ -89,50 +102,180 @@ public class MuisServer : BaseMediusTcpServer
 
     private async Task HandleGetUniverseInfoAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        // Request payload: [MessageID: 4][InfoType: 4]
         var r = new MediusReader(packet.Payload);
-        uint  messageId = r.Remaining >= 4 ? r.ReadUInt32() : 0;
-        uint  infoType  = r.Remaining >= 4 ? r.ReadUInt32() : 0xFFFFFFFF;
+        // Always capture the request context so the universe response echoes the correct msgId.
+        state.MuisMsgId       = r.Remaining >= MediusConstants.MESSAGEID_MAXLEN
+            ? r.ReadBytes(MediusConstants.MESSAGEID_MAXLEN)
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
+        state.MuisInfoType    = r.Remaining >= 4 ? r.ReadUInt32() : 0xFFFFFFFF;
+        state.MuisUseLobbyExt = packet.MessageClass == NetMessageClass.MessageClassLobbyExt;
 
-        _log.LogInformation("[MUIS] GetUniverseInfo from {Ep} — returning MAS={Ip}:{Port}",
-            state.RemoteEndpoint, _config.ServerIp, _config.MasPort);
+        _log.LogInformation("[MUIS] GetUniverseInfo from {Ep} (cheat round already={R})", state.RemoteEndpoint, state.MuisCheatRound);
 
-        // Build MediusUniverseVariableInformationResponse
-        // Response payload layout (matching PS2 Medius wire format):
-        //   MessageID:           uint32  (4)
-        //   StatusCode:          int32   (4)
-        //   InfoFilter:          uint32  (4)  — echo back infoType
-        //   UniverseID:          int32   (4)
-        //   ExtendedInfo:        string  (64)
-        //   UniverseName:        string  (64)
-        //   UniverseDescription: string  (256)
-        //   SvoURL:              string  (256)
-        //   DNS:                 string  (256) — MAS hostname or IP
-        //   Port:                int32   (4)
-        //   EndOfList:           byte    (1)
+        // Cheat exchange may have already been started proactively from OnSessionEstablishedAsync.
+        // If so, just update msgId/infoType and let the exchange complete naturally.
+        if (state.MuisCheatRound > 0) return;
 
-        var w = new MediusWriter();
-        w.Write(messageId);                           // MessageID
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.Write(infoType);                            // InfoFilter (echo)
-        w.Write((int)1);                              // UniverseID = 1
-        w.WriteString("",              64);           // ExtendedInfo
-        w.WriteString("SOCOM II",      64);           // UniverseName
-        w.WriteString("Fan server",    256);          // UniverseDescription
-        w.WriteString("",              256);          // SvoURL
-        w.WriteString(_config.ServerIp, 256);         // DNS = our IP
-        w.Write(_config.MasPort);                     // Port
-        w.Write((byte)1);                             // EndOfList = true
+        // Otherwise start round 1 now (PS2 sent GetUniverseInfo before we started).
+        state.MuisCheatRound = 1;
+        await SendPacketAsync(tcp, ScertPacket.CreateCheatQuery(), state, ct);
+    }
 
-        // Determine which message type to use as response:
-        // If request came as LobbyExt:GetUniverse_ExtraInfo → respond with LobbyExt:UniverseStatusList_ExtraInfoResponse
-        // If request came as Lobby:GetUniverse → respond with Lobby:GetUniverseResponse
+    protected override async Task HandleCheatQueryResponseAsync(ScertPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        if (state.MuisCheatRound == 0) return; // not in a MUIS exchange
+
+        state.MuisCheatRound++;
+        _log.LogInformation("[MUIS] Cheat round {R} response received", state.MuisCheatRound - 1);
+
+        switch (state.MuisCheatRound)
+        {
+            case 2:
+                // Round 2: send MEMORY_POKE + CHEAT_QUERY in one write.
+                await SendPacketAsync(tcp, ScertPacket.CreateMemoryPoke(), state, ct);
+                await SendPacketAsync(tcp, ScertPacket.CreateCheatQuery(), state, ct);
+                break;
+
+            case 3:
+                // Round 3: send another CHEAT_QUERY.
+                await SendPacketAsync(tcp, ScertPacket.CreateCheatQuery(), state, ct);
+                break;
+
+            case 4:
+                // All 3 responses received — now send the universe data.
+                _log.LogInformation("[MUIS] Cheat exchange complete — sending universe info to {Ep}", state.RemoteEndpoint);
+                await SendUniverseInfoAsync(state.MuisMsgId, state.MuisInfoType,
+                    state.MuisUseLobbyExt, state, tcp, ct);
+                break;
+        }
+    }
+
+    private async Task SendUniverseInfoAsync(byte[] msgId, uint infoType, bool useLobbyExt,
+        MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        _log.LogInformation("[MUIS] Sending universe info - MAS={Ip}:{Port}", _config.ServerIp, _config.MasPort);
+
+        var payload = BuildLegacyUniverseStatusPayload(msgId);
+
         MediusPacket response;
-        if (packet.MessageClass == NetMessageClass.MessageClassLobbyExt)
-            response = MediusPacket.BuildLobbyExt(MediusLobbyExtMessageId.UniverseStatusList_ExtraInfoResponse, w.ToArray());
+        if (useLobbyExt)
+        {
+            // SOCOM II (old Medius v108) understands only UniverseStatusList_ExtraInfoResponse (0x04).
+            response = MediusPacket.BuildLobbyExt(
+                MediusLobbyExtMessageId.UniverseStatusList_ExtraInfoResponse, payload);
+        }
         else
-            response = MediusPacket.BuildLobby(MediusLobbyMessageId.GetUniverseResponse, w.ToArray());
+        {
+            response = MediusPacket.BuildLobby(MediusLobbyMessageId.GetUniverseResponse, payload);
+        }
 
-        await SendMediusAsync(tcp, response, ct);
+        var appBytes = response.Serialize();
+        _log.LogInformation(
+            "[MUIS] Universe app payloadLen=0x{PayloadLen:X} appLen=0x{AppLen:X} status@0x18={Status} flag@0x2B4=0x{Flag:X2} endOfList@0x335=0x{Eol:X2} head={Head} tail={Tail}",
+            payload.Length,
+            appBytes.Length,
+            BitConverter.ToString(payload, 0x18, 4).Replace("-", " "),
+            payload[0x2B4],
+            payload[0x335],
+            HexSlice(appBytes, 0x00, Math.Min(0x20, appBytes.Length)),
+            HexSlice(appBytes, 0x2B0, Math.Min(0x20, Math.Max(0, appBytes.Length - 0x2B0))));
+
+        // Send ENCRYPTED (0x8A) — confirmed from 2012 live capture (Frame 176).
+        // The PS2 activates its game RC4 key upon receiving CRYPTKEY_GAME and will
+        // decrypt all subsequent SERVER_APP packets.  Sending plain (0x0A) causes
+        // the PS2 to RC4-"decrypt" the plaintext → garbage → status check fails →
+        // parser takes failure path → no universe entry added → disconnect.
+        await SendMediusAsync(tcp, response, state, ct);
+    }
+
+    private byte[] BuildLegacyUniverseStatusPayload(byte[] msgId)
+    {
+        // UniverseStatusList payload laid out to match SOCOM II runtime offsets.
+        // Confirmed from live PSRewired memory dump + disassembly of 0x0031AE88.
+        //
+        // Parser reads (s2 = payload pointer):
+        //   0x000 (21): MessageID
+        //   0x018 ( 4): StatusCode — MUST be 0, any other value skips the entire handler
+        //   0x01C (64): display name       → entry+0x01C
+        //   0x09C (64): MAS hostname/IP    → entry+0x09C  ← PS2 connects here
+        //   0x11C ( 4): MAS port (int32)   → entry+0x11C
+        //   0x120 (128): description       → entry+0x120
+        //   0x220 ( 4): user count         → entry+0x220
+        //   0x224 ( 4): max users          → entry+0x224
+        //   0x228 ( 4): unknown            → entry+0x228
+        //   0x22C ( 4): active flag        → entry+0x22C
+        //   0x234 (64): unknown field      → entry+0x234
+        //   0x2B4 ( 1): MAS enable flag (non-zero = initiate MAS TCP connection)
+        //   0x2B5 (128): version/patch string (e.g. "r0004") → entry+0x2B5
+        //                looked up via 0x0019AA00 to populate entry+0x338 ("r0004")
+        //                entry+0x338 being empty also passes the version check (beqz)
+        //   0x335 ( 1): EndOfList — MUST be 1 on final entry; PS2 parser loops until
+        //                this is non-zero before committing the universe and connecting to MAS.
+        //   0x336..0x337: struct padding (2 bytes, zeros)
+        // Total entry size = 0x338 bytes → Medius app = 2-byte header + 0x338-byte payload
+        //   = 0x33A = 826 bytes, matching 2012 live capture Frame 176 ciphertext len.
+        // Field sizes confirmed from disassembly of 0x0031AE88 loop counts and live
+        // PSRewired memory dump.
+        var payload = new byte[0x338];
+
+        static void WriteInt32Le(byte[] dst, int offset, int value)
+        {
+            dst[offset + 0] = (byte)(value & 0xFF);
+            dst[offset + 1] = (byte)((value >> 8) & 0xFF);
+            dst[offset + 2] = (byte)((value >> 16) & 0xFF);
+            dst[offset + 3] = (byte)((value >> 24) & 0xFF);
+        }
+
+        static void WriteFixedAscii(byte[] dst, int offset, int len, string text)
+        {
+            var s = text ?? string.Empty;
+            var max = Math.Max(0, len - 1);
+            var writeLen = Math.Min(s.Length, max);
+            for (var i = 0; i < writeLen; i++)
+                dst[offset + i] = (byte)(s[i] <= 0x7F ? s[i] : '?');
+            // Remaining bytes stay zero (null-terminated fixed field).
+        }
+
+        // 0x000: MessageID (21 bytes). payload[0x018] = StatusCode MUST stay 0 —
+        //        parser does lw a1,0x18(a3) → if non-zero, skips the entire handler.
+        Array.Copy(msgId, 0, payload, 0, Math.Min(msgId.Length, MediusConstants.MESSAGEID_MAXLEN));
+        // 0x01C: display name (parser copies 128 bytes: 0x40 iterations × 2)
+        WriteFixedAscii(payload, 0x01C, 128, "SOCOM II");
+        // 0x09C: MAS hostname/IP (parser copies 128 bytes) — PS2 connects to MAS here
+        WriteFixedAscii(payload, 0x09C, 128, _config.ServerIp);
+        // 0x11C: MAS port (lw, 4 bytes LE)
+        WriteInt32Le(payload, 0x11C, _config.MasPort);
+        // 0x120: description (parser copies 256 bytes: 0x80 iterations × 2)
+        WriteFixedAscii(payload, 0x120, 256, "Fan server");
+        // 0x220: status dot — 1 = green (confirmed from PSRewired dump: entry+0x220 = 1)
+        WriteInt32Le(payload, 0x220, 1);
+        // 0x224: user count (confirmed from dump: entry+0x224 = 0x20)
+        WriteInt32Le(payload, 0x224, 0x20);
+        // 0x228: max users (confirmed from dump: entry+0x228 = 0x2710)
+        WriteInt32Le(payload, 0x228, 0x2710);
+        // 0x22C: 8 bytes copied by parser — zeros (confirmed from dump: entry+0x22C = 0)
+        // 0x234: 128 bytes copied by parser — zeros
+        // 0x2B4: MAS enable flag — non-zero triggers immediate MAS TCP connection
+        payload[0x2B4] = 0x01;
+        // 0x2B5: version/patch string (parser copies 128 bytes: 0x40 iterations × 2)
+        //        entry+0x338 ("r0004") comes from 0x0019AA00 registry lookup which
+        //        will fail for our hostname — empty entry+0x338 still passes version check (beqz)
+        WriteFixedAscii(payload, 0x2B5, 128, "r0004");
+        // 0x335: EndOfList — PS2 universe parser loops until this byte is non-zero.
+        //        Without it the PS2 waits for more entries indefinitely and never
+        //        proceeds to connect to MAS.  Must be 1 on the final (or only) entry.
+        payload[0x335] = 0x01;
+        // 0x336..0x337: struct tail-padding (2 bytes, zeros)
+
+        return payload;
+    }
+
+    private static string HexSlice(byte[] data, int offset, int length)
+    {
+        if (offset < 0 || offset >= data.Length || length <= 0)
+            return string.Empty;
+
+        var count = Math.Min(length, data.Length - offset);
+        return BitConverter.ToString(data, offset, count).Replace("-", " ");
     }
 }

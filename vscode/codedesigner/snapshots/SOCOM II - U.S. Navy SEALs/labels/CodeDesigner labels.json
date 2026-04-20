@@ -1210,8 +1210,8 @@
     },
     {
       "address": "0x00000024",
-      "name": "FNC_FNC_0x00000024",
-      "type": "Function"
+      "name": "FNC_0x00000024",
+      "comment": "; No operation"
     },
     {
       "address": "0x00001CEF",
