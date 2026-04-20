@@ -1236,7 +1236,7 @@
     {
       "address": "0x00000010",
       "name": "FNC_0x00000010",
-      "type": "Function"
+      "comment": "; t9 = 0x00000000 \u0022FNC_EE_RAM_BASE\u0022"
     }
   ]
 }

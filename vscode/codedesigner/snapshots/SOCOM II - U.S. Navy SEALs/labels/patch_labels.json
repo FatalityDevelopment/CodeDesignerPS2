@@ -417,7 +417,8 @@
     {
       "address": "0x0057DB80",
       "name": "gCipherCtx",
-      "comment": "AES cipher context struct. \u002B0x58 = ptr to key schedule. \u002B0x70 = ptr to IV buffer. Used by AES_CBC_Wrapper. Key schedule filled before each decrypt, zeroed after."
+      "comment": "AES cipher context struct. \u002B0x58 = ptr to key schedule. \u002B0x70 = ptr to IV buffer. Used by AES_CBC_Wrapper. Key schedule filled before each decrypt, zeroed after.",
+      "type": "Pointer"
     },
     {
       "address": "0x0057DC00",

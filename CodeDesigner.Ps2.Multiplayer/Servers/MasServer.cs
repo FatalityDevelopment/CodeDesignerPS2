@@ -80,6 +80,14 @@ public class MasServer : BaseMediusTcpServer
                     await HandlePolicyAsync(packet, state, tcp, ct);
                     break;
 
+                case MediusLobbyMessageId.VersionServer:
+                    await HandleVersionServerAsync(packet, state, tcp, ct);
+                    break;
+
+                case MediusLobbyMessageId.GetWorldSecurityLevel:
+                    await HandleGetWorldSecurityLevelAsync(packet, state, tcp, ct);
+                    break;
+
                 default:
                     _log.LogInformation("[MAS] Unhandled lobby msg 0x{Type:X2} payload={Hex}",
                         packet.MessageType, BitConverter.ToString(packet.Payload).Replace("-", " "));
@@ -357,6 +365,33 @@ public class MasServer : BaseMediusTcpServer
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.GetMyIPResponse, w.ToArray()), ct);
     }
 
+    private Task HandleVersionServerAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        // VersionServer (0x86) is a one-way notification from the PS2 — RE of MasState3_VersionServer
+        // (0x0030C568) confirmed the PS2 sends it and immediately advances its own state machine
+        // without waiting for a reply.  Sending VersionServerResponse causes the PS2 to disconnect.
+        _log.LogInformation("[MAS] VersionServer received (one-way notification, no reply sent)");
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleGetWorldSecurityLevelAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    {
+        byte[] msgId = packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
+            ? packet.Payload[..MediusConstants.MESSAGEID_MAXLEN]
+            : new byte[MediusConstants.MESSAGEID_MAXLEN];
+
+        _log.LogInformation("[MAS] GetWorldSecurityLevel -> GetWorldSecurityLevelResponse");
+
+        // MediusGetWorldSecurityLevelResponse: [messageId:21][statusCode:4][securityLevel:4]
+        // securityLevel = 0 (MediusWorldSecurityLevelNone) — no security required
+        var w = new MediusWriter();
+        w.Write(msgId);
+        w.Write((int)MediusCallbackStatus.MediusSuccess);
+        w.Write((int)0);  // MediusWorldSecurityLevelNone
+
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.GetWorldSecurityLevelResponse, w.ToArray()), ct);
+    }
+
     private async Task HandlePolicyAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
         byte[] msgId = packet.Payload.Length >= MediusConstants.MESSAGEID_MAXLEN
@@ -421,3 +456,5 @@ internal static class MediusWriterExtensions
         w.WritePadding(2);
     }
 }
+// ---------------------------------------------------------------------------
+// Extension helpers for MediusWriter (keeps them near where they are used)

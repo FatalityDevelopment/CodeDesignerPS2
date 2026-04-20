@@ -186,6 +186,92 @@ public class MuisServer : BaseMediusTcpServer
         // the PS2 to RC4-"decrypt" the plaintext → garbage → status check fails →
         // parser takes failure path → no universe entry added → disconnect.
         await SendMediusAsync(tcp, response, state, ct);
+
+        // ---- Second message (always): Lobby::UniverseNewsResponse (PS2 handler 0x0031B270) ----
+        // Confirmed from PS2 context global 0x00421870 which begins with string "UniverseNews",
+        // identifying this handler as the UniverseNewsResponse (Lobby class 0x01, type 0xC9)
+        // consumer.  The 2012 MUIS capture Frame 177 (297 bytes = 7 SCERT + 290-byte payload)
+        // is this message.
+        // The PS2 registers handlers for BOTH LobbyExt::UniverseStatusList_ExtraInfoResponse
+        // (0x0031AE90, sets flag 0x453150) AND Lobby::UniverseNewsResponse (0x0031B270, sets
+        // flag 0x453158).  The state-machine at 0x00318788 checks (0x453150 AND 0x453158) before
+        // proceeding to MAS; without this second packet 0x453158 is never set, the PS2 never
+        // closes the MUIS socket, and stays in a CLIENT_ECHO keepalive loop showing
+        // "Disconnected from network".
+        var payload2  = BuildLegacyUniverseNewsPayload(msgId);
+        var response2 = MediusPacket.BuildLobby(MediusLobbyMessageId.UniverseNewsResponse, payload2);
+        _log.LogInformation(
+            "[MUIS] Sending second universe message (Lobby::UniverseNewsResponse 0x{Len:X} bytes)",
+            payload2.Length);
+        await SendMediusAsync(tcp, response2, state, ct);
+    }
+
+    private byte[] BuildLegacyUniverseNewsPayload(byte[] msgId)
+    {
+        // Lobby::UniverseNewsResponse body — 0x120 = 288 bytes.
+        // Confirmed by PS2 context global 0x00421870 which starts with string "UniverseNews",
+        // identifying handler 0x0031B270 as the UniverseNewsResponse consumer.
+        // Commit function 0x0031CCF0 (called from handler 0x0031B270) copies 0x120 bytes:
+        //   0x00..0x14 (21 bytes): MessageID
+        //   0x18       (  4 bytes): StatusCode — MUST be 0 (gate at 0x0031B288)
+        //   0x1C..0x11B (256 bytes): news text / padding
+        //   0x11C       (  1 byte):  end-of-news flag — MUST be non-zero to set 0x453158
+        //                             (checked at lb 0x11C(s0) / beqz at 0x0031B2CC)
+        // 2012 live capture: Frame 177 (297 bytes = 3 SCERT + 4 hash + 290-byte Medius payload;
+        //   Medius = 2-byte class/type header + 288-byte body = this struct).
+        var payload = new byte[0x120];
+
+        static void WriteFixedAscii(byte[] dst, int offset, int len, string text)
+        {
+            var s   = text ?? string.Empty;
+            var max = Math.Max(0, len - 1);
+            var n   = Math.Min(s.Length, max);
+            for (var i = 0; i < n; i++)
+                dst[offset + i] = (byte)(s[i] <= 0x7F ? s[i] : '?');
+        }
+
+        Array.Copy(msgId, 0, payload, 0, Math.Min(msgId.Length, MediusConstants.MESSAGEID_MAXLEN));
+        // StatusCode at 0x18 = 0 (zero-initialized array)
+        // News text at 0x1C..0x11B — empty is fine
+        payload[0x11C] = 0x01;  // end-of-news flag; must be non-zero to set 0x453158
+
+        return payload;
+    }
+
+    private byte[] BuildLegacyGetUniverseResponsePayload(byte[] msgId)
+    {
+        // Old Medius Lobby::GetUniverseResponse body — 0x120 = 288 bytes.
+        // Confirmed from disassembly of PS2 handler 0x0031B270 and commit function 0x0031CCF0.
+        //
+        // Commit function copies from payload into a second universe list (entry size = 0x120):
+        //   0x00..0x14 ( 21 bytes): MessageID
+        //   0x18       (  4 bytes): StatusCode        — MUST be 0
+        //   0x1C..0x5B ( 64 bytes): DisplayName
+        //   0x5C..0xDB (128 bytes): Description
+        //   0xDC..0x11B ( 64 bytes): Hostname/URL
+        //   0x11C       (  1 byte):  MAS flag          — MUST be non-zero (checked by lb then bnez)
+        //   0x11D..0x11F (3 bytes):  padding
+        //
+        // 2012 live capture: Frame 177 (297 bytes = 3 SCERT + 4 hash + 290-byte payload).
+        var payload = new byte[0x120];
+
+        static void WriteFixedAscii(byte[] dst, int offset, int len, string text)
+        {
+            var s   = text ?? string.Empty;
+            var max = Math.Max(0, len - 1);
+            var n   = Math.Min(s.Length, max);
+            for (var i = 0; i < n; i++)
+                dst[offset + i] = (byte)(s[i] <= 0x7F ? s[i] : '?');
+        }
+
+        Array.Copy(msgId, 0, payload, 0, Math.Min(msgId.Length, MediusConstants.MESSAGEID_MAXLEN));
+        // StatusCode at 0x18 = 0 (zero-initialized array)
+        WriteFixedAscii(payload, 0x1C,  64, "[FaTaLiTy] Dev Server");
+        WriteFixedAscii(payload, 0x5C, 128, "Get Down Or Lay Down....");
+        WriteFixedAscii(payload, 0xDC,  64, _config.ServerIp);
+        payload[0x11C] = 0x01;  // MAS available flag — handler 0x0031B270 checks this byte
+
+        return payload;
     }
 
     private byte[] BuildLegacyUniverseStatusPayload(byte[] msgId)
@@ -240,13 +326,13 @@ public class MuisServer : BaseMediusTcpServer
         //        parser does lw a1,0x18(a3) → if non-zero, skips the entire handler.
         Array.Copy(msgId, 0, payload, 0, Math.Min(msgId.Length, MediusConstants.MESSAGEID_MAXLEN));
         // 0x01C: display name (parser copies 128 bytes: 0x40 iterations × 2)
-        WriteFixedAscii(payload, 0x01C, 128, "SOCOM II");
+        WriteFixedAscii(payload, 0x01C, 128, "GTLC Pimp a fraud");
         // 0x09C: MAS hostname/IP (parser copies 128 bytes) — PS2 connects to MAS here
         WriteFixedAscii(payload, 0x09C, 128, _config.ServerIp);
         // 0x11C: MAS port (lw, 4 bytes LE)
         WriteInt32Le(payload, 0x11C, _config.MasPort);
         // 0x120: description (parser copies 256 bytes: 0x80 iterations × 2)
-        WriteFixedAscii(payload, 0x120, 256, "Fan server");
+        WriteFixedAscii(payload, 0x120, 256, "Professional student, known for robbing everyone elses code. Credit stealing homosexual for over 25+ years");
         // 0x220: status dot — 1 = green (confirmed from PSRewired dump: entry+0x220 = 1)
         WriteInt32Le(payload, 0x220, 1);
         // 0x224: user count (confirmed from dump: entry+0x224 = 0x20)

@@ -1,0 +1,1188 @@
+{
+  "setName": "socom2-mas-muis",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "entries": [
+    {
+      "address": "0x0063225C",
+      "name": "SCERT_RC4_DecryptXOR",
+      "comment": "xor a2,a2,a1 \u2014 NOP\u0027d to 00 00 00 00 to bypass PS2 RC4 decrypt"
+    },
+    {
+      "address": "0x0063225C",
+      "name": "SCERT_RC4_DecryptXOR",
+      "comment": "xor a2,a2,a1 \u2014 NOP\u0027d to 00 00 00 00 to bypass PS2 RC4 decrypt"
+    },
+    {
+      "address": "0x006322F8",
+      "name": "SCERT_RC4_EncryptXOR",
+      "comment": "xor a0,a0,v1 \u2014 NOP\u0027d to 00 00 00 00 to bypass PS2 RC4 encrypt"
+    },
+    {
+      "address": "0x006322F8",
+      "name": "SCERT_RC4_EncryptXOR",
+      "comment": "xor a0,a0,v1 \u2014 NOP\u0027d to 00 00 00 00 to bypass PS2 RC4 encrypt"
+    },
+    {
+      "address": "0x00636E70",
+      "name": "SCERT_KeyExchange",
+      "comment": "PS2 sends CLIENT_CONNECT_TCP after this fires; target for SCERT handshake success",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636E70",
+      "name": "SCERT_KeyExchange",
+      "comment": "PS2 sends CLIENT_CONNECT_TCP after this fires; target for SCERT handshake success",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636738",
+      "name": "SCERT_GetKeyCtx",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636738",
+      "name": "SCERT_GetKeyCtx",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636788",
+      "name": "SCERT_AllocKeyCtx",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636788",
+      "name": "SCERT_AllocKeyCtx",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636870",
+      "name": "SCERT_KeyCtxInstall",
+      "type": "Function"
+    },
+    {
+      "address": "0x00636870",
+      "name": "SCERT_KeyCtxInstall",
+      "type": "Function"
+    },
+    {
+      "address": "0x006368A8",
+      "name": "SCERT_RSA_Encrypt",
+      "type": "Function"
+    },
+    {
+      "address": "0x006368A8",
+      "name": "SCERT_RSA_Encrypt",
+      "type": "Function"
+    },
+    {
+      "address": "0x006366B8",
+      "name": "SCERT_AllocSendPkt",
+      "type": "Function"
+    },
+    {
+      "address": "0x006366B8",
+      "name": "SCERT_AllocSendPkt",
+      "type": "Function"
+    },
+    {
+      "address": "0x00639CA8",
+      "name": "SCERT_CopyKey",
+      "type": "Function"
+    },
+    {
+      "address": "0x00639CA8",
+      "name": "SCERT_CopyKey",
+      "type": "Function"
+    },
+    {
+      "address": "0x00632200",
+      "name": "SCERT_RC4_DecryptLoop",
+      "comment": "y\u002B=5; a2=S[y]; x=(S[y]\u002Bx)\u0026FF; S[y]=S[x]; S[x]=a2; keystream=S[(a2\u002BS[x])\u0026FF]; x-feedback on plaintext",
+      "type": "Function"
+    },
+    {
+      "address": "0x00632200",
+      "name": "SCERT_RC4_DecryptLoop",
+      "comment": "y\u002B=5; a2=S[y]; x=(S[y]\u002Bx)\u0026FF; S[y]=S[x]; S[x]=a2; keystream=S[(a2\u002BS[x])\u0026FF]; x-feedback on plaintext",
+      "type": "Function"
+    },
+    {
+      "address": "0x006322A8",
+      "name": "SCERT_RC4_EncryptLoop",
+      "comment": "x\u002B=5; y=(y\u002BS[x])\u0026FF; swap(S[x],S[y]); cipher=plain^S[(S[x]\u002BS[y])\u0026FF]; y-feedback on plaintext",
+      "type": "Function"
+    },
+    {
+      "address": "0x006322A8",
+      "name": "SCERT_RC4_EncryptLoop",
+      "comment": "x\u002B=5; y=(y\u002BS[x])\u0026FF; swap(S[x],S[y]); cipher=plain^S[(S[x]\u002BS[y])\u0026FF]; y-feedback on plaintext",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D320",
+      "name": "SCERT_OuterRecvHandler",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D320",
+      "name": "SCERT_OuterRecvHandler",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D450",
+      "name": "SCERT_ConnectAcceptHandler",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D450",
+      "name": "SCERT_ConnectAcceptHandler",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D278",
+      "name": "SCERT_SocketValidator",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D278",
+      "name": "SCERT_SocketValidator",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D6B0",
+      "name": "SCERT_ExpectedLenHelper",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063D6B0",
+      "name": "SCERT_ExpectedLenHelper",
+      "type": "Function"
+    },
+    {
+      "address": "0x006405C8",
+      "name": "SCERT_ReadSessionStateByte",
+      "type": "Function"
+    },
+    {
+      "address": "0x006405C8",
+      "name": "SCERT_ReadSessionStateByte",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640668",
+      "name": "SCERT_ParsePacketBody3Bytes",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640668",
+      "name": "SCERT_ParsePacketBody3Bytes",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640A20",
+      "name": "SCERT_WriteByteToPacketBuf",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640A20",
+      "name": "SCERT_WriteByteToPacketBuf",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640AC8",
+      "name": "SCERT_WriteUInt16ToPacketBuf",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640AC8",
+      "name": "SCERT_WriteUInt16ToPacketBuf",
+      "type": "Function"
+    },
+    {
+      "address": "0x00637C48",
+      "name": "SCERT_SendConnectCompleteResp",
+      "type": "Function"
+    },
+    {
+      "address": "0x00637C48",
+      "name": "SCERT_SendConnectCompleteResp",
+      "type": "Function"
+    },
+    {
+      "address": "0x0064DAE8",
+      "name": "SCERT_BuildConnectTCP",
+      "type": "Function"
+    },
+    {
+      "address": "0x0064DAE8",
+      "name": "SCERT_BuildConnectTCP",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640110",
+      "name": "SCERT_OuterRecv",
+      "comment": "Outermost SCERT receive handler; fires every poll",
+      "type": "Function"
+    },
+    {
+      "address": "0x00640110",
+      "name": "SCERT_OuterRecv",
+      "comment": "Outermost SCERT receive handler; fires every poll",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063EC28",
+      "name": "SCERT_CryptKeyPeer_Handler",
+      "comment": "Handles type 0x13 SERVER_CRYPTKEY_PEER; requires [session\u002B8]==3 and payload len==64",
+      "type": "Function"
+    },
+    {
+      "address": "0x0063EC28",
+      "name": "SCERT_CryptKeyPeer_Handler",
+      "comment": "Handles type 0x13 SERVER_CRYPTKEY_PEER; requires [session\u002B8]==3 and payload len==64",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061B710",
+      "name": "SCERT_ErrorDisconnect",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061B710",
+      "name": "SCERT_ErrorDisconnect",
+      "type": "Function"
+    },
+    {
+      "address": "0x00624CA8",
+      "name": "SCERT_QueueSend",
+      "type": "Function"
+    },
+    {
+      "address": "0x00624CA8",
+      "name": "SCERT_QueueSend",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AA30",
+      "name": "SCERT_RecvDispatch_State1",
+      "type": "Function"
+    },
+    {
+      "address": "0x0061AA30",
+      "name": "SCERT_RecvDispatch_State1",
+      "type": "Function"
+    },
+    {
+      "address": "0x00654E38",
+      "name": "gN_server",
+      "comment": "Sony RSA-512 server public key N (64 bytes LE) \u2014 matches Horizon hardcoded key exactly"
+    },
+    {
+      "address": "0x00654E38",
+      "name": "gN_server",
+      "comment": "Sony RSA-512 server public key N (64 bytes LE) \u2014 matches Horizon hardcoded key exactly"
+    },
+    {
+      "address": "0x00653D80",
+      "name": "gSCERT_ContextPtr",
+      "comment": "Points to SCERT session context",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00653D80",
+      "name": "gSCERT_ContextPtr",
+      "comment": "Points to SCERT session context",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00653D94",
+      "name": "gSCERT_State",
+      "comment": "Must be 0x01 for CRYPTKEY_PEER_Handler to proceed",
+      "dynamic": true
+    },
+    {
+      "address": "0x00653D94",
+      "name": "gSCERT_State",
+      "comment": "Must be 0x01 for CRYPTKEY_PEER_Handler to proceed",
+      "dynamic": true
+    },
+    {
+      "address": "0x00452850",
+      "name": "gN_ps2",
+      "comment": "PS2 RSA-512 public key N (64 bytes LE); read after CLIENT_CRYPTKEY_PUBLIC"
+    },
+    {
+      "address": "0x00452850",
+      "name": "gN_ps2",
+      "comment": "PS2 RSA-512 public key N (64 bytes LE); read after CLIENT_CRYPTKEY_PUBLIC"
+    },
+    {
+      "address": "0x00452890",
+      "name": "gD_ps2",
+      "comment": "PS2 RSA-512 private key D (64 bytes LE); read for session decryption"
+    },
+    {
+      "address": "0x00452890",
+      "name": "gD_ps2",
+      "comment": "PS2 RSA-512 private key D (64 bytes LE); read for session decryption"
+    },
+    {
+      "address": "0x0066EDA8",
+      "name": "gN_ps2_mirror1",
+      "comment": "Mirror copy of gN_ps2"
+    },
+    {
+      "address": "0x0066EDA8",
+      "name": "gN_ps2_mirror1",
+      "comment": "Mirror copy of gN_ps2"
+    },
+    {
+      "address": "0x00675D00",
+      "name": "gN_ps2_mirror2",
+      "comment": "Mirror copy of gN_ps2"
+    },
+    {
+      "address": "0x00675D00",
+      "name": "gN_ps2_mirror2",
+      "comment": "Mirror copy of gN_ps2"
+    },
+    {
+      "address": "0x01E7EF30",
+      "name": "gMediusSessionKey",
+      "comment": "16-byte Medius session AES key"
+    },
+    {
+      "address": "0x01E7EF30",
+      "name": "gMediusSessionKey",
+      "comment": "16-byte Medius session AES key"
+    },
+    {
+      "address": "0x01E7EF40",
+      "name": "gMediusSessionIV",
+      "comment": "16-byte Medius session AES IV"
+    },
+    {
+      "address": "0x01E7EF40",
+      "name": "gMediusSessionIV",
+      "comment": "16-byte Medius session AES IV"
+    },
+    {
+      "address": "0x00422530",
+      "name": "gPdOnlineHostname",
+      "comment": "Online hostname (PD); PS2 reads this for initial server connection",
+      "type": "String"
+    },
+    {
+      "address": "0x00422530",
+      "name": "gPdOnlineHostname",
+      "comment": "Online hostname (PD); PS2 reads this for initial server connection",
+      "type": "String"
+    },
+    {
+      "address": "0x00422550",
+      "name": "gMuisHostname",
+      "comment": "MUIS hostname string; checked by MasSessionKeySetup at 0x003121D0",
+      "type": "String"
+    },
+    {
+      "address": "0x00422550",
+      "name": "gMuisHostname",
+      "comment": "MUIS hostname string; checked by MasSessionKeySetup at 0x003121D0",
+      "type": "String"
+    },
+    {
+      "address": "0x0040C870",
+      "name": "gMasConnState",
+      "comment": "halfword (lh); MAS connection state; read via lui 0x41 \u002B -0x3790 offset"
+    },
+    {
+      "address": "0x0040C870",
+      "name": "gMasConnState",
+      "comment": "halfword (lh); MAS connection state; read via lui 0x41 \u002B -0x3790 offset"
+    },
+    {
+      "address": "0x0040C874",
+      "name": "gMasConnSockFd",
+      "comment": "MAS socket fd (lw); -1 = disconnected; read via lui 0x41 \u002B -0x378C offset"
+    },
+    {
+      "address": "0x0040C874",
+      "name": "gMasConnSockFd",
+      "comment": "MAS socket fd (lw); -1 = disconnected; read via lui 0x41 \u002B -0x378C offset"
+    },
+    {
+      "address": "0x0031AE90",
+      "name": "UniverseStatusParser",
+      "comment": "MUIS universe payload parser entry; checks status@\u002B0x18 via CheckStatusCode",
+      "type": "Function"
+    },
+    {
+      "address": "0x0031AE90",
+      "name": "UniverseStatusParser",
+      "comment": "MUIS universe payload parser entry; checks status@\u002B0x18 via CheckStatusCode",
+      "type": "Function"
+    },
+    {
+      "address": "0x0031B0A8",
+      "name": "UniverseStatusAddContinue",
+      "comment": "Branch target after second ServerRegistryLookup; continues into UniverseListAdd",
+      "type": "Function"
+    },
+    {
+      "address": "0x0031B0A8",
+      "name": "UniverseStatusAddContinue",
+      "comment": "Branch target after second ServerRegistryLookup; continues into UniverseListAdd",
+      "type": "Function"
+    },
+    {
+      "address": "0x0031B218",
+      "name": "UniverseStatusStatusFailExit",
+      "comment": "Exit path when status code gate fails; sets gUniverseConnectFlag=1",
+      "type": "Function"
+    },
+    {
+      "address": "0x0031B218",
+      "name": "UniverseStatusStatusFailExit",
+      "comment": "Exit path when status code gate fails; sets gUniverseConnectFlag=1",
+      "type": "Function"
+    },
+    {
+      "address": "0x0031C1E0",
+      "name": "UniverseListAdd",
+      "comment": "Adds universe entry to in-game universe list",
+      "type": "Function"
+    },
+    {
+      "address": "0x0031C1E0",
+      "name": "UniverseListAdd",
+      "comment": "Adds universe entry to in-game universe list",
+      "type": "Function"
+    },
+    {
+      "address": "0x003FFC20",
+      "name": "LobbyExtDispatchWrapper",
+      "comment": "Broad lobby extension dispatch wrapper (MUIS path)",
+      "type": "Function"
+    },
+    {
+      "address": "0x003FFC20",
+      "name": "LobbyExtDispatchWrapper",
+      "comment": "Broad lobby extension dispatch wrapper (MUIS path)",
+      "type": "Function"
+    },
+    {
+      "address": "0x003FFD2C",
+      "name": "UniverseStatusDispatchWrapper",
+      "comment": "Dispatcher that calls UniverseStatusParser; good BP target",
+      "type": "Function"
+    },
+    {
+      "address": "0x003FFD2C",
+      "name": "UniverseStatusDispatchWrapper",
+      "comment": "Dispatcher that calls UniverseStatusParser; good BP target",
+      "type": "Function"
+    },
+    {
+      "address": "0x00311560",
+      "name": "StatusCodeCheck",
+      "comment": "Returns 0 if status != 0 (alias of CheckStatusCode used in state machine too)",
+      "type": "Function"
+    },
+    {
+      "address": "0x00311560",
+      "name": "StatusCodeCheck",
+      "comment": "Returns 0 if status != 0 (alias of CheckStatusCode used in state machine too)",
+      "type": "Function"
+    },
+    {
+      "address": "0x003C8B80",
+      "name": "RegistryContextClear",
+      "comment": "Called from MasState4_Exit area, clears registry context",
+      "type": "Function"
+    },
+    {
+      "address": "0x003C8B80",
+      "name": "RegistryContextClear",
+      "comment": "Called from MasState4_Exit area, clears registry context",
+      "type": "Function"
+    },
+    {
+      "address": "0x002A5CB0",
+      "name": "UniverseEntryInit",
+      "comment": "Called in exit path of state machine to init universe entry struct",
+      "type": "Function"
+    },
+    {
+      "address": "0x002A5CB0",
+      "name": "UniverseEntryInit",
+      "comment": "Called in exit path of state machine to init universe entry struct",
+      "type": "Function"
+    },
+    {
+      "address": "0x00453124",
+      "name": "gUniverseCount",
+      "comment": "Number of universes in list; 2 at boot",
+      "type": "Value"
+    },
+    {
+      "address": "0x00453124",
+      "name": "gUniverseCount",
+      "comment": "Number of universes in list; 2 at boot",
+      "type": "Value"
+    },
+    {
+      "address": "0x00453150",
+      "name": "gUniverseConnectFlag",
+      "comment": "Set to 1 when UniverseStatusParser exits via fail path"
+    },
+    {
+      "address": "0x00453150",
+      "name": "gUniverseConnectFlag",
+      "comment": "Set to 1 when UniverseStatusParser exits via fail path"
+    },
+    {
+      "address": "0x00421AC0",
+      "name": "MpMediusErrorLookupData",
+      "comment": "Struct block; contains two 0x0920 words \u002B string MP_MEDIUS_ERROR"
+    },
+    {
+      "address": "0x00421AC0",
+      "name": "MpMediusErrorLookupData",
+      "comment": "Struct block; contains two 0x0920 words \u002B string MP_MEDIUS_ERROR"
+    },
+    {
+      "address": "0x00421AD0",
+      "name": "str_MP_MEDIUS_ERROR",
+      "comment": "Null-terminated string: MP_MEDIUS_ERROR",
+      "type": "String"
+    },
+    {
+      "address": "0x00421AD0",
+      "name": "str_MP_MEDIUS_ERROR",
+      "comment": "Null-terminated string: MP_MEDIUS_ERROR",
+      "type": "String"
+    },
+    {
+      "address": "0x0030C380",
+      "name": "MasConnStateMachine",
+      "comment": "Dispatches on connection state (a0=1..4); state 1=session, 2=login, 3=VersionServer, 4=exit",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C380",
+      "name": "MasConnStateMachine",
+      "comment": "Dispatches on connection state (a0=1..4); state 1=session, 2=login, 3=VersionServer, 4=exit",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C328",
+      "name": "MasStateStub_1",
+      "comment": "Returns v0=1; all 8 stubs tail-call MasStateStubCommon",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C328",
+      "name": "MasStateStub_1",
+      "comment": "Returns v0=1; all 8 stubs tail-call MasStateStubCommon",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C330",
+      "name": "MasStateStub_2",
+      "comment": "Returns v0=2",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C330",
+      "name": "MasStateStub_2",
+      "comment": "Returns v0=2",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C338",
+      "name": "MasStateStub_3",
+      "comment": "Returns v0=3",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C338",
+      "name": "MasStateStub_3",
+      "comment": "Returns v0=3",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C340",
+      "name": "MasStateStub_4",
+      "comment": "Returns v0=4",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C340",
+      "name": "MasStateStub_4",
+      "comment": "Returns v0=4",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C348",
+      "name": "MasStateStub_5",
+      "comment": "Returns v0=5",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C348",
+      "name": "MasStateStub_5",
+      "comment": "Returns v0=5",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C350",
+      "name": "MasStateStub_6",
+      "comment": "Returns v0=6",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C350",
+      "name": "MasStateStub_6",
+      "comment": "Returns v0=6",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C358",
+      "name": "MasStateStub_7",
+      "comment": "Returns v0=7",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C358",
+      "name": "MasStateStub_7",
+      "comment": "Returns v0=7",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C360",
+      "name": "MasStateStub_8",
+      "comment": "Returns v0=8",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C360",
+      "name": "MasStateStub_8",
+      "comment": "Returns v0=8",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C368",
+      "name": "MasStateStubCommon",
+      "comment": "Common tail called by all 8 MasStateStub_N functions",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C368",
+      "name": "MasStateStubCommon",
+      "comment": "Common tail called by all 8 MasStateStub_N functions",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C3C8",
+      "name": "MasState1_SessionSetup",
+      "comment": "State 1 handler; calls 0x00314910",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C3C8",
+      "name": "MasState1_SessionSetup",
+      "comment": "State 1 handler; calls 0x00314910",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C468",
+      "name": "MasState2_Login",
+      "comment": "State 2 handler \u2014 login flow",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C468",
+      "name": "MasState2_Login",
+      "comment": "State 2 handler \u2014 login flow",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C568",
+      "name": "MasState3_VersionServer",
+      "comment": "State 3 handler; calls MasVersionServerSend then MasConnErrorDispatch \u002B MasSessionKeySetup",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C568",
+      "name": "MasState3_VersionServer",
+      "comment": "State 3 handler; calls MasVersionServerSend then MasConnErrorDispatch \u002B MasSessionKeySetup",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C608",
+      "name": "MasState4_Exit",
+      "comment": "State 4 / default / 0 exit path",
+      "type": "Function"
+    },
+    {
+      "address": "0x0030C608",
+      "name": "MasState4_Exit",
+      "comment": "State 4 / default / 0 exit path",
+      "type": "Function"
+    },
+    {
+      "address": "0x00420610",
+      "name": "MasFuncPtrTable",
+      "comment": "8-entry function pointer table \u2192 MasStateStub_1..8",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610",
+      "name": "MasFuncPtrTable",
+      "comment": "8-entry function pointer table \u2192 MasStateStub_1..8",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420550",
+      "name": "MasStringTable",
+      "comment": "Contains strings: SessionBegin, AccountLogin, etc."
+    },
+    {
+      "address": "0x00420550",
+      "name": "MasStringTable",
+      "comment": "Contains strings: SessionBegin, AccountLogin, etc."
+    },
+    {
+      "address": "0x003FA038",
+      "name": "MasVersionServerSend",
+      "comment": "Sends VersionServer packet; a1=0x11 (17 = NET_SESSION_KEY_LEN) before SocketSend; checks gMasConnState==1 and gMasConnSockFd\u003E=0",
+      "type": "Function"
+    },
+    {
+      "address": "0x003FA038",
+      "name": "MasVersionServerSend",
+      "comment": "Sends VersionServer packet; a1=0x11 (17 = NET_SESSION_KEY_LEN) before SocketSend; checks gMasConnState==1 and gMasConnSockFd\u003E=0",
+      "type": "Function"
+    },
+    {
+      "address": "0x003FA0C0",
+      "name": "MasLoginSend",
+      "comment": "Sends login packet; a2=1; uses a1=0x15 param size, t1=0x1C total len",
+      "type": "Function"
+    },
+    {
+      "address": "0x003FA0C0",
+      "name": "MasLoginSend",
+      "comment": "Sends login packet; a2=1; uses a1=0x15 param size, t1=0x1C total len",
+      "type": "Function"
+    },
+    {
+      "address": "0x003FA160",
+      "name": "MasFunc_003FA160",
+      "comment": "Next function after MasLoginSend in series \u2014 TBD purpose",
+      "type": "Function"
+    },
+    {
+      "address": "0x003FA160",
+      "name": "MasFunc_003FA160",
+      "comment": "Next function after MasLoginSend in series \u2014 TBD purpose",
+      "type": "Function"
+    },
+    {
+      "address": "0x00628B58",
+      "name": "SocketSend",
+      "comment": "a0=flags, a1=len, a2=0xFFFF, a3=1, t0=sockFd, t1=totalLen, t2=connPtr",
+      "type": "Function"
+    },
+    {
+      "address": "0x00628B58",
+      "name": "SocketSend",
+      "comment": "a0=flags, a1=len, a2=0xFFFF, a3=1, t0=sockFd, t1=totalLen, t2=connPtr",
+      "type": "Function"
+    },
+    {
+      "address": "0x00311570",
+      "name": "MasConnErrorDispatch",
+      "comment": "Switch on a0 error code; branches on values 0,1,2,3,4 and -0x3BA through -0x3CA range",
+      "type": "Function"
+    },
+    {
+      "address": "0x00311570",
+      "name": "MasConnErrorDispatch",
+      "comment": "Switch on a0 error code; branches on values 0,1,2,3,4 and -0x3BA through -0x3CA range",
+      "type": "Function"
+    },
+    {
+      "address": "0x003121D0",
+      "name": "MasSessionKeySetup",
+      "comment": "Zeroes 0x2C-byte buf on stack, checks gMuisHostname against 0x0067xxxx, calls MasConnErrorDispatch",
+      "type": "Function"
+    },
+    {
+      "address": "0x003121D0",
+      "name": "MasSessionKeySetup",
+      "comment": "Zeroes 0x2C-byte buf on stack, checks gMuisHostname against 0x0067xxxx, calls MasConnErrorDispatch",
+      "type": "Function"
+    },
+    {
+      "address": "0x004017B0",
+      "name": "MemZeroRange",
+      "comment": "a0=ptr, a1=len; writes 0 to ptr[0] and ptr[len-1]; lightweight zero-fill",
+      "type": "Function"
+    },
+    {
+      "address": "0x004017B0",
+      "name": "MemZeroRange",
+      "comment": "a0=ptr, a1=len; writes 0 to ptr[0] and ptr[len-1]; lightweight zero-fill",
+      "type": "Function"
+    },
+    {
+      "address": "0x0036F620",
+      "name": "MasConnPostSetup",
+      "comment": "Called from MasState3 after VersionServerSend; a0=str ptr, a1=1; result drives MasConnActivate",
+      "type": "Function"
+    },
+    {
+      "address": "0x0036F620",
+      "name": "MasConnPostSetup",
+      "comment": "Called from MasState3 after VersionServerSend; a0=str ptr, a1=1; result drives MasConnActivate",
+      "type": "Function"
+    },
+    {
+      "address": "0x0036F020",
+      "name": "MasConnActivate",
+      "comment": "Called when MasConnPostSetup returns non-zero",
+      "type": "Function"
+    },
+    {
+      "address": "0x0036F020",
+      "name": "MasConnActivate",
+      "comment": "Called when MasConnPostSetup returns non-zero",
+      "type": "Function"
+    },
+    {
+      "address": "0x00314910",
+      "name": "MasState1_Sub",
+      "comment": "Called by MasState1_SessionSetup; purpose TBD",
+      "type": "Function"
+    },
+    {
+      "address": "0x00314910",
+      "name": "MasState1_Sub",
+      "comment": "Called by MasState1_SessionSetup; purpose TBD",
+      "type": "Function"
+    },
+    {
+      "address": "0x005412A0",
+      "name": "ZDBSectionDecrypt",
+      "comment": "ZDB outer section decrypt; jal from 0x5348BC after ReadSeedFromDNAS",
+      "type": "Function"
+    },
+    {
+      "address": "0x005412A0",
+      "name": "ZDBSectionDecrypt",
+      "comment": "ZDB outer section decrypt; jal from 0x5348BC after ReadSeedFromDNAS",
+      "type": "Function"
+    },
+    {
+      "address": "0x005408D0",
+      "name": "DispatchEncodingFunc",
+      "comment": "Encodes dispatch word \u2192 vtable call sequence per 0x80-byte chunk",
+      "type": "Function"
+    },
+    {
+      "address": "0x005408D0",
+      "name": "DispatchEncodingFunc",
+      "comment": "Encodes dispatch word \u2192 vtable call sequence per 0x80-byte chunk",
+      "type": "Function"
+    },
+    {
+      "address": "0x00540A10",
+      "name": "ZDBStreamTable",
+      "comment": "Per-chunk data stream table"
+    },
+    {
+      "address": "0x00540A10",
+      "name": "ZDBStreamTable",
+      "comment": "Per-chunk data stream table"
+    },
+    {
+      "address": "0x005153C0",
+      "name": "PatchDecrypt",
+      "type": "Function"
+    },
+    {
+      "address": "0x005153C0",
+      "name": "PatchDecrypt",
+      "type": "Function"
+    },
+    {
+      "address": "0x005153F0",
+      "name": "PatchDecrypt_AES_CBC_Wrapper",
+      "type": "Function"
+    },
+    {
+      "address": "0x005153F0",
+      "name": "PatchDecrypt_AES_CBC_Wrapper",
+      "type": "Function"
+    },
+    {
+      "address": "0x00534848",
+      "name": "ZDBSectionParser",
+      "comment": "PATCH DECRYPT / DNAS handler; reads DNAS seed",
+      "type": "Function"
+    },
+    {
+      "address": "0x00534848",
+      "name": "ZDBSectionParser",
+      "comment": "PATCH DECRYPT / DNAS handler; reads DNAS seed",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053FEC0",
+      "name": "AES_Thunk_CBC",
+      "comment": "t1=16; j 0x0053FC60 (AES_CBC_Core)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053FEC0",
+      "name": "AES_Thunk_CBC",
+      "comment": "t1=16; j 0x0053FC60 (AES_CBC_Core)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053FC60",
+      "name": "AES_CBC_Core",
+      "comment": "Real AES-128 CBC; tables at 0x562190 and 0x567A80; s4=chainPtr, fp=ctPtr, s5=keyPtr, s2=keySize(16)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053FC60",
+      "name": "AES_CBC_Core",
+      "comment": "Real AES-128 CBC; tables at 0x562190 and 0x567A80; s4=chainPtr, fp=ctPtr, s5=keyPtr, s2=keySize(16)",
+      "type": "Function"
+    },
+    {
+      "address": "0x00541658",
+      "name": "FTScoreChunkDecryptor",
+      "comment": "Dispatch path2 (separate buffers) \u2192 jal AES_Thunk_CBC",
+      "type": "Function"
+    },
+    {
+      "address": "0x00541658",
+      "name": "FTScoreChunkDecryptor",
+      "comment": "Dispatch path2 (separate buffers) \u2192 jal AES_Thunk_CBC",
+      "type": "Function"
+    },
+    {
+      "address": "0x00562190",
+      "name": "gAES_Tables_0",
+      "comment": "AES SBox / round constant table 0"
+    },
+    {
+      "address": "0x00562190",
+      "name": "gAES_Tables_0",
+      "comment": "AES SBox / round constant table 0"
+    },
+    {
+      "address": "0x00567A80",
+      "name": "gAES_Tables_1",
+      "comment": "AES inverse SBox / round constant table 1"
+    },
+    {
+      "address": "0x00567A80",
+      "name": "gAES_Tables_1",
+      "comment": "AES inverse SBox / round constant table 1"
+    },
+    {
+      "address": "0x0053D3D0",
+      "name": "LCGPRNGStep",
+      "comment": "state = state * 0x5851F42D4C957F2D \u002B 1 mod 2^64; output = (state\u003E\u003E55)\u00260xFF via FP pipeline",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053D3D0",
+      "name": "LCGPRNGStep",
+      "comment": "state = state * 0x5851F42D4C957F2D \u002B 1 mod 2^64; output = (state\u003E\u003E55)\u00260xFF via FP pipeline",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053D3B8",
+      "name": "StorePRNGSeed",
+      "comment": "2nd hit = FTScore seed store at 0x0053D3B8; confirmed seed 0x02291104",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053D3B8",
+      "name": "StorePRNGSeed",
+      "comment": "2nd hit = FTScore seed store at 0x0053D3B8; confirmed seed 0x02291104",
+      "type": "Function"
+    },
+    {
+      "address": "0x00560A10",
+      "name": "gPRNGState",
+      "comment": "64-bit LE PRNG state; seed 0x02291104 for FTScore"
+    },
+    {
+      "address": "0x00560A10",
+      "name": "gPRNGState",
+      "comment": "64-bit LE PRNG state; seed 0x02291104 for FTScore"
+    },
+    {
+      "address": "0x001E7000",
+      "name": "gMWo3FTScoreOutput",
+      "comment": "Decrypted FTScore output buffer; magic MWo3 \u002B FTScore.bin\\0"
+    },
+    {
+      "address": "0x001E7000",
+      "name": "gMWo3FTScoreOutput",
+      "comment": "Decrypted FTScore output buffer; magic MWo3 \u002B FTScore.bin\\0"
+    },
+    {
+      "address": "0x01E7EA60",
+      "name": "gAES_ChainValue",
+      "comment": "CBC IV / chain buffer (16 bytes) \u2014 captured mid-stream"
+    },
+    {
+      "address": "0x01E7EA60",
+      "name": "gAES_ChainValue",
+      "comment": "CBC IV / chain buffer (16 bytes) \u2014 captured mid-stream"
+    },
+    {
+      "address": "0x01E7EA70",
+      "name": "gAES_KeyBuf",
+      "comment": "AES-128 key buffer (16 bytes) \u2014 captured mid-stream"
+    },
+    {
+      "address": "0x01E7EA70",
+      "name": "gAES_KeyBuf",
+      "comment": "AES-128 key buffer (16 bytes) \u2014 captured mid-stream"
+    },
+    {
+      "address": "0x01E7EA80",
+      "name": "gAES_CipherTextBuf",
+      "comment": "Pointer to ciphertext input for AES CBC core",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x01E7EA80",
+      "name": "gAES_CipherTextBuf",
+      "comment": "Pointer to ciphertext input for AES CBC core",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x001CC750",
+      "name": "gServerRegistryContext",
+      "comment": "Root pointer; points to registry context at 0x001CC460",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x001CC750:\u002B0x005c",
+      "name": "registryListHead",
+      "comment": "Ptr at *gServerRegistryContext\u002B0x5C; null in observed run = no registry entries loaded",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00653D80:\u002B0x0008",
+      "name": "sessionStateByte",
+      "comment": "Checked == 3 in SCERT_CryptKeyPeer_Handler before accepting SERVER_CRYPTKEY_PEER"
+    },
+    {
+      "address": "0x00420610:\u002B0x0000",
+      "name": "MasFnPtr[0]",
+      "comment": "\u2192 MasStateStub_1 (0x0030C328)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0000",
+      "name": "MasFnPtr[0]",
+      "comment": "\u2192 MasStateStub_1 (0x0030C328)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0004",
+      "name": "MasFnPtr[1]",
+      "comment": "\u2192 MasStateStub_2 (0x0030C330)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0004",
+      "name": "MasFnPtr[1]",
+      "comment": "\u2192 MasStateStub_2 (0x0030C330)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0008",
+      "name": "MasFnPtr[2]",
+      "comment": "\u2192 MasStateStub_3 (0x0030C338)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0008",
+      "name": "MasFnPtr[2]",
+      "comment": "\u2192 MasStateStub_3 (0x0030C338)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x000c",
+      "name": "MasFnPtr[3]",
+      "comment": "\u2192 MasStateStub_4 (0x0030C340)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x000c",
+      "name": "MasFnPtr[3]",
+      "comment": "\u2192 MasStateStub_4 (0x0030C340)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0010",
+      "name": "MasFnPtr[4]",
+      "comment": "\u2192 MasStateStub_5 (0x0030C348)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0010",
+      "name": "MasFnPtr[4]",
+      "comment": "\u2192 MasStateStub_5 (0x0030C348)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0014",
+      "name": "MasFnPtr[5]",
+      "comment": "\u2192 MasStateStub_6 (0x0030C350)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0014",
+      "name": "MasFnPtr[5]",
+      "comment": "\u2192 MasStateStub_6 (0x0030C350)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0018",
+      "name": "MasFnPtr[6]",
+      "comment": "\u2192 MasStateStub_7 (0x0030C358)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x0018",
+      "name": "MasFnPtr[6]",
+      "comment": "\u2192 MasStateStub_7 (0x0030C358)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x001c",
+      "name": "MasFnPtr[7]",
+      "comment": "\u2192 MasStateStub_8 (0x0030C360)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00420610:\u002B0x001c",
+      "name": "MasFnPtr[7]",
+      "comment": "\u2192 MasStateStub_8 (0x0030C360)",
+      "type": "Pointer"
+    }
+  ]
+}
