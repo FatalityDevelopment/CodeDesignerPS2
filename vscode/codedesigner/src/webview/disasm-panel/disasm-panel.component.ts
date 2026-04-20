@@ -101,8 +101,15 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   selectedBios = '';
   selectedGame = '';
   activeTab: 'settings' | 'cheats' | 'cds' | 'recompile' = 'settings';
-  /** Cheat text owned here so the CDS "Add Cheat" action can inject codes. */
-  cheatText = '';
+
+  /** Cheat text owned here so the CDS "Add Cheat" action can inject codes. Persisted via localStorage. */
+  private static readonly CHEAT_TEXT_KEY = 'codedesigner.cheatsText';
+  private _cheatText = localStorage.getItem(DisasmPanelComponent.CHEAT_TEXT_KEY) ?? '';
+  get cheatText(): string { return this._cheatText; }
+  set cheatText(value: string) {
+    this._cheatText = value;
+    localStorage.setItem(DisasmPanelComponent.CHEAT_TEXT_KEY, value);
+  }
   currentGameName = '';
   private subs: Subscription[] = [];
 
