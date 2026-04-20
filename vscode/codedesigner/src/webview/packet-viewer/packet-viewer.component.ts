@@ -52,6 +52,13 @@ export interface DissectedField {
     value: string;
 }
 
+/** A packet payload for pcap save/load operations. */
+export interface PcapPacketEntry {
+    direction: number;
+    timestampUs: number;
+    data: string; // base64-encoded raw Ethernet frame
+}
+
 /** Actions emitted to the host page component. */
 export type PacketViewerAction =
     | { type: 'startCapture'; direction: number; maxQueue: number }
@@ -61,7 +68,9 @@ export type PacketViewerAction =
     | { type: 'getStatus' }
     | { type: 'getStats' }
     | { type: 'disassemble'; data: string }
-    | { type: 'clearPackets' };
+    | { type: 'clearPackets' }
+    | { type: 'openPcap' }
+    | { type: 'savePcap'; packets: PcapPacketEntry[] };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -626,6 +635,51 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
     gap: 8px;
 }
 .pv-empty-icon { font-size: 48px; opacity: 0.4; }
+
+/* ── Display filter bar ───────────────────────────────────────── */
+.pv-filterbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: #1e1e1e;
+    border-bottom: 1px solid #3c3c3c;
+    flex-shrink: 0;
+}
+.pv-filterbar-label {
+    font-size: 11px;
+    color: #888;
+    white-space: nowrap;
+}
+.pv-filterbar-input {
+    flex: 1;
+    padding: 3px 6px;
+    border: 1px solid #555;
+    border-radius: 3px;
+    background: #2d2d30;
+    color: #ccc;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', monospace);
+    min-width: 0;
+}
+.pv-filterbar-input:focus { outline: 1px solid #0e639c; border-color: #0e639c; }
+.pv-filterbar-clear {
+    padding: 2px 6px;
+    border: 1px solid #555;
+    border-radius: 3px;
+    background: #333;
+    color: #ccc;
+    font-size: 11px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.pv-filterbar-clear:hover { background: #444; }
+.pv-filterbar-count {
+    font-size: 11px;
+    color: #888;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
 `],
     template: `
 <div class="pv-root">
@@ -639,6 +693,9 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
         <button (click)="onPollOnce()" [disabled]="!capturing()">⟳ Poll</button>
         <button (click)="onClear()">✕ Clear</button>
         <div class="pv-sep"></div>
+        <button (click)="onOpenPcap()" title="Open a .pcap file">📂 Open</button>
+        <button (click)="onSavePcap()" [disabled]="packets().length === 0" title="Save capture as .pcap">💾 Save</button>
+        <div class="pv-sep"></div>
         <label style="font-size:12px;color:#999">Direction</label>
         <select [value]="captureDirection()" (change)="captureDirection.set(+$any($event).target.value)">
             <option value="0">Both</option>
@@ -646,7 +703,7 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
             <option value="2">RX only</option>
         </select>
         <div class="pv-sep"></div>
-        <label style="font-size:12px;color:#999">Filter</label>
+        <label style="font-size:12px;color:#999">Capture Filter</label>
         <select [value]="filterType()" (change)="filterType.set(+$any($event).target.value)">
             <option value="0">None</option>
             <option value="1">Protocol</option>
@@ -687,6 +744,18 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
         </span>
     </div>
 
+    <!-- ── Display filter bar ───────────────────────────────────────── -->
+    <div class="pv-filterbar">
+        <label class="pv-filterbar-label">Display Filter:</label>
+        <input class="pv-filterbar-input" type="text" placeholder="Search packets… (src, dst, proto, info)"
+               [value]="displayFilter()"
+               (input)="displayFilter.set($any($event).target.value)" />
+        @if (displayFilter()) {
+            <button class="pv-filterbar-clear" (click)="displayFilter.set('')" title="Clear filter">✕</button>
+            <span class="pv-filterbar-count">{{ filteredPackets().length }} / {{ packets().length }}</span>
+        }
+    </div>
+
     <!-- ── Body: three panes ───────────────────────────────────────── -->
     <div class="pv-body">
         <!-- Packet list -->
@@ -695,7 +764,12 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
                 <div class="pv-empty">
                     <div class="pv-empty-icon">📡</div>
                     <div>No packets captured</div>
-                    <div style="font-size:11px">Click <b>Start Capture</b> to begin capturing PS2 network traffic</div>
+                    <div style="font-size:11px">Click <b>Start Capture</b> to begin or <b>📂 Open</b> to load a .pcap file</div>
+                </div>
+            } @else if (filteredPackets().length === 0) {
+                <div class="pv-empty">
+                    <div class="pv-empty-icon">🔍</div>
+                    <div>No packets match the display filter</div>
                 </div>
             } @else {
                 <table class="pv-table">
@@ -712,7 +786,7 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
                         </tr>
                     </thead>
                     <tbody>
-                        @for (pkt of packets(); track pkt.index; let i = $index) {
+                        @for (pkt of filteredPackets(); track pkt.index; let i = $index) {
                             <tr [class.pv-selected]="selectedIndex() === pkt.index"
                                 (click)="selectPacket(pkt.index)">
                                 <td>{{ pkt.index + 1 }}</td>
@@ -775,7 +849,13 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
         } @else {
             <span>Adapter status unknown — click Start Capture to query</span>
         }
-        <span style="margin-left:auto">{{ packets().length }} packets</span>
+        <span style="margin-left:auto">
+            @if (displayFilter() && filteredPackets().length !== packets().length) {
+                {{ filteredPackets().length }} displayed / {{ packets().length }} packets
+            } @else {
+                {{ packets().length }} packets
+            }
+        </span>
         @if (statusMessage()) {
             <span>{{ statusMessage() }}</span>
         }
@@ -791,6 +871,8 @@ export class PacketViewerComponent {
     readonly filterProtocol = signal(0);
     readonly filterPort = signal(0);
     readonly filterIP = signal('');
+    /** Client-side display filter — case-insensitive substring search across visible columns. */
+    readonly displayFilter = signal('');
     readonly adapterStatus = signal<NetStatus | null>(null);
     readonly stats = signal<NetStats | null>(null);
     readonly statusMessage = signal('');
@@ -828,6 +910,22 @@ export class PacketViewerComponent {
         length: number;
         info: string;
     }>>([]);
+
+    /** Packets filtered by the display filter text — case-insensitive substring match. */
+    readonly filteredPackets = computed(() => {
+        const all = this.packets();
+        const f = this.displayFilter().trim().toLowerCase();
+        if (!f) { return all; }
+        return all.filter(p =>
+            p.dirLabel.toLowerCase().includes(f) ||
+            p.src.toLowerCase().includes(f) ||
+            p.dst.toLowerCase().includes(f) ||
+            p.proto.toLowerCase().includes(f) ||
+            p.info.toLowerCase().includes(f) ||
+            String(p.length).includes(f) ||
+            p.timeStr.includes(f)
+        );
+    });
 
     // ── Dissection of selected packet ────────────────────────────────────────
     readonly selectedLayers = computed(() => {
@@ -944,6 +1042,22 @@ export class PacketViewerComponent {
             port: this.filterPort(),
             ip: this.filterIP(),
         });
+    }
+
+    onOpenPcap(): void {
+        this.onAction?.({ type: 'openPcap' });
+    }
+
+    onSavePcap(): void {
+        if (this._rawPackets.length === 0) {
+            return;
+        }
+        const packets: PcapPacketEntry[] = this._rawPackets.map(e => ({
+            direction:   e.pkt.direction,
+            timestampUs: e.pkt.timestampUs,
+            data:        e.pkt.data,
+        }));
+        this.onAction?.({ type: 'savePcap', packets });
     }
 
     selectPacket(idx: number): void {
