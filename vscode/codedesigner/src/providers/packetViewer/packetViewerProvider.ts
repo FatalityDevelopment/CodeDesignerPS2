@@ -57,7 +57,7 @@ function parsePcap(buf: Buffer): PcapPacketEntry[] {
         off += inclLen;
 
         packets.push({
-            direction:   0, // pcap has no direction field; default to TX
+            direction:   0, // pcap has no direction field; mark all as TX (0=TX, 1=RX per CapturedPacket)
             timestampUs,
             data: frameBytes.toString('base64'),
         });
