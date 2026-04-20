@@ -68,6 +68,15 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
                     case 'packetViewerMessage':
                         pv.showStatus(data['message'] as string ?? '');
                         break;
+                    case 'packetViewerPcapLoaded':
+                        pv.onClear();
+                        pv.addCapturedPackets(data['packets'] as any[] ?? []);
+                        pv.recvCaptureComplete();
+                        pv.showStatus(`Loaded ${(data['packets'] as any[] ?? []).length} packet(s) from file`);
+                        break;
+                    case 'packetViewerSaveResult':
+                        pv.showStatus(data['message'] as string ?? '');
+                        break;
                     case 'packetViewerError':
                         pv.showStatus(data['message'] as string ?? 'Error');
                         pv.recvCaptureComplete();
