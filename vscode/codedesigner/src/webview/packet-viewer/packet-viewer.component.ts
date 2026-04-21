@@ -112,7 +112,14 @@ function readU16LE(buf: Uint8Array, off: number): number {
 
 // ── SCERT / Medius protocol tables ───────────────────────────────────────────
 
-/** Known Medius server ports and their names, matching config.json defaults. */
+/** Known Medius server ports and their names, matching config.json defaults.
+ *  MUIS = Medius Universe Information Server
+ *  MAS  = Medius Authentication Server
+ *  MLS  = Medius Lobby Server
+ *  DME  = Distributed Multi-player Engine
+ *  NAT  = NAT traversal server
+ *  DNAS = Dynamic Network Authentication System
+ */
 const MEDIUS_PORTS = new Map<number, string>([
     [10071, 'MUIS'],
     [10078, 'MAS'],
@@ -573,6 +580,14 @@ function mediusTypeName(msgClass: number, msgType: number): string {
     return `0x${toHex(msgType)}`;
 }
 
+// RT_MSG_TYPE values that carry a Medius APP payload (class + type bytes)
+const SCERT_APP_MSG_TYPES = new Set([
+    0x0A, // RT_MSG_SERVER_APP
+    0x0B, // RT_MSG_CLIENT_APP_TOSERVER
+    0x3B, // RT_MSG_CLIENT_MULTI_APP_TOSERVER
+    0x3C, // RT_MSG_SERVER_MULTI_APP_TOCLIENT
+]);
+
 /**
  * Parse SCERT messages from a raw TCP payload.
  *
@@ -610,8 +625,7 @@ function parseSCERT(tcpPayload: Uint8Array, frameBase: number): ScertParsed[] {
 
         // Parse Medius APP layer when present
         let medius: ScertMediusParsed | undefined;
-        const isAppMsg = msgType === 0x0A || msgType === 0x0B ||
-                         msgType === 0x3B || msgType === 0x3C;
+        const isAppMsg = SCERT_APP_MSG_TYPES.has(msgType);
         if (isAppMsg && payloadLen >= 2) {
             const appOff    = off + hdrSize;
             const msgClass  = tcpPayload[appOff];
@@ -794,7 +808,7 @@ function dissectFrame(raw: Uint8Array): DissectedLayer[] {
                     const scertFields: DissectedField[] = [
                         { name: 'Server',       value: server },
                         { name: 'Message Type', value: `0x${toHex(msg.msgType)} — ${msg.msgTypeName}` },
-                        { name: 'Encrypted',    value: msg.isEncrypted ? `Yes (hash: 0x${toHex(msg.hash ?? 0, 8)})` : 'No' },
+                        { name: 'Encrypted',    value: msg.isEncrypted ? `Yes (hash: 0x${toHex(msg.hash!, 8)})` : 'No' },
                         { name: 'Payload Length', value: `${msg.payloadLen} bytes` },
                     ];
 
