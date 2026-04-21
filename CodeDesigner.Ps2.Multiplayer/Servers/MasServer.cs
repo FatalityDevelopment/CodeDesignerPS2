@@ -365,13 +365,21 @@ public class MasServer : BaseMediusTcpServer
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.GetMyIPResponse, w.ToArray()), ct);
     }
 
-    private Task HandleVersionServerAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    private async Task HandleVersionServerAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        // VersionServer (0x86) is a one-way notification from the PS2 — RE of MasState3_VersionServer
-        // (0x0030C568) confirmed the PS2 sends it and immediately advances its own state machine
-        // without waiting for a reply.  Sending VersionServerResponse causes the PS2 to disconnect.
-        _log.LogInformation("[MAS] VersionServer received (one-way notification, no reply sent)");
-        return Task.CompletedTask;
+        _log.LogInformation("[MAS] VersionServer received — sending Policy prompt");
+
+        // After VersionServer the server pushes policy to prompt the client to proceed
+        // to the account login screen. This is server-initiated (no client msgId to echo).
+        // Text field is exactly 72 bytes padded to match the real server's 79-byte RT payload.
+        const string policyText = "Welcome to CodeDesigner Medius Server.\r\nPlay fair!";
+
+        var w = new MediusWriter();
+        w.Write((int)MediusCallbackStatus.MediusSuccess);  // status (4 bytes)
+        w.Write((byte)1);                                   // last = true (1 byte)
+        w.WriteString(policyText, 72);                      // text — 72 bytes, NOT POLICY_MAXLEN
+
+        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PolicyResponse, w.ToArray()), ct);
     }
 
     private async Task HandleGetWorldSecurityLevelAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)

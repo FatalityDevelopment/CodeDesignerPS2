@@ -588,13 +588,13 @@ public class MlsServer : BaseMediusTcpServer
         await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.PickLocationResponse, w.ToArray()), ct);
     }
 
-    private async Task HandleVersionServerAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
+    private Task HandleVersionServerAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
     {
-        var w = new MediusWriter();
-        w.Write((int)MediusCallbackStatus.MediusSuccess);
-        w.WriteString("CodeDesigner MLS 1.0", 64);
-
-        await SendMediusAsync(tcp, MediusPacket.BuildLobby(MediusLobbyMessageId.VersionServerResponse, w.ToArray()), ct);
+        // VersionServer (0x86) is a one-way notification from the PS2 client —
+        // the client advances its own state machine immediately without expecting a reply.
+        // The real server does NOT send VersionServerResponse here on MLS.
+        _log.LogInformation("[MLS] VersionServer received (one-way notification, no reply sent)");
+        return Task.CompletedTask;
     }
 
     private async Task HandleUtilGetServerVersionAsync(MediusPacket packet, MediusClientState state, TcpClient tcp, CancellationToken ct)
