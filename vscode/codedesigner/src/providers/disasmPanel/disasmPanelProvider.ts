@@ -428,6 +428,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'openHdd':
                     this.editorProvider.openHddOverlay();
                     break;
+                // ── DNS Mapping editor ────────────────────────────────────
+                case 'openDnsMapping':
+                    await this.handleOpenDnsMapping();
+                    break;
+                // ── Multiplayer config editor ─────────────────────────────
+                case 'openNetConfig':
+                    await this.handleOpenNetConfig();
+                    break;
                 // ── Cheat Code Converter ──────────────────────────────────
                 case 'openConverter':
                     this.editorProvider.openConverterOverlay();
@@ -1003,6 +1011,59 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             shellArgs: [],
         });
         terminal.show(true);
+    }
+
+    /**
+     * Open the Multiplayer server config.json in the VS Code text editor.
+     * The file lives in the install directory's Multiplayer sub-folder.
+     */
+    private async handleOpenNetConfig(): Promise<void> {
+        const installDir = DisasmPanelProvider.getInstallDirectory();
+        const configPath = path.join(installDir, 'Multiplayer', 'config.json');
+        if (!fs.existsSync(configPath)) {
+            vscode.window.showErrorMessage(
+                `Multiplayer config not found: ${configPath}. ` +
+                'Build the Multiplayer project first (dotnet build CodeDesigner.Ps2.Multiplayer) to deploy it.'
+            );
+            return;
+        }
+        const uri = vscode.Uri.file(configPath);
+        await vscode.commands.executeCommand('vscode.open', uri);
+    }
+
+    /**
+     * Open the DnsMappings section of config.json for inline editing,
+     * then show an information message about the format.
+     */
+    private async handleOpenDnsMapping(): Promise<void> {
+        const installDir = DisasmPanelProvider.getInstallDirectory();
+        const configPath = path.join(installDir, 'Multiplayer', 'config.json');
+        if (!fs.existsSync(configPath)) {
+            vscode.window.showErrorMessage(
+                `Multiplayer config not found: ${configPath}. ` +
+                'Build the Multiplayer project first (dotnet build CodeDesigner.Ps2.Multiplayer) to deploy it.'
+            );
+            return;
+        }
+        // Open the config file and reveal the DnsMappings key
+        const uri = vscode.Uri.file(configPath);
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(doc);
+
+        // Find the "DnsMappings" key and move the cursor there
+        const text = doc.getText();
+        const idx  = text.indexOf('"DnsMappings"');
+        if (idx >= 0) {
+            const pos = doc.positionAt(idx);
+            editor.selection = new vscode.Selection(pos, pos);
+            editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+        }
+
+        vscode.window.showInformationMessage(
+            'Add DNS overrides under "DnsMappings": { "hostname": "ip" }. ' +
+            'The DNS server intercepts A queries for these hostnames and responds with the mapped IP. ' +
+            'Restart the Multiplayer server for changes to take effect.'
+        );
     }
 
     /** Launch CodeDesigner control server with no mode args, then connect socket/views. */
