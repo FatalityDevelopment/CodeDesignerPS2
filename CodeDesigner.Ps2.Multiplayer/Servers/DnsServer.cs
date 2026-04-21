@@ -121,14 +121,34 @@ public class DnsServer
                             || qname.EndsWith(".pdonline.scea.com",    StringComparison.OrdinalIgnoreCase)
                             || qname.Equals("pdonline.scea.com",       StringComparison.OrdinalIgnoreCase);
 
-            _log.LogDebug("[DNS] Query from {Ep}: {Name} type={Type} intercept={Intercept}",
-                client, qname, qtype, isIntercept);
+            // Check user-defined custom hostname → IP mappings.
+            string? customIp = null;
+            if (!isIntercept && qtype == 1 /* A */)
+            {
+                foreach (var (host, ip) in _config.DnsMappings)
+                {
+                    if (qname.Equals(host, StringComparison.OrdinalIgnoreCase) ||
+                        qname.EndsWith("." + host, StringComparison.OrdinalIgnoreCase))
+                    {
+                        customIp = ip;
+                        break;
+                    }
+                }
+            }
+
+            _log.LogDebug("[DNS] Query from {Ep}: {Name} type={Type} intercept={Intercept} customIp={CustomIp}",
+                client, qname, qtype, isIntercept, customIp ?? "-");
 
             byte[] reply;
             if (isIntercept && qtype == 1 /* A */)
             {
                 reply = BuildAResponse(buf, qname, _config.ServerIp);
                 _log.LogInformation("[DNS] {Name} → {Ip} (intercept)", qname, _config.ServerIp);
+            }
+            else if (customIp != null)
+            {
+                reply = BuildAResponse(buf, qname, customIp);
+                _log.LogInformation("[DNS] {Name} → {Ip} (custom mapping)", qname, customIp);
             }
             else
             {

@@ -380,6 +380,14 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'openMemoryView', label });
   }
 
+  onOpenDnsMapping(): void {
+    this.bridge.postMessage({ command: 'openDnsMapping' });
+  }
+
+  onOpenNetConfig(): void {
+    this.bridge.postMessage({ command: 'openNetConfig' });
+  }
+
   onOpenConverter(): void {
     this.bridge.postMessage({ command: 'openConverter' });
   }

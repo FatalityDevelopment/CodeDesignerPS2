@@ -105,6 +105,558 @@ function fmtIP(buf: Uint8Array, off: number): string {
     return `${buf[off]}.${buf[off + 1]}.${buf[off + 2]}.${buf[off + 3]}`;
 }
 
+function readU16LE(buf: Uint8Array, off: number): number {
+    if (off + 1 >= buf.length) { return 0; }
+    return buf[off] | (buf[off + 1] << 8);
+}
+
+// ── SCERT / Medius protocol tables ───────────────────────────────────────────
+
+/** Known Medius server ports and their names, matching config.json defaults.
+ *  MUIS = Medius Universe Information Server
+ *  MAS  = Medius Authentication Server
+ *  MLS  = Medius Lobby Server
+ *  DME  = Distributed Multi-player Engine
+ *  NAT  = NAT traversal server
+ *  DNAS = Dynamic Network Authentication System
+ */
+const MEDIUS_PORTS = new Map<number, string>([
+    [10071, 'MUIS'],
+    [10078, 'MAS'],
+    [10075, 'MLS'],
+    [10070, 'DME'],
+    [10069, 'NAT'],
+    [10060, 'DNAS'],
+]);
+
+/** RT_MSG_TYPE wire values → display name. Source: ScertTypes.cs RT_MSG_TYPE enum. */
+const RT_MSG_TYPE_NAMES = new Map<number, string>([
+    [0x00, 'RT_MSG_CLIENT_CONNECT_TCP'],
+    [0x01, 'RT_MSG_CLIENT_DISCONNECT'],
+    [0x02, 'RT_MSG_CLIENT_APP_BROADCAST'],
+    [0x03, 'RT_MSG_CLIENT_APP_SINGLE'],
+    [0x04, 'RT_MSG_CLIENT_APP_LIST'],
+    [0x05, 'RT_MSG_CLIENT_ECHO'],
+    [0x06, 'RT_MSG_SERVER_CONNECT_REJECT'],
+    [0x07, 'RT_MSG_SERVER_CONNECT_ACCEPT_TCP'],
+    [0x08, 'RT_MSG_SERVER_CONNECT_NOTIFY'],
+    [0x09, 'RT_MSG_SERVER_DISCONNECT_NOTIFY'],
+    [0x0A, 'RT_MSG_SERVER_APP'],
+    [0x0B, 'RT_MSG_CLIENT_APP_TOSERVER'],
+    [0x0C, 'RT_MSG_UDP_APP'],
+    [0x0D, 'RT_MSG_CLIENT_SET_RECV_FLAG'],
+    [0x0E, 'RT_MSG_CLIENT_SET_AGG_TIME'],
+    [0x0F, 'RT_MSG_CLIENT_FLUSH_ALL'],
+    [0x10, 'RT_MSG_CLIENT_FLUSH_SINGLE'],
+    [0x11, 'RT_MSG_SERVER_FORCED_DISCONNECT'],
+    [0x12, 'RT_MSG_CLIENT_CRYPTKEY_PUBLIC'],
+    [0x13, 'RT_MSG_SERVER_CRYPTKEY_PEER'],
+    [0x14, 'RT_MSG_SERVER_CRYPTKEY_GAME'],
+    [0x15, 'RT_MSG_CLIENT_CONNECT_TCP_AUX_UDP'],
+    [0x16, 'RT_MSG_CLIENT_CONNECT_AUX_UDP'],
+    [0x17, 'RT_MSG_CLIENT_CONNECT_READY_AUX_UDP'],
+    [0x18, 'RT_MSG_SERVER_INFO_AUX_UDP'],
+    [0x19, 'RT_MSG_SERVER_CONNECT_ACCEPT_AUX_UDP'],
+    [0x1A, 'RT_MSG_SERVER_CONNECT_COMPLETE'],
+    [0x1B, 'RT_MSG_CLIENT_CRYPTKEY_PEER'],
+    [0x1C, 'RT_MSG_SERVER_SYSTEM_MESSAGE'],
+    [0x1D, 'RT_MSG_SERVER_CHEAT_QUERY'],
+    [0x1E, 'RT_MSG_SERVER_MEMORY_POKE'],
+    [0x1F, 'RT_MSG_SERVER_ECHO'],
+    [0x20, 'RT_MSG_CLIENT_DISCONNECT_WITH_REASON'],
+    [0x21, 'RT_MSG_CLIENT_CONNECT_READY_TCP'],
+    [0x22, 'RT_MSG_SERVER_CONNECT_REQUIRE'],
+    [0x23, 'RT_MSG_CLIENT_CONNECT_READY_REQUIRE'],
+    [0x24, 'RT_MSG_CLIENT_HELLO'],
+    [0x25, 'RT_MSG_SERVER_HELLO'],
+    [0x26, 'RT_MSG_SERVER_STARTUP_INFO_NOTIFY'],
+    [0x27, 'RT_MSG_CLIENT_PEER_QUERY'],
+    [0x28, 'RT_MSG_SERVER_PEER_QUERY_NOTIFY'],
+    [0x29, 'RT_MSG_CLIENT_PEER_QUERY_LIST'],
+    [0x2A, 'RT_MSG_SERVER_PEER_QUERY_LIST_NOTIFY'],
+    [0x2B, 'RT_MSG_CLIENT_WALLCLOCK_QUERY'],
+    [0x2C, 'RT_MSG_SERVER_WALLCLOCK_QUERY_NOTIFY'],
+    [0x2D, 'RT_MSG_CLIENT_TIMEBASE_QUERY'],
+    [0x2E, 'RT_MSG_SERVER_TIMEBASE_QUERY_NOTIFY'],
+    [0x2F, 'RT_MSG_CLIENT_TOKEN_MESSAGE'],
+    [0x30, 'RT_MSG_SERVER_TOKEN_MESSAGE'],
+    [0x31, 'RT_MSG_CLIENT_SYSTEM_MESSAGE'],
+    [0x32, 'RT_MSG_CLIENT_APP_BROADCAST_QOS'],
+    [0x33, 'RT_MSG_CLIENT_APP_SINGLE_QOS'],
+    [0x34, 'RT_MSG_CLIENT_APP_LIST_QOS'],
+    [0x35, 'RT_MSG_CLIENT_MAX_MSGLEN'],
+    [0x36, 'RT_MSG_SERVER_MAX_MSGLEN'],
+    [0x3B, 'RT_MSG_CLIENT_MULTI_APP_TOSERVER'],
+    [0x3C, 'RT_MSG_SERVER_MULTI_APP_TOCLIENT'],
+]);
+
+/** NetMessageClass byte → display name. Source: ScertTypes.cs NetMessageClass enum. */
+const NET_MSG_CLASS_NAMES = new Map<number, string>([
+    [0, 'DME'],
+    [1, 'Lobby'],
+    [2, 'Application'],
+    [3, 'LobbyReport'],
+    [4, 'LobbyExt'],
+    [5, 'LobbyAuth'],
+]);
+
+/**
+ * MediusLobbyMessageId byte → display name. Source: ScertTypes.cs.
+ * Used when NetMessageClass = 1 (Lobby).
+ */
+const MEDIUS_LOBBY_MSG = new Map<number, string>([
+    [0x00, 'WorldReport0'],
+    [0x01, 'PlayerReport'],
+    [0x02, 'EndGameReport'],
+    [0x03, 'SessionBegin'],
+    [0x04, 'SessionBeginResponse'],
+    [0x05, 'SessionEnd'],
+    [0x06, 'SessionEndResponse'],
+    [0x07, 'AccountLogin'],
+    [0x08, 'AccountLoginResponse'],
+    [0x09, 'AccountRegistration'],
+    [0x0A, 'AccountRegistrationResponse'],
+    [0x0B, 'AccountGetProfile'],
+    [0x0C, 'AccountGetProfileResponse'],
+    [0x0D, 'AccountUpdateProfile'],
+    [0x0E, 'AccountUpdateProfileResponse'],
+    [0x0F, 'AccountUpdatePassword'],
+    [0x11, 'AccountUpdateStats'],
+    [0x12, 'AccountUpdateStatsResponse'],
+    [0x13, 'AccountDelete'],
+    [0x14, 'AccountDeleteResponse'],
+    [0x15, 'AccountLogout'],
+    [0x16, 'AccountLogoutResponse'],
+    [0x17, 'AccountGetID'],
+    [0x18, 'AccountGetIDResponse'],
+    [0x19, 'AnonymousLogin'],
+    [0x1A, 'AnonymousLoginResponse'],
+    [0x1B, 'GetMyIP'],
+    [0x1C, 'GetMyIPResponse'],
+    [0x1D, 'CreateGameRequest'],
+    [0x1E, 'CreateGameResponse'],
+    [0x1F, 'CreateGameOnSelf'],
+    [0x20, 'CreateGameOnSelfResponse'],
+    [0x21, 'CreateChannelRequest'],
+    [0x22, 'CreateChannelResponse'],
+    [0x23, 'JoinGameRequest'],
+    [0x24, 'JoinGameResponse'],
+    [0x25, 'JoinChannel'],
+    [0x26, 'JoinChannelResponse'],
+    [0x27, 'JoinChannelFwd'],
+    [0x28, 'JoinChannelFwdResponse'],
+    [0x29, 'GameList'],
+    [0x2A, 'GameListResponse'],
+    [0x2B, 'ChannelList'],
+    [0x2C, 'ChannelListResponse'],
+    [0x2D, 'LobbyWorldPlayerList'],
+    [0x2E, 'LobbyWorldPlayerListResponse'],
+    [0x2F, 'GameWorldPlayerList'],
+    [0x30, 'GameWorldPlayerListResponse'],
+    [0x31, 'PlayerInfo'],
+    [0x32, 'PlayerInfoResponse'],
+    [0x33, 'GameInfo'],
+    [0x34, 'GameInfoResponse'],
+    [0x35, 'ChannelInfo'],
+    [0x36, 'ChannelInfoResponse'],
+    [0x37, 'FindWorldByName'],
+    [0x38, 'FindWorldByNameResponse'],
+    [0x39, 'FindPlayer'],
+    [0x3A, 'FindPlayerResponse'],
+    [0x3B, 'ChatMessage'],
+    [0x3C, 'ChatFwdMessage'],
+    [0x3D, 'GetBuddyList'],
+    [0x3E, 'GetBuddyListResponse'],
+    [0x3F, 'AddToBuddyList'],
+    [0x40, 'AddToBuddyListResponse'],
+    [0x41, 'RemoveFromBuddyList'],
+    [0x42, 'RemoveFromBuddyListResponse'],
+    [0x43, 'AddToBuddyListConfirmationRequest'],
+    [0x44, 'AddToBuddyListConfirmationResponse'],
+    [0x45, 'AddToBuddyListFwdConfirmationRequest'],
+    [0x46, 'AddToBuddyListFwdConfirmationResponse'],
+    [0x47, 'Policy'],
+    [0x48, 'PolicyResponse'],
+    [0x49, 'UpdateUserState'],
+    [0x4A, 'ErrorMessage'],
+    [0x4B, 'GetAnnouncements'],
+    [0x4C, 'GetAllAnnouncements'],
+    [0x4D, 'GetAnnouncementsResponse'],
+    [0x4E, 'SetGameListFilter'],
+    [0x4F, 'SetGameListFilterResponse'],
+    [0x50, 'ClearGameListFilter'],
+    [0x51, 'ClearGameListFilterResponse'],
+    [0x52, 'GetGameListFilter'],
+    [0x53, 'GetGameListFilterResponse'],
+    [0x54, 'CreateClan'],
+    [0x55, 'CreateClanResponse'],
+    [0x56, 'DisbandClan'],
+    [0x57, 'DisbandClanResponse'],
+    [0x58, 'GetClanByID'],
+    [0x59, 'GetClanByIDResponse'],
+    [0x5A, 'GetClanByName'],
+    [0x5B, 'GetClanByNameResponse'],
+    [0x5C, 'TransferClanLeadership'],
+    [0x5D, 'TransferClanLeadershipResponse'],
+    [0x5E, 'AddPlayerToClan'],
+    [0x5F, 'AddPlayerToClanResponse'],
+    [0x60, 'RemovePlayerFromClan'],
+    [0x61, 'RemovePlayerFromClanResponse'],
+    [0x62, 'TicketLogin / InvitePlayerToClan'],
+    [0x63, 'TicketLoginResponse / InvitePlayerToClanResponse'],
+    [0x64, 'GetUniverse / CheckMyClanInvitations'],
+    [0x65, 'GetUniverseResponse / CheckMyClanInvitationsResponse'],
+    [0x66, 'RespondToClanInvitation'],
+    [0x67, 'RespondToClanInvitationResponse'],
+    [0x68, 'RevokeClanInvitation'],
+    [0x69, 'RevokeClanInvitationResponse'],
+    [0x6A, 'RequestClanTeamChallenge'],
+    [0x6B, 'RequestClanTeamChallengeResponse'],
+    [0x6C, 'GetMyClanMessages'],
+    [0x6D, 'GetMyClanMessagesResponse'],
+    [0x6E, 'SendClanMessage'],
+    [0x6F, 'SendClanMessageResponse'],
+    [0x70, 'ModifyClanMessage'],
+    [0x71, 'ModifyClanMessageResponse'],
+    [0x72, 'DeleteClanMessage'],
+    [0x73, 'DeleteClanMessageResponse'],
+    [0x74, 'RespondToClanTeamChallenge'],
+    [0x75, 'RespondToClanTeamChallengeResponse'],
+    [0x76, 'RevokeClanTeamChallenge'],
+    [0x77, 'RevokeClanTeamChallengeResponse'],
+    [0x78, 'GetClanTeamChallengeHistory'],
+    [0x79, 'GetClanTeamChallengeHistoryResponse'],
+    [0x7A, 'GetClanInvitationsSent'],
+    [0x7B, 'GetClanInvitationsSentResponse'],
+    [0x7C, 'GetMyClans'],
+    [0x7D, 'GetMyClansResponse'],
+    [0x7E, 'GetAllClanMessages'],
+    [0x7F, 'GetAllClanMessagesResponse'],
+    [0x80, 'ConfirmClanTeamChallenge'],
+    [0x81, 'ConfirmClanTeamChallengeResponse'],
+    [0x82, 'GetClanTeamChallenges'],
+    [0x83, 'GetClanTeamChallengesResponse'],
+    [0x84, 'UpdateClanStats'],
+    [0x85, 'UpdateClanStatsResponse'],
+    [0x86, 'VersionServer'],
+    [0x87, 'VersionServerResponse'],
+    [0x88, 'GetWorldSecurityLevel'],
+    [0x89, 'GetWorldSecurityLevelResponse'],
+    [0x8A, 'BanPlayer'],
+    [0x8B, 'BanPlayerResponse'],
+    [0x8C, 'GetLocations'],
+    [0x8D, 'GetLocationsResponse'],
+    [0x8E, 'PickLocation'],
+    [0x8F, 'PickLocationResponse'],
+    [0x90, 'GetClanMemberList'],
+    [0x91, 'GetClanMemberListResponse'],
+    [0x92, 'LadderPosition'],
+    [0x93, 'LadderPositionResponse'],
+    [0x94, 'LadderList'],
+    [0x95, 'LadderListResponse'],
+    [0x96, 'ChatToggle'],
+    [0x97, 'ChatToggleResponse'],
+    [0x98, 'TextFilter'],
+    [0x99, 'TextFilterResponse'],
+    [0x9A, 'ServerReassignGameMediusWorldID'],
+    [0x9B, 'GetTotalGames'],
+    [0x9C, 'GetTotalGamesResponse'],
+    [0x9D, 'GetTotalChannels'],
+    [0x9E, 'GetTotalChannelsResponse'],
+    [0x9F, 'GetLobbyPlayerNames'],
+    [0xA0, 'GetLobbyPlayerNamesResponse'],
+    [0xA1, 'GetTotalUsers'],
+    [0xA2, 'GetTotalUsersResponse'],
+    [0xA3, 'SetLocalizationParams'],
+    [0xA4, 'SetLocalizationParamsResponse'],
+    [0xA5, 'FileCreate'],
+    [0xA6, 'FileCreateResponse'],
+    [0xA7, 'FileUpload'],
+    [0xA8, 'FileUploadResponse'],
+    [0xA9, 'FileUploadServerReq'],
+    [0xAA, 'FileClose'],
+    [0xAB, 'FileCloseResponse'],
+    [0xAC, 'FileDownload'],
+    [0xAD, 'FileDownloadResponse'],
+    [0xAE, 'FileDownloadStream'],
+    [0xAF, 'FileDownloadStreamResponse'],
+    [0xB0, 'FileDelete'],
+    [0xB1, 'FileDeleteResponse'],
+    [0xB2, 'FileListFiles'],
+    [0xB3, 'FileListFilesResponse'],
+    [0xB4, 'FileUpdateAttributes'],
+    [0xB5, 'FileUpdateAttributesResponse'],
+    [0xB6, 'FileGetAttributes'],
+    [0xB7, 'FileGetAttributesResponse'],
+    [0xB8, 'FileUpdateMetaData'],
+    [0xB9, 'FileUpdateMetaDataResponse'],
+    [0xBA, 'FileGetMetaData'],
+    [0xBB, 'FileGetMetaDataResponse'],
+    [0xBC, 'FileSearchByMetaData'],
+    [0xBD, 'FileSearchByMetaDataResponse'],
+    [0xBE, 'FileCancelOperation'],
+    [0xBF, 'FileCancelOperationResponse'],
+    [0xC0, 'GetIgnoreList'],
+    [0xC1, 'GetIgnoreListResponse'],
+    [0xC2, 'AddToIgnoreList'],
+    [0xC3, 'AddToIgnoreListResponse'],
+    [0xC4, 'RemoveFromIgnoreList'],
+    [0xC5, 'RemoveFromIgnoreListResponse'],
+    [0xC6, 'SetMessageAsRead'],
+    [0xC7, 'SetMessageAsReadResponse'],
+    [0xC8, 'GetUniverseInformation'],
+    [0xC9, 'UniverseNewsResponse'],
+    [0xCA, 'UniverseStatusListResponse'],
+    [0xCB, 'MachineSignaturePost'],
+    [0xCC, 'LadderPositionFast'],
+    [0xCD, 'LadderPositionFastResponse'],
+    [0xCE, 'UpdateLadderStats'],
+    [0xCF, 'UpdateLadderStatsResponse'],
+    [0xD0, 'GetLadderStats'],
+    [0xD1, 'GetLadderStatsResponse'],
+    [0xD2, 'ClanLadderList'],
+    [0xD3, 'ClanLadderListResponse'],
+    [0xD4, 'ClanLadderPosition'],
+    [0xD5, 'ClanLadderPositionResponse'],
+    [0xD6, 'GetBuddyList_ExtraInfo'],
+    [0xD7, 'GetBuddyList_ExtraInfoResponse'],
+    [0xD8, 'GetTotalRankings'],
+    [0xD9, 'GetTotalRankingsResponse'],
+    [0xDA, 'GetClanMemberList_ExtraInfo'],
+    [0xDB, 'GetClanMemberList_ExtraInfoResponse'],
+    [0xDC, 'GetLobbyPlayerNames_ExtraInfo'],
+    [0xDD, 'GetLobbyPlayerNames_ExtraInfoResponse'],
+    [0xDE, 'BillingLogin'],
+    [0xDF, 'BillingLoginResponse'],
+    [0xE0, 'BillingListRequest'],
+    [0xE1, 'BillingListResponse'],
+    [0xE2, 'BillingDetailRequest'],
+    [0xE3, 'BillingDetailResponse'],
+    [0xE4, 'PurchaseProductRequest'],
+    [0xE5, 'PurchaseProductResponse'],
+    [0xE6, 'BillingInfo'],
+    [0xE7, 'BillingInfoResponse'],
+    [0xE8, 'BillingTunnelRequest'],
+    [0xE9, 'BillingTunnelResponse'],
+    [0xEA, 'GameList_ExtraInfo'],
+    [0xEB, 'GameList_ExtraInfoResponse'],
+    [0xEC, 'ChannelList_ExtraInfo'],
+    [0xED, 'ChannelList_ExtraInfoResponse'],
+    [0xEE, 'InvitePlayerToClan_ByName'],
+    [0xEF, 'LadderList_ExtraInfo'],
+    [0xF0, 'LadderList_ExtraInfoResponse'],
+    [0xF1, 'LadderPosition_ExtraInfo'],
+    [0xF2, 'LadderPosition_ExtraInfoResponse'],
+    [0xF3, 'JoinGame'],
+    [0xF4, 'CreateGame1'],
+    [0xF5, 'UtilAddLobbyWorld'],
+    [0xF6, 'UtilAddLobbyWorldResponse'],
+    [0xF7, 'UtilAddGameWorld'],
+    [0xF8, 'UtilAddGameWorldResponse'],
+    [0xF9, 'UtilUpdateLobbyWorld'],
+    [0xFA, 'UtilUpdateLobbyWorldResponse'],
+    [0xFB, 'UtilUpdateGameWorld'],
+    [0xFC, 'UtilUpdateGameWorldResponse'],
+]);
+
+/**
+ * MediusLobbyExtMessageId byte → display name. Source: ScertTypes.cs.
+ * Used when NetMessageClass = 4 (LobbyExt).
+ */
+const MEDIUS_LOBBY_EXT_MSG = new Map<number, string>([
+    [0x00, 'CreateChannel1'],
+    [0x01, 'UtilGetServerVersion'],
+    [0x02, 'UtilGetServerVersionResponse'],
+    [0x03, 'GetUniverse_ExtraInfo'],
+    [0x04, 'UniverseStatusList_ExtraInfoResponse'],
+    [0x05, 'AddToBuddyListConfirmation'],
+    [0x06, 'AddToBuddyListFwdConfirmation'],
+    [0x07, 'AddToBuddyListFwdConfirmationResponse'],
+    [0x08, 'GetBuddyInvitations'],
+    [0x09, 'GetBuddyInvitationsResponse'],
+    [0x0A, 'DnasSignaturePost'],
+    [0x0B, 'UpdateLadderStatsWide'],
+    [0x0C, 'UpdateLadderStatsWideResponse'],
+    [0x0D, 'GetLadderStatsWide'],
+    [0x0E, 'GetLadderStatsWideResponse'],
+    [0x0F, 'LadderList_ExtraInfo'],
+    [0x10, 'UtilEventMsgHandler'],
+    [0x11, 'UniverseVariableInformationResponse'],
+    [0x12, 'SetLobbyWorldFilter'],
+    [0x13, 'SetLobbyWorldFilterResponse'],
+    [0x14, 'CreateChannel'],
+    [0x15, 'ChannelList_ExtraInfo1'],
+    [0x16, 'BinaryMessage'],
+    [0x17, 'BinaryFwdMessage'],
+    [0x18, 'PostDebugInfo'],
+    [0x19, 'PostDebugInfoResponse'],
+    [0x1A, 'UpdateClanLadderStatsWide_Delta'],
+    [0x1B, 'UpdateClanLadderStatsWide_DeltaResponse'],
+    [0x1C, 'GetLadderStatsWide_wIDArray'],
+    [0x1D, 'GetLadderStatsWide_wIDArray_Response'],
+    [0x1E, 'UniverseVariableSvoURLResponse'],
+    [0x1F, 'ChannelList_ExtraInfo'],
+    [0x23, 'GenericChatMessage'],
+    [0x24, 'GenericChatFwdMessage'],
+    [0x25, 'GenericChatSetFilterRequest'],
+    [0x26, 'GenericChatSetFilterResponse'],
+    [0x27, 'ExtendedSessionBeginRequest'],
+    [0x28, 'TokenRequest'],
+    [0x2A, 'GetServerTimeRequest'],
+    [0x2B, 'GetServerTimeResponse'],
+    [0x2C, 'VoteToBanPlayerRequest'],
+    [0x2D, 'SetAutoChatHistoryRequest'],
+    [0x2E, 'SetAutoChatHistoryResponse'],
+    [0x2F, 'CreateGame'],
+    [0x30, 'WorldReport'],
+    [0x31, 'ClearGameListFilter'],
+    [0x32, 'GetGameListFilterResponse'],
+    [0x33, 'SetGameListFilter'],
+    [0x34, 'SetGameListFilterResponse'],
+    [0x35, 'GameInfo'],
+    [0x36, 'GameInfoResponse'],
+    [0x37, 'GameList_ExtraInfo'],
+    [0x38, 'GameList_ExtraInfoResponse'],
+    [0x39, 'AccountUpdateStats_OpenAccess'],
+    [0x3A, 'AccountUpdateStats_OpenAccessResponse'],
+    [0x3B, 'AddPlayerToClan_ByClanOfficer'],
+    [0x3C, 'AddPlayerToClan_ByClanOfficerResponse'],
+    [0x58, 'TicketLogin'],
+    [0x59, 'TicketLoginResponse'],
+    [0x73, 'GenericChatMessage1'],
+    [0x74, 'GenericChatFwdMessage1'],
+    [0x75, 'MediusTextFilter1'],
+    [0x76, 'MediusTextFilterResponse1'],
+    [0x7B, 'SetLocalizationParams1'],
+    [0x86, 'SetLobbyWorldFilter1'],
+    [0x87, 'SetLobbyWorldFilterResponse1'],
+    [0x8B, 'SessionBegin1'],
+]);
+
+// ── SCERT parser ─────────────────────────────────────────────────────────────
+
+interface ScertMediusParsed {
+    /** NetMessageClass value. */
+    msgClass: number;
+    msgClassName: string;
+    /** Medius message type byte (MediusLobbyMessageId / MediusLobbyExtMessageId). */
+    msgType: number;
+    msgTypeName: string;
+    /** Byte offset in the full frame where the Medius class byte resides. */
+    frameOffset: number;
+}
+
+interface ScertParsed {
+    /** Raw type byte (before masking out the encrypted flag). */
+    rawTypeByte: number;
+    /** SCERT message type (low 7 bits). */
+    msgType: number;
+    msgTypeName: string;
+    isEncrypted: boolean;
+    /** Declared payload length (LE u16). */
+    payloadLen: number;
+    /** Optional 4-byte hash (present when encrypted). */
+    hash?: number;
+    /** Parsed Medius layer (present for APP_TOSERVER / SERVER_APP with class+type). */
+    medius?: ScertMediusParsed;
+    /** Byte offset of the SCERT header (type byte) within the full frame. */
+    frameOffset: number;
+    /** Total byte length of this SCERT record (header + hash? + payload). */
+    frameLength: number;
+}
+
+/**
+ * Return the server name for the port pair found in a TCP header,
+ * checking both src and dst against MEDIUS_PORTS.
+ */
+function serverFromPorts(srcPort: number, dstPort: number): string {
+    return MEDIUS_PORTS.get(dstPort) ?? MEDIUS_PORTS.get(srcPort) ?? '';
+}
+
+/** Resolve a Medius message type name given its class and type byte. */
+function mediusTypeName(msgClass: number, msgType: number): string {
+    if (msgClass === 1) { return MEDIUS_LOBBY_MSG.get(msgType) ?? `0x${toHex(msgType)}`; }
+    if (msgClass === 4) { return MEDIUS_LOBBY_EXT_MSG.get(msgType) ?? `0x${toHex(msgType)}`; }
+    return `0x${toHex(msgType)}`;
+}
+
+// RT_MSG_TYPE values that carry a Medius APP payload (class + type bytes)
+const SCERT_APP_MSG_TYPES = new Set([
+    0x0A, // RT_MSG_SERVER_APP
+    0x0B, // RT_MSG_CLIENT_APP_TOSERVER
+    0x3B, // RT_MSG_CLIENT_MULTI_APP_TOSERVER
+    0x3C, // RT_MSG_SERVER_MULTI_APP_TOCLIENT
+]);
+
+/**
+ * Parse SCERT messages from a raw TCP payload.
+ *
+ * Wire format (per SCERT spec):
+ *   Plain:     [type:1][payloadLen:2 LE][payload:payloadLen]
+ *   Encrypted: [type|0x80:1][payloadLen:2 LE][hash:4 LE][payload:payloadLen]
+ *
+ * @param tcpPayload  The TCP payload bytes (already offset past TCP header).
+ * @param frameBase   The absolute byte offset of tcpPayload[0] within the full
+ *                    Ethernet frame, so that frameOffset fields are frame-relative.
+ */
+function parseSCERT(tcpPayload: Uint8Array, frameBase: number): ScertParsed[] {
+    const msgs: ScertParsed[] = [];
+    let off = 0;
+
+    while (off < tcpPayload.length) {
+        // Need at least 3 bytes: type(1) + length(2)
+        if (off + 3 > tcpPayload.length) { break; }
+
+        const rawTypeByte  = tcpPayload[off];
+        const isEncrypted  = (rawTypeByte & 0x80) !== 0;
+        const msgType      = rawTypeByte & 0x7F;
+        const payloadLen   = readU16LE(tcpPayload, off + 1);
+
+        // Sanity: type must be a known SCERT value; bail if it looks like garbage
+        if (!RT_MSG_TYPE_NAMES.has(msgType)) { break; }
+
+        const hdrSize    = isEncrypted ? 7 : 3; // 1+2 + optional 4-byte hash
+        const totalSize  = hdrSize + payloadLen;
+
+        // Don't over-read beyond the buffer (fragmented segment — stop here)
+        if (off + totalSize > tcpPayload.length) { break; }
+
+        const hash = isEncrypted ? readU32BE(tcpPayload, off + 3) : undefined;
+
+        // Parse Medius APP layer when present
+        let medius: ScertMediusParsed | undefined;
+        const isAppMsg = SCERT_APP_MSG_TYPES.has(msgType);
+        if (isAppMsg && payloadLen >= 2) {
+            const appOff    = off + hdrSize;
+            const msgClass  = tcpPayload[appOff];
+            const mType     = tcpPayload[appOff + 1];
+            medius = {
+                msgClass,
+                msgClassName: NET_MSG_CLASS_NAMES.get(msgClass) ?? `0x${toHex(msgClass)}`,
+                msgType: mType,
+                msgTypeName: mediusTypeName(msgClass, mType),
+                frameOffset: frameBase + appOff,
+            };
+        }
+
+        msgs.push({
+            rawTypeByte,
+            msgType,
+            msgTypeName: RT_MSG_TYPE_NAMES.get(msgType) ?? `0x${toHex(msgType)}`,
+            isEncrypted,
+            payloadLen,
+            hash,
+            medius,
+            frameOffset: frameBase + off,
+            frameLength: totalSize,
+        });
+
+        off += totalSize;
+    }
+
+    return msgs;
+}
+
 /** Lightweight Ethernet/IPv4/ARP/TCP/UDP/ICMP dissector. */
 function dissectFrame(raw: Uint8Array): DissectedLayer[] {
     const layers: DissectedLayer[] = [];
@@ -219,8 +771,14 @@ function dissectFrame(raw: Uint8Array): DissectedLayer[] {
         if (tcpFlags & 0x08) { flagNames.push('PSH'); }
         if (tcpFlags & 0x10) { flagNames.push('ACK'); }
         if (tcpFlags & 0x20) { flagNames.push('URG'); }
+
+        const server = serverFromPorts(srcPort, dstPort);
+        const tcpLabel = server
+            ? `Transmission Control Protocol  [${server} :${dstPort > srcPort ? dstPort : srcPort}]`
+            : 'Transmission Control Protocol';
+
         layers.push({
-            label: 'Transmission Control Protocol',
+            label: tcpLabel,
             color: '#e6a23c',
             fields: [
                 { name: 'Source Port', value: String(srcPort) },
@@ -234,9 +792,76 @@ function dissectFrame(raw: Uint8Array): DissectedLayer[] {
             offset: payloadOff,
             length: dataOff,
         });
+
         // TCP payload
         const tcpPayOff = payloadOff + dataOff;
         const tcpPayLen = raw.length - tcpPayOff;
+
+        if (tcpPayLen > 0 && server) {
+            // ── SCERT parsing ──
+            const tcpPayload = raw.slice(tcpPayOff);
+            const scertMsgs  = parseSCERT(tcpPayload, tcpPayOff);
+
+            if (scertMsgs.length > 0) {
+                for (const msg of scertMsgs) {
+                    const hdrLen = msg.isEncrypted ? 7 : 3;
+                    const scertFields: DissectedField[] = [
+                        { name: 'Server',       value: server },
+                        { name: 'Message Type', value: `0x${toHex(msg.msgType)} — ${msg.msgTypeName}` },
+                        { name: 'Encrypted',    value: msg.isEncrypted ? `Yes (hash: 0x${toHex(msg.hash!, 8)})` : 'No' },
+                        { name: 'Payload Length', value: `${msg.payloadLen} bytes` },
+                    ];
+
+                    layers.push({
+                        label: `SCERT [${server}]  ${msg.msgTypeName}`,
+                        color: '#c792ea',
+                        fields: scertFields,
+                        offset: msg.frameOffset,
+                        length: hdrLen,
+                    });
+
+                    // Medius APP sub-layer
+                    if (msg.medius) {
+                        const m = msg.medius;
+                        layers.push({
+                            label: `Medius [${m.msgClassName}]  ${m.msgTypeName}`,
+                            color: '#ff9580',
+                            fields: [
+                                { name: 'Message Class', value: `0x${toHex(m.msgClass)} — ${m.msgClassName}` },
+                                { name: 'Message Type',  value: `0x${toHex(m.msgType)} — ${m.msgTypeName}` },
+                                { name: 'Payload Length', value: `${msg.payloadLen - 2} bytes` },
+                            ],
+                            offset: m.frameOffset,
+                            length: 2,
+                        });
+
+                        // Medius payload (remainder after 2-byte header)
+                        const mediusPayLen = msg.payloadLen - 2;
+                        if (mediusPayLen > 0) {
+                            layers.push({
+                                label: `Medius Payload (${mediusPayLen} bytes)`,
+                                color: '#909399',
+                                fields: [{ name: 'Length', value: `${mediusPayLen} bytes` }],
+                                offset: m.frameOffset + 2,
+                                length: mediusPayLen,
+                            });
+                        }
+                    } else if (msg.payloadLen > 0) {
+                        // Raw SCERT payload (non-APP messages)
+                        layers.push({
+                            label: `SCERT Payload (${msg.payloadLen} bytes)`,
+                            color: '#909399',
+                            fields: [{ name: 'Length', value: `${msg.payloadLen} bytes` }],
+                            offset: msg.frameOffset + hdrLen,
+                            length: msg.payloadLen,
+                        });
+                    }
+                }
+                return layers;
+            }
+        }
+
+        // Fallback: generic TCP data layer
         if (tcpPayLen > 0) {
             layers.push({
                 label: `Data (${tcpPayLen} bytes)`,
@@ -341,6 +966,30 @@ function packetInfoSummary(raw: Uint8Array): string {
             if (flags & 0x01) { fl.push('FIN'); }
             if (flags & 0x04) { fl.push('RST'); }
             if (flags & 0x08) { fl.push('PSH'); }
+
+            // ── SCERT summary ──
+            const server = serverFromPorts(sp, dp);
+            if (server) {
+                const tcpHdrLen = ((raw[payOff + 12] >> 4) & 0xF) * 4;
+                const tcpPayOff = payOff + tcpHdrLen;
+                if (tcpPayOff < raw.length) {
+                    const scertMsgs = parseSCERT(raw.slice(tcpPayOff), tcpPayOff);
+                    if (scertMsgs.length > 0) {
+                        const first = scertMsgs[0];
+                        const port  = MEDIUS_PORTS.has(dp) ? dp : sp;
+                        let summary = `[${server}:${port}] ${first.msgTypeName}`;
+                        if (first.medius) {
+                            summary += ` → ${first.medius.msgTypeName}`;
+                        }
+                        if (scertMsgs.length > 1) {
+                            summary += ` (+${scertMsgs.length - 1} more)`;
+                        }
+                        return summary;
+                    }
+                }
+                return `${srcIP}:${sp} → ${dstIP}:${dp}  [${server}] TCP [${fl.join(',')}]`;
+            }
+
             return `${srcIP}:${sp} → ${dstIP}:${dp}  ${pn} [${fl.join(',')}]`;
         }
         return `${srcIP}:${sp} → ${dstIP}:${dp}  ${pn}`;
@@ -354,7 +1003,15 @@ function packetProtocol(raw: Uint8Array): string {
     const et = readU16BE(raw, 12);
     if (et === 0x0806) { return 'ARP'; }
     if (et !== 0x0800 || raw.length < 24) { return etherTypeName(et); }
-    return ipProtoName(raw[23]);
+    const proto = raw[23];
+    if (proto !== 6 || raw.length < 34) { return ipProtoName(proto); }
+    const ihl    = (raw[14] & 0xF) * 4;
+    const payOff = 14 + ihl;
+    if (raw.length < payOff + 4) { return 'TCP'; }
+    const sp = readU16BE(raw, payOff);
+    const dp = readU16BE(raw, payOff + 2);
+    if (serverFromPorts(sp, dp)) { return 'SCERT'; }
+    return 'TCP';
 }
 
 /**
@@ -514,6 +1171,7 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
 .pv-table tr.pv-selected { background: #094771; }
 .pv-dir-tx { color: #e6a23c; }
 .pv-dir-rx { color: #67c23a; }
+.pv-server { color: #c792ea; font-weight: 600; }
 
 /* ── Dissection tree ──────────────────────────────────────────── */
 .pv-tree { padding: 4px 0; }
@@ -778,10 +1436,11 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
                             <th style="width:50px">No.</th>
                             <th style="width:80px">Time</th>
                             <th style="width:40px">Dir</th>
-                            <th style="width:140px">Source</th>
-                            <th style="width:140px">Destination</th>
-                            <th style="width:60px">Proto</th>
-                            <th style="width:50px">Len</th>
+                            <th style="width:60px">Server</th>
+                            <th style="width:130px">Source</th>
+                            <th style="width:130px">Destination</th>
+                            <th style="width:55px">Proto</th>
+                            <th style="width:45px">Len</th>
                             <th>Info</th>
                         </tr>
                     </thead>
@@ -792,6 +1451,7 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
                                 <td>{{ pkt.index + 1 }}</td>
                                 <td>{{ pkt.timeStr }}</td>
                                 <td [class]="pkt.dirClass">{{ pkt.dirLabel }}</td>
+                                <td class="pv-server">{{ pkt.server }}</td>
                                 <td>{{ pkt.src }}</td>
                                 <td>{{ pkt.dst }}</td>
                                 <td>{{ pkt.proto }}</td>
@@ -904,6 +1564,7 @@ export class PacketViewerComponent {
         timeStr: string;
         dirLabel: string;
         dirClass: string;
+        server: string;
         src: string;
         dst: string;
         proto: string;
@@ -918,6 +1579,7 @@ export class PacketViewerComponent {
         if (!f) { return all; }
         return all.filter(p =>
             p.dirLabel.toLowerCase().includes(f) ||
+            p.server.toLowerCase().includes(f) ||
             p.src.toLowerCase().includes(f) ||
             p.dst.toLowerCase().includes(f) ||
             p.proto.toLowerCase().includes(f) ||
@@ -1090,11 +1752,23 @@ export class PacketViewerComponent {
             const relTime = ((pkt.timestampUs - this._baseTimestamp) / 1_000_000).toFixed(6);
             const src = raw.length >= 26 && readU16BE(raw, 12) === 0x0800 ? fmtIP(raw, 26) : fmtMac(raw, 6);
             const dst = raw.length >= 30 && readU16BE(raw, 12) === 0x0800 ? fmtIP(raw, 30) : fmtMac(raw, 0);
+
+            // Determine server name from TCP port numbers (if IPv4 TCP)
+            let server = '';
+            if (readU16BE(raw, 12) === 0x0800 && raw.length > 23 && raw[23] === 6) {
+                const ihl    = (raw[14] & 0xF) * 4;
+                const payOff = 14 + ihl;
+                if (raw.length >= payOff + 4) {
+                    server = serverFromPorts(readU16BE(raw, payOff), readU16BE(raw, payOff + 2));
+                }
+            }
+
             return {
                 index: i,
                 timeStr: relTime,
                 dirLabel: pkt.directionName,
                 dirClass: pkt.direction === 0 ? 'pv-dir-tx' : 'pv-dir-rx',
+                server,
                 src,
                 dst,
                 proto: packetProtocol(raw),

@@ -82,6 +82,17 @@ public class MultiplayerConfig
     /// </summary>
     public List<int> AllowedAppIds { get; set; } = new() { 10683, 10684 };
 
+    // ── Custom DNS mappings ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Custom hostname → IP overrides served by the built-in DNS server.
+    /// The DNS server answers A-record queries for any hostname in this map
+    /// with the mapped IP, in addition to the built-in DNAS intercept rules.
+    /// Example:
+    ///   "muis.example.com": "192.168.2.89"
+    /// </summary>
+    public Dictionary<string, string> DnsMappings { get; set; } = new();
+
     /// <summary>When true, accounts are auto-created on first login (no separate registration).</summary>
     public bool AutoCreateAccounts { get; set; } = true;
 
