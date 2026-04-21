@@ -19,7 +19,8 @@ const SNAP_PREVIEW = 5;
  *
  * Organised as collapsible accordion sections:
  *  - Connection (default open): PCSX2/BIOS/Game selectors + Connect
- *  - Actions (default collapsed): Run, Restart, Network, Import, Snapshot, Screenshot
+ *  - Actions (default collapsed): Run, Restart, Import, Snapshot, Screenshot
+ *  - Network (default collapsed): Server, DNS Mapping, Config
  *  - Snapshots (default open): scrollable snapshot list with show-more toggle
  *  - Tools (default collapsed): AI Config, Packet Viewer
  *  - Memories (default collapsed): MCP Memory overlay (preserved in DOM when collapsed)
@@ -119,8 +120,6 @@ const SNAP_PREVIEW = 5;
                 ⟳ Restart
               </button>
 
-              <button id="startNetworkBtn" (click)="startNetworkClick.emit()">🌐 Network</button>
-
               <button id="importBinBtn" (click)="importBinClick.emit()" [disabled]="!isConnected()">
                 ⬆ Import
               </button>
@@ -140,6 +139,36 @@ const SNAP_PREVIEW = 5;
 
               <button id="docsBtn" (click)="docsClick.emit()">📖 Docs</button>
               <button id="archiveDocsBtn" (click)="archiveDocsClick.emit()">📚 Archive</button>
+
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- ── Network ──────────────────────────────────────────────────────── -->
+      <div class="acc-section">
+        <button class="acc-header" (click)="netOpen.set(!netOpen())">
+          <span class="acc-chevron">{{netOpen() ? '▾' : '▸'}}</span>
+          <span class="acc-title">Network</span>
+        </button>
+        @if (netOpen()) {
+          <div class="acc-body">
+            <div class="btn-grid">
+
+              <button id="startNetworkBtn" (click)="startNetworkClick.emit()"
+                      title="Launch the CodeDesigner Multiplayer server">
+                🖥 Server
+              </button>
+
+              <button id="dnsMapBtn" (click)="openDnsMappingClick.emit()"
+                      title="Edit custom hostname → IP DNS mappings for the Multiplayer server">
+                🗺 DNS Mapping
+              </button>
+
+              <button id="netConfigBtn" (click)="openNetConfigClick.emit()"
+                      title="Open the Multiplayer server config.json for editing">
+                ⚙ Config
+              </button>
 
             </div>
           </div>
@@ -302,6 +331,8 @@ export class SettingsTabComponent {
   readonly openMemoryCardClick   = output<void>();
   readonly openHddClick          = output<void>();
   readonly openMemoryViewClick = output<string>();
+  readonly openDnsMappingClick   = output<void>();
+  readonly openNetConfigClick    = output<void>();
 
   // ── Outputs (memory relay) ──────────────────────────────────────────────────
 
@@ -320,6 +351,7 @@ export class SettingsTabComponent {
 
   readonly connOpen  = signal(true);
   readonly actOpen   = signal(false);
+  readonly netOpen   = signal(false);
   readonly snapOpen  = signal(true);
   readonly toolsOpen = signal(false);
   readonly memOpen   = signal(false);
