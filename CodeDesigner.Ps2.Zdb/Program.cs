@@ -35,7 +35,7 @@ namespace CodeDesigner.Ps2.ZDBManager
             while (true)
             {
                 Console.Write($"{currentDir}> ");
-                string input = Console.ReadLine();
+                string input = Console.ReadLine() ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(input))
                     continue;
 
