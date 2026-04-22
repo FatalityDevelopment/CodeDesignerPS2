@@ -98,40 +98,35 @@ public sealed partial class CodeDesignerPs2Tools
             if (root.TryGetProperty("Error", out var err))
                 return $"Error: {err.GetString()}";
 
-            if (!root.TryGetProperty("CapturedPackets", out var packets) ||
-                packets.ValueKind != JsonValueKind.Array)
+            if (!root.TryGetProperty("ParsedPacketRows", out var rows) ||
+                rows.ValueKind != JsonValueKind.Array)
                 return SimpleMessage(json);
 
-            var sb = new StringBuilder();
-            int count = 0;
-            foreach (var p in packets.EnumerateArray())
-            {
-                count++;
-                string dir = p.TryGetProperty("directionName", out var dn) ? dn.GetString() ?? "?" : "?";
-                ulong ts = p.TryGetProperty("timestampUs", out var t) ? t.GetUInt64() : 0;
-                int len = p.TryGetProperty("length", out var l) ? l.GetInt32() : 0;
-                sb.AppendLine($"  [{count}] {dir} ts={ts}µs len={len}B");
-
-                // Show hex dump of full frame so packets can be analysed inline
-                if (p.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.String)
-                {
-                    byte[] bytes = Convert.FromBase64String(dataEl.GetString()!);
-                    int dumpLen = bytes.Length;
-                    for (int off = 0; off < dumpLen; off += 16)
-                    {
-                        int chunk = Math.Min(16, dumpLen - off);
-                        sb.Append("       ");
-                        for (int j = 0; j < chunk; j++)
-                            sb.Append($"{bytes[off + j]:X2} ");
-                        sb.AppendLine();
-                    }
-                }
-            }
-
+            int count = rows.GetArrayLength();
             if (count == 0)
                 return "No packets in capture queue.";
 
-            return $"Drained {count} packet(s):\n{sb.ToString().TrimEnd()}";
+            var sb = new StringBuilder();
+            sb.AppendLine($"Drained {count} packet(s):");
+            sb.AppendLine();
+            sb.AppendLine($"{"No.",-5} {"Time",-13} {"Dir",-4} {"Server",-6} {"Source",-22} {"Destination",-22} {"Proto",-6} {"Len",-5} Info");
+            sb.AppendLine(new string('─', 120));
+
+            foreach (var r in rows.EnumerateArray())
+            {
+                int    no     = r.TryGetProperty("no",     out var n)  ? n.GetInt32()     : 0;
+                string time   = r.TryGetProperty("time",   out var t)  ? t.GetString()  ?? "" : "";
+                string dir    = r.TryGetProperty("dir",    out var d)  ? d.GetString()  ?? "" : "";
+                string server = r.TryGetProperty("server", out var sv) ? sv.GetString() ?? "" : "";
+                string src    = r.TryGetProperty("src",    out var s)  ? s.GetString()  ?? "" : "";
+                string dst    = r.TryGetProperty("dst",    out var ds) ? ds.GetString() ?? "" : "";
+                string proto  = r.TryGetProperty("proto",  out var pr) ? pr.GetString() ?? "" : "";
+                int    len    = r.TryGetProperty("len",    out var l)  ? l.GetInt32()     : 0;
+                string info   = r.TryGetProperty("info",   out var i)  ? i.GetString()  ?? "" : "";
+                sb.AppendLine($"{no,-5} {time,-13} {dir,-4} {server,-6} {src,-22} {dst,-22} {proto,-6} {len,-5} {info}");
+            }
+
+            return sb.ToString().TrimEnd();
         }
         catch { return json; }
     }

@@ -4,7 +4,7 @@ using CodeDesigner.Ps2.Emulator;
 namespace CodeDesigner.Ps2.CheatEngine
 {
     /// <summary>
-    /// Implements <see cref="IByteEditor"/> backed by the PS2 EE main RAM.
+    /// Implements <see cref="IByteEditor"/> backed by the PS2 EE RAM.
     /// Address translation mirrors the logic in SocketServer.HandleReadMem /
     /// HandleWriteMem so that cheat addresses (typically with a 0x20000000 offset)
     /// resolve to the correct physical RAM location.

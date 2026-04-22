@@ -19,6 +19,19 @@ export interface CapturedPacket {
     data: string;
 }
 
+/** Pre-parsed table row returned by the Bridge alongside a captured packet. */
+export interface ParsedPacketRow {
+    no: number;
+    time: string;
+    dir: string;
+    server: string;
+    src: string;
+    dst: string;
+    proto: string;
+    len: number;
+    info: string;
+}
+
 /** Adapter status snapshot. */
 export interface NetStatus {
     enabled: boolean;
@@ -126,8 +139,17 @@ const MEDIUS_PORTS = new Map<number, string>([
     [10075, 'MLS'],
     [10070, 'DME'],
     [10069, 'NAT'],
-    [10060, 'DNAS'],
+    [443, 'DNAS'],
+    [53, 'DNS'],
 ]);
+
+/**
+ * TCP ports that carry the SCERT binary protocol.
+ * Port 443 (DNAS) is HTTPS/TLS — not SCERT — so it is excluded here to
+ * prevent TLS handshake bytes from being misread as SCERT messages.
+ * Port 53 (DNS) is excluded because it is UDP-only.
+ */
+const SCERT_DECODE_PORTS = new Set([10071, 10078, 10075, 10070, 10069]);
 
 /** RT_MSG_TYPE wire values → display name. Source: ScertTypes.cs RT_MSG_TYPE enum. */
 const RT_MSG_TYPE_NAMES = new Map<number, string>([
@@ -570,6 +592,9 @@ interface ScertParsed {
  * checking both src and dst against MEDIUS_PORTS.
  */
 function serverFromPorts(srcPort: number, dstPort: number): string {
+    if(MEDIUS_PORTS.get(srcPort) == "DNS")
+        return 'DNS';
+
     return MEDIUS_PORTS.get(dstPort) ?? MEDIUS_PORTS.get(srcPort) ?? '';
 }
 
@@ -599,7 +624,7 @@ const SCERT_APP_MSG_TYPES = new Set([
  * @param frameBase   The absolute byte offset of tcpPayload[0] within the full
  *                    Ethernet frame, so that frameOffset fields are frame-relative.
  */
-function parseSCERT(tcpPayload: Uint8Array, frameBase: number): ScertParsed[] {
+function parseSCERT(tcpPayload: Uint8Array, frameBase: number, direction = -1): ScertParsed[] {
     const msgs: ScertParsed[] = [];
     let off = 0;
 
@@ -654,11 +679,14 @@ function parseSCERT(tcpPayload: Uint8Array, frameBase: number): ScertParsed[] {
         off += totalSize;
     }
 
+    // Note: the PS2 sends cheat query responses using the same type byte as
+    // RT_MSG_SERVER_CHEAT_QUERY (0x1D), so direction-based filtering is intentionally
+    // omitted here to avoid hiding those packets.
     return msgs;
 }
 
 /** Lightweight Ethernet/IPv4/ARP/TCP/UDP/ICMP dissector. */
-function dissectFrame(raw: Uint8Array): DissectedLayer[] {
+function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
     const layers: DissectedLayer[] = [];
     if (raw.length < 14) { return layers; }
 
@@ -795,12 +823,14 @@ function dissectFrame(raw: Uint8Array): DissectedLayer[] {
 
         // TCP payload
         const tcpPayOff = payloadOff + dataOff;
-        const tcpPayLen = raw.length - tcpPayOff;
+        // Use IP total length to exclude Ethernet padding from TCP payload length
+        const tcpPayLen = totalLen - ihl - dataOff;
 
-        if (tcpPayLen > 0 && server) {
+        const isScertPort = SCERT_DECODE_PORTS.has(srcPort) || SCERT_DECODE_PORTS.has(dstPort);
+        if (tcpPayLen > 0 && server && isScertPort) {
             // ── SCERT parsing ──
-            const tcpPayload = raw.slice(tcpPayOff);
-            const scertMsgs  = parseSCERT(tcpPayload, tcpPayOff);
+            const tcpPayload = raw.slice(tcpPayOff, tcpPayOff + tcpPayLen);
+            const scertMsgs  = parseSCERT(tcpPayload, tcpPayOff, direction);
 
             if (scertMsgs.length > 0) {
                 for (const msg of scertMsgs) {
@@ -935,7 +965,7 @@ function icmpTypeName(t: number): string {
 }
 
 /** Generate the brief "Info" column summary for a packet. */
-function packetInfoSummary(raw: Uint8Array): string {
+function packetInfoSummary(raw: Uint8Array, direction?: number): string {
     if (raw.length < 14) { return 'Too short'; }
     const etherType = readU16BE(raw, 12);
     if (etherType === 0x0806 && raw.length >= 42) {
@@ -970,27 +1000,35 @@ function packetInfoSummary(raw: Uint8Array): string {
             // ── SCERT summary ──
             const server = serverFromPorts(sp, dp);
             if (server) {
-                const tcpHdrLen = ((raw[payOff + 12] >> 4) & 0xF) * 4;
-                const tcpPayOff = payOff + tcpHdrLen;
-                if (tcpPayOff < raw.length) {
-                    const scertMsgs = parseSCERT(raw.slice(tcpPayOff), tcpPayOff);
-                    if (scertMsgs.length > 0) {
-                        const first = scertMsgs[0];
-                        const port  = MEDIUS_PORTS.has(dp) ? dp : sp;
-                        let summary = `[${server}:${port}] ${first.msgTypeName}`;
-                        if (first.medius) {
-                            summary += ` → ${first.medius.msgTypeName}`;
+                if (SCERT_DECODE_PORTS.has(sp) || SCERT_DECODE_PORTS.has(dp)) {
+                    const ipTotalLen = readU16BE(raw, 16);
+                    const tcpHdrLen = ((raw[payOff + 12] >> 4) & 0xF) * 4;
+                    const tcpPayOff = payOff + tcpHdrLen;
+                    // Use IP total length to exclude Ethernet padding from TCP payload length
+                    const tcpPayLen = ipTotalLen - ihl - tcpHdrLen;
+                    if (tcpPayLen > 0) {
+                        const scertMsgs = parseSCERT(raw.slice(tcpPayOff, tcpPayOff + tcpPayLen), tcpPayOff, direction);
+                        if (scertMsgs.length > 0) {
+                            const first = scertMsgs[0];
+                            const port  = MEDIUS_PORTS.has(dp) ? dp : sp;
+                            let summary = `[${server}:${port}] ${first.msgTypeName}`;
+                            if (first.medius) {
+                                summary += ` → ${first.medius.msgTypeName}`;
+                            }
+                            if (scertMsgs.length > 1) {
+                                summary += ` (+${scertMsgs.length - 1} more)`;
+                            }
+                            return summary;
                         }
-                        if (scertMsgs.length > 1) {
-                            summary += ` (+${scertMsgs.length - 1} more)`;
-                        }
-                        return summary;
                     }
                 }
                 return `${srcIP}:${sp} → ${dstIP}:${dp}  [${server}] TCP [${fl.join(',')}]`;
             }
 
             return `${srcIP}:${sp} → ${dstIP}:${dp}  ${pn} [${fl.join(',')}]`;
+        }
+        if (proto === 17 && (sp === 53 || dp === 53)) {
+            return `${srcIP}:${sp} → ${dstIP}:${dp}  DNS`;
         }
         return `${srcIP}:${sp} → ${dstIP}:${dp}  ${pn}`;
     }
@@ -1004,23 +1042,48 @@ function packetProtocol(raw: Uint8Array): string {
     if (et === 0x0806) { return 'ARP'; }
     if (et !== 0x0800 || raw.length < 24) { return etherTypeName(et); }
     const proto = raw[23];
-    if (proto !== 6 || raw.length < 34) { return ipProtoName(proto); }
     const ihl    = (raw[14] & 0xF) * 4;
     const payOff = 14 + ihl;
-    if (raw.length < payOff + 4) { return 'TCP'; }
+    if (proto === 17) {
+        if (raw.length >= payOff + 4) {
+            const sp = readU16BE(raw, payOff);
+            const dp = readU16BE(raw, payOff + 2);
+            if (sp === 53 || dp === 53) { return 'DNS'; }
+        }
+        return 'UDP';
+    }
+    if (proto !== 6 || raw.length < payOff + 4) { return ipProtoName(proto); }
     const sp = readU16BE(raw, payOff);
     const dp = readU16BE(raw, payOff + 2);
-    if (serverFromPorts(sp, dp)) { return 'SCERT'; }
+    if (SCERT_DECODE_PORTS.has(sp) || SCERT_DECODE_PORTS.has(dp)) { return 'SCERT'; }
     return 'TCP';
 }
 
 /**
- * Build a structured hex dump with an optional highlighted byte range.
- * Returns HTML matching the disassembler memory webview layout —
- * a header row followed by data rows using flex-based alignment with
- * distinct colours for address, data bytes, and ASCII columns.
+ * Build a structured hex dump with per-layer field colouring.
+ *
+ * Each layer's bytes are coloured with that layer's accent colour (text).
+ * Bytes belonging to the selected layer additionally receive the `pv-hex-hl`
+ * background highlight so they stand out clearly.
+ *
+ * Later layers in the array override earlier ones (innermost wins), matching
+ * the order dissectFrame pushes layers: Ethernet → IP → TCP → SCERT → Medius.
  */
-function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
+function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerIdx = -1): string {
+    // Per-byte colour and selection state — innermost (later) layer wins.
+    const byteColor  = new Array<string | undefined>(raw.length);
+    const byteSel    = new Uint8Array(raw.length);
+
+    for (let li = 0; li < layers.length; li++) {
+        const layer = layers[li];
+        const end   = Math.min(layer.offset + layer.length, raw.length);
+        const isSel = li === selectedLayerIdx;
+        for (let b = layer.offset; b < end; b++) {
+            byteColor[b] = layer.color;
+            byteSel[b]   = isSel ? 1 : 0;
+        }
+    }
+
     // Header row
     let header = '<div class="pv-hex-row">';
     header += '<span class="pv-hex-addr">Offset</span>';
@@ -1042,12 +1105,23 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
         for (let j = 0; j < 16; j++) {
             if (j && j % 4 === 0) { bytesHtml += '<span class="pv-hex-gap"></span>'; }
             if (i + j < raw.length) {
-                const b = raw[i + j];
-                const inHl = hlOff >= 0 && (i + j) >= hlOff && (i + j) < hlOff + hlLen;
-                const hlClass = inHl ? ' pv-hex-hl' : '';
-                bytesHtml += `<span class="pv-hex-byte${hlClass}">${toHex(b)}</span>`;
-                const ch = (b >= 0x20 && b < 0x7F) ? String.fromCharCode(b) : '.';
-                asciiHtml += `<span class="pv-hex-char${hlClass}">${ch}</span>`;
+                const b   = raw[i + j];
+                const sel = byteSel[i + j];
+                const col = byteColor[i + j];
+                const ch  = (b >= 0x20 && b < 0x7F) ? String.fromCharCode(b) : '.';
+                if (sel) {
+                    // Selected layer — prominent background highlight.
+                    bytesHtml += `<span class="pv-hex-byte pv-hex-hl">${toHex(b)}</span>`;
+                    asciiHtml += `<span class="pv-hex-char pv-hex-hl">${ch}</span>`;
+                } else if (col) {
+                    // Non-selected layer — layer accent colour on text only.
+                    const sty = ` style="color:${col}"`;
+                    bytesHtml += `<span class="pv-hex-byte"${sty}>${toHex(b)}</span>`;
+                    asciiHtml += `<span class="pv-hex-char"${sty}>${ch}</span>`;
+                } else {
+                    bytesHtml += `<span class="pv-hex-byte">${toHex(b)}</span>`;
+                    asciiHtml += `<span class="pv-hex-char">${ch}</span>`;
+                }
             } else {
                 bytesHtml += '<span class="pv-hex-byte">  </span>';
                 asciiHtml += '<span class="pv-hex-char"> </span>';
@@ -1353,6 +1427,9 @@ function hexDump(raw: Uint8Array, hlOff = -1, hlLen = 0): string {
         <div class="pv-sep"></div>
         <button (click)="onOpenPcap()" title="Open a .pcap file">📂 Open</button>
         <button (click)="onSavePcap()" [disabled]="packets().length === 0" title="Save capture as .pcap">💾 Save</button>
+        @if (filename()) {
+            <span style="font-size:12px;color:#aaa;white-space:nowrap;overflow:hidden;max-width:220px;text-overflow:ellipsis" [title]="filename()">📄 {{ filename() }}</span>
+        }
         <div class="pv-sep"></div>
         <label style="font-size:12px;color:#999">Direction</label>
         <select [value]="captureDirection()" (change)="captureDirection.set(+$any($event).target.value)">
@@ -1536,12 +1613,15 @@ export class PacketViewerComponent {
     readonly adapterStatus = signal<NetStatus | null>(null);
     readonly stats = signal<NetStats | null>(null);
     readonly statusMessage = signal('');
+    readonly filename = signal('');
     readonly selectedIndex = signal(-1);
     readonly selectedLayerIdx = signal(-1);
     readonly expandedLayers = signal<Set<number>>(new Set());
 
     /** Internal raw packet storage. */
     private _rawPackets: Array<{ pkt: CapturedPacket; raw: Uint8Array }> = [];
+    /** Pre-parsed table rows from the Bridge (null = use local fallback). */
+    private _parsedRowCache: Array<ParsedPacketRow | null> = [];
     /** First timestamp for relative time display. */
     private _baseTimestamp = 0;
     /** Monotonic packet counter. */
@@ -1593,19 +1673,17 @@ export class PacketViewerComponent {
     readonly selectedLayers = computed(() => {
         const idx = this.selectedIndex();
         if (idx < 0 || idx >= this._rawPackets.length) { return []; }
-        return dissectFrame(this._rawPackets[idx].raw);
+        const entry = this._rawPackets[idx];
+        return dissectFrame(entry.raw, entry.pkt.direction);
     });
 
     readonly hexDumpHtml = computed(() => {
         const idx = this.selectedIndex();
         if (idx < 0 || idx >= this._rawPackets.length) { return ''; }
-        const raw = this._rawPackets[idx].raw;
-        const li = this.selectedLayerIdx();
+        const raw    = this._rawPackets[idx].raw;
+        const li     = this.selectedLayerIdx();
         const layers = this.selectedLayers();
-        if (li >= 0 && li < layers.length) {
-            return hexDump(raw, layers[li].offset, layers[li].length);
-        }
-        return hexDump(raw);
+        return hexDump(raw, layers, li);
     });
 
     // ── Public API (called by page component) ────────────────────────────────
@@ -1618,17 +1696,23 @@ export class PacketViewerComponent {
         this.stats.set(s);
     }
 
-    addCapturedPackets(packets: CapturedPacket[]): void {
-        for (const pkt of packets) {
+    addCapturedPackets(packets: CapturedPacket[], parsedRows?: ParsedPacketRow[]): void {
+        for (let i = 0; i < packets.length; i++) {
+            const pkt = packets[i];
             const raw = b64ToBytes(pkt.data);
             if (this._baseTimestamp === 0) { this._baseTimestamp = pkt.timestampUs; }
             this._rawPackets.push({ pkt, raw });
+            this._parsedRowCache.push(parsedRows?.[i] ?? null);
         }
         this._rebuildPacketList();
     }
 
     showStatus(msg: string): void {
         this.statusMessage.set(msg);
+    }
+
+    setFilename(name: string): void {
+        this.filename.set(name);
     }
 
     startPolling(): void {
@@ -1687,12 +1771,14 @@ export class PacketViewerComponent {
 
     onClear(): void {
         this._rawPackets = [];
+        this._parsedRowCache = [];
         this._baseTimestamp = 0;
         this._packetCounter = 0;
         this.selectedIndex.set(-1);
         this.selectedLayerIdx.set(-1);
         this.expandedLayers.set(new Set());
         this.packets.set([]);
+        this.filename.set('');
         this.onAction?.({ type: 'clearPackets' });
     }
 
@@ -1749,17 +1835,39 @@ export class PacketViewerComponent {
     private _rebuildPacketList(): void {
         const list = this._rawPackets.map((entry, i) => {
             const { pkt, raw } = entry;
+            const parsed = this._parsedRowCache[i];
+
+            if (parsed) {
+                // Use pre-parsed data from the Bridge.
+                return {
+                    index: i,
+                    timeStr: parsed.time,
+                    dirLabel: pkt.directionName,
+                    dirClass: pkt.direction === 0 ? 'pv-dir-tx' : 'pv-dir-rx',
+                    server: parsed.server,
+                    src: parsed.src,
+                    dst: parsed.dst,
+                    proto: parsed.proto,
+                    length: parsed.len,
+                    info: parsed.info,
+                };
+            }
+
+            // Fallback: local parsing (used for packets loaded from pcap files).
             const relTime = ((pkt.timestampUs - this._baseTimestamp) / 1_000_000).toFixed(6);
             const src = raw.length >= 26 && readU16BE(raw, 12) === 0x0800 ? fmtIP(raw, 26) : fmtMac(raw, 6);
             const dst = raw.length >= 30 && readU16BE(raw, 12) === 0x0800 ? fmtIP(raw, 30) : fmtMac(raw, 0);
 
             // Determine server name from TCP port numbers (if IPv4 TCP)
             let server = '';
-            if (readU16BE(raw, 12) === 0x0800 && raw.length > 23 && raw[23] === 6) {
-                const ihl    = (raw[14] & 0xF) * 4;
-                const payOff = 14 + ihl;
-                if (raw.length >= payOff + 4) {
-                    server = serverFromPorts(readU16BE(raw, payOff), readU16BE(raw, payOff + 2));
+            if (readU16BE(raw, 12) === 0x0800 && raw.length > 23) {
+                const ipProto = raw[23];
+                if (ipProto === 6 || ipProto === 17) {
+                    const ihl    = (raw[14] & 0xF) * 4;
+                    const payOff = 14 + ihl;
+                    if (raw.length >= payOff + 4) {
+                        server = serverFromPorts(readU16BE(raw, payOff), readU16BE(raw, payOff + 2));
+                    }
                 }
             }
 
@@ -1773,7 +1881,7 @@ export class PacketViewerComponent {
                 dst,
                 proto: packetProtocol(raw),
                 length: pkt.length,
-                info: packetInfoSummary(raw),
+                info: packetInfoSummary(raw, pkt.direction),
             };
         });
         this.packets.set(list);

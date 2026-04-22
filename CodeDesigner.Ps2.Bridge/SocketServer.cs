@@ -7,20 +7,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
-using System.Threading;
-using System.Threading.Tasks;
-
-using CodeDesigner.Ps2.MCManager;
-using CodeDesigner.Ps2.Common;
-using CodeDesigner.Ps2.CheatEngine;
 using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Emulator;
-using CodeDesigner.Ps2.Emulator.Hardware;
-using CodeDesigner.Ps2.Emulator.IOP;
 using Microsoft.EntityFrameworkCore;
-
-using CheatPorterLib = CodeDesigner.Ps2.CheatEngine.CheatPorter;
 using CodeDesigner.Ps2.LabelManager;
 
 namespace CodeDesigner.Ps2.Bridge
@@ -223,14 +212,6 @@ namespace CodeDesigner.Ps2.Bridge
             McpMemoryRepo = new DbMcpMemoryRepository(db);
             McpAgentRepo  = new DbMcpAgentRepository(db);
             McpOrchestrationRepo = new DbMcpOrchestrationRepository(db);
-
-            // Migrate legacy flat-file data into the DB on first run (idempotent).
-            MigrateLegacySettingsToDb();
-
-            // Warm up the legacy _labels/_structs dictionaries from the DB so that
-            // existing handlers continue to work without modification.
-            LoadLabels();
-            LoadStructs();
         }
 
         /// <inheritdoc/>
@@ -252,62 +233,6 @@ namespace CodeDesigner.Ps2.Bridge
             var ctx = new CodeDesignerDbContext(opts);
             ctx.Database.Migrate();
             return ctx;
-        }
-
-        /// <summary>
-        /// One-time migration: if <c>codedesigner-settings.json</c> is present and the
-        /// <c>ui.selectedEmulator</c> key is not yet in the DB, import the file values as
-        /// <see cref="CodeDesigner.Ps2.Database.Entities.Setting"/> rows, then rename the
-        /// file to <c>.bak</c> so the migration is not repeated on the next startup.
-        /// </summary>
-        private void MigrateLegacySettingsToDb()
-        {
-            try
-            {
-                var searchPaths = new[]
-                {
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "codedesigner-settings.json"),
-                    Path.Combine(Directory.GetCurrentDirectory(),       "codedesigner-settings.json"),
-                };
-
-                foreach (var settingsPath in searchPaths)
-                {
-                    if (!File.Exists(settingsPath)) continue;
-
-                    // Only migrate if the target keys are not already set.
-                    bool alreadyMigrated = Db.Settings.AnyAsync(s => s.Key == "ui.selectedEmulator").GetAwaiter().GetResult();
-                    if (alreadyMigrated) break;
-
-                    try
-                    {
-                        var json  = File.ReadAllText(settingsPath);
-                        using var doc = JsonDocument.Parse(json);
-                        var root  = doc.RootElement;
-
-                        void Upsert(string key, string? val)
-                        {
-                            if (string.IsNullOrWhiteSpace(val)) return;
-                            SettingsRepo.SetAsync(key, val).GetAwaiter().GetResult();
-                        }
-
-                        if (root.TryGetProperty("selectedEmulator", out var e)) Upsert("ui.selectedEmulator", e.GetString());
-                        if (root.TryGetProperty("selectedBios",     out var b)) Upsert("ui.selectedBios",     b.GetString());
-                        if (root.TryGetProperty("selectedGame",     out var g)) Upsert("ui.selectedGame",     g.GetString());
-
-                        File.Move(settingsPath, settingsPath + ".bak", overwrite: true);
-                        Console.WriteLine($"[DB] Migrated user preferences from {settingsPath}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[DB] Could not migrate {settingsPath}: {ex.Message}");
-                    }
-                    break;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[DB] Settings migration failed: {ex.Message}");
-            }
         }
 
         /// <summary>
@@ -347,7 +272,7 @@ namespace CodeDesigner.Ps2.Bridge
 
                 switch (entry.Type)
                 {
-                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.Struct:
+                    case LabelManager.Models.LabelType.Struct:
                     {
                         // Struct entry: goes in _structs (keyed by name) AND in _labels (pointer addr).
                         _labels[addr] = (entry.Name, entry.Comment);
@@ -366,16 +291,16 @@ namespace CodeDesigner.Ps2.Bridge
                         break;
                     }
 
-                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.Function:
+                    case LabelManager.Models.LabelType.Function:
                     {
                         // Function: displayed as "FNC_Name". Arg/return regs embedded in comment.
-                        string displayName = CodeDesigner.Ps2.LabelManager.Ps2LabelManager.GetDisplayLabel(entry);
+                        string displayName = Ps2LabelManager.GetDisplayLabel(entry);
                         string? comment    = BuildFunctionComment(entry, entry.Comment);
                         _labels[addr] = (displayName, comment);
                         break;
                     }
 
-                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.Array:
+                    case LabelManager.Models.LabelType.Array:
                     {
                         // Expand to Name[0], Name[1], … when stride + count are known.
                         _labels[addr] = (entry.Name, entry.Comment);
@@ -393,10 +318,10 @@ namespace CodeDesigner.Ps2.Bridge
                         break;
                     }
 
-                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.ArrayOfPointers:
-                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.LinkedList:
-                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.String:
-                    case CodeDesigner.Ps2.LabelManager.Models.LabelType.Address:
+                    case LabelManager.Models.LabelType.ArrayOfPointers:
+                    case LabelManager.Models.LabelType.LinkedList:
+                    case LabelManager.Models.LabelType.String:
+                    case LabelManager.Models.LabelType.Address:
                     default:
                     {
                         // Plain address label (or types requiring runtime resolution).
@@ -411,7 +336,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// Builds an extended comment for a <see cref="LabelType.Function"/> entry that
         /// includes arg/return register annotations when present.
         /// </summary>
-        private static string? BuildFunctionComment(CodeDesigner.Ps2.LabelManager.Models.LabelEntry entry, string? baseComment)
+        private static string? BuildFunctionComment(LabelManager.Models.LabelEntry entry, string? baseComment)
         {
             var parts = new System.Collections.Generic.List<string>();
             if (!string.IsNullOrWhiteSpace(baseComment))
@@ -421,160 +346,6 @@ namespace CodeDesigner.Ps2.Bridge
             if (entry.ReturnRegs is { Count: > 0 })
                 parts.Add("ret: " + string.Join(", ", entry.ReturnRegs));
             return parts.Count > 0 ? string.Join(" | ", parts) : null;
-        }
-
-        /// <summary>
-        /// Load PS2 symbol labels from ps2MemMap.json.
-        /// Searches the application base directory first, then the current working
-        /// directory, so the file can be placed next to the built executable or in
-        /// the directory from which the process was launched.
-        /// </summary>
-        private void LoadLabels()
-        {
-            var searchPaths = new[]
-            {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
-                Path.Combine(Directory.GetCurrentDirectory(), "ps2MemMap.json"),
-                // backward-compat: also check old filename
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2-labels.json"),
-                Path.Combine(Directory.GetCurrentDirectory(), "ps2-labels.json")
-            };
-
-            foreach (var labelsPath in searchPaths)
-            {
-                if (!File.Exists(labelsPath)) continue;
-                try
-                {
-                    var json = File.ReadAllText(labelsPath);
-                    using var doc = JsonDocument.Parse(json);
-                    if (!doc.RootElement.TryGetProperty("symbol", out var symbols)) continue;
-
-                    foreach (var sym in symbols.EnumerateArray())
-                    {
-                        string? addrStr = sym.TryGetProperty("address", out var ap) ? ap.GetString() : null;
-                        string? label   = sym.TryGetProperty("label",   out var lp) ? lp.GetString() : null;
-                        string? comment = sym.TryGetProperty("comment", out var cp) ? cp.GetString() : null;
-
-                        if (addrStr is null || label is null) continue;
-
-                        // Support both "0x1000F000" and plain "268500992" formats
-                        if (addrStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                            addrStr = addrStr[2..];
-
-                        if (uint.TryParse(addrStr,
-                                System.Globalization.NumberStyles.HexNumber,
-                                null, out uint addr))
-                        {
-                            _labels[addr] = (label, comment);
-                        }
-                    }
-                    Console.WriteLine($"[Labels] Loaded {_labels.Count} symbol(s) from {labelsPath}");
-                    return; // use only the first file found
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[Labels] Failed to load {labelsPath}: {ex.Message}");
-                }
-            }
-        }
-
-        /// <summary>
-        /// Load struct definitions from the "structs" array in ps2MemMap.json.
-        /// Searches the same paths as <see cref="LoadLabels"/>.
-        /// </summary>
-        private void LoadStructs()
-        {
-            var searchPaths = new[]
-            {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
-                Path.Combine(Directory.GetCurrentDirectory(),       "ps2MemMap.json")
-            };
-
-            foreach (var path in searchPaths)
-            {
-                if (!File.Exists(path)) continue;
-                try
-                {
-                    var json = File.ReadAllText(path);
-                    using var doc = JsonDocument.Parse(json);
-                    if (!doc.RootElement.TryGetProperty("structs", out var structsEl))
-                    {
-                        Console.WriteLine($"[Structs] No 'structs' array in {path}; 0 struct(s) loaded");
-                        return;
-                    }
-
-                    foreach (var s in structsEl.EnumerateArray())
-                    {
-                        var name    = s.TryGetProperty("name",        out var np) ? np.GetString() : null;
-                        var baseAddr = s.TryGetProperty("baseAddress", out var bp) ? bp.GetString() : null;
-
-                        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(baseAddr)) continue;
-
-                        var entry = new StructEntry { Name = name!, BaseAddress = baseAddr! };
-
-                        if (s.TryGetProperty("members", out var membersEl))
-                        {
-                            foreach (var m in membersEl.EnumerateArray())
-                            {
-                                int  offset     = m.TryGetProperty("offset", out var op) ? op.GetInt32() : 0;
-                                string? mName   = m.TryGetProperty("name",   out var mn) ? mn.GetString() : null;
-                                if (!string.IsNullOrWhiteSpace(mName))
-                                    entry.Members.Add(new StructMemberEntry { Offset = offset, Name = mName! });
-                            }
-                        }
-
-                        _structs[name!] = entry;
-                    }
-                    Console.WriteLine($"[Structs] Loaded {_structs.Count} struct(s) from {path}");
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[Structs] Failed to load structs from {path}: {ex.Message}");
-                }
-            }
-        }
-
-        /// <summary>
-        /// Persist both label symbols and struct definitions to ps2MemMap.json.
-        /// This is the single authoritative write path for the memory-map file so that
-        /// <see cref="LabelHandlers.SaveLabels"/> and <see cref="StructHandlers.SaveStructs"/>
-        /// always produce a consistent file without duplicating write logic.
-        /// </summary>
-        internal void SaveMemoryMap()
-        {
-            var searchPaths = new[]
-            {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ps2MemMap.json"),
-                Path.Combine(Directory.GetCurrentDirectory(),       "ps2MemMap.json")
-            };
-
-            string savePath = searchPaths[0];
-            foreach (var p in searchPaths)
-            {
-                if (File.Exists(p)) { savePath = p; break; }
-            }
-
-            var symbols = _labels
-                .OrderBy(kv => kv.Key)
-                .Select(kv => new LabelEntry
-                {
-                    Address = $"0x{kv.Key:X8}",
-                    Label   = kv.Value.Label,
-                    Comment = kv.Value.Comment
-                })
-                .ToList();
-
-            var structs = _structs.Values
-                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var json = JsonSerializer.Serialize(
-                new { symbol = symbols, structs },
-                new JsonSerializerOptions { WriteIndented = true });
-
-            File.WriteAllText(savePath, json);
-            Console.WriteLine($"[MemMap] Saved {_labels.Count} symbol(s) and {_structs.Count} struct(s) to {savePath}");
         }
 
         public async Task StartAsync()

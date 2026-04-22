@@ -386,7 +386,7 @@ namespace CodeDesigner.Ps2.Bridge
             return bytes;
         }
 
-        // Maximum region size for READMEMREGION (32 MB — covers all of EE main RAM).
+        // Maximum region size for READMEMREGION (32 MB — covers all of EE RAM).
         private const int MaxReadMemRegionSize = 32 * 1024 * 1024;
 
         // Maximum pattern-only scan size (also 32 MB for full EE RAM coverage).
@@ -487,7 +487,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>
         /// Handle SCANPATTERN command — scans a memory range for a byte pattern and
         /// returns only the matching addresses, without returning the raw region bytes.
-        /// Supports up to 32 MB (full EE main RAM).  In PINE mode the scan is done
+        /// Supports up to 32 MB (full EE RAM).  In PINE mode the scan is done
         /// in 1 MB chunks to keep individual PINE requests manageable.
         /// </summary>
         /// <param name="start">Inclusive start address (default 0 = start of EE RAM).</param>

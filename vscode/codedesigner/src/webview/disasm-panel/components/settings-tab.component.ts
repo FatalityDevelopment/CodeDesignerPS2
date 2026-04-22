@@ -157,12 +157,12 @@ const SNAP_PREVIEW = 5;
 
               <button id="startNetworkBtn" (click)="startNetworkClick.emit()"
                       title="Launch the CodeDesigner Multiplayer server">
-                🖥 Server
+                🌐 Start Servers
               </button>
 
-              <button id="dnsMapBtn" (click)="openDnsMappingClick.emit()"
-                      title="Edit custom hostname → IP DNS mappings for the Multiplayer server">
-                🗺 DNS Mapping
+              <button (click)="openPacketViewerClick.emit()"
+                      title="Open the Packet Viewer to capture and inspect PS2 network traffic">
+                📡 Packets
               </button>
 
               <button id="netConfigBtn" (click)="openNetConfigClick.emit()"
@@ -226,10 +226,6 @@ const SNAP_PREVIEW = 5;
                       title="Open the AI Configuration panel to manage agent profiles">
                 🤖 AI Config
               </button>
-              <button (click)="openPacketViewerClick.emit()"
-                      title="Open the Packet Viewer to capture and inspect PS2 network traffic">
-                📡 Packets
-              </button>
               <button (click)="openLabelManagerClick.emit()"
                       title="Open the Label Manager to manage address labels">
                 🏷 Labels
@@ -270,6 +266,10 @@ const SNAP_PREVIEW = 5;
       <div style="margin-top:12px; border-top:1px solid var(--vscode-panel-border,#404040); padding-top:12px;">
         <h4 style="margin:0 0 6px 0; font-size:11px; text-transform:uppercase; opacity:0.7;">Memory Views</h4>
         <div class="row">
+          <button (click)="openMemoryViewClick.emit('EE RAM')"
+                  title="Open EE RAM memory view (0x00000000)">
+            EE RAM
+          </button>
           <button (click)="openMemoryViewClick.emit('IOP RAM')"
                   title="Open IOP RAM memory view (0x1C000000)">
             IOP RAM

@@ -4,7 +4,7 @@
   "isoName": "",
   "regions": [
     {
-      "Label": "EE Main RAM",
+      "Label": "EE RAM",
       "File": "EEmem.bin",
       "BaseAddress": 0,
       "Size": 33554432

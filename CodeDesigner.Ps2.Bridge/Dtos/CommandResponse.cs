@@ -242,6 +242,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Captured packets returned by NETRECVCAPTURE.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<CapturedPacketInfo>? CapturedPackets { get; set; }
+        /// <summary>Pre-parsed packet rows returned by NETRECVCAPTURE (one row per packet).</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<ParsedPacketRow>? ParsedPacketRows { get; set; }
         /// <summary>Packet dissection text returned by NETDISASSEMBLE.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? DissectionText { get; set; }
@@ -362,6 +365,29 @@ namespace CodeDesigner.Ps2.Bridge
         public ushort CaptureQueueSize { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("droppedCount")]
         public uint DroppedCount { get; set; }
+    }
+
+    /// <summary>A single pre-parsed packet row returned alongside NETRECVCAPTURE raw data.</summary>
+    public class ParsedPacketRow
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("no")]
+        public int No { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("time")]
+        public string Time { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("dir")]
+        public string Dir { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("server")]
+        public string Server { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("src")]
+        public string Src { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("dst")]
+        public string Dst { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("proto")]
+        public string Proto { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("len")]
+        public int Len { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("info")]
+        public string Info { get; set; } = string.Empty;
     }
 
     /// <summary>Wire payload for a single captured packet returned by NETRECVCAPTURE.</summary>

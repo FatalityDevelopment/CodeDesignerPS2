@@ -117,7 +117,7 @@ namespace CodeDesigner.Ps2.Bridge
                     Directory.CreateDirectory(outputPath);
                     var regions = new[]
                     {
-                        (Label: "EE Main RAM",  File: "EEmem.bin",     Base: 0x00000000u,                 Size: (int)PS2MemoryBus.MainRamSize,    UseIop: false),
+                        (Label: "EE RAM",  File: "EEmem.bin",     Base: 0x00000000u,                 Size: (int)PS2MemoryBus.MainRamSize,    UseIop: false),
                         (Label: "BIOS ROM",     File: "BIOSrom.bin",   Base: PS2MemoryBus.BiosRomPhysBase, Size: (int)PS2MemoryBus.BiosRomSize,    UseIop: false),
                         (Label: "Scratchpad",   File: "Scratchpad.bin",Base: 0x70000000u,                 Size: (int)PS2MemoryBus.ScratchpadSize, UseIop: false),
                         (Label: "IOP RAM",      File: "IOPmem.bin",    Base: EeIopMirrorBase,             Size: (int)IopMemoryBus.RamSize,        UseIop: true),
@@ -145,7 +145,7 @@ namespace CodeDesigner.Ps2.Bridge
                 Directory.CreateDirectory(outputPath);
                 var regions = new[]
                 {
-                    (Label: "EE Main RAM",  File: "EEmem.bin",     Bytes: Scheduler.EE.Bus.Ram,        Base: 0x00000000u),
+                    (Label: "EE RAM",  File: "EEmem.bin",     Bytes: Scheduler.EE.Bus.Ram,        Base: 0x00000000u),
                     (Label: "BIOS ROM",     File: "BIOSrom.bin",   Bytes: Scheduler.EE.Bus.Bios,       Base: PS2MemoryBus.BiosRomPhysBase),
                     (Label: "Scratchpad",   File: "Scratchpad.bin",Bytes: Scheduler.EE.Bus.Scratchpad, Base: 0x70000000u),
                     (Label: "IOP RAM",      File: "IOPmem.bin",    Bytes: Scheduler.IOP.Bus.Ram,       Base: EeIopMirrorBase),
@@ -232,7 +232,7 @@ namespace CodeDesigner.Ps2.Bridge
                     try { PineClient!.Pause(); } catch { /* ignore pause errors */ }
                     var regions = new[]
                     {
-                        (File: "EEmem.bin",     Label: "EE Main RAM",  MaxSize: (int)PS2MemoryBus.MainRamSize,    Base: 0x00000000u,                 UseIop: false),
+                        (File: "EEmem.bin",     Label: "EE RAM",  MaxSize: (int)PS2MemoryBus.MainRamSize,    Base: 0x00000000u,                 UseIop: false),
                         (File: "BIOSrom.bin",   Label: "BIOS ROM",     MaxSize: (int)PS2MemoryBus.BiosRomSize,    Base: PS2MemoryBus.BiosRomPhysBase, UseIop: false),
                         (File: "Scratchpad.bin",Label: "Scratchpad",   MaxSize: (int)PS2MemoryBus.ScratchpadSize, Base: 0x70000000u,                 UseIop: false),
                         (File: "IOPmem.bin",    Label: "IOP RAM",      MaxSize: (int)IopMemoryBus.RamSize,        Base: EeIopMirrorBase,             UseIop: true),
@@ -265,7 +265,7 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 var regions = new[]
                 {
-                    (File: "EEmem.bin",     Label: "EE Main RAM",  Bytes: Scheduler.EE.Bus.Ram,        MaxSize: PS2MemoryBus.MainRamSize,        Base: 0x00000000u),
+                    (File: "EEmem.bin",     Label: "EE RAM",  Bytes: Scheduler.EE.Bus.Ram,        MaxSize: PS2MemoryBus.MainRamSize,        Base: 0x00000000u),
                     (File: "BIOSrom.bin",   Label: "BIOS ROM",     Bytes: Scheduler.EE.Bus.Bios,       MaxSize: Scheduler.EE.Bus.Bios.Length,   Base: PS2MemoryBus.BiosRomPhysBase),
                     (File: "Scratchpad.bin",Label: "Scratchpad",   Bytes: Scheduler.EE.Bus.Scratchpad, MaxSize: PS2MemoryBus.ScratchpadSize,     Base: 0x70000000u),
                     (File: "IOPmem.bin",    Label: "IOP RAM",      Bytes: Scheduler.IOP.Bus.Ram,       MaxSize: Scheduler.IOP.Bus.Ram.Length,   Base: EeIopMirrorBase),
@@ -325,7 +325,7 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     new SnapshotRegion
                     {
-                        Label       = "EE Main RAM",
+                        Label       = "EE RAM",
                         File        = filePath,
                         BaseAddress = 0x00000000u,
                         Size        = (int)PS2MemoryBus.MainRamSize,
@@ -385,7 +385,7 @@ namespace CodeDesigner.Ps2.Bridge
 
                 var memEntries = new[]
                 {
-                    (ZipName: "eeMemory.bin",  OutFile: "EEmem.bin",  Label: "EE Main RAM", Base: 0x00000000u),
+                    (ZipName: "eeMemory.bin",  OutFile: "EEmem.bin",  Label: "EE RAM", Base: 0x00000000u),
                     (ZipName: "iopMemory.bin", OutFile: "IOPmem.bin", Label: "IOP RAM",     Base: EeIopMirrorBase),
                 };
 

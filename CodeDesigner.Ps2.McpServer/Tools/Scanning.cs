@@ -376,7 +376,7 @@ public sealed partial class CodeDesignerPs2Tools
 
     [McpServerTool(Name = "scan_value")]
     [DynamicDescription("scan_value_desc")]
-    [Description("Scan EE main RAM (or a custom address range) for a specific value of a given data type (u8, u16, u32, u64, f32). Returns all addresses where the value matches.")]
+    [Description("Scan EE RAM (or a custom address range) for a specific value of a given data type (u8, u16, u32, u64, f32). Returns all addresses where the value matches.")]
     public async Task<string> ScanValue(
         [Description("Value to scan for (decimal or 0x-prefixed hex string, e.g. '100' or '0x64' for uint32).")] string scanValue,
         [Description("Data type to interpret memory as (e.g. 'uint32', 'float32').")] string dataType,

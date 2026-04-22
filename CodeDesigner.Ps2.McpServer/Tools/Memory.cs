@@ -22,7 +22,7 @@ public sealed partial class CodeDesignerPs2Tools
     public async Task<string> ReadMemory(
         [Description("Virtual address to read from (hex or decimal).")] string address,
         [Description("Number of bytes to read (1–65536, default 256).")] int length = 256,
-        [Description("Memory region: 'ee' for EE main RAM (default) or 'iop' for IOP RAM.")] string region = "ee",
+        [Description("Memory region: 'ee' for EE RAM (default) or 'iop' for IOP RAM.")] string region = "ee",
         CancellationToken cancellationToken = default)
     {
         uint? parsedAddress = TryParseAddress(address);
@@ -42,7 +42,7 @@ public sealed partial class CodeDesignerPs2Tools
     public async Task<string> WriteMemory(
         [Description("Virtual address to write to (hex or decimal).")] string address,
         [Description("Hex-encoded bytes to write, e.g. '27BD FFD0 AFBF 001C' or '0x27,0xBD,0xFF,0xD0'.")] string hexData,
-        [Description("Memory region: 'ee' for EE main RAM/scratchpad (default) or 'iop' for IOP RAM.")] string region = "ee",
+        [Description("Memory region: 'ee' for EE RAM/scratchpad (default) or 'iop' for IOP RAM.")] string region = "ee",
         CancellationToken cancellationToken = default)
     {
         uint? parsedAddress = TryParseAddress(address);
@@ -62,7 +62,7 @@ public sealed partial class CodeDesignerPs2Tools
     public async Task<string> LoadBin(
         [Description("Absolute path to the binary file to load.")] string filePath,
         [Description("Virtual address to load the binary data to (hex or decimal).")] string address,
-        [Description("Memory region: 'ee' for EE main RAM/scratchpad (default) or 'iop' for IOP RAM.")] string region = "ee",
+        [Description("Memory region: 'ee' for EE RAM/scratchpad (default) or 'iop' for IOP RAM.")] string region = "ee",
         CancellationToken cancellationToken = default)
     {
         uint? parsedAddress = TryParseAddress(address);
@@ -235,7 +235,7 @@ public sealed partial class CodeDesignerPs2Tools
         [Description("Byte pattern to search for — comma-separated values (decimal or 0x-hex), e.g. '0x4D,0x57,0x6F,0x33'. Use '?' as a wildcard to match any byte, e.g. '0x4D,?,0x33'.")] string searchPattern,
         [Description("Inclusive start address (hex or decimal). Omit or use '0' to start from the beginning of the region.")] string startAddress = "0",
         [Description("Exclusive end address (hex or decimal). Omit or use '0' to scan to the end of the region (32 MB for EE, 4 MB for IOP).")] string endAddress = "0",
-        [Description("Memory region: 'ee' for EE main RAM (default) or 'iop' for IOP RAM.")] string region = "ee",
+        [Description("Memory region: 'ee' for EE RAM (default) or 'iop' for IOP RAM.")] string region = "ee",
         CancellationToken cancellationToken = default)
     {
         uint? start = TryParseAddress(startAddress);

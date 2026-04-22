@@ -18,7 +18,10 @@ const PCAP_LINKTYPE_SLL   = 113;  // LINKTYPE_LINUX_SLL — encodes packet direc
 // SLL_PKT_OUTGOING (4) → packet sent from this host outbound  → direction 0 (TX)
 const SLL_PKT_HOST      = 0;
 const SLL_PKT_OUTGOING  = 4;
-
+// Known Medius server ports used to infer direction from Ethernet-type pcap frames.
+// If the source port is a Medius port the packet is server→PS2 (RX=1);
+// if the dest port is a Medius port the packet is PS2→server (TX=0).
+const PCAP_MEDIUS_PORTS = new Set([10071, 10078, 10075, 10073, 10070, 10069, 443, 10060]);
 /** A minimal captured packet payload for pcap I/O. */
 interface PcapPacketEntry {
     direction:   number;
@@ -106,11 +109,36 @@ function sllToEth(sllFrame: Buffer): { direction: number; ethFrame: Buffer } {
 // ── pcap parse / build ────────────────────────────────────────────────────────
 
 /**
+ * Infer packet direction from an Ethernet frame's TCP/UDP port numbers.
+ * Used for LINKTYPE_ETHERNET pcap files where direction is not stored.
+ *
+ * Returns 1 (RX) when the source port is a known Medius server port, and
+ * 0 (TX) otherwise (including non-TCP/UDP frames).
+ */
+function detectDirectionFromEthFrame(frame: Buffer): number {
+    if (frame.length < 34) { return 0; }
+    const etherType = frame.readUInt16BE(12);
+    if (etherType !== 0x0800) { return 0; }  // not IPv4
+    const ihl  = (frame[14] & 0xF) * 4;
+    const proto = frame[23];
+    if ((proto === 6 || proto === 17) && frame.length >= 14 + ihl + 4) {
+        const payOff = 14 + ihl;
+        const srcPort = frame.readUInt16BE(payOff);
+        const dstPort = frame.readUInt16BE(payOff + 2);
+        // Source port is a Medius port → server sent it → RX (direction=1)
+        if (PCAP_MEDIUS_PORTS.has(srcPort)) { return 1; }
+        // Dest port is a Medius port → PS2 sent it → TX (direction=0)
+        if (PCAP_MEDIUS_PORTS.has(dstPort)) { return 0; }
+    }
+    return 0;
+}
+
+/**
  * Parse a pcap file buffer and return an array of packet entries in the same
  * shape that the webview component expects (CapturedPacket-compatible).
  *
  * Supports:
- *  • LINKTYPE_ETHERNET (1)     — direction unknown, all marked 0 (TX)
+ *  • LINKTYPE_ETHERNET (1)     — direction inferred from TCP/UDP port numbers
  *  • LINKTYPE_LINUX_SLL (113)  — direction decoded from SLL packet_type;
  *                                frame reconstructed as synthetic Ethernet
  */
@@ -158,10 +186,11 @@ function parsePcap(buf: Buffer): PcapPacketEntry[] {
                 data: ethFrame.toString('base64'),
             });
         } else {
-            // LINKTYPE_ETHERNET or any other type — direction not available in
-            // the pcap record itself, so mark as 0 (TX / unknown).
+            // LINKTYPE_ETHERNET or any other type — detect direction from port numbers
+            // when the frame contains a known Medius server port, otherwise mark TX.
+            const direction = detectDirectionFromEthFrame(frameBytes);
             packets.push({
-                direction:   0,
+                direction,
                 timestampUs,
                 data: frameBytes.toString('base64'),
             });
@@ -292,12 +321,11 @@ export class PacketViewerProvider {
 
                 case 'recvCapture': {
                     const max = (action['maxPackets'] as number) ?? 100;
-                    const packets = await this.socketClient.netRecvCapture(max);
-                    if (packets.length > 0) {
-                        webview.postMessage({ type: 'packetViewerPackets', packets });
+                    const result = await this.socketClient.netRecvCapture(max);
+                    if (result.packets.length > 0) {
+                        webview.postMessage({ type: 'packetViewerPackets', packets: result.packets, parsedRows: result.parsedRows });
                     } else {
-                        // Send an empty response so the in-flight guard is cleared.
-                        webview.postMessage({ type: 'packetViewerPackets', packets: [] });
+                        webview.postMessage({ type: 'packetViewerPackets', packets: [], parsedRows: [] });
                     }
                     break;
                 }
@@ -357,7 +385,7 @@ export class PacketViewerProvider {
                         length:        Math.floor(Buffer.from(p.data, 'base64').length),
                         data:          p.data,
                     }));
-                    webview.postMessage({ type: 'packetViewerPcapLoaded', packets });
+                    webview.postMessage({ type: 'packetViewerPcapLoaded', packets, filename: filePath.split(/[\\/]/).pop() ?? filePath });
                     break;
                 }
 

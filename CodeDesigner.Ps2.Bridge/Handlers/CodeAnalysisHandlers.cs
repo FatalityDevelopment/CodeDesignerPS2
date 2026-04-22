@@ -599,7 +599,7 @@ namespace CodeDesigner.Ps2.Bridge
                 var bytes   = ReadLiveBytes(address, length, useIop);
 
                 // Build the set of all EE addresses referenced by MIPS code.
-                // We always use EE main RAM as the code source regardless of the scan
+                // We always use EE RAM as the code source regardless of the scan
                 // region so that the filter works when scanning BIOS, scratchpad, IOP, etc.
                 // In PINE mode we don't have direct access to the full EE RAM array;
                 // skip the code-reference filter to avoid a huge IPC read.
@@ -616,7 +616,7 @@ namespace CodeDesigner.Ps2.Bridge
                     // Filter 1: plausible EE address range.
                     if (!IsValidEePointerValue(val)) continue;
 
-                    // Filter 2: must be referenced by MIPS code in EE main RAM.
+                    // Filter 2: must be referenced by MIPS code in EE RAM.
                     // Skip this filter when no code has been found yet (early boot).
                     uint physVal = val >= 0x80000000u && val < 0xC0000000u ? val & 0x1FFFFFFFu : val;
                     if (codeRefs.Count > 0 && !codeRefs.Contains(physVal)) continue;

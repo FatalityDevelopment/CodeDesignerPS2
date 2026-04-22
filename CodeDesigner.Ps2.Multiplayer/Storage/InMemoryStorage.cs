@@ -8,12 +8,12 @@ namespace CodeDesigner.Ps2.Multiplayer.Storage;
 /// No persistence — data is lost when the server restarts.
 /// For development and LAN play. Replace with a database backend for production.
 /// </summary>
-public class InMemoryStorage
+public class InMemoryStorage : IMultiplayerStorage
 {
     // -------------------------------------------------------------------------
     // Accounts
     // -------------------------------------------------------------------------
-    private readonly ConcurrentDictionary<int,    MediusAccount> _accountsById   = new();
+    private readonly ConcurrentDictionary<int, MediusAccount> _accountsById = new();
     private readonly ConcurrentDictionary<string, MediusAccount> _accountsByName = new(StringComparer.OrdinalIgnoreCase);
     private int _nextAccountId = 1;
 
@@ -27,11 +27,11 @@ public class InMemoryStorage
     {
         var account = new MediusAccount
         {
-            AccountId    = Interlocked.Increment(ref _nextAccountId),
-            AccountName  = name,
+            AccountId = Interlocked.Increment(ref _nextAccountId),
+            AccountName = name,
             PasswordHash = passwordHash,
         };
-        _accountsById[account.AccountId]    = account;
+        _accountsById[account.AccountId] = account;
         _accountsByName[account.AccountName] = account;
         return account;
     }
@@ -55,10 +55,10 @@ public class InMemoryStorage
 
         var channel = new MediusChannel
         {
-            ChannelId   = Interlocked.Increment(ref _nextChannelId),
+            ChannelId = Interlocked.Increment(ref _nextChannelId),
             ChannelName = "Lobby",
-            MaxPlayers  = 256,
-            AppId       = appId,
+            MaxPlayers = 256,
+            AppId = appId,
         };
         _channelsById[channel.ChannelId] = channel;
         return channel;
@@ -68,10 +68,10 @@ public class InMemoryStorage
     {
         var channel = new MediusChannel
         {
-            ChannelId   = Interlocked.Increment(ref _nextChannelId),
+            ChannelId = Interlocked.Increment(ref _nextChannelId),
             ChannelName = name,
-            MaxPlayers  = maxPlayers,
-            AppId       = appId,
+            MaxPlayers = maxPlayers,
+            AppId = appId,
         };
         _channelsById[channel.ChannelId] = channel;
         return channel;
@@ -93,13 +93,13 @@ public class InMemoryStorage
     {
         var game = new MediusGame
         {
-            GameId        = Interlocked.Increment(ref _nextGameId),
-            GameName      = name,
-            AppId         = appId,
+            GameId = Interlocked.Increment(ref _nextGameId),
+            GameName = name,
+            AppId = appId,
             HostAccountId = hostAccountId,
-            HostName      = hostName,
-            MaxPlayers    = maxPlayers,
-            Status        = GameWorldStatus.WorldStaging,
+            HostName = hostName,
+            MaxPlayers = maxPlayers,
+            Status = GameWorldStatus.WorldStaging,
         };
         _gamesById[game.GameId] = game;
         return game;

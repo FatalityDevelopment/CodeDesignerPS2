@@ -56,7 +56,7 @@ export function formatAddressWithPrefix(addr: number): string {
 
 /**
  * Heuristic: does this value look like a valid EE code pointer?
- * Returns true if aligned to 4 bytes and within EE main RAM or BIOS regions.
+ * Returns true if aligned to 4 bytes and within EE RAM or BIOS regions.
  */
 export function isCodePointer(addr: number): boolean {
   const v = addr >>> 0;
@@ -68,7 +68,7 @@ export function isCodePointer(addr: number): boolean {
 
   const phys = toPhysAddr(v);
 
-  // EE main RAM (0x00000000–0x01FFFFFF) or BIOS (0x1FC00000–0x1FFFFFFF)
+  // EE RAM (0x00000000–0x01FFFFFF) or BIOS (0x1FC00000–0x1FFFFFFF)
   return (phys < 0x02000000) || (phys >= 0x1FC00000 && phys < 0x20000000);
 }
 

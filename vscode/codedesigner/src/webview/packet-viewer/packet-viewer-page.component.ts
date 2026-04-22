@@ -56,7 +56,7 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
                         pv.setStats(data['stats'] as any);
                         break;
                     case 'packetViewerPackets':
-                        pv.addCapturedPackets(data['packets'] as any[] ?? []);
+                        pv.addCapturedPackets(data['packets'] as any[] ?? [], data['parsedRows'] as any[] ?? []);
                         pv.recvCaptureComplete();
                         break;
                     case 'packetViewerCaptureStarted':
@@ -72,6 +72,7 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
                         pv.onClear();
                         pv.addCapturedPackets(data['packets'] as any[] ?? []);
                         pv.recvCaptureComplete();
+                        pv.setFilename(data['filename'] as string ?? '');
                         pv.showStatus(`Loaded ${(data['packets'] as any[] ?? []).length} packet(s) from file`);
                         break;
                     case 'packetViewerSaveResult':

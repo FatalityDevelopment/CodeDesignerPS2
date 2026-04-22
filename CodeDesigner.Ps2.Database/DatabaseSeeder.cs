@@ -998,7 +998,7 @@ public class DatabaseSeeder
             "snapshot saved to the snapshot directory. Useful for tracking value changes over time."),
 
         ("scan_value_desc",
-            "Scan EE main RAM (or a custom address range) for a specific value of a given data type " +
+            "Scan EE RAM (or a custom address range) for a specific value of a given data type " +
             "(u8, u16, u32, u64, f32). Returns all addresses where the value matches."),
 
         ("read_memory_region_desc",

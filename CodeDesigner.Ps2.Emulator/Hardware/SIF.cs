@@ -31,7 +31,7 @@ namespace CodeDesigner.Ps2.Emulator.Hardware
     ///
     ///   SIF0 FIFO — IOP→EE direction.
     ///               IOP DMAC channel 9 pushes 32-bit words into this FIFO.
-    ///               EE  DMAC channel 5 drains it into EE main RAM.
+    ///               EE  DMAC channel 5 drains it into EE RAM.
     ///
     ///   SIF1 FIFO — EE→IOP direction.
     ///               EE  DMAC channel 6 pushes 32-bit words into this FIFO.
@@ -72,7 +72,7 @@ namespace CodeDesigner.Ps2.Emulator.Hardware
         /// <summary>
         /// Read one 32-bit word from the SIF0 FIFO (IOP→EE direction).
         /// Called by the EE DMAC (channel 5) when it transfers data from the FIFO
-        /// into EE main RAM.  Returns 0 when the FIFO is empty.
+        /// into EE RAM.  Returns 0 when the FIFO is empty.
         /// </summary>
         public uint ReadSif0() =>
             _sif0Fifo.Count > 0 ? _sif0Fifo.Dequeue() : 0u;

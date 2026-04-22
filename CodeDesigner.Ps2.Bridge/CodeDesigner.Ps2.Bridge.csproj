@@ -27,6 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\CodeDesigner.Ps2.CdsLanguage\CodeDesigner.Ps2.CdsLanguage.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Common\CodeDesigner.Ps2.Common.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
@@ -88,11 +89,7 @@
     <ItemGroup Condition="'$(_InstallDir)' != ''">
       <_DeployFiles Include="$(OutputPath)**\*" />
     </ItemGroup>
-    <Copy
-      SourceFiles="@(_DeployFiles)"
-      DestinationFiles="@(_DeployFiles->'$(_InstallDir)/%(RecursiveDir)%(Filename)%(Extension)')"
-      SkipUnchangedFiles="true"
-      Condition="'$(_InstallDir)' != ''" />
+    <Copy SourceFiles="@(_DeployFiles)" DestinationFiles="@(_DeployFiles->'$(_InstallDir)/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'$(_InstallDir)' != ''" />
     <Message Text="[CodeDesigner] Deployed to $(_InstallDir)" Importance="high" Condition="'$(_InstallDir)' != ''" />
   </Target>
 

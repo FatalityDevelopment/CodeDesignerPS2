@@ -9,7 +9,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>
         /// Maximum number of bytes that a single full-range SCANVALUE scan will read.
         /// Prevents accidentally scanning more than 256 MB, which is already far larger
-        /// than the 32 MB EE Main RAM limit.
+        /// than the 32 MB EE RAM limit.
         /// </summary>
         private const long MaxValueScanBytes = 256L * 1024 * 1024;
 
@@ -149,7 +149,7 @@ namespace CodeDesigner.Ps2.Bridge
                 return PineClient!.ReadBytes(pineAddr, length);
             }
 
-            // Built-in emulator: use fast Array.Copy for aligned EE main RAM.
+            // Built-in emulator: use fast Array.Copy for aligned EE RAM.
             if (!useIop)
             {
                 uint physAddr;

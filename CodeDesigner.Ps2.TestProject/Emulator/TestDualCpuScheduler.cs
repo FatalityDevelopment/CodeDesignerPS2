@@ -75,7 +75,7 @@ namespace CodeDesigner.Ps2.TestProject
         {
             var sched = new DualCpuScheduler();
 
-            // Load NOPs into EE main RAM
+            // Load NOPs into EE RAM
             uint nop = 0x00000000u;
             for (int i = 0; i < 64; i++)
                 sched.EE.LoadProgram((uint)(i * 4), new[] { nop });
@@ -191,12 +191,12 @@ namespace CodeDesigner.Ps2.TestProject
         public void DualCpuScheduler_Breakpoint_PhysicalRam_FiresWhenPcIsKseg0()
         {
             // Regression test for the physical-address breakpoint bug: the live
-            // disassembly panel displays EE Main RAM at physical base 0x00000000.
+            // disassembly panel displays EE RAM at physical base 0x00000000.
             // Breakpoints set from that panel arrive as physical addresses (e.g. 0x00010000).
             // They must fire even though the CPU runs from the KSEG0 alias (0x80010000).
             var sched = new DualCpuScheduler();
 
-            // Place two NOPs in EE Main RAM so the instruction fetch succeeds.
+            // Place two NOPs in EE RAM so the instruction fetch succeeds.
             uint addr = 0x00010000u;
             sched.EE.Bus.Ram[addr]     = 0x00; // NOP word at physical 0x00010000
             sched.EE.Bus.Ram[addr + 1] = 0x00;
@@ -315,7 +315,7 @@ namespace CodeDesigner.Ps2.TestProject
             // EE DMAC CH6 (SIF1, RAM→FIFO) should push EE RAM contents into SIF1 FIFO.
             var emu = new PS2Emulator();
 
-            // Write one quadword (4 words) of test data into EE main RAM at address 0x1000.
+            // Write one quadword (4 words) of test data into EE RAM at address 0x1000.
             emu.Bus.WriteWord(0x1000u, 0x11111111u);
             emu.Bus.WriteWord(0x1004u, 0x22222222u);
             emu.Bus.WriteWord(0x1008u, 0x33333333u);
@@ -337,7 +337,7 @@ namespace CodeDesigner.Ps2.TestProject
         [TestMethod]
         public void SifDma_EeCh5_Sif0Fifo_To_Ram()
         {
-            // EE DMAC CH5 (SIF0, FIFO→RAM) should drain SIF0 FIFO into EE main RAM.
+            // EE DMAC CH5 (SIF0, FIFO→RAM) should drain SIF0 FIFO into EE RAM.
             var emu = new PS2Emulator();
 
             // Pre-fill SIF0 FIFO with one quadword of data (simulating IOP push).
@@ -407,7 +407,7 @@ namespace CodeDesigner.Ps2.TestProject
             // Full round-trip: EE writes data via CH6 → SIF1 FIFO → IOP reads via CH10.
             var sched = new DualCpuScheduler();
 
-            // 1. Write payload into EE main RAM.
+            // 1. Write payload into EE RAM.
             sched.EE.Bus.WriteWord(0x3000u, 0xC0FFEE00u);
             sched.EE.Bus.WriteWord(0x3004u, 0xC0FFEE01u);
             sched.EE.Bus.WriteWord(0x3008u, 0xC0FFEE02u);
@@ -451,7 +451,7 @@ namespace CodeDesigner.Ps2.TestProject
 
             Assert.AreEqual(4, sched.EE.Bus.Sif.Sif0Count, "SIF0 FIFO must have 4 words after IOP push");
 
-            // 3. EE DMAC CH5 (SIF0, FIFO→RAM): drain SIF0 FIFO into EE main RAM.
+            // 3. EE DMAC CH5 (SIF0, FIFO→RAM): drain SIF0 FIFO into EE RAM.
             sched.EE.Bus.WriteWord(0x1000C000u + DmacChannel.REG_MADR, 0x00006000u);
             sched.EE.Bus.WriteWord(0x1000C000u + DmacChannel.REG_QWC,  0x00000001u);  // 1 QW = 4 words
             sched.EE.Bus.WriteWord(0x1000C000u + DmacChannel.REG_CHCR, 0x00000101u);  // STR=1, DIR=1
@@ -607,7 +607,7 @@ namespace CodeDesigner.Ps2.TestProject
 
             Assert.AreEqual(3, sched.EE.Bus.Sif.Sif0Count, "SIF0 FIFO must have 3 words after IOP push");
 
-            // 4. EE DMAC CH5: drain SIF0 FIFO into EE main RAM at address 0x7000.
+            // 4. EE DMAC CH5: drain SIF0 FIFO into EE RAM at address 0x7000.
             //    CH5 transfers in QWs; 3 words = < 1 QW, so we transfer the words individually
             //    by reading directly from SIF0 and writing to EE RAM (mimicking the DMA).
             const uint eeDestBase = 0x7000u;

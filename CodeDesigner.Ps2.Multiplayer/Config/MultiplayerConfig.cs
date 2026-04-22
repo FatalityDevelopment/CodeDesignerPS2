@@ -98,4 +98,13 @@ public class MultiplayerConfig
 
     /// <summary>Client idle timeout in seconds.</summary>
     public int ClientTimeoutSeconds { get; set; } = 60;
+
+    /// <summary>Name of the multiplayer universe.</summary>
+    public string UniverseName { get; set; } = "My PS2 Multiplayer Server";
+    /// <summary>The description of the universe that gets displayed to users.</summary>
+    public string UniverseDescription { get; set; } = "Welcome to my PS2 multiplayer server!";
+    /// <summary>The news about the universe that gets displayed to users.</summary>
+    public string UniverseNews { get; set; } = "No news at the moment. Check back later!";
+    public string UniversePatchVersion { get; set; } = "r0004";
+    public string UniversePatchUrl { get; set; } = "https://example.com/patches/r0004/update.zip";
 }

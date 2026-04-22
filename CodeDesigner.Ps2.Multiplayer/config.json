@@ -16,6 +16,10 @@
     "MaxClients": 1000,
     "AllowedAppIds": [10472],
     "AutoCreateAccounts": true,
-    "ClientTimeoutSeconds": 60
+    "ClientTimeoutSeconds": 60,
+    "UniverseName": "Code Designer PS2 Multiplayer",
+    "UniverseDescription": "A private server for PS2 multiplayer gaming.",
+    "UniversePatchVersion": "r0004",
+    "UniverseUrl": "https://www.code-designer.com/ps2-multiplayer"
   }
 }

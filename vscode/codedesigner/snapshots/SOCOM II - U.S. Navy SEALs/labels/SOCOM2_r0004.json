@@ -705,7 +705,7 @@
     {
       "address": "0x00000000",
       "name": "EE_RAM_BASE",
-      "comment": "EE Main RAM base (physical)"
+      "comment": "EE RAM base (physical)"
     },
     {
       "address": "0x00000010",
@@ -750,7 +750,7 @@
     {
       "address": "0x01FFFFFF",
       "name": "EE_RAM_END",
-      "comment": "EE Main RAM top (32 MB, physical)"
+      "comment": "EE RAM top (32 MB, physical)"
     },
     {
       "address": "0x10000000",

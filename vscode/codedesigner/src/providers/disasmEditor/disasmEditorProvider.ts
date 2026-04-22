@@ -1371,7 +1371,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 // Find which live panel owns the address and instruct it to navigate.
                 const addr = message.address as number;
                 const physAddr = DisasmEditorProvider._toPhysAddr(addr as number);
-                // Prefer a panel in the same region first.  EE Main RAM sits at
+                // Prefer a panel in the same region first.  EE RAM sits at
                 // physical 0x00000000 and IOP RAM at 0x1C000000, so there is no
                 // address overlap; the region preference is kept as a tiebreaker
                 // for any future regions that might share a physical range.
@@ -3433,10 +3433,10 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         }
         case 'runScanner': {
           const kind = action.scannerKind as string;
-          // Default to EE main RAM region for label manager scans.
+          // Default to EE RAM region for label manager scans.
           const region = 'ee';
           const baseAddress = 0x00000000;
-          const totalBytes = 32 * 1024 * 1024; // 32 MB EE Main RAM
+          const totalBytes = 32 * 1024 * 1024; // 32 MB EE RAM
           try {
             let entries: LabelManagerEntry[] = [];
             if (kind === 'strings') {

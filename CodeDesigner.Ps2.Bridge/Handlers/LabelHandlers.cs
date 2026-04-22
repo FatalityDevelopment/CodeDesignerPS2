@@ -75,7 +75,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private void SaveLabels()
         {
-            SaveMemoryMap();
+
         }
     }
 }

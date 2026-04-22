@@ -144,7 +144,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// breakpoint storage.  KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1
         /// (0xA0000000–0xBFFFFFFF) both strip the top 3 bits to yield the
         /// physical address.  Physical addresses (from the live disassembly panels
-        /// which display EE Main RAM at 0x00000000 and BIOS ROM at 0x1FC00000) and
+        /// which display EE RAM at 0x00000000 and BIOS ROM at 0x1FC00000) and
         /// KUSEG user-mode addresses pass through unchanged.
         /// Using physical addresses as the canonical form ensures that a breakpoint
         /// set from the disassembly panel fires correctly regardless of which

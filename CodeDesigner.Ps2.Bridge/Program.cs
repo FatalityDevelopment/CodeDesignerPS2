@@ -234,7 +234,7 @@ namespace CodeDesigner.Ps2.Bridge
                     {
                         scheduler.RunSlice(slice);
                     }
-                    catch (CodeDesigner.Ps2.Common.Cpu.Instructions.EE.BreakpointException)
+                    catch (Common.Cpu.Instructions.EE.BreakpointException)
                     {
                         uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
                         Console.WriteLine($"[BREAK -> COP0 vector 0x{bpPc:x8}, continuing]");
@@ -467,7 +467,7 @@ namespace CodeDesigner.Ps2.Bridge
                     }
 
                     try { scheduler.RunSlice(SliceSize); }
-                    catch (CodeDesigner.Ps2.Common.Cpu.Instructions.EE.BreakpointException)
+                    catch (Common.Cpu.Instructions.EE.BreakpointException)
                     {
                         uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
                         Console.WriteLine($"[BREAK] pc=0x{bpPc:x8}");

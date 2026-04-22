@@ -326,13 +326,13 @@ public class MuisServer : BaseMediusTcpServer
         //        parser does lw a1,0x18(a3) → if non-zero, skips the entire handler.
         Array.Copy(msgId, 0, payload, 0, Math.Min(msgId.Length, MediusConstants.MESSAGEID_MAXLEN));
         // 0x01C: display name (parser copies 128 bytes: 0x40 iterations × 2)
-        WriteFixedAscii(payload, 0x01C, 128, "GTLC Pimp a fraud");
+        WriteFixedAscii(payload, 0x01C, 128, _config.UniverseName);
         // 0x09C: MAS hostname/IP (parser copies 128 bytes) — PS2 connects to MAS here
         WriteFixedAscii(payload, 0x09C, 128, _config.ServerIp);
         // 0x11C: MAS port (lw, 4 bytes LE)
         WriteInt32Le(payload, 0x11C, _config.MasPort);
         // 0x120: description (parser copies 256 bytes: 0x80 iterations × 2)
-        WriteFixedAscii(payload, 0x120, 256, "Professional student, known for robbing everyone elses code. Credit stealing homosexual for over 25+ years");
+        WriteFixedAscii(payload, 0x120, 256, _config.UniverseDescription);
         // 0x220: status dot — 1 = green (confirmed from PSRewired dump: entry+0x220 = 1)
         WriteInt32Le(payload, 0x220, 1);
         // 0x224: user count (confirmed from dump: entry+0x224 = 0x20)
@@ -346,7 +346,7 @@ public class MuisServer : BaseMediusTcpServer
         // 0x2B5: version/patch string (parser copies 128 bytes: 0x40 iterations × 2)
         //        entry+0x338 ("r0004") comes from 0x0019AA00 registry lookup which
         //        will fail for our hostname — empty entry+0x338 still passes version check (beqz)
-        WriteFixedAscii(payload, 0x2B5, 128, "r0004");
+        WriteFixedAscii(payload, 0x2B5, 128, _config.UniversePatchVersion);
         // 0x335: EndOfList — PS2 universe parser loops until this byte is non-zero.
         //        Without it the PS2 waits for more entries indefinitely and never
         //        proceeds to connect to MAS.  Must be 1 on the final (or only) entry.

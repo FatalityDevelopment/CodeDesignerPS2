@@ -1,8 +1,8 @@
 {
   "symbol": [
-    { "address": "0x00000000", "label": "EE_RAM_BASE",          "comment": "EE Main RAM base (physical)" },
+    { "address": "0x00000000", "label": "EE_RAM_BASE",          "comment": "EE RAM base (physical)" },
     { "address": "0x00008000", "label": "EE_KERNEL_BASE",       "comment": "EE kernel / OS loaded here by BIOS" },
-    { "address": "0x01FFFFFF", "label": "EE_RAM_END",           "comment": "EE Main RAM top (32 MB, physical)" },
+    { "address": "0x01FFFFFF", "label": "EE_RAM_END",           "comment": "EE RAM top (32 MB, physical)" },
     { "address": "0x70000000", "label": "EE_SCRATCHPAD",        "comment": "EE Scratchpad RAM (16 KB)" },
     { "address": "0x70003FFF", "label": "EE_SCRATCHPAD_END",    "comment": "EE Scratchpad RAM end" },
 

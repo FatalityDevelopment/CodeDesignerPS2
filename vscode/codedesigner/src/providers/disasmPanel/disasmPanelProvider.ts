@@ -48,16 +48,17 @@ interface SnapshotInfoFile {
  * constant socket traffic and causing flickering in the primary EE view.
  */
 const LIVE_REGIONS_DEFAULT = [
-    // EE Main RAM: shown at the physical base (0x00000000–0x01FFFFFF, 32 MB).
+    // EE RAM: shown at the physical base (0x00000000–0x01FFFFFF, 32 MB).
     // Using physical addresses keeps rows consistent with the memory map table
     // regardless of which virtual alias the CPU uses (KSEG0 0x80000000, uncached
     // 0x20100000, or uncached+accelerated 0x30100000).  HandleReadMem accepts
     // physical addresses for the EE region directly.
-    { region: 'ee',  address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE Main RAM'  },
+    { region: 'ee',  address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE RAM'  },
 ];
 
 /** Rarely-used memory regions available on-demand via the sidebar menu. */
 const LIVE_REGIONS_OPTIONAL = [
+    { region: 'ee', address: 0x00000000, size: 32 * 1024 * 1024, label: 'EE RAM' },
     // IOP RAM: shown at the EE physical base (0x1C000000–0x1DFFFFFF, 4 MB).
     // Per the PS2 memory map, IOP RAM is mirrored into EE address space at
     // 0xBC000000 (logical) → 0x1C000000 (physical).  Using the physical base
@@ -1944,7 +1945,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     public getAddressHistory(address: number): Array<{ name: string; date: string; value: string; disasm?: string }> {
         const results: Array<{ name: string; date: string; value: string; disasm?: string }> = [];
 
-        // Snapshots store physical base addresses (e.g. 0x00000000 for EE Main RAM).
+        // Snapshots store physical base addresses (e.g. 0x00000000 for EE RAM).
         // Convert any virtual/logical alias to its physical equivalent before
         // doing the offset calculation.
         //   KSEG0/KSEG1 (0x80000000–0xBFFFFFFF): strip top 3 bits → physical
@@ -3028,7 +3029,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     /**
      * Open the default live memory view panels immediately, even if not connected.
      * Panels will show placeholder content until the socket connects.
-     * Called at extension activation so the EE Main RAM tab is always visible.
+     * Called at extension activation so the EE RAM tab is always visible.
      * Rarely-used regions (IOP, BIOS, Scratchpad) can be opened on-demand via
      * the sidebar menu to reduce socket traffic and prevent flickering.
      */

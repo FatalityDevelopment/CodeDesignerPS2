@@ -1,6 +1,6 @@
 {
   "symbol": [
-    { "address": "0x00000000", "label": "EE_RAM_BASE",                    "comment": "EE Main RAM base (physical)" },
+    { "address": "0x00000000", "label": "EE_RAM_BASE",                    "comment": "EE RAM base (physical)" },
     { "address": "0x00008000", "label": "EE_KERNEL_BASE",                 "comment": "EE kernel / OS loaded here by BIOS" },
     { "address": "0x000B001C", "label": "gUniverseStruct_DisplayName",    "comment": null },
     { "address": "0x000B009C", "label": "gUniverseStruct_URL",            "comment": null },
@@ -111,7 +111,7 @@
     { "address": "0x01E7EC30", "label": "gDNASBlob",                      "comment": "DNAS blob in EE RAM. 0x300 bytes (offset 0x1E0 from gZDBBase). Starts: 83 F4 06 0A 3D E2 BA E4... Contains DNAS authentication data read by ReadSeedFromDNAS (0x53D438) to extract FTScore seed 0x02291104." },
     { "address": "0x01E7EF30", "label": "gMediusSessionKey",              "comment": "AES-128 session key (16 bytes). Medius SDK session key, provisioned by DNAS server during auth. Changes every boot/reconnect. Boot-time value: 875f14c4a8c3a28c18616d00903e6bb1. Followed at +0x10 by 16-byte IV." },
     { "address": "0x01E7F130", "label": "gAESDecryptOutput",              "comment": "AES-128 CBC decryption output buffer. 128 bytes per chunk. Written by AES_CBC_Core (0x53FC60), called from FTScoreChunkDecryptor (0x541658) ~880 times. After all chunks decrypted, complete MWo3 appears at gMWo3FTScoreOutput (0x1E7000). First chunk output: E4 08 94 FD AF 50 2A 36..." },
-    { "address": "0x01FFFFFF", "label": "EE_RAM_END",                     "comment": "EE Main RAM top (32 MB, physical)" }
+    { "address": "0x01FFFFFF", "label": "EE_RAM_END",                     "comment": "EE RAM top (32 MB, physical)" }
   ],
   "structs": [
     {

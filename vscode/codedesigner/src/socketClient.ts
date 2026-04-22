@@ -476,6 +476,7 @@ interface CommandResponse {
     NetStatus?: NetStatusInfo;
     NetStats?: NetStatsInfo;
     CapturedPackets?: CapturedPacketInfo[];
+    ParsedPacketRows?: ParsedPacketRow[];
     DissectionText?: string;
     InjectionSuccess?: boolean;
     // COMPILECDS sidecar results (assert / breakpoint / watchpoint directives)
@@ -3231,13 +3232,15 @@ export class SocketClient {
     }
 
     /** NETRECVCAPTURE — drains captured packets from the ring buffer. */
-    public async netRecvCapture(maxPackets?: number): Promise<CapturedPacketInfo[]> {
+    public async netRecvCapture(maxPackets?: number): Promise<{ packets: CapturedPacketInfo[]; parsedRows: ParsedPacketRow[] }> {
         const r = await this.sendCommand({
             Command: 'NETRECVCAPTURE',
             NetMaxPackets: maxPackets,
         } as CommandMessage);
         if (!r.Success) { throw new Error(r.Error || 'NETRECVCAPTURE failed'); }
-        return r.CapturedPackets ?? [];
+        const packets = r.CapturedPackets ?? [];
+        const parsedRows = this.normalizeParsedPacketRows(packets, r.ParsedPacketRows ?? []);
+        return { packets, parsedRows };
     }
 
     /** NETDISASSEMBLE — dissects a raw Ethernet frame and returns human-readable text. */
@@ -3273,6 +3276,80 @@ export class SocketClient {
             NetFilterIP: ip,
         } as CommandMessage);
         if (!r.Success) { throw new Error(r.Error || 'NETSETFILTER failed'); }
+    }
+
+    /**
+     * Bridge-side normalization for pre-parsed packet rows so all consumers see
+     * consistent Server/Protocol/Info values.
+     */
+    private normalizeParsedPacketRows(packets: CapturedPacketInfo[], parsedRows: ParsedPacketRow[]): ParsedPacketRow[] {
+        const scertDecodePorts = new Set([10071, 10078, 10075, 10070, 10069]);
+        const serverPortNames = new Map<number, string>([
+            [10071, 'MUIS'],
+            [10078, 'MAS'],
+            [10075, 'MLS'],
+            [10070, 'DME'],
+            [10069, 'NAT'],
+            [443, 'DNAS'],
+            [53, 'DNS'],
+        ]);
+
+        const parsePort = (endpoint: string): number | null => {
+            if (!endpoint || !endpoint.includes('.')) { return null; }
+            const idx = endpoint.lastIndexOf(':');
+            if (idx < 0 || idx >= endpoint.length - 1) { return null; }
+            const p = Number.parseInt(endpoint.slice(idx + 1), 10);
+            return Number.isInteger(p) && p >= 0 && p <= 65535 ? p : null;
+        };
+
+        const clone = parsedRows.map(row => ({ ...row }));
+
+        for (let i = 0; i < clone.length; i++) {
+            const row = clone[i];
+            const srcPort = parsePort(row.src);
+            const dstPort = parsePort(row.dst);
+            if (srcPort == null || dstPort == null) { continue; }
+
+            const isDns = srcPort === 53 || dstPort === 53;
+            const isScertPort = scertDecodePorts.has(srcPort) || scertDecodePorts.has(dstPort);
+
+            const server = serverPortNames.get(dstPort) ?? serverPortNames.get(srcPort) ?? '';
+            if (server && !row.server) {
+                row.server = server;
+            }
+
+            if (isDns) {
+                row.server = 'DNS';
+                row.proto = 'DNS';
+                row.info = `${row.src} -> ${row.dst} DNS`;
+                continue;
+            }
+
+            // Prevent TLS over port 443 from being mislabeled as SCERT.
+            if (row.proto === 'SCERT' && !isScertPort) {
+                row.proto = 'TCP';
+                row.info = `${row.src} -> ${row.dst} TCP`;
+                continue;
+            }
+
+            // If the bridge gave us TCP for a known SCERT port pair, surface SCERT.
+            if (isScertPort && row.proto === 'TCP') {
+                row.proto = 'SCERT';
+            }
+
+            // Keep row.no/time/dir/len as provided by bridge. Only normalize
+            // protocol-related fields that commonly drift.
+            if (!row.server && server) {
+                row.server = server;
+            }
+
+            // Best-effort backfill when bridge row is missing or sparse.
+            if (!row.info && i < packets.length) {
+                row.info = `${row.src} -> ${row.dst} ${row.proto || 'Unknown'}`;
+            }
+        }
+
+        return clone;
     }
 }
 
@@ -3312,4 +3389,17 @@ export interface CapturedPacketInfo {
     timestampUs: number;
     length: number;
     data: string;
+}
+
+/** A pre-parsed packet table row returned alongside NETRECVCAPTURE. */
+export interface ParsedPacketRow {
+    no: number;
+    time: string;
+    dir: string;
+    server: string;
+    src: string;
+    dst: string;
+    proto: string;
+    len: number;
+    info: string;
 }

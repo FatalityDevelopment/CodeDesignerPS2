@@ -96,10 +96,10 @@ namespace CodeDesigner.Ps2.TestProject
             Assert.AreEqual(entryPt, emu.Cpu.PC,
                 "BootFromDisc must set cpu.PC to the ELF entry point");
 
-            // Verify segment bytes were loaded into EE main RAM.
+            // Verify segment bytes were loaded into EE RAM.
             for (int i = 0; i < segData.Length; i++)
                 Assert.AreEqual(segData[i], emu.Bus.ReadByte(segVaddr + (uint)i),
-                    $"Segment byte {i} must be present in EE main RAM");
+                    $"Segment byte {i} must be present in EE RAM");
         }
 
         [TestMethod]
