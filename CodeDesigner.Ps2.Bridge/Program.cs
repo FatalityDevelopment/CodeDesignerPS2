@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using CodeDesigner.Ps2.Common;
+using CodeDesigner.Ps2.Compression;
 using CodeDesigner.Ps2.Emulator;
 using CodeDesigner.Ps2.Recompiler;
 
@@ -20,6 +21,17 @@ namespace CodeDesigner.Ps2.Bridge
                                  |___/              
 
 ");
+
+
+
+            //using var apache = ApacheZdb.Open("C:\\Users\\tholu\\Desktop\\APACHE00.ZDB");
+            //apache.DecryptFTScorePatch();
+            //apache.DecryptZSealEtcPatch();
+
+            //var zdb = ZdbArchive.Open("C:\\Users\\tholu\\Desktop\\M51.ZDB");
+            //zdb.ExtractAll("C:\\Users\\tholu\\Desktop");
+
+            
             Console.WriteLine("Version 1.00 - PlayStation 2 Toolkit");
             Console.WriteLine();
 
