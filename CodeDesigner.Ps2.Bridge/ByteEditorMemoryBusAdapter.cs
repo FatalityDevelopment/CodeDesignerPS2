@@ -32,31 +32,34 @@ namespace CodeDesigner.Ps2.Bridge
 
         public byte ReadByte(uint vaddr)
         {
-            byte[] data = _editor.Read((int)vaddr, 1);
+            // Cast to int with unchecked semantics: IByteEditor.Read accepts a signed int address,
+            // but both PS2ByteEditor and PinePcsx2ByteEditor cast it back to uint internally, so
+            // the bit pattern is preserved correctly for addresses >= 0x80000000.
+            byte[] data = _editor.Read(unchecked((int)vaddr), 1);
             return data.Length > 0 ? data[0] : (byte)0;
         }
 
         public ushort ReadHalf(uint vaddr)
         {
-            byte[] data = _editor.Read((int)vaddr, 2);
+            byte[] data = _editor.Read(unchecked((int)vaddr), 2);
             return data.Length >= 2 ? BitConverter.ToUInt16(data, 0) : (ushort)0;
         }
 
         public uint ReadWord(uint vaddr)
         {
-            byte[] data = _editor.Read((int)vaddr, 4);
+            byte[] data = _editor.Read(unchecked((int)vaddr), 4);
             return data.Length >= 4 ? BitConverter.ToUInt32(data, 0) : 0u;
         }
 
         public ulong ReadDoubleWord(uint vaddr)
         {
-            byte[] data = _editor.Read((int)vaddr, 8);
+            byte[] data = _editor.Read(unchecked((int)vaddr), 8);
             return data.Length >= 8 ? BitConverter.ToUInt64(data, 0) : 0UL;
         }
 
         public void ReadQuadWord(uint vaddr, out ulong lo, out ulong hi)
         {
-            byte[] data = _editor.Read((int)vaddr, 16);
+            byte[] data = _editor.Read(unchecked((int)vaddr), 16);
             lo = data.Length >= 8  ? BitConverter.ToUInt64(data, 0) : 0UL;
             hi = data.Length >= 16 ? BitConverter.ToUInt64(data, 8) : 0UL;
         }

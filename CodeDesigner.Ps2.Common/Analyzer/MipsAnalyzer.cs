@@ -13,6 +13,11 @@ namespace CodeDesigner.Ps2.Common
     /// </summary>
     public class MipsAnalyzer
     {
+        // Pre-compiled regex for stripping state-dependent branch hints.
+        // Matches: " [TAKEN]", " [NOT TAKEN]", " [TAKEN] [loop]", " [NOT TAKEN] [loop]"
+        private static readonly Regex s_stateHintsRegex = new(
+            @"\s*\[(NOT )?TAKEN\](\s*\[loop\])?",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
         // -----------------------------------------------------------------------
         // Memory-mapped I/O register name table (PS2 EE address space)
         // -----------------------------------------------------------------------
@@ -132,9 +137,10 @@ namespace CodeDesigner.Ps2.Common
         /// <param name="bus">Optional memory bus used to peek at branch/jump target addresses for string/pointer hints.</param>
         /// <param name="lookupLabel">Optional callback that returns a label name for a given address, or null if none.</param>
         /// <param name="includeStateHints">
-        /// When <c>false</c> (default), state-dependent branch hints such as <c>[TAKEN]</c> /
-        /// <c>[NOT TAKEN]</c> are stripped from the output.  These hints are meaningless when the
-        /// CPU state is blank (all registers zero), which is typical in the batch disassembly path.
+        /// When <c>false</c> (the default for batch analysis), state-dependent branch hints
+        /// such as <c>[TAKEN]</c> / <c>[NOT TAKEN]</c> are stripped from the output.  These
+        /// hints are meaningless when the CPU state starts from zero (all registers zeroed),
+        /// which is typical in the batch disassembly path.
         /// Pass <c>true</c> only when a real, live CPU snapshot is available.
         /// </param>
         /// <returns>Dictionary mapping instruction address to comment string</returns>
@@ -528,8 +534,12 @@ namespace CodeDesigner.Ps2.Common
                 {
                     typeChain.Add("STR");
                     addressChain.Add(current);
+                    // When the very first address is already a string (depth == 0, no hops yet),
+                    // AppendAddressHints will have already handled it via the direct-string check
+                    // that runs before TryResolvePointerChain. Returning null here avoids a
+                    // duplicate annotation in that case.
                     return typeChain.Count == 1
-                        ? null  // bare string — caller's direct-string check already handles this
+                        ? null
                         : FormatPointerChain(typeChain, addressChain, $"\"{str}\"");
                 }
 
@@ -538,7 +548,9 @@ namespace CodeDesigner.Ps2.Common
                 try { ptr = bus.ReadWord(current); }
                 catch { break; }
 
-                // Avoid infinite loops and null pointers
+                // Avoid infinite loops. Treat null pointers (0x00000000) as deliberate sentinels:
+                // while address 0 is technically valid EE RAM, a word value of 0 almost always
+                // indicates an uninitialised or null pointer rather than a real pointer into RAM.
                 if (ptr == 0 || ptr == current || !IsValidDataAddress(ptr))
                     break;
 
@@ -591,9 +603,7 @@ namespace CodeDesigner.Ps2.Common
             if (string.IsNullOrEmpty(analysis))
                 return analysis;
 
-            // Remove patterns like " [TAKEN]", " [NOT TAKEN]", " [TAKEN] [loop]", etc.
-            analysis = Regex.Replace(analysis, @"\s*\[(NOT )?TAKEN\]", string.Empty,
-                RegexOptions.IgnoreCase);
+            analysis = s_stateHintsRegex.Replace(analysis, string.Empty);
             return analysis.TrimEnd();
         }
 
