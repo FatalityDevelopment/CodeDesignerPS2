@@ -762,12 +762,25 @@ namespace CodeDesigner.Ps2.Bridge
                     }
                 }
 
-                // Run analyzer using the instruction's built-in Analyze() method
+                // Resolve a live memory bus so the analyzer can peek at strings and pointer chains.
+                // In PINE mode we wrap PinePcsx2ByteEditor; in built-in emulator mode we use
+                // the EE bus directly.  When neither backend is available (file-only mode) the
+                // bus remains null and the analyzer falls back to label/MMIO-name hints only.
+                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? analysisBus =
+                    IsPineMode && PineClient != null
+                        ? new ByteEditorMemoryBusAdapter(new PinePcsx2ByteEditor(PineClient))
+                        : (CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus?)Scheduler?.EE.Bus;
+
+                // Run analyzer using the instruction's built-in Analyze() method.
+                // State-specific hints (TAKEN / NOT TAKEN) are suppressed here because
+                // the batch analyzer starts from a blank CPU state.
                 var comments = MipsAnalyzer.AnalyzeInstructions(
                     instructionList, 
                     startAddress ?? 0,
                     executeInstructions: true,  // Execute instructions to track register state
-                    lookupLabel: addr => _labels.TryGetValue(addr, out var e) ? e.Label : null);
+                    bus: analysisBus,
+                    lookupLabel: addr => _labels.TryGetValue(addr, out var e) ? e.Label : null,
+                    includeStateHints: false);
 
                 // Apply comments and labels to results
                 for (int i = 0; i < results.Count; i++)

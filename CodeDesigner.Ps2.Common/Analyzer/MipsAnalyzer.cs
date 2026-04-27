@@ -13,6 +13,11 @@ namespace CodeDesigner.Ps2.Common
     /// </summary>
     public class MipsAnalyzer
     {
+        // Pre-compiled regex for stripping state-dependent branch hints.
+        // Matches: " [TAKEN]", " [NOT TAKEN]", " [TAKEN] [loop]", " [NOT TAKEN] [loop]"
+        private static readonly Regex s_stateHintsRegex = new(
+            @"\s*\[(NOT )?TAKEN\](\s*\[loop\])?",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
         // -----------------------------------------------------------------------
         // Memory-mapped I/O register name table (PS2 EE address space)
         // -----------------------------------------------------------------------
@@ -129,15 +134,23 @@ namespace CodeDesigner.Ps2.Common
         /// <param name="instructions">List of instruction words and their addresses</param>
         /// <param name="startPc">Starting program counter</param>
         /// <param name="executeInstructions">If true, executes instructions to track register state</param>
-        /// <param name="bus">Optional memory bus used to peek at branch/jump target addresses for string hints.</param>
+        /// <param name="bus">Optional memory bus used to peek at branch/jump target addresses for string/pointer hints.</param>
         /// <param name="lookupLabel">Optional callback that returns a label name for a given address, or null if none.</param>
+        /// <param name="includeStateHints">
+        /// When <c>false</c> (the default for batch analysis), state-dependent branch hints
+        /// such as <c>[TAKEN]</c> / <c>[NOT TAKEN]</c> are stripped from the output.  These
+        /// hints are meaningless when the CPU state starts from zero (all registers zeroed),
+        /// which is typical in the batch disassembly path.
+        /// Pass <c>true</c> only when a real, live CPU snapshot is available.
+        /// </param>
         /// <returns>Dictionary mapping instruction address to comment string</returns>
         public static Dictionary<uint, string> AnalyzeInstructions(
             IEnumerable<(uint instruction, uint address)> instructions, 
             uint startPc = 0,
             bool executeInstructions = true,
             IPs2MemoryBus? bus = null,
-            Func<uint, string?>? lookupLabel = null)
+            Func<uint, string?>? lookupLabel = null,
+            bool includeStateHints = false)
         {
             var comments = new Dictionary<uint, string>();
             
@@ -175,11 +188,16 @@ namespace CodeDesigner.Ps2.Common
                         
                         // Call the instruction's Analyze method to get analysis comment
                         string analysis = instrObj.AnalyzeGeneric(args, cpu, currentPc);
-                        
+
+                        // Strip state-dependent branch hints when the caller opts out.
+                        // [TAKEN] / [NOT TAKEN] are misleading when the CPU starts from a blank state.
+                        if (!includeStateHints)
+                            analysis = StripStateHints(analysis);
+
                         // Only add comment if analysis returned something meaningful
                         if (!string.IsNullOrWhiteSpace(analysis))
                         {
-                            // Append label/string hint for branch/jump targets when available
+                            // Append label/string/pointer hint for branch/jump targets when available
                             if (target.HasValue)
                             {
                                 string? hint = BuildTargetHint(target.Value, bus, lookupLabel);
@@ -213,11 +231,17 @@ namespace CodeDesigner.Ps2.Common
         /// <param name="instruction">The 32-bit instruction word.</param>
         /// <param name="pc">The virtual address of the instruction.</param>
         /// <param name="cpu">CPU state captured immediately before the instruction executed.</param>
-        /// <param name="bus">Optional memory bus used to peek at the branch/jump target for a string hint.</param>
+        /// <param name="bus">Optional memory bus used to peek at the branch/jump target for a string/pointer hint.</param>
         /// <param name="lookupLabel">Optional callback that returns a label name for a given address, or null if none.</param>
+        /// <param name="includeStateHints">
+        /// When <c>true</c> (default for single-step), state-dependent branch hints such as
+        /// <c>[TAKEN]</c> / <c>[NOT TAKEN]</c> are preserved.  Pass <c>false</c> when only a
+        /// blank/synthetic CPU state is available.
+        /// </param>
         public static string AnalyzeSingleInstruction(uint instruction, uint pc, CpuState cpu,
             IPs2MemoryBus? bus = null,
-            Func<uint, string?>? lookupLabel = null)
+            Func<uint, string?>? lookupLabel = null,
+            bool includeStateHints = true)
         {
             try
             {
@@ -229,7 +253,13 @@ namespace CodeDesigner.Ps2.Common
                 if (string.IsNullOrWhiteSpace(analysis))
                     return string.Empty;
 
-                // Append label/string hint for branch/jump targets when bus or label lookup is available
+                if (!includeStateHints)
+                    analysis = StripStateHints(analysis);
+
+                if (string.IsNullOrWhiteSpace(analysis))
+                    return string.Empty;
+
+                // Append label/string/pointer hint for branch/jump targets when bus or label lookup is available
                 if (bus != null || lookupLabel != null)
                 {
                     uint? target = TryGetBranchJumpTarget(instruction, pc, cpu);
@@ -241,7 +271,7 @@ namespace CodeDesigner.Ps2.Common
                     }
                 }
 
-                // Check for LUI+ADDIU or LUI+ORI patterns and append a label/string hint when available
+                // Check for LUI+ADDIU or LUI+ORI patterns and append a label/string/pointer hint when available
                 uint? pointerTarget = TryGetPointerLoadTarget(instruction, cpu);
                 if (pointerTarget.HasValue && (lookupLabel != null || bus != null))
                 {
@@ -251,7 +281,7 @@ namespace CodeDesigner.Ps2.Common
                     // No hint: the instruction's own Analyze() already shows the computed address
                 }
 
-                // Append hints (MMIO names, live values, string data) for any addresses in the comment
+                // Append hints (MMIO names, live values, string data, pointer chains) for any addresses in the comment
                 analysis = AppendAddressHints(analysis, bus, lookupLabel);
 
                 return $"; {analysis}";
@@ -383,7 +413,7 @@ namespace CodeDesigner.Ps2.Common
         /// <summary>
         /// Scans <paramref name="analysis"/> for hex address patterns (<c>0x{8 hex}</c> and
         /// <c>[0x{8 hex}]</c>) and appends the first useful hint found. Priority:
-        /// label lookup → MMIO register name → ASCII string peek → raw word value.
+        /// label lookup → MMIO register name → pointer chain / ASCII string peek → raw word value.
         /// Addresses that are already followed by a <c>"…"</c> hint are skipped.
         /// </summary>
         private static string AppendAddressHints(string analysis, IPs2MemoryBus? bus, Func<uint, string?>? lookupLabel)
@@ -403,7 +433,7 @@ namespace CodeDesigner.Ps2.Common
 
                 uint addr = Convert.ToUInt32(m.Groups[1].Value, 16);
 
-                // 1. Label lookup (highest priority)
+                // 1. Label lookup (highest priority — works even for 0x00000000)
                 if (lookupLabel != null)
                 {
                     string? label = lookupLabel(addr);
@@ -424,37 +454,192 @@ namespace CodeDesigner.Ps2.Common
                 if (bus == null)
                     continue;
 
-                // 3. ASCII string peek (only for addresses in RAM-like regions)
-                if (IsValidStringAddress(addr))
+                // 3. Pointer chain / string resolution for addresses in RAM-like regions
+                if (IsValidDataAddress(addr))
                 {
+                    // Try direct string first (most common case; no type tag needed)
                     string? str = TryPeekStringAtAddress(bus, addr);
                     if (str != null)
                     {
-                        analysis += $" \"{str}\"";
+                        string region = GetMemoryRegionName(addr) is string rn ? $" ({rn})" : string.Empty;
+                        analysis += $" \"{str}\"{region}";
+                        return analysis;
+                    }
+
+                    // Try pointer chain (up to 4 hops deep)
+                    string? chain = TryResolvePointerChain(bus, addr, lookupLabel);
+                    if (chain != null)
+                    {
+                        analysis += $" {chain}";
                         return analysis;
                     }
                 }
 
                 // 4. Raw word value (only for load addresses, denoted by [0x...] in the comment)
-                if (m.Value.StartsWith('[') && IsValidStringAddress(addr))
+                if (m.Value.StartsWith('[') && IsValidDataAddress(addr))
                 {
-                    string? rawVal = TryPeekWordValueAtAddress(bus, addr);
-                    if (rawVal != null)
+                    try
                     {
-                        analysis += $" = {rawVal}";
+                        uint word = bus.ReadWord(addr);
+                        string region = GetMemoryRegionName(addr) is string rn ? $" ({rn})" : string.Empty;
+                        analysis += $" = 0x{word:X8}{region}";
                         return analysis;
                     }
+                    catch { /* address unreadable */ }
                 }
             }
 
             return analysis;
         }
 
+        // -----------------------------------------------------------------------
+        // Pointer chain resolution
+        // -----------------------------------------------------------------------
+
+        private const int MaxPointerDepth = 4;
+
+        /// <summary>
+        /// Follows a pointer chain starting at <paramref name="addr"/> up to
+        /// <see cref="MaxPointerDepth"/> hops and returns a formatted hint string
+        /// of the form <c>[PTR->STR] 0xAAAAAAAA -> "hello"</c>, or <c>null</c>
+        /// when no useful chain is found.
+        /// </summary>
+        private static string? TryResolvePointerChain(IPs2MemoryBus bus, uint addr,
+            Func<uint, string?>? lookupLabel)
+        {
+            var addressChain = new List<uint>();
+            var typeChain    = new List<string>();
+
+            uint current = addr;
+            for (int depth = 0; depth < MaxPointerDepth; depth++)
+            {
+                if (!IsValidDataAddress(current))
+                    break;
+
+                // Check for label at this pointer address
+                if (depth > 0 && lookupLabel != null)
+                {
+                    string? lbl = lookupLabel(current);
+                    if (!string.IsNullOrWhiteSpace(lbl))
+                    {
+                        typeChain.Add("LBL");
+                        addressChain.Add(current);
+                        return FormatPointerChain(typeChain, addressChain, $"\"{lbl}\"");
+                    }
+                }
+
+                // Check if current address contains a string
+                string? str = TryPeekStringAtAddress(bus, current);
+                if (str != null)
+                {
+                    typeChain.Add("STR");
+                    addressChain.Add(current);
+                    // When the very first address is already a string (depth == 0, no hops yet),
+                    // AppendAddressHints will have already handled it via the direct-string check
+                    // that runs before TryResolvePointerChain. Returning null here avoids a
+                    // duplicate annotation in that case.
+                    return typeChain.Count == 1
+                        ? null
+                        : FormatPointerChain(typeChain, addressChain, $"\"{str}\"");
+                }
+
+                // Try to read the word at current address and follow as pointer
+                uint ptr;
+                try { ptr = bus.ReadWord(current); }
+                catch { break; }
+
+                // Avoid infinite loops. Treat null pointers (0x00000000) as deliberate sentinels:
+                // while address 0 is technically valid EE RAM, a word value of 0 almost always
+                // indicates an uninitialised or null pointer rather than a real pointer into RAM.
+                if (ptr == 0 || ptr == current || !IsValidDataAddress(ptr))
+                    break;
+
+                typeChain.Add("PTR");
+                addressChain.Add(current);
+                current = ptr;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Formats a resolved pointer chain into a human-readable hint string.
+        /// Example: <c>[PTR->PTR->STR] 0xAAAA0000 -> 0xBBBB0000 -> "hello"</c>
+        /// </summary>
+        private static string FormatPointerChain(List<string> types, List<uint> addresses, string finalValue)
+        {
+            var sb = new StringBuilder();
+            sb.Append('[');
+            sb.Append(string.Join("->", types));
+            sb.Append("] ");
+
+            // Show all intermediate address hops (the first address in the chain is the
+            // one whose content is shown, so we include all addresses up to the last).
+            for (int i = 0; i < addresses.Count - 1; i++)
+            {
+                sb.Append($"0x{addresses[i]:X8} -> ");
+            }
+
+            // Last address -> final value
+            if (addresses.Count > 0)
+                sb.Append($"0x{addresses[^1]:X8} -> ");
+
+            sb.Append(finalValue);
+            return sb.ToString();
+        }
+
+        // -----------------------------------------------------------------------
+        // State-hint stripping
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Removes <c>[TAKEN]</c>, <c>[NOT TAKEN]</c> (and their <c>[loop]</c>
+        /// suffix variants) from an analysis string produced by a branch instruction.
+        /// These hints are only meaningful with a live CPU state; they are noise when
+        /// registers start from zero.
+        /// </summary>
+        private static string StripStateHints(string analysis)
+        {
+            if (string.IsNullOrEmpty(analysis))
+                return analysis;
+
+            analysis = s_stateHintsRegex.Replace(analysis, string.Empty);
+            return analysis.TrimEnd();
+        }
+
+        // -----------------------------------------------------------------------
+        // Memory region awareness
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Returns a short human-readable name for the PS2 memory region containing
+        /// <paramref name="addr"/>, or <c>null</c> when the address is not in a
+        /// recognized named region.
+        /// </summary>
+        private static string? GetMemoryRegionName(uint addr)
+        {
+            // Strip KSEG0 / KSEG1 bits to get the physical equivalent
+            uint phys = addr;
+            if (addr >= 0x80000000u && addr < 0xC0000000u)
+                phys = addr & 0x1FFFFFFFu;
+
+            if (phys < 0x02000000u)             return "EE RAM";
+            if (phys >= 0x1FC00000u && phys < 0x20000000u) return "BIOS ROM";
+            if (addr >= 0x70000000u && addr < 0x70004000u) return "Scratchpad";
+            if (phys >= 0x10000000u && phys < 0x10010000u) return "I/O Regs";
+            if (phys >= 0x12000000u && phys < 0x12002000u) return "GS Regs";
+            return null;
+        }
+
+        // -----------------------------------------------------------------------
+        // Address range predicates
+        // -----------------------------------------------------------------------
+
         /// <summary>
         /// Returns true when <paramref name="addr"/> is in a region that may be safely
         /// read as data (main RAM, BIOS, scratchpad). Excludes I/O register space.
         /// </summary>
-        private static bool IsValidStringAddress(uint addr)
+        private static bool IsValidDataAddress(uint addr)
         {
             // Main RAM: 0x00000000–0x01FFFFFF (32 MB) and KSEG0/KSEG1 mirrors
             if (addr < 0x02000000u)
@@ -472,23 +657,6 @@ namespace CodeDesigner.Ps2.Common
             if (addr >= 0xBFC00000u && addr < 0xC0000000u)
                 return true;
             return false;
-        }
-
-        /// <summary>
-        /// Tries to peek a single 32-bit word at <paramref name="address"/> and
-        /// return it as a hex string. Returns <c>null</c> on failure.
-        /// </summary>
-        private static string? TryPeekWordValueAtAddress(IPs2MemoryBus bus, uint address)
-        {
-            try
-            {
-                uint word = bus.ReadWord(address);
-                return $"0x{word:X8}";
-            }
-            catch
-            {
-                return null;
-            }
         }
 
         /// <summary>
@@ -521,12 +689,13 @@ namespace CodeDesigner.Ps2.Common
 
         /// <summary>
         /// Builds a human-readable hint for a branch/jump <paramref name="target"/> address
-        /// by checking the label database first, then peeking at memory for a string.
+        /// by checking the label database first, then peeking at memory for a string or
+        /// following a pointer chain.
         /// Returns <c>null</c> when no useful hint can be produced.
         /// </summary>
         private static string? BuildTargetHint(uint target, IPs2MemoryBus? bus, Func<uint, string?>? lookupLabel)
         {
-            // Prefer a symbolic label over a raw memory peek
+            // 1. Prefer a symbolic label over a raw memory peek
             if (lookupLabel != null)
             {
                 string? label = lookupLabel(target);
@@ -534,15 +703,20 @@ namespace CodeDesigner.Ps2.Common
                     return $"\"{label}\"";
             }
 
-            // Fall back to peeking at the target address for a null-terminated string
-            if (bus != null)
+            if (bus == null || !IsValidDataAddress(target))
+                return null;
+
+            // 2. Direct string at target address
+            string? str = TryPeekStringAtAddress(bus, target);
+            if (str != null)
             {
-                string? str = TryPeekStringAtAddress(bus, target);
-                if (str != null)
-                    return $"\"{str}\"";
+                string region = GetMemoryRegionName(target) is string rn ? $" ({rn})" : string.Empty;
+                return $"\"{str}\"{region}";
             }
 
-            return null;
+            // 3. Pointer chain starting at target address
+            return TryResolvePointerChain(bus, target, lookupLabel);
         }
     }
 }
+
