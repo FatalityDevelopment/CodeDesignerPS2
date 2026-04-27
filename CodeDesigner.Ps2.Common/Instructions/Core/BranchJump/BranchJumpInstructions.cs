@@ -1,6 +1,7 @@
 using CodeDesigner.Ps2.Common.Cpu.InstrArgs;
 using CodeDesigner.Ps2.Common.CPU;
 using System;
+using System.Text;
 
 /*
 | Instruction | Description |
@@ -626,11 +627,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             uint target = pcUpper | (args.Addr << 2);
             if (cpu != null)
             {
-                uint a0 = (uint)cpu.RegsLo[4];
-                uint a1 = (uint)cpu.RegsLo[5];
-                uint a2 = (uint)cpu.RegsLo[6];
-                uint a3 = (uint)cpu.RegsLo[7];
-                return $"call 0x{target:X8} ($a0=0x{a0:X8} $a1=0x{a1:X8} $a2=0x{a2:X8} $a3=0x{a3:X8})";
+                return CallAnalysisHelper.BuildCallComment(cpu, $"call 0x{target:X8}");
             }
             return $"call 0x{target:X8}";
         }
@@ -718,11 +715,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
             if (cpu != null)
             {
                 uint target = (uint)cpu.RegsLo[args.Rs];
-                uint a0 = (uint)cpu.RegsLo[4];
-                uint a1 = (uint)cpu.RegsLo[5];
-                uint a2 = (uint)cpu.RegsLo[6];
-                uint a3 = (uint)cpu.RegsLo[7];
-                return $"call 0x{target:X8} ($a0=0x{a0:X8} $a1=0x{a1:X8} $a2=0x{a2:X8} $a3=0x{a3:X8})";
+                return CallAnalysisHelper.BuildCallComment(cpu, $"call 0x{target:X8}");
             }
             return $"call {CpuHelpers.RegName(args.Rs)}";
         }
@@ -1221,6 +1214,38 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
                 return $"→ 0x{target:X8} [{(taken ? "TAKEN" : "NOT TAKEN")}]{loopHint}";
             }
             return $"→ 0x{target:X8}";
+        }
+    }
+
+    /// <summary>Helper for JAL/JALR call-site analysis comments.</summary>
+    internal static class CallAnalysisHelper
+    {
+        /// <summary>
+        /// Builds a compact call comment: "call &lt;prefix&gt; ($a0=X, $a1=X, ..., $tN=X)"
+        /// Always includes $a0–$a3; additionally appends any non-zero $t0–$t7 registers.
+        /// Values are formatted as compact uppercase hex without leading zeros.
+        /// </summary>
+        internal static string BuildCallComment(CpuState cpu, string prefix)
+        {
+            var sb = new StringBuilder();
+            sb.Append(prefix);
+            sb.Append(" (");
+            // a0-a3 (registers 4-7) always shown
+            for (int i = 4; i <= 7; i++)
+            {
+                if (i > 4) sb.Append(", ");
+                uint val = (uint)cpu.RegsLo[i];
+                sb.Append($"${CpuHelpers.RegName(i)}={val:X}");
+            }
+            // t0-t7 (registers 8-15) only when non-zero
+            for (int i = 8; i <= 15; i++)
+            {
+                uint val = (uint)cpu.RegsLo[i];
+                if (val != 0)
+                    sb.Append($", ${CpuHelpers.RegName(i)}={val:X}");
+            }
+            sb.Append(')');
+            return sb.ToString();
         }
     }
 }

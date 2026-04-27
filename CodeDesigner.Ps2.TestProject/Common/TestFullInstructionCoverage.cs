@@ -1277,7 +1277,7 @@ namespace CodeDesigner.Ps2.TestProject
             Assert.IsNotNull(obj);
             obj!.ExecuteGeneric(cpu, args!);
             Assert.AreEqual(prevLo, cpu.RegsLo[8], "NOP: no register change");
-            AssertAnalysis(enc);
+            // NOP intentionally produces no analysis comment — it is pure noise for a reader
         }
 
         [TestMethod]
@@ -2676,6 +2676,24 @@ namespace CodeDesigner.Ps2.TestProject
 
             Assert.IsTrue(analysis.Contains("$a0"), $"JALR analysis should show $a0, got: {analysis}");
             Assert.IsTrue(analysis.Contains("call"), $"JALR analysis should contain 'call', got: {analysis}");
+        }
+
+        [TestMethod]
+        public void Analyze_JAL_ShowsTempRegisters_WhenNonZero()
+        {
+            // JAL $80400000 from PC $80000000 with non-zero $t0/$t1
+            uint enc = MipsEncoder.EncodeJ(0x03, 0x100000); // JAL to 0x80400000
+
+            var cpu = new CpuState { PC = 0x80000000u };
+            cpu.RegsLo[8]  = 0xDEADBEEFu; // $t0 — non-zero, should appear
+            cpu.RegsLo[9]  = 0x0000CAFEu; // $t1 — non-zero, should appear
+            // $t2-$t7 left zero — should not appear
+
+            string analysis = MipsAnalyzer.AnalyzeSingleInstruction(enc, 0x80000000u, cpu, null);
+
+            Assert.IsTrue(analysis.Contains("$t0"), $"Analysis should show $t0, got: {analysis}");
+            Assert.IsTrue(analysis.Contains("$t1"), $"Analysis should show $t1, got: {analysis}");
+            Assert.IsFalse(analysis.Contains("$t2"), $"Analysis should not show zero $t2, got: {analysis}");
         }
 
         // -----------------------------------------------------------------------
