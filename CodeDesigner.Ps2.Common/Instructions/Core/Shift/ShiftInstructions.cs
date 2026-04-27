@@ -53,7 +53,7 @@ namespace CodeDesigner.Ps2.Common.Cpu.Instructions.EE
         public override string Analyze(Args_R args, CpuState? cpu = null, uint? pc = null)
         {
             if (args.Rd == 0 && args.Rt == 0 && args.Shamt == 0)
-                return "No operation";
+                return string.Empty;
             if (cpu == null) return string.Empty;
             uint rtVal = (uint)CpuHelpers.GetReg32(cpu, args.Rt);
             return $"{CpuHelpers.RegName(args.Rd)} = 0x{rtVal << args.Shamt:X8}";
