@@ -1,0 +1,37 @@
+/* VS Code dark+ inspired palette as CSS variables. */
+:root {
+  --vsc-bg: #1e1e1e;
+  --vsc-bg-alt: #252526;
+  --vsc-bg-elev: #2d2d30;
+  --vsc-bg-input: #3c3c3c;
+  --vsc-fg: #cccccc;
+  --vsc-fg-muted: #9d9d9d;
+  --vsc-fg-strong: #ffffff;
+  --vsc-border: #3c3c3c;
+  --vsc-border-strong: #4d4d4d;
+  --vsc-accent: #007acc;
+  --vsc-accent-hover: #1f8ad2;
+  --vsc-error: #f48771;
+  --vsc-warn: #cca700;
+  --vsc-good: #89d185;
+
+  --vsc-activitybar-bg: #333333;
+  --vsc-sidebar-bg: #252526;
+  --vsc-editor-bg: #1e1e1e;
+  --vsc-panel-bg: #1e1e1e;
+  --vsc-statusbar-bg: #007acc;
+  --vsc-statusbar-fg: #ffffff;
+  --vsc-titlebar-bg: #3c3c3c;
+  --vsc-tab-active-bg: #1e1e1e;
+  --vsc-tab-inactive-bg: #2d2d2d;
+  --vsc-tab-hover-bg: #2a2a2a;
+  --vsc-row-hover: #2a2d2e;
+  --vsc-row-selected: #094771;
+
+  --vsc-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Ubuntu', 'Droid Sans', sans-serif;
+  --vsc-font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', Menlo, Consolas, 'Liberation Mono',
+    monospace;
+
+  --vsc-radius: 2px;
+  --vsc-z-modal: 1000;
+}
