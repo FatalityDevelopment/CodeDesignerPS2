@@ -603,7 +603,7 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
 
 
     <!-- ══════════════════════════ HISTORY TAB ══════════════════════════════ -->
-    <div class="aic-tab-panel" [class.hidden]="activeTab() !== 'history'">
+    <div class="aic-tab-panel aic-history-panel" [class.hidden]="activeTab() !== 'history'">
       <div class="aic-section-header">
         <h2 class="aic-section-title">&#x1F4DC; Conversation History</h2>
         <input class="aic-filter-input" type="text" spellcheck="false"
@@ -672,7 +672,7 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
         <div class="aic-planner-preview">
           <div class="aic-planner-preview-header">
             <span class="aic-planner-preview-title">Preview</span>
-            <label class="dv-toggle">
+            <label class="aic-toggle">
               <input type="checkbox" [checked]="plannerPreviewMode()" (change)="plannerPreviewMode.set($any($event.target).checked)" />
               Wrap text
             </label>

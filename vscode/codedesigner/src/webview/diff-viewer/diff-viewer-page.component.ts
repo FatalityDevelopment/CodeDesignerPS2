@@ -8,6 +8,7 @@ import {
   viewChild,
   NgZone,
   inject,
+  effect,
 } from '@angular/core';
 import { getVsCodeApi } from '../shared/vscode-api';
 import { PaginatedTableComponent, ColumnDef } from '../shared/components/index';
@@ -166,6 +167,14 @@ export class DiffViewerPageComponent implements AfterViewInit, OnDestroy {
   private readonly vscode    = getVsCodeApi();
   private readonly zone      = inject(NgZone);
   private readonly porterRef = viewChild<PorterPageComponent>('porterComp');
+
+  constructor() {
+    // Keep porter source/target in sync with whatever is selected in the diff tab.
+    // porterRef() is undefined before view init; when it becomes available the effect
+    // re-runs and pushes the current snapshot paths into the porter automatically.
+    effect(() => { this.porterRef()?.setSourcePath(this.snapshotA()?.path ?? ''); });
+    effect(() => { this.porterRef()?.setTargetPath(this.snapshotB()?.path ?? ''); });
+  }
 
   readonly activeTab          = signal<DiffTab>('diff');
   readonly diffMode           = signal<DiffMode>('flat-flat');
@@ -346,10 +355,27 @@ export class DiffViewerPageComponent implements AfterViewInit, OnDestroy {
         this.liveReadError.set(true);
         break;
 
+      case 'preloadSnapshots': {
+        const snapA = data['snapshotA'] as SnapshotEntry | null;
+        const snapB = data['snapshotB'] as SnapshotEntry | null;
+        const cur   = this.availableSnapshots();
+        const toAdd = [snapA, snapB].filter((s): s is SnapshotEntry =>
+          !!s && !cur.some(e => e.path === s.path)
+        );
+        if (toAdd.length) { this.availableSnapshots.set([...cur, ...toAdd]); }
+        if (snapA) { this.snapshotA.set(snapA); }
+        if (snapB) { this.snapshotB.set(snapB); }
+        break;
+      }
+
       case 'browseResult': {
         const side = data['side'] as 'A' | 'B';
         const snap = data['snapshot'] as SnapshotEntry | undefined;
         if (snap) {
+          // Add to the list so the <select> option renders and [selected] binding works.
+          if (!this.availableSnapshots().some(s => s.path === snap.path)) {
+            this.availableSnapshots.set([...this.availableSnapshots(), snap]);
+          }
           if (side === 'A') { this.snapshotA.set(snap); }
           else              { this.snapshotB.set(snap); }
         }

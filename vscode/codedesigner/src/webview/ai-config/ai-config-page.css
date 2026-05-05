@@ -988,3 +988,41 @@ body, html {
 }
 
 .aic-planner-pre.aic-planner-wrap { white-space: pre-wrap; }
+
+/* ── History tab panel layout ────────────────────────────────────────────── */
+.aic-history-panel {
+  flex-direction: column;
+  padding: 16px 20px;
+  overflow-y: auto;
+  gap: 8px;
+}
+
+/* ── Shared section heading (used by History and Prompt Builder tabs) ──────── */
+.aic-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--vscode-settings-headerForeground, var(--vscode-foreground));
+}
+
+/* ── Wrap-text toggle (used in Prompt Builder preview header) ──────────────── */
+.aic-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--vscode-foreground);
+}
+
+/* ── Muted text utility (used in History messages) ─────────────────────────── */
+.lm-muted {
+  color: var(--vscode-descriptionForeground, #777);
+}
+
+/* ── History metadata sub-fields ────────────────────────────────────────────── */
+.aic-history-agent,
+.aic-history-date {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #777);
+}
