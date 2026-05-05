@@ -6,8 +6,11 @@
     <button class="header-tool-btn" id="goto-toggle-btn" title="Go to Address (Ctrl+Alt+A)">&#8594; Go To</button>
     <button class="header-tool-btn live-only" id="setpc-toggle-btn" title="Set PC to Address (Ctrl+Alt+P)">&#9655; Set PC</button>
     <button class="header-tool-btn" id="nav-back-btn" title="Navigate Back (Alt+Left)" disabled>&#8592; Back</button>
-
-
+    <span class="header-separator"></span>
+    <app-memory-region-selector
+      [currentAddress]="signals.baseAddress()"
+      (regionSelected)="onRegionSelected($event)">
+    </app-memory-region-selector>
 </div>
 <!-- New Angular component-based panels -->
 <app-address-input-panel

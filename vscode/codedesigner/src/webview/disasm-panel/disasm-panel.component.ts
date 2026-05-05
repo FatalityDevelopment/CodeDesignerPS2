@@ -368,6 +368,14 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'openLabelManager' });
   }
 
+  onOpenSnapshotManager(): void {
+    this.bridge.postMessage({ command: 'openSnapshotManager' });
+  }
+
+  onOpenDiffViewer(): void {
+    this.bridge.postMessage({ command: 'openDiffViewer' });
+  }
+
   onOpenMemoryCard(): void {
     this.bridge.postMessage({ command: 'openMemoryCard' });
   }

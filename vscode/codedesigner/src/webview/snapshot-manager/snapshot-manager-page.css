@@ -1,0 +1,48 @@
+.sm-outer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground, #ccc);
+  background: var(--vscode-editor-background, #1e1e1e);
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.sm-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+  margin-bottom: 6px;
+}
+
+.sm-title {
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.sm-status {
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  background: var(--vscode-inputValidation-infoBackground, #063b49);
+  color: var(--vscode-inputValidation-infoForeground, #ccc);
+  border: 1px solid var(--vscode-inputValidation-infoBorder, #007acc);
+}
+
+.sm-status.sm-status-error {
+  background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+  color: var(--vscode-inputValidation-errorForeground, #f88);
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+.sm-col-date   { white-space: nowrap; font-size: 11px; }
+.sm-col-title  { font-weight: 500; }
+.sm-col-game   { font-size: 11px; }
+.sm-col-actions { white-space: nowrap; }

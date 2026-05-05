@@ -176,6 +176,10 @@ export class AiConfigProvider {
                 await this._handleToolUpdate(msg['key'] as string, msg['value'] as string, webview);
                 break;
 
+            case 'historyList':
+                await this._sendHistoryList(webview);
+                break;
+
             default:
                 getOutputChannel().warn(`[AiConfig] Unknown message type: ${type}`);
                 break;
@@ -550,6 +554,17 @@ export class AiConfigProvider {
             webview.postMessage({ type: 'toolUpdateResult', message: `Updated description for '${key}'.` });
         } catch (err: any) {
             webview.postMessage({ type: 'toolUpdateResult', error: err?.message ?? String(err) });
+        }
+    }
+
+    // ── History handler ───────────────────────────────────────────────────────
+
+    private async _sendHistoryList(webview: vscode.Webview): Promise<void> {
+        try {
+            const messages = await this.socketClient.mcpConversationList?.() ?? [];
+            webview.postMessage({ type: 'historyListResult', messages });
+        } catch (err: any) {
+            webview.postMessage({ type: 'historyListResult', messages: [], error: err?.message ?? String(err) });
         }
     }
 
