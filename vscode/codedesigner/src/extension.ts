@@ -70,6 +70,37 @@ export function activate(context: vscode.ExtensionContext) {
 	editorProvider.onPauseStateChange = (paused: boolean) => {
 		disasmPanelProvider.notifyPauseState(paused);
 	};
+// Wire memory-region navigation from the disasm-editor toolbar to the panel provider.
+	editorProvider.onOpenMemoryView = async (label: string) => {
+		await disasmPanelProvider.openOptionalMemoryView(label);
+	};
+
+	// Wire struct / label set changes from the DisasmEditorProvider to the STRUCTS panel.
+	// This keeps the tree view in sync with whatever label set is active in the editor.
+	// (Commented out — structs panel is disabled for now)
+	// editorProvider.onStructsChanged = (structs) => {
+	// 	pointerManagerProvider.setServerStructs(structs);
+	// };
+
+	// Wire pointer-manager label changes to the disasm instruction display.
+	// Whenever the user adds, edits, or deletes a pointer/child label, resolve
+	// all live addresses and push the results to any open live panels.
+	// NOTE: Do NOT call refreshStructLabels() here — struct labels come from the
+	// server and are independent of local pointer definitions.  Calling it here
+	// creates an infinite loop: refreshStructLabels → onStructsChanged →
+	// setServerStructs → _onDidChangeTreeData → refreshStructLabels → …
+	context.subscriptions.push(
+		pointerManagerProvider.onDidChangeTreeData(() => {
+			pointerManagerProvider.getResolvedLabels().then(labels => {
+				editorProvider.setPointerLabels(labels);
+			}).catch(() => { /* ignore — not connected */ });
+		})
+	);
+
+	// Wire pointer-manager labels into the CDS compiler: whenever CDS source is
+	// compiled, the current live-resolved labels (e.g. "seal.health") are forwarded
+	// to the backend so they can be referenced as :seal.health or @seal.health.
+	disasmPanelProvider.getPointerLabels = () => pointerManagerProvider.getResolvedLabels();
 
 	// Wire snapshot history lookup: when the edit overlay requests address history,
 	// delegate to the panel provider which manages snapshots.

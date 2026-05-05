@@ -10,6 +10,7 @@ import {
 import { getVsCodeApi } from '../shared/vscode-api';
 import { PaginatedTableComponent, ColumnDef, ConfirmDialogComponent } from '../shared/components/index';
 import { SnapshotEntry } from '../disasm-panel/types';
+import '../shared/styles/shared.css';
 import './snapshot-manager-page.css';
 
 @Component({

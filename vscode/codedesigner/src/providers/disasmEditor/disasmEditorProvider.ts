@@ -104,6 +104,13 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
   public onPauseStateChange?: (paused: boolean) => void;
 
   /**
+   * Optional callback invoked when a webview requests opening a live memory region by label
+   * (e.g. from the memory-region-selector toolbar buttons in the disasm editor).
+   * Set by DisasmPanelProvider so it can open the appropriate optional memory view.
+   */
+  public onOpenMemoryView?: (label: string) => Promise<void>;
+
+  /**
    * Optional callback for retrieving address history from snapshots.
    * Wired to DisasmPanelProvider.getAddressHistory() in extension.ts.
    */
@@ -1637,6 +1644,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this._handleLabelManagerAction(panel.webview, message.action as any);
             } else if (message.type === 'openLabelManagerTab') {
                 this.openLabelManagerTab(message.address as string | undefined);
+            } else if (message.type === 'openMemoryView') {
+                await this.onOpenMemoryView?.(message.label as string ?? '');
             } else if (message.type === 'toggleFollowAi') {
                 this.setFollowAiEnabled(!this._followAiEnabled);
             }
