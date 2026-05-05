@@ -21,7 +21,7 @@ import './snapshot-manager-page.css';
   template: `
 <div class="sm-outer">
   <div class="sm-header">
-    <span class="sm-title">&#128248; Snapshot Manager</span>
+    <span class="sm-title">Snapshot Manager</span>
     <button class="lm-tool-btn sm-refresh-btn" title="Refresh" (click)="onRefresh()">&#x21BB;</button>
   </div>
 
@@ -53,7 +53,7 @@ import './snapshot-manager-page.css';
       <td class="sm-col-title">{{ $any(row).label }}</td>
       <td class="sm-col-game lm-muted">{{ $any(row).isoName }}</td>
       <td class="sm-col-actions">
-        <button class="lm-row-btn" title="Open in file viewer" (click)="onOpen($any(row))">&#x1F4C2; Open</button>
+        <button class="lm-row-btn" title="Open in file viewer" (click)="onOpen($any(row))">&#x2192; Open</button>
         <button class="lm-row-btn" title="Reload snapshot into emulator" (click)="onReload($any(row))">&#x21BA; Reload</button>
         <button class="lm-row-btn" title="Compare with another snapshot" (click)="onDiff($any(row))">&#x2194; Diff</button>
         <button class="lm-row-btn lm-danger-btn" title="Delete snapshot" (click)="onDeleteRequest($any(row))">
