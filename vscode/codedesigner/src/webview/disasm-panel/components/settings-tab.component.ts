@@ -238,6 +238,14 @@ const SNAP_PREVIEW = 5;
                       title="Open the HDD Image Manager to browse and edit PS2 HDD images">
                 💿 HDD
               </button>
+              <button (click)="openSnapshotManagerClick.emit()"
+                      title="Open the Snapshot Manager to browse and manage memory snapshots">
+                📷 Snapshots
+              </button>
+              <button (click)="openDiffViewerClick.emit()"
+                      title="Open the Memory Diff Viewer to compare snapshots">
+                ↔ Diff
+              </button>
             </div>
           </div>
         }
@@ -328,6 +336,8 @@ export class SettingsTabComponent {
   readonly openAiConfigClick  = output<void>();
   readonly openPacketViewerClick = output<void>();
   readonly openLabelManagerClick = output<void>();
+  readonly openSnapshotManagerClick = output<void>();
+  readonly openDiffViewerClick   = output<void>();
   readonly openMemoryCardClick   = output<void>();
   readonly openHddClick          = output<void>();
   readonly openMemoryViewClick = output<string>();

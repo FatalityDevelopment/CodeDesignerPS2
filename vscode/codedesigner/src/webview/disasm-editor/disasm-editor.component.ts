@@ -23,12 +23,13 @@ import { MemoryCardOverlayComponent, McListResult, McActionResult } from './comp
 import { HddOverlayComponent, HddListResult, HddActionResult } from './components/hdd-overlay.component';
 import { ScannerOverlayComponent, ScanRequest, ScanResult } from './components/scanner-overlay.component';
 import { StructOffsetOverlayComponent, StructEntryData, AddStructEvent, AddStructMemberEvent } from './components/struct-offset-overlay.component';
+import { MemoryRegionSelectorComponent, MemoryRegion } from './components/memory-region-selector.component';
 import './disasm-editor.css';
 
 @Component({
   selector: 'app-disasm-editor',
   standalone: true,
-  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent],
+  imports: [HexViewComponent, SearchPanelComponent, AddressInputPanelComponent, VirtualGridComponent, ContextMenuComponent, DebugPanelComponent, BottomPanelComponent, EditOverlayComponent, ConverterOverlayComponent, PorterOverlayComponent, MemoryCardOverlayComponent, HddOverlayComponent, ScannerOverlayComponent, StructOffsetOverlayComponent, MemoryRegionSelectorComponent],
   providers: [DisasmEditorService],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './disasm-editor.component.html'
@@ -286,6 +287,10 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onGotoAddress(addr: number): void {
     this.gotoRuntime.navigate?.(addr);
+  }
+
+  protected onRegionSelected(region: MemoryRegion): void {
+    this.vscode.postMessage({ type: 'openMemoryView', label: region.label });
   }
 
   protected onGotoValueChange(value: string): void {

@@ -10,6 +10,8 @@ import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { AiConfigProvider } from '../aiConfig/aiConfigProvider';
 import { McpMemoryEditorProvider } from '../mcpMemoryEditor/mcpMemoryEditorProvider';
 import { PacketViewerProvider } from '../packetViewer/packetViewerProvider';
+import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
+import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
 import { ArchiveCheat } from '../../webview/disasm-panel/types';
 
 interface EmuSettings {
@@ -141,11 +143,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._mcpMemoryEditorProvider = new McpMemoryEditorProvider(socketClient);
         this._aiConfigProvider        = new AiConfigProvider(_extensionUri, socketClient);
         this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient);
+
+        const delegate: SnapshotDataDelegate = {
+            getSnapshots:   () => this.snapshots,
+            openSnapshot:   (p) => this.handleOpenSnapshot(p),
+            reloadSnapshot: (p) => this.handleLoadSnapshot(p),
+        };
+        this._snapshotManagerProvider = new SnapshotManagerProvider(_extensionUri, delegate);
+        this._diffViewerProvider      = new DiffViewerProvider(_extensionUri, delegate);
     }
 
     private readonly _mcpMemoryEditorProvider: McpMemoryEditorProvider;
     private readonly _aiConfigProvider: AiConfigProvider;
     private readonly _packetViewerProvider: PacketViewerProvider;
+    private readonly _snapshotManagerProvider: SnapshotManagerProvider;
+    private readonly _diffViewerProvider: DiffViewerProvider;
 
     // Register the provider with VS Code
     public register(context: vscode.ExtensionContext) {
@@ -416,6 +428,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 // ── Packet Viewer ─────────────────────────────────────────
                 case 'openPacketViewer':
                     this._packetViewerProvider.open();
+                    break;
+                // ── Snapshot Manager ──────────────────────────────────────
+                case 'openSnapshotManager':
+                    this._snapshotManagerProvider.open();
+                    break;
+                // ── Diff Viewer ───────────────────────────────────────────
+                case 'openDiffViewer':
+                    this._diffViewerProvider.open();
                     break;
                 // ── Label Manager ─────────────────────────────────────────
                 case 'openLabelManager':
@@ -1699,7 +1719,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             vscode.window.showErrorMessage(`Save screenshot failed: ${err?.message ?? err}`);
         }
     }
-    private async handleOpenSnapshot(snapshotPath: string): Promise<void> {
+    public async handleOpenSnapshot(snapshotPath: string): Promise<void> {
         // For PCSX2 .p2s snapshots, open the .bin files from the companion extracted directory.
         const dirPath = snapshotPath.endsWith('.p2s')
             ? snapshotPath + '.extracted'
@@ -1720,7 +1740,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     /** Reload a snapshot as a save state — writes memory back into the live emulator. */
-    private async handleLoadSnapshot(snapshotPath: string): Promise<void> {
+    public async handleLoadSnapshot(snapshotPath: string): Promise<void> {
         const out = getOutputChannel();
 
         if (!this.socketClient.isConnected()) {
@@ -1804,6 +1824,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (!isoName || !this.workspaceRoot) {
             this.snapshots = [];
             this.webview?.postMessage({ command: 'updateSnapshots', snapshots: [], gameName: '' });
+            this._snapshotManagerProvider.notifySnapshotsChanged();
             return;
         }
 
@@ -1814,6 +1835,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             if (!fs.existsSync(isoFolder)) {
                 this.snapshots = [];
                 this.webview?.postMessage({ command: 'updateSnapshots', snapshots: [], gameName: isoName });
+                this._snapshotManagerProvider.notifySnapshotsChanged();
                 return;
             }
 
@@ -1899,6 +1921,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         this.snapshots = entries;
         this.webview?.postMessage({ command: 'updateSnapshots', snapshots: entries, gameName: isoName });
+        this._snapshotManagerProvider.notifySnapshotsChanged();
     }
 
     /**

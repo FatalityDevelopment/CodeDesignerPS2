@@ -61,6 +61,15 @@ export interface McpConfigEntry {
   updatedAt:    string;
 }
 
+export interface ConversationMessage {
+  id:          number;
+  role:        'user' | 'assistant';
+  content:     string;
+  agentId?:    number;
+  agentName?:  string;
+  createdAt:   string;
+}
+
 // ── Markdown field descriptors ────────────────────────────────────────────────
 
 interface MarkdownField<T> {
@@ -115,6 +124,12 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
     </button>
     <button class="aic-tab" [class.active]="activeTab() === 'tools'" (click)="onOpenToolsTab()">
       Tools
+    </button>
+    <button class="aic-tab" [class.active]="activeTab() === 'history'" (click)="onOpenHistoryTab()">
+      History
+    </button>
+    <button class="aic-tab" [class.active]="activeTab() === 'planner'" (click)="activeTab.set('planner')">
+      Prompt Builder
     </button>
   </div>
 
@@ -586,6 +601,87 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
       </div>
     </div>
 
+
+    <!-- ══════════════════════════ HISTORY TAB ══════════════════════════════ -->
+    <div class="aic-tab-panel" [class.hidden]="activeTab() !== 'history'">
+      <div class="aic-section-header">
+        <h2 class="aic-section-title">&#x1F4DC; Conversation History</h2>
+        <input class="aic-filter-input" type="text" spellcheck="false"
+               placeholder="Filter by content, role, or agent…"
+               [value]="historyFilter()"
+               (input)="historyFilter.set($any($event.target).value)" />
+      </div>
+      @if (historyStatusMsg()) {
+        <div class="aic-status" [class.aic-status-error]="historyStatusError()">{{ historyStatusMsg() }}</div>
+      }
+      <div class="aic-history-list">
+        @for (msg of filteredHistory(); track msg.id) {
+          <div class="aic-history-item" [class.aic-history-user]="msg.role === 'user'" [class.aic-history-assistant]="msg.role === 'assistant'">
+            <div class="aic-history-meta">
+              <span class="aic-history-role">{{ msg.role }}</span>
+              @if (msg.agentName) { <span class="aic-history-agent lm-muted">{{ msg.agentName }}</span> }
+              <span class="aic-history-date lm-muted">{{ msg.createdAt }}</span>
+            </div>
+            <div class="aic-history-content" [class.aic-history-expanded]="expandedHistoryId() === msg.id"
+                 (click)="expandedHistoryId.set(expandedHistoryId() === msg.id ? null : msg.id)">
+              {{ msg.content }}
+            </div>
+          </div>
+        }
+        @if (filteredHistory().length === 0 && conversationHistory().length === 0) {
+          <p class="aic-empty">No conversation history found.</p>
+        }
+        @if (filteredHistory().length === 0 && conversationHistory().length > 0) {
+          <p class="aic-empty">No messages match the filter.</p>
+        }
+      </div>
+    </div>
+
+    <!-- ═════════════════════════ PROMPT BUILDER TAB ════════════════════════ -->
+    <div class="aic-tab-panel aic-planner-panel" [class.hidden]="activeTab() !== 'planner'">
+      <div class="aic-planner-layout">
+        <!-- Left: controls -->
+        <div class="aic-planner-controls">
+          <h2 class="aic-section-title">&#x270F; Prompt Builder</h2>
+          <div class="aic-planner-field">
+            <label class="aic-planner-label">Agent profile</label>
+            <select class="aic-planner-select" (change)="onPlannerAgentChange($event)">
+              <option value="">— none —</option>
+              @for (agent of agents(); track agent.id) {
+                <option [value]="agent.id" [selected]="plannerAgentId() === agent.id">{{ agent.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="aic-planner-field">
+            <label class="aic-planner-label">Objective / task</label>
+            <textarea class="aic-planner-textarea" rows="4" spellcheck="false"
+                      placeholder="Describe the task or objective…"
+                      [value]="plannerObjective()"
+                      (input)="plannerObjective.set($any($event.target).value)"></textarea>
+          </div>
+          <div class="aic-planner-toggles">
+            <label><input type="checkbox" [checked]="plannerIncludeRules()"      (change)="plannerIncludeRules.set($any($event.target).checked)"      /> Include Rules</label>
+            <label><input type="checkbox" [checked]="plannerIncludeGuidelines()" (change)="plannerIncludeGuidelines.set($any($event.target).checked)" /> Include Guidelines</label>
+            <label><input type="checkbox" [checked]="plannerIncludeWorkflow()"   (change)="plannerIncludeWorkflow.set($any($event.target).checked)"   /> Include Workflow</label>
+          </div>
+          <div class="aic-planner-actions">
+            <button class="aic-item-btn aic-primary-btn" (click)="onCopyPrompt()" title="Copy assembled prompt to clipboard">&#x1F4CB; Copy</button>
+          </div>
+        </div>
+        <!-- Right: live preview -->
+        <div class="aic-planner-preview">
+          <div class="aic-planner-preview-header">
+            <span class="aic-planner-preview-title">Preview</span>
+            <label class="dv-toggle">
+              <input type="checkbox" [checked]="plannerPreviewMode()" (change)="plannerPreviewMode.set($any($event.target).checked)" />
+              Wrap text
+            </label>
+          </div>
+          <pre class="aic-planner-pre" [class.aic-planner-wrap]="plannerPreviewMode()">{{ computedPrompt() }}</pre>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
   `,
@@ -598,7 +694,7 @@ export class AiConfigPageComponent implements AfterViewInit {
   readonly orchFields = ORCHESTRATION_FIELDS;
 
   // ── Tab state ──────────────────────────────────────────────────────────────
-  readonly activeTab = signal<'orchestration' | 'agents' | 'memories' | 'tools'>('orchestration');
+  readonly activeTab = signal<'orchestration' | 'agents' | 'memories' | 'tools' | 'history' | 'planner'>('orchestration');
 
   // ── Orchestration list state ──────────────────────────────────────────────
   readonly orchestrations     = signal<OrchestrationProfile[]>([]);
@@ -682,6 +778,55 @@ export class AiConfigPageComponent implements AfterViewInit {
   readonly toolStatusError  = signal(false);
   readonly editingToolKey   = signal<string | null>(null);
   readonly editingToolValue = signal('');
+
+  // ── History tab state ─────────────────────────────────────────────────────
+  readonly conversationHistory = signal<ConversationMessage[]>([]);
+  readonly historyFilter       = signal('');
+  readonly expandedHistoryId   = signal<number | null>(null);
+  readonly historyStatusMsg    = signal('');
+  readonly historyStatusError  = signal(false);
+
+  readonly filteredHistory = computed(() => {
+    const q = this.historyFilter().toLowerCase();
+    if (!q) { return this.conversationHistory(); }
+    return this.conversationHistory().filter(m =>
+      m.content.toLowerCase().includes(q) ||
+      m.role.toLowerCase().includes(q) ||
+      (m.agentName ?? '').toLowerCase().includes(q)
+    );
+  });
+
+  // ── Prompt Builder tab state ──────────────────────────────────────────────
+  readonly plannerAgentId          = signal<number | null>(null);
+  readonly plannerObjective        = signal('');
+  readonly plannerIncludeRules     = signal(true);
+  readonly plannerIncludeGuidelines = signal(true);
+  readonly plannerIncludeWorkflow  = signal(true);
+  readonly plannerPreviewMode      = signal(false);
+
+  readonly computedPrompt = computed(() => {
+    const agentId = this.plannerAgentId();
+    const agent   = agentId !== null ? this.agents().find(a => a.id === agentId) : null;
+    const lines: string[] = [];
+
+    if (agent) {
+      if (agent.objective)    { lines.push('## Objective', agent.objective, ''); }
+      if (this.plannerIncludeRules() && agent.rules) {
+        lines.push('## Rules', agent.rules, '');
+      }
+      if (this.plannerIncludeGuidelines() && agent.guidelines) {
+        lines.push('## Guidelines', agent.guidelines, '');
+      }
+      if (this.plannerIncludeWorkflow() && agent.recommendedWorkflow) {
+        lines.push('## Workflow', agent.recommendedWorkflow, '');
+      }
+    }
+
+    const obj = this.plannerObjective().trim();
+    if (obj) { lines.push('## Task', obj, ''); }
+
+    return lines.join('\n').trim();
+  });
 
   private _pendingAgentDelete = false;
 
@@ -1155,7 +1300,34 @@ export class AiConfigPageComponent implements AfterViewInit {
     this.toolStatusError.set(isError);
   }
 
+  // ── History tab actions ───────────────────────────────────────────────────
 
+  onOpenHistoryTab(): void {
+    this.activeTab.set('history');
+    if (this.conversationHistory().length === 0) {
+      this.vscode.postMessage({ type: 'historyList' });
+    }
+  }
+
+  // ── Prompt Builder tab actions ────────────────────────────────────────────
+
+  onPlannerAgentChange(event: Event): void {
+    const id = parseInt((event.target as HTMLSelectElement).value, 10);
+    this.plannerAgentId.set(isNaN(id) ? null : id);
+  }
+
+  onCopyPrompt(): void {
+    const text = this.computedPrompt();
+    if (!text) { return; }
+    navigator.clipboard?.writeText(text).catch(() => {
+      const el = document.createElement('textarea');
+      el.value = text;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    });
+  }
 
   private _handleMessage(data: Record<string, unknown>): void {
     switch (data['type']) {
@@ -1327,6 +1499,19 @@ export class AiConfigPageComponent implements AfterViewInit {
         } else {
           this.setToolStatus(msg ?? 'Saved.', false);
           this.loadTools();
+        }
+        break;
+      }
+
+      case 'historyListResult': {
+        const messages = (data['messages'] as ConversationMessage[] | undefined) ?? [];
+        const error    = data['error'] as string | undefined;
+        if (error) {
+          this.historyStatusMsg.set('Error: ' + error);
+          this.historyStatusError.set(true);
+        } else {
+          this.conversationHistory.set(messages);
+          this.historyStatusMsg.set('');
         }
         break;
       }
