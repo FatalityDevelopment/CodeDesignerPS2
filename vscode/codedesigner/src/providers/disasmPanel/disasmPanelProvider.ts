@@ -8,7 +8,7 @@ import { SocketClient, LabelEntry, DiscElfEntry, CdsSidecarResult, CdsDiagnostic
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
 import { DisasmEditorProvider } from '../disasmEditor/disasmEditorProvider';
 import { AiConfigProvider } from '../aiConfig/aiConfigProvider';
-import { McpMemoryEditorProvider } from '../mcpMemoryEditor/mcpMemoryEditorProvider';
+import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpProgressReportEditorProvider';
 import { PacketViewerProvider } from '../packetViewer/packetViewerProvider';
 import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
 import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
@@ -140,7 +140,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         private readonly editorProvider: DisasmEditorProvider,
         private readonly _extensionUri: vscode.Uri
     ) {
-        this._mcpMemoryEditorProvider = new McpMemoryEditorProvider(socketClient);
+        this._mcpProgressReportEditorProvider = new McpProgressReportEditorProvider(socketClient);
         this._aiConfigProvider        = new AiConfigProvider(_extensionUri, socketClient);
         this._packetViewerProvider    = new PacketViewerProvider(_extensionUri, socketClient);
 
@@ -153,7 +153,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._diffViewerProvider      = new DiffViewerProvider(_extensionUri, delegate, socketClient);
     }
 
-    private readonly _mcpMemoryEditorProvider: McpMemoryEditorProvider;
+    private readonly _mcpProgressReportEditorProvider: McpProgressReportEditorProvider;
     private readonly _aiConfigProvider: AiConfigProvider;
     private readonly _packetViewerProvider: PacketViewerProvider;
     private readonly _snapshotManagerProvider: SnapshotManagerProvider;
@@ -410,7 +410,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     await this.handleMcpMemoryAdd(msg.name ?? '');
                     break;
                 case 'mcpMemoryEdit':
-                    this._mcpMemoryEditorProvider.open(msg.id as number, msg.name ?? '', msg.content ?? '');
+                    this._mcpProgressReportEditorProvider.open(msg.id as number, msg.name ?? '', msg.content ?? '');
                     break;
                 case 'mcpMemoryExport':
                     await this.handleMcpMemoryExport(msg.id as number, msg.name ?? '');

@@ -1,6 +1,6 @@
 {
-  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "CDS (PS2 MIPS64 EE)",
+  "$schema": "https://json.schemastore.org/tmlanguage.json",
+  "name": "Code Designer",
   "scopeName": "source.cds",
   "patterns": [
     { "include": "#comments" },

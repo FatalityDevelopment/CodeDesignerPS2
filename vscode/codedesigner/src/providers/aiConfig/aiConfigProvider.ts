@@ -3,22 +3,22 @@ import * as path from 'path';
 import { getOutputChannel } from '../../extension';
 import { SocketClient, McpAgentInfo, McpMemoryInfo, McpOrchestrationInfo } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
-import { McpMemoryEditorProvider } from '../mcpMemoryEditor/mcpMemoryEditorProvider';
+import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpProgressReportEditorProvider';
 
 /**
  * Provider for the AI Configuration standalone webview tab.
  * Manages agent profiles (add / edit / delete / import / export)
- * and shows the agent's associated MCP memories.
+ * and shows the agent's associated progress reports.
  */
 export class AiConfigProvider {
     private _panel: vscode.WebviewPanel | undefined;
-    private readonly _mcpMemoryEditor: McpMemoryEditorProvider;
+    private readonly _mcpProgressReportEditor: McpProgressReportEditorProvider;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly socketClient: SocketClient,
     ) {
-        this._mcpMemoryEditor = new McpMemoryEditorProvider(socketClient);
+        this._mcpProgressReportEditor = new McpProgressReportEditorProvider(socketClient);
     }
 
     /** Open (or reveal) the AI Configuration panel. */
@@ -145,7 +145,7 @@ export class AiConfigProvider {
                 break;
 
             case 'memoryEdit':
-                this._mcpMemoryEditor.open(
+                this._mcpProgressReportEditor.open(
                     msg['id']      as number,
                     msg['name']    as string,
                     msg['content'] as string,

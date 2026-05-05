@@ -3,17 +3,17 @@ import { SocketClient } from '../../socketClient';
 import { getOutputChannel } from '../../extension';
 
 /**
- * Opens a VS Code WebView panel for editing a single MCP Memory entry.
+ * Opens a VS Code WebView panel for editing a single progress report entry.
  * The panel shows a textarea for the Markdown content and a Save button.
  * On save, the content is sent back to the server via MCPMEMORY_UPDATE.
  */
-export class McpMemoryEditorProvider {
+export class McpProgressReportEditorProvider {
     private readonly _panels = new Map<number, vscode.WebviewPanel>();
 
     constructor(private readonly socketClient: SocketClient) {}
 
     /**
-     * Opens (or re-focuses) the editor panel for the given memory entry.
+     * Opens (or re-focuses) the editor panel for the given progress report entry.
      */
     public open(id: number, name: string, content: string): void {
         const existing = this._panels.get(id);
@@ -23,8 +23,8 @@ export class McpMemoryEditorProvider {
         }
 
         const panel = vscode.window.createWebviewPanel(
-            'mcpMemoryEditor',
-            `MCP Memory: ${name}`,
+            'mcpProgressReportEditor',
+            `Progress Report: ${name}`,
             vscode.ViewColumn.One,
             { enableScripts: true }
         );
@@ -50,11 +50,11 @@ export class McpMemoryEditorProvider {
         try {
             await this.socketClient.mcpMemoryUpdate(id, undefined, content);
             panel.webview.postMessage({ command: 'saveResult', success: true });
-            vscode.window.showInformationMessage(`MCP Memory '${name}' saved.`);
+            vscode.window.showInformationMessage(`Progress report '${name}' saved.`);
         } catch (err: any) {
             panel.webview.postMessage({ command: 'saveResult', success: false, error: err?.message ?? String(err) });
-            vscode.window.showErrorMessage(`Failed to save MCP Memory '${name}': ${err?.message ?? err}`);
-            getOutputChannel().error(`McpMemoryEditor save error: ${err?.message ?? err}`);
+            vscode.window.showErrorMessage(`Failed to save progress report '${name}': ${err?.message ?? err}`);
+            getOutputChannel().error(`McpProgressReportEditor save error: ${err?.message ?? err}`);
         }
     }
 
@@ -66,7 +66,7 @@ export class McpMemoryEditorProvider {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MCP Memory: ${escapedName}</title>
+<title>Progress Report: ${escapedName}</title>
 <style>
   body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
   #toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--vscode-editorGroupHeader-tabsBackground); border-bottom: 1px solid var(--vscode-editorGroup-border); }

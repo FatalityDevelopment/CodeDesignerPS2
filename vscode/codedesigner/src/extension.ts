@@ -4,7 +4,6 @@ import * as vscode from 'vscode';
 import { DisasmEditorProvider } from './providers/disasmEditor/disasmEditorProvider';
 import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider';
 import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorProvider';
-import { PointerManagerProvider, PointerTreeItem } from './providers/pointerManager/pointerManagerProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
@@ -66,56 +65,12 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerCustomEditorProvider(Ps2FileEditorProvider.viewType, ps2FileEditor)
 	);
 
-	// ── Pointer Manager tree view (commented out — will be expanded later) ────
-	const pointerManagerProvider = new PointerManagerProvider(context);
-	// context.subscriptions.push(
-	// 	vscode.window.registerTreeDataProvider('disasm.pointerManager', pointerManagerProvider)
-	// );
-
-	// context.subscriptions.push(
-	// 	vscode.commands.registerCommand('codedesigner.pointerManager.addPointer', () =>
-	// 		pointerManagerProvider.addPointer()
-	// 	),
-	// 	vscode.commands.registerCommand('codedesigner.pointerManager.addChildLabel', (item?: PointerTreeItem) => {
-	// 		if (item && (item.itemType === 'pointer' || item.itemType === 'childPointer' || item.itemType === 'child')) {
-	// 			pointerManagerProvider.addChildLabel(item);
-	// 		} else {
-	// 			vscode.window.showWarningMessage('Select a pointer or label node first to add a child.');
-	// 		}
-	// 	}),
-	// 	vscode.commands.registerCommand('codedesigner.pointerManager.editNode', (item?: PointerTreeItem) => {
-	// 		if (item) { pointerManagerProvider.editNode(item); }
-	// 	}),
-	// 	vscode.commands.registerCommand('codedesigner.pointerManager.deleteNode', (item?: PointerTreeItem) => {
-	// 		if (item) { pointerManagerProvider.deleteNode(item); }
-	// 	}),
-	// 	vscode.commands.registerCommand('codedesigner.pointerManager.goToAddress', (addressOrItem: string | PointerTreeItem | undefined) => {
-	// 		let addrStr: string | undefined;
-	// 		if (typeof addressOrItem === 'string') {
-	// 			addrStr = addressOrItem;
-	// 		} else if (addressOrItem instanceof PointerTreeItem) {
-	// 			addrStr = addressOrItem.address;
-	// 		}
-	// 		if (!addrStr) { return; }
-	// 		const addr = parseInt(addrStr.replace(/^0x/i, ''), 16);
-	// 		// Validate the parsed value is a 32-bit address before navigating.
-	// 		if (isNaN(addr) || addr < 0 || addr > 0xFFFFFFFF) { return; }
-	// 		editorProvider.navigateToAddress(addr >>> 0);
-	// 	}),
-	// 	vscode.commands.registerCommand('codedesigner.pointerManager.refresh', () =>
-	// 		pointerManagerProvider.refresh()
-	// 	),
-	vscode.commands.registerCommand('codedesigner.openStructCalculator', () =>
-		editorProvider.openStructCalculator()
-	);
-
 	// Wire pause-state propagation: when a breakpoint/step pause is detected in the
 	// editor panels, the sidebar status bar needs to update too.
 	editorProvider.onPauseStateChange = (paused: boolean) => {
 		disasmPanelProvider.notifyPauseState(paused);
 	};
-
-	// Wire memory-region navigation from the disasm-editor toolbar to the panel provider.
+// Wire memory-region navigation from the disasm-editor toolbar to the panel provider.
 	editorProvider.onOpenMemoryView = async (label: string) => {
 		await disasmPanelProvider.openOptionalMemoryView(label);
 	};
@@ -158,14 +113,6 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage('Connected to C# server');
 		// Auto-open all live memory views (reuses existing panels if already open)
 		disasmPanelProvider.onSocketConnected();
-		// Re-resolve struct labels now that live memory is available (child labels
-		// require reading pointer values from the emulator).
-		pointerManagerProvider.getResolvedLabels().then(labels => {
-			editorProvider.setPointerLabels(labels);
-			// Also resolve struct labels from the C# backend now that the emulator
-			// is connected and struct pointer values can be read from live memory.
-			editorProvider.refreshStructLabels().catch(() => { /* non-fatal */ });
-		}).catch(() => { /* ignore — emulator may not be ready yet */ });
 	});
 
 	socketClient.onDisconnected(() => {

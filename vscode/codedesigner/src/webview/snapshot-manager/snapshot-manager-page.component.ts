@@ -112,8 +112,8 @@ export class SnapshotManagerPageComponent implements AfterViewInit {
     const list = [...this.filteredSnapshots()];
     if (!col) { return list; }
     return list.sort((a, b) => {
-      const av = (a as Record<string, unknown>)[col] as string ?? '';
-      const bv = (b as Record<string, unknown>)[col] as string ?? '';
+      const av = (a as unknown as Record<string, unknown>)[col] as string ?? '';
+      const bv = (b as unknown as Record<string, unknown>)[col] as string ?? '';
       return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
     });
   });

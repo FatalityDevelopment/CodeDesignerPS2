@@ -15,6 +15,7 @@ import { PorterPageComponent, PortResultPayload } from './porter-page.component'
 import { SnapshotEntry } from '../disasm-panel/types';
 import '../shared/styles/shared.css';
 import './diff-viewer-page.css';
+import '../disasm-editor/disasm-editor.css';
 
 export interface DiffRow {
   address:  string;
