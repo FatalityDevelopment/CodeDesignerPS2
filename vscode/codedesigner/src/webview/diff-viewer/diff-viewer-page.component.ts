@@ -39,22 +39,22 @@ type DiffMode = 'flat-flat' | 'live-flat';
   <!-- Tab bar -->
   <div class="dv-tab-bar">
     <button class="dv-tab" [class.dv-tab-active]="activeTab() === 'diff'"   (click)="activeTab.set('diff')">&#x2194; Memory Diff</button>
-    <button class="dv-tab" [class.dv-tab-active]="activeTab() === 'porter'" (click)="activeTab.set('porter')">&#x2699; Cheat Code Porter</button>
+    <button class="dv-tab" [class.dv-tab-active]="activeTab() === 'porter'" (click)="activeTab.set('porter')">&#x2699; Cheat Porter</button>
   </div>
 
   <!-- ── Diff tab ──────────────────────────────────────────────────────── -->
   <div class="dv-panel" [class.dv-hidden]="activeTab() !== 'diff'">
 
-    <!-- Mode selector -->
+    <!-- Mode selector toolbar -->
     <div class="dv-mode-bar">
-      <span class="dv-mode-label">Diff mode:</span>
+      <span class="dv-mode-label">Mode:</span>
       <button class="dv-mode-btn" [class.dv-mode-active]="diffMode() === 'flat-flat'"
               (click)="diffMode.set('flat-flat')">
-        &#x1F4C2; Snapshot ↔ Snapshot
+        Snapshot A vs Snapshot B
       </button>
       <button class="dv-mode-btn" [class.dv-mode-active]="diffMode() === 'live-flat'"
               (click)="diffMode.set('live-flat')">
-        &#x1F534; Live Memory ↔ Snapshot
+        Live EE RAM vs Snapshot
       </button>
     </div>
 
@@ -64,21 +64,23 @@ type DiffMode = 'flat-flat' | 'live-flat';
       <!-- Snapshot A row — hidden in live-flat mode -->
       @if (diffMode() === 'flat-flat') {
         <div class="dv-source-row">
-          <label class="dv-label">Snapshot A:</label>
+          <span class="dv-label">Snap A:</span>
           <select class="dv-snap-select" (change)="onSnapshotAChange($event)">
-            <option value="">— select —</option>
+            <option value="">— select snapshot —</option>
             @for (s of availableSnapshots(); track s.path) {
-              <option [value]="s.path" [selected]="snapshotA()?.path === s.path">{{ s.label }} ({{ s.isoName }})</option>
+              <option [value]="s.path" [selected]="snapshotA()?.path === s.path">
+                {{ s.label }}{{ s.isoName ? ' (' + s.isoName + ')' : '' }}
+              </option>
             }
           </select>
-          <button class="lm-tool-btn" title="Browse for a .bin file" (click)="onBrowseSource('A')">&#x1F4C2;</button>
+          <button class="lm-tool-btn" title="Browse for a .bin dump" (click)="onBrowseSource('A')">&#x2026; Browse</button>
         </div>
       } @else {
         <div class="dv-source-row">
-          <label class="dv-label">Source A:</label>
-          <span class="dv-live-badge">&#x1F534; Live EE RAM</span>
+          <span class="dv-label">Source A:</span>
+          <span class="dv-live-badge">LIVE EE RAM</span>
           <button class="lm-tool-btn" [disabled]="isReadingLive()" (click)="onReadLiveMemory()">
-            @if (isReadingLive()) { &#9203; Reading… } @else { &#x21BB; Read Now }
+            @if (isReadingLive()) { Reading&#x2026; } @else { &#x21BB; Read Now }
           </button>
           @if (liveReadStatus()) {
             <span class="dv-live-status" [class.dv-live-ok]="!liveReadError()">{{ liveReadStatus() }}</span>
@@ -88,14 +90,16 @@ type DiffMode = 'flat-flat' | 'live-flat';
 
       <!-- Snapshot B row (always flat file) -->
       <div class="dv-source-row">
-        <label class="dv-label">Snapshot B:</label>
+        <span class="dv-label">Snap B:</span>
         <select class="dv-snap-select" (change)="onSnapshotBChange($event)">
-          <option value="">— select —</option>
+          <option value="">— select snapshot —</option>
           @for (s of availableSnapshots(); track s.path) {
-            <option [value]="s.path" [selected]="snapshotB()?.path === s.path">{{ s.label }} ({{ s.isoName }})</option>
+            <option [value]="s.path" [selected]="snapshotB()?.path === s.path">
+              {{ s.label }}{{ s.isoName ? ' (' + s.isoName + ')' : '' }}
+            </option>
           }
         </select>
-        <button class="lm-tool-btn" title="Browse for a .bin file" (click)="onBrowseSource('B')">&#x1F4C2;</button>
+        <button class="lm-tool-btn" title="Browse for a .bin dump" (click)="onBrowseSource('B')">&#x2026; Browse</button>
       </div>
 
       <!-- Action row -->
@@ -105,19 +109,26 @@ type DiffMode = 'flat-flat' | 'live-flat';
                (input)="gotoAddress.set(asInput($event).value)"
                (keydown.enter)="onGoto()" />
         <button class="lm-tool-btn" (click)="onGoto()" title="Navigate editor to address">&#x2192; Goto</button>
-        <label class="dv-toggle" title="Toggle diff highlighting">
+        <label class="dv-toggle" title="Highlight changed values in B column">
           <input type="checkbox" [checked]="showDiff()" (change)="showDiff.set(asInput($event).checked)" />
           Highlight changes
         </label>
         <button class="lm-tool-btn" [disabled]="!canDiff() || isDiffing()"
                 (click)="onStartDiff()">
-          @if (isDiffing()) { &#9203; Comparing… } @else { &#x2194; Compare }
+          @if (isDiffing()) { Comparing&#x2026; } @else { &#x2194; Compare }
         </button>
       </div>
     </div>
 
     @if (statusMsg()) {
       <div class="dv-status" [class.dv-status-error]="statusIsError()">{{ statusMsg() }}</div>
+    }
+
+    @if (isDiffing()) {
+      <div class="dv-scanning-bar">
+        <div class="dv-scanning-bar-inner"></div>
+        <span class="dv-scanning-text">Comparing snapshots&#x2026; this may take a moment</span>
+      </div>
     }
 
     <app-paginated-table
@@ -147,8 +158,6 @@ type DiffMode = 'flat-flat' | 'live-flat';
         </td>
         <td class="dv-col-val-a lm-mono">{{ $any(row).valueA }}</td>
         <td class="dv-col-val-b lm-mono dv-changed">{{ $any(row).valueB }}</td>
-        <td class="dv-col-disasm lm-muted">{{ $any(row).disasmA }}</td>
-        <td class="dv-col-disasm lm-muted">{{ $any(row).disasmB }}</td>
       </tr>
     </ng-template>
   </div>
@@ -204,10 +213,8 @@ export class DiffViewerPageComponent implements AfterViewInit, OnDestroy {
 
   readonly diffColumns: ColumnDef[] = [
     { key: 'address', label: 'Address',    sortable: true  },
-    { key: 'valueA',  label: 'Source A',   sortable: false },
-    { key: 'valueB',  label: 'Snapshot B', sortable: false },
-    { key: 'disasmA', label: 'Disasm A',   sortable: false },
-    { key: 'disasmB', label: 'Disasm B',   sortable: false },
+    { key: 'valueA',  label: 'Value A',    sortable: false },
+    { key: 'valueB',  label: 'Value B',    sortable: false },
   ];
 
   readonly filteredDiffRows = computed(() => {

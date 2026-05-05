@@ -252,7 +252,7 @@ app-porter-page {
   </div>
 
   <button class="pp-port-btn" [disabled]="porting()" (click)="onPort()">
-    @if (porting()) { &#x23F3; Porting… } @else { &#x21CB; Port Cheats }
+    @if (porting()) { Porting&#x2026; } @else { &#x21CB; Port Cheats }
   </button>
 
   @if (statusMessage()) {
@@ -277,6 +277,13 @@ app-porter-page {
 
   <!-- Results -->
   <div class="pp-results-area">
+    @if (porting()) {
+      <div class="lm-scanning-bar">
+        <div class="lm-scanning-bar-inner"></div>
+        <span class="lm-scanning-text">Scanning memory for cheat codes&#x2026; this may take a moment</span>
+      </div>
+    }
+
     @if (flatRows().length === 0 && hasResults()) {
       <div class="pp-no-results">No cheat codes found in input.</div>
     }
@@ -323,18 +330,18 @@ app-porter-page {
                            [checked]="row.groupChecked"
                            [disabled]="!row.groupAnyFound"
                            (change)="onToggleBlock(row.blockIndex, asCheckbox($event).checked)" />
+                    <span class="pp-badge" style="margin-right:6px"
+                          [class.pp-badge-ok]="row.groupAllFound"
+                          [class.pp-badge-warn]="!row.groupAllFound && row.groupAnyFound"
+                          [class.pp-badge-err]="!row.groupAnyFound">
+                      {{ row.groupAllFound ? '[all found]' : row.groupAnyFound ? '[partial]' : '[not found]' }}
+                    </span>
                     {{ row.blockName || '(unnamed block)' }}
                     @if (row.blockText) {
                       <span class="lm-muted" style="margin-left:8px;font-weight:400;font-size:10px">
                         {{ row.blockText }}
                       </span>
                     }
-                    <span class="pp-badge" style="margin-left:8px"
-                          [class.pp-badge-ok]="row.groupAllFound"
-                          [class.pp-badge-warn]="!row.groupAllFound && row.groupAnyFound"
-                          [class.pp-badge-err]="!row.groupAnyFound">
-                      {{ row.groupAllFound ? '✓ all found' : row.groupAnyFound ? '⚠ partial' : '✗ not found' }}
-                    </span>
                   </td>
                 </tr>
               } @else {
@@ -380,7 +387,7 @@ app-porter-page {
       </div>
 
       <div class="pp-copy-row">
-        <button class="lm-tool-btn" (click)="copySelected()">&#x1F4CB; Copy Selected Codes</button>
+        <button class="lm-tool-btn" (click)="copySelected()">&#x2398; Copy Selected Codes</button>
       </div>
     }
   </div>

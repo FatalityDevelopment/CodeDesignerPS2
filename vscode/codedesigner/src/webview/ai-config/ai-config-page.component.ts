@@ -446,7 +446,7 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
 
         <!-- Header -->
         <div class="aic-memories-tab-header">
-          <h2 class="aic-memories-tab-title">&#x1F9E0; Memories</h2>
+          <h2 class="aic-memories-tab-title">Memories</h2>
           <div class="aic-memories-tab-header-actions">
             <button class="aic-icon-btn" title="Refresh" (click)="loadAllMemories()">&#x21BB;</button>
             <button class="aic-small-btn" title="Import from .md file" (click)="onImportGlobalMemory()">&#x2B06; Import</button>
@@ -544,7 +544,7 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
     <!-- ══════════════════════════════ TOOLS TAB ══════════════════════════ -->
     <div class="aic-tab-panel aic-tools-panel" [class.hidden]="activeTab() !== 'tools'">
       <div class="aic-tools-header">
-        <h2 class="aic-tools-title">&#x1F6E0; MCP Tool Descriptions</h2>
+        <h2 class="aic-tools-title">&#x2699; MCP Tool Descriptions</h2>
         <div class="aic-tools-actions">
           <button class="aic-icon-btn" title="Refresh tool list" (click)="loadTools()">&#x21BB;</button>
         </div>
@@ -605,7 +605,7 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
     <!-- ══════════════════════════ HISTORY TAB ══════════════════════════════ -->
     <div class="aic-tab-panel aic-history-panel" [class.hidden]="activeTab() !== 'history'">
       <div class="aic-section-header">
-        <h2 class="aic-section-title">&#x1F4DC; Conversation History</h2>
+        <h2 class="aic-section-title">Conversation History</h2>
         <input class="aic-filter-input" type="text" spellcheck="false"
                placeholder="Filter by content, role, or agent…"
                [value]="historyFilter()"
@@ -643,7 +643,7 @@ const ORCHESTRATION_FIELDS: MarkdownField<OrchestrationProfile>[] = [
         <!-- Left: controls -->
         <div class="aic-planner-controls">
           <h2 class="aic-section-title">&#x270F; Prompt Builder</h2>
-          <div class="aic-planner-field">
+<div class="aic-planner-field">
             <label class="aic-planner-label">Agent profile</label>
             <select class="aic-planner-select" (change)="onPlannerAgentChange($event)">
               <option value="">— none —</option>

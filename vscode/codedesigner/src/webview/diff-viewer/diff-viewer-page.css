@@ -1,19 +1,34 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Diff Viewer — matches label-manager / disasm-editor visual style
+   ══════════════════════════════════════════════════════════════════════════ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body, html {
+  height: 100%;
+  font-family: monospace;
+  font-size: 12px;
+  color: #d4d4d4;
+  background: #1e1e1e;
+  overflow: hidden;
+}
+
 .dv-outer {
   display: flex;
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
-  font-size: var(--vscode-font-size, 13px);
-  color: var(--vscode-foreground, #ccc);
-  background: var(--vscode-editor-background, #1e1e1e);
-  box-sizing: border-box;
+  font-family: monospace;
+  font-size: 12px;
+  color: #d4d4d4;
+  background: #1e1e1e;
 }
 
+/* ── Tab bar ─────────────────────────────────────────────────────────────── */
 .dv-tab-bar {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--vscode-panel-border, #444);
+  background: #252526;
+  border-bottom: 1px solid #3e3e42;
   flex-shrink: 0;
 }
 
@@ -21,41 +36,73 @@
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: var(--vscode-foreground, #ccc);
+  color: #ccc;
   padding: 7px 16px;
   font-size: 12px;
+  font-family: monospace;
   cursor: pointer;
   white-space: nowrap;
+  opacity: 0.75;
 }
 
-.dv-tab:hover {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-}
+.dv-tab:hover { opacity: 1; background: #2a2d2e; }
 
 .dv-tab.dv-tab-active {
-  border-bottom-color: var(--vscode-focusBorder, #007fd4);
-  color: var(--vscode-tab-activeForeground, #fff);
+  border-bottom-color: #3794ff;
+  color: #d4d4d4;
+  opacity: 1;
 }
 
+/* ── Panel ───────────────────────────────────────────────────────────────── */
 .dv-panel {
   display: flex;
   flex-direction: column;
   flex: 1;
   overflow: hidden;
-  padding: 8px;
 }
 
-.dv-hidden {
-  display: none !important;
+.dv-hidden { display: none !important; }
+
+/* ── Mode selector toolbar ───────────────────────────────────────────────── */
+.dv-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: #252526;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
+.dv-mode-label {
+  font-size: 11px;
+  color: #9cdcfe;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
+.dv-mode-btn {
+  background: #3c3c3c;
+  border: 1px solid #555;
+  color: #d4d4d4;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: monospace;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dv-mode-btn:hover:not(:disabled) { background: #4c4c4c; }
+.dv-mode-btn.dv-mode-active { background: #264f78; border-color: #3794ff; color: #fff; }
+
+/* ── Source controls (each row is a toolbar row) ─────────────────────────── */
 .dv-controls {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--vscode-panel-border, #444);
+  background: #252526;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
 }
 
 .dv-source-row,
@@ -63,97 +110,115 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid #2e2e2e;
 }
+
+.dv-source-row:last-of-type { border-bottom: none; }
+.dv-action-row { border-bottom: none; }
 
 .dv-label {
   font-size: 11px;
+  color: #9cdcfe;
+  font-family: monospace;
   white-space: nowrap;
-  min-width: 90px;
+  min-width: 80px;
+  flex-shrink: 0;
 }
 
+/* Matches #lm-set-select exactly */
 .dv-snap-select {
-  flex: 1;
-  background: var(--vscode-input-background, #3c3c3c);
-  color: var(--vscode-input-foreground, #ccc);
-  border: 1px solid var(--vscode-input-border, #555);
-  border-radius: 2px;
-  padding: 2px 4px;
+  background: #3c3c3c;
+  color: #d4d4d4;
+  border: 1px solid #555;
+  border-radius: 3px;
+  padding: 3px 6px;
   font-size: 12px;
+  font-family: monospace;
+  flex: 1;
+  max-width: 360px;
+  min-width: 120px;
 }
 
 .dv-goto-input {
-  width: 140px;
-  background: var(--vscode-input-background, #3c3c3c);
-  color: var(--vscode-input-foreground, #ccc);
-  border: 1px solid var(--vscode-input-border, #555);
-  border-radius: 2px;
-  padding: 2px 6px;
-  font-family: var(--vscode-editor-font-family, monospace);
+  background: #3c3c3c;
+  color: #d4d4d4;
+  border: 1px solid #555;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-family: monospace;
   font-size: 12px;
+  width: 130px;
+  outline: none;
 }
+.dv-goto-input:focus { border-color: #007acc; }
 
 .dv-toggle {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.dv-status {
-  padding: 3px 8px;
-  margin-bottom: 6px;
-  border-radius: 3px;
-  font-size: 12px;
-  background: var(--vscode-inputValidation-infoBackground, #063b49);
-  border: 1px solid var(--vscode-inputValidation-infoBorder, #007acc);
-}
-
-.dv-status.dv-status-error {
-  background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
-  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
-  color: var(--vscode-inputValidation-errorForeground, #f88);
-}
-
-/* Diff row colouring */
-.dv-changed-row .dv-changed { color: var(--vscode-editorWarning-foreground, #cca700); }
-
-.dv-col-addr   { white-space: nowrap; }
-.dv-col-val-a,
-.dv-col-val-b  { font-size: 11px; }
-.dv-col-disasm { font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
-
-/* ── Mode selector ──────────────────────────────────────────────────────── */
-.dv-mode-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 0 8px;
-  flex-shrink: 0;
-}
-.dv-mode-label {
   font-size: 11px;
-  color: #888;
-  white-space: nowrap;
+  font-family: monospace;
+  cursor: pointer;
+  color: #d4d4d4;
+  user-select: none;
 }
-.dv-mode-btn {
-  background: #2d2d30;
-  border: 1px solid #3e3e42;
-  color: #aaa;
+
+/* ── Status bar ─────────────────────────────────────────────────────────── */
+.dv-status {
   padding: 3px 10px;
   font-size: 11px;
-  border-radius: 3px;
-  cursor: pointer;
-  white-space: nowrap;
+  font-family: monospace;
+  background: #252526;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+  color: #73c991;
 }
-.dv-mode-btn:hover { background: #3e3e42; color: #ccc; }
-.dv-mode-btn.dv-mode-active {
-  background: #0e4a8a;
-  border-color: #007acc;
-  color: #fff;
+.dv-status.dv-status-error { color: #f48771; }
+
+/* ── Scanning / diff progress bar ────────────────────────────────────────── */
+.dv-scanning-bar {
+  position: relative;
+  height: 22px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #3e3e42;
+  overflow: hidden;
+  flex-shrink: 0;
 }
+.dv-scanning-bar-inner {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, #264f78, #3794ff, #264f78, transparent);
+  animation: dv-scan-slide 1.5s ease-in-out infinite;
+}
+@keyframes dv-scan-slide {
+  0%   { left: -30%; }
+  100% { left: 100%; }
+}
+.dv-scanning-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-family: monospace;
+  color: #9cdcfe;
+  text-shadow: 0 0 4px #000;
+}
+
+/* ── Diff row colouring ──────────────────────────────────────────────────── */
+.dv-changed-row .dv-changed { color: #cca700; }
+.dv-col-addr { white-space: nowrap; }
+.dv-col-val-a,
+.dv-col-val-b { font-size: 11px; }
+
+/* ── Live memory badge ───────────────────────────────────────────────────── */
 .dv-live-badge {
   font-size: 11px;
+  font-family: monospace;
   color: #73c991;
   padding: 2px 8px;
   background: #0a2a10;
@@ -161,13 +226,8 @@
   border-radius: 3px;
   white-space: nowrap;
 }
-.dv-live-status {
-  font-size: 11px;
-  color: #f48771;
-}
+.dv-live-status { font-size: 11px; font-family: monospace; color: #f48771; }
 .dv-live-status.dv-live-ok { color: #73c991; }
 
-/* ── Porter tab — full page, no padding ─────────────────────────────────── */
-.dv-porter-panel {
-  padding: 0;
-}
+/* ── Porter tab — no extra padding, fills full height ───────────────────── */
+.dv-porter-panel { padding: 0; }

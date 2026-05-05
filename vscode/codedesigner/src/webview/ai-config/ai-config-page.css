@@ -837,78 +837,13 @@ body, html {
   max-height: 500px;
 }
 
-/* ── History tab ─────────────────────────────────────────────────────────── */
-
-.aic-section-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.aic-filter-input {
-  flex: 1;
-  max-width: 320px;
-  background: var(--vscode-input-background);
-  color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border, #555);
-  border-radius: 3px;
-  padding: 3px 8px;
-  font-size: 12px;
-  outline: none;
-}
-
-.aic-filter-input:focus { border-color: var(--vscode-focusBorder, #007acc); }
-
-.aic-history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.aic-history-item {
-  border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.1));
-  border-radius: 4px;
-  padding: 8px 10px;
-}
-
-.aic-history-user    { border-left: 3px solid var(--vscode-focusBorder, #007acc); }
-.aic-history-assistant { border-left: 3px solid var(--vscode-terminal-ansiGreen, #4ec9b0); }
-
-.aic-history-meta {
-  display: flex;
-  gap: 8px;
-  font-size: 11px;
-  margin-bottom: 4px;
-}
-
-.aic-history-role {
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 10px;
-  letter-spacing: 0.5px;
-}
-
-.aic-history-content {
-  font-size: 12px;
-  cursor: pointer;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  white-space: pre-wrap;
-}
-
-.aic-history-content.aic-history-expanded {
-  -webkit-line-clamp: unset;
-  display: block;
-}
-
 /* ── Prompt Builder tab ──────────────────────────────────────────────────── */
 
-.aic-planner-panel { overflow: hidden; }
+.aic-planner-panel {
+  overflow: hidden;
+  padding: 12px 16px;
+  gap: 0;
+}
 
 .aic-planner-layout {
   display: flex;
@@ -918,48 +853,61 @@ body, html {
 }
 
 .aic-planner-controls {
-  flex: 0 0 280px;
+  flex: 0 0 300px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
+  padding-right: 4px;
 }
 
 .aic-planner-field { display: flex; flex-direction: column; gap: 4px; }
-.aic-planner-label { font-size: 11px; font-weight: 600; }
+.aic-planner-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 
 .aic-planner-select {
-  background: var(--vscode-input-background);
-  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #d4d4d4);
   border: 1px solid var(--vscode-input-border, #555);
   border-radius: 3px;
   padding: 3px 6px;
   font-size: 12px;
+  font-family: var(--vscode-font-family, sans-serif);
 }
 
 .aic-planner-textarea {
-  background: var(--vscode-input-background);
-  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #d4d4d4);
   border: 1px solid var(--vscode-input-border, #555);
   border-radius: 3px;
   padding: 4px 6px;
   font-family: var(--vscode-font-family, sans-serif);
   font-size: 12px;
   resize: vertical;
+  outline: none;
+}
+.aic-planner-textarea:focus {
+  border-color: var(--vscode-focusBorder, #007acc);
 }
 
-.aic-planner-toggles { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
-.aic-planner-toggles label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.aic-planner-toggles { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.aic-planner-toggles label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 
-.aic-planner-actions { display: flex; gap: 6px; }
+.aic-planner-actions { display: flex; gap: 6px; padding-top: 4px; }
 
 .aic-planner-preview {
   flex: 1;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.1));
+  border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.12));
   border-radius: 4px;
   overflow: hidden;
+  min-width: 0;
 }
 
 .aic-planner-preview-header {
@@ -967,10 +915,11 @@ body, html {
   align-items: center;
   gap: 8px;
   padding: 5px 10px;
-  border-bottom: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.1));
-  background: var(--vscode-editor-lineHighlightBackground, rgba(255,255,255,0.05));
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.12));
+  background: var(--vscode-sideBarSectionHeader-background, rgba(255,255,255,0.04));
   font-size: 11px;
   font-weight: 600;
+  flex-shrink: 0;
 }
 
 .aic-planner-preview-title { flex: 1; }
@@ -984,7 +933,8 @@ body, html {
   font-size: 12px;
   white-space: pre;
   background: var(--vscode-editor-background);
-  color: var(--vscode-editor-foreground);
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  line-height: 1.5;
 }
 
 .aic-planner-pre.aic-planner-wrap { white-space: pre-wrap; }
@@ -992,16 +942,16 @@ body, html {
 /* ── History tab panel layout ────────────────────────────────────────────── */
 .aic-history-panel {
   flex-direction: column;
-  padding: 16px 20px;
+  padding: 14px 18px;
   overflow-y: auto;
-  gap: 8px;
+  gap: 0;
 }
 
 /* ── Shared section heading (used by History and Prompt Builder tabs) ──────── */
 .aic-section-title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
-  margin: 0;
+  margin: 0 0 10px;
   color: var(--vscode-settings-headerForeground, var(--vscode-foreground));
 }
 
@@ -1013,6 +963,7 @@ body, html {
   font-size: 12px;
   cursor: pointer;
   color: var(--vscode-foreground);
+  user-select: none;
 }
 
 /* ── Muted text utility (used in History messages) ─────────────────────────── */
@@ -1025,4 +976,66 @@ body, html {
 .aic-history-date {
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #777);
+}
+
+/* ── History section header row ─────────────────────────────────────────────── */
+.aic-section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+/* ── History list ────────────────────────────────────────────────────────────── */
+.aic-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* ── History item cards ──────────────────────────────────────────────────────── */
+.aic-history-item {
+  border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.1));
+  border-radius: 3px;
+  padding: 7px 10px;
+  transition: background 0.08s;
+}
+.aic-history-item:hover { background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.04)); }
+.aic-history-user      { border-left: 3px solid var(--vscode-focusBorder, #007acc); }
+.aic-history-assistant { border-left: 3px solid var(--vscode-terminal-ansiGreen, #4ec9b0); }
+
+.aic-history-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.aic-history-role {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.aic-history-content {
+  font-size: 12px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  cursor: pointer;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--vscode-foreground, #d4d4d4);
+  opacity: 0.9;
+}
+
+.aic-history-content.aic-history-expanded {
+  -webkit-line-clamp: unset;
+  display: block;
 }
