@@ -14,6 +14,7 @@ import { PaginatedTableComponent, ColumnDef } from '../shared/components/index';
 import { PorterOverlayComponent } from '../disasm-editor/components/porter-overlay.component';
 import { SnapshotEntry } from '../disasm-panel/types';
 import './diff-viewer-page.css';
+import '../disasm-editor/disasm-editor.css';
 
 export interface DiffRow {
   address:  string;

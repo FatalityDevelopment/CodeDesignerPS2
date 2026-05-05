@@ -14,9 +14,8 @@ import {
   LabelManagerEntry,
   ScannerKind,
 } from '../disasm-editor/components/label-manager-overlay.component';
-import '../disasm-editor/disasm-editor.css';
 import './label-manager-page.css';
-
+import '../disasm-editor/disasm-editor.css';
 /**
  * Full-page host for the Label Manager standalone webview tab.
  *
