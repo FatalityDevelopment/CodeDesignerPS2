@@ -140,7 +140,6 @@
       "address": "0x00408F80",
       "name": "gMediusDispatchTable",
       "comment": "Medius msg ID-\u003Ehandler table; [id:4][fnPtr:4][dataPtr:4][pad:4] IDs 0x90\u002B",
-      "dynamic": true,
       "type": "Pointer"
     },
     {
@@ -249,7 +248,6 @@
       "address": "0x0044D648",
       "name": "Seal Pointer",
       "comment": "Static ptr to CSealEx player entity. Deref to get dynamic\u2026",
-      "dynamic": true,
       "type": "Pointer"
     },
     {
@@ -594,6 +592,7 @@
       "parentAddress": "0x004b8a54",
       "offset": 8,
       "name": "Weapon Pointer",
+      "dynamic": true,
       "type": "Pointer"
     },
     {
@@ -601,6 +600,7 @@
       "parentAddress": "0x004b8a54:\u002B0x0008",
       "offset": 0,
       "name": "((CTFSWeapon))",
+      "dynamic": true,
       "type": "Pointer"
     },
     {
@@ -608,6 +608,7 @@
       "parentAddress": "0x004b8a54:\u002B0x0008:\u002B0x0000",
       "offset": 0,
       "name": "(CTFSWeapon)",
+      "dynamic": true,
       "type": "Pointer"
     },
     {
@@ -615,6 +616,7 @@
       "parentAddress": "0x004b8a54:\u002B0x0008:\u002B0x0000:\u002B0x0000",
       "offset": 0,
       "name": "CTFSWeapon",
+      "dynamic": true,
       "type": "String"
     },
     {
@@ -622,6 +624,7 @@
       "parentAddress": "0x004b8a54:\u002B0x0008:\u002B0x0000",
       "offset": 8,
       "name": "FNC_CTFSWeapon[1]",
+      "dynamic": true,
       "type": "Function"
     },
     {
@@ -630,6 +633,7 @@
       "offset": 12,
       "name": "FNC_CTFSWeapon[2]",
       "comment": "projectile spawn",
+      "dynamic": true,
       "type": "Function"
     },
     {
@@ -705,7 +709,7 @@
     {
       "address": "0x00000000",
       "name": "EE_RAM_BASE",
-      "comment": "EE RAM base (physical)"
+      "comment": "EE Main RAM base (physical)"
     },
     {
       "address": "0x00000010",
@@ -750,7 +754,7 @@
     {
       "address": "0x01FFFFFF",
       "name": "EE_RAM_END",
-      "comment": "EE RAM top (32 MB, physical)"
+      "comment": "EE Main RAM top (32 MB, physical)"
     },
     {
       "address": "0x10000000",
@@ -2436,6 +2440,360 @@
       "address": "0x0045B008",
       "name": "AdapterActive",
       "comment": "Active/enabled flag"
+    },
+    {
+      "address": "0x0016F252",
+      "name": "PatchDest_ZSeal_0",
+      "comment": "First zsealetc scatter dest \u2014 1160 bytes"
+    },
+    {
+      "address": "0x00180000",
+      "name": "ELF_Entry",
+      "comment": "CONFIRMED: PS2 ELF entry point \u2014 game binary loads here",
+      "type": "Function"
+    },
+    {
+      "address": "0x00188938",
+      "name": "ZSealEtc_Payload",
+      "comment": "ZSealEtc.bin decrypted payload \u2014 valid MIPS confirmed",
+      "type": "Function"
+    },
+    {
+      "address": "0x001889B8",
+      "name": "ZSealEtc_DataPtr",
+      "comment": "Data pointer from MWo3 struct \u002B0x08 during ZSealEtc processing",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00195768",
+      "name": "Util_MemSet",
+      "comment": "memset \u2014 memory set/clear",
+      "type": "Function"
+    },
+    {
+      "address": "0x001958B0",
+      "name": "Util_MemCopy",
+      "comment": "memcpy \u2014 memory copy",
+      "type": "Function"
+    },
+    {
+      "address": "0x001B3D40",
+      "name": "MC_Open",
+      "comment": "Memory card open/stat \u2014 called with APACHE00.ZDB as filename arg",
+      "type": "Function"
+    },
+    {
+      "address": "0x001B3EA0",
+      "name": "MC_Close",
+      "comment": "Memory card file close \u2014 called after APACHE00.ZDB has been fully read",
+      "type": "Function"
+    },
+    {
+      "address": "0x001B40C0",
+      "name": "MC_ReadData",
+      "comment": "MemCard data read",
+      "type": "Function"
+    },
+    {
+      "address": "0x001B41D8",
+      "name": "MC_Write",
+      "comment": "Memory card write \u2014 possibly writing back patch state or error log",
+      "type": "Function"
+    },
+    {
+      "address": "0x001B4390",
+      "name": "MC_ReadStat",
+      "comment": "MemCard read/stat \u2014 error \u003C -9 triggers disc fallback",
+      "type": "Function"
+    },
+    {
+      "address": "0x001B46B8",
+      "name": "MC_ReadBlock",
+      "comment": "MemCard read \u2014 reads APACHE00.ZDB data blocks from memory card",
+      "type": "Function"
+    },
+    {
+      "address": "0x001B4888",
+      "name": "MC_ChangeDir",
+      "comment": "MemCard chdir \u2014 navigates into BASCUS-97275SOCOMII save folder to find APACHE00.ZDB",
+      "type": "Function"
+    },
+    {
+      "address": "0x001C5848",
+      "name": "PatchLoader_NotFound",
+      "comment": "Error path \u2014 executed when APACHE00.ZDB not found on memcard AND disc fallback fails",
+      "type": "Function"
+    },
+    {
+      "address": "0x001C59C0",
+      "name": "PatchLoader_Sub1",
+      "comment": "Sub-function in patch load chain",
+      "type": "Function"
+    },
+    {
+      "address": "0x001C5B30",
+      "name": "PatchLoader_Sub2",
+      "comment": "Sub-function in patch load chain \u2014 called before or after PatchLoaderEntry (0x001C60B0)",
+      "type": "Function"
+    },
+    {
+      "address": "0x001C5D40",
+      "name": "PatchLoader_Caller",
+      "comment": "Return address after ALL patches fully placed in RAM \u2014 safe read point for scatter destinations"
+    },
+    {
+      "address": "0x001C6110",
+      "name": "PatchLoader_AfterDNAS",
+      "comment": "Return from DNAS_Handler \u2014 v0=0 success"
+    },
+    {
+      "address": "0x001C6390",
+      "name": "PatchLoader_DiscFallback",
+      "comment": "Disc fallback \u2014 loads from cdrom0:\\SCUS_972.75;1",
+      "type": "Function"
+    },
+    {
+      "address": "0x001CA2A0",
+      "name": "PatchLoader_PostProcess",
+      "comment": "Post-ZDB processing \u2014 final patch injection step",
+      "type": "Function"
+    },
+    {
+      "address": "0x001D4448",
+      "name": "PatchFilename_APACHE00",
+      "comment": "String: APACHE00.ZDB",
+      "type": "String"
+    },
+    {
+      "address": "0x001D44B8",
+      "name": "PatchFileList_Base",
+      "comment": "File list: FTSCORE/ZSEALETC/PUNOTREM/PUNOTRE2/r0001"
+    },
+    {
+      "address": "0x001D4520",
+      "name": "PatchPath_CDROM",
+      "comment": "String: cdrom0:\\SCUS_972.75;1",
+      "type": "String"
+    },
+    {
+      "address": "0x001D52A4",
+      "name": "MWo3ContextPtr",
+      "comment": "Pointer to MWo3_Context (0x004C5380) \u2014 tracks CURRENT file being decrypted. Cycles: DNAS.bin -\u003E FTScore.bin -\u003E ZSealEtc.bin",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x001D52A8",
+      "name": "FTScoreOutputPtr",
+      "comment": "Points to FTScore.bin output buffer at 0x001E7000 (MWo3 container)",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x001DEED0",
+      "name": "FTScoreBlobPtrTable",
+      "comment": "Pointer table: \u002B0=zero, \u002B4=flag(1), \u002B8-\u003E0x017C3DE0 (save/session data), \u002B0xC-\u003E0x001DF340"
+    },
+    {
+      "address": "0x001DEED8",
+      "name": "PatchKeyPtr",
+      "comment": "Points to 0x017C3DE0 \u2014 high-entropy session blob region. NOT raw AES key; indirect pointer to session crypto material",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x001DEF00",
+      "name": "SaveHeaderPtr",
+      "comment": "Points to 0x01FFE350. Contains \u0027zSaveHead\u0027 string \u002B FP values. This is save game header data. IV is at 0x0057DC00.",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x001DEF04",
+      "name": "szAPACHE00_ZDB",
+      "comment": "String ref for APACHE00.ZDB patch filename",
+      "type": "String"
+    },
+    {
+      "address": "0x001E70EC",
+      "name": "FTScore_CoreHook",
+      "comment": "beq zero,zero,-7 trampoline injected by FTSCore patch. Calls vtable fn at 0x00434E40\u002B0x1C then loops \u2014 FTSCore persistent hook into game loop"
+    },
+    {
+      "address": "0x001E70F4",
+      "name": "FTScore_PatchLoadCheck",
+      "comment": "FTCore\u002B0xF4 \u2014 checks patch load status. Part of FTSCore injected code region.",
+      "type": "Function"
+    },
+    {
+      "address": "0x001E7100",
+      "name": "FTScore_RebootHandler",
+      "comment": "FTCore\u002B0x100 \u2014 reboot handler in injected patch code",
+      "type": "Function"
+    },
+    {
+      "address": "0x001F3BF0",
+      "name": "GenericErrorHandler",
+      "comment": "Generic error handler \u2014 called from multiple patch/DNAS paths",
+      "type": "Function"
+    },
+    {
+      "address": "0x002CF570",
+      "name": "PatchLoader_Secondary",
+      "comment": "Secondary patch load path \u2014 possibly for different SOCOM title patch or runtime reload",
+      "type": "Function"
+    },
+    {
+      "address": "0x002CF810",
+      "name": "DNASErrorHandler",
+      "comment": "DNAS error state check/handler \u2014 called when DNAS auth or patch decrypt fails",
+      "type": "Function"
+    },
+    {
+      "address": "0x003BCB10",
+      "name": "MemClear",
+      "comment": "Memory/buffer clear routine \u2014 used in patch load cleanup",
+      "type": "Function"
+    },
+    {
+      "address": "0x003C1020",
+      "name": "SaveListIcon",
+      "comment": "Save list icon data \u2014 SOCOM II memory card save icon"
+    },
+    {
+      "address": "0x004C5380",
+      "name": "MWo3Context",
+      "comment": "MWo3_Context struct \u2014 tracks current file being decrypted. \u002B0x04=file_counter, \u002B0x20=current_filename string. Cycles: DNAS-\u003EFTScore-\u003EZSealEtc",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x004CDAC8",
+      "name": "SSLC_ObjAlloc",
+      "comment": "SSL-C 2.1.0 object allocator",
+      "type": "Function"
+    },
+    {
+      "address": "0x00515F00",
+      "name": "AES_BlockProcessor",
+      "comment": "AES block processing \u2014 vtable dispatch to AES_CBC_DecryptFull",
+      "type": "Function"
+    },
+    {
+      "address": "0x005163F4",
+      "name": "AES_VtableDispatch",
+      "comment": "jalr v0 \u2014 v0=0x005153F0. Args: a0=cipher_state, a1=ciphertext, a2=plaintext_out, a3=len"
+    },
+    {
+      "address": "0x005163FC",
+      "name": "AES_VtableDispatch_Ret",
+      "comment": "Return from AES vtable \u2014 decrypt complete"
+    },
+    {
+      "address": "0x00518080",
+      "name": "AES_ObjectInit",
+      "comment": "AES cipher object init \u2014 checks sentinel 0x0056F0F0",
+      "type": "Function"
+    },
+    {
+      "address": "0x00524EE8",
+      "name": "AES_BlockDecrypt",
+      "comment": "Block decrypt dispatch \u2014 tails to AES_CBC_Wrapper",
+      "type": "Function"
+    },
+    {
+      "address": "0x00525CF0",
+      "name": "AES_CipherInit",
+      "comment": "Cipher init \u2014 calls key expansion chain",
+      "type": "Function"
+    },
+    {
+      "address": "0x0053F5B8",
+      "name": "DNAS_BlockCipherOrchestrator",
+      "comment": "Block cipher orchestrator \u2014 0x80-byte blocks, AES-128",
+      "type": "Function"
+    },
+    {
+      "address": "0x00536200",
+      "name": "Inflate_LoopTop",
+      "comment": "Top of inflate processing loop"
+    },
+    {
+      "address": "0x00536288",
+      "name": "Inflate_CallbackInvoke",
+      "comment": "jal 0x00541658 \u2014 invokes inflate/decompress callback"
+    },
+    {
+      "address": "0x00536498",
+      "name": "Inflate_UnpackRet",
+      "comment": "Return from inflate \u2014 v0=0 success"
+    },
+    {
+      "address": "0x005364A0",
+      "name": "Inflate_UnpackEntry",
+      "comment": "Unpack entry \u2014 s5=0x01E7EC30 (78 DA zlib stream at this point)",
+      "type": "Function"
+    },
+    {
+      "address": "0x00540A14",
+      "name": "ZDB_ScatterTable_FTScore",
+      "comment": "Scatter table \u2014 26 (dest_addr, size) pairs for patch placement"
+    },
+    {
+      "address": "0x00540C00",
+      "name": "ZDB_ChunkDescTable",
+      "comment": "Chunk descriptor table \u2014 9 entries"
+    },
+    {
+      "address": "0x0054C2E4",
+      "name": "PatchDest_0",
+      "comment": "Scatter dest 0 \u2014 ftscore chunk 0"
+    },
+    {
+      "address": "0x01E7EF40",
+      "name": "gAESInputIV",
+      "comment": "session_ctx\u002B0x310 \u2014 high-entropy AES input slice near key region. Raw IV at 0x0057DC00."
+    },
+    {
+      "address": "0x01FFE350",
+      "name": "gSaveHead",
+      "comment": "Save game header \u2014 contains zSaveHead magic string \u002B FP values. Referenced as IV/key candidate but is actually save header data",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x01FFECC0",
+      "name": "FileMetadataBlock",
+      "comment": "Contains timestamp struct (repeating 16 bytes) \u002B \u0027APACHE00.ZDB\u0027 string at \u002B0x20. File metadata/timestamp block."
+    },
+    {
+      "address": "0x0062BC68",
+      "name": "RSA_Decrypt",
+      "comment": "RSA decrypt \u2014 0x0062BC68",
+      "type": "Function"
+    },
+    {
+      "address": "0x0062EC78",
+      "name": "GetKeyMaster",
+      "comment": "GetKeyMaster \u2014 crypto key retrieval",
+      "type": "Function"
+    },
+    {
+      "address": "0x0062A720",
+      "name": "RC4_Encrypt",
+      "comment": "RC4 encrypt",
+      "type": "Function"
+    },
+    {
+      "address": "0x0062A7C8",
+      "name": "RC4_Decrypt",
+      "comment": "RC4 decrypt",
+      "type": "Function"
+    },
+    {
+      "address": "0x017C3DE0",
+      "name": "gSessionBlob",
+      "comment": "High-entropy session blob region. Referenced from FTScoreBlobPtrTable\u002B8. NOT raw AES key; indirect pointer to session crypto material"
+    },
+    {
+      "address": "0x00280D50",
+      "name": "LoadSavedGame",
+      "comment": "RPC ID 0x3C \u2014 loads player profile SaveGame%d from MC. Called with slot index arg.",
+      "type": "Function"
     }
   ]
 }

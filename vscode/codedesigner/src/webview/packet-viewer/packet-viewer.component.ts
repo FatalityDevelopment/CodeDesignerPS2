@@ -566,6 +566,8 @@ interface ScertMediusParsed {
     msgTypeName: string;
     /** Byte offset in the full frame where the Medius class byte resides. */
     frameOffset: number;
+    /** Parsed field-level dissection of the Medius payload (empty if struct unknown). */
+    payloadFields: DissectedField[];
 }
 
 interface ScertParsed {
@@ -581,6 +583,8 @@ interface ScertParsed {
     hash?: number;
     /** Parsed Medius layer (present for APP_TOSERVER / SERVER_APP with class+type). */
     medius?: ScertMediusParsed;
+    /** Parsed fields for non-APP SCERT messages (e.g. CONNECT_TCP, CRYPTKEY_PUBLIC). */
+    scertPayloadFields?: DissectedField[];
     /** Byte offset of the SCERT header (type byte) within the full frame. */
     frameOffset: number;
     /** Total byte length of this SCERT record (header + hash? + payload). */
@@ -611,6 +615,398 @@ const SCERT_APP_MSG_TYPES = new Set([
     0x0B, // RT_MSG_CLIENT_APP_TOSERVER
     0x3B, // RT_MSG_CLIENT_MULTI_APP_TOSERVER
     0x3C, // RT_MSG_SERVER_MULTI_APP_TOCLIENT
+]);
+
+// ── Medius protocol definitions ───────────────────────────────────────────────
+// Ported from medius_wireshark_dissector.lua by hashsploit
+
+const MEDIUS_C = {
+    MESSAGEID_MAXLEN:    21,
+    SESSIONKEY_MAXLEN:   17,
+    ACCESSKEY_MAXLEN:    17,
+    ACCOUNTNAME_MAXLEN:  32,
+    PASSWORD_MAXLEN:     32,
+    RSAKEY_MAXLEN:       64,
+    POLICY_MAXLEN:       256,
+    ACCOUNTSTATS_MAXLEN: 256,
+    CLANNAME_MAXLEN:     32,
+    CLANSTATS_MAXLEN:    256,
+    LADDERSTATSWIDE_MAXLEN: 100,
+};
+
+const MEDIUS_CONNECTION_TYPE = new Map<number, string>([
+    [0, 'MODEM'], [1, 'ETHERNET'], [2, 'WIRELESS'],
+]);
+
+const MEDIUS_POLICY_TYPE = new Map<number, string>([
+    [0, 'Usage'], [1, 'Privacy'],
+]);
+
+const MEDIUS_USER_ACTION = new Map<number, string>([
+    [0, 'KEEP_ALIVE'], [1, 'JOINED_CHAT_WORLD'], [2, 'LEFT_GAME_WORLD'],
+]);
+
+const MEDIUS_CLAN_STATUS = new Map<number, string>([
+    [0, 'CLAN_ACTIVE'], [0xFFFFFFFF, 'CLAN_DISBANDED'],
+]);
+
+const MEDIUS_ACCOUNT_TYPE = new Map<number, string>([
+    [0, 'CHILD_ACCOUNT'], [1, 'MASTER_ACCOUNT'],
+]);
+
+const APPLICATION_ID = new Map<number, string>([
+    [10411, 'Syphon Filter: The Omega Strain'],
+    [10683, 'Ratchet and Clank 3 (PAL)'],
+    [10684, 'Ratchet and Clank: Up Your Arsenal'],
+    [10782, 'Gran Turismo 4 (Beta)'],
+    [10994, 'Jak X: Combat Racing (NTSC-U)'],
+    [11184, 'Ratchet: Deadlocked'],
+    [11204, 'Jak X: Combat Racing (PAL)'],
+    [20624, 'Socom US Navy Seals Combined Assault'],
+    [20034, 'Socom 2 US Navy Seals'],
+    [20032, 'Socom US Navy Seals'],
+]);
+
+/** MediusCallbackStatus — negative values stored as unsigned 32-bit. */
+const MEDIUS_CALLBACK_STATUS = new Map<number, string>([
+    [0, 'MediusSuccess'],
+    [1, 'MediusNoResult'],
+    [2, 'MediusRequestAccepted'],
+    [3, 'MediusWorldCreatedSizeReduced'],
+    [4, 'MediusPass'],
+    [0xFFFFFC59, 'MediusNotAMember'],          // -935
+    [0xFFFFFC58, 'MediusSubscriptionInvalid'],  // -936
+    [0xFFFFFC57, 'MediusSubscriptionAborted'],  // -937
+    [0xFFFFFC56, 'MediusTokenDoesNotExist'],    // -938
+    [0xFFFFFC55, 'MediusTokenAlreadyTaken'],    // -939
+    [0xFFFFFC54, 'MediusSessionFail'],          // -940
+    [0xFFFFFC53, 'MediusTransactionCanceled'],  // -941
+    [0xFFFFFC52, 'MediusGatewayError'],         // -942
+    [0xFFFFFD88, 'MediusInvalidSessionKey'],    // -632
+    [0xFFFFFD87, 'MediusDuplicateLogin'],       // -633
+    [0xFFFFFD86, 'MediusAccountNotFound'],      // -634
+    [0xFFFFFD85, 'MediusBadPassword'],          // -635
+    [0xFFFFFD84, 'MediusBannedAccount'],        // -636
+    [0xFFFFFD83, 'MediusDBError'],              // -637
+    [0xFFFFFD82, 'MediusAlreadyLoggedIn'],      // -638
+    [0xFFFFFD81, 'MediusNotLoggedIn'],          // -639
+    [0xFFFFFD80, 'MediusAlreadyInGame'],        // -640
+    [0xFFFFFD7F, 'MediusNotInGame'],            // -641
+    [0xFFFFFD7E, 'MediusNoPermission'],         // -642
+    [0xFFFFFD7D, 'MediusGameNotFound'],         // -643
+    [0xFFFFFD7C, 'MediusGameFull'],             // -644
+    [0xFFFFFD7B, 'MediusWorldFull'],            // -645
+    [0xFFFFFD7A, 'MediusWorldNotFound'],        // -646
+    [0xFFFFFD79, 'MediusPlayerNotFound'],       // -647
+]);
+
+// ── Medius struct type system ─────────────────────────────────────────────────
+
+type MediusFieldType = 'bytes' | 'uint' | 'string' | 'bool';
+
+interface MediusFieldDef {
+    name: string;
+    type: MediusFieldType;
+    length: number;
+    enum?: Map<number, string>;
+    optional?: boolean;
+}
+
+type MediusStructDef = MediusFieldDef[];
+
+/**
+ * Parse a Medius payload byte array against a struct definition.
+ * Returns a list of DissectedField entries for the dissection tree.
+ */
+function parseMediusFields(struct: MediusStructDef, payload: Uint8Array): DissectedField[] {
+    const fields: DissectedField[] = [];
+    let off = 0;
+    for (const f of struct) {
+        if (off >= payload.length) {
+            if (!f.optional) { break; }
+            continue;
+        }
+        const avail = Math.min(f.length, payload.length - off);
+        switch (f.type) {
+            case 'uint': {
+                let val = 0;
+                for (let i = 0; i < avail; i++) { val |= payload[off + i] << (i * 8); }
+                val = val >>> 0; // to unsigned
+                const enumName = f.enum?.get(val);
+                const valStr   = enumName ? `${val} (${enumName})` : `${val} (0x${val.toString(16).toUpperCase()})`;
+                fields.push({ name: f.name, value: valStr });
+                break;
+            }
+            case 'string': {
+                let end = off;
+                while (end < off + avail && payload[end] !== 0) { end++; }
+                const str = String.fromCharCode(...payload.slice(off, end));
+                fields.push({ name: f.name, value: str || '(empty)' });
+                break;
+            }
+            case 'bool': {
+                let val = 0;
+                for (let i = 0; i < avail; i++) { val |= payload[off + i] << (i * 8); }
+                fields.push({ name: f.name, value: (val >>> 0) !== 0 ? 'true' : 'false' });
+                break;
+            }
+            case 'bytes':
+            default: {
+                const hex = Array.from(payload.slice(off, off + avail))
+                    .map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+                // Try to render as ASCII if all printable
+                const ascii = payload.slice(off, off + avail).every(b => b === 0 || (b >= 0x20 && b < 0x7F))
+                    ? '  "' + Array.from(payload.slice(off, off + avail))
+                        .map(b => b === 0 ? '' : String.fromCharCode(b)).join('') + '"'
+                    : '';
+                fields.push({ name: f.name, value: hex + ascii });
+                break;
+            }
+        }
+        off += f.length;
+    }
+    return fields;
+}
+
+/**
+ * Medius struct definitions keyed by (msgType << 8) | msgClass.
+ * E.g. SessionBegin = class 0x01, type 0x03 -> key 0x0301.
+ */
+const MEDIUS_STRUCTS = new Map<number, MediusStructDef>([
+
+    // -- SessionBegin (class=Lobby, type=0x03) ---------------------------------
+    [0x0301, [
+        { name: 'Message Id',       type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',          type: 'bytes', length: 3 },
+        { name: 'Connection Type',  type: 'uint',  length: 4, enum: MEDIUS_CONNECTION_TYPE },
+    ]],
+
+    // -- SessionBeginResponse (class=Lobby, type=0x04) -------------------------
+    [0x0401, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Callback Status', type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Session Key',     type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+    ]],
+
+    // -- AccountLogin (class=Lobby, type=0x07) ---------------------------------
+    [0x0701, [
+        { name: 'Message Id',    type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',   type: 'bytes',  length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Account Name',  type: 'string', length: MEDIUS_C.ACCOUNTNAME_MAXLEN },
+        { name: 'Password',      type: 'string', length: MEDIUS_C.PASSWORD_MAXLEN },
+    ]],
+
+    // -- AccountLoginResponse (class=Lobby, type=0x08) -------------------------
+    [0x0801, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Callback Status', type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Account Id',      type: 'uint',  length: 4 },
+    ]],
+
+    // -- AnonymousLogin (class=Lobby, type=0x19) -------------------------------
+    [0x1901, [
+        { name: 'Message Id',      type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',     type: 'bytes',  length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Language Type',   type: 'uint',   length: 4 },
+    ]],
+
+    // -- AnonymousLoginResponse (class=Lobby, type=0x1A) -----------------------
+    [0x1A01, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Callback Status', type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Account Id',      type: 'uint',  length: 4 },
+        { name: 'Account Type',    type: 'uint',  length: 4, enum: MEDIUS_ACCOUNT_TYPE },
+        { name: 'World Id',        type: 'uint',  length: 4 },
+        { name: 'Access Key',      type: 'bytes', length: MEDIUS_C.ACCESSKEY_MAXLEN },
+        { name: 'Session Key',     type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+    ]],
+
+    // -- AccountUpdateStats (class=Lobby, type=0x11) ---------------------------
+    [0x1101, [
+        { name: 'Message Id',     type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',    type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Account Stats',  type: 'bytes', length: MEDIUS_C.ACCOUNTSTATS_MAXLEN },
+    ]],
+
+    // -- AccountUpdateStatsResponse (class=Lobby, type=0x12) ------------------
+    [0x1201, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Callback Status', type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+    ]],
+
+    // -- GetMyIP (class=Lobby, type=0x1B) --------------------------------------
+    [0x1B01, [
+        { name: 'Message Id',  type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+    ]],
+
+    // -- GetMyIPResponse (class=Lobby, type=0x1C) ------------------------------
+    [0x1C01, [
+        { name: 'Message Id',      type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes',  length: 3 },
+        { name: 'Callback Status', type: 'uint',   length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'IP Address',      type: 'string', length: 16 },
+    ]],
+
+    // -- Policy (class=Lobby, type=0x47) ---------------------------------------
+    [0x4701, [
+        { name: 'Message Id',  type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Padding',     type: 'bytes', length: 2 },
+        { name: 'Policy Type', type: 'uint',  length: 4, enum: MEDIUS_POLICY_TYPE },
+    ]],
+
+    // -- PolicyResponse (class=Lobby, type=0x48) -------------------------------
+    [0x4801, [
+        { name: 'Message Id',      type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes',  length: 3 },
+        { name: 'Callback Status', type: 'uint',   length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Policy Message',  type: 'string', length: MEDIUS_C.POLICY_MAXLEN },
+        { name: 'End of Message',  type: 'bool',   length: 4 },
+    ]],
+
+    // -- UpdateUserState (class=Lobby, type=0x49) ------------------------------
+    [0x4901, [
+        { name: 'Session Key',  type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Padding',      type: 'bytes', length: 3 },
+        { name: 'User Action',  type: 'uint',  length: 4, enum: MEDIUS_USER_ACTION },
+    ]],
+
+    // -- ChatMessage (class=Lobby, type=0x3B) ----------------------------------
+    [0x3B01, [
+        { name: 'Message Id',   type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',  type: 'bytes',  length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Target Type',  type: 'uint',   length: 4 },
+        { name: 'Target Id',    type: 'uint',   length: 4 },
+        { name: 'Chat Type',    type: 'uint',   length: 4 },
+        { name: 'Message',      type: 'string', length: 512 },
+    ]],
+
+    // -- GetMyClans (class=Lobby, type=0x7C) -----------------------------------
+    [0x7C01, [
+        { name: 'Message Id',    type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',   type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Padding',       type: 'bytes', length: 2 },
+        { name: 'Starting Page', type: 'uint',  length: 4 },
+        { name: 'Page Size',     type: 'uint',  length: 4 },
+    ]],
+
+    // -- GetMyClansResponse (class=Lobby, type=0x7D) ---------------------------
+    [0x7D01, [
+        { name: 'Message Id',          type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',             type: 'bytes',  length: 3 },
+        { name: 'Callback Status',     type: 'uint',   length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Clan Id',             type: 'uint',   length: 4 },
+        { name: 'App Id',              type: 'uint',   length: 4, enum: APPLICATION_ID },
+        { name: 'Clan Name',           type: 'string', length: MEDIUS_C.CLANNAME_MAXLEN },
+        { name: 'Leader Account Id',   type: 'uint',   length: 4 },
+        { name: 'Leader Account Name', type: 'string', length: MEDIUS_C.ACCOUNTNAME_MAXLEN },
+        { name: 'Clan Stats',          type: 'bytes',  length: MEDIUS_C.CLANSTATS_MAXLEN },
+        { name: 'Clan Status',         type: 'uint',   length: 4, enum: MEDIUS_CLAN_STATUS },
+        { name: 'End of Message',      type: 'bool',   length: 4 },
+    ]],
+
+    // -- VersionServer (class=Lobby, type=0x86) --------------------------------
+    [0x8601, [
+        { name: 'Message Id',  type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+    ]],
+
+    // -- VersionServerResponse (class=Lobby, type=0x87) -----------------------
+    [0x8701, [
+        { name: 'Message Id',      type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes',  length: 3 },
+        { name: 'Callback Status', type: 'uint',   length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Version',         type: 'string', length: 32 },
+    ]],
+
+    // -- GetLocations (class=Lobby, type=0x8C) ---------------------------------
+    [0x8C01, [
+        { name: 'Message Id',  type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+    ]],
+
+    // -- PickLocation (class=Lobby, type=0x8E) ---------------------------------
+    [0x8E01, [
+        { name: 'Message Id',  type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Location Id', type: 'uint',  length: 4 },
+    ]],
+
+    // -- GetUniverseInformation (class=Lobby, type=0xC8) ----------------------
+    [0xC801, [
+        { name: 'Message Id',  type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Info Filter', type: 'uint',  length: 4 },
+    ]],
+
+    // -- MachineSignaturePost (class=Lobby, type=0xCB) ------------------------
+    [0xCB01, [
+        { name: 'Message Id',  type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Machine Sig', type: 'bytes', length: 16 },
+    ]],
+
+    // -- LobbyExt: DnasSignaturePost (class=LobbyExt, type=0x0A) -------------
+    [0x0A04, [
+        { name: 'Message Id',    type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',   type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'DNAS Category', type: 'uint',  length: 4 },
+        { name: 'DNAS Sig',      type: 'bytes', length: 32 },
+    ]],
+
+    // -- LobbyExt: TicketLogin (class=LobbyExt, type=0x58) -------------------
+    [0x5804, [
+        { name: 'Message Id',   type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',  type: 'bytes',  length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Account Name', type: 'string', length: MEDIUS_C.ACCOUNTNAME_MAXLEN },
+        { name: 'Ticket Data',  type: 'bytes',  length: 256 },
+    ]],
+
+    // -- LobbyExt: TicketLoginResponse (class=LobbyExt, type=0x59) -----------
+    [0x5904, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Callback Status', type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Account Id',      type: 'uint',  length: 4 },
+        { name: 'Account Type',    type: 'uint',  length: 4, enum: MEDIUS_ACCOUNT_TYPE },
+        { name: 'World Id',        type: 'uint',  length: 4 },
+        { name: 'Access Key',      type: 'bytes', length: MEDIUS_C.ACCESSKEY_MAXLEN },
+        { name: 'Session Key',     type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+    ]],
+]);
+
+/**
+ * SCERT payload struct definitions for non-APP message types.
+ * Keyed by SCERT msgType (0x00-0x36 etc.)
+ */
+const SCERT_PAYLOAD_STRUCTS = new Map<number, MediusStructDef>([
+    // RT_MSG_CLIENT_CONNECT_TCP (0x00) - Medius 1.10 layout
+    [0x00, [
+        { name: 'World Id',    type: 'uint',  length: 4 },
+        { name: 'App Id',      type: 'uint',  length: 4, enum: APPLICATION_ID },
+        { name: 'RSA Key',     type: 'bytes', length: MEDIUS_C.RSAKEY_MAXLEN },
+        { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN, optional: true },
+        { name: 'Access Key',  type: 'bytes', length: MEDIUS_C.ACCESSKEY_MAXLEN,  optional: true },
+    ]],
+    // RT_MSG_SERVER_CONNECT_ACCEPT_TCP (0x07) - server sends client its IP
+    [0x07, [
+        { name: 'Client IP', type: 'string', length: 16 },
+        { name: 'World Id',  type: 'uint',   length: 4 },
+    ]],
+    // RT_MSG_CLIENT_CRYPTKEY_PUBLIC (0x12)
+    [0x12, [
+        { name: 'RSA Key', type: 'bytes', length: MEDIUS_C.RSAKEY_MAXLEN },
+    ]],
+    // RT_MSG_SERVER_CRYPTKEY_PEER (0x13)
+    [0x13, [
+        { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+    ]],
 ]);
 
 /**
@@ -650,18 +1046,34 @@ function parseSCERT(tcpPayload: Uint8Array, frameBase: number, direction = -1): 
 
         // Parse Medius APP layer when present
         let medius: ScertMediusParsed | undefined;
+        let scertPayloadFields: DissectedField[] | undefined;
         const isAppMsg = SCERT_APP_MSG_TYPES.has(msgType);
         if (isAppMsg && payloadLen >= 2) {
             const appOff    = off + hdrSize;
             const msgClass  = tcpPayload[appOff];
             const mType     = tcpPayload[appOff + 1];
+            // Attempt field-level dissection of the Medius payload
+            const structKey = (mType << 8) | msgClass;
+            const structDef = MEDIUS_STRUCTS.get(structKey);
+            const mediusPayload = tcpPayload.slice(appOff + 2, off + hdrSize + payloadLen);
+            const payloadFields = structDef
+                ? parseMediusFields(structDef, mediusPayload)
+                : [];
             medius = {
                 msgClass,
                 msgClassName: NET_MSG_CLASS_NAMES.get(msgClass) ?? `0x${toHex(msgClass)}`,
                 msgType: mType,
                 msgTypeName: mediusTypeName(msgClass, mType),
                 frameOffset: frameBase + appOff,
+                payloadFields,
             };
+        } else if (!isAppMsg && payloadLen > 0) {
+            // Try struct-level dissection for known non-APP SCERT messages
+            const scertStruct = SCERT_PAYLOAD_STRUCTS.get(msgType);
+            if (scertStruct) {
+                const scertPayload = tcpPayload.slice(off + hdrSize, off + hdrSize + payloadLen);
+                scertPayloadFields = parseMediusFields(scertStruct, scertPayload);
+            }
         }
 
         msgs.push({
@@ -672,6 +1084,7 @@ function parseSCERT(tcpPayload: Uint8Array, frameBase: number, direction = -1): 
             payloadLen,
             hash,
             medius,
+            scertPayloadFields,
             frameOffset: frameBase + off,
             frameLength: totalSize,
         });
@@ -690,7 +1103,7 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
     const layers: DissectedLayer[] = [];
     if (raw.length < 14) { return layers; }
 
-    // ── Ethernet II ──
+    // -- Ethernet II --
     const dstMac = fmtMac(raw, 0);
     const srcMac = fmtMac(raw, 6);
     const etherType = readU16BE(raw, 12);
@@ -703,7 +1116,7 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
 
     let off = 14;
     if (etherType === 0x0806) {
-        // ── ARP ──
+        // -- ARP --
         if (raw.length >= off + 28) {
             const op = readU16BE(raw, off + 6);
             const senderMac = fmtMac(raw, off + 8);
@@ -729,7 +1142,7 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
 
     if (etherType !== 0x0800) { return layers; } // only IPv4 beyond here
 
-    // ── IPv4 ──
+    // -- IPv4 --
     if (raw.length < off + 20) { return layers; }
     const ihl = (raw[off] & 0x0F) * 4;
     const totalLen = readU16BE(raw, off + 2);
@@ -762,7 +1175,7 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
 
     const payloadOff = off + ihl;
 
-    // ── ICMP ──
+    // -- ICMP --
     if (proto === 1 && raw.length >= payloadOff + 8) {
         const icmpType = raw[payloadOff];
         const icmpCode = raw[payloadOff + 1];
@@ -783,7 +1196,7 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
         return layers;
     }
 
-    // ── TCP ──
+    // -- TCP --
     if (proto === 6 && raw.length >= payloadOff + 20) {
         const srcPort = readU16BE(raw, payloadOff);
         const dstPort = readU16BE(raw, payloadOff + 2);
@@ -828,7 +1241,7 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
 
         const isScertPort = SCERT_DECODE_PORTS.has(srcPort) || SCERT_DECODE_PORTS.has(dstPort);
         if (tcpPayLen > 0 && server && isScertPort) {
-            // ── SCERT parsing ──
+            // -- SCERT parsing --
             const tcpPayload = raw.slice(tcpPayOff, tcpPayOff + tcpPayLen);
             const scertMsgs  = parseSCERT(tcpPayload, tcpPayOff, direction);
 
@@ -836,9 +1249,9 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
                 for (const msg of scertMsgs) {
                     const hdrLen = msg.isEncrypted ? 7 : 3;
                     const scertFields: DissectedField[] = [
-                        { name: 'Server',       value: server },
-                        { name: 'Message Type', value: `0x${toHex(msg.msgType)} — ${msg.msgTypeName}` },
-                        { name: 'Encrypted',    value: msg.isEncrypted ? `Yes (hash: 0x${toHex(msg.hash!, 8)})` : 'No' },
+                        { name: 'Server',         value: server },
+                        { name: 'Message Type',   value: `0x${toHex(msg.msgType)} — ${msg.msgTypeName}` },
+                        { name: 'Encrypted',      value: msg.isEncrypted ? `Yes (hash: 0x${toHex(msg.hash!, 8)})` : 'No' },
                         { name: 'Payload Length', value: `${msg.payloadLen} bytes` },
                     ];
 
@@ -853,21 +1266,23 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
                     // Medius APP sub-layer
                     if (msg.medius) {
                         const m = msg.medius;
+                        const mediusPayLen = msg.payloadLen - 2;
+                        const hasFields = m.payloadFields.length > 0;
                         layers.push({
                             label: `Medius [${m.msgClassName}]  ${m.msgTypeName}`,
                             color: '#ff9580',
                             fields: [
-                                { name: 'Message Class', value: `0x${toHex(m.msgClass)} — ${m.msgClassName}` },
-                                { name: 'Message Type',  value: `0x${toHex(m.msgType)} — ${m.msgTypeName}` },
-                                { name: 'Payload Length', value: `${msg.payloadLen - 2} bytes` },
+                                { name: 'Message Class',  value: `0x${toHex(m.msgClass)} — ${m.msgClassName}` },
+                                { name: 'Message Type',   value: `0x${toHex(m.msgType)} — ${m.msgTypeName}` },
+                                { name: 'Payload Length', value: `${mediusPayLen} bytes` },
+                                ...m.payloadFields,
                             ],
                             offset: m.frameOffset,
                             length: 2,
                         });
 
-                        // Medius payload (remainder after 2-byte header)
-                        const mediusPayLen = msg.payloadLen - 2;
-                        if (mediusPayLen > 0) {
+                        if (!hasFields && mediusPayLen > 0) {
+                            // No struct known — show raw payload bytes
                             layers.push({
                                 label: `Medius Payload (${mediusPayLen} bytes)`,
                                 color: '#909399',
@@ -876,8 +1291,20 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
                                 length: mediusPayLen,
                             });
                         }
+                    } else if (msg.scertPayloadFields && msg.scertPayloadFields.length > 0) {
+                        // Non-APP SCERT message with known struct — show decoded fields
+                        layers.push({
+                            label: `SCERT Payload — ${msg.msgTypeName}`,
+                            color: '#b5c9e8',
+                            fields: [
+                                { name: 'Length', value: `${msg.payloadLen} bytes` },
+                                ...msg.scertPayloadFields,
+                            ],
+                            offset: msg.frameOffset + hdrLen,
+                            length: msg.payloadLen,
+                        });
                     } else if (msg.payloadLen > 0) {
-                        // Raw SCERT payload (non-APP messages)
+                        // Raw SCERT payload (non-APP messages, unknown struct)
                         layers.push({
                             label: `SCERT Payload (${msg.payloadLen} bytes)`,
                             color: '#909399',
@@ -904,7 +1331,7 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
         return layers;
     }
 
-    // ── UDP ──
+    // -- UDP --
     if (proto === 17 && raw.length >= payloadOff + 8) {
         const srcPort = readU16BE(raw, payloadOff);
         const dstPort = readU16BE(raw, payloadOff + 2);
@@ -982,7 +1409,7 @@ function packetInfoSummary(raw: Uint8Array, direction?: number): string {
     const payOff = 14 + ihl;
     if (proto === 1 && raw.length >= payOff + 2) {
         const t = raw[payOff];
-        return `${srcIP} → ${dstIP}  ICMP ${icmpTypeName(t)}`;
+        return `${srcIP} -> ${dstIP}  ICMP ${icmpTypeName(t)}`;
     }
     if ((proto === 6 || proto === 17) && raw.length >= payOff + 4) {
         const sp = readU16BE(raw, payOff);
@@ -997,7 +1424,7 @@ function packetInfoSummary(raw: Uint8Array, direction?: number): string {
             if (flags & 0x04) { fl.push('RST'); }
             if (flags & 0x08) { fl.push('PSH'); }
 
-            // ── SCERT summary ──
+            // -- SCERT summary --
             const server = serverFromPorts(sp, dp);
             if (server) {
                 if (SCERT_DECODE_PORTS.has(sp) || SCERT_DECODE_PORTS.has(dp)) {
@@ -1013,7 +1440,7 @@ function packetInfoSummary(raw: Uint8Array, direction?: number): string {
                             const port  = MEDIUS_PORTS.has(dp) ? dp : sp;
                             let summary = `[${server}:${port}] ${first.msgTypeName}`;
                             if (first.medius) {
-                                summary += ` → ${first.medius.msgTypeName}`;
+                                summary += ` -> ${first.medius.msgTypeName}`;
                             }
                             if (scertMsgs.length > 1) {
                                 summary += ` (+${scertMsgs.length - 1} more)`;
@@ -1022,17 +1449,17 @@ function packetInfoSummary(raw: Uint8Array, direction?: number): string {
                         }
                     }
                 }
-                return `${srcIP}:${sp} → ${dstIP}:${dp}  [${server}] TCP [${fl.join(',')}]`;
+                return `${srcIP}:${sp} -> ${dstIP}:${dp}  [${server}] TCP [${fl.join(',')}]`;
             }
 
-            return `${srcIP}:${sp} → ${dstIP}:${dp}  ${pn} [${fl.join(',')}]`;
+            return `${srcIP}:${sp} -> ${dstIP}:${dp}  ${pn} [${fl.join(',')}]`;
         }
         if (proto === 17 && (sp === 53 || dp === 53)) {
-            return `${srcIP}:${sp} → ${dstIP}:${dp}  DNS`;
+            return `${srcIP}:${sp} -> ${dstIP}:${dp}  DNS`;
         }
-        return `${srcIP}:${sp} → ${dstIP}:${dp}  ${pn}`;
+        return `${srcIP}:${sp} -> ${dstIP}:${dp}  ${pn}`;
     }
-    return `${srcIP} → ${dstIP}  ${ipProtoName(proto)}`;
+    return `${srcIP} -> ${dstIP}  ${ipProtoName(proto)}`;
 }
 
 /** Determine the high-level protocol name for the Protocol column. */
@@ -1067,7 +1494,7 @@ function packetProtocol(raw: Uint8Array): string {
  * background highlight so they stand out clearly.
  *
  * Later layers in the array override earlier ones (innermost wins), matching
- * the order dissectFrame pushes layers: Ethernet → IP → TCP → SCERT → Medius.
+ * the order dissectFrame pushes layers: Ethernet -> IP -> TCP -> SCERT -> Medius.
  */
 function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerIdx = -1): string {
     // Per-byte colour and selection state — innermost (later) layer wins.
@@ -1418,17 +1845,17 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     <!-- ── Toolbar ─────────────────────────────────────────────────── -->
     <div class="pv-toolbar">
         @if (!capturing()) {
-            <button (click)="onStartCapture()">▶ Start Capture</button>
+            <button (click)="onStartCapture()">&#9654; Start Capture</button>
         } @else {
-            <button class="pv-active" (click)="onStopCapture()">⏹ Stop Capture</button>
+            <button class="pv-active" (click)="onStopCapture()">&#9209; Stop Capture</button>
         }
-        <button (click)="onPollOnce()" [disabled]="!capturing()">⟳ Poll</button>
-        <button (click)="onClear()">✕ Clear</button>
+        <button (click)="onPollOnce()" [disabled]="!capturing()">&#10227; Poll</button>
+        <button (click)="onClear()">&#10005; Clear</button>
         <div class="pv-sep"></div>
-        <button (click)="onOpenPcap()" title="Open a .pcap file">📂 Open</button>
-        <button (click)="onSavePcap()" [disabled]="packets().length === 0" title="Save capture as .pcap">💾 Save</button>
+        <button (click)="onOpenPcap()" title="Open a .pcap file">&#128194; Open</button>
+        <button (click)="onSavePcap()" [disabled]="packets().length === 0" title="Save capture as .pcap">&#128190; Save</button>
         @if (filename()) {
-            <span style="font-size:12px;color:#aaa;white-space:nowrap;overflow:hidden;max-width:220px;text-overflow:ellipsis" [title]="filename()">📄 {{ filename() }}</span>
+            <span style="font-size:12px;color:#aaa;white-space:nowrap;overflow:hidden;max-width:220px;text-overflow:ellipsis" [title]="filename()">&#128196; {{ filename() }}</span>
         }
         <div class="pv-sep"></div>
         <label style="font-size:12px;color:#999">Direction</label>
@@ -1482,11 +1909,11 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     <!-- ── Display filter bar ───────────────────────────────────────── -->
     <div class="pv-filterbar">
         <label class="pv-filterbar-label">Display Filter:</label>
-        <input class="pv-filterbar-input" type="text" placeholder="Search packets… (src, dst, proto, info)"
+        <input class="pv-filterbar-input" type="text" placeholder="Search packets... (src, dst, proto, info)"
                [value]="displayFilter()"
                (input)="displayFilter.set($any($event).target.value)" />
         @if (displayFilter()) {
-            <button class="pv-filterbar-clear" (click)="displayFilter.set('')" title="Clear filter">✕</button>
+            <button class="pv-filterbar-clear" (click)="displayFilter.set('')" title="Clear filter">&#10005;</button>
             <span class="pv-filterbar-count">{{ filteredPackets().length }} / {{ packets().length }}</span>
         }
     </div>
@@ -1497,13 +1924,13 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
         <div class="pv-pane pv-pane-packets">
             @if (packets().length === 0) {
                 <div class="pv-empty">
-                    <div class="pv-empty-icon">📡</div>
+                    <div class="pv-empty-icon">&#128225;</div>
                     <div>No packets captured</div>
-                    <div style="font-size:11px">Click <b>Start Capture</b> to begin or <b>📂 Open</b> to load a .pcap file</div>
+                    <div style="font-size:11px">Click <b>Start Capture</b> to begin or <b>&#128194; Open</b> to load a .pcap file</div>
                 </div>
             } @else if (filteredPackets().length === 0) {
                 <div class="pv-empty">
-                    <div class="pv-empty-icon">🔍</div>
+                    <div class="pv-empty-icon">&#128269;</div>
                     <div>No packets match the display filter</div>
                 </div>
             } @else {
@@ -1548,7 +1975,7 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
                     @for (layer of selectedLayers(); track $index; let li = $index) {
                         <div class="pv-tree-layer" [class.pv-layer-selected]="selectedLayerIdx() === li"
                              (click)="selectLayer(li)">
-                            <span class="pv-tree-chevron">{{ expandedLayers().has(li) ? '▾' : '▸' }}</span>
+                            <span class="pv-tree-chevron">{{ expandedLayers().has(li) ? '&#9662;' : '&#9656;' }}</span>
                             <span class="pv-tree-dot" [style.background]="layer.color"></span>
                             <span>{{ layer.label }}</span>
                         </div>
@@ -1577,14 +2004,14 @@ function hexDump(raw: Uint8Array, layers: DissectedLayer[] = [], selectedLayerId
     <div class="pv-statusbar">
         @if (adapterStatus()) {
             <span [class]="adapterStatus()!.enabled ? 'pv-status-ok' : 'pv-status-err'">
-                {{ adapterStatus()!.enabled ? '● Connected' : '○ Disconnected' }}
+                {{ adapterStatus()!.enabled ? '&#9679; Connected' : '&#9675; Disconnected' }}
             </span>
             @if (adapterStatus()!.enabled) {
                 <span>MAC: {{ adapterStatus()!.ps2Mac }}</span>
                 <span>IP: {{ adapterStatus()!.ps2IP }}</span>
             }
         } @else {
-            <span>Adapter status unknown — click Start Capture to query</span>
+            <span>Adapter status unknown - click Start Capture to query</span>
         }
         <span style="margin-left:auto">
             @if (displayFilter() && filteredPackets().length !== packets().length) {
@@ -1741,7 +2168,7 @@ export class PacketViewerComponent {
     // ── UI event handlers ────────────────────────────────────────────────────
 
     onStartCapture(): void {
-        this.statusMessage.set('Starting capture…');
+        this.statusMessage.set('Starting capture...');
         this.onAction?.({ type: 'startCapture', direction: this.captureDirection(), maxQueue: 1000 });
     }
 

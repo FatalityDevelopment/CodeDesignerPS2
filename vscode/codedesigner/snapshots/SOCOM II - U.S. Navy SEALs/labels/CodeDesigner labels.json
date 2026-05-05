@@ -16,7 +16,7 @@
     {
       "address": "0x01FFFFFF",
       "name": "EE_RAM_END",
-      "comment": "EE RAM top (32 MB, physical)"
+      "comment": "EE Main RAM top (32 MB, physical)"
     },
     {
       "address": "0x70000000",
