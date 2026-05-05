@@ -561,7 +561,8 @@ export class AiConfigProvider {
 
     private async _sendHistoryList(webview: vscode.Webview): Promise<void> {
         try {
-            const messages = await this.socketClient.mcpConversationList?.() ?? [];
+            const list = (this.socketClient as any).mcpConversationList;
+            const messages = list ? await list.call(this.socketClient) : [];
             webview.postMessage({ type: 'historyListResult', messages });
         } catch (err: any) {
             webview.postMessage({ type: 'historyListResult', messages: [], error: err?.message ?? String(err) });

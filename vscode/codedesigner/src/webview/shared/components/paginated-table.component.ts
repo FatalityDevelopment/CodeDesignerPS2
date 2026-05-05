@@ -20,6 +20,100 @@ export interface ColumnDef {
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [NgTemplateOutlet],
+  styles: [`
+.lm-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid #3e3e42;
+  flex-shrink: 0;
+}
+.lm-filter {
+  flex: 1;
+  background: #3c3c3c;
+  color: #d4d4d4;
+  border: 1px solid #555;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.lm-clear-filter {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  line-height: 1;
+}
+.lm-clear-filter:hover { color: #ccc; }
+.lm-count { color: #777; font-size: 11px; white-space: nowrap; }
+.lm-muted  { color: #666; }
+.lm-pagination {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #3e3e42;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.lm-page-btn {
+  background: #2d2d30;
+  border: 1px solid #3e3e42;
+  color: #ccc;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1;
+}
+.lm-page-btn:hover:not(:disabled) { background: #3e3e42; color: #fff; }
+.lm-page-btn:disabled { opacity: 0.35; cursor: default; }
+.lm-page-info { color: #ccc; padding: 0 6px; white-space: nowrap; user-select: none; }
+.lm-page-size-select {
+  background: #2d2d30;
+  color: #ccc;
+  border: 1px solid #3e3e42;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+  margin-left: auto;
+}
+.lm-table-wrap { overflow-y: auto; flex: 1; min-height: 80px; }
+.lm-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.lm-table th {
+  position: sticky;
+  top: 0;
+  background: #252526;
+  color: #999;
+  font-weight: 500;
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid #3e3e42;
+}
+.lm-table td { padding: 4px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: middle; }
+.lm-table tr:hover td { background: #2a2d2e; }
+.lm-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.lm-sort-btn:hover { color: #ccc; }
+.lm-sort-btn.lm-sort-active { color: #d4d4d4; }
+.lm-sort-indicator { min-width: 10px; color: #569cd6; font-size: 10px; }
+`],
   template: `
 @if (showFilter()) {
   <div class="lm-filter-row">

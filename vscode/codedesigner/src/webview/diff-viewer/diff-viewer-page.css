@@ -123,24 +123,51 @@
 .dv-col-val-b  { font-size: 11px; }
 .dv-col-disasm { font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 
-/* Porter embedded: hide the backdrop overlay chrome */
+/* ── Mode selector ──────────────────────────────────────────────────────── */
+.dv-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 0 8px;
+  flex-shrink: 0;
+}
+.dv-mode-label {
+  font-size: 11px;
+  color: #888;
+  white-space: nowrap;
+}
+.dv-mode-btn {
+  background: #2d2d30;
+  border: 1px solid #3e3e42;
+  color: #aaa;
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dv-mode-btn:hover { background: #3e3e42; color: #ccc; }
+.dv-mode-btn.dv-mode-active {
+  background: #0e4a8a;
+  border-color: #007acc;
+  color: #fff;
+}
+.dv-live-badge {
+  font-size: 11px;
+  color: #73c991;
+  padding: 2px 8px;
+  background: #0a2a10;
+  border: 1px solid #0a4020;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.dv-live-status {
+  font-size: 11px;
+  color: #f48771;
+}
+.dv-live-status.dv-live-ok { color: #73c991; }
+
+/* ── Porter tab — full page, no padding ─────────────────────────────────── */
 .dv-porter-panel {
   padding: 0;
-}
-
-.dv-porter-embedded #porter-overlay {
-  position: static !important;
-  background: none !important;
-  display: flex !important;
-  flex-direction: column;
-  height: 100%;
-}
-
-.dv-porter-embedded #porter-box {
-  position: static !important;
-  max-width: 100% !important;
-  width: 100% !important;
-  height: 100%;
-  border-radius: 0 !important;
-  border: none !important;
 }

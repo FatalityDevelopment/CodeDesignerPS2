@@ -115,6 +115,11 @@ export function activate(context: vscode.ExtensionContext) {
 		disasmPanelProvider.notifyPauseState(paused);
 	};
 
+	// Wire memory-region navigation from the disasm-editor toolbar to the panel provider.
+	editorProvider.onOpenMemoryView = async (label: string) => {
+		await disasmPanelProvider.openOptionalMemoryView(label);
+	};
+
 	// Wire struct / label set changes from the DisasmEditorProvider to the STRUCTS panel.
 	// This keeps the tree view in sync with whatever label set is active in the editor.
 	// (Commented out — structs panel is disabled for now)

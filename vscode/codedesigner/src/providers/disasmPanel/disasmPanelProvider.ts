@@ -150,7 +150,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             reloadSnapshot: (p) => this.handleLoadSnapshot(p),
         };
         this._snapshotManagerProvider = new SnapshotManagerProvider(_extensionUri, delegate);
-        this._diffViewerProvider      = new DiffViewerProvider(_extensionUri, delegate);
+        this._diffViewerProvider      = new DiffViewerProvider(_extensionUri, delegate, socketClient);
     }
 
     private readonly _mcpMemoryEditorProvider: McpMemoryEditorProvider;
