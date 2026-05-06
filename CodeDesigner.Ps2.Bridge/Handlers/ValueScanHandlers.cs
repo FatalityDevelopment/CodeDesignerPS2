@@ -42,8 +42,8 @@ namespace CodeDesigner.Ps2.Bridge
         {
             try
             {
-                if (Scheduler == null && PineClient == null)
-                    return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+                if (Client == null)
+                    return CreateErrorResponse("No live memory backend — start with --pcsx2 or STARTEMULATOR");
 
                 if (string.IsNullOrWhiteSpace(scanValue))
                     return CreateErrorResponse("ScanValue is required");
@@ -137,41 +137,12 @@ namespace CodeDesigner.Ps2.Bridge
         // ── Bulk RAM reader (optimised for full-range scans) ─────────────────────
 
         /// <summary>
-        /// Reads a contiguous block of RAM for scanning.  For the built-in
-        /// emulator this copies directly from the RAM array (fast block-copy);
-        /// for PINE mode it delegates to the batched ReadBytes path.
+        /// Reads a contiguous block of RAM for scanning. Delegates to the
+        /// chunked debug-socket reader so all routes (PCSX2 PINE and built-in
+        /// emulator) go through the same code path.
         /// </summary>
         private byte[] ReadScanRam(uint startAddress, int length, bool useIop)
-        {
-            if (IsPineMode)
-            {
-                uint pineAddr = TranslatePineAddress(startAddress, useIop);
-                return PineClient!.ReadBytes(pineAddr, length);
-            }
-
-            // Built-in emulator: use fast Array.Copy for aligned EE RAM.
-            if (!useIop)
-            {
-                uint physAddr;
-                if (startAddress >= 0x80000000u && startAddress < 0xC0000000u)
-                    physAddr = startAddress & 0x1FFFFFFFu;
-                else if (startAddress >= 0x20000000u && startAddress < 0x22000000u)
-                    physAddr = startAddress - 0x20000000u;
-                else
-                    physAddr = startAddress;
-
-                byte[] ram = Scheduler!.EE.Bus.Ram;
-                if (physAddr + (uint)length <= (uint)ram.Length)
-                {
-                    var buf = new byte[length];
-                    Array.Copy(ram, (int)physAddr, buf, 0, length);
-                    return buf;
-                }
-            }
-
-            // Fallback: byte-by-byte read (handles IOP, mixed regions, BIOS, etc.)
-            return ReadLiveBytes(startAddress, length, useIop);
-        }
+            => ReadLiveBytesChunked(startAddress, length, useIop);
 
         // ── Helpers ──────────────────────────────────────────────────────────────
 

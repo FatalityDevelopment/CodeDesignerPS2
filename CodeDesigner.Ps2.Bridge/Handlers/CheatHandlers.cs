@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text.Json;
 using CodeDesigner.Ps2.Bridge.Database;
 using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.EmulatorCore;
 using Microsoft.EntityFrameworkCore;
 using CheatPorterLib = CodeDesigner.Ps2.CheatEngine.CheatPorter;
 
@@ -88,16 +87,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleApplyCheats(string? cheatText)
         {
-            if (Scheduler == null && PineClient == null)
+            if (Client == null)
                 return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (string.IsNullOrWhiteSpace(cheatText))
                 return CreateErrorResponse("No cheat data provided");
 
             try
             {
-                IByteEditor byteEditor = IsPineMode
-                    ? (IByteEditor)new PinePcsx2ByteEditor(PineClient!)
-                    : new PS2ByteEditor(Scheduler!);
+                var byteEditor = new DebugClientByteEditor(Client);
                 var engine = new CodeDesigner.Ps2.CheatEngine.CheatEngine(byteEditor);
                 var cheatList = new CheatList(cheatText);
                 engine.PatchMemory(cheatList);
@@ -237,7 +234,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleInjectCheatEngine(string? cheatText, uint? hookAddress, uint? engineBase, string? cdsSource)
         {
-            if (Scheduler == null && PineClient == null)
+            if (Client == null)
                 return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (string.IsNullOrWhiteSpace(cheatText) && string.IsNullOrWhiteSpace(cdsSource))
                 return CreateErrorResponse("No cheat data provided");
@@ -246,9 +243,7 @@ namespace CodeDesigner.Ps2.Bridge
 
             try
             {
-                IByteEditor byteEditor = IsPineMode
-                    ? (IByteEditor)new PinePcsx2ByteEditor(PineClient!)
-                    : new PS2ByteEditor(Scheduler!);
+                IByteEditor byteEditor = new DebugClientByteEditor(Client);
 
                 uint baseAddr = engineBase ?? 0x000C0000;
                 _cdsCheatEngine = new CdsCheatEngine(byteEditor, baseAddr);

@@ -20,7 +20,7 @@ namespace CodeDesigner.Ps2.Bridge
     /// <c>InternalPineSocket</c> as the handler migration progresses.
     /// </para>
     /// </summary>
-    public sealed class InternalEmulatorClient : IDisposable
+    public sealed class InternalEmulatorClient : IDebugClient
     {
         public const int DefaultPort = 28012;
 
@@ -129,10 +129,19 @@ namespace CodeDesigner.Ps2.Bridge
 
         public uint GetProgramCounter()
         {
-            byte[] rep = SendReceive(BuildSingleRequest(MsgGetProgramCounter), expectedReplySize: 9);
+            return GetProgramCounter(out _);
+        }
+
+        public uint GetProgramCounter(out bool isPaused)
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgGetProgramCounter), expectedReplySize: 10);
             if (rep[4] != IPC_OK) throw Fail("MsgGetProgramCounter");
+            isPaused = rep[9] != 0;
             return ReadU32LE(rep, 5);
         }
+
+        public DebugClientStatus GetStatusGeneric()
+            => (DebugClientStatus)(uint)GetStatus();
 
         public void Pause()
         {
@@ -159,10 +168,10 @@ namespace CodeDesigner.Ps2.Bridge
             if (rep[4] != IPC_OK) throw Fail("MsgSetBreakpoint");
         }
 
-        public void ClearBreakpoint(uint address)
+        public bool ClearBreakpoint(uint address)
         {
             byte[] rep = SendReceive(BuildReadRequest(MsgClearBreakpoint, address), expectedReplySize: 5);
-            if (rep[4] != IPC_OK) throw Fail("MsgClearBreakpoint");
+            return rep[4] == IPC_OK;
         }
 
         public void ClearAllBreakpoints()

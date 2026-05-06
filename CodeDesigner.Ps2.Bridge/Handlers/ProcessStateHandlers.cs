@@ -2,38 +2,30 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
-using CodeDesigner.Ps2.EmulatorCore;
 
 namespace CodeDesigner.Ps2.Bridge
 {
     partial class SocketServer
     {
+        // EE main RAM size — 32 MB. Used to bound the TCB scan.
+        private const uint EeMainRamSize = 32 * 1024 * 1024;
+
         /// <summary>
-        /// Reads the current running thread from CPU state and attempts to walk
-        /// the PS2 EE OS thread control block list in EE RAM.  Each TCB is 128
-        /// bytes; status byte at offset 0: 0x01=running, 0x02=ready, 0x04=wait,
-        /// 0x08=suspend, 0x10=dormant.  The thread table is located by reading
-        /// the kernel's internal data starting at physical 0x00000000.
+        /// Handle GETTHREADS — return current EE threads. PCSX2 PINE mode uses
+        /// the native <c>GetEEThreads()</c> opcode. Built-in mode walks the EE
+        /// kernel's TCB pool in RAM via the active <see cref="IDebugClient"/>.
         /// </summary>
         private string HandleGetThreads()
         {
-            if (IsPineMode)
+            if (PineClient != null)
             {
                 try
                 {
-                    var pineThreads = PineClient!.GetEEThreads();
-                    var pineThreadEntries = pineThreads.Select(t => new ThreadEntry
+                    var pineThreads = PineClient.GetEEThreads();
+                    var entries = pineThreads.Select(t => new ThreadEntry
                     {
                         Id       = (int)t.TID,
-                        Status   = t.Status switch
-                        {
-                            1 => "Running",
-                            2 => "Ready",
-                            4 => "Waiting",
-                            8 => "Suspended",
-                            16 => "Dormant",
-                            _ => $"0x{t.Status:X2}",
-                        },
+                        Status   = StatusName(t.Status),
                         Pc       = t.PC,
                         Sp       = t.StackTop,
                         Priority = (int)t.Priority,
@@ -43,7 +35,7 @@ namespace CodeDesigner.Ps2.Bridge
                     {
                         Success = true,
                         Command = "GETTHREADS",
-                        Threads = pineThreadEntries,
+                        Threads = entries,
                     });
                 }
                 catch (Exception ex)
@@ -51,81 +43,58 @@ namespace CodeDesigner.Ps2.Bridge
                     return CreateErrorResponse($"PINE GETTHREADS failed: {ex.Message}");
                 }
             }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
 
-            var cpu     = Scheduler.EE.Cpu;
-            var bus     = Scheduler.EE.Bus;
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
+
+            // ── Walk the PS2 EE OS TCB pool via the debug client ─────────────
+            // Same algorithm as the previous in-process version, but reads
+            // memory through Client.ReadBytes() so it works for both PCSX2 and
+            // the built-in InternalPineSocket.
+
+            const uint TcbSize     = 128u;
+            const uint MaxTcbScan  = 256u;
+            const uint TcbPoolBase = 0x00000100u;
+            const uint TcbPoolKseg0 = TcbPoolBase | 0x80000000u;
+
+            uint scanBytes = MaxTcbScan * TcbSize;
+            byte[] poolBytes;
+            try { poolBytes = Client.ReadBytes(TcbPoolKseg0, (int)scanBytes); }
+            catch { poolBytes = Array.Empty<byte>(); }
+
+            uint currentPc;
+            try { currentPc = NormalizePcToKseg0(Client.GetProgramCounter()); }
+            catch { currentPc = 0; }
+
+            // SP comes from $sp (GPR 29). Without GETREGS support yet we can
+            // only fall back to the running TCB's PC/Sp from the table itself.
+            uint currentSp = 0;
+
             var threads = new List<ThreadEntry>();
-
-            uint currentPc = NormalizePcToKseg0((uint)(cpu.PC & 0xFFFFFFFFUL));
-            uint currentSp = (uint)(cpu.RegsLo[29] & 0xFFFFFFFFUL);
-
-            // ── Walk the PS2 EE OS thread control block list ─────────────────
-            // The EE kernel places its thread pool at physical RAM.
-            // Structure per TCB (128 bytes):
-            //   +0x00  u32 status       (0x01=THS_RUN, 0x02=THS_READY,
-            //                            0x04=THS_WAIT, 0x08=THS_SUSPEND,
-            //                            0x10=THS_DORMANT)
-            //   +0x04  u32 entry        (original entry PC)
-            //   +0x08  u32 currentSp    (saved $sp when not running)
-            //   +0x0C  u32 stackTop     (stack base)
-            //   +0x10  u32 stackSize
-            //   +0x14  u32 gp
-            //   +0x18  u32 initPriority
-            //   +0x1C  u32 priority
-            //   +0x20  u32 waitType
-            //   +0x24  u32 waitId
-            //   +0x28  u32 wakeupCount
-            //   +0x2C  u32 attr
-            //   +0x30  u32 option
-            //   +0x70  u64 savedPc      (saved EPC for non-running threads)
-            //
-            // The kernel exports a thread count at a well-known location.
-            // We scan the first portion of EE RAM to find valid TCBs.
-
-            const uint TcbSize      = 128u;
-            const uint MaxTcbScan   = 256u;  // Cap scan to 256 threads
-            // Typical EE OS thread pool base (physical).
-            // The BIOS places the TCB array at approximately 0x00000100,
-            // immediately after the 256-byte kernel exception vector area.
-            const uint TcbPoolBase  = 0x00000100u;
-
             bool foundAny = false;
+
             for (uint i = 0; i < MaxTcbScan; i++)
             {
                 uint physBase = TcbPoolBase + i * TcbSize;
-                if (physBase + TcbSize > (uint)PS2MemoryBus.MainRamSize)
+                if (physBase + TcbSize > EeMainRamSize)
+                    break;
+                int slotOffset = (int)(physBase - TcbPoolBase);
+                if (slotOffset + 0x20 > poolBytes.Length)
                     break;
 
-                uint statusRaw = ReadEEWord(bus, physBase + 0x00);
-                uint entry     = ReadEEWord(bus, physBase + 0x04);
-                uint savedSp   = ReadEEWord(bus, physBase + 0x08);
-                uint initPri   = ReadEEWord(bus, physBase + 0x18);
-                uint curPri    = ReadEEWord(bus, physBase + 0x1C);
+                uint statusRaw = ReadU32(poolBytes, slotOffset + 0x00);
+                uint entry     = ReadU32(poolBytes, slotOffset + 0x04);
+                uint savedSp   = ReadU32(poolBytes, slotOffset + 0x08);
+                uint curPri    = ReadU32(poolBytes, slotOffset + 0x1C);
 
-                // Valid status values are a single power-of-two bit in [0x01..0x10].
-                // Zero means the slot is unallocated; anything else is garbage.
                 if (statusRaw == 0 || (statusRaw & ~0x1Fu) != 0 ||
                     (statusRaw & (statusRaw - 1)) != 0)
                     continue;
 
-                // Entry must be a plausible kernel/user code address or zero (idle)
                 if (entry != 0 &&
                     !(entry >= 0x00100000u || entry >= 0x80000000u))
                     continue;
 
-                string status = statusRaw switch
-                {
-                    0x01 => "Running",
-                    0x02 => "Ready",
-                    0x04 => "Waiting",
-                    0x08 => "Suspended",
-                    0x10 => "Dormant",
-                    _    => $"0x{statusRaw:X2}",
-                };
-
-                // For the running thread use the live CPU PC/SP.
                 bool isRunning = statusRaw == 0x01;
                 uint tcbPc = isRunning ? currentPc : NormalizePcToKseg0(entry);
                 uint tcbSp = isRunning ? currentSp : savedSp;
@@ -133,7 +102,7 @@ namespace CodeDesigner.Ps2.Bridge
                 threads.Add(new ThreadEntry
                 {
                     Id       = (int)i,
-                    Status   = status,
+                    Status   = StatusName(statusRaw),
                     Pc       = tcbPc,
                     Sp       = tcbSp,
                     Priority = (int)curPri,
@@ -142,14 +111,12 @@ namespace CodeDesigner.Ps2.Bridge
                 foundAny = true;
             }
 
-            // If the TCB scan found nothing (emulator not yet booted into OS, or
-            // BIOS layout different), synthesise one entry from the live CPU state.
             if (!foundAny)
             {
                 threads.Add(new ThreadEntry
                 {
                     Id       = 0,
-                    Status   = Scheduler.Paused ? "Suspended" : "Running",
+                    Status   = "Running",
                     Pc       = currentPc,
                     Sp       = currentSp,
                     Priority = 0,
@@ -157,34 +124,26 @@ namespace CodeDesigner.Ps2.Bridge
                 });
             }
 
-            var response = new CommandResponse
+            return JsonSerializer.Serialize(new CommandResponse
             {
                 Success = true,
                 Command = "GETTHREADS",
                 Threads = threads,
-            };
-            return JsonSerializer.Serialize(response);
+            });
         }
 
+        /// <summary>Handle GETIOPTHREADS — PCSX2 PINE only.</summary>
         private string HandleGetIopThreads()
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("GETIOPTHREADS requires PINE mode");
+            if (PineClient == null)
+                return CreateErrorResponse("GETIOPTHREADS requires PCSX2 PINE mode");
             try
             {
-                var pineThreads = PineClient!.GetIOPThreads();
-                var pineThreadEntries = pineThreads.Select(t => new ThreadEntry
+                var pineThreads = PineClient.GetIOPThreads();
+                var entries = pineThreads.Select(t => new ThreadEntry
                 {
                     Id       = (int)t.TID,
-                    Status   = t.Status switch
-                    {
-                        1  => "Running",
-                        2  => "Ready",
-                        4  => "Waiting",
-                        8  => "Suspended",
-                        16 => "Dormant",
-                        _  => $"0x{t.Status:X2}",
-                    },
+                    Status   = StatusName(t.Status),
                     Pc       = t.PC,
                     Sp       = t.StackTop,
                     Priority = (int)t.Priority,
@@ -194,69 +153,80 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     Success = true,
                     Command = "GETIOPTHREADS",
-                    Threads = pineThreadEntries,
+                    Threads = entries,
                 });
             }
-            catch (Exception ex)
-            {
-                return CreateErrorResponse($"PINE GETIOPTHREADS failed: {ex.Message}");
-            }
+            catch (Exception ex) { return CreateErrorResponse($"PINE GETIOPTHREADS failed: {ex.Message}"); }
         }
 
+        /// <summary>Handle GETMODULES — PCSX2 PINE only.</summary>
         private string HandleGetModules()
         {
-            if (IsPineMode)
+            if (PineClient == null)
+                return CreateErrorResponse("GETMODULES requires PCSX2 PINE mode");
+            try
             {
-                try
+                var modules = PineClient.GetModules();
+                var entries = modules.Select(m => new IopModuleInfo
                 {
-                    var modules = PineClient!.GetModules();
-                    var entries = modules.Select(m => new IopModuleInfo
-                    {
-                        Name      = m.Name,
-                        Version   = m.Version,
-                        TextAddr  = $"0x{m.TextAddr:X8}",
-                        Entry     = $"0x{m.Entry:X8}",
-                        GP        = $"0x{m.GP:X8}",
-                        TextSize  = m.TextSize,
-                        DataSize  = m.DataSize,
-                        BssSize   = m.BssSize,
-                    }).ToList();
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success = true,
-                        Command = "GETMODULES",
-                        Modules = entries,
-                    });
-                }
-                catch (Exception ex) { return CreateErrorResponse($"PINE GetModules failed: {ex.Message}"); }
+                    Name      = m.Name,
+                    Version   = m.Version,
+                    TextAddr  = $"0x{m.TextAddr:X8}",
+                    Entry     = $"0x{m.Entry:X8}",
+                    GP        = $"0x{m.GP:X8}",
+                    TextSize  = m.TextSize,
+                    DataSize  = m.DataSize,
+                    BssSize   = m.BssSize,
+                }).ToList();
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "GETMODULES",
+                    Modules = entries,
+                });
             }
-            return CreateErrorResponse("GETMODULES requires PINE mode");
+            catch (Exception ex) { return CreateErrorResponse($"PINE GetModules failed: {ex.Message}"); }
         }
 
+        /// <summary>Handle GETSTACK — PCSX2 PINE only.</summary>
         private string HandleGetStack()
         {
-            if (IsPineMode)
+            if (PineClient == null)
+                return CreateErrorResponse("GETSTACK requires PCSX2 PINE mode");
+            try
             {
-                try
+                var frames = PineClient.GetStack();
+                var entries = frames.Select(f => new PineStackFrameInfo
                 {
-                    var frames = PineClient!.GetStack();
-                    var entries = frames.Select(f => new PineStackFrameInfo
-                    {
-                        Entry     = $"0x{f.Entry:X8}",
-                        PC        = $"0x{f.PC:X8}",
-                        SP        = $"0x{f.SP:X8}",
-                        StackSize = f.StackSize,
-                    }).ToList();
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success     = true,
-                        Command     = "GETSTACK",
-                        StackFrames = entries,
-                    });
-                }
-                catch (Exception ex) { return CreateErrorResponse($"PINE GetStack failed: {ex.Message}"); }
+                    Entry     = $"0x{f.Entry:X8}",
+                    PC        = $"0x{f.PC:X8}",
+                    SP        = $"0x{f.SP:X8}",
+                    StackSize = f.StackSize,
+                }).ToList();
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success     = true,
+                    Command     = "GETSTACK",
+                    StackFrames = entries,
+                });
             }
-            return CreateErrorResponse("GETSTACK requires PINE mode");
+            catch (Exception ex) { return CreateErrorResponse($"PINE GetStack failed: {ex.Message}"); }
+        }
+
+        private static string StatusName(uint status) => status switch
+        {
+            0x01 => "Running",
+            0x02 => "Ready",
+            0x04 => "Waiting",
+            0x08 => "Suspended",
+            0x10 => "Dormant",
+            _    => $"0x{status:X2}",
+        };
+
+        private static uint ReadU32(byte[] buf, int offset)
+        {
+            if (offset + 4 > buf.Length) return 0;
+            return (uint)(buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24));
         }
     }
 }

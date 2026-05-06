@@ -213,11 +213,16 @@ namespace CodeDesigner.Ps2.EmulatorCore
                         case MsgStatus:
                             WriteU32LE(ms, _scheduler.Paused ? 1u : 0u); break;
                         case MsgGetProgramCounter:
-                            WriteU32LE(ms, (uint)(_scheduler.EE.Cpu.PC & 0xFFFFFFFFUL)); break;
+                            WriteU32LE(ms, (uint)(_scheduler.EE.Cpu.PC & 0xFFFFFFFFUL));
+                            ms.WriteByte(_scheduler.Paused ? (byte)1 : (byte)0);
+                            break;
                         case MsgPause:
                             _scheduler.Paused = true; break;
                         case MsgResume:
-                            _scheduler.Paused = false;
+                            // Skip the current PC if it sits on a breakpoint —
+                            // otherwise the BP would re-fire immediately. Match
+                            // PCSX2 PINE's behaviour by stepping past it once.
+                            ResumeWithBreakpointSkip();
                             break;
                         case MsgStep:
                             DoStep(ms); break;
@@ -340,6 +345,29 @@ namespace CodeDesigner.Ps2.EmulatorCore
             uint addr = ReadU32LE(p, pos); pos += 4;
             lock (_swapLock) _scheduler.Breakpoints.Remove(addr);
             return pos;
+        }
+
+        /// <summary>
+        /// Resume the scheduler, but if the current PC matches a registered
+        /// breakpoint, temporarily remove that breakpoint, single-step past it,
+        /// and re-add it. Without this dance the BP would re-fire immediately
+        /// on resume.
+        /// </summary>
+        private void ResumeWithBreakpointSkip()
+        {
+            lock (_swapLock)
+            {
+                uint currentPc = (uint)(_scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+                uint phys = (currentPc & 0x80000000u) != 0 ? currentPc & 0x1FFFFFFFu : currentPc;
+                bool hadBp = _scheduler.Breakpoints.Contains(phys);
+                if (hadBp)
+                {
+                    _scheduler.Breakpoints.Remove(phys);
+                    try { _scheduler.RunSlice(1); } catch { /* ignore */ }
+                    _scheduler.Breakpoints.Add(phys);
+                }
+                _scheduler.Paused = false;
+            }
         }
 
         private void DoStep(MemoryStream reply)

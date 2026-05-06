@@ -69,28 +69,17 @@ namespace CodeDesigner.Ps2.Bridge
 
         private string HandleRestart()
         {
-            if (IsPineMode)
+            if (PineClient != null)
             {
-                try
-                {
-                    PineClient!.Reset();
-                    return CreateSuccessResponse("Restarted");
-                }
-                catch (Exception ex)
-                {
-                    return CreateErrorResponse($"PINE reset failed: {ex.Message}");
-                }
+                try   { PineClient.Reset(); return CreateSuccessResponse("Restarted"); }
+                catch (Exception ex) { return CreateErrorResponse($"PINE reset failed: {ex.Message}"); }
             }
-
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-
-            _restartComplete.Reset();
-            PendingRestart = true;
-            Scheduler.Paused = false;
-            _restartComplete.Wait();
-
-            return CreateSuccessResponse("Restarted");
+            if (InternalClient != null)
+            {
+                try   { InternalClient.RequestRestart(); return CreateSuccessResponse("Restarted"); }
+                catch (Exception ex) { return CreateErrorResponse($"Internal reset failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("Emulator not running — no debug client attached");
         }
 
         /// <summary>
@@ -111,49 +100,24 @@ namespace CodeDesigner.Ps2.Bridge
                 outputPath = Path.Combine(Path.GetTempPath(), "codedesigner_snapshots", folder);
             }
 
-            if (IsPineMode)
-            {
-                try
-                {
-                    Directory.CreateDirectory(outputPath);
-                    var regions = new[]
-                    {
-                        (Label: "EE RAM",  File: "EEmem.bin",     Base: 0x00000000u,                 Size: (int)PS2MemoryBus.MainRamSize,    UseIop: false),
-                        (Label: "BIOS ROM",     File: "BIOSrom.bin",   Base: PS2MemoryBus.BiosRomPhysBase, Size: (int)PS2MemoryBus.BiosRomSize,    UseIop: false),
-                        (Label: "Scratchpad",   File: "Scratchpad.bin",Base: 0x70000000u,                 Size: (int)PS2MemoryBus.ScratchpadSize, UseIop: false),
-                        (Label: "IOP RAM",      File: "IOPmem.bin",    Base: EeIopMirrorBase,             Size: (int)IopMemoryBus.RamSize,        UseIop: true),
-                    };
-                    var written = new List<SnapshotRegion>();
-                    foreach (var (label, file, baseAddr, size, useIop) in regions)
-                    {
-                        uint pineAddr = TranslatePineAddress(baseAddr, useIop);
-                        byte[] bytes  = PineClient!.ReadBytes(pineAddr, size);
-                        File.WriteAllBytes(Path.Combine(outputPath, file), bytes);
-                        written.Add(new SnapshotRegion { Label = label, File = file, BaseAddress = baseAddr, Size = bytes.Length });
-                    }
-                    WriteSnapshotInfo(outputPath, written, isoName, title, description);
-                    return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "SNAPSHOT", Regions = written, Message = outputPath });
-                }
-                catch (Exception ex)
-                {
-                    return CreateErrorResponse("PINE Snapshot error: " + ex.Message);
-                }
-            }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running - no scheduler attached");
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
+
             try
             {
                 Directory.CreateDirectory(outputPath);
                 var regions = new[]
                 {
-                    (Label: "EE RAM",  File: "EEmem.bin",     Bytes: Scheduler.EE.Bus.Ram,        Base: 0x00000000u),
-                    (Label: "BIOS ROM",     File: "BIOSrom.bin",   Bytes: Scheduler.EE.Bus.Bios,       Base: PS2MemoryBus.BiosRomPhysBase),
-                    (Label: "Scratchpad",   File: "Scratchpad.bin",Bytes: Scheduler.EE.Bus.Scratchpad, Base: 0x70000000u),
-                    (Label: "IOP RAM",      File: "IOPmem.bin",    Bytes: Scheduler.IOP.Bus.Ram,       Base: EeIopMirrorBase),
+                    (Label: "EE RAM",     File: "EEmem.bin",     Base: 0x00000000u,             Size: (int)PS2MemoryBus.MainRamSize,    UseIop: false),
+                    (Label: "BIOS ROM",   File: "BIOSrom.bin",   Base: PS2MemoryBus.BiosRomPhysBase, Size: (int)PS2MemoryBus.BiosRomSize,    UseIop: false),
+                    (Label: "Scratchpad", File: "Scratchpad.bin",Base: 0x70000000u,             Size: (int)PS2MemoryBus.ScratchpadSize, UseIop: false),
+                    (Label: "IOP RAM",    File: "IOPmem.bin",    Base: EeIopMirrorBase,         Size: (int)IopMemoryBus.RamSize,        UseIop: true),
                 };
                 var written = new List<SnapshotRegion>();
-                foreach (var (label, file, bytes, baseAddr) in regions)
+                foreach (var (label, file, baseAddr, size, useIop) in regions)
                 {
+                    uint clientAddr = TranslateClientAddress(baseAddr, useIop);
+                    byte[] bytes  = Client.ReadBytes(clientAddr, size);
                     File.WriteAllBytes(Path.Combine(outputPath, file), bytes);
                     written.Add(new SnapshotRegion { Label = label, File = file, BaseAddress = baseAddr, Size = bytes.Length });
                 }
@@ -226,66 +190,36 @@ namespace CodeDesigner.Ps2.Bridge
                 return CreateErrorResponse("InputPath is required for LOADSNAPSHOT");
             if (!Directory.Exists(inputPath))
                 return CreateErrorResponse("Snapshot directory not found: " + inputPath);
-            if (IsPineMode)
-            {
-                try
-                {
-                    try { PineClient!.Pause(); } catch { /* ignore pause errors */ }
-                    var regions = new[]
-                    {
-                        (File: "EEmem.bin",     Label: "EE RAM",  MaxSize: (int)PS2MemoryBus.MainRamSize,    Base: 0x00000000u,                 UseIop: false),
-                        (File: "BIOSrom.bin",   Label: "BIOS ROM",     MaxSize: (int)PS2MemoryBus.BiosRomSize,    Base: PS2MemoryBus.BiosRomPhysBase, UseIop: false),
-                        (File: "Scratchpad.bin",Label: "Scratchpad",   MaxSize: (int)PS2MemoryBus.ScratchpadSize, Base: 0x70000000u,                 UseIop: false),
-                        (File: "IOPmem.bin",    Label: "IOP RAM",      MaxSize: (int)IopMemoryBus.RamSize,        Base: EeIopMirrorBase,             UseIop: true),
-                    };
-                    var loaded = new List<SnapshotRegion>();
-                    foreach (var (file, label, maxSize, baseAddr, useIop) in regions)
-                    {
-                        string filePath = Path.Combine(inputPath, file);
-                        if (!File.Exists(filePath)) continue;
-                        byte[] src = File.ReadAllBytes(filePath);
-                        int count  = Math.Min(src.Length, maxSize);
-                        if (count <= 0) continue;
-                        if (count != src.Length) Array.Resize(ref src, count);
-                        uint pineAddr = TranslatePineAddress(baseAddr, useIop);
-                        PineClient!.WriteBytes(pineAddr, src);
-                        loaded.Add(new SnapshotRegion { Label = label, File = filePath, BaseAddress = baseAddr, Size = count });
-                    }
-                    return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "LOADSNAPSHOT", Regions = loaded });
-                }
-                catch (Exception ex)
-                {
-                    return CreateErrorResponse("PINE LoadSnapshot error: " + ex.Message);
-                }
-            }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running - no scheduler attached");
-            bool wasPaused = Scheduler.Paused;
-            Scheduler.Paused = true;
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
+
             try
             {
+                try { Client.Pause(); } catch { /* ignore pause errors */ }
                 var regions = new[]
                 {
-                    (File: "EEmem.bin",     Label: "EE RAM",  Bytes: Scheduler.EE.Bus.Ram,        MaxSize: PS2MemoryBus.MainRamSize,        Base: 0x00000000u),
-                    (File: "BIOSrom.bin",   Label: "BIOS ROM",     Bytes: Scheduler.EE.Bus.Bios,       MaxSize: Scheduler.EE.Bus.Bios.Length,   Base: PS2MemoryBus.BiosRomPhysBase),
-                    (File: "Scratchpad.bin",Label: "Scratchpad",   Bytes: Scheduler.EE.Bus.Scratchpad, MaxSize: PS2MemoryBus.ScratchpadSize,     Base: 0x70000000u),
-                    (File: "IOPmem.bin",    Label: "IOP RAM",      Bytes: Scheduler.IOP.Bus.Ram,       MaxSize: Scheduler.IOP.Bus.Ram.Length,   Base: EeIopMirrorBase),
+                    (File: "EEmem.bin",      Label: "EE RAM",     MaxSize: (int)PS2MemoryBus.MainRamSize,    Base: 0x00000000u,                 UseIop: false),
+                    (File: "BIOSrom.bin",    Label: "BIOS ROM",   MaxSize: (int)PS2MemoryBus.BiosRomSize,    Base: PS2MemoryBus.BiosRomPhysBase, UseIop: false),
+                    (File: "Scratchpad.bin", Label: "Scratchpad", MaxSize: (int)PS2MemoryBus.ScratchpadSize, Base: 0x70000000u,                 UseIop: false),
+                    (File: "IOPmem.bin",     Label: "IOP RAM",    MaxSize: (int)IopMemoryBus.RamSize,        Base: EeIopMirrorBase,             UseIop: true),
                 };
                 var loaded = new List<SnapshotRegion>();
-                foreach (var (file, label, dest, maxSize, baseAddr) in regions)
+                foreach (var (file, label, maxSize, baseAddr, useIop) in regions)
                 {
                     string filePath = Path.Combine(inputPath, file);
                     if (!File.Exists(filePath)) continue;
                     byte[] src = File.ReadAllBytes(filePath);
-                    int count = Math.Min(src.Length, maxSize);
-                    Array.Copy(src, dest, count);
+                    int count  = Math.Min(src.Length, maxSize);
+                    if (count <= 0) continue;
+                    if (count != src.Length) Array.Resize(ref src, count);
+                    uint clientAddr = TranslateClientAddress(baseAddr, useIop);
+                    Client.WriteBytes(clientAddr, src);
                     loaded.Add(new SnapshotRegion { Label = label, File = filePath, BaseAddress = baseAddr, Size = count });
                 }
                 return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "LOADSNAPSHOT", Regions = loaded });
             }
             catch (Exception ex)
             {
-                if (!wasPaused) Scheduler.Paused = false;
                 return CreateErrorResponse("LoadSnapshot error: " + ex.Message);
             }
         }
@@ -300,57 +234,18 @@ namespace CodeDesigner.Ps2.Bridge
         /// a BIOS boot sequence.
         /// </para>
         /// </summary>
+        /// <summary>
+        /// Handle LOADELF — superseded by STARTFILEMODE, which spawns
+        /// CodeDesigner.Ps2.Emulator.exe with the ELF directly. Kept as a
+        /// stub that redirects callers so older clients see a clear message.
+        /// </summary>
         private string HandleLoadElf(string? filePath)
         {
-            if (string.IsNullOrWhiteSpace(filePath))
-                return CreateErrorResponse("InputPath is required for LOADELF");
-            if (!File.Exists(filePath))
-                return CreateErrorResponse("ELF file not found: " + filePath);
-            if (IsPineMode)
-                return CreateErrorResponse("LOADELF is only supported in internal emulator mode; use LOADBIN for PINE");
-
-            // Auto-create a lightweight scheduler when none exists so the user
-            // can load an ELF for analysis/debugging without booting a BIOS first.
-            if (Scheduler == null)
-                Scheduler = new DualCpuScheduler();
-
-            Scheduler.Paused = true;
-            try
-            {
-                byte[] elfData = File.ReadAllBytes(filePath);
-                uint entryPoint = ElfLoader.LoadIntoEmulator(elfData, Scheduler.EE);
-
-                // Collect loaded regions for the response (EE RAM only; BIOS and
-                // Scratchpad are not modified by ELF loading).
-                var loaded = new List<SnapshotRegion>
-                {
-                    new SnapshotRegion
-                    {
-                        Label       = "EE RAM",
-                        File        = filePath,
-                        BaseAddress = 0x00000000u,
-                        Size        = (int)PS2MemoryBus.MainRamSize,
-                    }
-                };
-
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success    = true,
-                    Command    = "LOADELF",
-                    PC         = entryPoint,
-                    Paused     = true,
-                    Regions    = loaded,
-                    Message    = $"ELF loaded; entry point 0x{entryPoint:X8}",
-                });
-            }
-            catch (ElfLoadException ex)
-            {
-                return CreateErrorResponse("ELF load error: " + ex.Message);
-            }
-            catch (Exception ex)
-            {
-                return CreateErrorResponse("LoadElf error: " + ex.Message);
-            }
+            return CreateErrorResponse(
+                "LOADELF has been superseded by STARTFILEMODE. " +
+                "Send the runtime command STARTFILEMODE with the ELF path as InputPath; " +
+                "the file will be loaded by CodeDesigner.Ps2.Emulator.exe and the bridge " +
+                "will connect via InternalEmulatorClient.");
         }
 
         private string HandleExtractP2s(string? filePath)

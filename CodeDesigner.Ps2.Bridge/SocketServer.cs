@@ -81,46 +81,49 @@ namespace CodeDesigner.Ps2.Bridge
         internal DbMcpOrchestrationRepository? McpOrchestrationRepo { get; }
 
         /// <summary>
-        /// When set, the READMEM command reads live memory from this scheduler.
+        /// LEGACY — still wired for the handlers that have not yet been
+        /// migrated onto <see cref="IDebugClient"/>. New code should never set
+        /// this; Bridge no longer hosts a scheduler in-process. Once every
+        /// handler routes through <see cref="Client"/> this property and the
+        /// EmulatorCore project reference can both be removed.
         /// </summary>
+        [Obsolete("Use Client/PineClient/InternalClient. The in-process scheduler is gone.")]
         public DualCpuScheduler? Scheduler { get; set; }
 
         /// <summary>
-        /// When set, memory and debugger commands are routed through the PCSX2 PINE
-        /// IPC socket instead of the internal emulator.  Requires PCSX2 to have PINE
-        /// enabled (Settings → Advanced → Enable PINE).
-        /// <para>
-        /// Basic commands (READMEM, WRITEMEM, APPLYCHEATS, ASSEMBLE, DISASSEMBLE, …)
-        /// work with the standard upstream PINE protocol.
-        /// </para>
-        /// <para>
-        /// Debugger commands (PAUSE, RESUME, STEP, SETBP, GETPC, GETREGS) require
-        /// the PINE protocol extension — see <c>PINE_EXTENSION_PROPOSAL.md</c> for
-        /// the C++ implementation to submit as a PCSX2 pull request.
-        /// </para>
+        /// PCSX2 PINE client. Set in <c>--pcsx2</c> mode or after STARTPCSX2.
+        /// Runs the PCSX2-specific PINE protocol (game metadata, OS thread
+        /// inspection, etc.) on top of the cross-runtime <see cref="IDebugClient"/>
+        /// surface.
         /// </summary>
         public PineClient? PineClient { get; set; }
 
         /// <summary>
-        /// Optional <see cref="InternalEmulatorClient"/> for talking to the
-        /// built-in emulator (CodeDesigner.Ps2.Emulator.exe) over its
-        /// <c>InternalPineSocket</c> on TCP 28012. Set when STARTEMULATOR /
-        /// STARTFILEMODE has spawned the child process — the peer of
-        /// <see cref="PineClient"/> for the non-PCSX2 mode.
-        /// <para>
-        /// Handlers will gradually migrate from direct <see cref="Scheduler"/>
-        /// access to routing through this client (mirroring how PineClient is
-        /// used today for PCSX2 mode).
-        /// </para>
+        /// Built-in emulator client. Set after STARTEMULATOR / STARTFILEMODE
+        /// spawns <c>CodeDesigner.Ps2.Emulator.exe</c>. Speaks PINE-shaped IPC
+        /// to the emulator's <c>InternalPineSocket</c> on TCP 28012 — the peer
+        /// of <see cref="PineClient"/> for the non-PCSX2 path.
         /// </summary>
         public InternalEmulatorClient? InternalClient { get; set; }
 
         /// <summary>
-        /// Returns <c>true</c> when the server should route memory operations
-        /// through PINE (a <see cref="PineClient"/> is attached and no internal
-        /// <see cref="Scheduler"/> is present).
+        /// Active <see cref="IDebugClient"/> for the current runtime mode —
+        /// either <see cref="PineClient"/> (PCSX2 PINE) or
+        /// <see cref="InternalClient"/> (built-in emulator). Returns <c>null</c>
+        /// when neither client is attached. Handlers always go through this.
         /// </summary>
-        private bool IsPineMode => PineClient != null && Scheduler == null;
+        public IDebugClient? Client => (IDebugClient?)PineClient ?? InternalClient;
+
+        /// <summary>Whether any debug client is currently attached.</summary>
+        public bool HasDebugClient => Client != null;
+
+        /// <summary>
+        /// LEGACY shorthand for handlers that still branch on PCSX2 mode. New
+        /// code should use <c>PineClient != null</c> directly or, better, route
+        /// through <see cref="Client"/>.
+        /// </summary>
+        [Obsolete("Branch on PineClient != null or use the Client property.")]
+        private bool IsPineMode => PineClient != null;
 
         // ── Navigation history ────────────────────────────────────────────────
         // A bounded circular log of recently visited EE addresses, populated
@@ -167,23 +170,10 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
-        /// <summary>
-        /// Set to <c>true</c> by <see cref="HandleRestart"/> to ask the emulator
-        /// run-loop (in Program.cs) to perform a full hardware reset: create a
-        /// fresh <see cref="DualCpuScheduler"/>, re-load the BIOS and disc, and
-        /// leave the emulator paused at the reset vector.  The run-loop clears this
-        /// flag once the new scheduler is installed.
-        /// </summary>
-        public volatile bool PendingRestart;
-
-        /// <summary>
-        /// Signalled by the emulator run-loop once the new scheduler is fully installed
-        /// after a restart.  <see cref="HandleRestart"/> waits on this gate so that it
-        /// does not return "Restarted" to the client until <see cref="Scheduler"/> is
-        /// the new instance — guaranteeing that subsequent SETBP and RESUME commands
-        /// operate on the correct scheduler.
-        /// </summary>
-        private readonly ManualResetEventSlim _restartComplete = new ManualResetEventSlim(false);
+        // Restart used to be coordinated through PendingRestart + _restartComplete
+        // back when the scheduler ran in-process. With the emulator now in its
+        // own process, RESET is a fire-and-forget call to the active client
+        // (PineClient.Reset() or InternalEmulatorClient.RequestRestart()).
 
         public event EventHandler<string>? MessageReceived;
         public event EventHandler<string>? ClientConnected;
@@ -195,12 +185,11 @@ namespace CodeDesigner.Ps2.Bridge
         public Func<CommandMessage, string>? RuntimeCommandHandler { get; set; }
 
         /// <summary>
-        /// Called by the emulator run-loop after a restart is fully complete (new
-        /// scheduler installed and paused at the reset vector).  Unblocks
-        /// <see cref="HandleRestart"/> so it can return the "Restarted" response to
-        /// the client only once SETBP/RESUME will target the correct scheduler.
+        /// No-op retained for binary compatibility with code that may still call
+        /// it. The old in-process restart coordination is gone — restarts are
+        /// now driven through the active <see cref="IDebugClient"/>.
         /// </summary>
-        public void SignalRestartComplete() => _restartComplete.Set();
+        public void SignalRestartComplete() { /* no-op */ }
 
         public SocketServer(int port = 8765)
             : this(port, CreateLocalDbContext(), ownsDb: true)

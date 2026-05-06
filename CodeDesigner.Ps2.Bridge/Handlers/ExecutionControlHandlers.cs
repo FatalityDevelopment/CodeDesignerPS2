@@ -1,263 +1,151 @@
 using System;
-using System.Collections.Generic;
 using System.Text.Json;
-using CodeDesigner.Ps2.Common;
-using CodeDesigner.Ps2.EmulatorCore;
 
 namespace CodeDesigner.Ps2.Bridge
 {
     partial class SocketServer
     {
+        /// <summary>
+        /// Handle PAUSE — pauses the EE via the active <see cref="IDebugClient"/>.
+        /// </summary>
         private string HandlePause()
         {
-            if (IsPineMode)
-            {
-                try   { PineClient!.Pause(); return CreateSuccessResponse("Paused"); }
-                catch (Exception ex) { return CreateErrorResponse($"PINE Pause error: {ex.Message}"); }
-            }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-            Scheduler.Paused = true;
-            return CreateSuccessResponse("Paused");
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
+            try   { Client.Pause(); return CreateSuccessResponse("Paused"); }
+            catch (Exception ex) { return CreateErrorResponse($"Pause error: {ex.Message}"); }
         }
 
         /// <summary>
-        /// Handle RESUME command — resumes emulator execution.
-        /// In PINE mode, resumes PCSX2 via the extended PINE protocol (MsgResume).
+        /// Handle RESUME — resumes EE execution. Clients (both PCSX2 PINE and
+        /// the built-in InternalPineSocket) handle the "skip current breakpoint"
+        /// behaviour server-side so the BP doesn't immediately re-fire.
         /// </summary>
         private string HandleResume()
         {
-            if (IsPineMode)
-            {
-                try   { PineClient!.Resume(); return CreateSuccessResponse("Resumed"); }
-                catch (Exception ex) { return CreateErrorResponse($"PINE Resume error: {ex.Message}"); }
-            }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-
-            // If the emulator is paused at a breakpoint, temporarily remove the
-            // breakpoint, step once, then restore it. This prevents the same
-            // breakpoint from immediately re-firing when execution resumes.
-            uint? breakpointToRestore = null;
-            if (Scheduler.LastBreakpointHit.HasValue)
-            {
-                breakpointToRestore = Scheduler.LastBreakpointHit.Value;
-                Scheduler.Breakpoints.Remove(breakpointToRestore.Value);
-                Scheduler.StepOne();
-                Scheduler.Breakpoints.Add(breakpointToRestore.Value);
-            }
-
-            Scheduler.Paused = false;
-            return CreateSuccessResponse("Resumed");
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
+            try   { Client.Resume(); return CreateSuccessResponse("Resumed"); }
+            catch (Exception ex) { return CreateErrorResponse($"Resume error: {ex.Message}"); }
         }
 
         /// <summary>
-        /// Handle STEP command — executes exactly one EE instruction while
-        /// keeping the emulator paused, then returns the new PC state.
-        /// In PINE mode, steps PCSX2 via the extended PINE protocol (MsgStep).
+        /// Handle STEP — executes one EE instruction and returns the new PC.
         /// </summary>
         private string HandleStep()
         {
-            if (IsPineMode)
-            {
-                try
-                {
-                    uint newPc = PineClient!.Step();
-                    var pine_resp = new CommandResponse
-                    {
-                        Success = true,
-                        Command = "STEP",
-                        Paused  = true,
-                        PC      = newPc,
-                    };
-                    return JsonSerializer.Serialize(pine_resp);
-                }
-                catch (Exception ex) { return CreateErrorResponse($"PINE Step error: {ex.Message}"); }
-            }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-            if (!Scheduler.Paused)
-                return CreateErrorResponse("Emulator must be paused to single-step");
-
-            // Capture the PC and instruction word *before* stepping so we can
-            // analyze the instruction with the actual pre-execution register state.
-            uint prePc = (uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
-            uint instrWord = 0;
-            string? analysisComment = null;
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
             try
             {
-                instrWord = Scheduler.EE.Bus.ReadWord(prePc);
-                // Snapshot register state before execution; Bus/COP0 are not needed for analysis.
-                var cpuSnap = Scheduler.EE.Cpu.CreateAnalysisSnapshot();
-                analysisComment = MipsAnalyzer.AnalyzeSingleInstruction(instrWord, prePc, cpuSnap,
-                    Scheduler.EE.Bus,
-                    addr => _labels.TryGetValue(addr, out var e) ? e.Label : null);
-            }
-            catch { /* If we can't read the instruction, skip analysis */ }
-
-            Scheduler.StepOne();
-
-            // Build the response with the PC update and the live analysis.
-            uint pc = NormalizePcToKseg0((uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL));
-            uint? bpHit = Scheduler.LastBreakpointHit.HasValue
-                ? NormalizePcToKseg0(Scheduler.LastBreakpointHit.Value)
-                : (uint?)null;
-            var response = new CommandResponse
-            {
-                Success = true,
-                Command = "STEP",
-                Paused  = Scheduler.Paused,
-                PC      = pc,
-                BreakpointHitAddress = bpHit,
-            };
-
-            // Attach analysis if we produced a non-empty comment.
-            if (!string.IsNullOrEmpty(analysisComment))
-            {
-                uint normalizedPrePc = NormalizePcToKseg0(prePc);
-                response.InstructionAnalysis = new Dictionary<string, string>
+                uint newPc = Client.Step();
+                return JsonSerializer.Serialize(new CommandResponse
                 {
-                    [normalizedPrePc.ToString("X8")] = analysisComment
-                };
+                    Success = true,
+                    Command = "STEP",
+                    Paused  = true,
+                    PC      = NormalizePcToKseg0(newPc),
+                });
             }
-
-            return JsonSerializer.Serialize(response);
+            catch (Exception ex) { return CreateErrorResponse($"Step error: {ex.Message}"); }
         }
 
         /// <summary>
-        /// Normalize a virtual EE address to its KSEG0 representation.
-        /// KSEG1 (0xA0000000–0xBFFFFFFF, uncached) is remapped to the equivalent
-        /// KSEG0 address (0x80000000–0x9FFFFFFF, cached) so that all PC values
-        /// presented to the client are consistent and use the 0x8xxxxxxx /
-        /// 0x9xxxxxxx form regardless of which segment the CPU is executing from.
+        /// Normalize a virtual EE address to its KSEG0 representation so PCs
+        /// returned to clients always use the 0x8xxxxxxx / 0x9xxxxxxx form.
         /// </summary>
         private static uint NormalizePcToKseg0(uint vaddr)
         {
-            // KSEG1: bits[31:29] == 101 (0xA0000000–0xBFFFFFFF)
             if ((vaddr & 0xE0000000u) == 0xA0000000u)
                 return (vaddr & 0x1FFFFFFFu) | 0x80000000u;
             return vaddr;
         }
 
         /// <summary>
-        /// Normalize a virtual EE address to its physical representation for
-        /// breakpoint storage.  KSEG0 (0x80000000–0x9FFFFFFF) and KSEG1
-        /// (0xA0000000–0xBFFFFFFF) both strip the top 3 bits to yield the
-        /// physical address.  Physical addresses (from the live disassembly panels
-        /// which display EE RAM at 0x00000000 and BIOS ROM at 0x1FC00000) and
-        /// KUSEG user-mode addresses pass through unchanged.
-        /// Using physical addresses as the canonical form ensures that a breakpoint
-        /// set from the disassembly panel fires correctly regardless of which
-        /// virtual alias the CPU uses at runtime.
+        /// Normalize an address to its KSEG0 alias for breakpoint storage.
+        /// PCSX2 PINE expects KSEG0/KSEG1 virtual addresses; InternalPineSocket
+        /// also accepts KSEG0 (and translates to physical internally on the
+        /// EmulatorCore side). Sending KSEG0 keeps both routes uniform.
+        /// </summary>
+        private static uint NormalizeBreakpointForClient(uint vaddr)
+        {
+            if (vaddr >= 0x80000000u && vaddr <= 0xBFFFFFFFu) return vaddr;
+            if (vaddr < 0x20000000u) return vaddr | 0x80000000u;
+            return vaddr;
+        }
+
+        /// <summary>
+        /// Normalize an EE address to its physical form (strip KSEG0/KSEG1
+        /// segment bits). Retained as a utility for handlers that store
+        /// breakpoints in physical form.
         /// </summary>
         private static uint NormalizeBreakpointToPhysical(uint vaddr)
         {
-            // KSEG0 (0x80000000–0x9FFFFFFF) or KSEG1 (0xA0000000–0xBFFFFFFF)
             if (vaddr >= 0x80000000u && vaddr <= 0xBFFFFFFFu)
                 return vaddr & 0x1FFFFFFFu;
             return vaddr;
         }
 
         /// <summary>
-        /// Handle SETBP command — adds a breakpoint at the given EE address.
-        /// In PINE mode, registers the breakpoint via the extended PINE protocol (MsgSetBreakpoint).
+        /// Handle SETBP — adds a breakpoint at the given EE address.
         /// </summary>
         private string HandleSetBreakpoint(uint? address)
         {
             if (address == null)
                 return CreateErrorResponse("BreakpointAddress is required for SETBP");
-            uint normalized = NormalizePcToKseg0(address.Value);
-            if (IsPineMode)
-            {
-                try   { PineClient!.SetBreakpoint(normalized); return CreateSuccessResponse($"Breakpoint set at 0x{normalized:X8}"); }
-                catch (Exception ex) { return CreateErrorResponse($"PINE SetBreakpoint error: {ex.Message}"); }
-            }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-            
-            normalized = NormalizeBreakpointToPhysical(address.Value);
-            Scheduler.Breakpoints.Add(normalized);
-            return CreateSuccessResponse($"Breakpoint set at 0x{normalized:X8}");
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
+            uint normalized = NormalizeBreakpointForClient(address.Value);
+            try   { Client.SetBreakpoint(normalized); return CreateSuccessResponse($"Breakpoint set at 0x{normalized:X8}"); }
+            catch (Exception ex) { return CreateErrorResponse($"SetBreakpoint error: {ex.Message}"); }
         }
 
         /// <summary>
-        /// Handle CLEARBP command — removes the breakpoint at the given EE address.
-        /// In PINE mode, clears the breakpoint via the extended PINE protocol (MsgClearBreakpoint).
+        /// Handle CLEARBP — removes the breakpoint at the given EE address.
         /// </summary>
         private string HandleClearBreakpoint(uint? address)
         {
             if (address == null)
                 return CreateErrorResponse("BreakpointAddress is required for CLEARBP");
-            uint normalized = NormalizePcToKseg0(address.Value);
-            if (IsPineMode)
-            {
-                try   { PineClient!.ClearBreakpoint(normalized); return CreateSuccessResponse($"Breakpoint cleared at 0x{normalized:X8}"); }
-                catch (Exception ex) { return CreateErrorResponse($"PINE ClearBreakpoint error: {ex.Message}"); }
-            }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-            normalized = NormalizeBreakpointToPhysical(address.Value);
-            Scheduler.Breakpoints.Remove(normalized);
-            return CreateSuccessResponse($"Breakpoint cleared at 0x{normalized:X8}");
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
+            uint normalized = NormalizeBreakpointForClient(address.Value);
+            try   { Client.ClearBreakpoint(normalized); return CreateSuccessResponse($"Breakpoint cleared at 0x{normalized:X8}"); }
+            catch (Exception ex) { return CreateErrorResponse($"ClearBreakpoint error: {ex.Message}"); }
         }
 
         /// <summary>
-        /// Handle CLEARBP_ALL command — removes all breakpoints.
-        /// In PINE mode, clears all breakpoints via the extended PINE protocol (MsgClearAllBreakpoints).
+        /// Handle CLEARBP_ALL — removes all breakpoints.
         /// </summary>
         private string HandleClearAllBreakpoints()
         {
-            if (IsPineMode)
-            {
-                try   { PineClient!.ClearAllBreakpoints(); return CreateSuccessResponse("All breakpoints cleared"); }
-                catch (Exception ex) { return CreateErrorResponse($"PINE ClearAllBreakpoints error: {ex.Message}"); }
-            }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-            Scheduler.Breakpoints.Clear();
-            return CreateSuccessResponse("All breakpoints cleared");
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
+            try   { Client.ClearAllBreakpoints(); return CreateSuccessResponse("All breakpoints cleared"); }
+            catch (Exception ex) { return CreateErrorResponse($"ClearAllBreakpoints error: {ex.Message}"); }
         }
 
         /// <summary>
-        /// Handle GETPC command — returns current EE PC and paused/breakpoint state.
-        /// In PINE mode, reads PC from PCSX2 via the extended PINE protocol (MsgGetProgramCounter).
-        /// The PC is normalized to KSEG0 (0x80000000–0x9FFFFFFF) so the client
-        /// always sees a consistent address regardless of whether the CPU executed
-        /// the instruction via the KSEG0 or KSEG1 virtual-address window.
+        /// Handle GETPC — returns current EE PC and paused state. The PC is
+        /// normalized to KSEG0 so the client sees a consistent address
+        /// regardless of which segment the CPU is executing from.
         /// </summary>
         private string HandleGetPC()
         {
-            if (IsPineMode)
+            if (Client == null)
+                return CreateErrorResponse("Emulator not running — no debug client attached");
+            try
             {
-                try
+                uint pc = Client.GetProgramCounter(out bool paused);
+                return JsonSerializer.Serialize(new CommandResponse
                 {
-                    uint pc = PineClient!.GetProgramCounter(out bool paused);
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success = true,
-                        Command = "GETPC",
-                        Paused  = paused,
-                        PC      = pc,
-                    });
-                }
-                catch (Exception ex) { return CreateErrorResponse($"PINE GetPC error: {ex.Message}"); }
+                    Success = true,
+                    Command = "GETPC",
+                    Paused  = paused,
+                    PC      = NormalizePcToKseg0(pc),
+                });
             }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-            uint normalizedPc = NormalizePcToKseg0((uint)(Scheduler.EE.Cpu.PC & 0xFFFFFFFFUL));
-            uint? bpHit = Scheduler.LastBreakpointHit.HasValue
-                ? NormalizePcToKseg0(Scheduler.LastBreakpointHit.Value)
-                : (uint?)null;
-            var response = new CommandResponse
-            {
-                Success = true,
-                Command = "GETPC",
-                Paused  = Scheduler.Paused,
-                PC      = normalizedPc,
-                BreakpointHitAddress = bpHit,
-            };
-
-            return JsonSerializer.Serialize(response);
+            catch (Exception ex) { return CreateErrorResponse($"GetPC error: {ex.Message}"); }
         }
     }
 }

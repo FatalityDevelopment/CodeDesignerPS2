@@ -5,12 +5,17 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeDesigner.Ps2.Common;
-using CodeDesigner.Ps2.EmulatorCore;
 
 namespace CodeDesigner.Ps2.Bridge
 {
     partial class SocketServer
     {
+        // PS2 EE memory layout constants — hardcoded here to avoid an
+        // EmulatorCore dependency. These match
+        // CodeDesigner.Ps2.EmulatorCore.PS2MemoryBus.{MainRamSize,ScratchpadSize}.
+        private const uint EeMainRamSizeBytes   = 32 * 1024 * 1024;
+        private const uint EeScratchpadSizeBytes = 16 * 1024;
+
         // Pointer-scanner helpers (shared by HandleScanPointers + HandleGetPointers)
         // ════════════════════════════════════════════════════════════════════════
 
@@ -46,8 +51,8 @@ namespace CodeDesigner.Ps2.Bridge
             // Reject the exception-vector / BIOS-stub area (physical < 0x00010000).
             if (phys < MinValidPointerPhysAddr) return false;
 
-            return phys < (uint)PS2MemoryBus.MainRamSize ||
-                   (val >= 0x70000000u && val < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize);
+            return phys < EeMainRamSizeBytes ||
+                   (val >= 0x70000000u && val < 0x70000000u + EeScratchpadSizeBytes);
         }
 
         /// <summary>
@@ -61,9 +66,9 @@ namespace CodeDesigner.Ps2.Bridge
         {
             if (vaddr == 0) return;
             uint phys = vaddr >= 0x80000000u && vaddr < 0xC0000000u ? vaddr & 0x1FFFFFFFu : vaddr;
-            if (phys < (uint)PS2MemoryBus.MainRamSize)
+            if (phys < EeMainRamSizeBytes)
                 set.Add(phys);
-            else if (vaddr >= 0x70000000u && vaddr < 0x70000000u + (uint)PS2MemoryBus.ScratchpadSize)
+            else if (vaddr >= 0x70000000u && vaddr < 0x70000000u + EeScratchpadSizeBytes)
                 set.Add(vaddr); // scratchpad: keep virtual address
         }
 
@@ -313,26 +318,25 @@ namespace CodeDesigner.Ps2.Bridge
                 var bytes = Convert.FromBase64String(base64Data);
 
                 // Build the set of all EE addresses referenced by MIPS code.
+                // We previously had a fast in-process path that scanned the
+                // full Scheduler.EE.Bus.Ram array directly. Without scheduler
+                // access, we look for evidence that the supplied buffer itself
+                // is mostly code (sufficient ADDIU $sp,$sp,-N prologues) and
+                // build the ref set from that — same fallback behaviour as
+                // the previous PINE-mode path.
                 HashSet<uint> codeRefs;
-                if (Scheduler != null)
+                int prologueCount = 0;
+                for (int k = 0; k + 3 < bytes.Length; k += 4)
                 {
-                    codeRefs = BuildCodeReferencedAddresses(Scheduler.EE.Bus.Ram, 0x00000000u);
+                    uint w = BitConverter.ToUInt32(bytes, k);
+                    // ADDIU $sp, $sp, -N  (opcode=9, rs=rt=29, imm<0)
+                    if ((w >> 26) == 0x09u && ((w >> 21) & 0x1Fu) == 29u &&
+                        ((w >> 16) & 0x1Fu) == 29u && (short)(w & 0xFFFF) < 0)
+                        prologueCount++;
                 }
-                else
-                {
-                    int prologueCount = 0;
-                    for (int k = 0; k + 3 < bytes.Length; k += 4)
-                    {
-                        uint w = BitConverter.ToUInt32(bytes, k);
-                        // ADDIU $sp, $sp, -N  (opcode=9, rs=rt=29, imm<0)
-                        if ((w >> 26) == 0x09u && ((w >> 21) & 0x1Fu) == 29u &&
-                            ((w >> 16) & 0x1Fu) == 29u && (short)(w & 0xFFFF) < 0)
-                            prologueCount++;
-                    }
-                    codeRefs = prologueCount >= 10
-                        ? BuildCodeReferencedAddresses(bytes, startAddress)
-                        : new HashSet<uint>();
-                }
+                codeRefs = prologueCount >= 10
+                    ? BuildCodeReferencedAddresses(bytes, startAddress)
+                    : new HashSet<uint>();
 
                 var results = new List<PointerEntry>();
 
@@ -468,7 +472,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanStrings(uint address, int length, string? region)
         {
-            if (Scheduler == null && PineClient == null)
+            if (Client == null)
                 return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANSTRINGS");
@@ -524,7 +528,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanFunctions(uint address, int length, string? region)
         {
-            if (Scheduler == null && PineClient == null)
+            if (Client == null)
                 return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANFUNCTIONS");
@@ -588,7 +592,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanPointers(uint address, int length, string? region)
         {
-            if (Scheduler == null && PineClient == null)
+            if (Client == null)
                 return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANPOINTERS");
@@ -603,9 +607,11 @@ namespace CodeDesigner.Ps2.Bridge
                 // region so that the filter works when scanning BIOS, scratchpad, IOP, etc.
                 // In PINE mode we don't have direct access to the full EE RAM array;
                 // skip the code-reference filter to avoid a huge IPC read.
-                HashSet<uint> codeRefs = Scheduler != null
-                    ? BuildCodeReferencedAddresses(Scheduler.EE.Bus.Ram, 0x00000000u)
-                    : new HashSet<uint>();
+                // Skip the code-reference filter when running through a debug
+                // socket — pulling all of EE RAM over the wire to build the
+                // ref set is too slow. The pre-existing PINE-mode path also
+                // skipped this filter, so behaviour matches.
+                HashSet<uint> codeRefs = new HashSet<uint>();
 
                 var results = new List<PointerEntry>();
 
@@ -648,7 +654,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanFloats(uint address, int length, string? region)
         {
-            if (Scheduler == null && PineClient == null)
+            if (Client == null)
                 return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANFLOATS");
@@ -704,7 +710,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanIntegers(uint address, int length, string? region)
         {
-            if (Scheduler == null && PineClient == null)
+            if (Client == null)
                 return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
                 return CreateErrorResponse("Length is required for SCANINTEGERS");
@@ -767,7 +773,7 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 else
                 {
-                    if (Scheduler == null && PineClient == null)
+                    if (Client == null)
                         return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
                     if (length <= 0)
                         return CreateErrorResponse("Length is required when searching live memory");
