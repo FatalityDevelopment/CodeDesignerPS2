@@ -208,14 +208,15 @@ namespace CodeDesigner.Ps2.Bridge
         {
             try
             {
-                if (IsPineMode && PineClient != null)
+                if (Client != null)
                 {
-                    uint pineAddr = address & 0x1FFFFFFF;
-                    byte[] bytes  = PineClient.ReadBytes(pineAddr, 4);
-                    return System.BitConverter.ToUInt32(bytes, 0);
+                    uint clientAddr = address >= 0x80000000u && address <= 0xBFFFFFFFu
+                        ? address
+                        : (address < 0x20000000u ? address | 0x80000000u : address);
+                    byte[] bytes = Client.ReadBytes(clientAddr, 4);
+                    if (bytes.Length == 4)
+                        return System.BitConverter.ToUInt32(bytes, 0);
                 }
-                if (Scheduler != null)
-                    return Scheduler.EE.Bus.ReadWord(address);
             }
             catch { /* swallow — no live backend or address out of range */ }
             return null;
@@ -244,8 +245,8 @@ namespace CodeDesigner.Ps2.Bridge
                 if (string.IsNullOrWhiteSpace(sourceCode))
                     return CreateErrorResponse("No source code provided");
 
-                if (Scheduler == null && PineClient == null)
-                    return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+                if (Client == null)
+                    return CreateErrorResponse("No live memory backend — start with --pcsx2 or STARTEMULATOR");
 
                 // ── Build external label dictionary ──────────────────────────────────
                 var extDict = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
@@ -346,9 +347,7 @@ namespace CodeDesigner.Ps2.Bridge
 
                 var cheatText = string.Join('\n', codeLines);
 
-                IByteEditor byteEditor = IsPineMode
-                    ? (IByteEditor)new PinePcsx2ByteEditor(PineClient!)
-                    : new PS2ByteEditor(Scheduler!);
+                IByteEditor byteEditor = new DebugClientByteEditor(Client!);
                 var engine    = new CheatEngine.CheatEngine(byteEditor);
                 var cheatList = new CheatList(cheatText);
                 engine.PatchMemory(cheatList);
@@ -514,25 +513,14 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Install a software breakpoint at the given EE virtual address.
-        /// Delegates to PineClient in PINE mode or to Scheduler.Breakpoints in internal mode.
+        /// Install a software breakpoint at the given EE virtual address through
+        /// the active <see cref="IDebugClient"/> (PineClient or InternalEmulatorClient).
         /// </summary>
         private void SetBreakpointInternal(uint address)
         {
-            if (IsPineMode)
-            {
-                if (PineClient == null)
-                    throw new InvalidOperationException("PINE client not connected");
-                PineClient.SetBreakpoint(NormalizePcToKseg0(address));
-            }
-            else if (Scheduler != null)
-            {
-                Scheduler.Breakpoints.Add(NormalizeBreakpointToPhysical(address));
-            }
-            else
-            {
+            if (Client == null)
                 throw new InvalidOperationException("No live backend for breakpoint installation");
-            }
+            Client.SetBreakpoint(NormalizeBreakpointForClient(address));
         }
 
         /// <summary>
@@ -762,14 +750,15 @@ namespace CodeDesigner.Ps2.Bridge
                     }
                 }
 
-                // Resolve a live memory bus so the analyzer can peek at strings and pointer chains.
-                // In PINE mode we wrap PinePcsx2ByteEditor; in built-in emulator mode we use
-                // the EE bus directly.  When neither backend is available (file-only mode) the
-                // bus remains null and the analyzer falls back to label/MMIO-name hints only.
+                // Resolve a live memory bus so the analyzer can peek at strings
+                // and pointer chains. Wraps the active debug client through the
+                // ByteEditor → IPs2MemoryBus adapter chain. When no backend is
+                // available (file-only mode) the bus remains null and the
+                // analyzer falls back to label/MMIO-name hints only.
                 CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? analysisBus =
-                    IsPineMode && PineClient != null
-                        ? new ByteEditorMemoryBusAdapter(new PinePcsx2ByteEditor(PineClient))
-                        : (CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus?)Scheduler?.EE.Bus;
+                    Client != null
+                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(Client))
+                        : null;
 
                 // Run analyzer using the instruction's built-in Analyze() method.
                 // State-specific hints (TAKEN / NOT TAKEN) are suppressed here because

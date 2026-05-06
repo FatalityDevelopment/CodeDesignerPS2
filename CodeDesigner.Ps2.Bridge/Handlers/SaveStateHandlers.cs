@@ -42,15 +42,17 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleReset()
         {
-            if (IsPineMode)
+            if (PineClient != null)
             {
-                try   { PineClient!.Reset(); return CreateSuccessResponse("Reset"); }
+                try   { PineClient.Reset(); return CreateSuccessResponse("Reset"); }
                 catch (Exception ex) { return CreateErrorResponse($"PINE Reset failed: {ex.Message}"); }
             }
-            if (Scheduler == null)
-                return CreateErrorResponse("Emulator not running — no scheduler attached");
-            Scheduler.Reset();
-            return CreateSuccessResponse("Reset");
+            if (InternalClient != null)
+            {
+                try   { InternalClient.RequestRestart(); return CreateSuccessResponse("Reset"); }
+                catch (Exception ex) { return CreateErrorResponse($"Internal reset failed: {ex.Message}"); }
+            }
+            return CreateErrorResponse("Emulator not running — no debug client attached");
         }
 
         private string HandleGetFps()

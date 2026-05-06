@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text.Json;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Compression;
-using CodeDesigner.Ps2.EmulatorCore;
 using CodeDesigner.Ps2.Recompiler;
 
 namespace CodeDesigner.Ps2.Bridge
@@ -298,8 +297,7 @@ namespace CodeDesigner.Ps2.Bridge
                     var pine = new PineClient(host, slot);
                     var status = pine.GetStatus();
 
-                    server.Scheduler = null;
-                    if (server.PineClient != null)
+                        if (server.PineClient != null)
                         server.PineClient.Dispose();
                     server.PineClient = pine;
 
@@ -368,7 +366,6 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 server.InternalClient?.Dispose();
                 server.InternalClient = null;
-                server.Scheduler = null;
 
                 try
                 {
@@ -498,7 +495,6 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 server.InternalClient?.Dispose();
                 server.InternalClient = null;
-                server.Scheduler = null;
 
                 int port = InternalEmulatorClient.DefaultPort;
                 var runArgs = new List<string> { "--file", filePath, "--port", port.ToString() };

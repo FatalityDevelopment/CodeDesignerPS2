@@ -8,7 +8,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using CodeDesigner.Ps2.Database;
-using CodeDesigner.Ps2.EmulatorCore;
 using Microsoft.EntityFrameworkCore;
 using CodeDesigner.Ps2.LabelManager;
 using CodeDesigner.Ps2.Bridge.Database;
@@ -81,16 +80,6 @@ namespace CodeDesigner.Ps2.Bridge
         internal DbMcpOrchestrationRepository? McpOrchestrationRepo { get; }
 
         /// <summary>
-        /// LEGACY — still wired for the handlers that have not yet been
-        /// migrated onto <see cref="IDebugClient"/>. New code should never set
-        /// this; Bridge no longer hosts a scheduler in-process. Once every
-        /// handler routes through <see cref="Client"/> this property and the
-        /// EmulatorCore project reference can both be removed.
-        /// </summary>
-        [Obsolete("Use Client/PineClient/InternalClient. The in-process scheduler is gone.")]
-        public DualCpuScheduler? Scheduler { get; set; }
-
-        /// <summary>
         /// PCSX2 PINE client. Set in <c>--pcsx2</c> mode or after STARTPCSX2.
         /// Runs the PCSX2-specific PINE protocol (game metadata, OS thread
         /// inspection, etc.) on top of the cross-runtime <see cref="IDebugClient"/>
@@ -118,11 +107,11 @@ namespace CodeDesigner.Ps2.Bridge
         public bool HasDebugClient => Client != null;
 
         /// <summary>
-        /// LEGACY shorthand for handlers that still branch on PCSX2 mode. New
-        /// code should use <c>PineClient != null</c> directly or, better, route
-        /// through <see cref="Client"/>.
+        /// Convenience for handlers that branch on PCSX2 mode specifically
+        /// (e.g. PINE-only opcodes like NETGETSTATUS, GETMODULES). Prefer
+        /// routing through <see cref="Client"/> when the operation is
+        /// supported on both runtimes.
         /// </summary>
-        [Obsolete("Branch on PineClient != null or use the Client property.")]
         private bool IsPineMode => PineClient != null;
 
         // ── Navigation history ────────────────────────────────────────────────
