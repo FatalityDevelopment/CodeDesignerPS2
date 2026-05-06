@@ -11,6 +11,8 @@ import { getVsCodeApi } from '../shared/vscode-api';
 import {
     PacketViewerComponent,
     PacketViewerAction,
+    MediusPortConfig,
+    setMediusPorts,
 } from './packet-viewer.component';
 import './packet-viewer-page.css';
 
@@ -49,6 +51,16 @@ export class PacketViewerPageComponent implements AfterViewInit, OnDestroy {
             const data = event.data as { type: string; [key: string]: unknown };
             this.zone.run(() => {
                 switch (data['type']) {
+                    case 'packetViewerConfig': {
+                        const ports = data['ports'] as MediusPortConfig[] | undefined;
+                        if (Array.isArray(ports)) {
+                            setMediusPorts(ports);
+                            // Re-render any already-rendered packets so the
+                            // server column / Info column pick up new names.
+                            pv.refreshDisplay();
+                        }
+                        break;
+                    }
                     case 'packetViewerStatus':
                         pv.setStatus(data['status'] as any);
                         break;

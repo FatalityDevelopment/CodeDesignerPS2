@@ -125,20 +125,29 @@ function readU16LE(buf: Uint8Array, off: number): number {
 
 // ── SCERT / Medius protocol tables ───────────────────────────────────────────
 
-/** Known Medius server ports and their names, matching config.json defaults.
+/**
+ * Known Medius server ports and their names. Populated from the Multiplayer
+ * service's config.json (sent by the extension host on init), with built-in
+ * defaults so the dissector still works if the config can't be loaded.
+ *
  *  MUIS = Medius Universe Information Server
  *  MAS  = Medius Authentication Server
  *  MLS  = Medius Lobby Server
  *  DME  = Distributed Multi-player Engine
  *  NAT  = NAT traversal server
  *  DNAS = Dynamic Network Authentication System
+ *
+ *  Note: declared with `let`, not `const` — `setMediusPorts` rebuilds these
+ *  in place when the host pushes a `packetViewerConfig` message, so the
+ *  parser/dissector functions all read live state.
  */
-const MEDIUS_PORTS = new Map<number, string>([
+let MEDIUS_PORTS = new Map<number, string>([
     [10071, 'MUIS'],
     [10077, 'MAS'],
     [10075, 'MLS'],
     [10070, 'DME'],
     [10069, 'NAT'],
+    [10060, 'DNAS'],
     [443, 'DNAS'],
     [53, 'DNS'],
 ]);
@@ -149,7 +158,23 @@ const MEDIUS_PORTS = new Map<number, string>([
  * prevent TLS handshake bytes from being misread as SCERT messages.
  * Port 53 (DNS) is excluded because it is UDP-only.
  */
-const SCERT_DECODE_PORTS = new Set([10071, 10077, 10075, 10070, 10069]);
+let SCERT_DECODE_PORTS = new Set([10071, 10078, 10075, 10070, 10069]);
+
+/** A port→name+scert flag entry pushed from the extension host. */
+export interface MediusPortConfig {
+    port: number;
+    name: string;
+    scert: boolean;
+}
+
+/**
+ * Replace the Medius port maps with values resolved from the user's config.
+ * Called from the page component when a `packetViewerConfig` message arrives.
+ */
+export function setMediusPorts(entries: MediusPortConfig[]): void {
+    MEDIUS_PORTS = new Map(entries.map(e => [e.port, e.name] as const));
+    SCERT_DECODE_PORTS = new Set(entries.filter(e => e.scert).map(e => e.port));
+}
 
 /** RT_MSG_TYPE wire values → display name. Source: ScertTypes.cs RT_MSG_TYPE enum. */
 const RT_MSG_TYPE_NAMES = new Map<number, string>([
@@ -2922,6 +2947,18 @@ export class PacketViewerComponent {
 
     showStatus(msg: string): void {
         this.statusMessage.set(msg);
+    }
+
+    /**
+     * Re-run dissection on every captured packet using the current Medius
+     * port map / SCERT decode set. Called when the host pushes a new config
+     * so already-rendered rows pick up updated server names.
+     */
+    refreshDisplay(): void {
+        // Clear the host-supplied parsedRows cache so _rebuildPacketList
+        // re-derives the Server / Proto / Info columns from the local dissector.
+        this._parsedRowCache = this._parsedRowCache.map(() => null);
+        this._rebuildPacketList();
     }
 
     setFilename(name: string): void {
