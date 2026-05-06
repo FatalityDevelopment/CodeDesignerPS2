@@ -1,8 +1,100 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { getOutputChannel } from '../../extension';
 import { SocketClient } from '../../socketClient';
 import { getNonce, getWebviewErrorHandlerScript } from '../../utils/nonce';
+
+// ── Multiplayer server config ─────────────────────────────────────────────────
+
+/** Server-name map entry sent to the webview for port-based dissection. */
+interface MediusPortEntry {
+    port: number;
+    /** Display name (e.g. "MAS", "MLS"). */
+    name: string;
+    /** True if this port carries SCERT binary protocol (i.e. should be dissected). */
+    scert: boolean;
+}
+
+/**
+ * Config file written by the Multiplayer service. Only the port fields that
+ * matter for packet dissection are read here — everything else is ignored.
+ */
+interface MultiplayerConfigPorts {
+    MuisPort?: number;
+    MasPort?: number;
+    MlsPort?: number;
+    DmePort?: number;
+    NatPort?: number;
+    DnasPort?: number;
+    DnasHttpsPort?: number;
+    DnsDnasPort?: number;
+}
+
+/**
+ * Default port map matching the config.json defaults. Used when the config
+ * file is missing, malformed, or doesn't override a particular port. Keep this
+ * in sync with CodeDesigner.Ps2.Multiplayer's config.
+ */
+const DEFAULT_MEDIUS_PORTS: MediusPortEntry[] = [
+    { port: 10071, name: 'MUIS', scert: true  },
+    { port: 10078, name: 'MAS',  scert: true  },
+    { port: 10075, name: 'MLS',  scert: true  },
+    { port: 10070, name: 'DME',  scert: true  },
+    { port: 10069, name: 'NAT',  scert: true  },
+    { port: 10060, name: 'DNAS', scert: false },
+    { port: 443,   name: 'DNAS', scert: false },
+    { port: 53,    name: 'DNS',  scert: false },
+];
+
+/**
+ * Locate and parse the Multiplayer service's config.json. Searches:
+ *  1. %LOCALAPPDATA%\CodeDesigner\Multiplayer\config.json (Windows)
+ *  2. ~/.local/share/CodeDesigner/Multiplayer/config.json (Linux/macOS)
+ *
+ * Returns the resolved port list. On missing/unreadable config, returns the
+ * built-in defaults — packet dissection still works, just against the stock
+ * port assignments.
+ */
+function loadMediusPorts(): MediusPortEntry[] {
+    const candidates: string[] = [];
+    const localAppData = process.env['LOCALAPPDATA'];
+    if (localAppData) {
+        candidates.push(path.join(localAppData, 'CodeDesigner', 'Multiplayer', 'config.json'));
+    }
+    candidates.push(path.join(os.homedir(), '.local', 'share', 'CodeDesigner', 'Multiplayer', 'config.json'));
+
+    let raw: MultiplayerConfigPorts | undefined;
+    for (const candidate of candidates) {
+        try {
+            if (!fs.existsSync(candidate)) { continue; }
+            const text = fs.readFileSync(candidate, 'utf8');
+            const parsed = JSON.parse(text) as { Online?: MultiplayerConfigPorts };
+            raw = parsed.Online;
+            if (raw) { break; }
+        } catch (err) {
+            // Note: don't fail open — log and try the next candidate.
+            const msg = err instanceof Error ? err.message : String(err);
+            getOutputChannel().warn(`[PacketViewer] Failed to read config at ${candidate}: ${msg}`);
+        }
+    }
+
+    if (!raw) { return DEFAULT_MEDIUS_PORTS; }
+
+    // Build entries, replacing default ports with config-overridden values where
+    // present. Names stay fixed — only ports vary by config.
+    return [
+        { port: raw.MuisPort      ?? 10071, name: 'MUIS', scert: true  },
+        { port: raw.MasPort       ?? 10078, name: 'MAS',  scert: true  },
+        { port: raw.MlsPort       ?? 10075, name: 'MLS',  scert: true  },
+        { port: raw.DmePort       ?? 10070, name: 'DME',  scert: true  },
+        { port: raw.NatPort       ?? 10069, name: 'NAT',  scert: true  },
+        { port: raw.DnasPort      ?? 10060, name: 'DNAS', scert: false },
+        { port: raw.DnasHttpsPort ?? 443,   name: 'DNAS', scert: false },
+        { port: raw.DnsDnasPort   ?? 53,    name: 'DNS',  scert: false },
+    ];
+}
 
 // ── pcap file format constants ────────────────────────────────────────────────
 
@@ -18,10 +110,18 @@ const PCAP_LINKTYPE_SLL   = 113;  // LINKTYPE_LINUX_SLL — encodes packet direc
 // SLL_PKT_OUTGOING (4) → packet sent from this host outbound  → direction 0 (TX)
 const SLL_PKT_HOST      = 0;
 const SLL_PKT_OUTGOING  = 4;
-// Known Medius server ports used to infer direction from Ethernet-type pcap frames.
-// If the source port is a Medius port the packet is server→PS2 (RX=1);
-// if the dest port is a Medius port the packet is PS2→server (TX=0).
-const PCAP_MEDIUS_PORTS = new Set([10071, 10078, 10075, 10073, 10070, 10069, 443, 10060]);
+/**
+ * Known Medius server ports used to infer direction from Ethernet-type pcap
+ * frames. If the source port is a Medius port the packet is server→PS2 (RX=1);
+ * if the dest port is a Medius port the packet is PS2→server (TX=0).
+ *
+ * Lazily populated from the loaded config so that user-overridden ports
+ * are recognised. Re-read by getPcapMediusPorts() each call so a config
+ * change during a session is picked up the next time a pcap is opened.
+ */
+function getPcapMediusPorts(): Set<number> {
+    return new Set(loadMediusPorts().map(p => p.port));
+}
 /** A minimal captured packet payload for pcap I/O. */
 interface PcapPacketEntry {
     direction:   number;
@@ -115,7 +215,7 @@ function sllToEth(sllFrame: Buffer): { direction: number; ethFrame: Buffer } {
  * Returns 1 (RX) when the source port is a known Medius server port, and
  * 0 (TX) otherwise (including non-TCP/UDP frames).
  */
-function detectDirectionFromEthFrame(frame: Buffer): number {
+function detectDirectionFromEthFrame(frame: Buffer, mediusPorts: Set<number>): number {
     if (frame.length < 34) { return 0; }
     const etherType = frame.readUInt16BE(12);
     if (etherType !== 0x0800) { return 0; }  // not IPv4
@@ -126,9 +226,9 @@ function detectDirectionFromEthFrame(frame: Buffer): number {
         const srcPort = frame.readUInt16BE(payOff);
         const dstPort = frame.readUInt16BE(payOff + 2);
         // Source port is a Medius port → server sent it → RX (direction=1)
-        if (PCAP_MEDIUS_PORTS.has(srcPort)) { return 1; }
+        if (mediusPorts.has(srcPort)) { return 1; }
         // Dest port is a Medius port → PS2 sent it → TX (direction=0)
-        if (PCAP_MEDIUS_PORTS.has(dstPort)) { return 0; }
+        if (mediusPorts.has(dstPort)) { return 0; }
     }
     return 0;
 }
@@ -142,7 +242,7 @@ function detectDirectionFromEthFrame(frame: Buffer): number {
  *  • LINKTYPE_LINUX_SLL (113)  — direction decoded from SLL packet_type;
  *                                frame reconstructed as synthetic Ethernet
  */
-function parsePcap(buf: Buffer): PcapPacketEntry[] {
+function parsePcap(buf: Buffer, mediusPorts: Set<number>): PcapPacketEntry[] {
     if (buf.length < 24) { return []; }
 
     const magic = buf.readUInt32LE(0);
@@ -188,7 +288,7 @@ function parsePcap(buf: Buffer): PcapPacketEntry[] {
         } else {
             // LINKTYPE_ETHERNET or any other type — detect direction from port numbers
             // when the frame contains a known Medius server port, otherwise mark TX.
-            const direction = detectDirectionFromEthFrame(frameBytes);
+            const direction = detectDirectionFromEthFrame(frameBytes, mediusPorts);
             packets.push({
                 direction,
                 timestampUs,
@@ -284,6 +384,9 @@ export class PacketViewerProvider {
         const type = msg['type'] as string | undefined;
 
         if (type === 'ready') {
+            // Send the resolved Medius port map first so the dissector can label
+            // packets correctly from the very first capture frame.
+            this._sendConfig(webview);
             // Try to send initial adapter status
             await this._sendStatus(webview);
             return;
@@ -369,7 +472,7 @@ export class PacketViewerProvider {
                     if (!uris || uris.length === 0) { break; }
                     const filePath = uris[0].fsPath;
                     const buf = fs.readFileSync(filePath);
-                    const rawPackets = parsePcap(buf);
+                    const rawPackets = parsePcap(buf, getPcapMediusPorts());
                     if (rawPackets.length === 0) {
                         webview.postMessage({
                             type: 'packetViewerError',
@@ -418,6 +521,11 @@ export class PacketViewerProvider {
     }
 
     // ── Data helpers ──────────────────────────────────────────────────────────
+
+    private _sendConfig(webview: vscode.Webview): void {
+        const ports = loadMediusPorts();
+        webview.postMessage({ type: 'packetViewerConfig', ports });
+    }
 
     private async _sendStatus(webview: vscode.Webview): Promise<void> {
         try {
