@@ -555,6 +555,43 @@ const MEDIUS_LOBBY_EXT_MSG = new Map<number, string>([
     [0x8B, 'SessionBegin1'],
 ]);
 
+/**
+ * MediusDmeMessageIds byte → display name. Source: ScertTypes.cs.
+ * Used when NetMessageClass = 0 (DME). These are server-to-server MGCL messages.
+ */
+const MEDIUS_DME_MSG = new Map<number, string>([
+    [0x00, 'ServerReport'],
+    [0x01, 'ServerAuthenticationRequest'],
+    [0x02, 'ServerAuthenticationResponse'],
+    [0x03, 'ServerSessionBeginRequest'],
+    [0x04, 'ServerSessionBeginResponse'],
+    [0x05, 'ServerSessionEndRequest'],
+    [0x06, 'ServerSessionEndResponse'],
+    [0x07, 'ServerCreateGameRequest'],
+    [0x08, 'ServerCreateGameResponse'],
+    [0x09, 'ServerJoinGameRequest'],
+    [0x0A, 'ServerJoinGameResponse'],
+    [0x0B, 'ServerEndGameRequest'],
+    [0x0C, 'ServerEndGameResponse'],
+    [0x0D, 'ServerWorldStatusRequest'],
+    [0x0E, 'ServerWorldStatusResponse'],
+    [0x10, 'ServerCreateGameOnMeResponse'],
+    [0x11, 'ServerEndGameOnMeRequest'],
+    [0x12, 'ServerEndGameOnMeResponse'],
+    [0x14, 'ServerMoveGameWorldOnMeRequest'],
+    [0x15, 'ServerMoveGameWorldOnMeResponse'],
+    [0x16, 'ServerSetAttributesRequest'],
+    [0x17, 'ServerSetAttributesResponse'],
+    [0x18, 'ServerCreateGameWithAttributesRequest'],
+    [0x19, 'ServerCreateGameWithAttributesResponse'],
+    [0x1A, 'ServerConnectGamesRequest'],
+    [0x1B, 'ServerConnectGamesResponse'],
+    [0x1C, 'ServerConnectNotification'],
+    [0x1E, 'ServerDisconnectPlayerRequest'],
+    [0x1F, 'ServerCreateGameOnMeRequest'],
+    [0x20, 'ServerWorldReportOnMe'],
+]);
+
 // ── SCERT parser ─────────────────────────────────────────────────────────────
 
 interface ScertMediusParsed {
@@ -604,6 +641,7 @@ function serverFromPorts(srcPort: number, dstPort: number): string {
 
 /** Resolve a Medius message type name given its class and type byte. */
 function mediusTypeName(msgClass: number, msgType: number): string {
+    if (msgClass === 0) { return MEDIUS_DME_MSG.get(msgType) ?? `0x${toHex(msgType)}`; }
     if (msgClass === 1) { return MEDIUS_LOBBY_MSG.get(msgType) ?? `0x${toHex(msgType)}`; }
     if (msgClass === 4) { return MEDIUS_LOBBY_EXT_MSG.get(msgType) ?? `0x${toHex(msgType)}`; }
     return `0x${toHex(msgType)}`;
@@ -667,37 +705,420 @@ const APPLICATION_ID = new Map<number, string>([
     [20032, 'Socom US Navy Seals'],
 ]);
 
-/** MediusCallbackStatus — negative values stored as unsigned 32-bit. */
+/**
+ * MediusCallbackStatus — full set of result codes from ScertTypes.cs.
+ * Negative values are stored as unsigned 32-bit (e.g. -1000 → 0xFFFFFC18).
+ */
 const MEDIUS_CALLBACK_STATUS = new Map<number, string>([
     [0, 'MediusSuccess'],
     [1, 'MediusNoResult'],
     [2, 'MediusRequestAccepted'],
     [3, 'MediusWorldCreatedSizeReduced'],
     [4, 'MediusPass'],
-    [0xFFFFFC59, 'MediusNotAMember'],          // -935
-    [0xFFFFFC58, 'MediusSubscriptionInvalid'],  // -936
-    [0xFFFFFC57, 'MediusSubscriptionAborted'],  // -937
-    [0xFFFFFC56, 'MediusTokenDoesNotExist'],    // -938
-    [0xFFFFFC55, 'MediusTokenAlreadyTaken'],    // -939
-    [0xFFFFFC54, 'MediusSessionFail'],          // -940
-    [0xFFFFFC53, 'MediusTransactionCanceled'],  // -941
-    [0xFFFFFC52, 'MediusGatewayError'],         // -942
-    [0xFFFFFD88, 'MediusInvalidSessionKey'],    // -632
-    [0xFFFFFD87, 'MediusDuplicateLogin'],       // -633
-    [0xFFFFFD86, 'MediusAccountNotFound'],      // -634
-    [0xFFFFFD85, 'MediusBadPassword'],          // -635
-    [0xFFFFFD84, 'MediusBannedAccount'],        // -636
-    [0xFFFFFD83, 'MediusDBError'],              // -637
-    [0xFFFFFD82, 'MediusAlreadyLoggedIn'],      // -638
-    [0xFFFFFD81, 'MediusNotLoggedIn'],          // -639
-    [0xFFFFFD80, 'MediusAlreadyInGame'],        // -640
-    [0xFFFFFD7F, 'MediusNotInGame'],            // -641
-    [0xFFFFFD7E, 'MediusNoPermission'],         // -642
-    [0xFFFFFD7D, 'MediusGameNotFound'],         // -643
-    [0xFFFFFD7C, 'MediusGameFull'],             // -644
-    [0xFFFFFD7B, 'MediusWorldFull'],            // -645
-    [0xFFFFFD7A, 'MediusWorldNotFound'],        // -646
-    [0xFFFFFD79, 'MediusPlayerNotFound'],       // -647
+    [0xFFFFFC18, 'MediusBeginSessionFailed'],                  // -1000
+    [0xFFFFFC19, 'MediusAccountAlreadyExists'],                // -999
+    [0xFFFFFC1A, 'MediusAccountNotFound'],                     // -998
+    [0xFFFFFC1B, 'MediusAccountLoggedIn'],                     // -997
+    [0xFFFFFC1C, 'MediusEndSessionFailed'],                    // -996
+    [0xFFFFFC1D, 'MediusLoginFailed'],                         // -995
+    [0xFFFFFC1E, 'MediusRegistrationFailed'],                  // -994
+    [0xFFFFFC1F, 'MediusIncorrectLoginStep'],                  // -993
+    [0xFFFFFC20, 'MediusAlreadyLeaderOfClan'],                 // -992
+    [0xFFFFFC21, 'MediusWMError'],                             // -991
+    [0xFFFFFC22, 'MediusNotClanLeader'],                       // -990
+    [0xFFFFFC23, 'MediusPlayerNotPrivileged'],                 // -989
+    [0xFFFFFC24, 'MediusDBError'],                             // -988
+    [0xFFFFFC25, 'MediusDMEError'],                            // -987
+    [0xFFFFFC26, 'MediusExceedsMaxWorlds'],                    // -986
+    [0xFFFFFC27, 'MediusRequestDenied'],                       // -985
+    [0xFFFFFC28, 'MediusSetGameListFilterFailed'],             // -984
+    [0xFFFFFC29, 'MediusClearGameListFilterFailed'],           // -983
+    [0xFFFFFC2A, 'MediusGetGameListFilterFailed'],             // -982
+    [0xFFFFFC2B, 'MediusNumFiltersAtMax'],                     // -981
+    [0xFFFFFC2C, 'MediusFilterNotFound'],                      // -980
+    [0xFFFFFC2D, 'MediusInvalidRequestMsg'],                   // -979
+    [0xFFFFFC2E, 'MediusInvalidPassword'],                     // -978
+    [0xFFFFFC2F, 'MediusGameNotFound'],                        // -977
+    [0xFFFFFC30, 'MediusChannelNotFound'],                     // -976
+    [0xFFFFFC31, 'MediusGameNameExists'],                      // -975
+    [0xFFFFFC32, 'MediusChannelNameExists'],                   // -974
+    [0xFFFFFC33, 'MediusGameNameNotFound'],                    // -973
+    [0xFFFFFC34, 'MediusPlayerBanned'],                        // -972
+    [0xFFFFFC35, 'MediusClanNotFound'],                        // -971
+    [0xFFFFFC36, 'MediusClanNameInUse'],                       // -970
+    [0xFFFFFC37, 'MediusSessionKeyInvalid'],                   // -969
+    [0xFFFFFC38, 'MediusTextStringInvalid'],                   // -968
+    [0xFFFFFC39, 'MediusFilterFailed'],                        // -967
+    [0xFFFFFC3A, 'MediusFail'],                                // -966
+    [0xFFFFFC3B, 'MediusFileInternalAccessError'],             // -965
+    [0xFFFFFC3C, 'MediusFileNoPermissions'],                   // -964
+    [0xFFFFFC3D, 'MediusFileDoesNotExist'],                    // -963
+    [0xFFFFFC3E, 'MediusFileAlreadyExists'],                   // -962
+    [0xFFFFFC3F, 'MediusFileInvalidFilename'],                 // -961
+    [0xFFFFFC40, 'MediusFileQuotaExceeded'],                   // -960
+    [0xFFFFFC41, 'MediusCacheFailure'],                        // -959
+    [0xFFFFFC42, 'MediusDataAlreadyExists'],                   // -958
+    [0xFFFFFC43, 'MediusDataDoesNotExist'],                    // -957
+    [0xFFFFFC44, 'MediusMaxExceeded'],                         // -956
+    [0xFFFFFC45, 'MediusKeyError'],                            // -955
+    [0xFFFFFC46, 'MediusIncompatibleAppID'],                   // -954
+    [0xFFFFFC47, 'MediusAccountBanned'],                       // -953
+    [0xFFFFFC48, 'MediusMachineBanned'],                       // -952
+    [0xFFFFFC49, 'MediusLeaderCannotLeaveClan'],               // -951
+    [0xFFFFFC4A, 'MediusFeatureNotEnabled'],                   // -950
+    [0xFFFFFC4B, 'MediusDNASSignatureLoggedIn'],               // -949
+    [0xFFFFFC4C, 'MediusWorldIsFull'],                         // -948
+    [0xFFFFFC4D, 'MediusNotClanMember'],                       // -947
+    [0xFFFFFC4E, 'MediusServerBusy'],                          // -946
+    [0xFFFFFC4F, 'MediusNumGameWorldsPerLobbyWorldExceeded'],  // -945
+    [0xFFFFFC50, 'MediusAccountNotUCCompliant'],               // -944
+    [0xFFFFFC51, 'MediusPasswordNotUCCompliant'],              // -943
+    [0xFFFFFC52, 'MediusGatewayError'],                        // -942
+    [0xFFFFFC53, 'MediusTransactionCanceled'],                 // -941
+    [0xFFFFFC54, 'MediusSessionFail'],                         // -940
+    [0xFFFFFC55, 'MediusTokenAlreadyTaken'],                   // -939
+    [0xFFFFFC56, 'MediusTokenDoesNotExist'],                   // -938
+    [0xFFFFFC57, 'MediusSubscriptionAborted'],                 // -937
+    [0xFFFFFC58, 'MediusSubscriptionInvalid'],                 // -936
+    [0xFFFFFC59, 'MediusNotAMember'],                          // -935
+]);
+
+// ── Additional secondary enums imported from ScertTypes.cs ───────────────────
+
+const MEDIUS_PLAYER_STATUS = new Map<number, string>([
+    [0, 'MediusPlayerDisconnected'],
+    [1, 'MediusPlayerInAuthWorld'],
+    [2, 'MediusPlayerInChatWorld'],
+    [3, 'MediusPlayerInGameWorld'],
+    [4, 'MediusPlayerInOtherUniverse'],
+]);
+
+const MEDIUS_PLAYER_SEARCH_TYPE = new Map<number, string>([
+    [0, 'PlayerAccountID'],
+    [1, 'PlayerAccountName'],
+]);
+
+const MEDIUS_CHARACTER_ENCODING = new Map<number, string>([
+    [0, 'NoUpdate'],
+    [1, 'ISO8859_1'],
+    [2, 'UTF8'],
+]);
+
+const MEDIUS_LANGUAGE_TYPE = new Map<number, string>([
+    [0,  'NoUpdate'],
+    [1,  'USEnglish'],
+    [2,  'UKEnglish'],
+    [3,  'Japanese'],
+    [4,  'Korean'],
+    [5,  'Italian'],
+    [6,  'Spanish'],
+    [7,  'German'],
+    [8,  'French'],
+    [9,  'Dutch'],
+    [10, 'Portuguese'],
+    [11, 'Chinese'],
+    [12, 'Taiwanese'],
+    [13, 'Finnish'],
+    [14, 'Norwegian'],
+]);
+
+/** Signed offsets in 100ths of an hour. Negative values stored as unsigned 32-bit. */
+const MEDIUS_TIME_ZONE = new Map<number, string>([
+    [0xFFFFFB50, 'IDLW'],   // -1200
+    [0xFFFFFC18, 'HST'],    // -1000
+    [0xFFFFFC7F, 'AKST'],   // -900
+    [0xFFFFFCE0, 'AKDT'],   // -800
+    [0xFFFFFCDF, 'PST'],    // -801
+    [0xFFFFFD41, 'PDT'],    // -700
+    [0xFFFFFD40, 'MST'],    // -701
+    [0xFFFFFDA8, 'MDT'],    // -600
+    [0xFFFFFDA7, 'CST'],    // -601
+    [0xFFFFFE0C, 'CDT'],    // -500
+    [0xFFFFFE0B, 'EST'],    // -501
+    [0xFFFFFE70, 'EDT'],    // -400
+    [0xFFFFFE6F, 'AST'],    // -401
+    [0xFFFFFEA2, 'NST'],    // -350
+    [0xFFFFFED4, 'ADT'],    // -300
+    [0xFFFFFF06, 'NDT'],    // -250
+    [0xFFFFFF9C, 'WAT'],    // -100
+    [0,    'GMT'],
+    [1,    'UTC'],
+    [2,    'WET'],
+    [100,  'BST'],
+    [101,  'IRISHST'],
+    [102,  'WEST'],
+    [103,  'CET'],
+    [200,  'CEST'],
+    [201,  'SWEDISHST'],
+    [202,  'FST'],
+    [203,  'CAT'],
+    [204,  'SAST'],
+    [205,  'EET'],
+    [206,  'ISRAELST'],
+    [300,  'EEST'],
+    [301,  'BT'],
+    [302,  'MSK'],
+    [350,  'IRANST'],
+    [400,  'MSD'],
+    [550,  'INDIANST'],
+    [750,  'JT'],
+    [800,  'HKT'],
+    [801,  'CCT'],
+    [802,  'AWST'],
+    [850,  'MT'],
+    [900,  'KST'],
+    [901,  'JST'],
+    [950,  'ACST'],
+    [1000, 'AEST'],
+    [1001, 'GST'],
+    [1050, 'ACDT'],
+    [1100, 'AEDT'],
+    [1101, 'SST'],
+    [1200, 'NZST'],
+    [1201, 'IDLE'],
+    [1300, 'NZDT'],
+]);
+
+const MEDIUS_CLAN_INVITATION_STATUS = new Map<number, string>([
+    [0, 'Undecided'],
+    [1, 'Accept'],
+    [2, 'Decline'],
+    [3, 'Revoked'],
+]);
+
+const MEDIUS_CLAN_CHALLENGE_STATUS = new Map<number, string>([
+    [0, 'Request'],
+    [1, 'Accepted'],
+    [2, 'Revoked'],
+    [3, 'Refused'],
+    [4, 'Confirmed'],
+]);
+
+const MEDIUS_CLAN_MESSAGE_STATUS = new Map<number, string>([
+    [0, 'Unread'],
+    [1, 'Modified'],
+    [2, 'Deleted'],
+    [3, 'Read'],
+]);
+
+const MEDIUS_GAME_HOST_TYPE = new Map<number, string>([
+    [0, 'ClientServer'],
+    [1, 'IntegratedServer'],
+    [2, 'PeerToPeer'],
+    [3, 'LANPlay'],
+    [4, 'ClientServerAuxUDP'],
+]);
+
+const MGCL_GAME_HOST_TYPE = new Map<number, string>([
+    [0, 'ClientServer'],
+    [1, 'IntegratedServer'],
+    [2, 'PeerToPeer'],
+    [3, 'LANPlay'],
+    [4, 'ClientServerAuxUDP'],
+]);
+
+const MEDIUS_APPLICATION_TYPE = new Map<number, string>([
+    [0, 'AppTypeGame'],
+    [1, 'LobbyChatChannel'],
+]);
+
+const MEDIUS_WORLD_STATUS = new Map<number, string>([
+    [0, 'WorldInactive'],
+    [1, 'WorldStaging'],
+    [2, 'WorldActive'],
+    [3, 'WorldClosed'],
+    [4, 'WorldPendingCreation'],
+    [5, 'WorldPendingConnectToGame'],
+]);
+
+const MEDIUS_JOIN_TYPE = new Map<number, string>([
+    [0, 'AsPlayer'],
+    [1, 'AsSpectator'],
+    [2, 'AsMassSpectator'],
+]);
+
+/** Flags — render as bitmask name when matched, or hex value otherwise. */
+const MEDIUS_WORLD_ATTRIBUTES = new Map<number, string>([
+    [0, 'NONE'],
+    [1, 'ALLOW_REBROADCAST'],
+    [2, 'ALLOW_SPECTATOR'],
+    [4, 'INTERNAL'],
+]);
+
+const MEDIUS_WORLD_SECURITY_LEVEL = new Map<number, string>([
+    [0, 'NONE'],
+    [1, 'PLAYER_PASSWORD'],
+    [2, 'MODERATOR'],
+]);
+
+const MEDIUS_GAME_LIST_FILTER_FIELD = new Map<number, string>([
+    [1,  'PLAYER_COUNT'],
+    [2,  'MIN_PLAYERS'],
+    [3,  'MAX_PLAYERS'],
+    [4,  'GAME_LEVEL'],
+    [5,  'PLAYER_SKILL_LEVEL'],
+    [6,  'RULES_SET'],
+    [7,  'GENERIC_FIELD_1'],
+    [8,  'GENERIC_FIELD_2'],
+    [9,  'GENERIC_FIELD_3'],
+    [10, 'LOBBY_WORLDID'],
+    [11, 'GENERIC_FIELD_4'],
+    [12, 'GENERIC_FIELD_5'],
+    [13, 'GENERIC_FIELD_6'],
+    [14, 'GENERIC_FIELD_7'],
+    [15, 'GENERIC_FIELD_8'],
+]);
+
+const MEDIUS_CHAT_MESSAGE_TYPE = new Map<number, string>([
+    [0, 'Broadcast'],
+    [1, 'Whisper'],
+    [2, 'BroadcastAcrossEntireUniverse'],
+    [3, 'ClanChat'],
+    [4, 'BuddyChat'],
+]);
+
+const MEDIUS_BINARY_MESSAGE_TYPE = new Map<number, string>([
+    [0, 'BroadcastBinaryMsg'],
+    [1, 'TargetBinaryMsg'],
+    [2, 'BroadcastBinaryMsgAcrossEntireUniverse'],
+]);
+
+const MEDIUS_TEXT_FILTER_TYPE = new Map<number, string>([
+    [0, 'PassFail'],
+    [1, 'Replace'],
+]);
+
+const NET_CLIENT_STATUS = new Map<number, string>([
+    [0, 'None'],
+    [1, 'NotConnected'],
+    [2, 'Connected'],
+    [3, 'Joining'],
+    [4, 'Joined'],
+    [5, 'JoinedSessionMaster'],
+]);
+
+const MEDIUS_LADDER_TYPE = new Map<number, string>([
+    [0, 'Player'],
+    [1, 'Clan'],
+]);
+
+const MEDIUS_DNAS_CATEGORY = new Map<number, string>([
+    [0, 'ConsoleID'],
+    [1, 'TitleID'],
+    [2, 'DiskID'],
+]);
+
+const MEDIUS_SORT_ORDER = new Map<number, string>([
+    [0, 'ASCENDING'],
+    [1, 'DESCENDING'],
+]);
+
+const MEDIUS_TOKEN_ACTION = new Map<number, string>([
+    [0, 'InvalidTokenAction'],
+    [1, 'AddToken'],
+    [2, 'UpdateToken'],
+    [3, 'RemoveToken'],
+]);
+
+const MEDIUS_TOKEN_CATEGORY = new Map<number, string>([
+    [0, 'InvalidToken'],
+    [1, 'GenericToken1'],
+    [2, 'GenericToken2'],
+    [3, 'GenericToken3'],
+    [4, 'AccountToken'],
+    [5, 'ClanToken'],
+]);
+
+const MEDIUS_FILE_XFER_STATUS = new Map<number, string>([
+    [0, 'Error'],
+    [1, 'Initial'],
+    [2, 'Mid'],
+    [3, 'End'],
+]);
+
+const MEDIUS_UNIVERSE_INFO_FILTER = new Map<number, string>([
+    [0x001, 'INFO_UNIVERSES'],
+    [0x002, 'INFO_NEWS'],
+    [0x004, 'INFO_ID'],
+    [0x008, 'INFO_NAME'],
+    [0x010, 'INFO_DNS'],
+    [0x020, 'INFO_DESCRIPTION'],
+    [0x040, 'INFO_STATUS'],
+    [0x080, 'INFO_BILLING'],
+    [0x100, 'INFO_EXTRAINFO'],
+    [0x200, 'INFO_SVO_URL'],
+]);
+
+const CHEAT_QUERY_TYPE = new Map<number, string>([
+    [0,  'RAW_MEMORY'],
+    [1,  'SHA1_HASH'],
+    [2,  'MD5_HASH'],
+    [3,  'ACTIVE_THREAD_CNT'],
+    [4,  'REMENANT_THREAD_CNT'],
+    [5,  'SALTY_SHA1_HASH'],
+    [6,  'SALTY_MD5_HASH'],
+    [8,  '4BYTE_POKE_ADDRESS'],
+    [9,  'NO_OP_FUNC_ADDRESS'],
+    [10, 'INTERRUPT_CNT'],
+    [11, 'THREAD_INFO'],
+    [12, 'STRING_EXISTS'],
+    [13, 'IOP_RAW_MEMORY'],
+    [14, 'IOP_SHA1_HASH'],
+    [15, 'IOP_MD5_HASH'],
+    [16, 'IOP_SALTY_SHA1_HASH'],
+    [17, 'IOP_SALTY_MD5_HASH'],
+    [18, 'IOP_MOD_RAW'],
+    [19, 'IOP_MOD_SHA1'],
+    [20, 'IOP_MOD_MD5'],
+    [21, 'IOP_MOD_SALTY_SHA1'],
+    [22, 'IOP_MOD_SALTY_MD5'],
+    [23, 'IOP_MOD_CNT'],
+    [24, 'IOP_MOD_TEXT_ADDR'],
+    [25, 'IOP_MOD_TEXT_SIZE'],
+    [26, 'IOP_THREAD_CNT'],
+    [27, 'IOP_MEM_FREE'],
+    [28, 'IOP_MEM_USED'],
+]);
+
+const MGCL_EVENT_TYPE = new Map<number, string>([
+    [0, 'CLIENT_CONNECT'],
+    [1, 'CLIENT_DISCONNECT'],
+]);
+
+/** MGCL_ERROR_CODE — negative values stored as unsigned 32-bit. */
+const MGCL_ERROR_CODE = new Map<number, string>([
+    [0,          'MGCL_SUCCESS'],
+    [0xFFFFFFFF, 'MGCL_CONNECTION_ERROR'],                              // -1
+    [0xFFFFFFFE, 'MGCL_CONNECTION_FAILED'],                             // -2
+    [0xFFFFFFFD, 'MGCL_DISCONNECT_FAILED'],                             // -3
+    [0xFFFFFFFC, 'MGCL_NOT_CONNECTED'],                                 // -4
+    [0xFFFFFFFB, 'MGCL_SEND_FAILED'],                                   // -5
+    [0xFFFFFFFA, 'MGCL_INITIALIZATION_FAILED'],                         // -6
+    [0xFFFFFFF9, 'MGCL_SHUTDOWN_ERROR'],                                // -7
+    [0xFFFFFFF8, 'MGCL_NETWORK_ERROR'],                                 // -8
+    [0xFFFFFFF7, 'MGCL_AUTHENTICATION_FAILED'],                         // -9
+    [0xFFFFFFF6, 'MGCL_SESSIONBEGIN_FAILED'],                           // -10
+    [0xFFFFFFF5, 'MGCL_SESSIONEND_FAILED'],                             // -11
+    [0xFFFFFFF4, 'MGCL_UNSUCCESSFUL'],                                  // -12
+    [0xFFFFFFF3, 'MGCL_INVALID_ARG'],                                   // -13
+    [0xFFFFFFF2, 'MGCL_NATRESOLVE_FAILED'],                             // -14
+    [0xFFFFFFF1, 'MGCL_GAME_NAME_EXISTS'],                              // -15
+    [0xFFFFFFF0, 'MGCL_WORLDID_INUSE'],                                 // -16
+    [0xFFFFFFEF, 'MGCL_DME_ERROR'],                                     // -17
+    [0xFFFFFFEE, 'MGCL_CALL_MGCL_CLOSE_BEFORE_REINITIALIZING'],         // -18
+    [0xFFFFFFED, 'MGCL_NUM_GAME_WORLDS_PER_LOBBY_WORLD_EXCEEDED'],      // -19
+]);
+
+const MGCL_TRUST_LEVEL = new Map<number, string>([
+    [0, 'TRUSTED'],
+    [1, 'NOT_TRUSTED'],
+]);
+
+const RT_RECV_FLAG = new Map<number, string>([
+    [1, 'RECV_SINGLE'],
+    [2, 'RECV_LIST'],
+    [4, 'RECV_BROADCAST'],
+    [8, 'RECV_NOTIFICATION'],
 ]);
 
 // ── Medius struct type system ─────────────────────────────────────────────────
@@ -810,7 +1231,7 @@ const MEDIUS_STRUCTS = new Map<number, MediusStructDef>([
     [0x1901, [
         { name: 'Message Id',      type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
         { name: 'Session Key',     type: 'bytes',  length: MEDIUS_C.SESSIONKEY_MAXLEN },
-        { name: 'Language Type',   type: 'uint',   length: 4 },
+        { name: 'Language Type',   type: 'uint',   length: 4, enum: MEDIUS_LANGUAGE_TYPE },
     ]],
 
     // -- AnonymousLoginResponse (class=Lobby, type=0x1A) -----------------------
@@ -881,9 +1302,9 @@ const MEDIUS_STRUCTS = new Map<number, MediusStructDef>([
     [0x3B01, [
         { name: 'Message Id',   type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
         { name: 'Session Key',  type: 'bytes',  length: MEDIUS_C.SESSIONKEY_MAXLEN },
-        { name: 'Target Type',  type: 'uint',   length: 4 },
+        { name: 'Target Type',  type: 'uint',   length: 4, enum: MEDIUS_CHAT_MESSAGE_TYPE },
         { name: 'Target Id',    type: 'uint',   length: 4 },
-        { name: 'Chat Type',    type: 'uint',   length: 4 },
+        { name: 'Chat Type',    type: 'uint',   length: 4, enum: MEDIUS_CHAT_MESSAGE_TYPE },
         { name: 'Message',      type: 'string', length: 512 },
     ]],
 
@@ -942,7 +1363,7 @@ const MEDIUS_STRUCTS = new Map<number, MediusStructDef>([
     [0xC801, [
         { name: 'Message Id',  type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
         { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
-        { name: 'Info Filter', type: 'uint',  length: 4 },
+        { name: 'Info Filter', type: 'uint',  length: 4, enum: MEDIUS_UNIVERSE_INFO_FILTER },
     ]],
 
     // -- MachineSignaturePost (class=Lobby, type=0xCB) ------------------------
@@ -956,7 +1377,7 @@ const MEDIUS_STRUCTS = new Map<number, MediusStructDef>([
     [0x0A04, [
         { name: 'Message Id',    type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
         { name: 'Session Key',   type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
-        { name: 'DNAS Category', type: 'uint',  length: 4 },
+        { name: 'DNAS Category', type: 'uint',  length: 4, enum: MEDIUS_DNAS_CATEGORY },
         { name: 'DNAS Sig',      type: 'bytes', length: 32 },
     ]],
 
@@ -978,6 +1399,284 @@ const MEDIUS_STRUCTS = new Map<number, MediusStructDef>([
         { name: 'World Id',        type: 'uint',  length: 4 },
         { name: 'Access Key',      type: 'bytes', length: MEDIUS_C.ACCESSKEY_MAXLEN },
         { name: 'Session Key',     type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+    ]],
+
+    // ── DME class (0) — server-to-server MGCL messages ────────────────────────
+
+    // -- DME: ServerSessionBeginRequest (class=DME, type=0x03) ---------------
+    [0x0300, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'App Id',          type: 'uint',  length: 4, enum: APPLICATION_ID },
+        { name: 'Server Key',      type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN, optional: true },
+    ]],
+
+    // -- DME: ServerSessionBeginResponse (class=DME, type=0x04) --------------
+    [0x0400, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Confirmation',    type: 'uint',  length: 4, enum: MGCL_ERROR_CODE },
+    ]],
+
+    // -- DME: ServerCreateGameRequest (class=DME, type=0x07) -----------------
+    [0x0700, [
+        { name: 'Message Id',      type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Game World Id',   type: 'uint',   length: 4 },
+        { name: 'World Status',    type: 'uint',   length: 4, enum: MEDIUS_WORLD_STATUS },
+        { name: 'Max Clients',     type: 'uint',   length: 4 },
+    ]],
+
+    // -- DME: ServerCreateGameResponse (class=DME, type=0x08) ----------------
+    [0x0800, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Confirmation',    type: 'uint',  length: 4, enum: MGCL_ERROR_CODE },
+        { name: 'Game World Id',   type: 'uint',  length: 4 },
+        { name: 'World Status',    type: 'uint',  length: 4, enum: MEDIUS_WORLD_STATUS },
+    ]],
+
+    // -- DME: ServerEndGameRequest (class=DME, type=0x0B) --------------------
+    [0x0B00, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Game World Id',   type: 'uint',  length: 4 },
+    ]],
+
+    // -- DME: ServerEndGameResponse (class=DME, type=0x0C) -------------------
+    [0x0C00, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Confirmation',    type: 'uint',  length: 4, enum: MGCL_ERROR_CODE },
+    ]],
+
+    // -- DME: ServerWorldStatusRequest (class=DME, type=0x0D) ----------------
+    [0x0D00, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Game World Id',   type: 'uint',  length: 4 },
+        { name: 'World Status',    type: 'uint',  length: 4, enum: MEDIUS_WORLD_STATUS },
+    ]],
+
+    // -- DME: ServerConnectNotification (class=DME, type=0x1C) ---------------
+    [0x1C00, [
+        { name: 'Message Id',         type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',            type: 'bytes', length: 3 },
+        { name: 'Game World Id',      type: 'uint',  length: 4 },
+        { name: 'Player Id',          type: 'uint',  length: 4 },
+        { name: 'Account Id',         type: 'uint',  length: 4 },
+        { name: 'Connect Event Type', type: 'uint',  length: 4, enum: MGCL_EVENT_TYPE },
+    ]],
+
+    // ── Lobby class (1) — additional structs ──────────────────────────────────
+
+    // -- CreateGameRequest (class=Lobby, type=0x1D) --------------------------
+    [0x1D01, [
+        { name: 'Message Id',      type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',     type: 'bytes',  length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Application Id',  type: 'uint',   length: 4, enum: APPLICATION_ID },
+        { name: 'Min Players',     type: 'uint',   length: 4 },
+        { name: 'Max Players',     type: 'uint',   length: 4 },
+        { name: 'Game Level',      type: 'uint',   length: 4 },
+        { name: 'Player Skill Lvl',type: 'uint',   length: 4 },
+        { name: 'Rules Set',       type: 'uint',   length: 4 },
+        { name: 'Generic Field 1', type: 'uint',   length: 4 },
+        { name: 'Generic Field 2', type: 'uint',   length: 4 },
+        { name: 'Generic Field 3', type: 'uint',   length: 4 },
+        { name: 'Game Host Type',  type: 'uint',   length: 4, enum: MEDIUS_GAME_HOST_TYPE },
+        { name: 'World Status',    type: 'uint',   length: 4, enum: MEDIUS_WORLD_STATUS, optional: true },
+    ]],
+
+    // -- CreateGameResponse (class=Lobby, type=0x1E) -------------------------
+    [0x1E01, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Status Code',     type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Media World Id',  type: 'uint',  length: 4 },
+    ]],
+
+    // -- CreateChannelRequest (class=Lobby, type=0x21) -----------------------
+    [0x2101, [
+        { name: 'Message Id',      type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',     type: 'bytes',  length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Lobby Channel Name', type: 'string', length: MEDIUS_C.ACCOUNTNAME_MAXLEN },
+        { name: 'Min Players',     type: 'uint',   length: 4, optional: true },
+        { name: 'Max Players',     type: 'uint',   length: 4, optional: true },
+        { name: 'Genfield Lvl',    type: 'uint',   length: 4, optional: true },
+    ]],
+
+    // -- CreateChannelResponse (class=Lobby, type=0x22) ----------------------
+    [0x2201, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Status Code',     type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Media World Id',  type: 'uint',  length: 4 },
+    ]],
+
+    // -- JoinGameRequest (class=Lobby, type=0x23) ----------------------------
+    [0x2301, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',     type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 2 },
+        { name: 'Media World Id',  type: 'uint',  length: 4 },
+        { name: 'Game Password',   type: 'string',length: MEDIUS_C.PASSWORD_MAXLEN, optional: true },
+        { name: 'Join Type',       type: 'uint',  length: 4, enum: MEDIUS_JOIN_TYPE, optional: true },
+    ]],
+
+    // -- JoinGameResponse (class=Lobby, type=0x24) ---------------------------
+    [0x2401, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Status Code',     type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'DME World Id',    type: 'uint',  length: 4 },
+        { name: 'DME Server IP',   type: 'string',length: 16 },
+        { name: 'DME Server Port', type: 'uint',  length: 2 },
+        { name: 'Padding2',        type: 'bytes', length: 2 },
+    ]],
+
+    // -- JoinChannel (class=Lobby, type=0x25) --------------------------------
+    [0x2501, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',     type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 2 },
+        { name: 'Media World Id',  type: 'uint',  length: 4 },
+    ]],
+
+    // -- JoinChannelResponse (class=Lobby, type=0x26) ------------------------
+    [0x2601, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Status Code',     type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Media World Id',  type: 'uint',  length: 4 },
+    ]],
+
+    // -- ChannelInfo (class=Lobby, type=0x35) --------------------------------
+    [0x3501, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',     type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 2 },
+        { name: 'Media World Id',  type: 'uint',  length: 4 },
+    ]],
+
+    // -- ChannelInfoResponse (class=Lobby, type=0x36) ------------------------
+    [0x3601, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Status Code',     type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Lobby Name',      type: 'string',length: MEDIUS_C.ACCOUNTNAME_MAXLEN, optional: true },
+        { name: 'Active Players',  type: 'uint',  length: 4, optional: true },
+        { name: 'Max Players',     type: 'uint',  length: 4, optional: true },
+        { name: 'Game World Status', type: 'uint',length: 4, enum: MEDIUS_WORLD_STATUS, optional: true },
+    ]],
+
+    // -- SetGameListFilter (class=Lobby, type=0x4E) --------------------------
+    [0x4E01, [
+        { name: 'Message Id',     type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',    type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Padding',        type: 'bytes', length: 2 },
+        { name: 'Base/Comparison',type: 'uint',  length: 4 },
+        { name: 'Filter Field',   type: 'uint',  length: 4, enum: MEDIUS_GAME_LIST_FILTER_FIELD },
+        { name: 'Mask',           type: 'uint',  length: 4 },
+        { name: 'Comparison Op',  type: 'uint',  length: 4 },
+    ]],
+
+    // -- SetGameListFilterResponse (class=Lobby, type=0x4F) ------------------
+    [0x4F01, [
+        { name: 'Message Id',      type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',         type: 'bytes', length: 3 },
+        { name: 'Status Code',     type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Filter Id',       type: 'uint',  length: 4 },
+    ]],
+
+    // ── LobbyExt class (4) — additional structs ───────────────────────────────
+
+    // -- LobbyExt: BinaryMessage (class=LobbyExt, type=0x16) -----------------
+    [0x1604, [
+        { name: 'Message Id',       type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',      type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Padding',          type: 'bytes', length: 2 },
+        { name: 'Target Account Id',type: 'uint',  length: 4 },
+        { name: 'Message Type',     type: 'uint',  length: 4, enum: MEDIUS_BINARY_MESSAGE_TYPE },
+        { name: 'Message Size',     type: 'uint',  length: 2 },
+        { name: 'Padding2',         type: 'bytes', length: 2 },
+        { name: 'Message',          type: 'bytes', length: 256, optional: true },
+    ]],
+
+    // -- LobbyExt: BinaryFwdMessage (class=LobbyExt, type=0x17) --------------
+    [0x1704, [
+        { name: 'Origin Account Id',type: 'uint',  length: 4 },
+        { name: 'Message Type',     type: 'uint',  length: 4, enum: MEDIUS_BINARY_MESSAGE_TYPE },
+        { name: 'Message Size',     type: 'uint',  length: 2 },
+        { name: 'Padding',          type: 'bytes', length: 2 },
+        { name: 'Message',          type: 'bytes', length: 256, optional: true },
+    ]],
+
+    // -- LobbyExt: ExtendedSessionBeginRequest (class=LobbyExt, type=0x27) --
+    [0x2704, [
+        { name: 'Message Id',       type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',          type: 'bytes', length: 3 },
+        { name: 'Connection Type',  type: 'uint',  length: 4, enum: MEDIUS_CONNECTION_TYPE },
+        { name: 'Client Version',   type: 'string',length: 64, optional: true },
+        { name: 'Locale',           type: 'uint',  length: 4, enum: MEDIUS_LANGUAGE_TYPE, optional: true },
+    ]],
+
+    // -- LobbyExt: TokenRequest (class=LobbyExt, type=0x28) ------------------
+    [0x2804, [
+        { name: 'Message Id',       type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',      type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Token Action',     type: 'uint',  length: 4, enum: MEDIUS_TOKEN_ACTION },
+        { name: 'Token Category',   type: 'uint',  length: 4, enum: MEDIUS_TOKEN_CATEGORY },
+        { name: 'Token Value',      type: 'uint',  length: 4 },
+    ]],
+
+    // -- LobbyExt: GenericChatMessage (class=LobbyExt, type=0x23) ------------
+    [0x2304, [
+        { name: 'Message Id',       type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',      type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Message Type',     type: 'uint',  length: 4, enum: MEDIUS_CHAT_MESSAGE_TYPE },
+        { name: 'Target Id',        type: 'uint',  length: 4 },
+        { name: 'Message',          type: 'string',length: 512, optional: true },
+    ]],
+
+    // -- LobbyExt: GetServerTimeRequest (class=LobbyExt, type=0x2A) ----------
+    [0x2A04, [
+        { name: 'Message Id',       type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',      type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Time Zone',        type: 'uint',  length: 4, enum: MEDIUS_TIME_ZONE, optional: true },
+    ]],
+
+    // -- LobbyExt: GetServerTimeResponse (class=LobbyExt, type=0x2B) ---------
+    [0x2B04, [
+        { name: 'Message Id',       type: 'bytes', length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Padding',          type: 'bytes', length: 3 },
+        { name: 'Status Code',      type: 'uint',  length: 4, enum: MEDIUS_CALLBACK_STATUS },
+        { name: 'Time Zone',        type: 'uint',  length: 4, enum: MEDIUS_TIME_ZONE },
+        { name: 'Local Time',       type: 'bytes', length: 16, optional: true },
+    ]],
+
+    // -- LobbyExt: CreateGame (class=LobbyExt, type=0x2F) --------------------
+    [0x2F04, [
+        { name: 'Message Id',      type: 'bytes',  length: MEDIUS_C.MESSAGEID_MAXLEN },
+        { name: 'Session Key',     type: 'bytes',  length: MEDIUS_C.SESSIONKEY_MAXLEN },
+        { name: 'Application Id',  type: 'uint',   length: 4, enum: APPLICATION_ID },
+        { name: 'Min Players',     type: 'uint',   length: 4 },
+        { name: 'Max Players',     type: 'uint',   length: 4 },
+        { name: 'Game Level',      type: 'uint',   length: 4 },
+        { name: 'Player Skill Lvl',type: 'uint',   length: 4 },
+        { name: 'Rules Set',       type: 'uint',   length: 4 },
+        { name: 'Generic Field 1', type: 'uint',   length: 4 },
+        { name: 'Generic Field 2', type: 'uint',   length: 4 },
+        { name: 'Generic Field 3', type: 'uint',   length: 4 },
+        { name: 'Game Host Type',  type: 'uint',   length: 4, enum: MEDIUS_GAME_HOST_TYPE },
+        { name: 'Attributes',      type: 'uint',   length: 4, enum: MEDIUS_WORLD_ATTRIBUTES, optional: true },
+        { name: 'Security Level',  type: 'uint',   length: 4, enum: MEDIUS_WORLD_SECURITY_LEVEL, optional: true },
+    ]],
+
+    // -- LobbyExt: WorldReport (class=LobbyExt, type=0x30) -------------------
+    [0x3004, [
+        { name: 'Media World Id',  type: 'uint',  length: 4 },
+        { name: 'World Status',    type: 'uint',  length: 4, enum: MEDIUS_WORLD_STATUS },
+        { name: 'Total Players',   type: 'uint',  length: 4 },
+        { name: 'Game Level',      type: 'uint',  length: 4, optional: true },
     ]],
 ]);
 
@@ -1006,6 +1705,23 @@ const SCERT_PAYLOAD_STRUCTS = new Map<number, MediusStructDef>([
     // RT_MSG_SERVER_CRYPTKEY_PEER (0x13)
     [0x13, [
         { name: 'Session Key', type: 'bytes', length: MEDIUS_C.SESSIONKEY_MAXLEN },
+    ]],
+    // RT_MSG_CLIENT_SET_RECV_FLAG (0x0D)
+    [0x0D, [
+        { name: 'Recv Flags', type: 'uint', length: 4, enum: RT_RECV_FLAG },
+    ]],
+    // RT_MSG_SERVER_CHEAT_QUERY (0x1D)
+    [0x1D, [
+        { name: 'Cheat Query Type', type: 'uint',  length: 1, enum: CHEAT_QUERY_TYPE },
+        { name: 'Sequence',         type: 'uint',  length: 1 },
+        { name: 'Padding',          type: 'bytes', length: 2 },
+        { name: 'Address',          type: 'uint',  length: 4 },
+        { name: 'Length',           type: 'uint',  length: 4 },
+        { name: 'Salt / Extra',     type: 'bytes', length: 64, optional: true },
+    ]],
+    // RT_MSG_CLIENT_DISCONNECT_WITH_REASON (0x20)
+    [0x20, [
+        { name: 'Reason', type: 'uint', length: 4 },
     ]],
 ]);
 
@@ -1391,6 +2107,31 @@ function icmpTypeName(t: number): string {
     }
 }
 
+/**
+ * If a parsed struct produced a status-bearing field (Callback Status / Status Code /
+ * Confirmation), return the symbolic enum name extracted from its value, or undefined.
+ * parseMediusFields renders enum uints as "123 (EnumName)" — we pull what's in the parens.
+ */
+function extractStatusName(fields: DissectedField[]): string | undefined {
+    for (const f of fields) {
+        if (f.name === 'Callback Status' || f.name === 'Status Code' || f.name === 'Confirmation') {
+            const m = /\(([^)]+)\)/.exec(f.value);
+            if (m && !/^0x[0-9A-F]+$/i.test(m[1])) { return m[1]; }
+            return undefined;
+        }
+    }
+    return undefined;
+}
+
+/** Pull the first enum-decoded value (parenthesized non-hex) from a list of fields. */
+function extractFirstEnumDetail(fields: DissectedField[]): string | undefined {
+    for (const f of fields) {
+        const m = /\(([^)]+)\)/.exec(f.value);
+        if (m && !/^0x[0-9A-F]+$/i.test(m[1])) { return `${f.name}: ${m[1]}`; }
+    }
+    return undefined;
+}
+
 /** Generate the brief "Info" column summary for a packet. */
 function packetInfoSummary(raw: Uint8Array, direction?: number): string {
     if (raw.length < 14) { return 'Too short'; }
@@ -1441,6 +2182,13 @@ function packetInfoSummary(raw: Uint8Array, direction?: number): string {
                             let summary = `[${server}:${port}] ${first.msgTypeName}`;
                             if (first.medius) {
                                 summary += ` -> ${first.medius.msgTypeName}`;
+                                // Surface callback status / status code if a struct decoded one
+                                const statusName = extractStatusName(first.medius.payloadFields);
+                                if (statusName) { summary += ` (${statusName})`; }
+                            } else if (first.scertPayloadFields) {
+                                // For non-APP SCERT messages with decoded payload (e.g. cheat query)
+                                const detail = extractFirstEnumDetail(first.scertPayloadFields);
+                                if (detail) { summary += ` (${detail})`; }
                             }
                             if (scertMsgs.length > 1) {
                                 summary += ` (+${scertMsgs.length - 1} more)`;
