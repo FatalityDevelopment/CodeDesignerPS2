@@ -1,4 +1,4 @@
-﻿namespace CodeDesigner.Ps2.Compression
+﻿namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 {
     // -------------------------------------------------------------------------
     //  Dispatch word codec (ZDBDispatchWordEncoder EE 0x005408D0)

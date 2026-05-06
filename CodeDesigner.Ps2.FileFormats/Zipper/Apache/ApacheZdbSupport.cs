@@ -1,8 +1,9 @@
+using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace CodeDesigner.Ps2.Compression
+namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
 {
     /// <summary>
     /// Named layout constants for APACHE00.ZDB.

@@ -1,4 +1,4 @@
-﻿namespace CodeDesigner.Ps2.Compression
+﻿namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
 {
     /// <summary>
     /// Practical dispatch/exclusion profiles for APACHE00 section crypto.

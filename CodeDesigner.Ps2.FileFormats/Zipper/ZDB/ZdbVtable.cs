@@ -1,4 +1,4 @@
-﻿namespace CodeDesigner.Ps2.Compression
+﻿namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 {
     // -------------------------------------------------------------------------
     //  Outer vtable transforms (EE 0x00562198, all 16 confirmed)

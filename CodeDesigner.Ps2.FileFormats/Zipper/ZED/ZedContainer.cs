@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace CodeDesigner.Ps2.Compression
+namespace CodeDesigner.Ps2.FileFormats.Zipper.ZED
 {
     /// <summary>
     /// Represents one named record inside a ZED/ZAR container.

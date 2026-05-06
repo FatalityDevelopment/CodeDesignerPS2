@@ -1,6 +1,6 @@
 ﻿using System.Text;
 
-namespace CodeDesigner.Ps2.Compression
+namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 {
     // =========================================================================
 

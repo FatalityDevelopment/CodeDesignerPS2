@@ -1,4 +1,6 @@
-namespace CodeDesigner.Ps2.Compression
+using CodeDesigner.Ps2.FileFormats.Zipper.ZED;
+
+namespace CodeDesigner.Ps2.FileFormats.Zipper.ZAR
 {
     /// <summary>
     /// Archive-shaped facade for ZAR files.

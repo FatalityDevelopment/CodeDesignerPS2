@@ -1,6 +1,6 @@
 using System;
 
-namespace CodeDesigner.Ps2.Compression
+namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
 {
     /// <summary>
     /// Patches the captured ZSealEtc IOP secrman binary (code.bin, loaded at IOP 0x00188938)
@@ -29,7 +29,7 @@ namespace CodeDesigner.Ps2.Compression
     ///   If the EE ISO patches supply the revival_aes.bin key independently this is
     ///   not required.  Revival AES key: D5 F6 C6 D5 7C 66 49 76 68 25 23 D7 57 A8 F6 4B
     /// </summary>
-    public static class IopSecrmanPatcher
+    public static class RSAKeyPatcher
     {
         // ── Patch 1: fn@0x001892A0 – DNAS key-byte loop guard ───────────────
         // code.bin offset: 0x0A28  (IOP addr 0x00189360)

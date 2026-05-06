@@ -1,6 +1,6 @@
 ﻿using System.Security.Cryptography;
 
-namespace CodeDesigner.Ps2.Compression
+namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 {
     // -------------------------------------------------------------------------
     //  Pipeline options  (pass to DecryptSection / EncryptSection)

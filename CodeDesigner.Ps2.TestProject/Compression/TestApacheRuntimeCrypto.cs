@@ -1,4 +1,4 @@
-using CodeDesigner.Ps2.Compression;
+using CodeDesigner.Ps2.FileFormats.Zipper.Apache;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace CodeDesigner.Ps2.TestProject

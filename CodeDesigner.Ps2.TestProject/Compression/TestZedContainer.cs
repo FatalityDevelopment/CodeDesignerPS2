@@ -1,4 +1,5 @@
-using CodeDesigner.Ps2.Compression;
+using CodeDesigner.Ps2.FileFormats.Zipper.ZAR;
+using CodeDesigner.Ps2.FileFormats.Zipper.ZED;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Linq;
 

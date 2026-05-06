@@ -21,7 +21,6 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.MCManager\CodeDesigner.Ps2.MCManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Recompiler\CodeDesigner.Ps2.Recompiler.csproj" />
-    <ProjectReference Include="..\CodeDesigner.Ps2.Zdb\CodeDesigner.Ps2.Zdb.csproj" />
   </ItemGroup>
 
   <ItemGroup>

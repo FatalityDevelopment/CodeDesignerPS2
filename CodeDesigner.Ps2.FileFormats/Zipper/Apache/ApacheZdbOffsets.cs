@@ -1,4 +1,4 @@
-﻿namespace CodeDesigner.Ps2.Compression
+﻿namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
 {
     // -------------------------------------------------------------------------
     //  Confirmed file offsets

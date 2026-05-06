@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace CodeDesigner.Ps2.ZDBManager
+namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 {
     // TODO: Check if crc can replace this, or if this is a different checksum algorithm. It seems to be a custom one, but it shares some similarities with crc32 (e.g. the seed table is the same as the crc32 polynomial table).
     internal class ZdbChecksum

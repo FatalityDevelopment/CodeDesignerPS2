@@ -2,9 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
-using CodeDesigner.Ps2.Zdb;
+using CodeDesigner.Ps2.Compression;
+using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
 
-namespace CodeDesigner.Ps2.Compression
+namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
 {
     /// <summary>
     /// Builds a disc-compatible revival APACHE00.ZDB that runs on a factory console
@@ -27,14 +28,14 @@ namespace CodeDesigner.Ps2.Compression
     ///   ftscore  : version-increment ftscorePlaintext → encrypt with revival AES key → sign with our key
     ///   zsealetc : keep disc-encrypted body unchanged → replace Sony RSA sig with ours
     /// </summary>
-    public static class RevivalPatchBuilder
+    public static class ApachePatchBuilder
     {
         // DNAS prefix size: 0x300-byte blob + 16-byte key + 16-byte IV = 0x320 bytes.
         // Key is at prefix[0x300], IV is at prefix[0x310] (ApacheZdbOffsets.SessionKey/IvOffset).
         private const int DnasPrefixSize = ApacheZdbOffsets.SessionIvOffset + 16; // 0x310 + 16 = 0x320
 
         // Fixed revival AES key used for FTScore re-encryption.
-        // Must match the runtime key-injection patch path (IopSecrmanPatcher Patch 4).
+        // Must match the runtime key-injection patch path (RSAKeyPatcher Patch 4).
         private static readonly byte[] RevivalFtScoreKey =
         {
             0xD5, 0xF6, 0xC6, 0xD5, 0x7C, 0x66, 0x49, 0x76,
@@ -43,7 +44,7 @@ namespace CodeDesigner.Ps2.Compression
 
         // Fixed revival IV used for FTScore re-encryption.
         // Captured live from AES_CBC_Core a1 ptr (0x01E7EB00) on first chunk after fresh boot.
-        // Must match the IV injected by IopSecrmanPatcher Patch 4.
+        // Must match the IV injected by RSAKeyPatcher Patch 4.
         private static readonly byte[] RevivalFtScoreIv =
         {
             0xA4, 0xD3, 0x03, 0x46, 0x7A, 0x2B, 0x9B, 0x3C,

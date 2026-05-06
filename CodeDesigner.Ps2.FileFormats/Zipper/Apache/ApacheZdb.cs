@@ -1,11 +1,12 @@
 ﻿using CodeDesigner.Ps2.Compression;
+using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace CodeDesigner.Ps2.Zdb
+namespace CodeDesigner.Ps2.FileFormats.Zipper.Apache
 {
     // -------------------------------------------------------------------------
     //  High-level APACHE00.ZDB helper

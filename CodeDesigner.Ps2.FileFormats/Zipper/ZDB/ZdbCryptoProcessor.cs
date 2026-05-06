@@ -1,8 +1,8 @@
-﻿using CodeDesigner.Ps2.Zdb;
+﻿using CodeDesigner.Ps2.FileFormats.Zipper.Apache;
 using System.IO.Compression;
 using System.Security.Cryptography;
 
-namespace CodeDesigner.Ps2.Compression
+namespace CodeDesigner.Ps2.FileFormats.Zipper.ZDB
 {
 
     // -------------------------------------------------------------------------

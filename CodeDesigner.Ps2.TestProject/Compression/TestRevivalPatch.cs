@@ -1,4 +1,5 @@
-﻿using CodeDesigner.Ps2.Compression;
+﻿using CodeDesigner.Ps2.FileFormats.Zipper.Apache;
+using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.IO;
@@ -34,7 +35,7 @@ namespace CodeDesigner.Ps2.TestProject
             Assert.IsTrue(File.Exists(FTScoreBinPath),
                 $"FTScore plaintext not found: {FTScoreBinPath}");
 
-            RevivalPatchBuilder.BuildResult result = RevivalPatchBuilder.BuildAndSave(
+            ApachePatchBuilder.BuildResult result = ApachePatchBuilder.BuildAndSave(
                 OriginalZdbPath,
                 FTScoreBinPath);
 
@@ -69,7 +70,7 @@ namespace CodeDesigner.Ps2.TestProject
 
             byte[] discZdb    = File.ReadAllBytes(OriginalZdbPath);
             byte[] zsealPlain;
-            try { zsealPlain = RevivalPatchBuilder.DecryptDiscZSealEtc(discZdb); }
+            try { zsealPlain = ApachePatchBuilder.DecryptDiscZSealEtc(discZdb); }
             catch (InvalidDataException ex)
             {
                 Assert.Inconclusive(
@@ -106,7 +107,7 @@ namespace CodeDesigner.Ps2.TestProject
 
             byte[] discZdb   = File.ReadAllBytes(OriginalZdbPath);
             byte[] ftPlain;
-            try { ftPlain = RevivalPatchBuilder.DecryptDiscFtScore(discZdb); }
+            try { ftPlain = ApachePatchBuilder.DecryptDiscFtScore(discZdb); }
             catch (InvalidDataException ex)
             {
                 Assert.Inconclusive(
