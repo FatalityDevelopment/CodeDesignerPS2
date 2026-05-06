@@ -4,12 +4,11 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-
 using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Database.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Database
 {
     /// <summary>
     /// Async persistence layer for MCP Agent profiles, backed by <see cref="CodeDesignerDbContext"/>.

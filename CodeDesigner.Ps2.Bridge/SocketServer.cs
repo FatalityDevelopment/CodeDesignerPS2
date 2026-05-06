@@ -11,6 +11,7 @@ using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Emulator;
 using Microsoft.EntityFrameworkCore;
 using CodeDesigner.Ps2.LabelManager;
+using CodeDesigner.Ps2.Bridge.Database;
 
 namespace CodeDesigner.Ps2.Bridge
 {

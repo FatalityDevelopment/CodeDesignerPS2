@@ -4,14 +4,14 @@ using System.Text.Json;
 using CodeDesigner.Ps2.Database.Entities;
 
 using MgrEntry = CodeDesigner.Ps2.LabelManager.Models.LabelEntry;
-using MgrSet   = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
-using MgrType  = CodeDesigner.Ps2.LabelManager.Models.LabelType;
+using MgrSet = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
+using MgrType = CodeDesigner.Ps2.LabelManager.Models.LabelType;
 
-using DbLabel    = CodeDesigner.Ps2.Database.Entities.Label;
+using DbLabel = CodeDesigner.Ps2.Database.Entities.Label;
 using DbLabelSet = CodeDesigner.Ps2.Database.Entities.LabelSet;
 using DbLabelType = CodeDesigner.Ps2.Database.Entities.LabelType;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Database
 {
     /// <summary>
     /// Maps between <c>CodeDesigner.Ps2.LabelManager</c> in-memory models and

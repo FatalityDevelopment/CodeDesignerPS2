@@ -2,12 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-
 using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Database.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Database
 {
     /// <summary>
     /// Async persistence layer for snapshot metadata, backed by <see cref="CodeDesignerDbContext"/>.

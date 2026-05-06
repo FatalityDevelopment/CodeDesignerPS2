@@ -7,17 +7,17 @@ using CodeDesigner.Ps2.Database;
 using Microsoft.EntityFrameworkCore;
 
 using MgrEntry = CodeDesigner.Ps2.LabelManager.Models.LabelEntry;
-using MgrSet   = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
+using MgrSet = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
 
-using DbLabel    = CodeDesigner.Ps2.Database.Entities.Label;
+using DbLabel = CodeDesigner.Ps2.Database.Entities.Label;
 using DbLabelSet = CodeDesigner.Ps2.Database.Entities.LabelSet;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Database
 {
     /// <summary>
     /// Async persistence layer for label sets, backed by <see cref="CodeDesignerDbContext"/>.
     /// All public methods accept a <paramref name="gameId"/> string (serial, IsoPath suffix,
-    /// or Game.Title) that is resolved to a <see cref="CodeDesigner.Ps2.Database.Entities.GameDisc.Id"/>
+    /// or Game.Title) that is resolved to a <see cref="Ps2.Database.Entities.GameDisc.Id"/>
     /// before any DB query, so that labels are always scoped to the exact disc release.
     /// </summary>
     internal sealed class DbLabelRepository
