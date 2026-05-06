@@ -143,7 +143,7 @@ function readU16LE(buf: Uint8Array, off: number): number {
  */
 let MEDIUS_PORTS = new Map<number, string>([
     [10071, 'MUIS'],
-    [10078, 'MAS'],
+    [10077, 'MAS'],
     [10075, 'MLS'],
     [10070, 'DME'],
     [10069, 'NAT'],
