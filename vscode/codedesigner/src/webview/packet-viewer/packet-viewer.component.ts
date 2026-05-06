@@ -1964,15 +1964,20 @@ function dissectFrame(raw: Uint8Array, direction = -1): DissectedLayer[] {
             if (scertMsgs.length > 0) {
                 for (const msg of scertMsgs) {
                     const hdrLen = msg.isEncrypted ? 7 : 3;
+                    // Embed medius type in the SCERT label/field, matching the wireshark
+                    // dissector's RT_COMMAND(TYPE) convention.
+                    const msgTypeDisplay = msg.medius
+                        ? `${msg.msgTypeName}(${msg.medius.msgTypeName})`
+                        : msg.msgTypeName;
                     const scertFields: DissectedField[] = [
                         { name: 'Server',         value: server },
-                        { name: 'Message Type',   value: `0x${toHex(msg.msgType)} — ${msg.msgTypeName}` },
+                        { name: 'Message Type',   value: `0x${toHex(msg.msgType)} — ${msgTypeDisplay}` },
                         { name: 'Encrypted',      value: msg.isEncrypted ? `Yes (hash: 0x${toHex(msg.hash!, 8)})` : 'No' },
                         { name: 'Payload Length', value: `${msg.payloadLen} bytes` },
                     ];
 
                     layers.push({
-                        label: `SCERT [${server}]  ${msg.msgTypeName}`,
+                        label: `SCERT [${server}]  ${msgTypeDisplay}`,
                         color: '#c792ea',
                         fields: scertFields,
                         offset: msg.frameOffset,
@@ -2177,21 +2182,24 @@ function packetInfoSummary(raw: Uint8Array, direction?: number): string {
                     if (tcpPayLen > 0) {
                         const scertMsgs = parseSCERT(raw.slice(tcpPayOff, tcpPayOff + tcpPayLen), tcpPayOff, direction);
                         if (scertMsgs.length > 0) {
+                            // Wireshark-style: [RT_MSG_TYPE(MediusType), RT_MSG_TYPE2(...)]
+                            // Mirrors the format used by hashsploit's medius_wireshark_dissector.lua
+                            const parts = scertMsgs.map(msg => {
+                                if (msg.medius) {
+                                    return `${msg.msgTypeName}(${msg.medius.msgTypeName})`;
+                                }
+                                return msg.msgTypeName;
+                            });
+                            let summary = `[${parts.join(', ')}]`;
+                            // Append callback status / first decoded enum from the first message
+                            // as a small extra hint that's not part of wireshark's format.
                             const first = scertMsgs[0];
-                            const port  = MEDIUS_PORTS.has(dp) ? dp : sp;
-                            let summary = `[${server}:${port}] ${first.msgTypeName}`;
                             if (first.medius) {
-                                summary += ` -> ${first.medius.msgTypeName}`;
-                                // Surface callback status / status code if a struct decoded one
                                 const statusName = extractStatusName(first.medius.payloadFields);
                                 if (statusName) { summary += ` (${statusName})`; }
                             } else if (first.scertPayloadFields) {
-                                // For non-APP SCERT messages with decoded payload (e.g. cheat query)
                                 const detail = extractFirstEnumDetail(first.scertPayloadFields);
                                 if (detail) { summary += ` (${detail})`; }
-                            }
-                            if (scertMsgs.length > 1) {
-                                summary += ` (+${scertMsgs.length - 1} more)`;
                             }
                             return summary;
                         }
