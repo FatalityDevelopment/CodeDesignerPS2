@@ -7,14 +7,22 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using SharpCompress.Archives;
 using SharpCompress.Common;
-using CodeDesigner.Ps2.EmulatorCore;
-using CodeDesigner.Ps2.EmulatorCore.IOP;
+using CodeDesigner.Ps2.IsoManager;
 using CodeDesigner.Ps2.Bridge.Database;
 
 namespace CodeDesigner.Ps2.Bridge
 {
     partial class SocketServer
     {
+        // PS2 memory layout constants — duplicated locally so Bridge has no
+        // EmulatorCore dependency. Match
+        // CodeDesigner.Ps2.EmulatorCore.PS2MemoryBus / IopMemoryBus.
+        private const uint EeRamSize       = 32 * 1024 * 1024;     // 32 MB EE main RAM
+        private const uint BiosRomPhysBase = 0x1FC00000u;          // EE BIOS ROM physical base
+        private const uint BiosRomSize     = 4 * 1024 * 1024;      // 4 MB BIOS ROM
+        private const uint EeScratchpadSize = 16 * 1024;            // 16 KB scratchpad
+        private const uint IopRamBytes     = 2 * 1024 * 1024;      // 2 MB IOP RAM
+
         /// <summary>
         /// Handle PCSX2STATUS — queries the PCSX2 emulator status via PINE (MsgStatus).
         /// </summary>
@@ -108,10 +116,10 @@ namespace CodeDesigner.Ps2.Bridge
                 Directory.CreateDirectory(outputPath);
                 var regions = new[]
                 {
-                    (Label: "EE RAM",     File: "EEmem.bin",     Base: 0x00000000u,             Size: (int)PS2MemoryBus.MainRamSize,    UseIop: false),
-                    (Label: "BIOS ROM",   File: "BIOSrom.bin",   Base: PS2MemoryBus.BiosRomPhysBase, Size: (int)PS2MemoryBus.BiosRomSize,    UseIop: false),
-                    (Label: "Scratchpad", File: "Scratchpad.bin",Base: 0x70000000u,             Size: (int)PS2MemoryBus.ScratchpadSize, UseIop: false),
-                    (Label: "IOP RAM",    File: "IOPmem.bin",    Base: EeIopMirrorBase,         Size: (int)IopMemoryBus.RamSize,        UseIop: true),
+                    (Label: "EE RAM",     File: "EEmem.bin",     Base: 0x00000000u,             Size: (int)EeRamSize,    UseIop: false),
+                    (Label: "BIOS ROM",   File: "BIOSrom.bin",   Base: BiosRomPhysBase, Size: (int)BiosRomSize,    UseIop: false),
+                    (Label: "Scratchpad", File: "Scratchpad.bin",Base: 0x70000000u,             Size: (int)EeScratchpadSize, UseIop: false),
+                    (Label: "IOP RAM",    File: "IOPmem.bin",    Base: EeIopMirrorBase,         Size: (int)IopRamBytes,        UseIop: true),
                 };
                 var written = new List<SnapshotRegion>();
                 foreach (var (label, file, baseAddr, size, useIop) in regions)
@@ -198,10 +206,10 @@ namespace CodeDesigner.Ps2.Bridge
                 try { Client.Pause(); } catch { /* ignore pause errors */ }
                 var regions = new[]
                 {
-                    (File: "EEmem.bin",      Label: "EE RAM",     MaxSize: (int)PS2MemoryBus.MainRamSize,    Base: 0x00000000u,                 UseIop: false),
-                    (File: "BIOSrom.bin",    Label: "BIOS ROM",   MaxSize: (int)PS2MemoryBus.BiosRomSize,    Base: PS2MemoryBus.BiosRomPhysBase, UseIop: false),
-                    (File: "Scratchpad.bin", Label: "Scratchpad", MaxSize: (int)PS2MemoryBus.ScratchpadSize, Base: 0x70000000u,                 UseIop: false),
-                    (File: "IOPmem.bin",     Label: "IOP RAM",    MaxSize: (int)IopMemoryBus.RamSize,        Base: EeIopMirrorBase,             UseIop: true),
+                    (File: "EEmem.bin",      Label: "EE RAM",     MaxSize: (int)EeRamSize,    Base: 0x00000000u,                 UseIop: false),
+                    (File: "BIOSrom.bin",    Label: "BIOS ROM",   MaxSize: (int)BiosRomSize,    Base: BiosRomPhysBase, UseIop: false),
+                    (File: "Scratchpad.bin", Label: "Scratchpad", MaxSize: (int)EeScratchpadSize, Base: 0x70000000u,                 UseIop: false),
+                    (File: "IOPmem.bin",     Label: "IOP RAM",    MaxSize: (int)IopRamBytes,        Base: EeIopMirrorBase,             UseIop: true),
                 };
                 var loaded = new List<SnapshotRegion>();
                 foreach (var (file, label, maxSize, baseAddr, useIop) in regions)
@@ -355,7 +363,7 @@ namespace CodeDesigner.Ps2.Bridge
             try
             {
                 using var stream = OpenDiscStream(isoPath);
-                var cdvd = new Cdvd();
+                var cdvd = new Ps2IsoImage();
                 cdvd.LoadFromStream(stream);
 
                 string? bootElfName = null;
@@ -364,7 +372,7 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
                     string cnfText  = System.Text.Encoding.Latin1.GetString(cnfBytes);
-                    string? rawBoot = CodeDesigner.Ps2.EmulatorCore.GameLoader.ParseSystemCnf(cnfText);
+                    string? rawBoot = SystemCnfParser.ParseBoot2(cnfText);
                     if (rawBoot != null)
                     {
                         int slash = rawBoot.LastIndexOfAny(new[] { '/', '\\' });
@@ -423,7 +431,7 @@ namespace CodeDesigner.Ps2.Bridge
             try
             {
                 using var stream = OpenDiscStream(isoPath);
-                var cdvd = new Cdvd();
+                var cdvd = new Ps2IsoImage();
                 cdvd.LoadFromStream(stream);
 
                 string resolvedElfName = elfName?.Trim() ?? string.Empty;
@@ -435,7 +443,7 @@ namespace CodeDesigner.Ps2.Bridge
                         return CreateErrorResponse("SYSTEM.CNF not found on disc.");
                     byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
                     string cnfText  = System.Text.Encoding.Latin1.GetString(cnfBytes);
-                    resolvedElfName = CodeDesigner.Ps2.EmulatorCore.GameLoader.ParseSystemCnf(cnfText) ?? string.Empty;
+                    resolvedElfName = SystemCnfParser.ParseBoot2(cnfText) ?? string.Empty;
                     if (string.IsNullOrEmpty(resolvedElfName))
                         return CreateErrorResponse("BOOT2 entry not found in SYSTEM.CNF.");
                 }
