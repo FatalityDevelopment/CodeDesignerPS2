@@ -639,12 +639,42 @@ function serverFromPorts(srcPort: number, dstPort: number): string {
     return MEDIUS_PORTS.get(dstPort) ?? MEDIUS_PORTS.get(srcPort) ?? '';
 }
 
-/** Resolve a Medius message type name given its class and type byte. */
+/**
+ * Resolve a Medius message type name given its class and type byte.
+ *
+ * Wire layout: app messages start with [classByte:1][typeByte:1] which the
+ * hashsploit medius_wireshark_dissector.lua reads as a single LE uint16 key
+ * (typeByte << 8 | classByte) into one big mediustypes table.
+ *
+ * We keep per-class maps (matches `ScertTypes.cs`) but resolve in two passes:
+ *   1. Class-specific lookup. Classes 2/3/5 (Application/LobbyReport/LobbyAuth)
+ *      share the same MediusLobbyMessageId / MediusDmeMessageIds id space
+ *      historically — class=5 (auth) routes lobby-style ids; class=3
+ *      (lobby-report) routes DME server-side ids; class=2 (app) routes lobby
+ *      ids. Without this, MAS (auth) traffic and DME traffic both fell back
+ *      to raw hex.
+ *   2. Map walk if the class byte is malformed (e.g. encrypted payloads where
+ *      the first byte is gibberish): try MEDIUS_LOBBY_MSG, then LOBBY_EXT, then
+ *      DME. Better to surface a likely name than a bare hex value.
+ */
 function mediusTypeName(msgClass: number, msgType: number): string {
-    if (msgClass === 0) { return MEDIUS_DME_MSG.get(msgType) ?? `0x${toHex(msgType)}`; }
-    if (msgClass === 1) { return MEDIUS_LOBBY_MSG.get(msgType) ?? `0x${toHex(msgType)}`; }
-    if (msgClass === 4) { return MEDIUS_LOBBY_EXT_MSG.get(msgType) ?? `0x${toHex(msgType)}`; }
-    return `0x${toHex(msgType)}`;
+    let name: string | undefined;
+    switch (msgClass) {
+        case 0:                                                  // DME
+            name = MEDIUS_DME_MSG.get(msgType); break;
+        case 1: case 2: case 5:                                  // Lobby / Application / LobbyAuth
+            name = MEDIUS_LOBBY_MSG.get(msgType); break;
+        case 3:                                                  // LobbyReport — DME server-side ids
+            name = MEDIUS_DME_MSG.get(msgType); break;
+        case 4:                                                  // LobbyExt
+            name = MEDIUS_LOBBY_EXT_MSG.get(msgType); break;
+    }
+    if (name) { return name; }
+
+    return MEDIUS_LOBBY_MSG.get(msgType)
+        ?? MEDIUS_LOBBY_EXT_MSG.get(msgType)
+        ?? MEDIUS_DME_MSG.get(msgType)
+        ?? `0x${toHex(msgType)}`;
 }
 
 // RT_MSG_TYPE values that carry a Medius APP payload (class + type bytes)
