@@ -135,7 +135,7 @@ function readU16LE(buf: Uint8Array, off: number): number {
  */
 const MEDIUS_PORTS = new Map<number, string>([
     [10071, 'MUIS'],
-    [10078, 'MAS'],
+    [10077, 'MAS'],
     [10075, 'MLS'],
     [10070, 'DME'],
     [10069, 'NAT'],
@@ -149,7 +149,7 @@ const MEDIUS_PORTS = new Map<number, string>([
  * prevent TLS handshake bytes from being misread as SCERT messages.
  * Port 53 (DNS) is excluded because it is UDP-only.
  */
-const SCERT_DECODE_PORTS = new Set([10071, 10078, 10075, 10070, 10069]);
+const SCERT_DECODE_PORTS = new Set([10071, 10077, 10075, 10070, 10069]);
 
 /** RT_MSG_TYPE wire values → display name. Source: ScertTypes.cs RT_MSG_TYPE enum. */
 const RT_MSG_TYPE_NAMES = new Map<number, string>([

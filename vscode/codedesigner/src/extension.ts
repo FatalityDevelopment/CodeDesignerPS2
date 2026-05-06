@@ -89,18 +89,18 @@ export function activate(context: vscode.ExtensionContext) {
 	// server and are independent of local pointer definitions.  Calling it here
 	// creates an infinite loop: refreshStructLabels → onStructsChanged →
 	// setServerStructs → _onDidChangeTreeData → refreshStructLabels → …
-	context.subscriptions.push(
-		pointerManagerProvider.onDidChangeTreeData(() => {
-			pointerManagerProvider.getResolvedLabels().then(labels => {
-				editorProvider.setPointerLabels(labels);
-			}).catch(() => { /* ignore — not connected */ });
-		})
-	);
+	//context.subscriptions.push(
+	//	pointerManagerProvider.onDidChangeTreeData(() => {
+	//		pointerManagerProvider.getResolvedLabels().then(labels => {
+	//			editorProvider.setPointerLabels(labels);
+	//		}).catch(() => { /* ignore — not connected */ });
+	//	})
+	//);
 
 	// Wire pointer-manager labels into the CDS compiler: whenever CDS source is
 	// compiled, the current live-resolved labels (e.g. "seal.health") are forwarded
 	// to the backend so they can be referenced as :seal.health or @seal.health.
-	disasmPanelProvider.getPointerLabels = () => pointerManagerProvider.getResolvedLabels();
+	//disasmPanelProvider.getPointerLabels = () => pointerManagerProvider.getResolvedLabels();
 
 	// Wire snapshot history lookup: when the edit overlay requests address history,
 	// delegate to the panel provider which manages snapshots.
