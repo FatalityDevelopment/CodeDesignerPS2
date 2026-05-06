@@ -1,4 +1,4 @@
-﻿using CodeDesigner.Ps2.ZDBManager;
+﻿using CodeDesigner.Ps2.FileFormats.Zipper.ZDB;
 using System;
 using System.Collections.Generic;
 using System.IO;

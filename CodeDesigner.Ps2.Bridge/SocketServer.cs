@@ -8,7 +8,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using CodeDesigner.Ps2.Database;
-using CodeDesigner.Ps2.Emulator;
+using CodeDesigner.Ps2.EmulatorCore;
 using Microsoft.EntityFrameworkCore;
 using CodeDesigner.Ps2.LabelManager;
 using CodeDesigner.Ps2.Bridge.Database;
@@ -100,6 +100,20 @@ namespace CodeDesigner.Ps2.Bridge
         /// </para>
         /// </summary>
         public PineClient? PineClient { get; set; }
+
+        /// <summary>
+        /// Optional <see cref="InternalEmulatorClient"/> for talking to the
+        /// built-in emulator (CodeDesigner.Ps2.Emulator.exe) over its
+        /// <c>InternalPineSocket</c> on TCP 28012. Set when STARTEMULATOR /
+        /// STARTFILEMODE has spawned the child process — the peer of
+        /// <see cref="PineClient"/> for the non-PCSX2 mode.
+        /// <para>
+        /// Handlers will gradually migrate from direct <see cref="Scheduler"/>
+        /// access to routing through this client (mirroring how PineClient is
+        /// used today for PCSX2 mode).
+        /// </para>
+        /// </summary>
+        public InternalEmulatorClient? InternalClient { get; set; }
 
         /// <summary>
         /// Returns <c>true</c> when the server should route memory operations

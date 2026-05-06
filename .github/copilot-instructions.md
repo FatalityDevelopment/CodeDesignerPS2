@@ -16,7 +16,7 @@ This is a C# library and toolset for the **Sony PlayStation 2 Emotion Engine (EE
 ```
 CodeDesigner/
 ├── CodeDesigner.Ps2.Common/     # Core library (assembler, disassembler, instructions, encoder/decoder)
-├── CodeDesigner.Ps2.Emulator/   # PS2 emulator: EE + IOP CPUs, hardware peripherals, ELF loader
+├── CodeDesigner.Ps2.EmulatorCore/   # PS2 emulator: EE + IOP CPUs, hardware peripherals, ELF loader
 ├── CodeDesigner.Ps2/            # Console application + socket server
 ├── CodeDesigner.Ps2.McpServer/  # MCP stdio bridge for GitHub Copilot
 ├── CodeDesigner.Ps2.CdsLanguage/ # CDS compiler and parser
@@ -110,7 +110,7 @@ cd CodeDesigner.Ps2 && dotnet run -- --server
 
 ### IOP Subsystem
 
-All IOP classes live in `CodeDesigner.Ps2.Emulator/IOP/`.
+All IOP classes live in `CodeDesigner.Ps2.EmulatorCore/IOP/`.
 
 - **IopState / IopMemoryBus / IopEmulator**: IOP RAM = 2 MB. INTC at `0x1F801070`/`0x1F801074`, timers at `0x1F801100`, SIF mirror at `0x1D000000`. `IopEmulator` bridges into `CpuState` for instruction execution. Reset vector `0xBFC00000`.
 - **IOP DMAC**: 13 channels (0–6 at `0x1F801080+`, 7–12 at `0x1F801500+`). Registers per channel: MADR+0, BCR+4, CHCR+8 (STR=bit24). DPCR/DICR at `0x1F8010F0`/`0xF4`, DPCR2/DICR2 at `0x1F801570`/`0x74`. INTC bit 3.

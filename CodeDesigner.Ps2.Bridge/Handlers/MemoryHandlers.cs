@@ -1,7 +1,7 @@
 using System;
 using System.Text.Json;
-using CodeDesigner.Ps2.Emulator;
-using CodeDesigner.Ps2.Emulator.IOP;
+using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.EmulatorCore.IOP;
 
 namespace CodeDesigner.Ps2.Bridge
 {

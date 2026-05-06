@@ -129,7 +129,7 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     byte[] cnfBytes = iso.ReadFile(cnfEntry.Value);
                     string cnfText = Encoding.Latin1.GetString(cnfBytes);
-                    string? bootElf = CodeDesigner.Ps2.Emulator.GameLoader.ParseSystemCnf(cnfText);
+                    string? bootElf = CodeDesigner.Ps2.EmulatorCore.GameLoader.ParseSystemCnf(cnfText);
                     if (!string.IsNullOrEmpty(bootElf))
                     {
                         sb.AppendLine($"Boot ELF: {bootElf}");

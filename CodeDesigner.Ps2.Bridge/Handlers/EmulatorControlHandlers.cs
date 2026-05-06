@@ -7,8 +7,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using SharpCompress.Archives;
 using SharpCompress.Common;
-using CodeDesigner.Ps2.Emulator;
-using CodeDesigner.Ps2.Emulator.IOP;
+using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.EmulatorCore.IOP;
+using CodeDesigner.Ps2.Bridge.Database;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -468,7 +469,7 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
                     string cnfText  = System.Text.Encoding.Latin1.GetString(cnfBytes);
-                    string? rawBoot = CodeDesigner.Ps2.Emulator.GameLoader.ParseSystemCnf(cnfText);
+                    string? rawBoot = CodeDesigner.Ps2.EmulatorCore.GameLoader.ParseSystemCnf(cnfText);
                     if (rawBoot != null)
                     {
                         int slash = rawBoot.LastIndexOfAny(new[] { '/', '\\' });
@@ -539,7 +540,7 @@ namespace CodeDesigner.Ps2.Bridge
                         return CreateErrorResponse("SYSTEM.CNF not found on disc.");
                     byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
                     string cnfText  = System.Text.Encoding.Latin1.GetString(cnfBytes);
-                    resolvedElfName = CodeDesigner.Ps2.Emulator.GameLoader.ParseSystemCnf(cnfText) ?? string.Empty;
+                    resolvedElfName = CodeDesigner.Ps2.EmulatorCore.GameLoader.ParseSystemCnf(cnfText) ?? string.Empty;
                     if (string.IsNullOrEmpty(resolvedElfName))
                         return CreateErrorResponse("BOOT2 entry not found in SYSTEM.CNF.");
                 }

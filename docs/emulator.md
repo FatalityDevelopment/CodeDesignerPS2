@@ -1,8 +1,8 @@
 [← Back to Documentation Index](README.md)
 
-# CodeDesigner.Ps2.Emulator — PS2 Hardware Emulation
+# CodeDesigner.Ps2.EmulatorCore — PS2 Hardware Emulation
 
-The `CodeDesigner.Ps2.Emulator` project provides a complete software emulation of the Sony PlayStation 2 console, including the Emotion Engine (EE) CPU, I/O Processor (IOP), and all major hardware peripherals.
+The `CodeDesigner.Ps2.EmulatorCore` project provides a complete software emulation of the Sony PlayStation 2 console, including the Emotion Engine (EE) CPU, I/O Processor (IOP), and all major hardware peripherals.
 
 ## Overview
 

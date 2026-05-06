@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using CodeDesigner.Ps2.Bridge.Database;
 using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.Emulator;
+using CodeDesigner.Ps2.EmulatorCore;
 using Microsoft.EntityFrameworkCore;
 using CheatPorterLib = CodeDesigner.Ps2.CheatEngine.CheatPorter;
 

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CodeDesigner.Ps2.EmulatorCore</RootNamespace>
+    <AssemblyName>CodeDesigner.Ps2.EmulatorCore</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.Common\CodeDesigner.Ps2.Common.csproj" />
+    <ProjectReference Include="..\CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj" />
+  </ItemGroup>
+
+</Project>

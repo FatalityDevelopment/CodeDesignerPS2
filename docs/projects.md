@@ -22,7 +22,7 @@ Each instruction class implements `Disassemble`, `Assemble`, and `Exec` methods 
 
 ---
 
-## CodeDesigner.Ps2.Emulator
+## CodeDesigner.Ps2.EmulatorCore
 
 **Role:** Full PS2 system emulator.
 

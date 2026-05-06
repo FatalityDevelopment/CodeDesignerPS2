@@ -1,6 +1,6 @@
 using System;
 using CodeDesigner.Ps2.CheatEngine;
-using CodeDesigner.Ps2.Emulator;
+using CodeDesigner.Ps2.EmulatorCore;
 
 namespace CodeDesigner.Ps2.Bridge
 {

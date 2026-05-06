@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeDesigner.Ps2.Common;
-using CodeDesigner.Ps2.Emulator;
+using CodeDesigner.Ps2.EmulatorCore;
 
 namespace CodeDesigner.Ps2.Bridge
 {

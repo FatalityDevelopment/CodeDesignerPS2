@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using CodeDesigner.Ps2.Emulator;
-using CodeDesigner.Ps2.Emulator.Hardware;
-using CodeDesigner.Ps2.Emulator.IOP;
+using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.EmulatorCore.Hardware;
+using CodeDesigner.Ps2.EmulatorCore.IOP;
 using CodeDesigner.Ps2.Common.Cpu.Instructions.EE;
 
 

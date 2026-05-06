@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Text.Json;
+using CodeDesigner.Ps2.Bridge.Database;
 
 namespace CodeDesigner.Ps2.Bridge
 {

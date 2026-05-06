@@ -171,6 +171,6 @@ Logs written to console and optional file.
 
 - .NET 6+ runtime
 - CodeDesigner.Ps2.Common
-- CodeDesigner.Ps2.Emulator
+- CodeDesigner.Ps2.EmulatorCore
 - CodeDesigner.Ps2.Database</content>
 <parameter name="filePath">c:\Users\tholu\Desktop\CodeDesigner\docs\console-app.md

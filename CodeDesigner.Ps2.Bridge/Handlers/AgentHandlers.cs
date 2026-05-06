@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json;
+using CodeDesigner.Ps2.Database.Entities;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -189,7 +190,7 @@ namespace CodeDesigner.Ps2.Bridge
 
         // ── DTO mapper ────────────────────────────────────────────────────────
 
-        private static McpAgentInfo ToMcpAgentDto(Database.Entities.McpAgent a) => new McpAgentInfo
+        private static McpAgentInfo ToMcpAgentDto(McpAgent a) => new McpAgentInfo
         {
             Id                  = a.Id,
             IsAgentLead         = a.IsAgentLead,

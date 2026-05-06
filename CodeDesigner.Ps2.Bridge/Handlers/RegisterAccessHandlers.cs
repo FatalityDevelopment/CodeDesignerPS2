@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
-using CodeDesigner.Ps2.Emulator;
-using CodeDesigner.Ps2.Emulator.Hardware;
+using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.EmulatorCore.Hardware;
 
 namespace CodeDesigner.Ps2.Bridge
 {

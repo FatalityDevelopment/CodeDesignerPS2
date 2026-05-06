@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json;
+using CodeDesigner.Ps2.Database.Entities;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -201,7 +202,7 @@ namespace CodeDesigner.Ps2.Bridge
 
         // ── DTO mapper ────────────────────────────────────────────────────────
 
-        private static McpOrchestrationInfo ToMcpOrchestrationDto(Database.Entities.McpOrchestration o) => new McpOrchestrationInfo
+        private static McpOrchestrationInfo ToMcpOrchestrationDto(McpOrchestration o) => new McpOrchestrationInfo
         {
             Id          = o.Id,
             IsActive    = o.IsActive,

@@ -1,8 +1,8 @@
-using System.IO.Compression;
+using System.Diagnostics;
 using System.Text.Json;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Compression;
-using CodeDesigner.Ps2.Emulator;
+using CodeDesigner.Ps2.EmulatorCore;
 using CodeDesigner.Ps2.Recompiler;
 
 namespace CodeDesigner.Ps2.Bridge
@@ -10,7 +10,6 @@ namespace CodeDesigner.Ps2.Bridge
     class Program
     {
         private static readonly object RuntimeModeLock = new object();
-        private static Task? ActiveEmulatorTask;
 
         static async Task Main(string[] args)
         {
@@ -53,15 +52,11 @@ namespace CodeDesigner.Ps2.Bridge
                 return;
             }
 
-            if (HasFlag(args, "--run"))
+            if (HasFlag(args, "--run") || HasFlag(args, "--file"))
             {
-                await RunEmulator(args);
-                return;
-            }
-
-            if (HasFlag(args, "--file"))
-            {
-                await RunFileMode(args);
+                // The built-in emulator now lives in CodeDesigner.Ps2.Emulator.
+                // Forward these flags to that executable.
+                Environment.ExitCode = LaunchInternalEmulator(args);
                 return;
             }
 
@@ -74,255 +69,42 @@ namespace CodeDesigner.Ps2.Bridge
             await StartSocketServer();
         }
 
-        private static async Task RunEmulator(string[] args, SocketServer? attachedServer = null)
+        /// <summary>
+        /// Spawn <c>CodeDesigner.Ps2.Emulator.exe</c> with the supplied args and
+        /// wait for it to exit. Bridge no longer hosts the built-in emulator
+        /// in-process — that lives in its own process now (analogous to PCSX2).
+        /// </summary>
+        private static int LaunchInternalEmulator(string[] args)
         {
-            string? biosPath = GetArg(args, "--bios");
-            string? discPath = GetArg(args, "--disc");
-            string? stepsStr = GetArg(args, "--steps");
-            biosPath ??= DefaultBiosPath();
-
-            if (!File.Exists(biosPath))
+            string baseDir = AppContext.BaseDirectory;
+            string exe = Path.Combine(baseDir,
+                OperatingSystem.IsWindows()
+                    ? "CodeDesigner.Ps2.Emulator.exe"
+                    : "CodeDesigner.Ps2.Emulator");
+            if (!File.Exists(exe))
             {
-                Console.Error.WriteLine($"Error: BIOS file not found: {biosPath}");
-                return;
+                Console.Error.WriteLine($"Internal emulator binary not found at: {exe}");
+                Console.Error.WriteLine("Build CodeDesigner.Ps2.Emulator and re-run, or invoke it directly.");
+                return 1;
             }
 
-            if (discPath != null && discPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            var psi = new ProcessStartInfo
             {
-                discPath = ExtractIsoFromZip(discPath);
-                if (discPath == null)
-                    return;
-            }
-
-            if (discPath != null && !File.Exists(discPath))
-            {
-                Console.Error.WriteLine($"Error: Disc image not found: {discPath}");
-                return;
-            }
-
-            long maxSteps = stepsStr != null && long.TryParse(stepsStr, out long parsed)
-                ? parsed
-                : long.MaxValue;
-
-            Console.WriteLine($"Loading BIOS: {biosPath}");
-            byte[] biosData;
-            try
-            {
-                biosData = File.ReadAllBytes(biosPath);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error reading BIOS file: {ex.Message}");
-                return;
-            }
-
-            var scheduler = new DualCpuScheduler();
-            try
-            {
-                var biosInfo = BiosLoader.Load(biosData, scheduler);
-                Console.WriteLine($"BIOS loaded: {biosInfo}");
-            }
-            catch (BiosLoadException ex)
-            {
-                Console.Error.WriteLine($"Error loading BIOS: {ex.Message}");
-                return;
-            }
-
-            FileStream? isoStream = null;
-            if (discPath != null)
-            {
-                Console.WriteLine($"Loading disc: {discPath}");
-                try
-                {
-                    isoStream = new FileStream(discPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                    string bootPath = GameLoader.InsertDisc(isoStream, scheduler);
-                    if (bootPath.Length > 0)
-                        Console.WriteLine($"Disc inserted. BIOS will boot: {bootPath}");
-                    else
-                        Console.WriteLine("Disc inserted. BIOS will boot the game.");
-                }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is GameLoadException)
-                {
-                    isoStream?.Dispose();
-                    Console.Error.WriteLine($"Error loading game disc: {ex.Message}");
-                    return;
-                }
-            }
-            else
-            {
-                Console.WriteLine("No disc image provided - running BIOS only.");
-            }
-
-            var debugSession = new BuiltInEmulatorDebugSession(scheduler);
-            debugSession.Attach();
-
-            bool ownsEmbeddedServer = attachedServer == null;
-            var embeddedServer = attachedServer ?? new SocketServer(8765);
-            Task serverTask = Task.CompletedTask;
-
-            if (embeddedServer.PineClient != null)
-            {
-                embeddedServer.PineClient.Dispose();
-                embeddedServer.PineClient = null;
-            }
-
-            embeddedServer.Scheduler = scheduler;
-
-            if (ownsEmbeddedServer)
-            {
-                embeddedServer.ClientConnected += (_, ep) => Console.WriteLine($"[Server] Client connected: {ep}");
-                embeddedServer.ClientDisconnected += (_, _) => Console.WriteLine("[Server] Client disconnected");
-                serverTask = Task.Run(() => embeddedServer.StartAsync());
-            }
-
-            Console.WriteLine("Emulator starting at reset vector - paused, waiting for client.");
-            scheduler.Paused = true;
-
-            Console.WriteLine();
-            Console.WriteLine("Emulator ready. Waiting for client to resume...");
-            if (maxSteps != long.MaxValue)
-                Console.WriteLine($"Step limit: {maxSteps:N0} EE steps.");
-            Console.WriteLine();
-
-            using var cts = new CancellationTokenSource();
-            Console.CancelKeyPress += (_, e) =>
-            {
-                e.Cancel = true;
-                cts.Cancel();
-                Console.WriteLine("\nStopping emulator...");
+                FileName  = exe,
+                UseShellExecute = false,
             };
+            // Forward all our args except the dispatch flag itself; Emulator
+            // expects to see --bios / --disc / --file / --steps / --port directly.
+            foreach (var a in args)
+                if (!a.Equals("--run", StringComparison.OrdinalIgnoreCase))
+                    psi.ArgumentList.Add(a);
 
-            const int SliceSize = 256;
-            long totalSteps = 0;
-            var startTime = DateTime.UtcNow;
-
-            try
-            {
-                while (!cts.Token.IsCancellationRequested && totalSteps < maxSteps)
-                {
-                    if (embeddedServer.PendingRestart)
-                    {
-                        embeddedServer.PendingRestart = false;
-                        Console.WriteLine("[Restart] Reinitialising emulator...");
-
-                        var savedBreakpoints = new HashSet<uint>(scheduler.Breakpoints);
-                        var newScheduler = new DualCpuScheduler();
-
-                        BiosLoader.Load(biosData, newScheduler);
-
-                        if (isoStream != null)
-                        {
-                            isoStream.Seek(0, SeekOrigin.Begin);
-                            string bootPath = GameLoader.InsertDisc(isoStream, newScheduler);
-                            if (bootPath.Length > 0)
-                                Console.WriteLine($"[Restart] Disc inserted. BIOS will boot: {bootPath}");
-                        }
-
-                        foreach (var bp in savedBreakpoints)
-                            newScheduler.Breakpoints.Add(bp);
-
-                        scheduler = newScheduler;
-                        debugSession.OnSchedulerReplaced(newScheduler);
-                        embeddedServer.Scheduler = newScheduler;
-                        scheduler.Paused = true;
-                        embeddedServer.SignalRestartComplete();
-
-                        totalSteps = 0;
-                        startTime = DateTime.UtcNow;
-                        debugSession.ResetState();
-
-                        Console.WriteLine("[Restart] Emulator reinitialised - paused at reset vector, waiting for client to resume.");
-                        continue;
-                    }
-
-                    if (scheduler.Paused)
-                    {
-                        await scheduler.WaitForResumeAsync(cts.Token).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    int slice = (int)Math.Min(SliceSize, maxSteps - totalSteps);
-                    try
-                    {
-                        scheduler.RunSlice(slice);
-                    }
-                    catch (Common.Cpu.Instructions.EE.BreakpointException)
-                    {
-                        uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
-                        Console.WriteLine($"[BREAK -> COP0 vector 0x{bpPc:x8}, continuing]");
-                    }
-
-                    scheduler.TickHardware((uint)slice);
-                    totalSteps += slice;
-                    debugSession.TryReport(totalSteps, startTime);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Ctrl+C
-            }
-
-            double totalElapsed = (DateTime.UtcNow - startTime).TotalSeconds;
-            Console.WriteLine();
-            Console.WriteLine($"Emulator stopped after {totalSteps:N0} EE steps ({totalElapsed:F2}s).");
-            debugSession.PrintFinalPcSummary();
-
-            if (ownsEmbeddedServer)
-            {
-                embeddedServer.Stop();
-                await serverTask.ConfigureAwait(false);
-            }
-            else
-            {
-                embeddedServer.Scheduler = null;
-            }
-
-            isoStream?.Dispose();
+            using var proc = Process.Start(psi);
+            if (proc == null) return 1;
+            proc.WaitForExit();
+            return proc.ExitCode;
         }
 
-        private static string? ExtractIsoFromZip(string zipPath)
-        {
-            Console.WriteLine($"Opening ZIP archive: {zipPath}");
-            try
-            {
-                using var archive = ZipFile.OpenRead(zipPath);
-                var entry = archive.Entries.FirstOrDefault(e =>
-                    e.Name.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) ||
-                    e.Name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase));
-
-                if (entry == null)
-                {
-                    Console.Error.WriteLine("Error: No ISO/BIN disc image found inside the ZIP archive.");
-                    return null;
-                }
-
-                string safeFileName = Path.GetFileName(entry.Name);
-                if (string.IsNullOrEmpty(safeFileName))
-                {
-                    Console.Error.WriteLine("Error: ZIP entry has no valid filename.");
-                    return null;
-                }
-
-                string tempPath = Path.Combine(Path.GetTempPath(), safeFileName);
-                if (File.Exists(tempPath) &&
-                    new FileInfo(tempPath).Length == entry.Length &&
-                    File.GetLastWriteTimeUtc(tempPath) >= File.GetLastWriteTimeUtc(zipPath))
-                {
-                    Console.WriteLine($"Using cached extraction: {tempPath}");
-                    return tempPath;
-                }
-
-                Console.WriteLine($"Extracting '{safeFileName}' ({entry.Length / 1_048_576.0:F0} MB) to temp folder...");
-                entry.ExtractToFile(tempPath, overwrite: true);
-                Console.WriteLine("Extraction complete.");
-                return tempPath;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error extracting ZIP archive: {ex.Message}");
-                return null;
-            }
-        }
 
         private static async Task StartPcsx2BridgeServer(string[] args)
         {
@@ -392,117 +174,6 @@ namespace CodeDesigner.Ps2.Bridge
         /// no disc), start the socket server paused at the ELF entry point, and wait for
         /// the VS Code client to connect and send debugger commands.
         /// </summary>
-        private static async Task RunFileMode(string[] args, SocketServer? attachedServer = null)
-        {
-            string? elfPath = GetArg(args, "--file");
-
-            if (string.IsNullOrWhiteSpace(elfPath))
-            {
-                Console.Error.WriteLine("Error: --file requires an ELF path, e.g. --file game.elf");
-                return;
-            }
-
-            if (!File.Exists(elfPath))
-            {
-                Console.Error.WriteLine($"Error: ELF file not found: {elfPath}");
-                return;
-            }
-
-            byte[] elfData;
-            try { elfData = File.ReadAllBytes(elfPath); }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error reading ELF file: {ex.Message}");
-                return;
-            }
-
-            var scheduler = new DualCpuScheduler();
-            uint entryPoint;
-            try
-            {
-                entryPoint = ElfLoader.LoadIntoEmulator(elfData, scheduler.EE);
-            }
-            catch (ElfLoadException ex)
-            {
-                Console.Error.WriteLine($"Error loading ELF: {ex.Message}");
-                return;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error loading ELF: {ex.Message}");
-                return;
-            }
-
-            scheduler.Paused = true;
-            Console.WriteLine($"ELF loaded: {elfPath}");
-            Console.WriteLine($"Entry point: 0x{entryPoint:X8}");
-            Console.WriteLine("Emulator is paused in file mode. Connect VS Code to debug.");
-
-            bool ownsEmbeddedServer = attachedServer == null;
-            var embeddedServer = attachedServer ?? new SocketServer(8765);
-            Task serverTask = Task.CompletedTask;
-
-            if (embeddedServer.PineClient != null)
-            {
-                embeddedServer.PineClient.Dispose();
-                embeddedServer.PineClient = null;
-            }
-
-            embeddedServer.Scheduler = scheduler;
-
-            if (ownsEmbeddedServer)
-            {
-                embeddedServer.ClientConnected += (_, ep) => Console.WriteLine($"[File Mode] Client connected: {ep}");
-                embeddedServer.ClientDisconnected += (_, _) => Console.WriteLine("[File Mode] Client disconnected");
-                serverTask = Task.Run(() => embeddedServer.StartAsync());
-            }
-
-            using var cts = new CancellationTokenSource();
-            Console.CancelKeyPress += (_, e) =>
-            {
-                e.Cancel = true;
-                cts.Cancel();
-                Console.WriteLine("\nStopping file mode emulator...");
-            };
-
-            const int SliceSize = 256;
-            long totalSteps = 0;
-
-            try
-            {
-                while (!cts.Token.IsCancellationRequested)
-                {
-                    if (scheduler.Paused)
-                    {
-                        await scheduler.WaitForResumeAsync(cts.Token).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    try { scheduler.RunSlice(SliceSize); }
-                    catch (Common.Cpu.Instructions.EE.BreakpointException)
-                    {
-                        uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
-                        Console.WriteLine($"[BREAK] pc=0x{bpPc:x8}");
-                    }
-
-                    scheduler.TickHardware((uint)SliceSize);
-                    totalSteps += SliceSize;
-                }
-            }
-            catch (OperationCanceledException) { }
-
-            Console.WriteLine($"File mode stopped after {totalSteps:N0} EE steps.");
-
-            if (ownsEmbeddedServer)
-            {
-                embeddedServer.Stop();
-                await serverTask.ConfigureAwait(false);
-            }
-            else
-            {
-                embeddedServer.Scheduler = null;
-            }
-        }
 
         private static Task RunRecompiler(string[] args)
         {
@@ -607,7 +278,7 @@ namespace CodeDesigner.Ps2.Bridge
         {
             lock (RuntimeModeLock)
             {
-                if (ActiveEmulatorTask != null && !ActiveEmulatorTask.IsCompleted)
+                if (ActiveEmulatorProcess != null && !ActiveEmulatorProcess.HasExited)
                 {
                     return JsonSerializer.Serialize(new CommandResponse
                     {
@@ -651,20 +322,16 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
-        // Maximum seconds to wait for RunEmulator to initialise the scheduler after
-        // STARTEMULATOR is received.  BIOS loading takes < 500 ms on typical hardware;
-        // 30 s covers pathologically slow I/O without risking a TypeScript client timeout.
-        private const int EmulatorStartTimeoutSeconds = 30;
+        // Process handle for the spawned CodeDesigner.Ps2.Emulator.exe (built-in
+        // emulator host). Replaces the in-process ActiveEmulatorTask of the previous
+        // architecture — Bridge no longer hosts the emulator itself, it spawns it.
+        private static Process? ActiveEmulatorProcess;
 
         private static string HandleStartEmulatorMode(SocketServer server, CommandMessage command)
         {
-            // Capture the newly-started task reference outside the lock so we can poll
-            // it after releasing RuntimeModeLock (avoids holding the lock while sleeping).
-            Task startTask;
-
             lock (RuntimeModeLock)
             {
-                if (ActiveEmulatorTask != null && !ActiveEmulatorTask.IsCompleted)
+                if (ActiveEmulatorProcess != null && !ActiveEmulatorProcess.HasExited)
                 {
                     return JsonSerializer.Serialize(new CommandResponse
                     {
@@ -674,7 +341,7 @@ namespace CodeDesigner.Ps2.Bridge
                     });
                 }
 
-                var runArgs = new List<string> { "--run" };
+                var runArgs = new List<string>();
                 if (!string.IsNullOrWhiteSpace(command.BiosPath))
                 {
                     runArgs.Add("--bios");
@@ -690,53 +357,77 @@ namespace CodeDesigner.Ps2.Bridge
                     runArgs.Add("--steps");
                     runArgs.Add(command.Steps.Value.ToString());
                 }
+                int port = InternalEmulatorClient.DefaultPort;
+                runArgs.Add("--port");
+                runArgs.Add(port.ToString());
 
                 if (server.PineClient != null)
                 {
                     server.PineClient.Dispose();
                     server.PineClient = null;
                 }
-
-                // Clear any stale scheduler from a previous run so the wait loop below
-                // detects when the newly-started RunEmulator task sets the new one.
+                server.InternalClient?.Dispose();
+                server.InternalClient = null;
                 server.Scheduler = null;
 
-                ActiveEmulatorTask = Task.Run(async () =>
+                try
                 {
+                    ActiveEmulatorProcess = SpawnEmulatorProcess(runArgs.ToArray());
+                }
+                catch (Exception ex)
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = false,
+                        Command = "STARTEMULATOR",
+                        Error   = $"Cannot spawn Emulator.exe: {ex.Message}"
+                    });
+                }
+
+                if (ActiveEmulatorProcess == null)
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = false,
+                        Command = "STARTEMULATOR",
+                        Error   = "Emulator.exe failed to start"
+                    });
+                }
+
+                // Give the child a moment to bind its InternalPineSocket before
+                // we attempt to connect.  Five attempts of 200 ms keeps total
+                // wait under one second while comfortably covering JIT startup.
+                InternalEmulatorClient? client = null;
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    Thread.Sleep(200);
                     try
                     {
-                        await RunEmulator(runArgs.ToArray(), server);
+                        client = new InternalEmulatorClient("127.0.0.1", port);
+                        _ = client.GetStatus();   // probes connection
+                        break;
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        Console.Error.WriteLine($"[Runtime] Emulator task crashed: {ex.Message}");
+                        client?.Dispose();
+                        client = null;
                     }
-                });
+                }
 
-                startTask = ActiveEmulatorTask;
-            } // release RuntimeModeLock before blocking so STARTPCSX2/STARTEMULATOR from
-              // other clients aren't held up while we wait for BIOS loading.
-
-            // Wait until RunEmulator has set the scheduler (BIOS loaded, emulator paused
-            // at the reset vector) before returning success.  Without this wait, TypeScript
-            // immediately sends RESUME which arrives while Scheduler is still null, causing
-            // "Emulator not running — no scheduler attached" and leaving the emulator
-            // permanently paused.  ProcessCommand is synchronous so Thread.Sleep is used.
-            var waitStart = DateTime.UtcNow;
-            while (server.Scheduler == null
-                   && !startTask.IsCompleted
-                   && (DateTime.UtcNow - waitStart).TotalSeconds < EmulatorStartTimeoutSeconds)
-            {
-                Thread.Sleep(50);
-            }
-
-            if (server.Scheduler == null)
-                return JsonSerializer.Serialize(new CommandResponse
+                if (client == null)
                 {
-                    Success = false,
-                    Command = "STARTEMULATOR",
-                    Error = "Emulator failed to start — check BIOS path and disc image."
-                });
+                    try { ActiveEmulatorProcess.Kill(); } catch { /* ignore */ }
+                    ActiveEmulatorProcess = null;
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = false,
+                        Command = "STARTEMULATOR",
+                        Error   = "Could not connect to Emulator.exe InternalPineSocket"
+                    });
+                }
+
+                server.InternalClient = client;
+            }
 
             return JsonSerializer.Serialize(new CommandResponse
             {
@@ -747,12 +438,33 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// STARTFILEMODE runtime command — load a PS2 ELF32, BIN, or RAW binary into
-        /// a bare emulator (no BIOS, no disc), leave it paused at the entry point.
-        /// Supported file types:
-        ///   .elf / .ELF  — PS2 ELF32 executable (entry point from ELF header)
-        ///   .bin / .raw  — flat binary loaded at <see cref="CommandMessage.Address"/>
-        ///                  (defaults to 0x00000000); PC set to load address
+        /// Launch <c>CodeDesigner.Ps2.Emulator.exe</c> as a background child process.
+        /// Returns the Process handle; the caller is responsible for kill/dispose.
+        /// </summary>
+        private static Process? SpawnEmulatorProcess(string[] args)
+        {
+            string baseDir = AppContext.BaseDirectory;
+            string exe = Path.Combine(baseDir,
+                OperatingSystem.IsWindows()
+                    ? "CodeDesigner.Ps2.Emulator.exe"
+                    : "CodeDesigner.Ps2.Emulator");
+            if (!File.Exists(exe))
+                throw new FileNotFoundException($"Internal emulator binary not found at: {exe}");
+
+            var psi = new ProcessStartInfo
+            {
+                FileName        = exe,
+                UseShellExecute = false,
+            };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            return Process.Start(psi);
+        }
+
+        /// <summary>
+        /// STARTFILEMODE runtime command — spawn <c>CodeDesigner.Ps2.Emulator.exe</c>
+        /// in <c>--file</c> mode and connect to it via <see cref="InternalEmulatorClient"/>.
+        /// The actual ELF/BIN load now happens in the child process; Bridge simply
+        /// forwards the request and wires up the debug client.
         /// </summary>
         private static string HandleStartFileMode(SocketServer server, CommandMessage command)
         {
@@ -771,62 +483,79 @@ namespace CodeDesigner.Ps2.Bridge
                     Error = $"File not found: {filePath}"
                 });
 
-            byte[] fileData;
-            try { fileData = File.ReadAllBytes(filePath); }
-            catch (Exception ex)
-            {
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success = false, Command = "STARTFILEMODE",
-                    Error = $"Cannot read file: {ex.Message}"
-                });
-            }
-
             lock (RuntimeModeLock)
             {
-                // Stop any running emulator task by replacing the scheduler; the
-                // run-loop will exit naturally when the task next checks for the
-                // cancellation token or detects the scheduler swap.
-                if (ActiveEmulatorTask != null && !ActiveEmulatorTask.IsCompleted)
-                    ActiveEmulatorTask = null;
+                if (ActiveEmulatorProcess != null && !ActiveEmulatorProcess.HasExited)
+                {
+                    try { ActiveEmulatorProcess.Kill(); } catch { /* ignore */ }
+                    ActiveEmulatorProcess = null;
+                }
 
                 if (server.PineClient != null)
                 {
                     server.PineClient.Dispose();
                     server.PineClient = null;
                 }
+                server.InternalClient?.Dispose();
+                server.InternalClient = null;
+                server.Scheduler = null;
 
-                var scheduler = new DualCpuScheduler();
-                uint entryPoint;
-
-                string ext = Path.GetExtension(filePath).ToLowerInvariant();
-                if (ext == ".elf")
+                int port = InternalEmulatorClient.DefaultPort;
+                var runArgs = new List<string> { "--file", filePath, "--port", port.ToString() };
+                if (command.Address.HasValue)
                 {
-                    try { entryPoint = ElfLoader.LoadIntoEmulator(fileData, scheduler.EE); }
-                    catch (ElfLoadException ex)
+                    runArgs.Add("--load-address");
+                    runArgs.Add($"0x{command.Address.Value:X8}");
+                }
+
+                try
+                {
+                    ActiveEmulatorProcess = SpawnEmulatorProcess(runArgs.ToArray());
+                }
+                catch (Exception ex)
+                {
+                    return JsonSerializer.Serialize(new CommandResponse
                     {
-                        return JsonSerializer.Serialize(new CommandResponse
-                        {
-                            Success = false, Command = "STARTFILEMODE",
-                            Error = $"ELF load error: {ex.Message}"
-                        });
+                        Success = false, Command = "STARTFILEMODE",
+                        Error   = $"Cannot spawn Emulator.exe: {ex.Message}"
+                    });
+                }
+
+                InternalEmulatorClient? client = null;
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    Thread.Sleep(200);
+                    try
+                    {
+                        client = new InternalEmulatorClient("127.0.0.1", port);
+                        _ = client.GetStatus();
+                        break;
+                    }
+                    catch
+                    {
+                        client?.Dispose();
+                        client = null;
                     }
                 }
-                else
+
+                if (client == null)
                 {
-                    // .bin / .raw — flat binary; load at the requested address (default 0)
-                    uint loadAddress = command.Address ?? 0u;
-                    var bus = scheduler.EE.Bus;
-                    for (int i = 0; i < fileData.Length; i++)
-                        bus.WriteByte(loadAddress + (uint)i, fileData[i]);
-                    entryPoint = loadAddress;
-                    scheduler.EE.Cpu.PC = entryPoint;
+                    try { ActiveEmulatorProcess?.Kill(); } catch { /* ignore */ }
+                    ActiveEmulatorProcess = null;
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success = false, Command = "STARTFILEMODE",
+                        Error   = "Could not connect to Emulator.exe InternalPineSocket"
+                    });
                 }
 
-                scheduler.Paused = true;
-                server.Scheduler = scheduler;
+                server.InternalClient = client;
 
-                Console.WriteLine($"[File Mode] Loaded: {filePath}  entry=0x{entryPoint:X8}");
+                Console.WriteLine($"[File Mode] Spawned Emulator.exe with: {filePath}");
+
+                uint entryPoint;
+                try { entryPoint = client.GetProgramCounter(); }
+                catch { entryPoint = command.Address ?? 0u; }
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -884,12 +613,16 @@ namespace CodeDesigner.Ps2.Bridge
         private static void PrintHelp()
         {
             Console.WriteLine("Usage:");
-            Console.WriteLine("  dotnet run -- --run [--bios <bios.bin>] [--disc <game.iso>] [--steps N]");
             Console.WriteLine("  dotnet run -- --pcsx2 [--pcsx2-slot 28011] [--pcsx2-host 127.0.0.1] [--port 8765]");
             Console.WriteLine("  dotnet run -- --recompile --elf <game.elf> [--out recomp_out] [options]");
             Console.WriteLine("  dotnet run -- --server");
             Console.WriteLine("  dotnet run -- --graphics-info");
             Console.WriteLine("  dotnet run -- --help");
+            Console.WriteLine();
+            Console.WriteLine("The built-in emulator now lives in CodeDesigner.Ps2.Emulator.exe.");
+            Console.WriteLine("  Emulator.exe --bios <bios.bin> [--disc <game.iso|zip>] [--steps N] [--port 28012]");
+            Console.WriteLine("  Emulator.exe --file <game.elf|bin> [--load-address 0xN] [--port 28012]");
+            Console.WriteLine("Bridge --run / --file forward to that binary; --pcsx2 connects to PCSX2 PINE.");
             Console.WriteLine();
             Console.WriteLine("Default with no flags: starts control server on port 8765.");
             Console.WriteLine("Use STARTPCSX2 / STARTEMULATOR socket commands to select runtime mode.");
