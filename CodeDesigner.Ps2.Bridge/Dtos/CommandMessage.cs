@@ -20,6 +20,8 @@ namespace CodeDesigner.Ps2.Bridge
         public string? Comment { get; set; }
         public string? Query { get; set; }
         public string? SearchMode { get; set; }
+        public uint? TargetAddress { get; set; }
+        public List<string>? ReferenceKinds { get; set; }
         // SETREG fields
         public string? RegisterName { get; set; }
         public int? RegisterIndex { get; set; }

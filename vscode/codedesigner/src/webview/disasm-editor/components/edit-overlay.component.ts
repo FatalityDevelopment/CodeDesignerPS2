@@ -37,6 +37,13 @@ export interface EditOverlaySaveEvent {
   originalBytes: string;
 }
 
+export type RefKind = 'controlFlow' | 'resolved' | 'pointer' | 'stringPattern';
+
+export interface EditOverlayRefsRequest {
+  address: number;
+  kinds: RefKind[];
+}
+
 /**
  * Modal overlay for editing an instruction's bytes, label, and comment.
  * Has two tabs: Edit and History.
@@ -162,6 +169,32 @@ export interface EditOverlaySaveEvent {
     <div id="edit-overlay-tab-refs"
          class="edit-overlay-tab-content"
          [class.active]="activeTab() === 'refs'">
+      <div class="edit-overlay-refs-options">
+        <label class="edit-overlay-refs-option">
+          <input type="checkbox"
+                 [checked]="refKindEnabled('controlFlow')"
+                 (change)="onRefKindChange('controlFlow', $event)" />
+          Branches
+        </label>
+        <label class="edit-overlay-refs-option">
+          <input type="checkbox"
+                 [checked]="refKindEnabled('resolved')"
+                 (change)="onRefKindChange('resolved', $event)" />
+          Resolved
+        </label>
+        <label class="edit-overlay-refs-option">
+          <input type="checkbox"
+                 [checked]="refKindEnabled('pointer')"
+                 (change)="onRefKindChange('pointer', $event)" />
+          Pointers
+        </label>
+        <label class="edit-overlay-refs-option">
+          <input type="checkbox"
+                 [checked]="refKindEnabled('stringPattern')"
+                 (change)="onRefKindChange('stringPattern', $event)" />
+          String/CRC
+        </label>
+      </div>
       <div class="edit-overlay-refs-list">
         @if (refsLoading()) {
           <div class="edit-overlay-refs-loading">
@@ -171,12 +204,19 @@ export interface EditOverlaySaveEvent {
         } @else if (refs().length === 0) {
           <div class="edit-overlay-history-empty">No references found.</div>
         } @else {
-          @for (r of refs(); track r.address) {
-            <div class="edit-overlay-refs-row">
-              <span class="edit-overlay-refs-addr">0x{{ r.address }}</span>
+          @for (r of refs(); track refTrack(r)) {
+            <div class="edit-overlay-refs-row" (click)="onRefClick(r)">
+              <span class="edit-overlay-refs-kind">{{ r.kindLabel || refKindLabel(r.kind) }}</span>
+              <span class="edit-overlay-refs-addr">0x{{ normalizeAddress(r.address) }}</span>
               @if (r.instruction) {
                 <span class="edit-overlay-refs-instr"
                       [innerHTML]="colorizeRegisters(r.instruction)"></span>
+              }
+              @if (r.summary) {
+                <span class="edit-overlay-refs-summary">{{ r.summary }}</span>
+              }
+              @if (r.detail) {
+                <span class="edit-overlay-refs-detail">{{ r.detail }}</span>
               }
             </div>
           }
@@ -213,8 +253,11 @@ export class EditOverlayComponent {
   /** Emitted when the overlay opens to request history. */
   readonly requestHistory = output<number>();
 
-  /** Emitted when the references tab is first activated. */
-  readonly requestRefs = output<number>();
+  /** Emitted when references should be loaded. */
+  readonly requestRefs = output<EditOverlayRefsRequest>();
+
+  /** Emitted when a reference result should update the disassembler view. */
+  readonly navigateRef = output<number>();
 
   // ── State ───────────────────────────────────────────────────────────────────
 
@@ -233,6 +276,12 @@ export class EditOverlayComponent {
 
   readonly refs = signal<RefEntry[]>([]);
   readonly refsLoading = signal(false);
+  readonly refKinds = signal<Record<RefKind, boolean>>({
+    controlFlow: true,
+    resolved: true,
+    pointer: true,
+    stringPattern: true,
+  });
 
   /** Colorized version of disasmPreview for innerHTML binding. */
   readonly colorizedDisasmPreview = computed(() => this.colorizeRegisters(this.disasmPreview()));
@@ -366,10 +415,62 @@ export class EditOverlayComponent {
     this.activeTab.set('refs');
     if (!this._refsRequested) {
       this._refsRequested = true;
-      this.refsLoading.set(true);
-      this.refs.set([]);
-      this.requestRefs.emit(this._address);
+      this.requestRefsForCurrentAddress();
     }
+  }
+
+  refKindEnabled(kind: RefKind): boolean {
+    return this.refKinds()[kind];
+  }
+
+  onRefKindChange(kind: RefKind, event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.refKinds.update(current => ({ ...current, [kind]: checked }));
+    if (this.activeTab() === 'refs') {
+      this._refsRequested = true;
+      this.requestRefsForCurrentAddress();
+    }
+  }
+
+  onRefClick(ref: RefEntry): void {
+    const value = typeof ref.addressValue === 'number'
+      ? ref.addressValue
+      : parseInt(this.normalizeAddress(ref.address), 16);
+    if (!Number.isNaN(value)) {
+      this.navigateRef.emit(value);
+    }
+  }
+
+  refTrack(ref: RefEntry): string {
+    return `${ref.kind ?? ''}:${ref.address}:${ref.summary ?? ''}:${ref.matchedValue ?? ''}`;
+  }
+
+  refKindLabel(kind: string | undefined): string {
+    switch (kind) {
+      case 'controlFlow': return 'Branch/Jump';
+      case 'resolved': return 'Resolved';
+      case 'pointer': return 'Pointer';
+      case 'stringPattern': return 'ASCII';
+      case 'crc32': return 'CRC32';
+      default: return 'Reference';
+    }
+  }
+
+  normalizeAddress(address: string): string {
+    return (address || '').replace(/^0x/i, '').toUpperCase().padStart(8, '0');
+  }
+
+  private requestRefsForCurrentAddress(): void {
+    const kinds = (Object.keys(this.refKinds()) as RefKind[])
+      .filter(kind => this.refKinds()[kind]);
+    if (kinds.length === 0) {
+      this.refsLoading.set(false);
+      this.refs.set([]);
+      return;
+    }
+    this.refsLoading.set(true);
+    this.refs.set([]);
+    this.requestRefs.emit({ address: this._address, kinds });
   }
 
   save(): void {

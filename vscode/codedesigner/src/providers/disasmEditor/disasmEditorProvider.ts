@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, AiActivityEvent, AiSessionStartEvent, AiLabelUpdateEvent, StructEntry, LabelManagerEntry, LabelSetPayload } from "../../socketClient";
+import { SocketClient, LabelEntry, StringEntry, FunctionEntry, PointerEntry, FloatEntry, IntegerEntry, SearchMatch, ReferenceEntry, AiActivityEvent, AiSessionStartEvent, AiLabelUpdateEvent, StructEntry, LabelManagerEntry, LabelSetPayload } from "../../socketClient";
 import { getOutputChannel } from "../../extension";
 import { getNonce, getWebviewErrorHandlerScript } from "../../utils/nonce";
 
@@ -809,7 +809,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         webviewPanel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
       } else if (message.type === "getAddressRefs") {
         await this.handleGetAddressRefs(webviewPanel, message.address as number,
-          DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData);
+          DisasmEditorProvider.BASE_ADDRESS, fileData.length, undefined, fileData,
+          message.kinds as string[] | undefined);
       } else if (message.type === "assembleInstr") {
         if (this.socketClient?.isConnected()) {
           try {
@@ -1558,7 +1559,8 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 panel.webview.postMessage({ type: 'addressHistoryResult', address: message.address, history });
             } else if (message.type === 'getAddressRefs') {
                 await this.handleGetAddressRefs(panel, message.address as number,
-                    baseAddress, totalBytes, region);
+                    baseAddress, totalBytes, region, undefined,
+                    message.kinds as string[] | undefined);
             } else if (message.type === 'convertCheat') {
                 try {
                     const result = await this.socketClient!.convertCheat(
@@ -1990,10 +1992,50 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
 
   /**
    * Handle a `getAddressRefs` message from the webview.
-   * Runs a refs search for `targetAddress` and returns enriched results
-   * (address + instruction text) via an `addressRefsResult` message.
+   * Runs the bridge reference scanner for `targetAddress` and returns structured
+   * results via an `addressRefsResult` message.
    */
   private async handleGetAddressRefs(
+    panel: vscode.WebviewPanel,
+    targetAddress: number,
+    baseAddress: number,
+    length: number,
+    region?: string,
+    fileData?: Buffer,
+    kinds?: string[]
+  ): Promise<void> {
+    try {
+      const selectedKinds = kinds && kinds.length > 0
+        ? kinds
+        : ['controlFlow', 'resolved', 'pointer', 'stringPattern'];
+      let refs: ReferenceEntry[] = [];
+
+      if (fileData) {
+        if (this.socketClient?.isConnected()) {
+          try {
+            refs = await this.socketClient.scanReferences(
+              baseAddress, fileData.length, targetAddress, selectedKinds, undefined, fileData);
+          } catch {
+            refs = [];
+          }
+        }
+      } else if (this.socketClient?.isConnected()) {
+        try {
+          refs = await this.socketClient.scanReferences(
+            baseAddress, length, targetAddress, selectedKinds, region);
+        } catch {
+          refs = [];
+        }
+      }
+
+      panel.webview.postMessage({ type: 'addressRefsResult', refs });
+    } catch (err: any) {
+      console.error(`[REFS] handleGetAddressRefs failed: ${err?.message ?? err}`);
+      panel.webview.postMessage({ type: 'addressRefsResult', refs: [] });
+    }
+  }
+
+  private async handleGetAddressRefsLegacy(
     panel: vscode.WebviewPanel,
     targetAddress: number,
     baseAddress: number,

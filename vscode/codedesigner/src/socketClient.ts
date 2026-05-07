@@ -16,6 +16,8 @@ interface CommandMessage {
     Comment?: string;
     Query?: string;
     SearchMode?: string;
+    TargetAddress?: number;
+    ReferenceKinds?: string[];
     RegisterName?: string;
     RegisterIndex?: number;
     RegisterValue?: string;
@@ -189,6 +191,23 @@ export interface FunctionEntry {
 export interface PointerEntry {
     address:  string;
     pointsTo: string;
+}
+
+/**
+ * A structured reference to an address found by SCANREFERENCES.
+ */
+export interface ReferenceEntry {
+    address: string;
+    addressValue: number;
+    kind: string;
+    kindLabel: string;
+    targetAddress: string;
+    instruction: string;
+    summary: string;
+    detail?: string;
+    matchedValue?: string;
+    matchLength?: number;
+    sourceAddresses?: string[];
 }
 
 /**
@@ -422,6 +441,7 @@ interface CommandResponse {
     Strings?:   StringEntry[];
     Functions?: FunctionEntry[];
     Pointers?:  PointerEntry[];
+    References?: ReferenceEntry[];
     Floats?:    FloatEntry[];
     Integers?:  IntegerEntry[];
     Matches?:   SearchMatch[];
@@ -2212,6 +2232,34 @@ export class SocketClient {
             throw new Error(response.Error || 'Search failed');
         }
         return response.Matches ?? [];
+    }
+
+    /**
+     * Scan for structured references to a target address.
+     * For live panels pass address+length+region; for file panels pass fileData.
+     */
+    public async scanReferences(
+        address: number,
+        length: number,
+        targetAddress: number,
+        kinds: string[],
+        region?: string,
+        fileData?: Buffer
+    ): Promise<ReferenceEntry[]> {
+        const command: CommandMessage = {
+            Command: 'SCANREFERENCES',
+            Address: address,
+            Length: length,
+            TargetAddress: targetAddress,
+            ReferenceKinds: kinds,
+            Region: region,
+            Data: fileData ? fileData.toString('base64') : undefined,
+        };
+        const response = await this.sendCommand(command, 120000);
+        if (!response.Success) {
+            throw new Error(response.Error || 'ScanReferences failed');
+        }
+        return response.References ?? [];
     }
 
     /**

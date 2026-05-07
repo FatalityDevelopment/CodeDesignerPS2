@@ -201,7 +201,7 @@ namespace CodeDesigner.Ps2.Bridge
 
         // ── DTO mapper ────────────────────────────────────────────────────────
 
-        private static McpOrchestrationInfo ToMcpOrchestrationDto(Database.Entities.McpOrchestration o) => new McpOrchestrationInfo
+        private static McpOrchestrationInfo ToMcpOrchestrationDto(Database.Entities.McpOrchestration o) => new()
         {
             Id          = o.Id,
             IsActive    = o.IsActive,

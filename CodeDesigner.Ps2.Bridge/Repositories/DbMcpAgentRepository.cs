@@ -8,7 +8,7 @@ using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Database.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace CodeDesigner.Ps2.Bridge.Database
+namespace CodeDesigner.Ps2.Bridge.Repositories
 {
     /// <summary>
     /// Async persistence layer for MCP Agent profiles, backed by <see cref="CodeDesignerDbContext"/>.

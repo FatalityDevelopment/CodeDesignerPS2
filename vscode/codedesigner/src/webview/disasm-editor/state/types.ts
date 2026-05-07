@@ -160,8 +160,24 @@ export interface HistoryEntry {
 export interface RefEntry {
   /** Hex address of the instruction that references the target (e.g. "00123456"). */
   address: string;
+  /** Numeric address used for navigation. */
+  addressValue?: number;
+  /** Reference kind id, e.g. "controlFlow", "resolved", "pointer", "stringPattern", "crc32". */
+  kind?: string;
+  /** Human-readable reference kind. */
+  kindLabel?: string;
+  /** Hex address being referenced. */
+  targetAddress?: string;
   /** Human-readable instruction text, e.g. "JAL 0x00567890". Empty when unavailable. */
   instruction: string;
+  /** Short description of the match. */
+  summary?: string;
+  /** Optional extra detail, such as string contents. */
+  detail?: string;
+  /** Matched value, such as a pointer or CRC32 value. */
+  matchedValue?: string;
+  /** Source addresses that form a combined reference. */
+  sourceAddresses?: string[];
 }
 
 // ── Panel Visibility ──────────────────────────────────────────────────────────

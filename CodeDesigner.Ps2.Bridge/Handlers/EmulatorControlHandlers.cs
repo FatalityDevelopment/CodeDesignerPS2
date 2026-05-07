@@ -9,6 +9,7 @@ using SharpCompress.Archives;
 using SharpCompress.Common;
 using CodeDesigner.Ps2.Emulator;
 using CodeDesigner.Ps2.Emulator.IOP;
+using CodeDesigner.Ps2.Bridge.Repositories;
 
 namespace CodeDesigner.Ps2.Bridge
 {

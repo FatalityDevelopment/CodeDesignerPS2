@@ -1638,6 +1638,30 @@ app-bottom-panel {
 }
 
 /* ── Refs tab content ── */
+.edit-overlay-refs-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid #3e3e42;
+    background: #252526;
+}
+
+.edit-overlay-refs-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #cccccc;
+    font-family: monospace;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.edit-overlay-refs-option input {
+    margin: 0;
+}
+
 .edit-overlay-refs-list {
     max-height: 200px;
     overflow-y: auto;
@@ -1686,10 +1710,23 @@ app-bottom-panel {
     font-family: monospace;
     font-size: 11px;
     border-bottom: 1px solid #2d2d30;
+    cursor: pointer;
 }
 
 .edit-overlay-refs-row:last-child {
     border-bottom: none;
+}
+
+.edit-overlay-refs-row:hover {
+    background: #2a2d2e;
+}
+
+.edit-overlay-refs-kind {
+    color: #dcdcaa;
+    flex: 0 0 78px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .edit-overlay-refs-addr {
@@ -1701,6 +1738,22 @@ app-bottom-panel {
 .edit-overlay-refs-instr {
     flex: 1;
     color: #cccccc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.edit-overlay-refs-summary {
+    flex: 1;
+    color: #cccccc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.edit-overlay-refs-detail {
+    color: #858585;
+    max-width: 30%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

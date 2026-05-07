@@ -12,7 +12,7 @@ using MgrSet = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
 using DbLabel = CodeDesigner.Ps2.Database.Entities.Label;
 using DbLabelSet = CodeDesigner.Ps2.Database.Entities.LabelSet;
 
-namespace CodeDesigner.Ps2.Bridge.Database
+namespace CodeDesigner.Ps2.Bridge.Repositories
 {
     /// <summary>
     /// Async persistence layer for label sets, backed by <see cref="CodeDesignerDbContext"/>.

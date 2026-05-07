@@ -11,7 +11,7 @@ using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Emulator;
 using Microsoft.EntityFrameworkCore;
 using CodeDesigner.Ps2.LabelManager;
-using CodeDesigner.Ps2.Bridge.Database;
+using CodeDesigner.Ps2.Bridge.Repositories;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -41,7 +41,7 @@ namespace CodeDesigner.Ps2.Bridge
         {
             "READMEM", "WRITEMEM", "LOADBIN", "DISASSEMBLE",
             "SETBP", "CLEARBP",
-            "SCANSTRINGS", "SCANFUNCTIONS", "SCANPOINTERS", "SCANFLOATS", "SCANINTEGERS",
+            "SCANSTRINGS", "SCANFUNCTIONS", "SCANPOINTERS", "SCANFLOATS", "SCANINTEGERS", "SCANREFERENCES",
             "SCANVALUE",
             "NAVIGATETO",
         };
@@ -746,6 +746,16 @@ namespace CodeDesigner.Ps2.Bridge
                         return HandleSearch(command.Query ?? "", command.SearchMode ?? "text",
                                             command.Address ?? 0, command.Length ?? 0,
                                             command.Region, command.Data);
+
+                    case "SCANREFERENCES":
+                    case "SCAN_REFERENCES":
+                        return HandleScanReferences(
+                            command.TargetAddress,
+                            command.Address ?? 0,
+                            command.Length ?? 0,
+                            command.Region,
+                            command.Data,
+                            command.ReferenceKinds);
 
                     case "GETTHREADS":
                         return HandleGetThreads();
