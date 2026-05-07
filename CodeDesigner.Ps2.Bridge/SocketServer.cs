@@ -229,13 +229,24 @@ namespace CodeDesigner.Ps2.Bridge
             // routes commands to them. New services should be added to the
             // list below — see ICommandService for the migration recipe.
             Services.IBridgeContext ctx = this;
+            // MemoryService is constructed first so peer services can access
+            // its chunked debug-socket reader through ctx.Memory.
+            _memoryService = new Services.MemoryService(ctx);
             _dispatcher = new Services.CommandDispatcher(new Services.ICommandService[]
             {
-                new Services.MemoryService(ctx),
+                _memoryService,
                 new Services.ExecutionService(ctx),
                 new Services.CheatsService(ctx),
+                new Services.NetworkService(ctx),
+                new Services.PadService(ctx),
+                new Services.PineWatchService(ctx),
+                new Services.SaveStateService(ctx),
+                new Services.SteppingService(ctx),
             });
         }
+
+        private readonly Services.MemoryService _memoryService;
+        Services.MemoryService Services.IBridgeContext.Memory => _memoryService;
 
         /// <inheritdoc/>
         public void Dispose()
@@ -876,42 +887,22 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PCSX2GAMEINFO":
                         return HandlePcsx2GameInfo();
 
-                    case "RESET":
-                        return HandleReset();
-
-                    case "STEPINTO":
-                    case "STEP_INTO":
-                        return HandleStepInto();
-
-                    case "STEPOVER":
-                    case "STEP_OVER":
-                        return HandleStepOver();
-
-                    case "STEPOUT":
-                    case "STEP_OUT":
-                        return HandleStepOut();
-
-                    case "GETFPS":
-                    case "GET_FPS":
-                        return HandleGetFps();
-
-                    case "SETLIMITER":
-                    case "SET_LIMITER":
-                    case "SETLIMITERMODE":
-                        return HandleSetLimiterMode(command.LimiterMode);
-
-                    case "FRAMEADVANCE":
-                    case "FRAME_ADVANCE":
-                        return HandleFrameAdvance(command.FrameCount);
+                    // RESET, STEPINTO/OVER/OUT, GETFPS, SETLIMITER, FRAMEADVANCE
+                    // → SaveStateService / SteppingService (migrated). Aliases:
+                    case "STEP_INTO":   return DispatchAlias(command, "STEPINTO");
+                    case "STEP_OVER":   return DispatchAlias(command, "STEPOVER");
+                    case "STEP_OUT":    return DispatchAlias(command, "STEPOUT");
+                    case "GET_FPS":     return DispatchAlias(command, "GETFPS");
+                    case "SET_LIMITER": return DispatchAlias(command, "SETLIMITER");
+                    case "FRAME_ADVANCE": return DispatchAlias(command, "FRAMEADVANCE");
 
                     case "LISTBP":
                     case "LIST_BP":
                     case "LISTBREAKPOINTS":
                         return HandleListBreakpoints(command.CpuSel);
 
-                    case "GETSYMBOL":
-                    case "GET_SYMBOL":
-                        return HandleGetSymbol(command.Address);
+                    // GETSYMBOL → SteppingService (migrated)
+                    case "GET_SYMBOL": return DispatchAlias(command, "GETSYMBOL");
 
                     case "GETSYMBOLBYNAME":
                     case "GET_SYMBOL_BY_NAME":
@@ -951,33 +942,18 @@ namespace CodeDesigner.Ps2.Bridge
                     case "GET_LOCALS":
                         return HandleGetLocals(command.Address);
 
-                    case "SAVESTATETOFILE":
-                    case "SAVE_STATE_FILE":
-                    case "SAVESTATEFILE":
-                        return HandleSaveStateFile(command.FilePath);
-
-                    case "LOADSTATEFROMFILE":
-                    case "LOAD_STATE_FILE":
-                    case "LOADSTATEFILE":
-                        return HandleLoadStateFile(command.FilePath);
+                    // SaveState slot/file ops → SaveStateService (migrated)
+                    case "SAVE_STATE_FILE":  return DispatchAlias(command, "SAVESTATETOFILE");
+                    case "LOAD_STATE_FILE":  return DispatchAlias(command, "LOADSTATEFROMFILE");
+                    case "PINE_VERSION":     return DispatchAlias(command, "PINEVERSION");
+                    case "PINE_SAVESTATE":
+                    case "PINE_SAVE_STATE":  return DispatchAlias(command, "PINESAVESTATE");
+                    case "PINE_LOADSTATE":
+                    case "PINE_LOAD_STATE":  return DispatchAlias(command, "PINELOADSTATE");
 
                     case "EXTRACTP2S":
                     case "EXTRACT_P2S":
                         return HandleExtractP2s(command.FilePath);
-
-                    case "PINEVERSION":
-                    case "PINE_VERSION":
-                        return HandlePineVersion();
-
-                    case "PINESAVESTATE":
-                    case "PINE_SAVESTATE":
-                    case "PINE_SAVE_STATE":
-                        return HandlePineSaveStateSlot(command.StateSlot);
-
-                    case "PINELOADSTATE":
-                    case "PINE_LOADSTATE":
-                    case "PINE_LOAD_STATE":
-                        return HandlePineLoadStateSlot(command.StateSlot);
 
                     // READMEMREGION, SCANPATTERN → MemoryService (migrated). The
                     // alias forms (READ_MEM_REGION, SCAN_PATTERN) are still
@@ -1014,89 +990,31 @@ namespace CodeDesigner.Ps2.Bridge
                     case "RUN_UNTIL_PC":
                         return HandleRunUntilPc(command.TargetPc, command.TimeoutMs ?? 10_000);
 
-                    // ── PINE hardware watchpoints ─────────────────────────────
-                    case "PINEADDWATCH":
-                    case "PINE_ADD_WATCH":
-                        return HandlePineAddWatch(
-                            command.CpuSel,
-                            command.Address,
-                            command.EndAddress,
-                            command.WatchCond);
+                    // PINE hardware watchpoints → PineWatchService (migrated)
+                    case "PINE_ADD_WATCH":         return DispatchAlias(command, "PINEADDWATCH");
+                    case "PINE_REMOVE_WATCH":      return DispatchAlias(command, "PINEREMOVEWATCH");
+                    case "PINE_LIST_WATCHES":      return DispatchAlias(command, "PINELISTWATCHES");
+                    case "PINE_CLEAR_ALL_WATCHES": return DispatchAlias(command, "PINECLEARALLWATCHES");
+                    case "PINE_SAVE_SCREENSHOT":   return DispatchAlias(command, "PINESAVESCREENSHOT");
 
-                    case "PINEREMOVEWATCH":
-                    case "PINE_REMOVE_WATCH":
-                        return HandlePineRemoveWatch(
-                            command.CpuSel,
-                            command.Address,
-                            command.EndAddress);
+                    // Pad / controller input → PadService (migrated)
+                    case "PAD_GET_STATE":  return DispatchAlias(command, "PADGETSTATE");
+                    case "PAD_SET_BUTTON": return DispatchAlias(command, "PADSETBUTTON");
+                    case "PAD_SET_ANALOG": return DispatchAlias(command, "PADSETANALOG");
+                    case "PAD_SET_STATE":  return DispatchAlias(command, "PADSETSTATE");
+                    case "PAD_GET_TYPE":   return DispatchAlias(command, "PADGETTYPE");
 
-                    case "PINELISTWATCHES":
-                    case "PINE_LIST_WATCHES":
-                        return HandlePineListWatches(command.CpuSel);
-
-                    case "PINECLEARALLWATCHES":
-                    case "PINE_CLEAR_ALL_WATCHES":
-                        return HandlePineClearAllWatches();
-
-                    case "PINESAVESCREENSHOT":
-                    case "PINE_SAVE_SCREENSHOT":
-                        return HandlePineSaveScreenshot();
-
-                    // ── Pad / controller input ────────────────────────────────
-                    case "PADGETSTATE":
-                    case "PAD_GET_STATE":
-                        return HandlePadGetState(command.PadSlot);
-
-                    case "PADSETBUTTON":
-                    case "PAD_SET_BUTTON":
-                        return HandlePadSetButton(command.PadSlot, command.PadButtonIndex, command.PadButtonValue);
-
-                    case "PADSETANALOG":
-                    case "PAD_SET_ANALOG":
-                        return HandlePadSetAnalog(command.PadSlot, command.PadLx, command.PadLy, command.PadRx, command.PadRy);
-
-                    case "PADSETSTATE":
-                    case "PAD_SET_STATE":
-                        return HandlePadSetState(command.PadSlot, command.PadButtons,
-                            command.PadLx, command.PadLy, command.PadRx, command.PadRy,
-                            command.PadPressures);
-
-                    case "PADGETTYPE":
-                    case "PAD_GET_TYPE":
-                        return HandlePadGetType(command.PadSlot);
-
-                    // ── DEV9 network bridge ───────────────────────────────────
-                    case "NETGETSTATUS":
-                    case "NET_GET_STATUS":
-                        return HandleNetGetStatus();
-
-                    case "NETCAPTURE":
-                    case "NET_CAPTURE":
-                        return HandleNetCapture(command.NetCaptureEnable, command.NetCaptureDirection, command.NetCaptureMaxQueue);
-
-                    case "NETRECVCAPTURE":
-                    case "NET_RECV_CAPTURE":
-                        return HandleNetRecvCapture(command.NetMaxPackets);
-
-                    case "NETINJECT":
-                    case "NET_INJECT":
-                        return HandleNetInject(command.NetFrameData);
-
-                    case "NETINJECTTX":
-                    case "NET_INJECT_TX":
-                        return HandleNetInjectTx(command.NetFrameData);
-
-                    case "NETDISASSEMBLE":
-                    case "NET_DISASSEMBLE":
-                        return HandleNetDisassemble(command.NetFrameData);
-
-                    case "NETSETFILTER":
-                    case "NET_SET_FILTER":
-                        return HandleNetSetFilter(command.NetFilterType, command.NetFilterProtocol, command.NetFilterPort, command.NetFilterIP);
-
-                    case "NETGETSTATS":
-                    case "NET_GET_STATS":
-                        return HandleNetGetStats();
+                    // DEV9 network bridge → NetworkService (migrated). Aliases
+                    // (NET_GET_STATUS / NET_CAPTURE / etc.) bounce through the
+                    // dispatcher with the canonical name.
+                    case "NET_GET_STATUS":   return DispatchAlias(command, "NETGETSTATUS");
+                    case "NET_CAPTURE":      return DispatchAlias(command, "NETCAPTURE");
+                    case "NET_RECV_CAPTURE": return DispatchAlias(command, "NETRECVCAPTURE");
+                    case "NET_INJECT":       return DispatchAlias(command, "NETINJECT");
+                    case "NET_INJECT_TX":    return DispatchAlias(command, "NETINJECTTX");
+                    case "NET_DISASSEMBLE":  return DispatchAlias(command, "NETDISASSEMBLE");
+                    case "NET_SET_FILTER":   return DispatchAlias(command, "NETSETFILTER");
+                    case "NET_GET_STATS":    return DispatchAlias(command, "NETGETSTATS");
 
                     // ── Database query (read-only) ────────────────────────────
                     case "QUERYDB":
@@ -1289,6 +1207,20 @@ namespace CodeDesigner.Ps2.Bridge
                 return CreateErrorResponse($"Error processing command: {ex.Message}");
             }
         }
+        /// <summary>
+        /// Re-dispatch a command under a different (canonical) name. Used by
+        /// the legacy switch to forward snake_case aliases to the registered
+        /// canonical command name without duplicating handler logic.
+        /// </summary>
+        private string DispatchAlias(CommandMessage original, string canonicalName)
+        {
+            // Mutate the existing message's Command in-place so all the
+            // typed payload fields carry through unchanged.
+            original.Command = canonicalName;
+            return _dispatcher.TryDispatch(original)
+                ?? CreateErrorResponse($"{canonicalName} is not registered with the dispatcher");
+        }
+
         private string CreateSuccessResponse(string message)
         {
             var response = new CommandResponse

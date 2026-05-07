@@ -51,5 +51,11 @@ namespace CodeDesigner.Ps2.Bridge.Services
         // ── Cross-service navigation history ─────────────────────────────────
         /// <summary>Record an EE address into the bounded nav-history log.</summary>
         void RecordNavEntry(uint address, string source);
+
+        // ── Peer service handles ─────────────────────────────────────────────
+        // Set by <see cref="SocketServer"/> after constructing the service
+        // instances. Other services can call into MemoryService for the
+        // chunked debug-socket reader without copying its logic.
+        MemoryService Memory { get; }
     }
 }

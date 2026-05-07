@@ -2,10 +2,22 @@ using System;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class PadService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public PadService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandlePadGetState(c.PadSlot),                                                "PADGETSTATE");
+            reg.Add(c => HandlePadSetButton(c.PadSlot, c.PadButtonIndex, c.PadButtonValue),           "PADSETBUTTON");
+            reg.Add(c => HandlePadSetAnalog(c.PadSlot, c.PadLx, c.PadLy, c.PadRx, c.PadRy),           "PADSETANALOG");
+            reg.Add(c => HandlePadSetState(c.PadSlot, c.PadButtons, c.PadLx, c.PadLy, c.PadRx, c.PadRy, c.PadPressures), "PADSETSTATE");
+            reg.Add(c => HandlePadGetType(c.PadSlot),                                                 "PADGETTYPE");
+        }
+
         // ── PADGETSTATE ──────────────────────────────────────────────────────
 
         /// <summary>
@@ -15,14 +27,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePadGetState(byte? padSlot)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PADGETSTATE requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PADGETSTATE requires PINE mode (connect to PCSX2 first)");
             if (padSlot == null)
-                return CreateErrorResponse("PadSlot is required for PADGETSTATE");
+                return Responses.Error("PadSlot is required for PADGETSTATE");
 
             try
             {
-                var state = PineClient!.PadGetState(padSlot.Value);
+                var state = _ctx.PineClient!.PadGetState(padSlot.Value);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success  = true,
@@ -40,7 +52,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE PadGetState failed: {ex.Message}");
+                return Responses.Error($"PINE PadGetState failed: {ex.Message}");
             }
         }
 
@@ -53,18 +65,18 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePadSetButton(byte? padSlot, byte? buttonIndex, float? value)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PADSETBUTTON requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PADSETBUTTON requires PINE mode (connect to PCSX2 first)");
             if (padSlot == null)
-                return CreateErrorResponse("PadSlot is required for PADSETBUTTON");
+                return Responses.Error("PadSlot is required for PADSETBUTTON");
             if (buttonIndex == null)
-                return CreateErrorResponse("PadButtonIndex is required for PADSETBUTTON");
+                return Responses.Error("PadButtonIndex is required for PADSETBUTTON");
             if (value == null)
-                return CreateErrorResponse("PadButtonValue is required for PADSETBUTTON");
+                return Responses.Error("PadButtonValue is required for PADSETBUTTON");
 
             try
             {
-                PineClient!.PadSetButton(padSlot.Value, buttonIndex.Value, value.Value);
+                _ctx.PineClient!.PadSetButton(padSlot.Value, buttonIndex.Value, value.Value);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
@@ -74,7 +86,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE PadSetButton failed: {ex.Message}");
+                return Responses.Error($"PINE PadSetButton failed: {ex.Message}");
             }
         }
 
@@ -86,10 +98,10 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePadSetAnalog(byte? padSlot, byte? lx, byte? ly, byte? rx, byte? ry)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PADSETANALOG requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PADSETANALOG requires PINE mode (connect to PCSX2 first)");
             if (padSlot == null)
-                return CreateErrorResponse("PadSlot is required for PADSETANALOG");
+                return Responses.Error("PadSlot is required for PADSETANALOG");
 
             byte lxVal = lx ?? 0x7F;
             byte lyVal = ly ?? 0x7F;
@@ -98,7 +110,7 @@ namespace CodeDesigner.Ps2.Bridge
 
             try
             {
-                PineClient!.PadSetAnalog(padSlot.Value, lxVal, lyVal, rxVal, ryVal);
+                _ctx.PineClient!.PadSetAnalog(padSlot.Value, lxVal, lyVal, rxVal, ryVal);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
@@ -108,7 +120,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE PadSetAnalog failed: {ex.Message}");
+                return Responses.Error($"PINE PadSetAnalog failed: {ex.Message}");
             }
         }
 
@@ -122,12 +134,12 @@ namespace CodeDesigner.Ps2.Bridge
             byte? lx, byte? ly, byte? rx, byte? ry,
             System.Collections.Generic.List<byte>? pressures)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PADSETSTATE requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PADSETSTATE requires PINE mode (connect to PCSX2 first)");
             if (padSlot == null)
-                return CreateErrorResponse("PadSlot is required for PADSETSTATE");
+                return Responses.Error("PadSlot is required for PADSETSTATE");
             if (pressures == null || pressures.Count != 16)
-                return CreateErrorResponse("PadPressures must contain exactly 16 values for PADSETSTATE");
+                return Responses.Error("PadPressures must contain exactly 16 values for PADSETSTATE");
 
             uint btns  = buttons ?? 0xFFFF; // all released by default
             byte lxVal = lx ?? 0x7F;
@@ -137,7 +149,7 @@ namespace CodeDesigner.Ps2.Bridge
 
             try
             {
-                PineClient!.PadSetState(padSlot.Value, btns, lxVal, lyVal, rxVal, ryVal, pressures.ToArray());
+                _ctx.PineClient!.PadSetState(padSlot.Value, btns, lxVal, lyVal, rxVal, ryVal, pressures.ToArray());
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
@@ -147,7 +159,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE PadSetState failed: {ex.Message}");
+                return Responses.Error($"PINE PadSetState failed: {ex.Message}");
             }
         }
 
@@ -159,14 +171,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePadGetType(byte? padSlot)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PADGETTYPE requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PADGETTYPE requires PINE mode (connect to PCSX2 first)");
             if (padSlot == null)
-                return CreateErrorResponse("PadSlot is required for PADGETTYPE");
+                return Responses.Error("PadSlot is required for PADGETTYPE");
 
             try
             {
-                byte controllerType = PineClient!.PadGetType(padSlot.Value);
+                byte controllerType = _ctx.PineClient!.PadGetType(padSlot.Value);
                 string typeName = controllerType switch
                 {
                     0 => "NotConnected",
@@ -187,7 +199,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE PadGetType failed: {ex.Message}");
+                return Responses.Error($"PINE PadGetType failed: {ex.Message}");
             }
         }
     }

@@ -3,10 +3,22 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class PineWatchService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public PineWatchService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandlePineAddWatch(c.CpuSel, c.Address, c.EndAddress, c.WatchCond), "PINEADDWATCH");
+            reg.Add(c => HandlePineRemoveWatch(c.CpuSel, c.Address, c.EndAddress),           "PINEREMOVEWATCH");
+            reg.Add(c => HandlePineListWatches(c.CpuSel),                                    "PINELISTWATCHES");
+            reg.Add(_ => HandlePineClearAllWatches(),                                        "PINECLEARALLWATCHES");
+            reg.Add(_ => HandlePineSaveScreenshot(),                                         "PINESAVESCREENSHOT");
+        }
+
         // ── PINEADDWATCH ──────────────────────────────────────────────────────
 
         /// <summary>
@@ -19,24 +31,24 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePineAddWatch(byte? cpuSel, uint? start, uint? end, byte? cond)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PINEADDWATCH requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PINEADDWATCH requires PINE mode (connect to PCSX2 first)");
             if (start == null)
-                return CreateErrorResponse("Address (start) is required for PINEADDWATCH");
+                return Responses.Error("Address (start) is required for PINEADDWATCH");
             if (end == null)
-                return CreateErrorResponse("EndAddress (end, exclusive) is required for PINEADDWATCH");
+                return Responses.Error("EndAddress (end, exclusive) is required for PINEADDWATCH");
             if (start >= end)
-                return CreateErrorResponse("Start address must be less than end address for PINEADDWATCH");
+                return Responses.Error("Start address must be less than end address for PINEADDWATCH");
 
             byte cpu     = cpuSel ?? 0;
             byte condVal = cond   ?? 0x03; // default: read+write
 
             if (condVal == 0 || condVal > 0x03)
-                return CreateErrorResponse("WatchCond must be 0x01 (read), 0x02 (write), or 0x03 (read+write)");
+                return Responses.Error("WatchCond must be 0x01 (read), 0x02 (write), or 0x03 (read+write)");
 
             try
             {
-                PineClient!.AddWatch(cpu, start.Value, end.Value, condVal);
+                _ctx.PineClient!.AddWatch(cpu, start.Value, end.Value, condVal);
                 string condStr = condVal switch
                 {
                     0x01 => "read",
@@ -53,7 +65,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE AddWatch failed: {ex.Message}");
+                return Responses.Error($"PINE AddWatch failed: {ex.Message}");
             }
         }
 
@@ -66,20 +78,20 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePineRemoveWatch(byte? cpuSel, uint? start, uint? end)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PINEREMOVEWATCH requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PINEREMOVEWATCH requires PINE mode (connect to PCSX2 first)");
             if (start == null)
-                return CreateErrorResponse("Address (start) is required for PINEREMOVEWATCH");
+                return Responses.Error("Address (start) is required for PINEREMOVEWATCH");
             if (end == null)
-                return CreateErrorResponse("EndAddress (end, exclusive) is required for PINEREMOVEWATCH");
+                return Responses.Error("EndAddress (end, exclusive) is required for PINEREMOVEWATCH");
 
             byte cpu = cpuSel ?? 0;
 
             try
             {
-                bool removed = PineClient!.RemoveWatch(cpu, start.Value, end.Value);
+                bool removed = _ctx.PineClient!.RemoveWatch(cpu, start.Value, end.Value);
                 if (!removed)
-                    return CreateErrorResponse(
+                    return Responses.Error(
                         $"No watchpoint found on {(cpu == 0 ? "EE" : "IOP")} at 0x{start.Value:X8}–0x{end.Value:X8}");
 
                 return JsonSerializer.Serialize(new CommandResponse
@@ -91,7 +103,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE RemoveWatch failed: {ex.Message}");
+                return Responses.Error($"PINE RemoveWatch failed: {ex.Message}");
             }
         }
 
@@ -103,14 +115,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePineListWatches(byte? cpuSel)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PINELISTWATCHES requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PINELISTWATCHES requires PINE mode (connect to PCSX2 first)");
 
             byte sel = cpuSel ?? 0xFF;
 
             try
             {
-                var watches = PineClient!.ListWatches(sel);
+                var watches = _ctx.PineClient!.ListWatches(sel);
                 var infos = watches.Select(w => new PineWatchInfo
                 {
                     Cpu   = w.Cpu == 0 ? "EE" : "IOP",
@@ -133,7 +145,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE ListWatches failed: {ex.Message}");
+                return Responses.Error($"PINE ListWatches failed: {ex.Message}");
             }
         }
 
@@ -145,12 +157,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePineClearAllWatches()
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PINECLEARALLWATCHES requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PINECLEARALLWATCHES requires PINE mode (connect to PCSX2 first)");
 
             try
             {
-                PineClient!.ClearAllWatches();
+                _ctx.PineClient!.ClearAllWatches();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
@@ -160,7 +172,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE ClearAllWatches failed: {ex.Message}");
+                return Responses.Error($"PINE ClearAllWatches failed: {ex.Message}");
             }
         }
 
@@ -172,12 +184,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePineSaveScreenshot()
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("PINESAVESCREENSHOT requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PINESAVESCREENSHOT requires PINE mode (connect to PCSX2 first)");
 
             try
             {
-                PineClient!.SaveScreenshot();
+                _ctx.PineClient!.SaveScreenshot();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
@@ -187,7 +199,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE SaveScreenshot failed: {ex.Message}");
+                return Responses.Error($"PINE SaveScreenshot failed: {ex.Message}");
             }
         }
     }

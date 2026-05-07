@@ -3,10 +3,25 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class NetworkService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public NetworkService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(_ => HandleNetGetStatus(),                                                          "NETGETSTATUS");
+            reg.Add(c => HandleNetCapture(c.NetCaptureEnable, c.NetCaptureDirection, c.NetCaptureMaxQueue), "NETCAPTURE");
+            reg.Add(c => HandleNetRecvCapture(c.NetMaxPackets),                                         "NETRECVCAPTURE");
+            reg.Add(c => HandleNetInject(c.NetFrameData),                                               "NETINJECT");
+            reg.Add(c => HandleNetInjectTx(c.NetFrameData),                                             "NETINJECTTX");
+            reg.Add(c => HandleNetDisassemble(c.NetFrameData),                                          "NETDISASSEMBLE");
+            reg.Add(c => HandleNetSetFilter(c.NetFilterType, c.NetFilterProtocol, c.NetFilterPort, c.NetFilterIP), "NETSETFILTER");
+            reg.Add(_ => HandleNetGetStats(),                                                            "NETGETSTATS");
+        }
+
         // ── NETGETSTATUS ─────────────────────────────────────────────────────
 
         /// <summary>
@@ -15,12 +30,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleNetGetStatus()
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("NETGETSTATUS requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("NETGETSTATUS requires PINE mode (connect to PCSX2 first)");
 
             try
             {
-                var s = PineClient!.NetGetStatus();
+                var s = _ctx.PineClient!.NetGetStatus();
                 string adapterTypeName = s.AdapterType switch
                 {
                     0 => "Unset",
@@ -46,7 +61,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE NetGetStatus failed: {ex.Message}");
+                return Responses.Error($"PINE NetGetStatus failed: {ex.Message}");
             }
         }
 
@@ -58,14 +73,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleNetCapture(bool? enable, byte? direction, ushort? maxQueue)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("NETCAPTURE requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("NETCAPTURE requires PINE mode (connect to PCSX2 first)");
             if (enable == null)
-                return CreateErrorResponse("NetCaptureEnable is required for NETCAPTURE");
+                return Responses.Error("NetCaptureEnable is required for NETCAPTURE");
 
             try
             {
-                PineClient!.NetCapture(enable.Value, direction ?? 0, maxQueue ?? 0);
+                _ctx.PineClient!.NetCapture(enable.Value, direction ?? 0, maxQueue ?? 0);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
@@ -77,7 +92,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE NetCapture failed: {ex.Message}");
+                return Responses.Error($"PINE NetCapture failed: {ex.Message}");
             }
         }
 
@@ -89,12 +104,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleNetRecvCapture(ushort? maxPackets)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("NETRECVCAPTURE requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("NETRECVCAPTURE requires PINE mode (connect to PCSX2 first)");
 
             try
             {
-                var packets = PineClient!.NetRecvCapture(maxPackets ?? 50);
+                var packets = _ctx.PineClient!.NetRecvCapture(maxPackets ?? 50);
                 var infos = packets.Select(p => new CapturedPacketInfo
                 {
                     Direction     = p.Direction,
@@ -118,7 +133,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE NetRecvCapture failed: {ex.Message}");
+                return Responses.Error($"PINE NetRecvCapture failed: {ex.Message}");
             }
         }
 
@@ -130,15 +145,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleNetInject(string? frameBase64)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("NETINJECT requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("NETINJECT requires PINE mode (connect to PCSX2 first)");
             if (string.IsNullOrEmpty(frameBase64))
-                return CreateErrorResponse("NetFrameData (base64) is required for NETINJECT");
+                return Responses.Error("NetFrameData (base64) is required for NETINJECT");
 
             try
             {
                 byte[] frame = Convert.FromBase64String(frameBase64);
-                bool ok = PineClient!.NetInject(frame);
+                bool ok = _ctx.PineClient!.NetInject(frame);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success          = true,
@@ -151,11 +166,11 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (FormatException)
             {
-                return CreateErrorResponse("NetFrameData is not valid base64");
+                return Responses.Error("NetFrameData is not valid base64");
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE NetInject failed: {ex.Message}");
+                return Responses.Error($"PINE NetInject failed: {ex.Message}");
             }
         }
 
@@ -167,15 +182,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleNetInjectTx(string? frameBase64)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("NETINJECTTX requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("NETINJECTTX requires PINE mode (connect to PCSX2 first)");
             if (string.IsNullOrEmpty(frameBase64))
-                return CreateErrorResponse("NetFrameData (base64) is required for NETINJECTTX");
+                return Responses.Error("NetFrameData (base64) is required for NETINJECTTX");
 
             try
             {
                 byte[] frame = Convert.FromBase64String(frameBase64);
-                bool ok = PineClient!.NetInjectTx(frame);
+                bool ok = _ctx.PineClient!.NetInjectTx(frame);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success          = true,
@@ -188,11 +203,11 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (FormatException)
             {
-                return CreateErrorResponse("NetFrameData is not valid base64");
+                return Responses.Error("NetFrameData is not valid base64");
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE NetInjectTx failed: {ex.Message}");
+                return Responses.Error($"PINE NetInjectTx failed: {ex.Message}");
             }
         }
 
@@ -204,15 +219,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleNetDisassemble(string? frameBase64)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("NETDISASSEMBLE requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("NETDISASSEMBLE requires PINE mode (connect to PCSX2 first)");
             if (string.IsNullOrEmpty(frameBase64))
-                return CreateErrorResponse("NetFrameData (base64) is required for NETDISASSEMBLE");
+                return Responses.Error("NetFrameData (base64) is required for NETDISASSEMBLE");
 
             try
             {
                 byte[] frame = Convert.FromBase64String(frameBase64);
-                string text = PineClient!.NetDisassemble(frame);
+                string text = _ctx.PineClient!.NetDisassemble(frame);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success        = true,
@@ -223,11 +238,11 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (FormatException)
             {
-                return CreateErrorResponse("NetFrameData is not valid base64");
+                return Responses.Error("NetFrameData is not valid base64");
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE NetDisassemble failed: {ex.Message}");
+                return Responses.Error($"PINE NetDisassemble failed: {ex.Message}");
             }
         }
 
@@ -239,10 +254,10 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleNetSetFilter(byte? filterType, byte? protocol, ushort? port, string? ipStr)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("NETSETFILTER requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("NETSETFILTER requires PINE mode (connect to PCSX2 first)");
             if (filterType == null)
-                return CreateErrorResponse("NetFilterType is required for NETSETFILTER");
+                return Responses.Error("NetFilterType is required for NETSETFILTER");
 
             try
             {
@@ -250,11 +265,11 @@ namespace CodeDesigner.Ps2.Bridge
                 if (filterType == 3 && !string.IsNullOrEmpty(ipStr))
                 {
                     if (!System.Net.IPAddress.TryParse(ipStr, out var parsed))
-                        return CreateErrorResponse($"Invalid IP address: {ipStr}");
+                        return Responses.Error($"Invalid IP address: {ipStr}");
                     ipBytes = parsed.GetAddressBytes();
                 }
 
-                PineClient!.NetSetFilter(filterType.Value, protocol ?? 0, port ?? 0, ipBytes);
+                _ctx.PineClient!.NetSetFilter(filterType.Value, protocol ?? 0, port ?? 0, ipBytes);
 
                 string desc = filterType.Value switch
                 {
@@ -274,7 +289,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE NetSetFilter failed: {ex.Message}");
+                return Responses.Error($"PINE NetSetFilter failed: {ex.Message}");
             }
         }
 
@@ -286,12 +301,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleNetGetStats()
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("NETGETSTATS requires PINE mode (connect to PCSX2 first)");
+            if (_ctx.PineClient == null)
+                return Responses.Error("NETGETSTATS requires PINE mode (connect to PCSX2 first)");
 
             try
             {
-                var stats = PineClient!.NetGetStats();
+                var stats = _ctx.PineClient!.NetGetStats();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success  = true,
@@ -312,7 +327,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE NetGetStats failed: {ex.Message}");
+                return Responses.Error($"PINE NetGetStats failed: {ex.Message}");
             }
         }
 
