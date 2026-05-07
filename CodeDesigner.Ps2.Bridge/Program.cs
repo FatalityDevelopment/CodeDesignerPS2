@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Compression;
@@ -51,14 +50,6 @@ namespace CodeDesigner.Ps2.Bridge
                 return;
             }
 
-            if (HasFlag(args, "--run") || HasFlag(args, "--file"))
-            {
-                // The built-in emulator now lives in CodeDesigner.Ps2.Emulator.
-                // Forward these flags to that executable.
-                Environment.ExitCode = LaunchInternalEmulator(args);
-                return;
-            }
-
             if (HasFlag(args, "--pcsx2"))
             {
                 await StartPcsx2BridgeServer(args);
@@ -67,43 +58,6 @@ namespace CodeDesigner.Ps2.Bridge
 
             await StartSocketServer();
         }
-
-        /// <summary>
-        /// Spawn <c>CodeDesigner.Ps2.Emulator.exe</c> with the supplied args and
-        /// wait for it to exit. Bridge no longer hosts the built-in emulator
-        /// in-process — that lives in its own process now (analogous to PCSX2).
-        /// </summary>
-        private static int LaunchInternalEmulator(string[] args)
-        {
-            string baseDir = AppContext.BaseDirectory;
-            string exe = Path.Combine(baseDir,
-                OperatingSystem.IsWindows()
-                    ? "CodeDesigner.Ps2.Emulator.exe"
-                    : "CodeDesigner.Ps2.Emulator");
-            if (!File.Exists(exe))
-            {
-                Console.Error.WriteLine($"Internal emulator binary not found at: {exe}");
-                Console.Error.WriteLine("Build CodeDesigner.Ps2.Emulator and re-run, or invoke it directly.");
-                return 1;
-            }
-
-            var psi = new ProcessStartInfo
-            {
-                FileName  = exe,
-                UseShellExecute = false,
-            };
-            // Forward all our args except the dispatch flag itself; Emulator
-            // expects to see --bios / --disc / --file / --steps / --port directly.
-            foreach (var a in args)
-                if (!a.Equals("--run", StringComparison.OrdinalIgnoreCase))
-                    psi.ArgumentList.Add(a);
-
-            using var proc = Process.Start(psi);
-            if (proc == null) return 1;
-            proc.WaitForExit();
-            return proc.ExitCode;
-        }
-
 
         private static async Task StartPcsx2BridgeServer(string[] args)
         {
@@ -277,16 +231,6 @@ namespace CodeDesigner.Ps2.Bridge
         {
             lock (RuntimeModeLock)
             {
-                if (ActiveEmulatorProcess != null && !ActiveEmulatorProcess.HasExited)
-                {
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success = false,
-                        Command = "STARTPCSX2",
-                        Error = "Built-in emulator is already running. Stop it before switching to PCSX2 mode."
-                    });
-                }
-
                 string host = string.IsNullOrWhiteSpace(command.Pcsx2Host)
                     ? "127.0.0.1"
                     : command.Pcsx2Host;
@@ -297,8 +241,10 @@ namespace CodeDesigner.Ps2.Bridge
                     var pine = new PineClient(host, slot);
                     var status = pine.GetStatus();
 
-                        if (server.PineClient != null)
-                        server.PineClient.Dispose();
+                    server.InternalClient?.Dispose();
+                    server.InternalClient = null;
+
+                    if (server.PineClient != null) server.PineClient.Dispose();
                     server.PineClient = pine;
 
                     return JsonSerializer.Serialize(new CommandResponse
@@ -320,44 +266,25 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
-        // Process handle for the spawned CodeDesigner.Ps2.Emulator.exe (built-in
-        // emulator host). Replaces the in-process ActiveEmulatorTask of the previous
-        // architecture — Bridge no longer hosts the emulator itself, it spawns it.
-        private static Process? ActiveEmulatorProcess;
+        // Default + override port for the InternalPineSocket hosted by
+        // CodeDesigner.Ps2.Emulator.exe. The frontend spawns Emulator.exe
+        // itself; Bridge only connects.
+        private const string InternalEmulatorHostDefault = "127.0.0.1";
 
+        /// <summary>
+        /// STARTEMULATOR — connect to a CodeDesigner.Ps2.Emulator.exe instance
+        /// that the front-end has already spawned. Bridge is purely a client of
+        /// the InternalPineSocket; process lifecycle belongs to the front end
+        /// (mirroring how the user launches PCSX2 themselves before STARTPCSX2).
+        /// </summary>
         private static string HandleStartEmulatorMode(SocketServer server, CommandMessage command)
         {
             lock (RuntimeModeLock)
             {
-                if (ActiveEmulatorProcess != null && !ActiveEmulatorProcess.HasExited)
-                {
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success = true,
-                        Command = "STARTEMULATOR",
-                        Message = "Built-in emulator is already running"
-                    });
-                }
-
-                var runArgs = new List<string>();
-                if (!string.IsNullOrWhiteSpace(command.BiosPath))
-                {
-                    runArgs.Add("--bios");
-                    runArgs.Add(command.BiosPath!);
-                }
-                if (!string.IsNullOrWhiteSpace(command.DiscPath))
-                {
-                    runArgs.Add("--disc");
-                    runArgs.Add(command.DiscPath!);
-                }
-                if (command.Steps.HasValue && command.Steps.Value > 0)
-                {
-                    runArgs.Add("--steps");
-                    runArgs.Add(command.Steps.Value.ToString());
-                }
-                int port = InternalEmulatorClient.DefaultPort;
-                runArgs.Add("--port");
-                runArgs.Add(port.ToString());
+                string host = string.IsNullOrWhiteSpace(command.InternalEmulatorHost)
+                    ? InternalEmulatorHostDefault
+                    : command.InternalEmulatorHost!;
+                int port = command.InternalEmulatorPort ?? InternalEmulatorClient.DefaultPort;
 
                 if (server.PineClient != null)
                 {
@@ -367,59 +294,36 @@ namespace CodeDesigner.Ps2.Bridge
                 server.InternalClient?.Dispose();
                 server.InternalClient = null;
 
-                try
-                {
-                    ActiveEmulatorProcess = SpawnEmulatorProcess(runArgs.ToArray());
-                }
-                catch (Exception ex)
-                {
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success = false,
-                        Command = "STARTEMULATOR",
-                        Error   = $"Cannot spawn Emulator.exe: {ex.Message}"
-                    });
-                }
-
-                if (ActiveEmulatorProcess == null)
-                {
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success = false,
-                        Command = "STARTEMULATOR",
-                        Error   = "Emulator.exe failed to start"
-                    });
-                }
-
-                // Give the child a moment to bind its InternalPineSocket before
-                // we attempt to connect.  Five attempts of 200 ms keeps total
-                // wait under one second while comfortably covering JIT startup.
+                // Retry briefly so a near-simultaneous Emulator.exe startup
+                // has time to bind its listener before we give up.
                 InternalEmulatorClient? client = null;
-                for (int attempt = 0; attempt < 5; attempt++)
+                Exception? lastEx = null;
+                for (int attempt = 0; attempt < 10; attempt++)
                 {
-                    Thread.Sleep(200);
                     try
                     {
-                        client = new InternalEmulatorClient("127.0.0.1", port);
-                        _ = client.GetStatus();   // probes connection
+                        client = new InternalEmulatorClient(host, port);
+                        _ = client.GetStatus();   // probe
+                        lastEx = null;
                         break;
                     }
-                    catch
+                    catch (Exception ex)
                     {
                         client?.Dispose();
                         client = null;
+                        lastEx = ex;
+                        Thread.Sleep(200);
                     }
                 }
 
                 if (client == null)
                 {
-                    try { ActiveEmulatorProcess.Kill(); } catch { /* ignore */ }
-                    ActiveEmulatorProcess = null;
                     return JsonSerializer.Serialize(new CommandResponse
                     {
                         Success = false,
                         Command = "STARTEMULATOR",
-                        Error   = "Could not connect to Emulator.exe InternalPineSocket"
+                        Error   = $"Could not connect to InternalPineSocket at {host}:{port} — " +
+                                  $"is CodeDesigner.Ps2.Emulator.exe running? ({lastEx?.Message})"
                     });
                 }
 
@@ -435,58 +339,18 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// Launch <c>CodeDesigner.Ps2.Emulator.exe</c> as a background child process.
-        /// Returns the Process handle; the caller is responsible for kill/dispose.
-        /// </summary>
-        private static Process? SpawnEmulatorProcess(string[] args)
-        {
-            string baseDir = AppContext.BaseDirectory;
-            string exe = Path.Combine(baseDir,
-                OperatingSystem.IsWindows()
-                    ? "CodeDesigner.Ps2.Emulator.exe"
-                    : "CodeDesigner.Ps2.Emulator");
-            if (!File.Exists(exe))
-                throw new FileNotFoundException($"Internal emulator binary not found at: {exe}");
-
-            var psi = new ProcessStartInfo
-            {
-                FileName        = exe,
-                UseShellExecute = false,
-            };
-            foreach (var a in args) psi.ArgumentList.Add(a);
-            return Process.Start(psi);
-        }
-
-        /// <summary>
-        /// STARTFILEMODE runtime command — spawn <c>CodeDesigner.Ps2.Emulator.exe</c>
-        /// in <c>--file</c> mode and connect to it via <see cref="InternalEmulatorClient"/>.
-        /// The actual ELF/BIN load now happens in the child process; Bridge simply
-        /// forwards the request and wires up the debug client.
+        /// STARTFILEMODE — same connection flow as STARTEMULATOR. The front
+        /// end is expected to have launched <c>Emulator.exe --file &lt;elf&gt;</c>
+        /// before sending this command.
         /// </summary>
         private static string HandleStartFileMode(SocketServer server, CommandMessage command)
         {
-            string? filePath = command.InputPath;
-            if (string.IsNullOrWhiteSpace(filePath))
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success = false, Command = "STARTFILEMODE",
-                    Error = "InputPath is required for STARTFILEMODE"
-                });
-
-            if (!File.Exists(filePath))
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success = false, Command = "STARTFILEMODE",
-                    Error = $"File not found: {filePath}"
-                });
-
             lock (RuntimeModeLock)
             {
-                if (ActiveEmulatorProcess != null && !ActiveEmulatorProcess.HasExited)
-                {
-                    try { ActiveEmulatorProcess.Kill(); } catch { /* ignore */ }
-                    ActiveEmulatorProcess = null;
-                }
+                string host = string.IsNullOrWhiteSpace(command.InternalEmulatorHost)
+                    ? InternalEmulatorHostDefault
+                    : command.InternalEmulatorHost!;
+                int port = command.InternalEmulatorPort ?? InternalEmulatorClient.DefaultPort;
 
                 if (server.PineClient != null)
                 {
@@ -496,58 +360,37 @@ namespace CodeDesigner.Ps2.Bridge
                 server.InternalClient?.Dispose();
                 server.InternalClient = null;
 
-                int port = InternalEmulatorClient.DefaultPort;
-                var runArgs = new List<string> { "--file", filePath, "--port", port.ToString() };
-                if (command.Address.HasValue)
-                {
-                    runArgs.Add("--load-address");
-                    runArgs.Add($"0x{command.Address.Value:X8}");
-                }
-
-                try
-                {
-                    ActiveEmulatorProcess = SpawnEmulatorProcess(runArgs.ToArray());
-                }
-                catch (Exception ex)
-                {
-                    return JsonSerializer.Serialize(new CommandResponse
-                    {
-                        Success = false, Command = "STARTFILEMODE",
-                        Error   = $"Cannot spawn Emulator.exe: {ex.Message}"
-                    });
-                }
-
                 InternalEmulatorClient? client = null;
-                for (int attempt = 0; attempt < 5; attempt++)
+                Exception? lastEx = null;
+                for (int attempt = 0; attempt < 10; attempt++)
                 {
-                    Thread.Sleep(200);
                     try
                     {
-                        client = new InternalEmulatorClient("127.0.0.1", port);
+                        client = new InternalEmulatorClient(host, port);
                         _ = client.GetStatus();
+                        lastEx = null;
                         break;
                     }
-                    catch
+                    catch (Exception ex)
                     {
                         client?.Dispose();
                         client = null;
+                        lastEx = ex;
+                        Thread.Sleep(200);
                     }
                 }
 
                 if (client == null)
                 {
-                    try { ActiveEmulatorProcess?.Kill(); } catch { /* ignore */ }
-                    ActiveEmulatorProcess = null;
                     return JsonSerializer.Serialize(new CommandResponse
                     {
                         Success = false, Command = "STARTFILEMODE",
-                        Error   = "Could not connect to Emulator.exe InternalPineSocket"
+                        Error   = $"Could not connect to InternalPineSocket at {host}:{port} — " +
+                                  $"is CodeDesigner.Ps2.Emulator.exe running? ({lastEx?.Message})"
                     });
                 }
 
                 server.InternalClient = client;
-
-                Console.WriteLine($"[File Mode] Spawned Emulator.exe with: {filePath}");
 
                 uint entryPoint;
                 try { entryPoint = client.GetProgramCounter(); }
@@ -611,17 +454,16 @@ namespace CodeDesigner.Ps2.Bridge
             Console.WriteLine("Usage:");
             Console.WriteLine("  dotnet run -- --pcsx2 [--pcsx2-slot 28011] [--pcsx2-host 127.0.0.1] [--port 8765]");
             Console.WriteLine("  dotnet run -- --recompile --elf <game.elf> [--out recomp_out] [options]");
-            Console.WriteLine("  dotnet run -- --server");
             Console.WriteLine("  dotnet run -- --graphics-info");
             Console.WriteLine("  dotnet run -- --help");
             Console.WriteLine();
-            Console.WriteLine("The built-in emulator now lives in CodeDesigner.Ps2.Emulator.exe.");
-            Console.WriteLine("  Emulator.exe --bios <bios.bin> [--disc <game.iso|zip>] [--steps N] [--port 28012]");
-            Console.WriteLine("  Emulator.exe --file <game.elf|bin> [--load-address 0xN] [--port 28012]");
-            Console.WriteLine("Bridge --run / --file forward to that binary; --pcsx2 connects to PCSX2 PINE.");
+            Console.WriteLine("Bridge is the control router. Run the runtime processes yourself:");
+            Console.WriteLine("  CodeDesigner.Ps2.Emulator.exe --bios <bios.bin> [--disc <game.iso|zip>] [--port 28012]");
+            Console.WriteLine("  CodeDesigner.Ps2.Emulator.exe --file <game.elf|bin> [--load-address 0xN] [--port 28012]");
+            Console.WriteLine("  pcsx2.exe -batch <game.iso>   (with PINE enabled, default port 28011)");
             Console.WriteLine();
             Console.WriteLine("Default with no flags: starts control server on port 8765.");
-            Console.WriteLine("Use STARTPCSX2 / STARTEMULATOR socket commands to select runtime mode.");
+            Console.WriteLine("Use STARTPCSX2 / STARTEMULATOR / STARTFILEMODE socket commands to attach.");
         }
 
         private static void PrintGraphicsInfo()
