@@ -23,7 +23,7 @@ namespace CodeDesigner.Ps2.pis2map
             }
             if (args.Length >= 2)
             {
-                FileStream fpis = null;
+                FileStream? fpis = null;
                 try { fpis = File.Open(args[0], FileMode.Open, FileAccess.Read); } catch { }
 
                 if (fpis != null)
@@ -145,7 +145,7 @@ namespace CodeDesigner.Ps2.pis2map
         {
             byte[] rtline = new byte[] { 0x0D, 0x0A };
 
-            FileStream fmap = null;
+            FileStream? fmap = null;
             try { fmap = File.Open(mapName, FileMode.Create, FileAccess.Write); } catch { }
 
             if (fmap != null)
