@@ -30,6 +30,7 @@ namespace CodeDesigner.Ps2.Bridge
         // through the IBridgeContext surface using explicit impls so services
         // get a clean read/write view without forcing public visibility.
         Dictionary<uint, (string Label, string? Comment)> Services.IBridgeContext.Labels => _labels;
+        Dictionary<string, StructEntry>                   Services.IBridgeContext.Structs => _structs;
         CodeDesigner.Ps2.Database.CodeDesignerDbContext   Services.IBridgeContext.Db                  => Db;
         Database.DbLabelRepository                        Services.IBridgeContext.LabelRepo           => LabelRepo;
         Database.DbSettingsRepository                     Services.IBridgeContext.SettingsRepo        => SettingsRepo;
@@ -38,6 +39,15 @@ namespace CodeDesigner.Ps2.Bridge
         Database.DbMcpOrchestrationRepository?            Services.IBridgeContext.McpOrchestrationRepo => McpOrchestrationRepo;
         CodeDesigner.Ps2.LabelManager.Ps2LabelManager     Services.IBridgeContext.LabelMgr            => LabelMgr;
         void Services.IBridgeContext.RecordNavEntry(uint address, string source) => RecordNavEntry(address, source);
+        void Services.IBridgeContext.SyncLegacyDictsFromLabelManager() => SyncLegacyDictsFromLabelManager();
+        IReadOnlyList<NavHistoryEntry> Services.IBridgeContext.GetNavHistorySnapshot()
+        {
+            lock (_navHistoryLock) return new List<NavHistoryEntry>(_navHistory);
+        }
+        void Services.IBridgeContext.ClearNavHistory()
+        {
+            lock (_navHistoryLock) _navHistory.Clear();
+        }
         private TcpListener? _listener;
         private bool _isRunning;
         private readonly int _port;
@@ -217,6 +227,7 @@ namespace CodeDesigner.Ps2.Bridge
         private SocketServer(int port, CodeDesignerDbContext db, bool ownsDb)
         {
             _port       = port;
+            
             _ownsDb     = ownsDb;
             Db          = db;
             LabelRepo   = new DbLabelRepository(db);
@@ -242,6 +253,15 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.PineWatchService(ctx),
                 new Services.SaveStateService(ctx),
                 new Services.SteppingService(ctx),
+                new Services.QueryDbService(ctx),
+                new Services.NavHistoryService(ctx),
+                new Services.SettingsService(ctx),
+                new Services.StructService(ctx),
+                new Services.SnapshotsService(ctx),
+                new Services.MemoryCardService(ctx),
+                new Services.IsoService(ctx),
+                new Services.LabelService(ctx),
+                new Services.McpConfigService(ctx),
             });
         }
 
@@ -706,14 +726,7 @@ namespace CodeDesigner.Ps2.Bridge
                     case "RESTART":
                         return HandleRestart();
 
-                    case "GETLABELS":
-                        return HandleGetLabels();
-
-                    case "ADDLABEL":
-                        return HandleAddLabel(command.Address, command.Label, command.Comment);
-
-                    case "DELETELABEL":
-                        return HandleDeleteLabel(command.Address);
+                    // Labels → LabelService (migrated)
 
                     case "GETSTRINGS":
                         return HandleGetStrings(command.Address ?? 0, command.Data);
@@ -781,17 +794,7 @@ namespace CodeDesigner.Ps2.Bridge
                             command.Region,
                             command.ScanAddresses);
 
-                    case "GETSTRUCTS":
-                        return HandleGetStructs();
-
-                    case "ADDSTRUCT":
-                        return HandleAddStruct(command.StructName, command.StructBaseAddress);
-
-                    case "DELETESTRUCT":
-                        return HandleDeleteStruct(command.StructName);
-
-                    case "ADDSTRUCTMEMBER":
-                        return HandleAddStructMember(command.StructName, command.MemberOffset, command.MemberName);
+                    // Structs → StructService (migrated)
 
                     // ── Label Manager commands ────────────────────────────────────────
                     case "GETLABELSETS":
@@ -832,24 +835,7 @@ namespace CodeDesigner.Ps2.Bridge
                             return CreateErrorResponse("Address is required for RESOLVELINKEDLIST");
                         return HandleResolveLinkedList(command.Address.Value, command.MemberOffset ?? 0);
 
-                    case "MC_LIST":
-                        return HandleMcList(command.McPath);
-
-                    case "MC_EXPORT":
-                        return HandleMcExport(command.McPath, command.SaveName, command.ExportDir);
-
-                    case "MC_IMPORT":
-                        return HandleMcImport(command.McPath, command.ImportDir, command.McOverwrite ?? false);
-
-                    case "MC_DELETE":
-                        return HandleMcDelete(command.McPath, command.SaveName);
-
-                    case "MC_FORMAT":
-                        return HandleMcFormat(command.McPath);
-
-                    case "MC_READ_FILE":
-                    case "MC_READFILE":
-                        return HandleMcReadFile(command.McPath, command.SaveName, command.McFileName);
+                    // Memory-card → MemoryCardService (migrated)
 
                     case "HDD_LIST":
                         return HandleHddList(command.HddPath);
@@ -869,14 +855,7 @@ namespace CodeDesigner.Ps2.Bridge
                     case "HDD_CREATE":
                         return HandleHddCreate(command.HddPath, command.HddSizeGb ?? 40);
 
-                    case "ISO_LIST_FILES":
-                        return HandleIsoListFiles(command.IsoPath);
-
-                    case "ISO_READ_FILE":
-                        return HandleIsoReadFile(command.IsoPath, command.FilePath, command.OutputPath);
-
-                    case "ISO_GET_INFO":
-                        return HandleIsoGetInfo(command.IsoPath);
+                    // ISO → IsoService (migrated)
 
                     case "PING":
                         return CreateSuccessResponse("PONG");
@@ -1016,60 +995,27 @@ namespace CodeDesigner.Ps2.Bridge
                     case "NET_SET_FILTER":   return DispatchAlias(command, "NETSETFILTER");
                     case "NET_GET_STATS":    return DispatchAlias(command, "NETGETSTATS");
 
-                    // ── Database query (read-only) ────────────────────────────
-                    case "QUERYDB":
-                    case "QUERY_DB":
-                        return HandleQueryDb(command.SqlQuery);
+                    // QUERYDB / NAV history / Settings / Snapshots / Memory-card
+                    // → migrated to dedicated services. Aliases bounce through.
+                    case "QUERY_DB":            return DispatchAlias(command, "QUERYDB");
+                    case "GET_NAV_HISTORY":     return DispatchAlias(command, "GETNAVHISTORY");
+                    case "RECORD_NAV":          return DispatchAlias(command, "RECORDNAV");
+                    case "CLEAR_NAV_HISTORY":   return DispatchAlias(command, "CLEARNAVHISTORY");
+                    case "NAVIGATE_TO":         return DispatchAlias(command, "NAVIGATETO");
+                    case "GET_SETTING":         return DispatchAlias(command, "GETSETTING");
+                    case "SET_SETTING":         return DispatchAlias(command, "SETSETTING");
+                    case "GET_ALL_SETTINGS":    return DispatchAlias(command, "GETALLSETTINGS");
+                    case "DELETE_SETTING":      return DispatchAlias(command, "DELETESETTING");
 
-                    // ── Game Disc ─────────────────────────────────────────────
+                    // Game-disc handler stays here — not yet migrated
                     case "UPDATEGAMEDISC":
                     case "UPDATE_GAME_DISC":
                         return HandleUpdateGameDisc(command.GameSerial, command.IsoPath, command.GameCrc, command.GameTitle);
 
-                    // ── Navigation history ────────────────────────────────────
-                    case "GETNAVHISTORY":
-                    case "GET_NAV_HISTORY":
-                        return HandleGetNavHistory();
-
-                    case "RECORDNAV":
-                    case "RECORD_NAV":
-                        return HandleRecordNav(command.Address, command.NavSource ?? "user");
-
-                    case "CLEARNAVHISTORY":
-                    case "CLEAR_NAV_HISTORY":
-                        return HandleClearNavHistory();
-
-                    // ── Navigate VS Code disasm view ──────────────────────────
-                    case "NAVIGATETO":
-                    case "NAVIGATE_TO":
-                        return HandleNavigateTo(command.Address);
-
-                    // ── Snapshot address history ──────────────────────────────
+                    // Snapshot-address-history not yet migrated
                     case "GETADDRESSHISTORY":
                     case "GET_ADDRESS_HISTORY":
                         return HandleGetAddressHistory(command.Address, command.SnapshotDir);
-
-                    // ── Settings (DB-backed) ──────────────────────────────────
-                    case "GETSETTING":
-                    case "GET_SETTING":
-                        return HandleGetSetting(command.SettingKey);
-
-                    case "SETSETTING":
-                    case "SET_SETTING":
-                        return HandleSetSetting(command.SettingKey, command.SettingValue);
-
-                    case "GETALLSETTINGS":
-                    case "GET_ALL_SETTINGS":
-                        return HandleGetAllSettings(command.SettingPrefix);
-
-                    case "DELETESETTING":
-                    case "DELETE_SETTING":
-                        return HandleDeleteSetting(command.SettingKey);
-
-                    // ── Snapshots (DB-backed) ─────────────────────────────────
-                    case "GETSNAPSHOTS":
-                    case "GET_SNAPSHOTS":
-                        return HandleGetSnapshots(command.IsoName);
 
                     // ── MCP Memory Manager (DB-backed) ───────────────────────
                     case "MCPMEMORY_LIST":
@@ -1176,12 +1122,7 @@ namespace CodeDesigner.Ps2.Bridge
                     case "MCPORCHESTRATION_SETACTIVE":
                         return HandleMcpOrchestrationSetActive(command.McpOrchestrationId);
 
-                    // ── MCP Config commands ───────────────────────────────────────────
-                    case "MCPCONFIG_LIST":
-                        return HandleMcpConfigList();
-
-                    case "MCPCONFIG_UPDATE":
-                        return HandleMcpConfigUpdate(command.McpConfigKey, command.McpConfigValue);
+                    // MCP Config → McpConfigService (migrated)
 
                     // ── AI session lifecycle ───────────────────────────────────────────
                     case "SESSION_START":

@@ -2,16 +2,27 @@ using System;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class StructService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public StructService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(_ => HandleGetStructs(),                                                              "GETSTRUCTS");
+            reg.Add(c => HandleAddStruct(c.StructName, c.StructBaseAddress),                              "ADDSTRUCT");
+            reg.Add(c => HandleDeleteStruct(c.StructName),                                                "DELETESTRUCT");
+            reg.Add(c => HandleAddStructMember(c.StructName, c.MemberOffset, c.MemberName),               "ADDSTRUCTMEMBER");
+        }
+
         /// <summary>
         /// Handle GETSTRUCTS — returns all struct definitions sorted by name.
         /// </summary>
         private string HandleGetStructs()
         {
-            var structs = _structs.Values
+            var structs = _ctx.Structs.Values
                 .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
@@ -29,24 +40,24 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleAddStruct(string? structName, string? baseAddress)
         {
             if (string.IsNullOrWhiteSpace(structName))
-                return CreateErrorResponse("StructName is required for ADDSTRUCT");
+                return Responses.Error("StructName is required for ADDSTRUCT");
             if (string.IsNullOrWhiteSpace(baseAddress))
-                return CreateErrorResponse("StructBaseAddress is required for ADDSTRUCT");
+                return Responses.Error("StructBaseAddress is required for ADDSTRUCT");
 
             var name = structName.Trim();
             var addr = baseAddress.Trim();
 
-            if (_structs.TryGetValue(name, out var existing))
+            if (_ctx.Structs.TryGetValue(name, out var existing))
             {
                 existing.BaseAddress = addr;
             }
             else
             {
-                _structs[name] = new StructEntry { Name = name, BaseAddress = addr };
+                _ctx.Structs[name] = new StructEntry { Name = name, BaseAddress = addr };
             }
 
             SaveStructs();
-            return CreateSuccessResponse($"Struct '{name}' saved with base address {addr}");
+            return Responses.Success($"Struct '{name}' saved with base address {addr}");
         }
 
         /// <summary>
@@ -55,14 +66,14 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleDeleteStruct(string? structName)
         {
             if (string.IsNullOrWhiteSpace(structName))
-                return CreateErrorResponse("StructName is required for DELETESTRUCT");
+                return Responses.Error("StructName is required for DELETESTRUCT");
 
             var name = structName.Trim();
-            if (!_structs.Remove(name))
-                return CreateErrorResponse($"No struct found with name '{name}'");
+            if (!_ctx.Structs.Remove(name))
+                return Responses.Error($"No struct found with name '{name}'");
 
             SaveStructs();
-            return CreateSuccessResponse($"Struct '{name}' removed");
+            return Responses.Success($"Struct '{name}' removed");
         }
 
         /// <summary>
@@ -71,15 +82,15 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleAddStructMember(string? structName, int? memberOffset, string? memberName)
         {
             if (string.IsNullOrWhiteSpace(structName))
-                return CreateErrorResponse("StructName is required for ADDSTRUCTMEMBER");
+                return Responses.Error("StructName is required for ADDSTRUCTMEMBER");
             if (memberOffset == null)
-                return CreateErrorResponse("MemberOffset is required for ADDSTRUCTMEMBER");
+                return Responses.Error("MemberOffset is required for ADDSTRUCTMEMBER");
             if (string.IsNullOrWhiteSpace(memberName))
-                return CreateErrorResponse("MemberName is required for ADDSTRUCTMEMBER");
+                return Responses.Error("MemberName is required for ADDSTRUCTMEMBER");
 
             var name = structName.Trim();
-            if (!_structs.TryGetValue(name, out var entry))
-                return CreateErrorResponse($"No struct found with name '{name}'");
+            if (!_ctx.Structs.TryGetValue(name, out var entry))
+                return Responses.Error($"No struct found with name '{name}'");
 
             var trimmedMember = memberName.Trim();
             var existing = entry.Members.FirstOrDefault(m => m.Offset == memberOffset.Value);
@@ -94,7 +105,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
 
             SaveStructs();
-            return CreateSuccessResponse($"Member '{trimmedMember}' at offset 0x{memberOffset.Value:X} added to struct '{name}'");
+            return Responses.Success($"Member '{trimmedMember}' at offset 0x{memberOffset.Value:X} added to struct '{name}'");
         }
 
         /// <summary>

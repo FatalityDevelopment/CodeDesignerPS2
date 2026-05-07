@@ -48,9 +48,21 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// <summary>Label manager — typed model behind the legacy dict.</summary>
         CodeDesigner.Ps2.LabelManager.Ps2LabelManager LabelMgr { get; }
 
+        /// <summary>Re-derives <see cref="Labels"/> from <see cref="LabelMgr"/>'s active set.</summary>
+        void SyncLegacyDictsFromLabelManager();
+
+        /// <summary>Struct definitions (name → struct entry) — owned by StructService.</summary>
+        Dictionary<string, StructEntry> Structs { get; }
+
         // ── Cross-service navigation history ─────────────────────────────────
         /// <summary>Record an EE address into the bounded nav-history log.</summary>
         void RecordNavEntry(uint address, string source);
+
+        /// <summary>Snapshot of the nav-history (most recent last).</summary>
+        IReadOnlyList<NavHistoryEntry> GetNavHistorySnapshot();
+
+        /// <summary>Empty the nav-history log.</summary>
+        void ClearNavHistory();
 
         // ── Peer service handles ─────────────────────────────────────────────
         // Set by <see cref="SocketServer"/> after constructing the service

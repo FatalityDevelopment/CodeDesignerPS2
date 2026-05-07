@@ -5,10 +5,18 @@ using System.Data.Common;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class QueryDbService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public QueryDbService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleQueryDb(c.SqlQuery), "QUERYDB", "QUERY_DB");
+        }
+
         // ── QUERYDB ───────────────────────────────────────────────────────────
 
         // DDL blocklist — prevent destructive schema operations.
@@ -35,17 +43,17 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleQueryDb(string? sql)
         {
-            if (Db == null)
-                return CreateErrorResponse("Database is not available");
+            if (_ctx.Db == null)
+                return Responses.Error("Database is not available");
             if (string.IsNullOrWhiteSpace(sql))
-                return CreateErrorResponse("SqlQuery is required for QUERYDB");
+                return Responses.Error("SqlQuery is required for QUERYDB");
 
             // Block DDL — schema mutations are never permitted via this path.
             var upper = sql.ToUpperInvariant();
             foreach (var ddl in _queryDbDdlBlocklist)
             {
                 if (upper.Contains(ddl, StringComparison.Ordinal))
-                    return CreateErrorResponse(
+                    return Responses.Error(
                         $"QUERYDB does not permit '{ddl.TrimEnd()}' statements — use EF Core migrations for schema changes");
             }
 
@@ -56,7 +64,7 @@ namespace CodeDesigner.Ps2.Bridge
 
             try
             {
-                var conn = Db.Database.GetDbConnection();
+                var conn = _ctx.Db.Database.GetDbConnection();
                 if (conn.State != ConnectionState.Open)
                     conn.Open();
 
@@ -119,7 +127,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"QUERYDB error: {ex.Message}");
+                return Responses.Error($"QUERYDB error: {ex.Message}");
             }
         }
     }

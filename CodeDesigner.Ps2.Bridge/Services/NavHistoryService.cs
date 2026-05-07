@@ -2,10 +2,21 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class NavHistoryService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public NavHistoryService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(_ => HandleGetNavHistory(),                                  "GETNAVHISTORY");
+            reg.Add(c => HandleRecordNav(c.Address, c.NavSource ?? "user"),      "RECORDNAV");
+            reg.Add(_ => HandleClearNavHistory(),                                "CLEARNAVHISTORY");
+            reg.Add(c => HandleNavigateTo(c.Address),                            "NAVIGATETO");
+        }
+
         // ── GETNAVHISTORY ─────────────────────────────────────────────────────
 
         /// <summary>
@@ -14,15 +25,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleGetNavHistory()
         {
-            List<NavHistoryEntry> entries;
-            lock (_navHistoryLock)
-                entries = new List<NavHistoryEntry>(_navHistory);
-
-            return JsonSerializer.Serialize(new CommandResponse
+            var entries = _ctx.GetNavHistorySnapshot();
+            return Responses.Json(new CommandResponse
             {
                 Success    = true,
                 Command    = "GETNAVHISTORY",
-                NavHistory = entries,
+                NavHistory = new List<NavHistoryEntry>(entries),
                 Message    = $"{entries.Count} navigation entry(s)",
             });
         }
@@ -37,10 +45,10 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleRecordNav(uint? address, string source)
         {
             if (address == null)
-                return CreateErrorResponse("Address is required for RECORDNAV");
+                return Responses.Error("Address is required for RECORDNAV");
 
-            RecordNavEntry(address.Value, source);
-            return CreateSuccessResponse($"Navigation to 0x{NormalizePcToKseg0(address.Value):X8} recorded");
+            _ctx.RecordNavEntry(address.Value, source);
+            return Responses.Success($"Navigation to 0x{AddressTranslator.NormalizePcToKseg0(address.Value):X8} recorded");
         }
 
         // ── CLEARNAVHISTORY ───────────────────────────────────────────────────
@@ -50,13 +58,9 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleClearNavHistory()
         {
-            int count;
-            lock (_navHistoryLock)
-            {
-                count = _navHistory.Count;
-                _navHistory.Clear();
-            }
-            return CreateSuccessResponse($"Cleared {count} navigation entry(s)");
+            int count = _ctx.GetNavHistorySnapshot().Count;
+            _ctx.ClearNavHistory();
+            return Responses.Success($"Cleared {count} navigation entry(s)");
         }
 
         // ── NAVIGATETO ────────────────────────────────────────────────────────
@@ -69,11 +73,11 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleNavigateTo(uint? address)
         {
             if (address == null)
-                return CreateErrorResponse("Address is required for NAVIGATETO");
+                return Responses.Error("Address is required for NAVIGATETO");
 
-            uint display = NormalizePcToKseg0(address.Value);
-            RecordNavEntry(address.Value, "navigate");
-            return CreateSuccessResponse($"Navigate to 0x{display:X8}");
+            uint display = AddressTranslator.NormalizePcToKseg0(address.Value);
+            _ctx.RecordNavEntry(address.Value, "navigate");
+            return Responses.Success($"Navigate to 0x{display:X8}");
         }
     }
 }

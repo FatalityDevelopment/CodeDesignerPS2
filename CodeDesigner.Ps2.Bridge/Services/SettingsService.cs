@@ -2,10 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class SettingsService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public SettingsService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleGetSetting(c.SettingKey),                       "GETSETTING");
+            reg.Add(c => HandleSetSetting(c.SettingKey, c.SettingValue),       "SETSETTING");
+            reg.Add(c => HandleGetAllSettings(c.SettingPrefix),                "GETALLSETTINGS");
+            reg.Add(c => HandleDeleteSetting(c.SettingKey),                    "DELETESETTING");
+        }
+
         // ── GETSETTING ────────────────────────────────────────────────────────
 
         /// <summary>
@@ -15,11 +26,11 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetSetting(string? key)
         {
             if (string.IsNullOrWhiteSpace(key))
-                return CreateErrorResponse("Key is required for GETSETTING");
+                return Responses.Error("Key is required for GETSETTING");
 
             try
             {
-                var value = SettingsRepo.GetAsync(key.Trim()).GetAwaiter().GetResult();
+                var value = _ctx.SettingsRepo.GetAsync(key.Trim()).GetAwaiter().GetResult();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success  = true,
@@ -29,7 +40,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"GETSETTING failed: {ex.Message}");
+                return Responses.Error($"GETSETTING failed: {ex.Message}");
             }
         }
 
@@ -43,16 +54,16 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleSetSetting(string? key, string? value)
         {
             if (string.IsNullOrWhiteSpace(key))
-                return CreateErrorResponse("Key is required for SETSETTING");
+                return Responses.Error("Key is required for SETSETTING");
 
             try
             {
-                SettingsRepo.SetAsync(key.Trim(), value).GetAwaiter().GetResult();
-                return CreateSuccessResponse($"Setting '{key}' saved.");
+                _ctx.SettingsRepo.SetAsync(key.Trim(), value).GetAwaiter().GetResult();
+                return Responses.Success($"Setting '{key}' saved.");
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"SETSETTING failed: {ex.Message}");
+                return Responses.Error($"SETSETTING failed: {ex.Message}");
             }
         }
 
@@ -67,7 +78,7 @@ namespace CodeDesigner.Ps2.Bridge
         {
             try
             {
-                var settings = SettingsRepo.GetAllAsync(prefix?.Trim()).GetAwaiter().GetResult();
+                var settings = _ctx.SettingsRepo.GetAllAsync(prefix?.Trim()).GetAwaiter().GetResult();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success  = true,
@@ -77,7 +88,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"GETALLSETTINGS failed: {ex.Message}");
+                return Responses.Error($"GETALLSETTINGS failed: {ex.Message}");
             }
         }
 
@@ -90,16 +101,16 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleDeleteSetting(string? key)
         {
             if (string.IsNullOrWhiteSpace(key))
-                return CreateErrorResponse("Key is required for DELETESETTING");
+                return Responses.Error("Key is required for DELETESETTING");
 
             try
             {
-                SettingsRepo.DeleteAsync(key.Trim()).GetAwaiter().GetResult();
-                return CreateSuccessResponse($"Setting '{key}' deleted.");
+                _ctx.SettingsRepo.DeleteAsync(key.Trim()).GetAwaiter().GetResult();
+                return Responses.Success($"Setting '{key}' deleted.");
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"DELETESETTING failed: {ex.Message}");
+                return Responses.Error($"DELETESETTING failed: {ex.Message}");
             }
         }
     }

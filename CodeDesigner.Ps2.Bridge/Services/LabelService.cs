@@ -4,20 +4,30 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class LabelService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public LabelService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(_ => HandleGetLabels(),                                "GETLABELS");
+            reg.Add(c => HandleAddLabel(c.Address, c.Label, c.Comment),    "ADDLABEL");
+            reg.Add(c => HandleDeleteLabel(c.Address),                     "DELETELABEL");
+        }
+
         /// <summary>
         /// Handle GETLABELS — returns all labels in the database, sorted by address.
         /// </summary>
         private string HandleGetLabels()
         {
-            // Sync the legacy dict from LabelMgr so callers always see up-to-date data
+            // Sync the legacy dict from _ctx.LabelMgr so callers always see up-to-date data
             // (labels added via ADDLABELENTRY may have been written to disk since the last sync).
-            SyncLegacyDictsFromLabelManager();
+            _ctx.SyncLegacyDictsFromLabelManager();
 
-            var labels = _labels
+            var labels = _ctx.Labels
                 .OrderBy(kv => kv.Key)
                 .Select(kv => new LabelEntry
                 {
@@ -41,17 +51,17 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleAddLabel(uint? address, string? label, string? comment)
         {
             if (address == null)
-                return CreateErrorResponse("Address is required for ADDLABEL");
+                return Responses.Error("Address is required for ADDLABEL");
             if (string.IsNullOrWhiteSpace(label))
-                return CreateErrorResponse("Label is required for ADDLABEL");
+                return Responses.Error("Label is required for ADDLABEL");
 
             var trimmedLabel   = label.Trim();
             var trimmedComment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
 
-            _labels[address.Value] = (trimmedLabel, trimmedComment);
+            _ctx.Labels[address.Value] = (trimmedLabel, trimmedComment);
             SaveLabels();
 
-            return CreateSuccessResponse($"Label '{trimmedLabel}' set at 0x{address.Value:X8}");
+            return Responses.Success($"Label '{trimmedLabel}' set at 0x{address.Value:X8}");
         }
 
         /// <summary>
@@ -60,13 +70,13 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleDeleteLabel(uint? address)
         {
             if (address == null)
-                return CreateErrorResponse("Address is required for DELETELABEL");
+                return Responses.Error("Address is required for DELETELABEL");
 
-            if (!_labels.Remove(address.Value))
-                return CreateErrorResponse($"No label found at 0x{address.Value:X8}");
+            if (!_ctx.Labels.Remove(address.Value))
+                return Responses.Error($"No label found at 0x{address.Value:X8}");
 
             SaveLabels();
-            return CreateSuccessResponse($"Label removed at 0x{address.Value:X8}");
+            return Responses.Success($"Label removed at 0x{address.Value:X8}");
         }
 
         /// <summary>

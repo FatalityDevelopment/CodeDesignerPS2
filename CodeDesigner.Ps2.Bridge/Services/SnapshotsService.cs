@@ -3,10 +3,18 @@ using System.Linq;
 using System.Text.Json;
 using CodeDesigner.Ps2.Bridge.Database;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class SnapshotsService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public SnapshotsService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleGetSnapshots(c.IsoName), "GETSNAPSHOTS", "GET_SNAPSHOTS");
+        }
+
         /// <summary>
         /// Handle GETSNAPSHOTS — returns snapshot metadata records from the database for
         /// the game identified by <paramref name="isoName"/>.  The binary snapshot files
@@ -16,11 +24,11 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetSnapshots(string? isoName)
         {
             if (string.IsNullOrWhiteSpace(isoName))
-                return CreateErrorResponse("IsoName is required for GETSNAPSHOTS");
+                return Responses.Error("IsoName is required for GETSNAPSHOTS");
 
             try
             {
-                var repo      = new DbSnapshotRepository(Db);
+                var repo      = new DbSnapshotRepository(_ctx.Db);
                 var snapshots = repo.GetSnapshotsForGameAsync(isoName.Trim()).GetAwaiter().GetResult();
 
                 var payload = snapshots.Select(s => new SnapshotInfo
@@ -42,7 +50,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"GETSNAPSHOTS failed: {ex.Message}");
+                return Responses.Error($"GETSNAPSHOTS failed: {ex.Message}");
             }
         }
     }

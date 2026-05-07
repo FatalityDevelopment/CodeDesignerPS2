@@ -6,16 +6,53 @@ using System.Text;
 using System.Text.Json;
 using CodeDesigner.Ps2.IsoManager;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class IsoService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public IsoService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleIsoListFiles(c.IsoPath),                                   "ISO_LIST_FILES");
+            reg.Add(c => HandleIsoReadFile(c.IsoPath, c.FilePath, c.OutputPath),          "ISO_READ_FILE");
+            reg.Add(c => HandleIsoGetInfo(c.IsoPath),                                     "ISO_GET_INFO");
+        }
+
+        /// <summary>
+        /// Open a disc-image stream from either a plain ISO/BIN path or a ZIP
+        /// archive. Mirrors the helper that lives in EmulatorControlHandlers.
+        /// </summary>
+        private static Stream OpenDiscStream(string path)
+        {
+            if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                using var archive = ZipFile.OpenRead(path);
+                var entry = archive.Entries.FirstOrDefault(e =>
+                    e.Name.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) ||
+                    e.Name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase));
+
+                if (entry == null)
+                    throw new InvalidOperationException("No ISO or BIN disc image found inside the ZIP archive.");
+                if (entry.Length > (long)int.MaxValue)
+                    throw new InvalidOperationException($"Disc image inside ZIP is too large ({entry.Length / 1_048_576.0:F0} MB). Extract the ISO to disk and select it directly.");
+
+                var ms = new MemoryStream((int)entry.Length);
+                using (var entryStream = entry.Open())
+                    entryStream.CopyTo(ms);
+                ms.Position = 0;
+                return ms;
+            }
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+
         private string HandleIsoListFiles(string? isoPath)
         {
             if (string.IsNullOrWhiteSpace(isoPath))
-                return CreateErrorResponse("IsoPath is required for ISO_LIST_FILES");
+                return Responses.Error("IsoPath is required for ISO_LIST_FILES");
             if (!File.Exists(isoPath))
-                return CreateErrorResponse($"ISO file not found: {isoPath}");
+                return Responses.Error($"ISO file not found: {isoPath}");
             try
             {
                 using var stream = OpenDiscStream(isoPath);
@@ -44,18 +81,18 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ISO_LIST_FILES error: {ex.Message}");
+                return Responses.Error($"ISO_LIST_FILES error: {ex.Message}");
             }
         }
 
         private string HandleIsoReadFile(string? isoPath, string? filePath, string? outputPath)
         {
             if (string.IsNullOrWhiteSpace(isoPath))
-                return CreateErrorResponse("IsoPath is required for ISO_READ_FILE");
+                return Responses.Error("IsoPath is required for ISO_READ_FILE");
             if (string.IsNullOrWhiteSpace(filePath))
-                return CreateErrorResponse("FilePath is required for ISO_READ_FILE");
+                return Responses.Error("FilePath is required for ISO_READ_FILE");
             if (!File.Exists(isoPath))
-                return CreateErrorResponse($"ISO file not found: {isoPath}");
+                return Responses.Error($"ISO file not found: {isoPath}");
             try
             {
                 using var stream = OpenDiscStream(isoPath);
@@ -64,10 +101,10 @@ namespace CodeDesigner.Ps2.Bridge
 
                 var entry = iso.FindFile(filePath);
                 if (entry == null)
-                    return CreateErrorResponse($"File not found on disc: {filePath}");
+                    return Responses.Error($"File not found on disc: {filePath}");
 
                 if (entry.Value.IsDirectory)
-                    return CreateErrorResponse($"Cannot read directory as file: {filePath}");
+                    return Responses.Error($"Cannot read directory as file: {filePath}");
 
                 byte[] fileData = iso.ReadFile(entry.Value);
 
@@ -101,16 +138,16 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ISO_READ_FILE error: {ex.Message}");
+                return Responses.Error($"ISO_READ_FILE error: {ex.Message}");
             }
         }
 
         private string HandleIsoGetInfo(string? isoPath)
         {
             if (string.IsNullOrWhiteSpace(isoPath))
-                return CreateErrorResponse("IsoPath is required for ISO_GET_INFO");
+                return Responses.Error("IsoPath is required for ISO_GET_INFO");
             if (!File.Exists(isoPath))
-                return CreateErrorResponse($"ISO file not found: {isoPath}");
+                return Responses.Error($"ISO file not found: {isoPath}");
             try
             {
                 using var stream = OpenDiscStream(isoPath);
@@ -148,7 +185,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ISO_GET_INFO error: {ex.Message}");
+                return Responses.Error($"ISO_GET_INFO error: {ex.Message}");
             }
         }
     }

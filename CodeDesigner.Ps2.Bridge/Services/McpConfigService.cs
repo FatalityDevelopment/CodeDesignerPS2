@@ -5,10 +5,19 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using CodeDesigner.Ps2.Database.Entities;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class McpConfigService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public McpConfigService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(_ => HandleMcpConfigList(),                            "MCPCONFIG_LIST", "MCPCONFIGLIST");
+            reg.Add(c => HandleMcpConfigUpdate(c.McpConfigKey, c.McpConfigValue), "MCPCONFIG_UPDATE", "MCPCONFIGUPDATE");
+        }
+
         // ── MCPCONFIG_LIST ────────────────────────────────────────────────────
 
         /// <summary>
@@ -16,12 +25,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleMcpConfigList()
         {
-            if (Db is null)
-                return CreateErrorResponse("Database is not available");
+            if (_ctx.Db is null)
+                return Responses.Error("Database is not available");
 
             try
             {
-                var configs = Db.McpConfigs
+                var configs = _ctx.Db.McpConfigs
                                 .OrderBy(c => c.Key)
                                 .AsNoTracking()
                                 .ToList();
@@ -44,7 +53,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"MCPCONFIG_LIST failed: {ex.Message}");
+                return Responses.Error($"MCPCONFIG_LIST failed: {ex.Message}");
             }
         }
 
@@ -56,21 +65,22 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleMcpConfigUpdate(string? key, string? value)
         {
-            if (Db is null)
-                return CreateErrorResponse("Database is not available");
+            if (_ctx.Db is null)
+                return Responses.Error("Database is not available");
 
-            key = RequireParam(key, "McpConfigKey", out var e1);
-            if (key is null) return CreateErrorResponse(e1!);
+            if (string.IsNullOrWhiteSpace(key))
+                return Responses.Error("McpConfigKey is required");
+            key = key.Trim();
 
             try
             {
-                var config = Db.McpConfigs.FirstOrDefault(c => c.Key == key);
+                var config = _ctx.Db.McpConfigs.FirstOrDefault(c => c.Key == key);
                 if (config is null)
-                    return CreateErrorResponse($"MCP config key '{key}' not found.");
+                    return Responses.Error($"MCP config key '{key}' not found.");
 
                 config.Value     = value;
                 config.UpdatedAt = DateTime.UtcNow;
-                Db.SaveChanges();
+                _ctx.Db.SaveChanges();
 
                 var info = new McpConfigInfo
                 {
@@ -91,7 +101,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"MCPCONFIG_UPDATE failed: {ex.Message}");
+                return Responses.Error($"MCPCONFIG_UPDATE failed: {ex.Message}");
             }
         }
     }
