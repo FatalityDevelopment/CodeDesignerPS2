@@ -6,10 +6,34 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeDesigner.Ps2.Common;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class CodeAnalysisService : ICommandService
     {
+        // Float scanner thresholds — values outside this range are filtered
+        // out as implausible game values.
+        private const float FloatScanMinAbs = 0.001f;
+        private const float FloatScanMaxAbs = 1_000_000f;
+
+        private readonly IBridgeContext _ctx;
+        public CodeAnalysisService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleGetStrings(c.Address ?? 0, c.Data),                                                          "GETSTRINGS");
+            reg.Add(c => HandleGetFunctions(c.Address ?? 0, c.Data),                                                        "GETFUNCTIONS");
+            reg.Add(c => HandleGetPointers(c.Address ?? 0, c.Data),                                                         "GETPOINTERS");
+            reg.Add(c => HandleGetFloats(c.Address ?? 0, c.Data),                                                           "GETFLOATS");
+            reg.Add(c => HandleGetIntegers(c.Address ?? 0, c.Data),                                                         "GETINTEGERS");
+            reg.Add(c => HandleScanStrings(c.Address ?? 0, c.Length ?? 0, c.Region),                                        "SCANSTRINGS");
+            reg.Add(c => HandleScanFunctions(c.Address ?? 0, c.Length ?? 0, c.Region),                                      "SCANFUNCTIONS");
+            reg.Add(c => HandleScanPointers(c.Address ?? 0, c.Length ?? 0, c.Region),                                       "SCANPOINTERS");
+            reg.Add(c => HandleScanFloats(c.Address ?? 0, c.Length ?? 0, c.Region),                                         "SCANFLOATS");
+            reg.Add(c => HandleScanIntegers(c.Address ?? 0, c.Length ?? 0, c.Region),                                       "SCANINTEGERS");
+            reg.Add(c => HandleSearch(c.Query ?? "", c.SearchMode ?? "text", c.Address ?? 0, c.Length ?? 0, c.Region, c.Data), "SEARCH");
+            reg.Add(c => HandleScanReferences(c.TargetAddress, c.Address ?? 0, c.Length ?? 0, c.Region, c.Data, c.ReferenceKinds), "SCANREFERENCES", "SCAN_REFERENCES");
+        }
+
         // PS2 EE memory layout constants — hardcoded here to avoid an
         // EmulatorCore dependency. These match
         // CodeDesigner.Ps2.EmulatorCore.PS2MemoryBus.{MainRamSize,ScratchpadSize}.
@@ -188,7 +212,7 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetStrings(uint startAddress, string? base64Data)
         {
             if (string.IsNullOrEmpty(base64Data))
-                return CreateErrorResponse("Data (base64 binary) is required for GETSTRINGS");
+                return Responses.Error("Data (base64 binary) is required for GETSTRINGS");
 
             try
             {
@@ -231,7 +255,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"GetStrings error: {ex.Message}");
+                return Responses.Error($"GetStrings error: {ex.Message}");
             }
         }
 
@@ -246,7 +270,7 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetFunctions(uint startAddress, string? base64Data)
         {
             if (string.IsNullOrEmpty(base64Data))
-                return CreateErrorResponse("Data (base64 binary) is required for GETFUNCTIONS");
+                return Responses.Error("Data (base64 binary) is required for GETFUNCTIONS");
 
             try
             {
@@ -285,7 +309,7 @@ namespace CodeDesigner.Ps2.Bridge
                     .Select(addr => new FunctionEntry
                     {
                         Address = $"0x{addr:X8}",
-                        Label   = _labels.TryGetValue(addr, out var entry)
+                        Label   = _ctx.Labels.TryGetValue(addr, out var entry)
                                       ? entry.Label
                                       : $"FNC_0x{addr:X8}"
                     })
@@ -300,7 +324,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"GetFunctions error: {ex.Message}");
+                return Responses.Error($"GetFunctions error: {ex.Message}");
             }
         }
 
@@ -311,7 +335,7 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetPointers(uint startAddress, string? base64Data)
         {
             if (string.IsNullOrEmpty(base64Data))
-                return CreateErrorResponse("Data (base64 binary) is required for GETPOINTERS");
+                return Responses.Error("Data (base64 binary) is required for GETPOINTERS");
 
             try
             {
@@ -368,7 +392,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"GetPointers error: {ex.Message}");
+                return Responses.Error($"GetPointers error: {ex.Message}");
             }
         }
 
@@ -379,7 +403,7 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetFloats(uint startAddress, string? base64Data)
         {
             if (string.IsNullOrEmpty(base64Data))
-                return CreateErrorResponse("Data (base64 binary) is required for GETFLOATS");
+                return Responses.Error("Data (base64 binary) is required for GETFLOATS");
 
             try
             {
@@ -419,7 +443,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"GetFloats error: {ex.Message}");
+                return Responses.Error($"GetFloats error: {ex.Message}");
             }
         }
 
@@ -430,7 +454,7 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetIntegers(uint startAddress, string? base64Data)
         {
             if (string.IsNullOrEmpty(base64Data))
-                return CreateErrorResponse("Data (base64 binary) is required for GETINTEGERS");
+                return Responses.Error("Data (base64 binary) is required for GETINTEGERS");
 
             try
             {
@@ -461,7 +485,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"GetIntegers error: {ex.Message}");
+                return Responses.Error($"GetIntegers error: {ex.Message}");
             }
         }
 
@@ -472,15 +496,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanStrings(uint address, int length, string? region)
         {
-            if (Client == null)
-                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+            if (_ctx.Client == null)
+                return Responses.Error("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
-                return CreateErrorResponse("Length is required for SCANSTRINGS");
+                return Responses.Error("Length is required for SCANSTRINGS");
 
             try
             {
                 bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes   = ReadLiveBytes(address, length, useIop);
+                var bytes   = _ctx.Memory.ReadLiveBytes(address, length, useIop);
                 var results = new List<StringEntry>();
                 const int MinLength = 4;
 
@@ -517,7 +541,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ScanStrings error: {ex.Message}");
+                return Responses.Error($"ScanStrings error: {ex.Message}");
             }
         }
 
@@ -528,15 +552,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanFunctions(uint address, int length, string? region)
         {
-            if (Client == null)
-                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+            if (_ctx.Client == null)
+                return Responses.Error("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
-                return CreateErrorResponse("Length is required for SCANFUNCTIONS");
+                return Responses.Error("Length is required for SCANFUNCTIONS");
 
             try
             {
                 bool useIop  = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes      = ReadLiveBytes(address, length, useIop);
+                var bytes      = _ctx.Memory.ReadLiveBytes(address, length, useIop);
                 var candidates = new HashSet<uint>();
 
                 for (int i = 0; i + 3 < bytes.Length; i += 4)
@@ -566,7 +590,7 @@ namespace CodeDesigner.Ps2.Bridge
                     .Select(addr => new FunctionEntry
                     {
                         Address = $"0x{addr:X8}",
-                        Label   = _labels.TryGetValue(addr, out var entry)
+                        Label   = _ctx.Labels.TryGetValue(addr, out var entry)
                                       ? entry.Label
                                       : $"FNC_0x{addr:X8}"
                     })
@@ -581,7 +605,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ScanFunctions error: {ex.Message}");
+                return Responses.Error($"ScanFunctions error: {ex.Message}");
             }
         }
 
@@ -592,15 +616,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanPointers(uint address, int length, string? region)
         {
-            if (Client == null)
-                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+            if (_ctx.Client == null)
+                return Responses.Error("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
-                return CreateErrorResponse("Length is required for SCANPOINTERS");
+                return Responses.Error("Length is required for SCANPOINTERS");
 
             try
             {
                 bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes   = ReadLiveBytes(address, length, useIop);
+                var bytes   = _ctx.Memory.ReadLiveBytes(address, length, useIop);
 
                 // Build the set of all EE addresses referenced by MIPS code.
                 // We always use EE RAM as the code source regardless of the scan
@@ -643,7 +667,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ScanPointers error: {ex.Message}");
+                return Responses.Error($"ScanPointers error: {ex.Message}");
             }
         }
 
@@ -654,15 +678,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanFloats(uint address, int length, string? region)
         {
-            if (Client == null)
-                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+            if (_ctx.Client == null)
+                return Responses.Error("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
-                return CreateErrorResponse("Length is required for SCANFLOATS");
+                return Responses.Error("Length is required for SCANFLOATS");
 
             try
             {
                 bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes   = ReadLiveBytes(address, length, useIop);
+                var bytes   = _ctx.Memory.ReadLiveBytes(address, length, useIop);
                 var results = new List<FloatEntry>();
 
                 for (int i = 0; i + 3 < bytes.Length; i += 4)
@@ -699,7 +723,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ScanFloats error: {ex.Message}");
+                return Responses.Error($"ScanFloats error: {ex.Message}");
             }
         }
 
@@ -710,15 +734,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleScanIntegers(uint address, int length, string? region)
         {
-            if (Client == null)
-                return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+            if (_ctx.Client == null)
+                return Responses.Error("No live memory backend — start with --run or --pcsx2");
             if (length <= 0)
-                return CreateErrorResponse("Length is required for SCANINTEGERS");
+                return Responses.Error("Length is required for SCANINTEGERS");
 
             try
             {
                 bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                var bytes   = ReadLiveBytes(address, length, useIop);
+                var bytes   = _ctx.Memory.ReadLiveBytes(address, length, useIop);
                 var results = new List<IntegerEntry>();
 
                 for (int i = 0; i + 3 < bytes.Length; i += 4)
@@ -746,7 +770,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ScanIntegers error: {ex.Message}");
+                return Responses.Error($"ScanIntegers error: {ex.Message}");
             }
         }
 
@@ -762,7 +786,7 @@ namespace CodeDesigner.Ps2.Bridge
                                     string? region, string? base64Data)
         {
             if (string.IsNullOrEmpty(query))
-                return CreateErrorResponse("Query is required for SEARCH");
+                return Responses.Error("Query is required for SEARCH");
 
             try
             {
@@ -773,12 +797,12 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 else
                 {
-                    if (Client == null)
-                        return CreateErrorResponse("No live memory backend — start with --run or --pcsx2");
+                    if (_ctx.Client == null)
+                        return Responses.Error("No live memory backend — start with --run or --pcsx2");
                     if (length <= 0)
-                        return CreateErrorResponse("Length is required when searching live memory");
+                        return Responses.Error("Length is required when searching live memory");
                     bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                    bytes = ReadLiveBytes(startAddress, length, useIop);
+                    bytes = _ctx.Memory.ReadLiveBytes(startAddress, length, useIop);
                 }
 
                 var matches = new List<SearchMatch>();
@@ -789,7 +813,7 @@ namespace CodeDesigner.Ps2.Bridge
                     string hexStr = query.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? query[2..] : query;
                     if (!uint.TryParse(hexStr, System.Globalization.NumberStyles.HexNumber,
                                        System.Globalization.CultureInfo.InvariantCulture, out uint targetAddr))
-                        return CreateErrorResponse("Invalid address for instruction-reference search");
+                        return Responses.Error("Invalid address for instruction-reference search");
 
                     return JsonSerializer.Serialize(new CommandResponse
                     {
@@ -803,7 +827,7 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     var pattern = ParseBytePattern(query);
                     if (pattern == null)
-                        return CreateErrorResponse("Invalid byte pattern");
+                        return Responses.Error("Invalid byte pattern");
 
                     for (int i = 0; i <= bytes.Length - pattern.Length; i++)
                     {
@@ -854,7 +878,7 @@ namespace CodeDesigner.Ps2.Bridge
                     if (useRegex)
                     {
                         try { rx = new Regex(query, RegexOptions.IgnoreCase); }
-                        catch { return CreateErrorResponse("Invalid regular expression"); }
+                        catch { return Responses.Error("Invalid regular expression"); }
                     }
                     string queryLower = query.ToLowerInvariant();
 
@@ -870,7 +894,7 @@ namespace CodeDesigner.Ps2.Bridge
                         int    sp       = disasm.IndexOf(' ');
                         string op       = sp < 0 ? disasm : disasm[..sp];
                         string args     = sp < 0 ? "" : disasm[(sp + 1)..].Trim();
-                        bool   hasLabel = _labels.TryGetValue(addr, out var le);
+                        bool   hasLabel = _ctx.Labels.TryGetValue(addr, out var le);
                         string label    = hasLabel ? le!.Label         : "";
                         string comment  = hasLabel ? (le!.Comment ?? "") : "";
 
@@ -922,7 +946,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"Search error: {ex.Message}");
+                return Responses.Error($"Search error: {ex.Message}");
             }
         }
 
@@ -1130,7 +1154,7 @@ namespace CodeDesigner.Ps2.Bridge
                                             string? region, string? base64Data, List<string>? kinds)
         {
             if (!targetAddress.HasValue)
-                return CreateErrorResponse("TargetAddress is required for SCANREFERENCES");
+                return Responses.Error("TargetAddress is required for SCANREFERENCES");
 
             try
             {
@@ -1143,13 +1167,13 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 else
                 {
-                    if (Client == null)
-                        return CreateErrorResponse("No live memory backend — start with --pcsx2 or STARTEMULATOR");
+                    if (_ctx.Client == null)
+                        return Responses.Error("No live memory backend — start with --pcsx2 or STARTEMULATOR");
                     if (length <= 0)
-                        return CreateErrorResponse("Length is required when scanning live references");
+                        return Responses.Error("Length is required when scanning live references");
 
                     bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
-                    bytes = ReadLiveBytesChunked(startAddress, length, useIop);
+                    bytes = _ctx.Memory.ReadLiveBytesChunked(startAddress, length, useIop);
                 }
 
                 var references = ReferenceScanner.Scan(new ReferenceScanInput
@@ -1170,7 +1194,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ScanReferences error: {ex.Message}");
+                return Responses.Error($"ScanReferences error: {ex.Message}");
             }
         }
 

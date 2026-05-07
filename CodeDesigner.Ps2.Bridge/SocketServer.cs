@@ -161,13 +161,13 @@ namespace CodeDesigner.Ps2.Bridge
         internal void RecordNavEntry(uint address, string source)
         {
             // Normalise to KSEG0 for a canonical display address.
-            uint display  = NormalizePcToKseg0(address);
+            uint display  = Services.AddressTranslator.NormalizePcToKseg0(address);
             string addrStr = $"0x{display:X8}";
 
             // Try to find a label — check both the KSEG0 address and the
             // physical address (labels may be stored under either form).
             string? label = null;
-            uint phys = NormalizeBreakpointToPhysical(address);
+            uint phys = Services.AddressTranslator.NormalizeBreakpointToPhysical(address);
             if (_labels.TryGetValue(display, out var l1)) label = l1.Label;
             else if (_labels.TryGetValue(phys, out var l2)) label = l2.Label;
 
@@ -277,6 +277,9 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.ValueScanService(ctx),
                 new Services.BreakpointDisassemblyService(ctx),
                 new Services.LabelManagerService(ctx),
+                new Services.AssemblerService(ctx),
+                new Services.CodeAnalysisService(ctx),
+                new Services.EmulatorControlService(ctx),
             });
         }
 
@@ -699,92 +702,10 @@ namespace CodeDesigner.Ps2.Bridge
                             return CreateErrorResponse("Runtime mode switching is not enabled in this server instance");
                         return RuntimeCommandHandler(command);
 
-                    case "ASSEMBLE":
-                        return HandleAssemble(command.Data);
-
-                    case "COMPILECDS":
-                        return HandleCompileCds(command.Data, command.Labels);
-                    
-                    case "VALIDATECDS":
-                        return HandleValidateCds(command.Data, command.Labels);
-                    
-                    case "DISASSEMBLE":
-                        return HandleDisassemble(command.Data, command.Address);
-
-                    // ── Migrated to Services/* — handled by the dispatcher above. ───
-                    // READMEM, WRITEMEM, LOADBIN, READMEMREGION, SCANPATTERN  → MemoryService
-                    // PAUSE, RESUME, STEP, SETBP, CLEARBP, CLEARBP_ALL, GETPC → ExecutionService
-                    // GETGAMECHEATS, APPLYCHEATS, PORTCHEATS, CONVERTCHEAT,
-                    // INJECTCHEATENGINE, UPDATECHEATENGINE, REMOVECHEATENGINE → CheatsService
-
-                    case "SNAPSHOT":
-                        return HandleSnapshot(command.OutputPath, command.IsoName, command.Title, command.Description);
-
-                    case "LOADSNAPSHOT":
-                        return HandleLoadSnapshot(command.InputPath);
-
-                    case "LOADELF":
-                        return HandleLoadElf(command.InputPath);
-
-                    // GETREGS, SETREG → RegisterService (migrated)
-
-                    case "CDSPATCH":
-                        return HandleCdsPatch(command.Data, command.Labels);
-
-                    case "GET_GAME_CHEATS":
-                        return _dispatcher.TryDispatch(new CommandMessage { Command = "GETGAMECHEATS", GameSerial = command.GameSerial })
-                            ?? CreateErrorResponse("GETGAMECHEATS not registered");
-
-                    case "RESTART":
-                        return HandleRestart();
-
-                    // Labels → LabelService (migrated)
-
-                    case "GETSTRINGS":
-                        return HandleGetStrings(command.Address ?? 0, command.Data);
-
-                    case "GETFUNCTIONS":
-                        return HandleGetFunctions(command.Address ?? 0, command.Data);
-
-                    case "GETPOINTERS":
-                        return HandleGetPointers(command.Address ?? 0, command.Data);
-
-                    case "GETFLOATS":
-                        return HandleGetFloats(command.Address ?? 0, command.Data);
-
-                    case "GETINTEGERS":
-                        return HandleGetIntegers(command.Address ?? 0, command.Data);
-
-                    case "SCANSTRINGS":
-                        return HandleScanStrings(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SCANFUNCTIONS":
-                        return HandleScanFunctions(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SCANPOINTERS":
-                        return HandleScanPointers(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SCANFLOATS":
-                        return HandleScanFloats(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SCANINTEGERS":
-                        return HandleScanIntegers(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SEARCH":
-                        return HandleSearch(command.Query ?? "", command.SearchMode ?? "text",
-                                            command.Address ?? 0, command.Length ?? 0,
-                                            command.Region, command.Data);
-
-                    case "SCANREFERENCES":
-                    case "SCAN_REFERENCES":
-                        return HandleScanReferences(
-                            command.TargetAddress,
-                            command.Address ?? 0,
-                            command.Length ?? 0,
-                            command.Region,
-                            command.Data,
-                            command.ReferenceKinds);
-
+                    // All command-specific cases below have been migrated into
+                    // Services/* — see ICommandService for the recipe. The
+                    // dispatcher above handles them. Aliases that don't match
+                    // a registered name are bounced via DispatchAlias().
                     // GETTHREADS, GETIOPTHREADS → ProcessStateService (migrated)
                     case "GET_IOP_THREADS":
                     case "IOPTHREADS":         return DispatchAlias(command, "GETIOPTHREADS");
@@ -793,11 +714,7 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PINE_DISASSEMBLE":
                     case "PINE_DISASM":        return DispatchAlias(command, "PINEDISASSEMBLE");
 
-                    case "LISTDISCELFS":
-                        return HandleListDiscElfs(command.IsoPath);
-
-                    case "RECOMPILE":
-                        return HandleRecompile(command.IsoPath, command.ElfName, command.OutputDirectory);
+                    case "SCAN_REFERENCES":    return DispatchAlias(command, "SCANREFERENCES");
 
                     // CONVERTCHEAT, PORTCHEATS → CheatsService (migrated)
 
@@ -816,11 +733,7 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PING":
                         return CreateSuccessResponse("PONG");
 
-                    case "PCSX2STATUS":
-                        return HandlePcsx2Status();
-
-                    case "PCSX2GAMEINFO":
-                        return HandlePcsx2GameInfo();
+                    // PCSX2STATUS, PCSX2GAMEINFO → EmulatorControlService (migrated)
 
                     // RESET, STEPINTO/OVER/OUT, GETFPS, SETLIMITER, FRAMEADVANCE
                     // → SaveStateService / SteppingService (migrated). Aliases:
@@ -860,9 +773,8 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PINE_LOADSTATE":
                     case "PINE_LOAD_STATE":  return DispatchAlias(command, "PINELOADSTATE");
 
-                    case "EXTRACTP2S":
-                    case "EXTRACT_P2S":
-                        return HandleExtractP2s(command.FilePath);
+                    // EXTRACTP2S → EmulatorControlService (migrated)
+                    case "EXTRACT_P2S": return DispatchAlias(command, "EXTRACTP2S");
 
                     // READMEMREGION, SCANPATTERN → MemoryService (migrated). The
                     // alias forms (READ_MEM_REGION, SCAN_PATTERN) are still

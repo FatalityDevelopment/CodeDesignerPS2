@@ -7,10 +7,22 @@ using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.CdsLanguage;
 using CodeDesigner.Ps2.CdsLanguage.SyntaxItems;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class AssemblerService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public AssemblerService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleAssemble(c.Data),                                "ASSEMBLE");
+            reg.Add(c => HandleCompileCds(c.Data, c.Labels),                    "COMPILECDS");
+            reg.Add(c => HandleValidateCds(c.Data, c.Labels),                   "VALIDATECDS");
+            reg.Add(c => HandleCdsPatch(c.Data, c.Labels),                      "CDSPATCH");
+            reg.Add(c => HandleDisassemble(c.Data, c.Address),                  "DISASSEMBLE");
+        }
+
 
         /// <summary>
         /// Handle COMPILECDS command — compiles a CDS (Code Designer Script) source text
@@ -51,7 +63,7 @@ namespace CodeDesigner.Ps2.Bridge
             try
             {
                 if (string.IsNullOrWhiteSpace(sourceCode))
-                    return CreateErrorResponse("No source code provided");
+                    return Responses.Error("No source code provided");
 
                 // ── Build external label dictionary ──────────────────────────────────
                 // Priority (lowest to highest): pointer-manager labels → server labels → CDS source.
@@ -74,7 +86,7 @@ namespace CodeDesigner.Ps2.Bridge
                 }
 
                 // Server-registered labels (breakpoints, user labels, etc.)
-                foreach (var kv in _labels)
+                foreach (var kv in _ctx.Labels)
                     extDict[kv.Value.Label] = kv.Key;
 
                 // ── Parse ────────────────────────────────────────────────────────────
@@ -196,7 +208,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"Compile error: {ex.Message}");
+                return Responses.Error($"Compile error: {ex.Message}");
             }
         }
 
@@ -208,12 +220,12 @@ namespace CodeDesigner.Ps2.Bridge
         {
             try
             {
-                if (Client != null)
+                if (_ctx.Client != null)
                 {
                     uint clientAddr = address >= 0x80000000u && address <= 0xBFFFFFFFu
                         ? address
                         : (address < 0x20000000u ? address | 0x80000000u : address);
-                    byte[] bytes = Client.ReadBytes(clientAddr, 4);
+                    byte[] bytes = _ctx.Client.ReadBytes(clientAddr, 4);
                     if (bytes.Length == 4)
                         return System.BitConverter.ToUInt32(bytes, 0);
                 }
@@ -243,10 +255,10 @@ namespace CodeDesigner.Ps2.Bridge
             try
             {
                 if (string.IsNullOrWhiteSpace(sourceCode))
-                    return CreateErrorResponse("No source code provided");
+                    return Responses.Error("No source code provided");
 
-                if (Client == null)
-                    return CreateErrorResponse("No live memory backend — start with --pcsx2 or STARTEMULATOR");
+                if (_ctx.Client == null)
+                    return Responses.Error("No live memory backend — start with --pcsx2 or STARTEMULATOR");
 
                 // ── Build external label dictionary ──────────────────────────────────
                 var extDict = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
@@ -264,7 +276,7 @@ namespace CodeDesigner.Ps2.Bridge
                             extDict[entry.Label] = addr;
                     }
                 }
-                foreach (var kv in _labels)
+                foreach (var kv in _ctx.Labels)
                     extDict[kv.Value.Label] = kv.Key;
 
                 // ── Parse ────────────────────────────────────────────────────────────
@@ -347,7 +359,7 @@ namespace CodeDesigner.Ps2.Bridge
 
                 var cheatText = string.Join('\n', codeLines);
 
-                IByteEditor byteEditor = new DebugClientByteEditor(Client!);
+                IByteEditor byteEditor = new DebugClientByteEditor(_ctx.Client!);
                 var engine    = new CheatEngine.CheatEngine(byteEditor);
                 var cheatList = new CheatList(cheatText);
                 engine.PatchMemory(cheatList);
@@ -406,7 +418,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"CDSPATCH error: {ex.Message}");
+                return Responses.Error($"CDSPATCH error: {ex.Message}");
             }
         }
 
@@ -452,7 +464,7 @@ namespace CodeDesigner.Ps2.Bridge
             try
             {
                 if (string.IsNullOrWhiteSpace(sourceCode))
-                    return CreateErrorResponse("No source code provided");
+                    return Responses.Error("No source code provided");
 
                 // ── Build external label dictionary ──────────────────────────────
                 var extDict = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
@@ -470,7 +482,7 @@ namespace CodeDesigner.Ps2.Bridge
                             extDict[entry.Label] = addr;
                     }
                 }
-                foreach (var kv in _labels)
+                foreach (var kv in _ctx.Labels)
                     extDict[kv.Value.Label] = kv.Key;
 
                 // ── Parse (no compile step) ──────────────────────────────────────
@@ -508,31 +520,31 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"VALIDATECDS error: {ex.Message}");
+                return Responses.Error($"VALIDATECDS error: {ex.Message}");
             }
         }
 
         /// <summary>
         /// Install a software breakpoint at the given EE virtual address through
-        /// the active <see cref="IDebugClient"/> (PineClient or InternalEmulatorClient).
+        /// the active <see cref="IDebugClient"/> (_ctx.PineClient or InternalEmulatorClient).
         /// </summary>
         private void SetBreakpointInternal(uint address)
         {
-            if (Client == null)
+            if (_ctx.Client == null)
                 throw new InvalidOperationException("No live backend for breakpoint installation");
-            Client.SetBreakpoint(NormalizeBreakpointForClient(address));
+            _ctx.Client.SetBreakpoint(AddressTranslator.NormalizeBreakpointForClient(address));
         }
 
         /// <summary>
         /// Install a hardware watchpoint at the given EE virtual address range.
-        /// In PINE mode delegates to <see cref="PineClient.AddWatch"/>; PINE-only feature.
+        /// In PINE mode delegates to <see cref="_ctx.PineClient.AddWatch"/>; PINE-only feature.
         /// </summary>
         private void SetWatchpointInternal(uint address, uint size, WatchpointAccessType accessType)
         {
-            if (!IsPineMode)
+            if (_ctx.PineClient == null)
                 throw new InvalidOperationException("Watchpoints via CDSPATCH require PINE mode (connect to PCSX2 first)");
-            if (PineClient == null)
-                throw new InvalidOperationException("PINE client not connected");
+            if (_ctx.PineClient == null)
+                throw new InvalidOperationException("PINE _ctx.Client not connected");
 
             uint cond = accessType switch
             {
@@ -546,7 +558,7 @@ namespace CodeDesigner.Ps2.Bridge
                 throw new ArgumentOutOfRangeException(nameof(size),
                     $"Watchpoint range overflow: physStart=0x{physStart:X8} + size={size} exceeds physical address space");
             uint physEnd   = physStart + size;
-            PineClient.AddWatch(cpu: 0, physStart, physEnd, (byte)cond);
+            _ctx.PineClient.AddWatch(cpu: 0, physStart, physEnd, (byte)cond);
         }
 
         /// <summary>
@@ -617,7 +629,7 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 if (string.IsNullOrWhiteSpace(asmCode))
                 {
-                    return CreateErrorResponse("No assembly code provided");
+                    return Responses.Error("No assembly code provided");
                 }
 
                 // Split into lines and assemble each
@@ -666,7 +678,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"Assemble error: {ex.Message}");
+                return Responses.Error($"Assemble error: {ex.Message}");
             }
         }
 
@@ -679,7 +691,7 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 if (string.IsNullOrWhiteSpace(hexCode))
                 {
-                    return CreateErrorResponse("No hex code provided");
+                    return Responses.Error("No hex code provided");
                 }
 
                 // Split into lines and disassemble each hex value
@@ -751,13 +763,13 @@ namespace CodeDesigner.Ps2.Bridge
                 }
 
                 // Resolve a live memory bus so the analyzer can peek at strings
-                // and pointer chains. Wraps the active debug client through the
+                // and pointer chains. Wraps the active debug _ctx.Client through the
                 // ByteEditor → IPs2MemoryBus adapter chain. When no backend is
                 // available (file-only mode) the bus remains null and the
                 // analyzer falls back to label/MMIO-name hints only.
                 CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? analysisBus =
-                    Client != null
-                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(Client))
+                    _ctx.Client != null
+                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.Client))
                         : null;
 
                 // Run analyzer using the instruction's built-in Analyze() method.
@@ -768,7 +780,7 @@ namespace CodeDesigner.Ps2.Bridge
                     startAddress ?? 0,
                     executeInstructions: true,  // Execute instructions to track register state
                     bus: analysisBus,
-                    lookupLabel: addr => _labels.TryGetValue(addr, out var e) ? e.Label : null,
+                    lookupLabel: addr => _ctx.Labels.TryGetValue(addr, out var e) ? e.Label : null,
                     includeStateHints: false);
 
                 // Apply comments and labels to results
@@ -783,7 +795,7 @@ namespace CodeDesigner.Ps2.Bridge
                         }
 
                         // Apply label from the database
-                        if (_labels.TryGetValue(addr, out var labelEntry))
+                        if (_ctx.Labels.TryGetValue(addr, out var labelEntry))
                         {
                             results[i].Label = labelEntry.Label;
                             // Use the label's comment only when the analyzer produced nothing
@@ -804,7 +816,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"Disassemble error: {ex.Message}");
+                return Responses.Error($"Disassemble error: {ex.Message}");
             }
         }
 

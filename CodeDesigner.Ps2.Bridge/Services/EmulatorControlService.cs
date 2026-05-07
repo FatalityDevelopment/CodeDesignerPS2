@@ -10,10 +10,26 @@ using SharpCompress.Common;
 using CodeDesigner.Ps2.IsoManager;
 using CodeDesigner.Ps2.Bridge.Repositories;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class EmulatorControlService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public EmulatorControlService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(_ => HandlePcsx2Status(),                                                                              "PCSX2STATUS");
+            reg.Add(_ => HandlePcsx2GameInfo(),                                                                            "PCSX2GAMEINFO");
+            reg.Add(_ => HandleRestart(),                                                                                  "RESTART");
+            reg.Add(c => HandleSnapshot(c.OutputPath, c.IsoName, c.Title, c.Description),                                  "SNAPSHOT");
+            reg.Add(c => HandleLoadSnapshot(c.InputPath),                                                                  "LOADSNAPSHOT");
+            reg.Add(c => HandleLoadElf(c.InputPath),                                                                       "LOADELF");
+            reg.Add(c => HandleExtractP2s(c.FilePath),                                                                     "EXTRACTP2S", "EXTRACT_P2S");
+            reg.Add(c => HandleListDiscElfs(c.IsoPath),                                                                    "LISTDISCELFS");
+            reg.Add(c => HandleRecompile(c.IsoPath, c.ElfName, c.OutputDirectory),                                         "RECOMPILE");
+        }
+
         // PS2 memory layout constants — duplicated locally so Bridge has no
         // EmulatorCore dependency. Match
         // CodeDesigner.Ps2.EmulatorCore.PS2MemoryBus / IopMemoryBus.
@@ -28,16 +44,16 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePcsx2Status()
         {
-            if (PineClient == null)
-                return CreateErrorResponse("PCSX2STATUS requires --pcsx2 mode");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PCSX2STATUS requires --pcsx2 mode");
             try
             {
-                var status = PineClient.GetStatus();
-                return CreateSuccessResponse(status.ToString());
+                var status = _ctx.PineClient.GetStatus();
+                return Responses.Success(status.ToString());
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE Status error: {ex.Message}");
+                return Responses.Error($"PINE Status error: {ex.Message}");
             }
         }
 
@@ -46,14 +62,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandlePcsx2GameInfo()
         {
-            if (PineClient == null)
-                return CreateErrorResponse("PCSX2GAMEINFO requires --pcsx2 mode");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PCSX2GAMEINFO requires --pcsx2 mode");
             try
             {
-                string title   = PineClient.GetGameTitle();
-                string id      = PineClient.GetGameID();
-                string uuid    = PineClient.GetGameUUID();
-                string version = PineClient.GetGameVersion();
+                string title   = _ctx.PineClient.GetGameTitle();
+                string id      = _ctx.PineClient.GetGameID();
+                string uuid    = _ctx.PineClient.GetGameUUID();
+                string version = _ctx.PineClient.GetGameVersion();
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -71,23 +87,23 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE GameInfo error: {ex.Message}");
+                return Responses.Error($"PINE GameInfo error: {ex.Message}");
             }
         }
 
         private string HandleRestart()
         {
-            if (PineClient != null)
+            if (_ctx.PineClient != null)
             {
-                try   { PineClient.Reset(); return CreateSuccessResponse("Restarted"); }
-                catch (Exception ex) { return CreateErrorResponse($"PINE reset failed: {ex.Message}"); }
+                try   { _ctx.PineClient.Reset(); return Responses.Success("Restarted"); }
+                catch (Exception ex) { return Responses.Error($"PINE reset failed: {ex.Message}"); }
             }
-            if (InternalClient != null)
+            if (_ctx.InternalClient != null)
             {
-                try   { InternalClient.RequestRestart(); return CreateSuccessResponse("Restarted"); }
-                catch (Exception ex) { return CreateErrorResponse($"Internal reset failed: {ex.Message}"); }
+                try   { _ctx.InternalClient.RequestRestart(); return Responses.Success("Restarted"); }
+                catch (Exception ex) { return Responses.Error($"Internal reset failed: {ex.Message}"); }
             }
-            return CreateErrorResponse("Emulator not running — no debug client attached");
+            return Responses.Error("Emulator not running — no debug _ctx.Client attached");
         }
 
         /// <summary>
@@ -108,8 +124,8 @@ namespace CodeDesigner.Ps2.Bridge
                 outputPath = Path.Combine(Path.GetTempPath(), "codedesigner_snapshots", folder);
             }
 
-            if (Client == null)
-                return CreateErrorResponse("Emulator not running — no debug client attached");
+            if (_ctx.Client == null)
+                return Responses.Error("Emulator not running — no debug _ctx.Client attached");
 
             try
             {
@@ -119,13 +135,13 @@ namespace CodeDesigner.Ps2.Bridge
                     (Label: "EE RAM",     File: "EEmem.bin",     Base: 0x00000000u,             Size: (int)EeRamSize,    UseIop: false),
                     (Label: "BIOS ROM",   File: "BIOSrom.bin",   Base: BiosRomPhysBase, Size: (int)BiosRomSize,    UseIop: false),
                     (Label: "Scratchpad", File: "Scratchpad.bin",Base: 0x70000000u,             Size: (int)EeScratchpadSize, UseIop: false),
-                    (Label: "IOP RAM",    File: "IOPmem.bin",    Base: EeIopMirrorBase,         Size: (int)IopRamBytes,        UseIop: true),
+                    (Label: "IOP RAM",    File: "IOPmem.bin",    Base: AddressTranslator.EeIopMirrorBase,         Size: (int)IopRamBytes,        UseIop: true),
                 };
                 var written = new List<SnapshotRegion>();
                 foreach (var (label, file, baseAddr, size, useIop) in regions)
                 {
-                    uint clientAddr = TranslateClientAddress(baseAddr, useIop);
-                    byte[] bytes  = Client.ReadBytes(clientAddr, size);
+                    uint clientAddr = AddressTranslator.ToClientAddress(baseAddr, useIop);
+                    byte[] bytes  = _ctx.Client.ReadBytes(clientAddr, size);
                     File.WriteAllBytes(Path.Combine(outputPath, file), bytes);
                     written.Add(new SnapshotRegion { Label = label, File = file, BaseAddress = baseAddr, Size = bytes.Length });
                 }
@@ -134,7 +150,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse("Snapshot error: " + ex.Message);
+                return Responses.Error("Snapshot error: " + ex.Message);
             }
         }
 
@@ -179,7 +195,7 @@ namespace CodeDesigner.Ps2.Bridge
                     ?? Path.GetFileName(outputPath.TrimEnd(
                         Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
-                var snapshotRepo = new DbSnapshotRepository(Db);
+                var snapshotRepo = new DbSnapshotRepository(_ctx.Db);
                 snapshotRepo.AddSnapshotAsync(outputPath, snapshotTitle, description, isoName)
                             .GetAwaiter().GetResult();
             }
@@ -195,21 +211,21 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleLoadSnapshot(string? inputPath)
         {
             if (string.IsNullOrWhiteSpace(inputPath))
-                return CreateErrorResponse("InputPath is required for LOADSNAPSHOT");
+                return Responses.Error("InputPath is required for LOADSNAPSHOT");
             if (!Directory.Exists(inputPath))
-                return CreateErrorResponse("Snapshot directory not found: " + inputPath);
-            if (Client == null)
-                return CreateErrorResponse("Emulator not running — no debug client attached");
+                return Responses.Error("Snapshot directory not found: " + inputPath);
+            if (_ctx.Client == null)
+                return Responses.Error("Emulator not running — no debug _ctx.Client attached");
 
             try
             {
-                try { Client.Pause(); } catch { /* ignore pause errors */ }
+                try { _ctx.Client.Pause(); } catch { /* ignore pause errors */ }
                 var regions = new[]
                 {
                     (File: "EEmem.bin",      Label: "EE RAM",     MaxSize: (int)EeRamSize,    Base: 0x00000000u,                 UseIop: false),
                     (File: "BIOSrom.bin",    Label: "BIOS ROM",   MaxSize: (int)BiosRomSize,    Base: BiosRomPhysBase, UseIop: false),
                     (File: "Scratchpad.bin", Label: "Scratchpad", MaxSize: (int)EeScratchpadSize, Base: 0x70000000u,                 UseIop: false),
-                    (File: "IOPmem.bin",     Label: "IOP RAM",    MaxSize: (int)IopRamBytes,        Base: EeIopMirrorBase,             UseIop: true),
+                    (File: "IOPmem.bin",     Label: "IOP RAM",    MaxSize: (int)IopRamBytes,        Base: AddressTranslator.EeIopMirrorBase,             UseIop: true),
                 };
                 var loaded = new List<SnapshotRegion>();
                 foreach (var (file, label, maxSize, baseAddr, useIop) in regions)
@@ -220,15 +236,15 @@ namespace CodeDesigner.Ps2.Bridge
                     int count  = Math.Min(src.Length, maxSize);
                     if (count <= 0) continue;
                     if (count != src.Length) Array.Resize(ref src, count);
-                    uint clientAddr = TranslateClientAddress(baseAddr, useIop);
-                    Client.WriteBytes(clientAddr, src);
+                    uint clientAddr = AddressTranslator.ToClientAddress(baseAddr, useIop);
+                    _ctx.Client.WriteBytes(clientAddr, src);
                     loaded.Add(new SnapshotRegion { Label = label, File = filePath, BaseAddress = baseAddr, Size = count });
                 }
                 return JsonSerializer.Serialize(new CommandResponse { Success = true, Command = "LOADSNAPSHOT", Regions = loaded });
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse("LoadSnapshot error: " + ex.Message);
+                return Responses.Error("LoadSnapshot error: " + ex.Message);
             }
         }
 
@@ -249,7 +265,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleLoadElf(string? filePath)
         {
-            return CreateErrorResponse(
+            return Responses.Error(
                 "LOADELF has been superseded by STARTFILEMODE. " +
                 "Send the runtime command STARTFILEMODE with the ELF path as InputPath; " +
                 "the file will be loaded by CodeDesigner.Ps2.Emulator.exe and the bridge " +
@@ -259,7 +275,7 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleExtractP2s(string? filePath)
         {
             if (string.IsNullOrEmpty(filePath))
-                return CreateErrorResponse("FilePath is required for EXTRACTP2S");
+                return Responses.Error("FilePath is required for EXTRACTP2S");
 
             // PCSX2 acknowledges the SAVESTATETOFILE PINE command before it finishes
             // writing the file.  Poll briefly so the extraction does not race the flush.
@@ -271,7 +287,7 @@ namespace CodeDesigner.Ps2.Bridge
                     Thread.Sleep(pollInterval);
 
                 if (!File.Exists(filePath))
-                    return CreateErrorResponse($"File not found: {filePath}");
+                    return Responses.Error($"File not found: {filePath}");
             }
 
             try
@@ -290,7 +306,7 @@ namespace CodeDesigner.Ps2.Bridge
                 var memEntries = new[]
                 {
                     (ZipName: "eeMemory.bin",  OutFile: "EEmem.bin",  Label: "EE RAM", Base: 0x00000000u),
-                    (ZipName: "iopMemory.bin", OutFile: "IOPmem.bin", Label: "IOP RAM",     Base: EeIopMirrorBase),
+                    (ZipName: "iopMemory.bin", OutFile: "IOPmem.bin", Label: "IOP RAM",     Base: AddressTranslator.EeIopMirrorBase),
                 };
 
                 var regions  = new List<SnapshotRegion>();
@@ -307,7 +323,7 @@ namespace CodeDesigner.Ps2.Bridge
                 }
 
                 if (regions.Count == 0)
-                    return CreateErrorResponse("No memory dump files (eeMemory.bin, iopMemory.bin) found in the .p2s archive");
+                    return Responses.Error("No memory dump files (eeMemory.bin, iopMemory.bin) found in the .p2s archive");
 
                 string snapName = Path.GetFileNameWithoutExtension(filePath);
                 var info = new
@@ -323,7 +339,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"EXTRACTP2S failed: {ex.Message}");
+                return Responses.Error($"EXTRACTP2S failed: {ex.Message}");
             }
         }
 
@@ -356,9 +372,9 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleListDiscElfs(string? isoPath)
         {
             if (string.IsNullOrWhiteSpace(isoPath))
-                return CreateErrorResponse("IsoPath is required.");
+                return Responses.Error("IsoPath is required.");
             if (!File.Exists(isoPath))
-                return CreateErrorResponse($"ISO file not found: {isoPath}");
+                return Responses.Error($"ISO file not found: {isoPath}");
 
             try
             {
@@ -417,16 +433,16 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"LISTDISCELFS failed: {ex.Message}");
+                return Responses.Error($"LISTDISCELFS failed: {ex.Message}");
             }
         }
 
         private string HandleRecompile(string? isoPath, string? elfName, string? outputDirectory)
         {
             if (string.IsNullOrWhiteSpace(isoPath))
-                return CreateErrorResponse("IsoPath is required.");
+                return Responses.Error("IsoPath is required.");
             if (!File.Exists(isoPath))
-                return CreateErrorResponse($"ISO file not found: {isoPath}");
+                return Responses.Error($"ISO file not found: {isoPath}");
 
             try
             {
@@ -440,21 +456,21 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     var cnfEntry = cdvd.FindFile("SYSTEM.CNF");
                     if (cnfEntry == null)
-                        return CreateErrorResponse("SYSTEM.CNF not found on disc.");
+                        return Responses.Error("SYSTEM.CNF not found on disc.");
                     byte[] cnfBytes = cdvd.ReadFile(cnfEntry.Value);
                     string cnfText  = System.Text.Encoding.Latin1.GetString(cnfBytes);
                     resolvedElfName = SystemCnfParser.ParseBoot2(cnfText) ?? string.Empty;
                     if (string.IsNullOrEmpty(resolvedElfName))
-                        return CreateErrorResponse("BOOT2 entry not found in SYSTEM.CNF.");
+                        return Responses.Error("BOOT2 entry not found in SYSTEM.CNF.");
                 }
 
                 var entry = cdvd.FindFile(resolvedElfName);
                 if (entry == null)
-                    return CreateErrorResponse($"ELF not found on disc: {resolvedElfName}");
+                    return Responses.Error($"ELF not found on disc: {resolvedElfName}");
 
                 byte[] elfData = cdvd.ReadFile(entry.Value);
                 if (elfData.Length == 0)
-                    return CreateErrorResponse($"ELF is empty: {resolvedElfName}");
+                    return Responses.Error($"ELF is empty: {resolvedElfName}");
 
                 string outDir = string.IsNullOrWhiteSpace(outputDirectory) ? "recomp_out" : outputDirectory;
 
@@ -481,7 +497,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"RECOMPILE failed: {ex.Message}");
+                return Responses.Error($"RECOMPILE failed: {ex.Message}");
             }
         }
 
