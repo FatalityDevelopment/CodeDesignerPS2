@@ -17,8 +17,27 @@ namespace CodeDesigner.Ps2.Bridge
     /// <summary>
     /// Socket server for communication with VSCode extension
     /// </summary>
-    public partial class SocketServer : IDisposable
+    public partial class SocketServer : IDisposable, Services.IBridgeContext
     {
+        // ── Service dispatcher ───────────────────────────────────────────────
+        // Per-domain command handlers register with this registry at startup;
+        // ProcessCommand asks the dispatcher first and only falls back to the
+        // legacy switch for handlers that have not been migrated yet.
+        private readonly Services.CommandDispatcher _dispatcher;
+
+        // ── IBridgeContext explicit implementations ──────────────────────────
+        // SocketServer's existing fields stay as `internal`; we expose them
+        // through the IBridgeContext surface using explicit impls so services
+        // get a clean read/write view without forcing public visibility.
+        Dictionary<uint, (string Label, string? Comment)> Services.IBridgeContext.Labels => _labels;
+        CodeDesigner.Ps2.Database.CodeDesignerDbContext   Services.IBridgeContext.Db                  => Db;
+        Database.DbLabelRepository                        Services.IBridgeContext.LabelRepo           => LabelRepo;
+        Database.DbSettingsRepository                     Services.IBridgeContext.SettingsRepo        => SettingsRepo;
+        Database.DbMcpMemoryRepository?                   Services.IBridgeContext.McpMemoryRepo       => McpMemoryRepo;
+        Database.DbMcpAgentRepository?                    Services.IBridgeContext.McpAgentRepo        => McpAgentRepo;
+        Database.DbMcpOrchestrationRepository?            Services.IBridgeContext.McpOrchestrationRepo => McpOrchestrationRepo;
+        CodeDesigner.Ps2.LabelManager.Ps2LabelManager     Services.IBridgeContext.LabelMgr            => LabelMgr;
+        void Services.IBridgeContext.RecordNavEntry(uint address, string source) => RecordNavEntry(address, source);
         private TcpListener? _listener;
         private bool _isRunning;
         private readonly int _port;
@@ -205,6 +224,17 @@ namespace CodeDesigner.Ps2.Bridge
             McpMemoryRepo = new DbMcpMemoryRepository(db);
             McpAgentRepo  = new DbMcpAgentRepository(db);
             McpOrchestrationRepo = new DbMcpOrchestrationRepository(db);
+
+            // Build the per-domain command services and the dispatcher that
+            // routes commands to them. New services should be added to the
+            // list below — see ICommandService for the migration recipe.
+            Services.IBridgeContext ctx = this;
+            _dispatcher = new Services.CommandDispatcher(new Services.ICommandService[]
+            {
+                new Services.MemoryService(ctx),
+                new Services.ExecutionService(ctx),
+                new Services.CheatsService(ctx),
+            });
         }
 
         /// <inheritdoc/>
@@ -598,6 +628,12 @@ namespace CodeDesigner.Ps2.Bridge
                     RecordNavEntry(command.Address.Value, "mcp");
                 }
 
+                // Try the per-domain command dispatcher first. Returns null
+                // when no migrated service owns this command — falls through
+                // to the legacy switch for handlers still in partial classes.
+                var dispatched = _dispatcher.TryDispatch(command);
+                if (dispatched != null) return dispatched;
+
                 switch (command.Command.ToUpperInvariant())
                 {
                     case "STARTPCSX2":
@@ -628,8 +664,11 @@ namespace CodeDesigner.Ps2.Bridge
                     case "DISASSEMBLE":
                         return HandleDisassemble(command.Data, command.Address);
 
-                    case "READMEM":
-                        return HandleReadMem(command.Address ?? 0, command.Length ?? 256, command.Region);
+                    // ── Migrated to Services/* — handled by the dispatcher above. ───
+                    // READMEM, WRITEMEM, LOADBIN, READMEMREGION, SCANPATTERN  → MemoryService
+                    // PAUSE, RESUME, STEP, SETBP, CLEARBP, CLEARBP_ALL, GETPC → ExecutionService
+                    // GETGAMECHEATS, APPLYCHEATS, PORTCHEATS, CONVERTCHEAT,
+                    // INJECTCHEATENGINE, UPDATECHEATENGINE, REMOVECHEATENGINE → CheatsService
 
                     case "SNAPSHOT":
                         return HandleSnapshot(command.OutputPath, command.IsoName, command.Title, command.Description);
@@ -639,27 +678,6 @@ namespace CodeDesigner.Ps2.Bridge
 
                     case "LOADELF":
                         return HandleLoadElf(command.InputPath);
-                    
-                    case "PAUSE":
-                        return HandlePause();
-
-                    case "RESUME":
-                        return HandleResume();
-
-                    case "STEP":
-                        return HandleStep();
-
-                    case "SETBP":
-                        return HandleSetBreakpoint(command.BreakpointAddress);
-
-                    case "CLEARBP":
-                        return HandleClearBreakpoint(command.BreakpointAddress);
-
-                    case "CLEARBP_ALL":
-                        return HandleClearAllBreakpoints();
-
-                    case "GETPC":
-                        return HandleGetPC();
 
                     case "GETREGS":
                         return HandleGetRegisters();
@@ -667,30 +685,12 @@ namespace CodeDesigner.Ps2.Bridge
                     case "SETREG":
                         return HandleSetRegister(command.RegisterName, command.RegisterIndex, command.RegisterValue);
 
-                    case "WRITEMEM":
-                        return HandleWriteMem(command.Address ?? 0, command.Data, command.Region);
-
-                    case "LOADBIN":
-                        return HandleLoadBin(command.InputPath, command.Address ?? 0, command.Region);
-
-                    case "APPLYCHEATS":
-                        return HandleApplyCheats(command.Data);
-
                     case "CDSPATCH":
                         return HandleCdsPatch(command.Data, command.Labels);
 
-                    case "INJECTCHEATENGINE":
-                        return HandleInjectCheatEngine(command.Data, command.HookAddress, command.EngineBase, command.CdsSource);
-
-                    case "UPDATECHEATENGINE":
-                        return HandleUpdateCheatEngine(command.Data, command.CdsSource);
-
-                    case "REMOVECHEATENGINE":
-                        return HandleRemoveCheatEngine();
-
-                    case "GETGAMECHEATS":
                     case "GET_GAME_CHEATS":
-                        return HandleGetGameCheats(command.GameSerial);
+                        return _dispatcher.TryDispatch(new CommandMessage { Command = "GETGAMECHEATS", GameSerial = command.GameSerial })
+                            ?? CreateErrorResponse("GETGAMECHEATS not registered");
 
                     case "RESTART":
                         return HandleRestart();
@@ -758,11 +758,7 @@ namespace CodeDesigner.Ps2.Bridge
                     case "RECOMPILE":
                         return HandleRecompile(command.IsoPath, command.ElfName, command.OutputDirectory);
 
-                    case "CONVERTCHEAT":
-                        return HandleConvertCheat(command.Data, command.Format, command.Direction);
-
-                    case "PORTCHEATS":
-                        return HandlePortCheats(command.Data, command.SourceDumpPath, command.TargetDumpPath);
+                    // CONVERTCHEAT, PORTCHEATS → CheatsService (migrated)
 
                     case "SCANVALUE":
                         return HandleScanValue(
@@ -983,22 +979,30 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PINE_LOAD_STATE":
                         return HandlePineLoadStateSlot(command.StateSlot);
 
-                    case "READMEMREGION":
+                    // READMEMREGION, SCANPATTERN → MemoryService (migrated). The
+                    // alias forms (READ_MEM_REGION, SCAN_PATTERN) are still
+                    // routed here for backwards compatibility — they redirect
+                    // through the dispatcher with the canonical name.
                     case "READ_MEM_REGION":
                     case "READMEM_REGION":
-                        return HandleReadMemRegion(
-                            command.Address    ?? 0,
-                            command.EndAddress ?? 0,
-                            command.SearchPattern,
-                            command.Region);
+                        return _dispatcher.TryDispatch(new CommandMessage
+                        {
+                            Command       = "READMEMREGION",
+                            Address       = command.Address,
+                            EndAddress    = command.EndAddress,
+                            SearchPattern = command.SearchPattern,
+                            Region        = command.Region,
+                        }) ?? CreateErrorResponse("READMEMREGION not registered");
 
-                    case "SCANPATTERN":
                     case "SCAN_PATTERN":
-                        return HandleScanPattern(
-                            command.Address    ?? 0,
-                            command.EndAddress ?? 0,
-                            command.SearchPattern,
-                            command.Region);
+                        return _dispatcher.TryDispatch(new CommandMessage
+                        {
+                            Command       = "SCANPATTERN",
+                            Address       = command.Address,
+                            EndAddress    = command.EndAddress,
+                            SearchPattern = command.SearchPattern,
+                            Region        = command.Region,
+                        }) ?? CreateErrorResponse("SCANPATTERN not registered");
 
                     case "TRACECALLS":
                     case "TRACE_CALLS":
