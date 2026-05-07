@@ -115,7 +115,8 @@
     (assembleInstr)="onAssembleInstr($event)"
     (disasmBytes)="onDisasmBytes($event)"
     (requestHistory)="onRequestHistory($event)"
-    (requestRefs)="onRequestRefs($event)" />
+    (requestRefs)="onRequestRefs($event)"
+    (navigateRef)="onReferenceNavigate($event)" />
 <app-converter-overlay #converterOverlayComp
     (close$)="onConverterOverlayClose()"
     (convert$)="onConvertCheat($event)" />

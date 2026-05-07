@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using CodeDesigner.Ps2.Database.Entities;
-using CodeDesigner.Ps2.Bridge.Database;
+using CodeDesigner.Ps2.Bridge.Repositories;
 
 namespace CodeDesigner.Ps2.Bridge
 {

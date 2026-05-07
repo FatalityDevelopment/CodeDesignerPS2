@@ -10,7 +10,7 @@ using System.Text.Json;
 using CodeDesigner.Ps2.Database;
 using Microsoft.EntityFrameworkCore;
 using CodeDesigner.Ps2.LabelManager;
-using CodeDesigner.Ps2.Bridge.Database;
+using CodeDesigner.Ps2.Bridge.Repositories;
 
 namespace CodeDesigner.Ps2.Bridge
 {
@@ -32,11 +32,11 @@ namespace CodeDesigner.Ps2.Bridge
         Dictionary<uint, (string Label, string? Comment)> Services.IBridgeContext.Labels => _labels;
         Dictionary<string, StructEntry>                   Services.IBridgeContext.Structs => _structs;
         CodeDesigner.Ps2.Database.CodeDesignerDbContext   Services.IBridgeContext.Db                  => Db;
-        Database.DbLabelRepository                        Services.IBridgeContext.LabelRepo           => LabelRepo;
-        Database.DbSettingsRepository                     Services.IBridgeContext.SettingsRepo        => SettingsRepo;
-        Database.DbMcpMemoryRepository?                   Services.IBridgeContext.McpMemoryRepo       => McpMemoryRepo;
-        Database.DbMcpAgentRepository?                    Services.IBridgeContext.McpAgentRepo        => McpAgentRepo;
-        Database.DbMcpOrchestrationRepository?            Services.IBridgeContext.McpOrchestrationRepo => McpOrchestrationRepo;
+        Repositories.DbLabelRepository                    Services.IBridgeContext.LabelRepo           => LabelRepo;
+        Repositories.DbSettingsRepository                 Services.IBridgeContext.SettingsRepo        => SettingsRepo;
+        Repositories.DbMcpMemoryRepository?               Services.IBridgeContext.McpMemoryRepo       => McpMemoryRepo;
+        Repositories.DbMcpAgentRepository?                Services.IBridgeContext.McpAgentRepo        => McpAgentRepo;
+        Repositories.DbMcpOrchestrationRepository?        Services.IBridgeContext.McpOrchestrationRepo => McpOrchestrationRepo;
         CodeDesigner.Ps2.LabelManager.Ps2LabelManager     Services.IBridgeContext.LabelMgr            => LabelMgr;
         void Services.IBridgeContext.RecordNavEntry(uint address, string source) => RecordNavEntry(address, source);
         void Services.IBridgeContext.SyncLegacyDictsFromLabelManager() => SyncLegacyDictsFromLabelManager();
@@ -69,7 +69,7 @@ namespace CodeDesigner.Ps2.Bridge
         {
             "READMEM", "WRITEMEM", "LOADBIN", "DISASSEMBLE",
             "SETBP", "CLEARBP",
-            "SCANSTRINGS", "SCANFUNCTIONS", "SCANPOINTERS", "SCANFLOATS", "SCANINTEGERS",
+            "SCANSTRINGS", "SCANFUNCTIONS", "SCANPOINTERS", "SCANFLOATS", "SCANINTEGERS", "SCANREFERENCES",
             "SCANVALUE",
             "NAVIGATETO",
         };
@@ -762,6 +762,16 @@ namespace CodeDesigner.Ps2.Bridge
                         return HandleSearch(command.Query ?? "", command.SearchMode ?? "text",
                                             command.Address ?? 0, command.Length ?? 0,
                                             command.Region, command.Data);
+
+                    case "SCANREFERENCES":
+                    case "SCAN_REFERENCES":
+                        return HandleScanReferences(
+                            command.TargetAddress,
+                            command.Address ?? 0,
+                            command.Length ?? 0,
+                            command.Region,
+                            command.Data,
+                            command.ReferenceKinds);
 
                     case "GETTHREADS":
                         return HandleGetThreads();

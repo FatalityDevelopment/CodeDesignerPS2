@@ -6,7 +6,7 @@ using CodeDesigner.Ps2.Database;
 using CodeDesigner.Ps2.Database.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace CodeDesigner.Ps2.Bridge.Database
+namespace CodeDesigner.Ps2.Bridge.Repositories
 {
     /// <summary>
     /// Async persistence layer for application settings, backed by <see cref="CodeDesignerDbContext"/>.

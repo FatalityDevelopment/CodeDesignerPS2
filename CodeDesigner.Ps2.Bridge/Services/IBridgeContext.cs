@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using CodeDesigner.Ps2.Bridge.Database;
+using CodeDesigner.Ps2.Bridge.Repositories;
 using CodeDesigner.Ps2.Database;
 
 namespace CodeDesigner.Ps2.Bridge.Services

@@ -16,7 +16,7 @@ import { VirtualGridComponent } from './components/virtual-grid.component';
 import { ContextMenuComponent, ContextMenuData } from './components/context-menu.component';
 import { DebugPanelComponent } from './components/debug-panel.component';
 import { BottomPanelComponent, BottomTab } from './components/bottom-panel.component';
-import { EditOverlayComponent, EditOverlayOpenData, EditOverlaySaveEvent } from './components/edit-overlay.component';
+import { EditOverlayComponent, EditOverlayOpenData, EditOverlaySaveEvent, EditOverlayRefsRequest } from './components/edit-overlay.component';
 import { ConverterOverlayComponent, ConvertRequest, ConvertResult } from './components/converter-overlay.component';
 import { PorterOverlayComponent, PortRequest, PortResultPayload } from './components/porter-overlay.component';
 import { MemoryCardOverlayComponent, McListResult, McActionResult } from './components/memory-card-overlay.component';
@@ -501,8 +501,12 @@ export class DisasmEditorComponent implements AfterViewInit {
     this.vscode.postMessage({ type: 'getAddressHistory', address });
   }
 
-  protected onRequestRefs(address: number): void {
-    this.vscode.postMessage({ type: 'getAddressRefs', address });
+  protected onRequestRefs(event: EditOverlayRefsRequest): void {
+    this.vscode.postMessage({ type: 'getAddressRefs', address: event.address, kinds: event.kinds });
+  }
+
+  protected onReferenceNavigate(address: number): void {
+    this.gotoRuntime.navigate?.(address);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

@@ -11,7 +11,7 @@ using DbLabel = CodeDesigner.Ps2.Database.Entities.Label;
 using DbLabelSet = CodeDesigner.Ps2.Database.Entities.LabelSet;
 using DbLabelType = CodeDesigner.Ps2.Database.Entities.LabelType;
 
-namespace CodeDesigner.Ps2.Bridge.Database
+namespace CodeDesigner.Ps2.Bridge.Repositories
 {
     /// <summary>
     /// Maps between <c>CodeDesigner.Ps2.LabelManager</c> in-memory models and

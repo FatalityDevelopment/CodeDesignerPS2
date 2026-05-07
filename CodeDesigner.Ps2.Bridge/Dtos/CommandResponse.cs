@@ -80,6 +80,7 @@ namespace CodeDesigner.Ps2.Bridge
         public List<FloatEntry>?    Floats    { get; set; }
         public List<IntegerEntry>?  Integers  { get; set; }
         public List<SearchMatch>?   Matches   { get; set; }
+        public List<ReferenceEntry>? References { get; set; }
         // GETTHREADS
         public List<ThreadEntry>?   Threads   { get; set; }
 

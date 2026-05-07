@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 using SharpCompress.Archives;
 using SharpCompress.Common;
 using CodeDesigner.Ps2.IsoManager;
-using CodeDesigner.Ps2.Bridge.Database;
+using CodeDesigner.Ps2.Bridge.Repositories;
 
 namespace CodeDesigner.Ps2.Bridge
 {

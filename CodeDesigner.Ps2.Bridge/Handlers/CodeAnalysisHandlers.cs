@@ -939,6 +939,19 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private static List<SearchMatch> HandleSearchRefs(uint targetAddress, byte[] bytes, uint baseAddress)
         {
+            var references = ReferenceScanner.Scan(new ReferenceScanInput
+            {
+                TargetAddress = targetAddress,
+                BaseAddress = baseAddress,
+                Bytes = bytes,
+                Kinds = ReferenceScanKinds.ControlFlow | ReferenceScanKinds.ResolvedAddress,
+            });
+
+            return ReferenceScanner.ToSearchMatches(references, baseAddress);
+        }
+
+        private static List<SearchMatch> HandleSearchRefsLegacy(uint targetAddress, byte[] bytes, uint baseAddress)
+        {
             var matches = new List<SearchMatch>();
             int len = bytes.Length;
 
@@ -1105,6 +1118,80 @@ namespace CodeDesigner.Ps2.Bridge
             }
 
             return matches;
+        }
+
+        /// <summary>
+        /// Handle SCANREFERENCES - returns structured references to a target address.
+        /// This is the reusable backend entry point for the address dialog and any
+        /// future callers that need control-flow, resolved-code, pointer, and
+        /// string/CRC/pattern references in one place.
+        /// </summary>
+        private string HandleScanReferences(uint? targetAddress, uint startAddress, int length,
+                                            string? region, string? base64Data, List<string>? kinds)
+        {
+            if (!targetAddress.HasValue)
+                return CreateErrorResponse("TargetAddress is required for SCANREFERENCES");
+
+            try
+            {
+                byte[] bytes;
+                if (!string.IsNullOrEmpty(base64Data))
+                {
+                    bytes = Convert.FromBase64String(base64Data);
+                    if (length <= 0)
+                        length = bytes.Length;
+                }
+                else
+                {
+                    if (Client == null)
+                        return CreateErrorResponse("No live memory backend — start with --pcsx2 or STARTEMULATOR");
+                    if (length <= 0)
+                        return CreateErrorResponse("Length is required when scanning live references");
+
+                    bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+                    bytes = ReadLiveBytesChunked(startAddress, length, useIop);
+                }
+
+                var references = ReferenceScanner.Scan(new ReferenceScanInput
+                {
+                    TargetAddress = targetAddress.Value,
+                    BaseAddress = startAddress,
+                    Bytes = bytes,
+                    Kinds = ReferenceScanner.ParseKinds(kinds),
+                });
+
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = true,
+                    Command = "SCANREFERENCES",
+                    References = references.Select(ToReferenceEntry).ToList(),
+                    Message = $"Found {references.Count} reference(s)",
+                });
+            }
+            catch (Exception ex)
+            {
+                return CreateErrorResponse($"ScanReferences error: {ex.Message}");
+            }
+        }
+
+        private static ReferenceEntry ToReferenceEntry(ReferenceScanResult result)
+        {
+            return new ReferenceEntry
+            {
+                Address = $"{result.Address:X8}",
+                AddressValue = result.Address,
+                Kind = result.Kind,
+                KindLabel = result.KindLabel,
+                TargetAddress = $"{result.TargetAddress:X8}",
+                Instruction = result.Instruction,
+                Summary = result.Summary,
+                Detail = result.Detail,
+                MatchedValue = result.MatchedValue,
+                MatchLength = result.MatchLength,
+                SourceAddresses = result.SourceAddresses.Count > 0
+                    ? result.SourceAddresses.Select(a => $"{a:X8}").ToList()
+                    : null,
+            };
         }
 
         /// <summary>Parse a whitespace/comma-separated hex byte pattern string.</summary>

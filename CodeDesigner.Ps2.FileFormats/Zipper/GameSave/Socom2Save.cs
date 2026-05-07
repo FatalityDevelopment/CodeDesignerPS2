@@ -45,7 +45,7 @@ namespace CodeDesigner.Ps2.Save
         private const int ModuleNamesBase = 0x0064;   // null-terminated module name strings
 
         // ── State ──────────────────────────────────────────────────────────
-        private byte[] _decrypted;
+        private byte[] _decrypted = Array.Empty<byte>();
 
         // ── Public properties ──────────────────────────────────────────────
 

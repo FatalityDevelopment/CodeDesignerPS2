@@ -15,7 +15,8 @@ namespace CodeDesigner.Ps2.Bridge
             try
             {
                 var agents = McpAgentRepo.ListAsync().GetAwaiter().GetResult();
-                var infos  = agents.ConvertAll(ToMcpAgentDto);
+                // Use an explicit lambda to avoid generic type inference issues with method groups.
+                var infos  = agents.ConvertAll(a => ToMcpAgentDto(a));
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success   = true,
