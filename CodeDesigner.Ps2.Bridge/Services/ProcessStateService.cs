@@ -3,10 +3,21 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class ProcessStateService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public ProcessStateService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(_ => HandleGetThreads(),    "GETTHREADS");
+            reg.Add(_ => HandleGetIopThreads(), "GETIOPTHREADS", "GET_IOP_THREADS", "IOPTHREADS");
+            reg.Add(_ => HandleGetModules(),    "GETMODULES",    "GET_MODULES",     "IOPMODULES");
+            reg.Add(_ => HandleGetStack(),      "GETSTACK",      "GET_STACK",       "CALLSTACK");
+        }
+
         // EE main RAM size — 32 MB. Used to bound the TCB scan.
         private const uint EeMainRamSize = 32 * 1024 * 1024;
 
@@ -17,11 +28,11 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleGetThreads()
         {
-            if (PineClient != null)
+            if (_ctx.PineClient != null)
             {
                 try
                 {
-                    var pineThreads = PineClient.GetEEThreads();
+                    var pineThreads = _ctx.PineClient.GetEEThreads();
                     var entries = pineThreads.Select(t => new ThreadEntry
                     {
                         Id       = (int)t.TID,
@@ -40,16 +51,16 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 catch (Exception ex)
                 {
-                    return CreateErrorResponse($"PINE GETTHREADS failed: {ex.Message}");
+                    return Responses.Error($"PINE GETTHREADS failed: {ex.Message}");
                 }
             }
 
-            if (Client == null)
-                return CreateErrorResponse("Emulator not running — no debug client attached");
+            if (_ctx.Client == null)
+                return Responses.Error("Emulator not running — no debug _ctx.Client attached");
 
-            // ── Walk the PS2 EE OS TCB pool via the debug client ─────────────
+            // ── Walk the PS2 EE OS TCB pool via the debug _ctx.Client ─────────────
             // Same algorithm as the previous in-process version, but reads
-            // memory through Client.ReadBytes() so it works for both PCSX2 and
+            // memory through _ctx.Client.ReadBytes() so it works for both PCSX2 and
             // the built-in InternalPineSocket.
 
             const uint TcbSize     = 128u;
@@ -59,11 +70,11 @@ namespace CodeDesigner.Ps2.Bridge
 
             uint scanBytes = MaxTcbScan * TcbSize;
             byte[] poolBytes;
-            try { poolBytes = Client.ReadBytes(TcbPoolKseg0, (int)scanBytes); }
+            try { poolBytes = _ctx.Client.ReadBytes(TcbPoolKseg0, (int)scanBytes); }
             catch { poolBytes = Array.Empty<byte>(); }
 
             uint currentPc;
-            try { currentPc = NormalizePcToKseg0(Client.GetProgramCounter()); }
+            try { currentPc = AddressTranslator.NormalizePcToKseg0(_ctx.Client.GetProgramCounter()); }
             catch { currentPc = 0; }
 
             // SP comes from $sp (GPR 29). Without GETREGS support yet we can
@@ -96,7 +107,7 @@ namespace CodeDesigner.Ps2.Bridge
                     continue;
 
                 bool isRunning = statusRaw == 0x01;
-                uint tcbPc = isRunning ? currentPc : NormalizePcToKseg0(entry);
+                uint tcbPc = isRunning ? currentPc : AddressTranslator.NormalizePcToKseg0(entry);
                 uint tcbSp = isRunning ? currentSp : savedSp;
 
                 threads.Add(new ThreadEntry
@@ -106,7 +117,7 @@ namespace CodeDesigner.Ps2.Bridge
                     Pc       = tcbPc,
                     Sp       = tcbSp,
                     Priority = (int)curPri,
-                    EntryPc  = NormalizePcToKseg0(entry),
+                    EntryPc  = AddressTranslator.NormalizePcToKseg0(entry),
                 });
                 foundAny = true;
             }
@@ -135,11 +146,11 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Handle GETIOPTHREADS — PCSX2 PINE only.</summary>
         private string HandleGetIopThreads()
         {
-            if (PineClient == null)
-                return CreateErrorResponse("GETIOPTHREADS requires PCSX2 PINE mode");
+            if (_ctx.PineClient == null)
+                return Responses.Error("GETIOPTHREADS requires PCSX2 PINE mode");
             try
             {
-                var pineThreads = PineClient.GetIOPThreads();
+                var pineThreads = _ctx.PineClient.GetIOPThreads();
                 var entries = pineThreads.Select(t => new ThreadEntry
                 {
                     Id       = (int)t.TID,
@@ -156,17 +167,17 @@ namespace CodeDesigner.Ps2.Bridge
                     Threads = entries,
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"PINE GETIOPTHREADS failed: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"PINE GETIOPTHREADS failed: {ex.Message}"); }
         }
 
         /// <summary>Handle GETMODULES — PCSX2 PINE only.</summary>
         private string HandleGetModules()
         {
-            if (PineClient == null)
-                return CreateErrorResponse("GETMODULES requires PCSX2 PINE mode");
+            if (_ctx.PineClient == null)
+                return Responses.Error("GETMODULES requires PCSX2 PINE mode");
             try
             {
-                var modules = PineClient.GetModules();
+                var modules = _ctx.PineClient.GetModules();
                 var entries = modules.Select(m => new IopModuleInfo
                 {
                     Name      = m.Name,
@@ -185,17 +196,17 @@ namespace CodeDesigner.Ps2.Bridge
                     Modules = entries,
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"PINE GetModules failed: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"PINE GetModules failed: {ex.Message}"); }
         }
 
         /// <summary>Handle GETSTACK — PCSX2 PINE only.</summary>
         private string HandleGetStack()
         {
-            if (PineClient == null)
-                return CreateErrorResponse("GETSTACK requires PCSX2 PINE mode");
+            if (_ctx.PineClient == null)
+                return Responses.Error("GETSTACK requires PCSX2 PINE mode");
             try
             {
-                var frames = PineClient.GetStack();
+                var frames = _ctx.PineClient.GetStack();
                 var entries = frames.Select(f => new PineStackFrameInfo
                 {
                     Entry     = $"0x{f.Entry:X8}",
@@ -210,7 +221,7 @@ namespace CodeDesigner.Ps2.Bridge
                     StackFrames = entries,
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"PINE GetStack failed: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"PINE GetStack failed: {ex.Message}"); }
         }
 
         private static string StatusName(uint status) => status switch

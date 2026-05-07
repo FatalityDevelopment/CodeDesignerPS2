@@ -3,17 +3,26 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class BreakpointDisassemblyService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public BreakpointDisassemblyService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleListBreakpoints(c.CpuSel),                                                        "LISTBP", "LIST_BP", "LISTBREAKPOINTS");
+            reg.Add(c => HandlePineDisassemble(c.CpuSel, c.Address, c.Length.HasValue ? (ushort?)c.Length.Value : null), "PINEDISASSEMBLE", "PINE_DISASSEMBLE", "PINE_DISASM");
+        }
+
         private string HandleListBreakpoints(byte? cpuSel)
         {
-            if (IsPineMode)
+            if (_ctx.PineClient != null)
             {
                 try
                 {
-                    var bps = PineClient!.ListBreakpoints(cpuSel ?? 0xFF);
+                    var bps = _ctx.PineClient!.ListBreakpoints(cpuSel ?? 0xFF);
                     var entries = bps.Select(b => new PineBreakpointInfo
                     {
                         Address = $"0x{b.Address:X8}",
@@ -27,20 +36,20 @@ namespace CodeDesigner.Ps2.Bridge
                         Breakpoints = entries,
                     });
                 }
-                catch (Exception ex) { return CreateErrorResponse($"PINE ListBreakpoints failed: {ex.Message}"); }
+                catch (Exception ex) { return Responses.Error($"PINE ListBreakpoints failed: {ex.Message}"); }
             }
             // Internal emulator — just use the existing breakpoint set
-            return CreateErrorResponse("LISTBP requires PINE mode (use SETBP / CLEARBP for the internal emulator)");
+            return Responses.Error("LISTBP requires PINE mode (use SETBP / CLEARBP for the internal emulator)");
         }
 
         private string HandlePineDisassemble(byte? cpuSel, uint? address, ushort? count)
         {
-            if (cpuSel  == null) return CreateErrorResponse("CpuSel is required for PINEDISASSEMBLE (0=EE, 1=IOP)");
-            if (address == null) return CreateErrorResponse("Address is required for PINEDISASSEMBLE");
-            if (!IsPineMode)     return CreateErrorResponse("PINEDISASSEMBLE requires PINE mode; use DISASSEMBLE for static disassembly");
+            if (cpuSel  == null) return Responses.Error("CpuSel is required for PINEDISASSEMBLE (0=EE, 1=IOP)");
+            if (address == null) return Responses.Error("Address is required for PINEDISASSEMBLE");
+            if (_ctx.PineClient == null)     return Responses.Error("PINEDISASSEMBLE requires PINE mode; use DISASSEMBLE for static disassembly");
             try
             {
-                var lines = PineClient!.Disassemble(cpuSel.Value, address.Value, count ?? 32);
+                var lines = _ctx.PineClient!.Disassemble(cpuSel.Value, address.Value, count ?? 32);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success          = true,
@@ -54,7 +63,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"PINE Disassemble failed: {ex.Message}");
+                return Responses.Error($"PINE Disassemble failed: {ex.Message}");
             }
         }
     }

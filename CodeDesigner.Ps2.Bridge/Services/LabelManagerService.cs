@@ -7,10 +7,33 @@ using MgrEntry = CodeDesigner.Ps2.LabelManager.Models.LabelEntry;
 using MgrSet   = CodeDesigner.Ps2.LabelManager.Models.LabelSet;
 using MgrType  = CodeDesigner.Ps2.LabelManager.Models.LabelType;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class LabelManagerService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public LabelManagerService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleGetLabelSets(c.WorkspaceDir, c.GameId),                                                    "GETLABELSETS");
+            reg.Add(c => HandleGetLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                          "GETLABELSET");
+            reg.Add(c => HandleSetActiveLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                    "SETACTIVELABELSET");
+            reg.Add(c => HandleCreateLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                       "CREATELABELSET");
+            reg.Add(c => HandleDeleteLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                       "DELETELABELSET");
+            reg.Add(c => HandleRenameLabelSet(c.WorkspaceDir, c.GameId, c.SetName, c.NewSetName),                         "RENAMELABELSET");
+            reg.Add(c => HandleAddLabelEntry(c.WorkspaceDir, c.GameId, c.SetName, c.LabelEntry),                          "ADDLABELENTRY");
+            reg.Add(c => HandleAddLabelEntries(c.WorkspaceDir, c.GameId, c.SetName, c.LabelEntries),                      "ADDLABELENTRIES");
+            reg.Add(c => HandleDeleteLabelEntry(c.WorkspaceDir, c.GameId, c.SetName, c.LabelEntryAddress, c.Address),     "DELETELABELENTRY");
+            reg.Add(c => HandleImportLabelSet(c.WorkspaceDir, c.GameId, c.SetName, c.Data),                               "IMPORTLABELSET");
+            reg.Add(c => HandleExportLabelSet(c.WorkspaceDir, c.GameId, c.SetName),                                       "EXPORTLABELSET");
+            reg.Add(_ => HandleResolveStrings(),                                                                          "RESOLVESTRINGS");
+            reg.Add(c => c.Address is null
+                ? Responses.Error("Address is required for RESOLVELINKEDLIST")
+                : HandleResolveLinkedList(c.Address.Value, c.MemberOffset ?? 0),
+                "RESOLVELINKEDLIST");
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────
 
         private static string? RequireParam(string? value, string name, out string? error)
@@ -79,11 +102,11 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetLabelSets(string? workspaceDir, string? gameId)
         {
             gameId = RequireParam(gameId, "GameId", out var e2);
-            if (gameId is null) return CreateErrorResponse(e2!);
+            if (gameId is null) return Responses.Error(e2!);
 
             try
             {
-                var userSets = LabelRepo.GetSetNamesAsync(gameId).GetAwaiter().GetResult();
+                var userSets = _ctx.LabelRepo.GetSetNamesAsync(gameId).GetAwaiter().GetResult();
 
                 // Always include the built-in set in the list.
                 var all = new List<string> { "Built-in" };
@@ -98,7 +121,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"GETLABELSETS failed: {ex.Message}");
+                return Responses.Error($"GETLABELSETS failed: {ex.Message}");
             }
         }
 
@@ -111,28 +134,28 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetLabelSet(string? workspaceDir, string? gameId, string? setName)
         {
             setName = RequireParam(setName, "SetName", out var e1);
-            if (setName is null) return CreateErrorResponse(e1!);
+            if (setName is null) return Responses.Error(e1!);
 
             MgrSet? set;
             if (setName.Equals("Built-in", StringComparison.OrdinalIgnoreCase))
             {
-                set = LabelMgr.BuiltIn;
+                set = _ctx.LabelMgr.BuiltIn;
             }
             else
             {
                 gameId = RequireParam(gameId, "GameId", out var e3);
-                if (gameId is null) return CreateErrorResponse(e3!);
+                if (gameId is null) return Responses.Error(e3!);
 
                 try
                 {
-                    set = LabelRepo.LoadSetAsync(gameId, setName).GetAwaiter().GetResult();
+                    set = _ctx.LabelRepo.LoadSetAsync(gameId, setName).GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {
-                    return CreateErrorResponse($"GETLABELSET failed: {ex.Message}");
+                    return Responses.Error($"GETLABELSET failed: {ex.Message}");
                 }
 
-                if (set is null) return CreateErrorResponse($"Label set '{setName}' not found.");
+                if (set is null) return Responses.Error($"Label set '{setName}' not found.");
             }
 
             return JsonSerializer.Serialize(new CommandResponse
@@ -154,37 +177,37 @@ namespace CodeDesigner.Ps2.Bridge
         {
             gameId  = RequireParam(gameId,  "GameId",  out var e2);
             setName = RequireParam(setName, "SetName", out var e3);
-            if (gameId is null)  return CreateErrorResponse(e2!);
-            if (setName is null) return CreateErrorResponse(e3!);
+            if (gameId is null)  return Responses.Error(e2!);
+            if (setName is null) return Responses.Error(e3!);
 
             // "Built-in" is a synthetic set — just clear the active user set.
             if (setName.Equals("Built-in", StringComparison.OrdinalIgnoreCase))
             {
-                LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
-                LabelMgr.ClearActiveSet();
-                SyncLegacyDictsFromLabelManager();
+                _ctx.LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
+                _ctx.LabelMgr.ClearActiveSet();
+                _ctx.SyncLegacyDictsFromLabelManager();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success  = true,
                     Command  = "SETACTIVELABELSET",
-                    LabelSet = ToWireSet(LabelMgr.BuiltIn),
+                    LabelSet = ToWireSet(_ctx.LabelMgr.BuiltIn),
                 });
             }
 
             try
             {
-                var set = LabelRepo.LoadSetAsync(gameId, setName).GetAwaiter().GetResult();
-                if (set is null) return CreateErrorResponse($"Label set '{setName}' not found.");
+                var set = _ctx.LabelRepo.LoadSetAsync(gameId, setName).GetAwaiter().GetResult();
+                if (set is null) return Responses.Error($"Label set '{setName}' not found.");
 
                 // Set the in-memory context so GetMergedLabels() resolves the right game.
-                LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
+                _ctx.LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
 
                 if (!string.IsNullOrWhiteSpace(workspaceDir))
                 {
-                    // Mirror the DB set into the on-disk path so LabelMgr's file-based
+                    // Mirror the DB set into the on-disk path so _ctx.LabelMgr's file-based
                     // helpers (used by GetMergedLabels, RESOLVESTRINGS, etc.) find it.
-                    LabelMgr.SaveSet(set, workspaceDir, gameId);
-                    LabelMgr.SetActiveSet(workspaceDir, gameId, setName);
+                    _ctx.LabelMgr.SaveSet(set, workspaceDir, gameId);
+                    _ctx.LabelMgr.SetActiveSet(workspaceDir, gameId, setName);
                 }
                 else
                 {
@@ -192,12 +215,12 @@ namespace CodeDesigner.Ps2.Bridge
                     // by saving to a temp directory so SetActiveSet can locate the file.
                     var tempDir = Path.Combine(Path.GetTempPath(), "codedesigner_labels");
                     Directory.CreateDirectory(tempDir);
-                    LabelMgr.SaveSet(set, tempDir, gameId);
-                    LabelMgr.SetActiveSet(tempDir, gameId, setName);
+                    _ctx.LabelMgr.SaveSet(set, tempDir, gameId);
+                    _ctx.LabelMgr.SetActiveSet(tempDir, gameId, setName);
                 }
 
-                // Rebuild _labels / _structs so all existing handlers see the updated data.
-                SyncLegacyDictsFromLabelManager();
+                // Rebuild _ctx.Labels / _ctx.Structs so all existing handlers see the updated data.
+                _ctx.SyncLegacyDictsFromLabelManager();
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -208,7 +231,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"SETACTIVELABELSET failed: {ex.Message}");
+                return Responses.Error($"SETACTIVELABELSET failed: {ex.Message}");
             }
         }
 
@@ -218,32 +241,32 @@ namespace CodeDesigner.Ps2.Bridge
         {
             gameId  = RequireParam(gameId,  "GameId",  out var e2);
             setName = RequireParam(setName, "SetName", out var e3);
-            if (gameId is null)  return CreateErrorResponse(e2!);
-            if (setName is null) return CreateErrorResponse(e3!);
+            if (gameId is null)  return Responses.Error(e2!);
+            if (setName is null) return Responses.Error(e3!);
 
             try
             {
-                var set = LabelRepo.CreateSetAsync(gameId, setName).GetAwaiter().GetResult();
+                var set = _ctx.LabelRepo.CreateSetAsync(gameId, setName).GetAwaiter().GetResult();
 
                 // Persist the empty set to disk immediately so that the server's
-                // in-memory state (LabelMgr.WorkspaceDir, ActiveSetName, _labels/_structs)
+                // in-memory state (_ctx.LabelMgr.WorkspaceDir, ActiveSetName, _ctx.Labels/_ctx.Structs)
                 // is consistent from the moment the set is created.  This mirrors the
                 // logic in HandleSetActiveLabelSet so that GetMergedLabels() can find
                 // the set even before the client explicitly calls SETACTIVELABELSET.
-                LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
+                _ctx.LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
                 if (!string.IsNullOrWhiteSpace(workspaceDir))
                 {
-                    LabelMgr.SaveSet(set, workspaceDir, gameId);
-                    LabelMgr.SetActiveSet(workspaceDir, gameId, setName);
+                    _ctx.LabelMgr.SaveSet(set, workspaceDir, gameId);
+                    _ctx.LabelMgr.SetActiveSet(workspaceDir, gameId, setName);
                 }
                 else
                 {
                     var tempDir = Path.Combine(Path.GetTempPath(), "codedesigner_labels");
                     Directory.CreateDirectory(tempDir);
-                    LabelMgr.SaveSet(set, tempDir, gameId);
-                    LabelMgr.SetActiveSet(tempDir, gameId, setName);
+                    _ctx.LabelMgr.SaveSet(set, tempDir, gameId);
+                    _ctx.LabelMgr.SetActiveSet(tempDir, gameId, setName);
                 }
-                SyncLegacyDictsFromLabelManager();
+                _ctx.SyncLegacyDictsFromLabelManager();
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -254,7 +277,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse(ex.Message);
+                return Responses.Error(ex.Message);
             }
         }
 
@@ -264,18 +287,18 @@ namespace CodeDesigner.Ps2.Bridge
         {
             gameId  = RequireParam(gameId,  "GameId",  out var e2);
             setName = RequireParam(setName, "SetName", out var e3);
-            if (gameId is null)  return CreateErrorResponse(e2!);
-            if (setName is null) return CreateErrorResponse(e3!);
+            if (gameId is null)  return Responses.Error(e2!);
+            if (setName is null) return Responses.Error(e3!);
 
             try
             {
-                LabelRepo.DeleteSetAsync(gameId, setName).GetAwaiter().GetResult();
-                SyncLegacyDictsFromLabelManager();
-                return CreateSuccessResponse($"Label set '{setName}' deleted.");
+                _ctx.LabelRepo.DeleteSetAsync(gameId, setName).GetAwaiter().GetResult();
+                _ctx.SyncLegacyDictsFromLabelManager();
+                return Responses.Success($"Label set '{setName}' deleted.");
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"DELETELABELSET failed: {ex.Message}");
+                return Responses.Error($"DELETELABELSET failed: {ex.Message}");
             }
         }
 
@@ -286,29 +309,29 @@ namespace CodeDesigner.Ps2.Bridge
             gameId     = RequireParam(gameId,     "GameId",     out var e2);
             setName    = RequireParam(setName,    "SetName",    out var e3);
             newSetName = RequireParam(newSetName, "NewSetName", out var e4);
-            if (gameId is null)     return CreateErrorResponse(e2!);
-            if (setName is null)    return CreateErrorResponse(e3!);
-            if (newSetName is null) return CreateErrorResponse(e4!);
+            if (gameId is null)     return Responses.Error(e2!);
+            if (setName is null)    return Responses.Error(e3!);
+            if (newSetName is null) return Responses.Error(e4!);
 
             try
             {
-                var set = LabelRepo.RenameSetAsync(gameId, setName, newSetName).GetAwaiter().GetResult();
+                var set = _ctx.LabelRepo.RenameSetAsync(gameId, setName, newSetName).GetAwaiter().GetResult();
 
-                // Keep the LabelMgr in-memory state in sync with the new name.
-                LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
+                // Keep the _ctx.LabelMgr in-memory state in sync with the new name.
+                _ctx.LabelMgr.SetContext(workspaceDir ?? string.Empty, gameId);
                 if (!string.IsNullOrWhiteSpace(workspaceDir))
                 {
-                    LabelMgr.SaveSet(set, workspaceDir, gameId);
-                    LabelMgr.SetActiveSet(workspaceDir, gameId, newSetName);
+                    _ctx.LabelMgr.SaveSet(set, workspaceDir, gameId);
+                    _ctx.LabelMgr.SetActiveSet(workspaceDir, gameId, newSetName);
                 }
                 else
                 {
                     var tempDir = Path.Combine(Path.GetTempPath(), "codedesigner_labels");
                     Directory.CreateDirectory(tempDir);
-                    LabelMgr.SaveSet(set, tempDir, gameId);
-                    LabelMgr.SetActiveSet(tempDir, gameId, newSetName);
+                    _ctx.LabelMgr.SaveSet(set, tempDir, gameId);
+                    _ctx.LabelMgr.SetActiveSet(tempDir, gameId, newSetName);
                 }
-                SyncLegacyDictsFromLabelManager();
+                _ctx.SyncLegacyDictsFromLabelManager();
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -319,7 +342,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"RENAMELABELSET failed: {ex.Message}");
+                return Responses.Error($"RENAMELABELSET failed: {ex.Message}");
             }
         }
 
@@ -329,25 +352,25 @@ namespace CodeDesigner.Ps2.Bridge
         {
             gameId  = RequireParam(gameId,  "GameId",  out var e2);
             setName = RequireParam(setName, "SetName", out var e3);
-            if (gameId is null)  return CreateErrorResponse(e2!);
-            if (setName is null) return CreateErrorResponse(e3!);
-            if (entry is null)   return CreateErrorResponse("LabelEntry is required for ADDLABELENTRY");
+            if (gameId is null)  return Responses.Error(e2!);
+            if (setName is null) return Responses.Error(e3!);
+            if (entry is null)   return Responses.Error("LabelEntry is required for ADDLABELENTRY");
 
             if (string.IsNullOrWhiteSpace(entry.Address))
-                return CreateErrorResponse("LabelEntry.Address is required");
+                return Responses.Error("LabelEntry.Address is required");
             if (string.IsNullOrWhiteSpace(entry.Name))
-                return CreateErrorResponse("LabelEntry.Name is required");
+                return Responses.Error("LabelEntry.Name is required");
 
             try
             {
-                var set = LabelRepo.AddOrUpdateEntryAsync(gameId, setName, FromWireEntry(entry)).GetAwaiter().GetResult();
+                var set = _ctx.LabelRepo.AddOrUpdateEntryAsync(gameId, setName, FromWireEntry(entry)).GetAwaiter().GetResult();
 
                 // Keep legacy dicts in sync.  If no active set is configured yet, or
                 // the active set matches the one being written, auto-configure the
-                // LabelMgr context so that GetMergedLabels() (and therefore GETLABELS)
+                // _ctx.LabelMgr context so that GetMergedLabels() (and therefore GETLABELS)
                 // immediately reflects the change.
-                bool isActiveSet = string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
-                bool noActiveSet = string.IsNullOrEmpty(LabelMgr.ActiveSetName);
+                bool isActiveSet = string.Equals(_ctx.LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
+                bool noActiveSet = string.IsNullOrEmpty(_ctx.LabelMgr.ActiveSetName);
 
                 if (isActiveSet || noActiveSet)
                 {
@@ -356,9 +379,9 @@ namespace CodeDesigner.Ps2.Bridge
                     // EnsureWorkspaceDirectory calls SetActiveSet before the file exists
                     // (noActiveSet case), so ActiveSetName may still be null.  Retry now
                     // that the file has been written to disk.
-                    if (string.IsNullOrEmpty(LabelMgr.ActiveSetName) && !string.IsNullOrWhiteSpace(LabelMgr.WorkspaceDir))
-                        LabelMgr.SetActiveSet(LabelMgr.WorkspaceDir, gameId, setName);
-                    SyncLegacyDictsFromLabelManager();
+                    if (string.IsNullOrEmpty(_ctx.LabelMgr.ActiveSetName) && !string.IsNullOrWhiteSpace(_ctx.LabelMgr.WorkspaceDir))
+                        _ctx.LabelMgr.SetActiveSet(_ctx.LabelMgr.WorkspaceDir, gameId, setName);
+                    _ctx.SyncLegacyDictsFromLabelManager();
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
@@ -370,7 +393,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ADDLABELENTRY failed: {ex.Message}");
+                return Responses.Error($"ADDLABELENTRY failed: {ex.Message}");
             }
         }
 
@@ -380,35 +403,35 @@ namespace CodeDesigner.Ps2.Bridge
         {
             gameId  = RequireParam(gameId,  "GameId",  out var e2);
             setName = RequireParam(setName, "SetName", out var e3);
-            if (gameId is null)  return CreateErrorResponse(e2!);
-            if (setName is null) return CreateErrorResponse(e3!);
+            if (gameId is null)  return Responses.Error(e2!);
+            if (setName is null) return Responses.Error(e3!);
             if (entries is null || entries.Count == 0)
-                return CreateErrorResponse("LabelEntries is required and must contain at least one entry for ADDLABELENTRIES");
+                return Responses.Error("LabelEntries is required and must contain at least one entry for ADDLABELENTRIES");
 
             // Validate all entries have required fields.
             for (int i = 0; i < entries.Count; i++)
             {
                 if (string.IsNullOrWhiteSpace(entries[i].Address))
-                    return CreateErrorResponse($"LabelEntries[{i}].Address is required");
+                    return Responses.Error($"LabelEntries[{i}].Address is required");
                 if (string.IsNullOrWhiteSpace(entries[i].Name))
-                    return CreateErrorResponse($"LabelEntries[{i}].Name is required");
+                    return Responses.Error($"LabelEntries[{i}].Name is required");
             }
 
             try
             {
                 var mgrEntries = entries.Select(FromWireEntry).ToList();
-                var set = LabelRepo.AddOrUpdateEntriesAsync(gameId, setName, mgrEntries).GetAwaiter().GetResult();
+                var set = _ctx.LabelRepo.AddOrUpdateEntriesAsync(gameId, setName, mgrEntries).GetAwaiter().GetResult();
 
-                bool isActiveSet = string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
-                bool noActiveSet = string.IsNullOrEmpty(LabelMgr.ActiveSetName);
+                bool isActiveSet = string.Equals(_ctx.LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
+                bool noActiveSet = string.IsNullOrEmpty(_ctx.LabelMgr.ActiveSetName);
 
                 if (isActiveSet || noActiveSet)
                 {
                     EnsureWorkspaceDirectory(workspaceDir, gameId, setName);
                     PersistActiveSetToDisk(set);
-                    if (string.IsNullOrEmpty(LabelMgr.ActiveSetName) && !string.IsNullOrWhiteSpace(LabelMgr.WorkspaceDir))
-                        LabelMgr.SetActiveSet(LabelMgr.WorkspaceDir, gameId, setName);
-                    SyncLegacyDictsFromLabelManager();
+                    if (string.IsNullOrEmpty(_ctx.LabelMgr.ActiveSetName) && !string.IsNullOrWhiteSpace(_ctx.LabelMgr.WorkspaceDir))
+                        _ctx.LabelMgr.SetActiveSet(_ctx.LabelMgr.WorkspaceDir, gameId, setName);
+                    _ctx.SyncLegacyDictsFromLabelManager();
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
@@ -421,7 +444,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"ADDLABELENTRIES failed: {ex.Message}");
+                return Responses.Error($"ADDLABELENTRIES failed: {ex.Message}");
             }
         }
 
@@ -431,8 +454,8 @@ namespace CodeDesigner.Ps2.Bridge
         {
             gameId  = RequireParam(gameId,  "GameId",  out var e2);
             setName = RequireParam(setName, "SetName", out var e3);
-            if (gameId is null)  return CreateErrorResponse(e2!);
-            if (setName is null) return CreateErrorResponse(e3!);
+            if (gameId is null)  return Responses.Error(e2!);
+            if (setName is null) return Responses.Error(e3!);
 
             // Prefer the string address field (supports synthetic child paths like
             // "0x80010000:+0x0010").  Fall back to the legacy numeric field.
@@ -440,16 +463,16 @@ namespace CodeDesigner.Ps2.Bridge
             if (string.IsNullOrEmpty(addrStr))
             {
                 if (addressUint is null)
-                    return CreateErrorResponse("Address is required for DELETELABELENTRY");
+                    return Responses.Error("Address is required for DELETELABELENTRY");
                 addrStr = $"0x{addressUint.Value:X8}";
             }
 
             try
             {
-                var set = LabelRepo.DeleteEntryAsync(gameId, setName, addrStr).GetAwaiter().GetResult();
+                var set = _ctx.LabelRepo.DeleteEntryAsync(gameId, setName, addrStr).GetAwaiter().GetResult();
 
-                bool isActiveSet = string.Equals(LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
-                bool noActiveSet = string.IsNullOrEmpty(LabelMgr.ActiveSetName);
+                bool isActiveSet = string.Equals(_ctx.LabelMgr.ActiveSetName, setName, StringComparison.OrdinalIgnoreCase);
+                bool noActiveSet = string.IsNullOrEmpty(_ctx.LabelMgr.ActiveSetName);
 
                 if (isActiveSet || noActiveSet)
                 {
@@ -458,9 +481,9 @@ namespace CodeDesigner.Ps2.Bridge
                     // EnsureWorkspaceDirectory calls SetActiveSet before the file exists
                     // (noActiveSet case), so ActiveSetName may still be null.  Retry now
                     // that the file has been written to disk.
-                    if (string.IsNullOrEmpty(LabelMgr.ActiveSetName) && !string.IsNullOrWhiteSpace(LabelMgr.WorkspaceDir))
-                        LabelMgr.SetActiveSet(LabelMgr.WorkspaceDir, gameId, setName);
-                    SyncLegacyDictsFromLabelManager();
+                    if (string.IsNullOrEmpty(_ctx.LabelMgr.ActiveSetName) && !string.IsNullOrWhiteSpace(_ctx.LabelMgr.WorkspaceDir))
+                        _ctx.LabelMgr.SetActiveSet(_ctx.LabelMgr.WorkspaceDir, gameId, setName);
+                    _ctx.SyncLegacyDictsFromLabelManager();
                 }
 
                 return JsonSerializer.Serialize(new CommandResponse
@@ -472,12 +495,12 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse(ex.Message);
+                return Responses.Error(ex.Message);
             }
         }
 
         /// <summary>
-        /// Ensures <see cref="LabelMgr"/> has a valid workspace directory and active-set
+        /// Ensures <see cref="_ctx.LabelMgr"/> has a valid workspace directory and active-set
         /// name so that <see cref="PersistActiveSetToDisk"/> and
         /// <see cref="SyncLegacyDictsFromLabelManager"/> can function.
         /// Uses <paramref name="workspaceDir"/> when supplied, otherwise falls back to a
@@ -485,13 +508,13 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private void EnsureWorkspaceDirectory(string? workspaceDir, string gameId, string setName)
         {
-            if (!string.IsNullOrWhiteSpace(LabelMgr.WorkspaceDir)) return;
+            if (!string.IsNullOrWhiteSpace(_ctx.LabelMgr.WorkspaceDir)) return;
 
             var dir = !string.IsNullOrWhiteSpace(workspaceDir)
                 ? workspaceDir
                 : Path.Combine(Path.GetTempPath(), "codedesigner_labels");
             Directory.CreateDirectory(dir);
-            LabelMgr.SetActiveSet(dir, gameId, setName);
+            _ctx.LabelMgr.SetActiveSet(dir, gameId, setName);
         }
 
         /// <summary>
@@ -503,11 +526,11 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private void PersistActiveSetToDisk(CodeDesigner.Ps2.LabelManager.Models.LabelSet set)
         {
-            // LabelMgr.WorkspaceDir reflects the directory that was established by the
+            // _ctx.LabelMgr.WorkspaceDir reflects the directory that was established by the
             // most recent SETACTIVELABELSET (or CREATELABELSET) call – it may be a temp
             // path when no workspace is open.  We must write to exactly that location.
-            var dir    = LabelMgr.WorkspaceDir;
-            var gameId = set.GameId ?? LabelMgr.GameId;
+            var dir    = _ctx.LabelMgr.WorkspaceDir;
+            var gameId = set.GameId ?? _ctx.LabelMgr.GameId;
 
             if (string.IsNullOrWhiteSpace(dir) || string.IsNullOrWhiteSpace(gameId))
             {
@@ -517,7 +540,7 @@ namespace CodeDesigner.Ps2.Bridge
                 return;
             }
 
-            LabelMgr.SaveSet(set, dir, gameId);
+            _ctx.LabelMgr.SaveSet(set, dir, gameId);
         }
 
         // ── IMPORTLABELSET ────────────────────────────────────────────────────
@@ -525,16 +548,16 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleImportLabelSet(string? workspaceDir, string? gameId, string? setName, string? data)
         {
             gameId = RequireParam(gameId, "GameId", out var e2);
-            if (gameId is null) return CreateErrorResponse(e2!);
+            if (gameId is null) return Responses.Error(e2!);
             if (string.IsNullOrWhiteSpace(data))
-                return CreateErrorResponse("Data (JSON) is required for IMPORTLABELSET");
+                return Responses.Error("Data (JSON) is required for IMPORTLABELSET");
 
             try
             {
                 // Parse using the LabelManager's existing import logic (handles both legacy and
                 // native JSON formats), then persist the result to the database.
-                var mgrSet = LabelMgr.Import(data, workspaceDir ?? string.Empty, gameId, setName?.Trim());
-                var saved  = LabelRepo.SaveSetAsync(mgrSet, gameId).GetAwaiter().GetResult();
+                var mgrSet = _ctx.LabelMgr.Import(data, workspaceDir ?? string.Empty, gameId, setName?.Trim());
+                var saved  = _ctx.LabelRepo.SaveSetAsync(mgrSet, gameId).GetAwaiter().GetResult();
 
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -545,7 +568,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"Import failed: {ex.Message}");
+                return Responses.Error($"Import failed: {ex.Message}");
             }
         }
 
@@ -555,13 +578,13 @@ namespace CodeDesigner.Ps2.Bridge
         {
             gameId  = RequireParam(gameId,  "GameId",  out var e2);
             setName = RequireParam(setName, "SetName", out var e3);
-            if (gameId is null)  return CreateErrorResponse(e2!);
-            if (setName is null) return CreateErrorResponse(e3!);
+            if (gameId is null)  return Responses.Error(e2!);
+            if (setName is null) return Responses.Error(e3!);
 
             try
             {
-                var set = LabelRepo.LoadSetAsync(gameId, setName).GetAwaiter().GetResult();
-                if (set is null) return CreateErrorResponse($"Label set '{setName}' not found.");
+                var set = _ctx.LabelRepo.LoadSetAsync(gameId, setName).GetAwaiter().GetResult();
+                if (set is null) return Responses.Error($"Label set '{setName}' not found.");
 
                 // Serialise using the same format as LabelManager's Export.
                 var json = System.Text.Json.JsonSerializer.Serialize(set, new System.Text.Json.JsonSerializerOptions
@@ -579,7 +602,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse(ex.Message);
+                return Responses.Error(ex.Message);
             }
         }
 
@@ -588,15 +611,15 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>
         /// RESOLVESTRINGS — reads each String-typed label's address from live PCSX2
         /// memory (PINE mode only), extracts the null-terminated ASCII content, and
-        /// updates the runtime label display in <c>_labels</c> to include it.
+        /// updates the runtime label display in <c>_ctx.Labels</c> to include it.
         /// Returns a summary of how many labels were resolved.
         /// </summary>
         private string HandleResolveStrings()
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("RESOLVESTRINGS requires PINE (PCSX2) mode.");
+            if (_ctx.PineClient == null)
+                return Responses.Error("RESOLVESTRINGS requires PINE (PCSX2) mode.");
 
-            var merged = LabelMgr.GetMergedLabels();
+            var merged = _ctx.LabelMgr.GetMergedLabels();
             int resolved = 0;
             var skipped  = new List<string>();
 
@@ -614,7 +637,7 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     // Read up to 256 bytes to find the null terminator.
                     const int MaxStringLen = 256;
-                    byte[] raw = PineClient!.ReadBytes(addr, MaxStringLen);
+                    byte[] raw = _ctx.PineClient!.ReadBytes(addr, MaxStringLen);
 
                     int len = 0;
                     while (len < raw.Length && raw[len] != 0) len++;
@@ -628,7 +651,7 @@ namespace CodeDesigner.Ps2.Bridge
                     }
 
                     string content = sb.ToString();
-                    _labels[addr] = ($"{entry.Name}: \"{content}\"", entry.Comment);
+                    _ctx.Labels[addr] = ($"{entry.Name}: \"{content}\"", entry.Comment);
                     resolved++;
                 }
                 catch
@@ -641,7 +664,7 @@ namespace CodeDesigner.Ps2.Bridge
             if (skipped.Count > 0)
                 msg += $" Skipped (read error): {string.Join(", ", skipped)}.";
 
-            return CreateSuccessResponse(msg);
+            return Responses.Success(msg);
         }
 
         // ── RESOLVELINKEDLIST ─────────────────────────────────────────────────
@@ -651,16 +674,16 @@ namespace CodeDesigner.Ps2.Bridge
         /// using <paramref name="nextOffset"/> as the byte offset within each node
         /// where the next-node pointer is stored.  Only works in PINE (PCSX2) mode.
         /// Optionally uses the label name found at <paramref name="startAddress"/> to
-        /// assign <c>Name[0]</c>, <c>Name[1]</c>, … entries in <c>_labels</c>.
+        /// assign <c>Name[0]</c>, <c>Name[1]</c>, … entries in <c>_ctx.Labels</c>.
         /// Returns the ordered list of node addresses.
         /// </summary>
         private string HandleResolveLinkedList(uint startAddress, int nextOffset)
         {
-            if (!IsPineMode)
-                return CreateErrorResponse("RESOLVELINKEDLIST requires PINE (PCSX2) mode.");
+            if (_ctx.PineClient == null)
+                return Responses.Error("RESOLVELINKEDLIST requires PINE (PCSX2) mode.");
 
             // Look up the label name at the start address for indexed display.
-            string labelBase = _labels.TryGetValue(startAddress, out var existing)
+            string labelBase = _ctx.Labels.TryGetValue(startAddress, out var existing)
                 ? existing.Label
                 : $"0x{startAddress:X8}";
 
@@ -680,15 +703,15 @@ namespace CodeDesigner.Ps2.Bridge
                 seen.Add(current);
                 nodeAddresses.Add(current);
 
-                // Update _labels for this node address.
-                _labels[current] = ($"{labelBase}[{index}]", null);
+                // Update _ctx.Labels for this node address.
+                _ctx.Labels[current] = ($"{labelBase}[{index}]", null);
                 index++;
 
                 // Read the next pointer (uint32 little-endian) at current + nextOffset.
                 uint ptrAddr = current + (uint)nextOffset;
                 try
                 {
-                    byte[] ptrBytes = PineClient!.ReadBytes(ptrAddr, 4);
+                    byte[] ptrBytes = _ctx.PineClient!.ReadBytes(ptrAddr, 4);
                     current = (uint)(ptrBytes[0] | (ptrBytes[1] << 8) | (ptrBytes[2] << 16) | (ptrBytes[3] << 24));
                 }
                 catch

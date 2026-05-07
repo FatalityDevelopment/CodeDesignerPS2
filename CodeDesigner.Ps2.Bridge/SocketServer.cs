@@ -240,12 +240,15 @@ namespace CodeDesigner.Ps2.Bridge
             // routes commands to them. New services should be added to the
             // list below — see ICommandService for the migration recipe.
             Services.IBridgeContext ctx = this;
-            // MemoryService is constructed first so peer services can access
-            // its chunked debug-socket reader through ctx.Memory.
-            _memoryService = new Services.MemoryService(ctx);
+            // MemoryService and RegisterService are constructed first so peer
+            // services that depend on them (e.g. WatchpointTraceService) can
+            // be wired up via constructor injection.
+            _memoryService   = new Services.MemoryService(ctx);
+            _registerService = new Services.RegisterService(ctx);
             _dispatcher = new Services.CommandDispatcher(new Services.ICommandService[]
             {
                 _memoryService,
+                _registerService,
                 new Services.ExecutionService(ctx),
                 new Services.CheatsService(ctx),
                 new Services.NetworkService(ctx),
@@ -269,10 +272,16 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.SymbolDatabaseService(ctx),
                 new Services.GameDiscService(ctx),
                 new Services.HddService(ctx),
+                new Services.ProcessStateService(ctx),
+                new Services.WatchpointTraceService(ctx, _registerService),
+                new Services.ValueScanService(ctx),
+                new Services.BreakpointDisassemblyService(ctx),
+                new Services.LabelManagerService(ctx),
             });
         }
 
-        private readonly Services.MemoryService _memoryService;
+        private readonly Services.MemoryService   _memoryService;
+        private readonly Services.RegisterService _registerService;
         Services.MemoryService Services.IBridgeContext.Memory => _memoryService;
 
         /// <inheritdoc/>
@@ -717,11 +726,7 @@ namespace CodeDesigner.Ps2.Bridge
                     case "LOADELF":
                         return HandleLoadElf(command.InputPath);
 
-                    case "GETREGS":
-                        return HandleGetRegisters();
-
-                    case "SETREG":
-                        return HandleSetRegister(command.RegisterName, command.RegisterIndex, command.RegisterValue);
+                    // GETREGS, SETREG → RegisterService (migrated)
 
                     case "CDSPATCH":
                         return HandleCdsPatch(command.Data, command.Labels);
@@ -780,18 +785,13 @@ namespace CodeDesigner.Ps2.Bridge
                             command.Data,
                             command.ReferenceKinds);
 
-                    case "GETTHREADS":
-                        return HandleGetThreads();
-
-                    case "GETIOPTHREADS":
+                    // GETTHREADS, GETIOPTHREADS → ProcessStateService (migrated)
                     case "GET_IOP_THREADS":
-                    case "IOPTHREADS":
-                        return HandleGetIopThreads();
+                    case "IOPTHREADS":         return DispatchAlias(command, "GETIOPTHREADS");
 
-                    case "PINEDISASSEMBLE":
+                    // PINEDISASSEMBLE → BreakpointDisassemblyService (migrated)
                     case "PINE_DISASSEMBLE":
-                    case "PINE_DISASM":
-                        return HandlePineDisassemble(command.CpuSel, command.Address, command.Length.HasValue ? (ushort?)command.Length.Value : null);
+                    case "PINE_DISASM":        return DispatchAlias(command, "PINEDISASSEMBLE");
 
                     case "LISTDISCELFS":
                         return HandleListDiscElfs(command.IsoPath);
@@ -801,56 +801,11 @@ namespace CodeDesigner.Ps2.Bridge
 
                     // CONVERTCHEAT, PORTCHEATS → CheatsService (migrated)
 
-                    case "SCANVALUE":
-                        return HandleScanValue(
-                            command.Address    ?? 0,
-                            command.EndAddress ?? 0x02000000u,
-                            command.ScanValue,
-                            command.Comparison,
-                            command.DataType,
-                            command.Region,
-                            command.ScanAddresses);
+                    // SCANVALUE → ValueScanService (migrated)
 
                     // Structs → StructService (migrated)
 
-                    // ── Label Manager commands ────────────────────────────────────────
-                    case "GETLABELSETS":
-                        return HandleGetLabelSets(command.WorkspaceDir, command.GameId);
-
-                    case "GETLABELSET":
-                        return HandleGetLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "SETACTIVELABELSET":
-                        return HandleSetActiveLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "CREATELABELSET":
-                        return HandleCreateLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "DELETELABELSET":
-                        return HandleDeleteLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "RENAMELABELSET":
-                        return HandleRenameLabelSet(command.WorkspaceDir, command.GameId, command.SetName, command.NewSetName);
-
-                    case "ADDLABELENTRY":
-                        return HandleAddLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntry);
-
-                    case "DELETELABELENTRY":
-                        return HandleDeleteLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntryAddress, command.Address);
-
-                    case "IMPORTLABELSET":
-                        return HandleImportLabelSet(command.WorkspaceDir, command.GameId, command.SetName, command.Data);
-
-                    case "EXPORTLABELSET":
-                        return HandleExportLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "RESOLVESTRINGS":
-                        return HandleResolveStrings();
-
-                    case "RESOLVELINKEDLIST":
-                        if (command.Address is null)
-                            return CreateErrorResponse("Address is required for RESOLVELINKEDLIST");
-                        return HandleResolveLinkedList(command.Address.Value, command.MemberOffset ?? 0);
+                    // Label-manager commands → LabelManagerService (migrated)
 
                     // Memory-card → MemoryCardService (migrated)
 
@@ -876,10 +831,9 @@ namespace CodeDesigner.Ps2.Bridge
                     case "SET_LIMITER": return DispatchAlias(command, "SETLIMITER");
                     case "FRAME_ADVANCE": return DispatchAlias(command, "FRAMEADVANCE");
 
-                    case "LISTBP":
+                    // LISTBP / LISTBREAKPOINTS → BreakpointDisassemblyService (migrated)
                     case "LIST_BP":
-                    case "LISTBREAKPOINTS":
-                        return HandleListBreakpoints(command.CpuSel);
+                    case "LISTBREAKPOINTS": return DispatchAlias(command, "LISTBP");
 
                     // GETSYMBOL → SteppingService (migrated)
                     case "GET_SYMBOL": return DispatchAlias(command, "GETSYMBOL");
@@ -887,25 +841,15 @@ namespace CodeDesigner.Ps2.Bridge
                     // GETSYMBOLBYNAME, LISTFUNCTIONS, LISTGLOBALS, GETLOCALS → SymbolDatabaseService (migrated)
                     case "GET_SYMBOL_BY_NAME": return DispatchAlias(command, "GETSYMBOLBYNAME");
 
-                    case "GETSTACK":
+                    // GETSTACK/GETMODULES → ProcessStateService; GETREGISTER/PINESETREG → RegisterService (migrated)
                     case "GET_STACK":
-                    case "CALLSTACK":
-                        return HandleGetStack();
-
-                    case "GETMODULES":
+                    case "CALLSTACK":         return DispatchAlias(command, "GETSTACK");
                     case "GET_MODULES":
-                    case "IOPMODULES":
-                        return HandleGetModules();
-
-                    case "GETREGISTER":
+                    case "IOPMODULES":        return DispatchAlias(command, "GETMODULES");
                     case "GET_REGISTER":
-                    case "PINEGETREGISTER":
-                        return HandleGetRegister(command.CpuSel, command.RegisterCategory, command.RegisterIndex);
-
-                    case "PINESETREG":
+                    case "PINEGETREGISTER":   return DispatchAlias(command, "GETREGISTER");
                     case "PINE_SETREG":
-                    case "PINESETREGISTER":
-                        return HandlePineSetRegister(command.CpuSel, command.RegisterCategory, command.RegisterIndex, command.RegisterValue);
+                    case "PINESETREGISTER":   return DispatchAlias(command, "PINESETREG");
 
                     // SaveState slot/file ops → SaveStateService (migrated)
                     case "SAVE_STATE_FILE":  return DispatchAlias(command, "SAVESTATETOFILE");
@@ -945,15 +889,10 @@ namespace CodeDesigner.Ps2.Bridge
                             Region        = command.Region,
                         }) ?? CreateErrorResponse("SCANPATTERN not registered");
 
-                    case "TRACECALLS":
-                    case "TRACE_CALLS":
-                        return HandleTraceCalls(
-                            command.EndAddress,
-                            command.MaxInstructions ?? 10_000);
+                    // TRACECALLS / RUNUNTILPC → WatchpointTraceService (migrated)
+                    case "TRACE_CALLS":   return DispatchAlias(command, "TRACECALLS");
+                    case "RUN_UNTIL_PC":  return DispatchAlias(command, "RUNUNTILPC");
 
-                    case "RUNUNTILPC":
-                    case "RUN_UNTIL_PC":
-                        return HandleRunUntilPc(command.TargetPc, command.TimeoutMs ?? 10_000);
 
                     // PINE hardware watchpoints → PineWatchService (migrated)
                     case "PINE_ADD_WATCH":         return DispatchAlias(command, "PINEADDWATCH");
@@ -1006,9 +945,7 @@ namespace CodeDesigner.Ps2.Bridge
                     case "SESSION_START":
                         return CreateSuccessResponse("AI session started");
 
-                    // ── Batch label entry ──────────────────────────────────────────────
-                    case "ADDLABELENTRIES":
-                        return HandleAddLabelEntries(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntries);
+                    // ADDLABELENTRIES → LabelManagerService (migrated)
 
                     default:
                         // Echo for unknown commands

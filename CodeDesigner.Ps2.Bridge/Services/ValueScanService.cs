@@ -2,10 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class ValueScanService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public ValueScanService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleScanValue(c.Address ?? 0, c.EndAddress ?? 0x02000000u, c.ScanValue, c.Comparison, c.DataType, c.Region, c.ScanAddresses), "SCANVALUE");
+        }
+
         /// <summary>
         /// Maximum number of bytes that a single full-range SCANVALUE scan will read.
         /// Prevents accidentally scanning more than 256 MB, which is already far larger
@@ -42,11 +50,11 @@ namespace CodeDesigner.Ps2.Bridge
         {
             try
             {
-                if (Client == null)
-                    return CreateErrorResponse("No live memory backend — start with --pcsx2 or STARTEMULATOR");
+                if (_ctx.Client == null)
+                    return Responses.Error("No live memory backend — start with --pcsx2 or STARTEMULATOR");
 
                 if (string.IsNullOrWhiteSpace(scanValue))
-                    return CreateErrorResponse("ScanValue is required");
+                    return Responses.Error("ScanValue is required");
 
                 bool useIop   = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
                 int  typeSize = GetScanTypeSize(dataType);
@@ -55,7 +63,7 @@ namespace CodeDesigner.Ps2.Bridge
                 // silently matching nothing.
                 string? parseError = ValidateScanValue(scanValue, dataType);
                 if (parseError != null)
-                    return CreateErrorResponse(parseError);
+                    return Responses.Error(parseError);
 
                 var  results  = new List<ScanValueResult>();
                 bool capped   = false;
@@ -66,7 +74,7 @@ namespace CodeDesigner.Ps2.Bridge
                     foreach (uint addr in previousAddresses)
                     {
                         byte[] bytes;
-                        try { bytes = ReadLiveBytes(addr, typeSize, useIop); }
+                        try { bytes = _ctx.Memory.ReadLiveBytes(addr, typeSize, useIop); }
                         catch (Exception ex)
                         {
                             System.Diagnostics.Debug.WriteLine($"[SCANVALUE] Skipping 0x{addr:X8}: {ex.Message}");
@@ -88,7 +96,7 @@ namespace CodeDesigner.Ps2.Bridge
                 {
                     // Full range scan.
                     if (endAddress <= startAddress)
-                        return CreateErrorResponse("End address must be greater than start address");
+                        return Responses.Error("End address must be greater than start address");
 
                     long rangeLen = Math.Min((long)(endAddress - startAddress), MaxValueScanBytes);
 
@@ -99,7 +107,7 @@ namespace CodeDesigner.Ps2.Bridge
                     }
                     catch (Exception ex)
                     {
-                        return CreateErrorResponse($"Failed to read memory: {ex.Message}");
+                        return Responses.Error($"Failed to read memory: {ex.Message}");
                     }
 
                     for (int offset = 0; offset + typeSize <= ram.Length; offset += typeSize)
@@ -130,7 +138,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"SCANVALUE failed: {ex.Message}");
+                return Responses.Error($"SCANVALUE failed: {ex.Message}");
             }
         }
 
@@ -142,7 +150,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// emulator) go through the same code path.
         /// </summary>
         private byte[] ReadScanRam(uint startAddress, int length, bool useIop)
-            => ReadLiveBytesChunked(startAddress, length, useIop);
+            => _ctx.Memory.ReadLiveBytesChunked(startAddress, length, useIop);
 
         // ── Helpers ──────────────────────────────────────────────────────────────
 

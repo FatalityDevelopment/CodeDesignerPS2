@@ -2,10 +2,21 @@ using System;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class RegisterService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public RegisterService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(_ => HandleGetRegisters(),                                                          "GETREGS");
+            reg.Add(c => HandleGetRegister(c.CpuSel, c.RegisterCategory, c.RegisterIndex),              "GETREGISTER", "GET_REGISTER", "PINEGETREGISTER");
+            reg.Add(c => HandlePineSetRegister(c.CpuSel, c.RegisterCategory, c.RegisterIndex, c.RegisterValue), "PINESETREG", "PINE_SETREG", "PINESETREGISTER");
+            reg.Add(c => HandleSetRegister(c.RegisterName, c.RegisterIndex, c.RegisterValue),           "SETREG");
+        }
+
         /// <summary>
         /// Handle GETREGS — returns the full EE CPU register state.
         /// <para>
@@ -15,20 +26,27 @@ namespace CodeDesigner.Ps2.Bridge
         /// 145-byte snapshot PCSX2 PINE returns. Tracked as follow-up work.
         /// </para>
         /// </summary>
+        /// <summary>
+        /// Public entry-point for cross-service callers (e.g. WatchpointTraceService
+        /// after a RUNUNTILPC settles) — returns the same JSON
+        /// <see cref="CommandResponse"/> that GETREGS would.
+        /// </summary>
+        public string GetRegistersResponse() => HandleGetRegisters();
+
         private string HandleGetRegisters()
         {
-            if (PineClient == null)
+            if (_ctx.PineClient == null)
             {
-                if (Client == null)
-                    return CreateErrorResponse("Emulator not running — no debug client attached");
-                return CreateErrorResponse(
-                    "GETREGS is not yet implemented for the built-in emulator client; " +
+                if (_ctx.Client == null)
+                    return Responses.Error("Emulator not running — no debug _ctx.Client attached");
+                return Responses.Error(
+                    "GETREGS is not yet implemented for the built-in emulator _ctx.Client; " +
                     "the InternalPineSocket needs the GetRegisters opcode (0x17) wired up.");
             }
 
             try
             {
-                var snap = PineClient.GetRegisters();
+                var snap = _ctx.PineClient.GetRegisters();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success    = true,
@@ -71,20 +89,20 @@ namespace CodeDesigner.Ps2.Bridge
                     GS_Priv     = snap.GsPriv.ToList(),
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"GetRegisters error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"GetRegisters error: {ex.Message}"); }
         }
 
         /// <summary>Handle GETREGISTER — single-register read via PCSX2 PINE.</summary>
         private string HandleGetRegister(byte? cpuSel, byte? cat, int? regIndex)
         {
-            if (cpuSel == null) return CreateErrorResponse("CpuSel is required for GETREGISTER (0=EE, 1=IOP)");
-            if (cat == null)    return CreateErrorResponse("RegisterCategory is required for GETREGISTER");
-            if (regIndex == null) return CreateErrorResponse("RegisterIndex is required for GETREGISTER");
-            if (PineClient == null)
-                return CreateErrorResponse("GETREGISTER is currently PCSX2-only");
+            if (cpuSel == null) return Responses.Error("CpuSel is required for GETREGISTER (0=EE, 1=IOP)");
+            if (cat == null)    return Responses.Error("RegisterCategory is required for GETREGISTER");
+            if (regIndex == null) return Responses.Error("RegisterIndex is required for GETREGISTER");
+            if (_ctx.PineClient == null)
+                return Responses.Error("GETREGISTER is currently PCSX2-only");
             try
             {
-                byte[] val = PineClient.GetRegister(cpuSel.Value, cat.Value, (byte)regIndex.Value);
+                byte[] val = _ctx.PineClient.GetRegister(cpuSel.Value, cat.Value, (byte)regIndex.Value);
                 string hex = BitConverter.ToString(val).Replace("-", "");
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -93,22 +111,22 @@ namespace CodeDesigner.Ps2.Bridge
                     RegisterValue = hex,
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"GetRegister failed: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"GetRegister failed: {ex.Message}"); }
         }
 
         /// <summary>Handle PINESETREG — single-register write via PCSX2 PINE.</summary>
         private string HandlePineSetRegister(byte? cpuSel, byte? cat, int? regIndex, string? regValue)
         {
-            if (cpuSel == null) return CreateErrorResponse("CpuSel is required for PINESETREG (0=EE, 1=IOP)");
-            if (cat == null)    return CreateErrorResponse("RegisterCategory is required for PINESETREG");
-            if (regIndex == null) return CreateErrorResponse("RegisterIndex is required for PINESETREG");
-            if (string.IsNullOrEmpty(regValue)) return CreateErrorResponse("RegisterValue (32 hex chars = 128-bit LE) is required for PINESETREG");
-            if (PineClient == null)
-                return CreateErrorResponse("PINESETREG is currently PCSX2-only");
+            if (cpuSel == null) return Responses.Error("CpuSel is required for PINESETREG (0=EE, 1=IOP)");
+            if (cat == null)    return Responses.Error("RegisterCategory is required for PINESETREG");
+            if (regIndex == null) return Responses.Error("RegisterIndex is required for PINESETREG");
+            if (string.IsNullOrEmpty(regValue)) return Responses.Error("RegisterValue (32 hex chars = 128-bit LE) is required for PINESETREG");
+            if (_ctx.PineClient == null)
+                return Responses.Error("PINESETREG is currently PCSX2-only");
 
             string hex = regValue.Replace("0x", "").Replace("0X", "").Trim();
             if (hex.Length > 32 || hex.Length == 0 || hex.Length % 2 != 0)
-                return CreateErrorResponse("RegisterValue must be an even-length hex string of up to 32 characters (128 bits)");
+                return Responses.Error("RegisterValue must be an even-length hex string of up to 32 characters (128 bits)");
             byte[] val128 = new byte[16];
             byte[] parsed = new byte[hex.Length / 2];
             for (int i = 0; i < parsed.Length; i++)
@@ -117,10 +135,10 @@ namespace CodeDesigner.Ps2.Bridge
 
             try
             {
-                PineClient.SetRegister(cpuSel.Value, cat.Value, (byte)regIndex.Value, val128);
-                return CreateSuccessResponse("Register set");
+                _ctx.PineClient.SetRegister(cpuSel.Value, cat.Value, (byte)regIndex.Value, val128);
+                return Responses.Success("Register set");
             }
-            catch (Exception ex) { return CreateErrorResponse($"SetRegister failed: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"SetRegister failed: {ex.Message}"); }
         }
 
         /// <summary>
@@ -133,12 +151,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleSetRegister(string? regName, int? regIndex, string? regValue)
         {
-            if (PineClient == null)
-                return CreateErrorResponse(
+            if (_ctx.PineClient == null)
+                return Responses.Error(
                     "SETREG is currently PCSX2-only; built-in emulator support requires " +
                     "the InternalPineSocket to wire up the SetRegister opcode.");
             if (string.IsNullOrWhiteSpace(regName) || string.IsNullOrWhiteSpace(regValue))
-                return CreateErrorResponse("Missing parameters");
+                return Responses.Error("Missing parameters");
 
             // Map the named register to PINE category + index, then forward via PINESETREG.
             // For now, only the most common categories (GPR, COP0, FPR) are supported.
@@ -150,18 +168,18 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 case "GPR":
                     if (regIndex == null || regIndex < 1 || regIndex > 31)
-                        return CreateErrorResponse("GPR index must be 1-31");
+                        return Responses.Error("GPR index must be 1-31");
                     cat = 0; idx = regIndex.Value; break;
                 case "COP0":
                     if (regIndex == null || regIndex < 0 || regIndex > 31)
-                        return CreateErrorResponse("COP0 index must be 0-31");
+                        return Responses.Error("COP0 index must be 0-31");
                     cat = 1; idx = regIndex.Value; break;
                 case "FPR":
                     if (regIndex == null || regIndex < 0 || regIndex > 31)
-                        return CreateErrorResponse("FPR index must be 0-31");
+                        return Responses.Error("FPR index must be 0-31");
                     cat = 2; idx = regIndex.Value; break;
                 default:
-                    return CreateErrorResponse(
+                    return Responses.Error(
                         $"SETREG via PINE only supports GPR, COP0 and FPR currently. " +
                         $"Use PINESETREG with explicit CpuSel/Category/Index for finer control.");
             }

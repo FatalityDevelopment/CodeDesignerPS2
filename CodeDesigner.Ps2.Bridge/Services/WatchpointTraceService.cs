@@ -3,10 +3,24 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class WatchpointTraceService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        private readonly RegisterService _registers;
+        public WatchpointTraceService(IBridgeContext ctx, RegisterService registers)
+        {
+            _ctx = ctx;
+            _registers = registers;
+        }
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleTraceCalls(c.EndAddress, c.MaxInstructions ?? 10000), "TRACECALLS",  "TRACE_CALLS");
+            reg.Add(c => HandleRunUntilPc(c.TargetPc,   c.TimeoutMs       ?? 10000), "RUNUNTILPC",  "RUN_UNTIL_PC");
+        }
+
         // ── TRACECALLS ────────────────────────────────────────────────────────
 
         /// <summary>
@@ -23,14 +37,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleTraceCalls(uint? endPc, int maxInstructions)
         {
-            if (Client == null)
-                return CreateErrorResponse("Emulator not running — no debug client attached");
+            if (_ctx.Client == null)
+                return Responses.Error("Emulator not running — no debug _ctx.Client attached");
             if (endPc == null)
-                return CreateErrorResponse("EndAddress is required for TRACECALLS");
+                return Responses.Error("EndAddress is required for TRACECALLS");
 
             if (maxInstructions <= 0) maxInstructions = 10_000;
 
-            uint normalizedEnd = NormalizeBreakpointToPhysical(endPc.Value);
+            uint normalizedEnd = AddressTranslator.NormalizeBreakpointToPhysical(endPc.Value);
             var traces = new List<CallTraceEntry>();
 
             bool pendingCall   = false;
@@ -39,14 +53,14 @@ namespace CodeDesigner.Ps2.Bridge
             try
             {
                 // Confirm we're paused before single-stepping.
-                _ = Client.GetProgramCounter(out bool initiallyPaused);
+                _ = _ctx.Client.GetProgramCounter(out bool initiallyPaused);
                 if (!initiallyPaused)
-                    return CreateErrorResponse("Emulator must be paused before tracing calls");
+                    return Responses.Error("Emulator must be paused before tracing calls");
 
                 for (int i = 0; i < maxInstructions; i++)
                 {
-                    uint prePc           = Client.GetProgramCounter();
-                    uint normalizedPrePc = NormalizeBreakpointToPhysical(prePc);
+                    uint prePc           = _ctx.Client.GetProgramCounter();
+                    uint normalizedPrePc = AddressTranslator.NormalizeBreakpointToPhysical(prePc);
 
                     if (normalizedPrePc == normalizedEnd)
                         break;
@@ -55,7 +69,7 @@ namespace CodeDesigner.Ps2.Bridge
                     uint instrWord = 0;
                     try
                     {
-                        byte[] insn = Client.ReadBytes(prePc, 4);
+                        byte[] insn = _ctx.Client.ReadBytes(prePc, 4);
                         if (insn.Length == 4)
                             instrWord = (uint)(insn[0] | (insn[1] << 8) | (insn[2] << 16) | (insn[3] << 24));
                     }
@@ -66,14 +80,14 @@ namespace CodeDesigner.Ps2.Bridge
                     bool isCall = opcode == 3                                          // JAL
                                || (opcode == 0 && (instrWord & 0x3Fu) == 9u && rs != 0u); // JALR
 
-                    uint newPc = Client.Step();
+                    uint newPc = _ctx.Client.Step();
 
                     if (pendingCall)
                     {
                         traces.Add(new CallTraceEntry
                         {
-                            From = NormalizePcToKseg0(pendingFromPc).ToString("X8"),
-                            To   = NormalizePcToKseg0(newPc).ToString("X8"),
+                            From = AddressTranslator.NormalizePcToKseg0(pendingFromPc).ToString("X8"),
+                            To   = AddressTranslator.NormalizePcToKseg0(newPc).ToString("X8"),
                         });
                         pendingCall = false;
                     }
@@ -87,7 +101,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"TraceCalls error: {ex.Message}");
+                return Responses.Error($"TraceCalls error: {ex.Message}");
             }
 
             return JsonSerializer.Serialize(new CommandResponse
@@ -111,44 +125,45 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleRunUntilPc(uint? targetPc, int timeoutMs)
         {
-            if (Client == null)
-                return CreateErrorResponse("Emulator not running — no debug client attached");
+            if (_ctx.Client == null)
+                return Responses.Error("Emulator not running — no debug _ctx.Client attached");
             if (targetPc == null)
-                return CreateErrorResponse("TargetPc is required for RUNUNTILPC");
+                return Responses.Error("TargetPc is required for RUNUNTILPC");
 
             if (timeoutMs <= 0) timeoutMs = 10_000;
 
-            uint normalizedTarget = NormalizeBreakpointForClient(targetPc.Value);
+            uint normalizedTarget = AddressTranslator.NormalizeBreakpointForClient(targetPc.Value);
 
             try
             {
-                Client.SetBreakpoint(normalizedTarget);
-                Client.Resume();
+                _ctx.Client.SetBreakpoint(normalizedTarget);
+                _ctx.Client.Resume();
 
                 var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
                 bool paused = false;
                 while (DateTime.UtcNow < deadline)
                 {
-                    Client.GetProgramCounter(out paused);
+                    _ctx.Client.GetProgramCounter(out paused);
                     if (paused) break;
                     Thread.Sleep(10);
                 }
 
-                Client.ClearBreakpoint(normalizedTarget);
+                _ctx.Client.ClearBreakpoint(normalizedTarget);
 
                 if (!paused)
                 {
-                    Client.Pause();
-                    return CreateErrorResponse(
+                    _ctx.Client.Pause();
+                    return Responses.Error(
                         $"Timeout: PC did not reach 0x{targetPc.Value:X8} within {timeoutMs} ms. " +
-                        $"Current PC: 0x{NormalizePcToKseg0(Client.GetProgramCounter()):X8}");
+                        $"Current PC: 0x{AddressTranslator.NormalizePcToKseg0(_ctx.Client.GetProgramCounter()):X8}");
                 }
 
-                return HandleGetRegisters();
+                // Re-use RegisterService to return the full snapshot.
+                return _registers.GetRegistersResponse();
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"RunUntilPc error: {ex.Message}");
+                return Responses.Error($"RunUntilPc error: {ex.Message}");
             }
         }
     }
