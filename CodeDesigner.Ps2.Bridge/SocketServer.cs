@@ -262,6 +262,13 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.IsoService(ctx),
                 new Services.LabelService(ctx),
                 new Services.McpConfigService(ctx),
+                new Services.AgentService(ctx),
+                new Services.OrchestrationService(ctx),
+                new Services.MemoryEntryService(ctx),
+                new Services.SnapshotHistoryService(ctx),
+                new Services.SymbolDatabaseService(ctx),
+                new Services.GameDiscService(ctx),
+                new Services.HddService(ctx),
             });
         }
 
@@ -847,23 +854,7 @@ namespace CodeDesigner.Ps2.Bridge
 
                     // Memory-card → MemoryCardService (migrated)
 
-                    case "HDD_LIST":
-                        return HandleHddList(command.HddPath);
-
-                    case "HDD_LIST_FILES":
-                        return HandleHddListFiles(command.HddPath, command.PartitionId);
-
-                    case "HDD_EXPORT":
-                        return HandleHddExport(command.HddPath, command.PartitionId, command.FileName, command.ExportDir);
-
-                    case "HDD_IMPORT":
-                        return HandleHddImport(command.HddPath, command.PartitionId, command.ImportDir, command.McOverwrite ?? false);
-
-                    case "HDD_DELETE":
-                        return HandleHddDelete(command.HddPath, command.PartitionId);
-
-                    case "HDD_CREATE":
-                        return HandleHddCreate(command.HddPath, command.HddSizeGb ?? 40);
+                    // HDD → HddService (migrated)
 
                     // ISO → IsoService (migrated)
 
@@ -893,9 +884,8 @@ namespace CodeDesigner.Ps2.Bridge
                     // GETSYMBOL → SteppingService (migrated)
                     case "GET_SYMBOL": return DispatchAlias(command, "GETSYMBOL");
 
-                    case "GETSYMBOLBYNAME":
-                    case "GET_SYMBOL_BY_NAME":
-                        return HandleGetSymbolByName(command.SymbolName);
+                    // GETSYMBOLBYNAME, LISTFUNCTIONS, LISTGLOBALS, GETLOCALS → SymbolDatabaseService (migrated)
+                    case "GET_SYMBOL_BY_NAME": return DispatchAlias(command, "GETSYMBOLBYNAME");
 
                     case "GETSTACK":
                     case "GET_STACK":
@@ -916,20 +906,6 @@ namespace CodeDesigner.Ps2.Bridge
                     case "PINE_SETREG":
                     case "PINESETREGISTER":
                         return HandlePineSetRegister(command.CpuSel, command.RegisterCategory, command.RegisterIndex, command.RegisterValue);
-
-                    case "LISTFUNCTIONS":
-                    case "LIST_FUNCTIONS":
-                    case "PINEFUNCTIONS":
-                        return HandleListFunctions(command.Offset, command.MaxCount);
-
-                    case "LISTGLOBALS":
-                    case "LIST_GLOBALS":
-                    case "PINEGLOBALS":
-                        return HandleListGlobals(command.Offset, command.MaxCount);
-
-                    case "GETLOCALS":
-                    case "GET_LOCALS":
-                        return HandleGetLocals(command.Address);
 
                     // SaveState slot/file ops → SaveStateService (migrated)
                     case "SAVE_STATE_FILE":  return DispatchAlias(command, "SAVESTATETOFILE");
@@ -1017,120 +993,12 @@ namespace CodeDesigner.Ps2.Bridge
                     case "GET_ALL_SETTINGS":    return DispatchAlias(command, "GETALLSETTINGS");
                     case "DELETE_SETTING":      return DispatchAlias(command, "DELETESETTING");
 
-                    // Game-disc handler stays here — not yet migrated
-                    case "UPDATEGAMEDISC":
-                    case "UPDATE_GAME_DISC":
-                        return HandleUpdateGameDisc(command.GameSerial, command.IsoPath, command.GameCrc, command.GameTitle);
+                    // Game-disc + Snapshot-address-history → migrated
+                    case "UPDATE_GAME_DISC":   return DispatchAlias(command, "UPDATEGAMEDISC");
+                    case "GET_ADDRESS_HISTORY": return DispatchAlias(command, "GETADDRESSHISTORY");
 
-                    // Snapshot-address-history not yet migrated
-                    case "GETADDRESSHISTORY":
-                    case "GET_ADDRESS_HISTORY":
-                        return HandleGetAddressHistory(command.Address, command.SnapshotDir);
-
-                    // ── MCP Memory Manager (DB-backed) ───────────────────────
-                    case "MCPMEMORY_LIST":
-                    case "MCPMEMORYLIST":
-                        return HandleMcpMemoryList(command.GameId);
-
-                    case "MCPMEMORY_GET":
-                    case "MCPMEMORYGET":
-                        return HandleMcpMemoryGet(command.McpMemoryId);
-
-                    case "MCPMEMORY_ADD":
-                    case "MCPMEMORYADD":
-                        return HandleMcpMemoryAdd(command.McpMemoryName, command.McpMemoryContent, command.GameId, command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_UPDATE":
-                    case "MCPMEMORYUPDATE":
-                        return HandleMcpMemoryUpdate(command.McpMemoryId, command.McpMemoryName, command.McpMemoryContent, command.GameId, command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_DELETE":
-                    case "MCPMEMORYDELETE":
-                        return HandleMcpMemoryDelete(command.McpMemoryId);
-
-                    case "MCPMEMORY_IMPORT":
-                    case "MCPMEMORYIMPORT":
-                        return HandleMcpMemoryImport(command.FilePath);
-
-                    case "MCPMEMORY_EXPORT":
-                    case "MCPMEMORYEXPORT":
-                        return HandleMcpMemoryExport(command.McpMemoryId, command.OutputPath);
-
-                    case "MCPMEMORY_UPSERT":
-                    case "MCPMEMORYUPSERT":
-                        return HandleMcpMemoryUpsert(command.McpMemoryName, command.McpMemoryContent, command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_DELETE_BY_NAME":
-                    case "MCPMEMORYDELETEBYNAME":
-                        return HandleMcpMemoryDeleteByName(command.McpMemoryName);
-
-                    case "MCPMEMORY_LIST_FOR_AGENT":
-                    case "MCPMEMORYLISTFORAGENT":
-                        return HandleMcpMemoryListForAgent(command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_LIST_SHARED":
-                    case "MCPMEMORYLISTSHARED":
-                        return HandleMcpMemoryListShared();
-
-                    // ── MCP Agent Profiles (DB-backed) ───────────────────────
-                    case "MCPAGENT_LIST":
-                    case "MCPAGENTLIST":
-                        return HandleMcpAgentList();
-
-                    case "MCPAGENT_GET":
-                    case "MCPAGENTGET":
-                        return HandleMcpAgentGet(command.McpAgentId);
-
-                    case "MCPAGENT_ADD":
-                    case "MCPAGENTADD":
-                        return HandleMcpAgentAdd(command);
-
-                    case "MCPAGENT_UPDATE":
-                    case "MCPAGENTUPDATE":
-                        return HandleMcpAgentUpdate(command);
-
-                    case "MCPAGENT_DELETE":
-                    case "MCPAGENTDELETE":
-                        return HandleMcpAgentDelete(command.McpAgentId);
-
-                    case "MCPAGENT_IMPORT":
-                    case "MCPAGENTIMPORT":
-                        return HandleMcpAgentImport(command.FilePath);
-
-                    case "MCPAGENT_EXPORT":
-                    case "MCPAGENTEXPORT":
-                        return HandleMcpAgentExport(command.McpAgentId, command.OutputPath);
-
-                    case "MCPORCHESTRATION_LIST":
-                    case "MCPORCHESTRATIONLIST":
-                        return HandleMcpOrchestrationList();
-
-                    case "MCPORCHESTRATION_GET":
-                    case "MCPORCHESTRATIONGET":
-                        return HandleMcpOrchestrationGet(command.McpOrchestrationId);
-
-                    case "MCPORCHESTRATION_ADD":
-                    case "MCPORCHESTRATIONADD":
-                        return HandleMcpOrchestrationAdd(command);
-
-                    case "MCPORCHESTRATION_UPDATE":
-                    case "MCPORCHESTRATIONUPDATE":
-                        return HandleMcpOrchestrationUpdate(command);
-
-                    case "MCPORCHESTRATION_DELETE":
-                    case "MCPORCHESTRATIONDELETE":
-                        return HandleMcpOrchestrationDelete(command.McpOrchestrationId);
-
-                    case "MCPORCHESTRATION_IMPORT":
-                    case "MCPORCHESTRATIONIMPORT":
-                        return HandleMcpOrchestrationImport(command.FilePath);
-
-                    case "MCPORCHESTRATION_EXPORT":
-                    case "MCPORCHESTRATIONEXPORT":
-                        return HandleMcpOrchestrationExport(command.McpOrchestrationId, command.OutputPath);
-
-                    case "MCPORCHESTRATION_SETACTIVE":
-                        return HandleMcpOrchestrationSetActive(command.McpOrchestrationId);
+                    // MCP Memory/Agent/Orchestration → MemoryEntryService /
+                    // AgentService / OrchestrationService (migrated)
 
                     // MCP Config → McpConfigService (migrated)
 

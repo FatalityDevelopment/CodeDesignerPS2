@@ -3,10 +3,18 @@ using Microsoft.EntityFrameworkCore;
 using CodeDesigner.Ps2.Database.Entities;
 using CodeDesigner.Ps2.Bridge.Repositories;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class GameDiscService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public GameDiscService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleUpdateGameDisc(c.GameSerial, c.IsoPath, c.GameCrc, c.GameTitle),         "UPDATEGAMEDISC", "UPDATE_GAME_DISC");
+        }
+
         // ── UPDATEGAMEDISC ────────────────────────────────────────────────────
 
         /// <summary>
@@ -19,14 +27,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         private string HandleUpdateGameDisc(string? serial, string? isoPath, string? crc, string? gameTitle = null)
         {
-            if (Db == null)
-                return CreateErrorResponse("Database is not available");
+            if (_ctx.Db == null)
+                return Responses.Error("Database is not available");
             if (string.IsNullOrWhiteSpace(serial))
-                return CreateErrorResponse("GameSerial is required for UPDATEGAMEDISC");
+                return Responses.Error("GameSerial is required for UPDATEGAMEDISC");
 
             var normalized = DbLabelRepository.NormalizeSerial(serial);
 
-            var disc = Db.GameDiscs
+            var disc = _ctx.Db.GameDiscs
                          .FirstOrDefault(d =>
                              d.Serial != null &&
                              d.Serial.Replace("_", "-").ToUpper() == normalized);
@@ -35,12 +43,12 @@ namespace CodeDesigner.Ps2.Bridge
             {
                 // ── Determine region from serial prefix ───────────────────────
                 var regionName = InferRegionFromSerial(normalized);
-                var region = Db.GameRegions.FirstOrDefault(r => r.Name == regionName);
+                var region = _ctx.Db.GameRegions.FirstOrDefault(r => r.Name == regionName);
                 if (region is null)
                 {
                     region = new GameRegion { Name = regionName };
-                    Db.GameRegions.Add(region);
-                    Db.SaveChanges();
+                    _ctx.Db.GameRegions.Add(region);
+                    _ctx.Db.SaveChanges();
                 }
 
                 // ── Find or create the Game row ───────────────────────────────
@@ -48,12 +56,12 @@ namespace CodeDesigner.Ps2.Bridge
                     ? gameTitle
                     : $"Unknown Game ({normalized})";   // fall back to a descriptive placeholder
 
-                var game = Db.Games.FirstOrDefault(g => g.Title == title);
+                var game = _ctx.Db.Games.FirstOrDefault(g => g.Title == title);
                 if (game is null)
                 {
                     game = new Game { Title = title };
-                    Db.Games.Add(game);
-                    Db.SaveChanges();
+                    _ctx.Db.Games.Add(game);
+                    _ctx.Db.SaveChanges();
                 }
 
                 // ── Create the GameDisc row ───────────────────────────────────
@@ -65,8 +73,8 @@ namespace CodeDesigner.Ps2.Bridge
                     IsoPath      = isoPath,
                     CRC          = crc,
                 };
-                Db.GameDiscs.Add(disc);
-                Db.SaveChanges();
+                _ctx.Db.GameDiscs.Add(disc);
+                _ctx.Db.SaveChanges();
             }
             else
             {
@@ -85,7 +93,7 @@ namespace CodeDesigner.Ps2.Bridge
                 }
 
                 if (changed)
-                    Db.SaveChanges();
+                    _ctx.Db.SaveChanges();
             }
 
             return JsonSerializer.Serialize(new CommandResponse

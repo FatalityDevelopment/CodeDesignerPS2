@@ -2,19 +2,34 @@ using System;
 using System.Text.Json;
 using CodeDesigner.Ps2.Database.Entities;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class OrchestrationService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public OrchestrationService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(_ => HandleMcpOrchestrationList(),                                "MCPORCHESTRATION_LIST",      "MCPORCHESTRATIONLIST");
+            reg.Add(c => HandleMcpOrchestrationGet(c.McpOrchestrationId),             "MCPORCHESTRATION_GET",       "MCPORCHESTRATIONGET");
+            reg.Add(c => HandleMcpOrchestrationAdd(c),                                "MCPORCHESTRATION_ADD",       "MCPORCHESTRATIONADD");
+            reg.Add(c => HandleMcpOrchestrationUpdate(c),                             "MCPORCHESTRATION_UPDATE",    "MCPORCHESTRATIONUPDATE");
+            reg.Add(c => HandleMcpOrchestrationDelete(c.McpOrchestrationId),          "MCPORCHESTRATION_DELETE",    "MCPORCHESTRATIONDELETE");
+            reg.Add(c => HandleMcpOrchestrationImport(c.FilePath),                    "MCPORCHESTRATION_IMPORT",    "MCPORCHESTRATIONIMPORT");
+            reg.Add(c => HandleMcpOrchestrationExport(c.McpOrchestrationId, c.OutputPath), "MCPORCHESTRATION_EXPORT", "MCPORCHESTRATIONEXPORT");
+            reg.Add(c => HandleMcpOrchestrationSetActive(c.McpOrchestrationId),       "MCPORCHESTRATION_SETACTIVE", "MCPORCHESTRATIONSETACTIVE");
+        }
+
         // ── MCPORCHESTRATION_LIST ────────────────────────────────────────────
 
         private string HandleMcpOrchestrationList()
         {
-            if (McpOrchestrationRepo is null)
-                return CreateErrorResponse("MCP Orchestration repository is not available");
+            if (_ctx.McpOrchestrationRepo is null)
+                return Responses.Error("MCP Orchestration repository is not available");
             try
             {
-                var profiles = McpOrchestrationRepo.ListAsync().GetAwaiter().GetResult();
+                var profiles = _ctx.McpOrchestrationRepo.ListAsync().GetAwaiter().GetResult();
                 var infos    = profiles.ConvertAll(ToMcpOrchestrationDto);
                 return JsonSerializer.Serialize(new CommandResponse
                 {
@@ -23,22 +38,22 @@ namespace CodeDesigner.Ps2.Bridge
                     McpOrchestrations    = infos,
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_LIST error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_LIST error: {ex.Message}"); }
         }
 
         // ── MCPORCHESTRATION_GET ─────────────────────────────────────────────
 
         private string HandleMcpOrchestrationGet(int? id)
         {
-            if (McpOrchestrationRepo is null)
-                return CreateErrorResponse("MCP Orchestration repository is not available");
+            if (_ctx.McpOrchestrationRepo is null)
+                return Responses.Error("MCP Orchestration repository is not available");
             if (id is null)
-                return CreateErrorResponse("McpOrchestrationId is required for MCPORCHESTRATION_GET");
+                return Responses.Error("McpOrchestrationId is required for MCPORCHESTRATION_GET");
             try
             {
-                var profile = McpOrchestrationRepo.GetAsync(id.Value).GetAwaiter().GetResult();
+                var profile = _ctx.McpOrchestrationRepo.GetAsync(id.Value).GetAwaiter().GetResult();
                 if (profile is null)
-                    return CreateErrorResponse($"Orchestration profile {id} not found.");
+                    return Responses.Error($"Orchestration profile {id} not found.");
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success             = true,
@@ -46,20 +61,20 @@ namespace CodeDesigner.Ps2.Bridge
                     McpOrchestration    = ToMcpOrchestrationDto(profile),
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_GET error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_GET error: {ex.Message}"); }
         }
 
         // ── MCPORCHESTRATION_ADD ─────────────────────────────────────────────
 
         private string HandleMcpOrchestrationAdd(CommandMessage cmd)
         {
-            if (McpOrchestrationRepo is null)
-                return CreateErrorResponse("MCP Orchestration repository is not available");
+            if (_ctx.McpOrchestrationRepo is null)
+                return Responses.Error("MCP Orchestration repository is not available");
             if (string.IsNullOrWhiteSpace(cmd.McpOrchestrationName))
-                return CreateErrorResponse("McpOrchestrationName is required for MCPORCHESTRATION_ADD");
+                return Responses.Error("McpOrchestrationName is required for MCPORCHESTRATION_ADD");
             try
             {
-                var profile = McpOrchestrationRepo.AddAsync(
+                var profile = _ctx.McpOrchestrationRepo.AddAsync(
                     cmd.McpOrchestrationName!,
                     cmd.McpOrchestrationDescription,
                     cmd.McpOrchestrationStrategy,
@@ -77,20 +92,20 @@ namespace CodeDesigner.Ps2.Bridge
                     McpOrchestration    = ToMcpOrchestrationDto(profile),
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_ADD error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_ADD error: {ex.Message}"); }
         }
 
         // ── MCPORCHESTRATION_UPDATE ──────────────────────────────────────────
 
         private string HandleMcpOrchestrationUpdate(CommandMessage cmd)
         {
-            if (McpOrchestrationRepo is null)
-                return CreateErrorResponse("MCP Orchestration repository is not available");
+            if (_ctx.McpOrchestrationRepo is null)
+                return Responses.Error("MCP Orchestration repository is not available");
             if (cmd.McpOrchestrationId is null)
-                return CreateErrorResponse("McpOrchestrationId is required for MCPORCHESTRATION_UPDATE");
+                return Responses.Error("McpOrchestrationId is required for MCPORCHESTRATION_UPDATE");
             try
             {
-                var profile = McpOrchestrationRepo.UpdateAsync(
+                var profile = _ctx.McpOrchestrationRepo.UpdateAsync(
                     cmd.McpOrchestrationId.Value,
                     cmd.McpOrchestrationName,
                     cmd.McpOrchestrationDescription,
@@ -109,20 +124,20 @@ namespace CodeDesigner.Ps2.Bridge
                     McpOrchestration    = ToMcpOrchestrationDto(profile),
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_UPDATE error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_UPDATE error: {ex.Message}"); }
         }
 
         // ── MCPORCHESTRATION_DELETE ──────────────────────────────────────────
 
         private string HandleMcpOrchestrationDelete(int? id)
         {
-            if (McpOrchestrationRepo is null)
-                return CreateErrorResponse("MCP Orchestration repository is not available");
+            if (_ctx.McpOrchestrationRepo is null)
+                return Responses.Error("MCP Orchestration repository is not available");
             if (id is null)
-                return CreateErrorResponse("McpOrchestrationId is required for MCPORCHESTRATION_DELETE");
+                return Responses.Error("McpOrchestrationId is required for MCPORCHESTRATION_DELETE");
             try
             {
-                McpOrchestrationRepo.DeleteAsync(id.Value).GetAwaiter().GetResult();
+                _ctx.McpOrchestrationRepo.DeleteAsync(id.Value).GetAwaiter().GetResult();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
@@ -130,20 +145,20 @@ namespace CodeDesigner.Ps2.Bridge
                     Message = $"Orchestration profile {id} deleted.",
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_DELETE error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_DELETE error: {ex.Message}"); }
         }
 
         // ── MCPORCHESTRATION_IMPORT ──────────────────────────────────────────
 
         private string HandleMcpOrchestrationImport(string? filePath)
         {
-            if (McpOrchestrationRepo is null)
-                return CreateErrorResponse("MCP Orchestration repository is not available");
+            if (_ctx.McpOrchestrationRepo is null)
+                return Responses.Error("MCP Orchestration repository is not available");
             if (string.IsNullOrWhiteSpace(filePath))
-                return CreateErrorResponse("FilePath is required for MCPORCHESTRATION_IMPORT");
+                return Responses.Error("FilePath is required for MCPORCHESTRATION_IMPORT");
             try
             {
-                var profile = McpOrchestrationRepo.ImportFromFileAsync(filePath!).GetAwaiter().GetResult();
+                var profile = _ctx.McpOrchestrationRepo.ImportFromFileAsync(filePath!).GetAwaiter().GetResult();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success             = true,
@@ -152,22 +167,22 @@ namespace CodeDesigner.Ps2.Bridge
                     McpOrchestration    = ToMcpOrchestrationDto(profile),
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_IMPORT error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_IMPORT error: {ex.Message}"); }
         }
 
         // ── MCPORCHESTRATION_EXPORT ──────────────────────────────────────────
 
         private string HandleMcpOrchestrationExport(int? id, string? outputPath)
         {
-            if (McpOrchestrationRepo is null)
-                return CreateErrorResponse("MCP Orchestration repository is not available");
+            if (_ctx.McpOrchestrationRepo is null)
+                return Responses.Error("MCP Orchestration repository is not available");
             if (id is null)
-                return CreateErrorResponse("McpOrchestrationId is required for MCPORCHESTRATION_EXPORT");
+                return Responses.Error("McpOrchestrationId is required for MCPORCHESTRATION_EXPORT");
             if (string.IsNullOrWhiteSpace(outputPath))
-                return CreateErrorResponse("OutputPath is required for MCPORCHESTRATION_EXPORT");
+                return Responses.Error("OutputPath is required for MCPORCHESTRATION_EXPORT");
             try
             {
-                McpOrchestrationRepo.ExportToFileAsync(id.Value, outputPath!).GetAwaiter().GetResult();
+                _ctx.McpOrchestrationRepo.ExportToFileAsync(id.Value, outputPath!).GetAwaiter().GetResult();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success = true,
@@ -175,20 +190,20 @@ namespace CodeDesigner.Ps2.Bridge
                     Message = $"Orchestration profile {id} exported to '{outputPath}'.",
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_EXPORT error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_EXPORT error: {ex.Message}"); }
         }
 
         // ── MCPORCHESTRATION_SETACTIVE ───────────────────────────────────────
 
         private string HandleMcpOrchestrationSetActive(int? id)
         {
-            if (McpOrchestrationRepo is null)
-                return CreateErrorResponse("MCP Orchestration repository is not available");
+            if (_ctx.McpOrchestrationRepo is null)
+                return Responses.Error("MCP Orchestration repository is not available");
             if (id is null)
-                return CreateErrorResponse("McpOrchestrationId is required for MCPORCHESTRATION_SETACTIVE");
+                return Responses.Error("McpOrchestrationId is required for MCPORCHESTRATION_SETACTIVE");
             try
             {
-                var profile = McpOrchestrationRepo.SetActiveAsync(id.Value).GetAwaiter().GetResult();
+                var profile = _ctx.McpOrchestrationRepo.SetActiveAsync(id.Value).GetAwaiter().GetResult();
                 return JsonSerializer.Serialize(new CommandResponse
                 {
                     Success             = true,
@@ -197,7 +212,7 @@ namespace CodeDesigner.Ps2.Bridge
                     McpOrchestration    = ToMcpOrchestrationDto(profile),
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"MCPORCHESTRATION_SETACTIVE error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"MCPORCHESTRATION_SETACTIVE error: {ex.Message}"); }
         }
 
         // ── DTO mapper ────────────────────────────────────────────────────────

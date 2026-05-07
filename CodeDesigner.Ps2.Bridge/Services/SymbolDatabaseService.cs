@@ -3,17 +3,28 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class SymbolDatabaseService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public SymbolDatabaseService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleListFunctions(c.Offset, c.MaxCount),                                     "LISTFUNCTIONS", "LIST_FUNCTIONS", "PINEFUNCTIONS");
+            reg.Add(c => HandleGetSymbolByName(c.SymbolName),                                           "GETSYMBOLBYNAME", "GET_SYMBOL_BY_NAME");
+            reg.Add(c => HandleListGlobals(c.Offset, c.MaxCount),                                       "LISTGLOBALS", "LIST_GLOBALS", "PINEGLOBALS");
+            reg.Add(c => HandleGetLocals(c.Address),                                                    "GETLOCALS", "GET_LOCALS");
+        }
+
         private string HandleListFunctions(uint? offset, ushort? maxCount)
         {
-            if (IsPineMode)
+            if (_ctx.PineClient != null)
             {
                 try
                 {
-                    var (total, symbols) = PineClient!.ListFunctions(offset ?? 0, maxCount ?? 256);
+                    var (total, symbols) = _ctx.PineClient!.ListFunctions(offset ?? 0, maxCount ?? 256);
                     return JsonSerializer.Serialize(new CommandResponse
                     {
                         Success       = true,
@@ -27,20 +38,20 @@ namespace CodeDesigner.Ps2.Bridge
                         }).ToList(),
                     });
                 }
-                catch (Exception ex) { return CreateErrorResponse($"PINE ListFunctions failed: {ex.Message}"); }
+                catch (Exception ex) { return Responses.Error($"PINE ListFunctions failed: {ex.Message}"); }
             }
-            return CreateErrorResponse("LISTFUNCTIONS requires PINE mode");
+            return Responses.Error("LISTFUNCTIONS requires PINE mode");
         }
 
         private string HandleGetSymbolByName(string? name)
         {
-            if (string.IsNullOrEmpty(name)) return CreateErrorResponse("SymbolName is required for GETSYMBOLBYNAME");
-            if (IsPineMode)
+            if (string.IsNullOrEmpty(name)) return Responses.Error("SymbolName is required for GETSYMBOLBYNAME");
+            if (_ctx.PineClient != null)
             {
                 try
                 {
-                    var sym = PineClient!.GetSymbolByName(name);
-                    if (sym == null) return CreateErrorResponse($"Symbol '{name}' not found");
+                    var sym = _ctx.PineClient!.GetSymbolByName(name);
+                    if (sym == null) return Responses.Error($"Symbol '{name}' not found");
                     return JsonSerializer.Serialize(new CommandResponse
                     {
                         Success       = true,
@@ -50,18 +61,18 @@ namespace CodeDesigner.Ps2.Bridge
                         SymbolSize    = sym.Value.Size,
                     });
                 }
-                catch (Exception ex) { return CreateErrorResponse($"PINE GetSymbolByName failed: {ex.Message}"); }
+                catch (Exception ex) { return Responses.Error($"PINE GetSymbolByName failed: {ex.Message}"); }
             }
-            return CreateErrorResponse("GETSYMBOLBYNAME requires PINE mode");
+            return Responses.Error("GETSYMBOLBYNAME requires PINE mode");
         }
 
         private string HandleListGlobals(uint? offset, ushort? maxCount)
         {
-            if (IsPineMode)
+            if (_ctx.PineClient != null)
             {
                 try
                 {
-                    var (total, symbols) = PineClient!.ListGlobals(offset ?? 0, maxCount ?? 256);
+                    var (total, symbols) = _ctx.PineClient!.ListGlobals(offset ?? 0, maxCount ?? 256);
                     return JsonSerializer.Serialize(new CommandResponse
                     {
                         Success       = true,
@@ -75,19 +86,19 @@ namespace CodeDesigner.Ps2.Bridge
                         }).ToList(),
                     });
                 }
-                catch (Exception ex) { return CreateErrorResponse($"PINE ListGlobals failed: {ex.Message}"); }
+                catch (Exception ex) { return Responses.Error($"PINE ListGlobals failed: {ex.Message}"); }
             }
-            return CreateErrorResponse("LISTGLOBALS requires PINE mode");
+            return Responses.Error("LISTGLOBALS requires PINE mode");
         }
 
         private string HandleGetLocals(uint? address)
         {
-            if (address == null) return CreateErrorResponse("Address is required for GETLOCALS");
-            if (IsPineMode)
+            if (address == null) return Responses.Error("Address is required for GETLOCALS");
+            if (_ctx.PineClient != null)
             {
                 try
                 {
-                    var locals = PineClient!.GetLocals(address.Value);
+                    var locals = _ctx.PineClient!.GetLocals(address.Value);
                     return JsonSerializer.Serialize(new CommandResponse
                     {
                         Success    = true,
@@ -100,9 +111,9 @@ namespace CodeDesigner.Ps2.Bridge
                         }).ToList(),
                     });
                 }
-                catch (Exception ex) { return CreateErrorResponse($"PINE GetLocals failed: {ex.Message}"); }
+                catch (Exception ex) { return Responses.Error($"PINE GetLocals failed: {ex.Message}"); }
             }
-            return CreateErrorResponse("GETLOCALS requires PINE mode");
+            return Responses.Error("GETLOCALS requires PINE mode");
         }
     }
 }

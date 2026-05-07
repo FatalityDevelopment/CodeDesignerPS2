@@ -5,10 +5,18 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class SnapshotHistoryService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public SnapshotHistoryService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleGetAddressHistory(c.Address, c.SnapshotDir), "GETADDRESSHISTORY", "GET_ADDRESS_HISTORY");
+        }
+
         // ── GETADDRESSHISTORY ─────────────────────────────────────────────────
 
         // Internal POCO for deserialising snapshot-info.json written by the VS Code
@@ -60,11 +68,11 @@ namespace CodeDesigner.Ps2.Bridge
         private string HandleGetAddressHistory(uint? address, string? snapshotDir)
         {
             if (address == null)
-                return CreateErrorResponse("Address is required for GETADDRESSHISTORY");
+                return Responses.Error("Address is required for GETADDRESSHISTORY");
             if (string.IsNullOrWhiteSpace(snapshotDir))
-                return CreateErrorResponse("SnapshotDir is required for GETADDRESSHISTORY");
+                return Responses.Error("SnapshotDir is required for GETADDRESSHISTORY");
             if (!Directory.Exists(snapshotDir))
-                return CreateErrorResponse($"Snapshot directory not found: {snapshotDir}");
+                return Responses.Error($"Snapshot directory not found: {snapshotDir}");
 
             // Normalise to physical so we can compare against region base addresses.
             uint physAddr = NormalizeToSnapshotPhysical(address.Value);
@@ -79,7 +87,7 @@ namespace CodeDesigner.Ps2.Bridge
             }
             catch (Exception ex)
             {
-                return CreateErrorResponse($"Failed to scan snapshot directory: {ex.Message}");
+                return Responses.Error($"Failed to scan snapshot directory: {ex.Message}");
             }
 
             var results = new List<AddressHistoryEntry>();

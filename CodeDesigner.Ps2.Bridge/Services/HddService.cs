@@ -4,16 +4,29 @@ using System.Linq;
 using System.Text.Json;
 using CodeDesigner.Ps2.HddManager;
 
-namespace CodeDesigner.Ps2.Bridge
+namespace CodeDesigner.Ps2.Bridge.Services
 {
-    partial class SocketServer
+    internal sealed class HddService : ICommandService
     {
+        private readonly IBridgeContext _ctx;
+        public HddService(IBridgeContext ctx) => _ctx = ctx;
+
+        public void Register(CommandRegistry reg)
+        {
+            reg.Add(c => HandleHddList(c.HddPath),                                                              "HDD_LIST");
+            reg.Add(c => HandleHddListFiles(c.HddPath, c.PartitionId),                                          "HDD_LIST_FILES");
+            reg.Add(c => HandleHddExport(c.HddPath, c.PartitionId, c.FileName, c.ExportDir),                    "HDD_EXPORT");
+            reg.Add(c => HandleHddImport(c.HddPath, c.PartitionId, c.ImportDir, c.McOverwrite ?? false),        "HDD_IMPORT");
+            reg.Add(c => HandleHddDelete(c.HddPath, c.PartitionId),                                             "HDD_DELETE");
+            reg.Add(c => HandleHddCreate(c.HddPath, c.HddSizeGb ?? 40),                                         "HDD_CREATE");
+        }
+
         private string HandleHddList(string? hddPath)
         {
             if (string.IsNullOrWhiteSpace(hddPath))
-                return CreateErrorResponse("HddPath is required for HDD_LIST");
+                return Responses.Error("HddPath is required for HDD_LIST");
             if (!File.Exists(hddPath))
-                return CreateErrorResponse($"HDD image file not found: {hddPath}");
+                return Responses.Error($"HDD image file not found: {hddPath}");
             try
             {
                 using var hdd = Ps2HddImage.Open(hddPath);
@@ -49,17 +62,17 @@ namespace CodeDesigner.Ps2.Bridge
                 var resp = new CommandResponse { Success = true, Command = "HDD_LIST", HddPartitions = infos };
                 return JsonSerializer.Serialize(resp);
             }
-            catch (Exception ex) { return CreateErrorResponse($"HDD_LIST error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"HDD_LIST error: {ex.Message}"); }
         }
 
         private string HandleHddListFiles(string? hddPath, string? partitionId)
         {
             if (string.IsNullOrWhiteSpace(hddPath))
-                return CreateErrorResponse("HddPath is required for HDD_LIST_FILES");
+                return Responses.Error("HddPath is required for HDD_LIST_FILES");
             if (string.IsNullOrWhiteSpace(partitionId))
-                return CreateErrorResponse("PartitionId is required for HDD_LIST_FILES");
+                return Responses.Error("PartitionId is required for HDD_LIST_FILES");
             if (!File.Exists(hddPath))
-                return CreateErrorResponse($"HDD image file not found: {hddPath}");
+                return Responses.Error($"HDD image file not found: {hddPath}");
             try
             {
                 using var hdd = Ps2HddImage.Open(hddPath);
@@ -74,16 +87,16 @@ namespace CodeDesigner.Ps2.Bridge
                 var resp = new CommandResponse { Success = true, Command = "HDD_LIST_FILES", HddFiles = infos };
                 return JsonSerializer.Serialize(resp);
             }
-            catch (Exception ex) { return CreateErrorResponse($"HDD_LIST_FILES error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"HDD_LIST_FILES error: {ex.Message}"); }
         }
 
         private string HandleHddExport(string? hddPath, string? partitionId, string? fileName, string? exportDir)
         {
-            if (string.IsNullOrWhiteSpace(hddPath))    return CreateErrorResponse("HddPath is required");
-            if (string.IsNullOrWhiteSpace(partitionId)) return CreateErrorResponse("PartitionId is required");
-            if (string.IsNullOrWhiteSpace(fileName))    return CreateErrorResponse("FileName is required");
-            if (string.IsNullOrWhiteSpace(exportDir))   return CreateErrorResponse("ExportDir is required");
-            if (!File.Exists(hddPath)) return CreateErrorResponse($"HDD image file not found: {hddPath}");
+            if (string.IsNullOrWhiteSpace(hddPath))    return Responses.Error("HddPath is required");
+            if (string.IsNullOrWhiteSpace(partitionId)) return Responses.Error("PartitionId is required");
+            if (string.IsNullOrWhiteSpace(fileName))    return Responses.Error("FileName is required");
+            if (string.IsNullOrWhiteSpace(exportDir))   return Responses.Error("ExportDir is required");
+            if (!File.Exists(hddPath)) return Responses.Error($"HDD image file not found: {hddPath}");
             try
             {
                 using var hdd = Ps2HddImage.Open(hddPath);
@@ -96,24 +109,24 @@ namespace CodeDesigner.Ps2.Bridge
                     Data = outPath,
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"HDD_EXPORT error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"HDD_EXPORT error: {ex.Message}"); }
         }
 
         private string HandleHddImport(string? hddPath, string? partitionId, string? importDir, bool overwrite)
         {
-            if (string.IsNullOrWhiteSpace(hddPath))    return CreateErrorResponse("HddPath is required");
-            if (string.IsNullOrWhiteSpace(partitionId)) return CreateErrorResponse("PartitionId is required");
-            if (string.IsNullOrWhiteSpace(importDir))   return CreateErrorResponse("ImportDir is required");
-            return CreateErrorResponse(
+            if (string.IsNullOrWhiteSpace(hddPath))    return Responses.Error("HddPath is required");
+            if (string.IsNullOrWhiteSpace(partitionId)) return Responses.Error("PartitionId is required");
+            if (string.IsNullOrWhiteSpace(importDir))   return Responses.Error("ImportDir is required");
+            return Responses.Error(
                 "HDD_IMPORT is not yet supported. Direct PFS write support (inode creation, allocation bitmap management, " +
                 "directory entry creation) is pending. Use PCSX2's built-in HDD tools or the pfsshell utility for write operations.");
         }
 
         private string HandleHddDelete(string? hddPath, string? partitionId)
         {
-            if (string.IsNullOrWhiteSpace(hddPath))    return CreateErrorResponse("HddPath is required");
-            if (string.IsNullOrWhiteSpace(partitionId)) return CreateErrorResponse("PartitionId is required");
-            if (!File.Exists(hddPath)) return CreateErrorResponse($"HDD image file not found: {hddPath}");
+            if (string.IsNullOrWhiteSpace(hddPath))    return Responses.Error("HddPath is required");
+            if (string.IsNullOrWhiteSpace(partitionId)) return Responses.Error("PartitionId is required");
+            if (!File.Exists(hddPath)) return Responses.Error($"HDD image file not found: {hddPath}");
             try
             {
                 using var hdd = Ps2HddImage.Open(hddPath);
@@ -124,12 +137,12 @@ namespace CodeDesigner.Ps2.Bridge
                     Message = $"Deleted partition '{partitionId}'",
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"HDD_DELETE error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"HDD_DELETE error: {ex.Message}"); }
         }
 
         private string HandleHddCreate(string? hddPath, int sizeGb)
         {
-            if (string.IsNullOrWhiteSpace(hddPath)) return CreateErrorResponse("HddPath is required");
+            if (string.IsNullOrWhiteSpace(hddPath)) return Responses.Error("HddPath is required");
             if (sizeGb <= 0) sizeGb = 40;
             try
             {
@@ -141,7 +154,7 @@ namespace CodeDesigner.Ps2.Bridge
                     Data = hddPath,
                 });
             }
-            catch (Exception ex) { return CreateErrorResponse($"HDD_CREATE error: {ex.Message}"); }
+            catch (Exception ex) { return Responses.Error($"HDD_CREATE error: {ex.Message}"); }
         }
     }
 }
