@@ -3268,6 +3268,51 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     // ── File mode (internal emulator, no BIOS) ────────────────────────────────
 
     /**
+     * Spawn CodeDesigner.Ps2.Emulator.exe with --file <path> so it loads the
+     * binary into a bare scheduler and hosts InternalPineSocket on port 28012.
+     * Always tears down any pre-existing emulator process first — file mode
+     * needs a fresh emulator state, and reusing a BIOS-mode instance (or one
+     * pointed at a different file) would either deadlock the port or load
+     * the wrong file.
+     *
+     * Mirrors {@link handleStartEmulatorProcess} but with --file args and
+     * dispose-and-respawn semantics.
+     */
+    private handleStartEmulatorFileProcess(filePath: string): boolean {
+        const out = getOutputChannel();
+
+        const exe = DisasmPanelProvider.findEmulatorExe();
+        if (!exe) {
+            const installDir = DisasmPanelProvider.getInstallDirectory();
+            const msg = `CodeDesigner.Ps2.Emulator binary not found in ${installDir}. Build the project first to deploy it.`;
+            out.error(msg);
+            vscode.window.showErrorMessage(msg);
+            return false;
+        }
+
+        if (this.emulatorProcessTerminal) {
+            out.info('Disposing previous built-in emulator process before re-launching in file mode.');
+            try { this.emulatorProcessTerminal.dispose(); } catch { /* ignore */ }
+            this.emulatorProcessTerminal = undefined;
+        }
+
+        const args = ['--file', filePath];
+        const preview = [exe, ...args]
+            .map(v => v.includes(' ') ? `"${v}"` : v)
+            .join(' ');
+        out.info(`Starting built-in emulator (file mode): ${preview}`);
+
+        const terminal = vscode.window.createTerminal({
+            name: 'CodeDesigner Emulator',
+            shellPath: exe,
+            shellArgs: args,
+        });
+        terminal.show(false);
+        this.emulatorProcessTerminal = terminal;
+        return true;
+    }
+
+    /**
      * Load a PS2 ELF, BIN, or RAW file into the internal emulator in file mode
      * (STARTFILEMODE command).  The emulator is initialised with a bare scheduler —
      * no BIOS, no disc — and left paused at the file's entry point.  All default
@@ -3284,6 +3329,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         out.info(`Opening file in internal emulator (file mode): ${filePath}`);
+
+        // Spawn Emulator.exe --file <path> ourselves; Bridge no longer
+        // launches it. Without this, STARTFILEMODE has no InternalPineSocket
+        // to attach to and times out after ~10 s.
+        if (!this.handleStartEmulatorFileProcess(filePath)) { return; }
+
         try {
             const result = await this.socketClient.startFileMode(filePath);
             const entryHex = result.entryPoint.toString(16).toUpperCase().padStart(8, '0');
