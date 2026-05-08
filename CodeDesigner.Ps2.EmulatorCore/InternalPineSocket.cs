@@ -54,6 +54,18 @@ namespace CodeDesigner.Ps2.EmulatorCore
         private const byte MsgSetBreakpoint       = 0x14;
         private const byte MsgClearBreakpoint     = 0x15;
         private const byte MsgClearAllBreakpoints = 0x16;
+        // Internal-only set-PC. Used by Bridge's file-mode loader to point the
+        // EE at the entry point after writing a binary into RAM.
+        private const byte MsgSetProgramCounter   = 0x17;
+        // Internal-only bulk write: writes N bytes at a base address in one
+        // round-trip. Required for file-mode loading — byte-at-a-time would
+        // take minutes for a 32 MB dump.
+        private const byte MsgWriteBuffer         = 0x18;
+        // Internal-only bulk read: reads N bytes at a base address in one
+        // round-trip. Required for label/string/value scanners that walk
+        // multi-MB regions — without this they make millions of round-trips
+        // and time out.
+        private const byte MsgReadBuffer          = 0x19;
         private const byte MsgReset               = 0x24;
 
         // Internal-only opcodes (high range, won't collide with PCSX2 PINE).
@@ -232,6 +244,12 @@ namespace CodeDesigner.Ps2.EmulatorCore
                             pos = HandleBreakpointRemove(packet, pos); break;
                         case MsgClearAllBreakpoints:
                             _scheduler.Breakpoints.Clear(); break;
+                        case MsgSetProgramCounter:
+                            pos = HandleSetProgramCounter(packet, pos); break;
+                        case MsgWriteBuffer:
+                            pos = HandleWriteBuffer(packet, pos); break;
+                        case MsgReadBuffer:
+                            pos = HandleReadBuffer(packet, pos, ms); break;
                         case MsgReset:
                         case MsgInternalRequestRestart:
                             _pendingRestart = true; break;
@@ -333,17 +351,90 @@ namespace CodeDesigner.Ps2.EmulatorCore
             return pos;
         }
 
+        /// <summary>
+        /// Set the EE program counter. Used by file-mode load to jump to the
+        /// freshly written binary's entry point. Wire format: u32 PC.
+        /// </summary>
+        private int HandleSetProgramCounter(byte[] p, int pos)
+        {
+            uint pc = ReadU32LE(p, pos); pos += 4;
+            lock (_swapLock) _scheduler.EE.Cpu.PC = pc;
+            return pos;
+        }
+
+        /// <summary>
+        /// Bulk read: <c>u32 address, u32 length</c>. Reply body is
+        /// <c>byte[length]</c>. Mirrors the byte-level read path so VTLB /
+        /// IOP-mirror semantics stay identical to <see cref="MsgRead8"/>.
+        /// </summary>
+        private int HandleReadBuffer(byte[] p, int pos, MemoryStream reply)
+        {
+            uint addr = ReadU32LE(p, pos); pos += 4;
+            uint len  = ReadU32LE(p, pos); pos += 4;
+            // Cap to a few MB so a malformed length can't allocate gigabytes.
+            if (len > 16 * 1024 * 1024)
+                throw new InvalidOperationException("ReadBuffer length too large");
+
+            lock (_swapLock)
+            {
+                var bus = _scheduler.EE.Bus;
+                for (uint i = 0; i < len; i++)
+                    reply.WriteByte(bus.ReadByte(addr + i));
+            }
+            return pos;
+        }
+
+        /// <summary>
+        /// Bulk write: <c>u32 address, u32 length, byte[length] data</c>. Goes
+        /// through the same <see cref="PS2MemoryBus.WriteByte"/> path as the
+        /// per-byte opcode so VTLB / IOP-mirror semantics remain identical.
+        /// </summary>
+        private int HandleWriteBuffer(byte[] p, int pos)
+        {
+            uint addr = ReadU32LE(p, pos); pos += 4;
+            uint len  = ReadU32LE(p, pos); pos += 4;
+            // Bound-check against the remaining packet so a malformed length
+            // can't read past the buffer.
+            if (len > (uint)(p.Length - pos))
+                throw new InvalidOperationException("WriteBuffer length exceeds packet");
+
+            lock (_swapLock)
+            {
+                var bus = _scheduler.EE.Bus;
+                for (uint i = 0; i < len; i++)
+                    bus.WriteByte(addr + i, p[pos + (int)i]);
+            }
+            pos += (int)len;
+            return pos;
+        }
+
+        /// <summary>
+        /// Strip KSEG0/KSEG1 segment bits from a virtual address. The scheduler
+        /// stores breakpoints as physical addresses and compares them against
+        /// physically-normalised PCs (see <c>DualCpuScheduler.NormalizeToPhysical</c>),
+        /// so we must drop incoming KSEG aliases here or BPs from the front
+        /// end (which sends KSEG0) will never match the running PC.
+        /// </summary>
+        private static uint NormaliseBreakpointAddress(uint vaddr)
+        {
+            if (vaddr >= 0x80000000u && vaddr <= 0xBFFFFFFFu)
+                return vaddr & 0x1FFFFFFFu;
+            return vaddr;
+        }
+
         private int HandleBreakpointAdd(byte[] p, int pos)
         {
             uint addr = ReadU32LE(p, pos); pos += 4;
-            lock (_swapLock) _scheduler.Breakpoints.Add(addr);
+            uint phys = NormaliseBreakpointAddress(addr);
+            lock (_swapLock) _scheduler.Breakpoints.Add(phys);
             return pos;
         }
 
         private int HandleBreakpointRemove(byte[] p, int pos)
         {
             uint addr = ReadU32LE(p, pos); pos += 4;
-            lock (_swapLock) _scheduler.Breakpoints.Remove(addr);
+            uint phys = NormaliseBreakpointAddress(addr);
+            lock (_swapLock) _scheduler.Breakpoints.Remove(phys);
             return pos;
         }
 

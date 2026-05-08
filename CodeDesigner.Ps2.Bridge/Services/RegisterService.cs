@@ -151,12 +151,36 @@ namespace CodeDesigner.Ps2.Bridge.Services
         /// </summary>
         private string HandleSetRegister(string? regName, int? regIndex, string? regValue)
         {
+            if (string.IsNullOrWhiteSpace(regName) || string.IsNullOrWhiteSpace(regValue))
+                return Responses.Error("Missing parameters");
+
+            // PC is special: it has its own dedicated PINE opcode on the
+            // built-in emulator (MsgSetProgramCounter) and is not in any of
+            // the GPR/COP0/FPR categories. Handle it before the category
+            // dispatch so the "PINE-only" guard below doesn't block it.
+            if (regName!.Equals("PC", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryParseHexU32(regValue!, out uint pc))
+                    return Responses.Error($"Invalid PC value '{regValue}'");
+
+                if (_ctx.InternalClient != null)
+                {
+                    try   { _ctx.InternalClient.SetProgramCounter(pc); return Responses.Success($"PC set to 0x{pc:X8}"); }
+                    catch (Exception ex) { return Responses.Error($"SETREG PC failed: {ex.Message}"); }
+                }
+                if (_ctx.PineClient != null)
+                {
+                    // PCSX2 PINE: PC lives in COP0 cat=1 idx=24 in PCSX2's
+                    // register map; not all PINE builds expose it for write.
+                    return Responses.Error("SETREG PC is not supported via PCSX2 PINE; use the PCSX2 debugger.");
+                }
+                return Responses.Error("SETREG PC requires an attached emulator");
+            }
+
             if (_ctx.PineClient == null)
                 return Responses.Error(
                     "SETREG is currently PCSX2-only; built-in emulator support requires " +
                     "the InternalPineSocket to wire up the SetRegister opcode.");
-            if (string.IsNullOrWhiteSpace(regName) || string.IsNullOrWhiteSpace(regValue))
-                return Responses.Error("Missing parameters");
 
             // Map the named register to PINE category + index, then forward via PINESETREG.
             // For now, only the most common categories (GPR, COP0, FPR) are supported.
@@ -185,6 +209,22 @@ namespace CodeDesigner.Ps2.Bridge.Services
             }
 
             return HandlePineSetRegister(cpuSel, cat, idx, regValue);
+        }
+
+        /// <summary>
+        /// Parse a u32 from "0x…" hex (case-insensitive), bare hex, or decimal.
+        /// Used for SETREG PC where the front end sends "0x80100000" form.
+        /// </summary>
+        private static bool TryParseHexU32(string input, out uint value)
+        {
+            string s = input.Trim();
+            if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                return uint.TryParse(s.Substring(2), System.Globalization.NumberStyles.HexNumber,
+                                     System.Globalization.CultureInfo.InvariantCulture, out value);
+            if (uint.TryParse(s, System.Globalization.NumberStyles.HexNumber,
+                              System.Globalization.CultureInfo.InvariantCulture, out value))
+                return true;
+            return uint.TryParse(s, out value);
         }
     }
 }

@@ -45,8 +45,65 @@ namespace CodeDesigner.Ps2.Emulator
             if (filePath != null)
                 return await RunFileMode(filePath, args, port);
 
+            // Bare mode — no BIOS, no file. Just open InternalPineSocket and
+            // wait for Bridge to drive the emulator. Used by the file-mode
+            // flow: Bridge writes the binary into RAM and sets PC via PINE.
+            if (HasFlag(args, "--bare"))
+                return await RunBareMode(port);
+
             // Otherwise BIOS+disc mode (BIOS may be defaulted, disc is optional).
             return await RunEmulator(args, port);
+        }
+
+        // ── Bare mode (idle, awaiting PINE commands) ──────────────────────────────
+
+        /// <summary>
+        /// Spin up a paused, BIOS-less, file-less emulator that just hosts
+        /// <see cref="InternalPineSocket"/>. Bridge drives state transitions
+        /// (write memory, set PC, resume) over PINE — used by File→Open of
+        /// raw/ELF/BIN binaries which need stepping but no boot sequence.
+        /// </summary>
+        private static async Task<int> RunBareMode(int port)
+        {
+            var scheduler = new DualCpuScheduler();
+            scheduler.Paused = true;
+
+            using var pine = new InternalPineSocket(scheduler, port);
+            pine.Start();
+            Console.WriteLine($"InternalPineSocket listening on port {port}. Bare mode — emulator paused; awaiting commands.");
+
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                cts.Cancel();
+                Console.WriteLine("\nStopping bare-mode emulator...");
+            };
+
+            const int SliceSize = 256;
+            try
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    if (scheduler.Paused)
+                    {
+                        await scheduler.WaitForResumeAsync(cts.Token).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    try { scheduler.RunSlice(SliceSize); }
+                    catch (Common.Cpu.Instructions.EE.BreakpointException)
+                    {
+                        uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+                        Console.WriteLine($"[BREAK] pc=0x{bpPc:x8}");
+                    }
+
+                    scheduler.TickHardware((uint)SliceSize);
+                }
+            }
+            catch (OperationCanceledException) { }
+
+            return 0;
         }
 
         // ── BIOS+disc mode ────────────────────────────────────────────────────────
@@ -406,6 +463,7 @@ namespace CodeDesigner.Ps2.Emulator
             Console.WriteLine("Usage:");
             Console.WriteLine("  Emulator.exe [--bios <bios.bin>] [--disc <game.iso|zip>] [--steps N] [--port 28012]");
             Console.WriteLine("  Emulator.exe --file <game.elf|bin> [--load-address 0xN] [--port 28012]");
+            Console.WriteLine("  Emulator.exe --bare [--port 28012]   ← idle: Bridge drives via PINE (file-mode loader)");
             Console.WriteLine();
             Console.WriteLine("The emulator hosts an InternalPineSocket on --port (default 28012)");
             Console.WriteLine("which Bridge connects to in built-in mode (analogous to PCSX2 PINE on 28011).");
