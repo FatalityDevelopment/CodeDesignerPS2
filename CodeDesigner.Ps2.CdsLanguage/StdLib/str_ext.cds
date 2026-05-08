@@ -2,7 +2,7 @@
 // atoi (decimal/hex), itoa_dec.
 // Usage: include "StdLib/str_ext.cds"
 // Returns & conventions: integers in $v0, strings via memory pointers in $v0 when applicable.
-// Clobbers: $t0-$t6, uses $t9/$t8 as scratch if needed (preprocessor warns about $t8/$t9).
+// Clobbers: $t0-$t7, plus $t8/$t9 as scratch in atoi/itoa.
 
 // find(hay, needle) -> v0 = index (0-based) or -1 if not found
 lib_str_find:
@@ -108,7 +108,7 @@ lib_str_endswith:
     // find lengths
     addi $t0, $a0, $0
     addi $t1, $a1, $0
-    addi $t2, $zero, $0
+    addi $t2, $zero, $0       // suffix length
 ew_len_s:
     lb   $t3, 0($t1)
     beq  $t3, $zero, :ew_len_str
@@ -117,7 +117,7 @@ ew_len_s:
     j    :ew_len_s
     nop
 ew_len_str:
-    addi $t4, $zero, $0
+    addi $t4, $zero, $0       // hay length
 ew_len_h:
     lb   $t5, 0($t0)
     beq  $t5, $zero, :ew_check
@@ -126,10 +126,13 @@ ew_len_h:
     j    :ew_len_h
     nop
 ew_check:
-    blt  $t4, $t2, :ew_false
-    // set pointers to ends
-    subu $t0, $t0, $t2   // t0 = str_end - suffix_len
-    subu $t1, $a1, $zero // reuse
+    // if hayLen < suffixLen: return false
+    slt  $at, $t4, $t2
+    bne  $at, $zero, :ew_false
+    nop
+    // align str_ptr to (str_end - suffix_len): t0 currently = str_end, subtract t2
+    subu $t0, $t0, $t2
+    addi $t1, $a1, $0         // restart suffix ptr
 ew_cmp:
     lb   $t6, 0($t1)
     beq  $t6, $zero, :ew_true
@@ -148,15 +151,18 @@ ew_false:
     jr   $ra
     nop
 
-// atoi: parse decimal or 0xHEX -> v0 = value, assumes valid input
+// atoi: parse decimal or 0xHEX -> v0 = value, assumes valid input.
+// Uses $t8 to materialise ASCII char-code constants (BEQ requires reg-reg).
 lib_str_atoi:
     // $a0 = ptr
     lb   $t0, 0($a0)
     beq  $t0, $zero, :atoi_zero
     // detect optional sign
-    addi $t1, $zero, 1   // sign = 1
-    beq  $t0, $45, :atoi_minus // '-'
-    beq  $t0, $43, :atoi_plus  // '+'
+    addi $t1, $zero, 1        // sign = 1
+    addiu $t8, $zero, 45      // '-'
+    beq  $t0, $t8, :atoi_minus
+    addiu $t8, $zero, 43      // '+'
+    beq  $t0, $t8, :atoi_plus
     j    :atoi_start
     nop
 atoi_minus:
@@ -169,14 +175,17 @@ atoi_plus:
 atoi_start:
     lb   $t0, 0($a0)
     beq  $t0, $zero, :atoi_zero
-    // hex?
-    beq  $t0, $48, :atoi_maybe_hex // '0'
+    // hex?  (leading "0x" or "0X")
+    addiu $t8, $zero, 48      // '0'
+    beq  $t0, $t8, :atoi_maybe_hex
     j    :atoi_dec
     nop
 atoi_maybe_hex:
     lb   $t2, 1($a0)
-    beq  $t2, $120, :atoi_hex // 'x' lowercase
-    beq  $t2, $88, :atoi_hex  // 'X' uppercase
+    addiu $t8, $zero, 120     // 'x'
+    beq  $t2, $t8, :atoi_hex
+    addiu $t8, $zero, 88      // 'X'
+    beq  $t2, $t8, :atoi_hex
     j    :atoi_dec
     nop
 atoi_hex:
@@ -185,10 +194,19 @@ atoi_hex:
 atoi_hex_loop:
     lb   $t3, 0($a0)
     beq  $t3, $zero, :atoi_apply_sign
-    // convert hex digit
-    blt  $t3, $58, :hex_digit_digit
-    blt  $t3, $71, :hex_digit_upper
-    blt  $t3, $103, :hex_digit_lower
+    // convert hex digit:
+    //   '0'-'9'  (48-57): t3 -= 48
+    //   'A'-'F'  (65-70): t3 -= 55
+    //   'a'-'f'  (97-102): t3 -= 87
+    slti $at, $t3, 58         // < 58 -> '0'-'9' range (anything < ':')
+    bne  $at, $zero, :hex_digit_digit
+    nop
+    slti $at, $t3, 71         // < 71 -> 'A'-'F' range (anything < 'G')
+    bne  $at, $zero, :hex_digit_upper
+    nop
+    slti $at, $t3, 103        // < 103 -> 'a'-'f' range (anything < 'g')
+    bne  $at, $zero, :hex_digit_lower
+    nop
     j    :atoi_apply_sign
     nop
 hex_digit_digit:
@@ -212,16 +230,25 @@ atoi_dec:
 atoi_dec_loop:
     lb   $t3, 0($a0)
     beq  $t3, $zero, :atoi_apply_sign
-    blt  $t3, $48, :atoi_apply_sign
-    bgt  $t3, $57, :atoi_apply_sign
+    slti $at, $t3, 48         // < '0' -> stop
+    bne  $at, $zero, :atoi_apply_sign
+    nop
+    slti $at, $t3, 58         // < ':' -> still digit; >= 58 -> stop
+    beq  $at, $zero, :atoi_apply_sign
+    nop
     addiu $t3, $t3, -48
-    muli $v0, $v0, 10
+    // v0 = v0 * 10 (no immediate-form mul; use $t8 = 10, multu, mflo)
+    addiu $t8, $zero, 10
+    multu $v0, $t8
+    mflo $v0
     addu $v0, $v0, $t3
     addiu $a0, $a0, 1
     j    :atoi_dec_loop
     nop
 atoi_apply_sign:
-    mul  $v0, $v0, $t1
+    // v0 = v0 * sign  (sign is +1 or -1 in $t1)
+    multu $v0, $t1
+    mflo $v0
     jr   $ra
     nop
 atoi_zero:
@@ -229,55 +256,63 @@ atoi_zero:
     jr   $ra
     nop
 
-// itoa_dec(value, dst) -> write decimal string into dst, returns dst in v0
+// itoa_dec(value, dst) -> write decimal string into dst, returns dst in v0.
+// Handles negative values (sign-prepended). Uses $t8 = 10 as divisor.
 lib_str_itoa:
     // $a0 = value, $a1 = dst
     addi $v0, $a1, $0
     // handle zero
     beq  $a0, $zero, :itoa_write_zero
-    addi $t0, $a1, $0     // dst ptr
-    addi $t1, $zero, $0   // digit count
-    // handle negative (treat $a0 as signed)
-    bltz $a0, :itoa_negative
-itoa_loop:
-    // get digit = value % 10  (simple repeated subtract is expensive; we use div pseudo)
-    div  $a0, $zero, $a0, 10  // pseudo: assume assembler supports dividing with immediate; if not replace with helper
-    mfhi $t2
-    mflo $a0
-    addiu $t2, $t2, 48
-    sb   $t2, 0($t0)
-    addiu $t0, $t0, 1
-    addiu $t1, $t1, 1
-    bne  $a0, $zero, :itoa_loop
-    j    :itoa_finish
     nop
-itoa_negative:
-    negu $a0, $a0
-    addi $t3, $zero, 1
+    addi $t0, $a1, $0         // write ptr (digits emitted in reverse)
+    addi $t1, $zero, $0       // negative-flag (1 if was negative)
+    bltz $a0, :itoa_negative
+    nop
     j    :itoa_loop
     nop
-itoa_write_zero:
-    sb   $48, 0($a1)
-    sb   $zero, 1($a1)
+itoa_negative:
+    addi $t1, $zero, 1
+    negu $a0, $a0             // pseudo: a0 = -a0  (assembler rewrites to subu)
+itoa_loop:
+    addiu $t8, $zero, 10
+    divu $a0, $t8             // hi=remainder, lo=quotient
+    mfhi $t2                  // digit
+    mflo $a0                  // value /= 10
+    addiu $t2, $t2, 48        // digit + '0'
+    sb   $t2, 0($t0)
+    addiu $t0, $t0, 1
+    bne  $a0, $zero, :itoa_loop
+    nop
+    // optionally prepend '-' for negatives
+    beq  $t1, $zero, :itoa_finish
+    nop
+    addiu $t8, $zero, 45      // '-'
+    sb   $t8, 0($t0)
+    addiu $t0, $t0, 1
+itoa_finish:
+    // null-terminate at $t0, then reverse the [a1, t0) range in place
+    sb   $zero, 0($t0)
+    addiu $t3, $t0, -1        // last digit ptr
+    addi $t4, $a1, $0         // first digit ptr
+itoa_rev_loop:
+    // loop while first < last
+    slt  $at, $t4, $t3
+    beq  $at, $zero, :itoa_done
+    nop
+    lb   $t5, 0($t4)
+    lb   $t6, 0($t3)
+    sb   $t6, 0($t4)
+    sb   $t5, 0($t3)
+    addiu $t4, $t4, 1
+    addiu $t3, $t3, -1
+    j    :itoa_rev_loop
+    nop
+itoa_done:
     jr   $ra
     nop
-itoa_finish:
-    // reverse digits in-place; t0 points after last digit, a1 is base
-    subu $t4, $t0, $a1
-    addiu $t4, $t4, -1  // last index
-    addi $t5, $a1, $0
-rev_loop:
-    beq  $t1, $zero, :rev_done
-    lb   $t6, 0($a1)
-    lb   $t7, 0($t4)
-    sb   $t7, 0($a1)
-    sb   $t6, 0($t4)
-    addiu $a1, $a1, 1
-    addiu $t4, $t4, -1
-    addiu $t1, $t1, -2
-    bgtz $t1, :rev_loop
-    nop
-rev_done:
-    sb   $zero, 0($t0)
+itoa_write_zero:
+    addiu $t8, $zero, 48      // '0'
+    sb   $t8, 0($a1)
+    sb   $zero, 1($a1)
     jr   $ra
     nop

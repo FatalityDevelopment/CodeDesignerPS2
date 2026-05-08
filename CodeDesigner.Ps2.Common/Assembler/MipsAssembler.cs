@@ -241,7 +241,7 @@ namespace CodeDesigner.Ps2.Common
 
             // Split by whitespace and commas
             string[] parts = asmLine.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
-            
+
             if (parts.Length == 0)
             {
                 throw new ArgumentException("Empty instruction");
@@ -249,6 +249,15 @@ namespace CodeDesigner.Ps2.Common
 
             string mnemonic = parts[0].ToLowerInvariant();
             string[] operands = parts.Skip(1).ToArray();
+
+            // Single-instruction pseudo rewrites: rewrite to a real mnemonic + operands
+            // before dispatch. Multi-instruction pseudos (la, blt, bgt, ble, bge) are
+            // handled at the parser level so they can advance the address counter.
+            if (TryExpandSingleInstructionPseudo(mnemonic, operands, out string realMnemonic, out string[] realOperands))
+            {
+                mnemonic = realMnemonic;
+                operands = realOperands;
+            }
 
             // Try R-type
             if (RTypeInstructionsByName.TryGetValue(mnemonic, out var rInstr))
@@ -269,6 +278,85 @@ namespace CodeDesigner.Ps2.Common
             }
 
             throw new ArgumentException($"Unknown instruction: {mnemonic}");
+        }
+
+        /// <summary>
+        /// Try to rewrite a one-instruction pseudo into its underlying real mnemonic + operands.
+        /// Returns true and populates <paramref name="realMnemonic"/>/<paramref name="realOperands"/>
+        /// when a rewrite applies; otherwise returns false and the caller dispatches the original
+        /// mnemonic.
+        /// </summary>
+        private static bool TryExpandSingleInstructionPseudo(
+            string mnemonic, string[] operands, out string realMnemonic, out string[] realOperands)
+        {
+            switch (mnemonic)
+            {
+                // move rd, rs  ->  addu rd, rs, $zero
+                case "move":
+                    if (operands.Length != 2)
+                        throw new ArgumentException("Expected 2 operands for move");
+                    realMnemonic = "addu";
+                    realOperands = new[] { operands[0], operands[1], "$zero" };
+                    return true;
+
+                // not rd, rs  ->  nor rd, rs, $zero
+                case "not":
+                    if (operands.Length != 2)
+                        throw new ArgumentException("Expected 2 operands for not");
+                    realMnemonic = "nor";
+                    realOperands = new[] { operands[0], operands[1], "$zero" };
+                    return true;
+
+                // negu rd, rs  ->  subu rd, $zero, rs
+                case "negu":
+                    if (operands.Length != 2)
+                        throw new ArgumentException("Expected 2 operands for negu");
+                    realMnemonic = "subu";
+                    realOperands = new[] { operands[0], "$zero", operands[1] };
+                    return true;
+
+                // bnez rs, label  ->  bne rs, $zero, label
+                case "bnez":
+                    if (operands.Length != 2)
+                        throw new ArgumentException("Expected 2 operands for bnez");
+                    realMnemonic = "bne";
+                    realOperands = new[] { operands[0], "$zero", operands[1] };
+                    return true;
+
+                // beqz rs, label  ->  beq rs, $zero, label
+                case "beqz":
+                    if (operands.Length != 2)
+                        throw new ArgumentException("Expected 2 operands for beqz");
+                    realMnemonic = "beq";
+                    realOperands = new[] { operands[0], "$zero", operands[1] };
+                    return true;
+
+                // b label  ->  beq $zero, $zero, label
+                case "b":
+                    if (operands.Length != 1)
+                        throw new ArgumentException("Expected 1 operand for b");
+                    realMnemonic = "beq";
+                    realOperands = new[] { "$zero", "$zero", operands[0] };
+                    return true;
+
+                // li rt, imm (16-bit signed)  ->  addiu rt, $zero, imm
+                // Callers that need a 32-bit immediate should use the CDS `setreg` directive.
+                case "li":
+                    if (operands.Length != 2)
+                        throw new ArgumentException("Expected 2 operands for li");
+                    int liImm = ParseImmediate(operands[1]);
+                    if (liImm < short.MinValue || liImm > 0xFFFF)
+                        throw new ArgumentException(
+                            $"li immediate {operands[1]} does not fit in 16 bits; use `setreg` for 32-bit values");
+                    realMnemonic = "addiu";
+                    realOperands = new[] { operands[0], "$zero", operands[1] };
+                    return true;
+
+                default:
+                    realMnemonic = mnemonic;
+                    realOperands = operands;
+                    return false;
+            }
         }
 
         private static uint AssembleR(Instruction<Args_R> instr, string[] operands)

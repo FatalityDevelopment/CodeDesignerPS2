@@ -1,5 +1,7 @@
 // Quick tests / examples for StdLib routines.
-// Include the libraries you want to exercise.
+// Demonstrates the natural call-site syntax made available by stdlib.cds.
+
+include "StdLib/stdlib.cds"        // function declarations
 include "StdLib/string.cds"
 include "StdLib/strutils.cds"
 include "StdLib/mem.cds"
@@ -10,18 +12,18 @@ include "StdLib/allocator.cds"
 include "StdLib/split.cds"
 include "StdLib/printf.cds"
 
-// Data area for tests
+// --- Data area for tests ----------------------------------------------------
 address $80101000
 test_src:
     string "one,two,three"
 test_outbuf:
-    // reserve 64 bytes
+    // 48 bytes of zero-filled output buffer
     string "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
     string "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
     string "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
 
 test_ptrs:
-    // space for 8 pointers
+    // space for 8 pointers (32 bytes)
     hexcode $00000000
     hexcode $00000000
     hexcode $00000000
@@ -32,45 +34,37 @@ test_ptrs:
     hexcode $00000000
 
 main_test:
-    // Test split
-    setreg $a0, $80101000
-    addiu $a1, $zero, $2C   // ',' ascii = 0x2C
-    setreg $a2, $80101040   // test_ptrs
-    addiu $a3, $zero, $8
-    jal :lib_str_split
-    nop
-    // v0 = count
+    // ─ str_split(test_src, ',', test_ptrs, 8) ──────────────────────────────
+    setreg $t0, $80101000               // src pointer
+    addiu  $t1, $zero, 44               // ',' (decimal)
+    setreg $t2, $80101040               // out array
+    addiu  $t3, $zero, 8                // maxParts
+    str_split(t0, t1, t2, t3)
 
-    // Test hash
-    setreg $a0, $80101000
-    addiu $a1, $zero, $0
-    jal :lib_hash_fnv1a
-    nop
+    // ─ hash_fnv1a(test_src) ────────────────────────────────────────────────
+    setreg $t0, $80101000
+    hash_fnv1a(t0)
 
-    // Test crc32 of the source string (length 13)
-    setreg $a0, $80101000
-    addiu $a1, $zero, $0D
-    jal :lib_crc32
-    nop
+    // ─ crc32(test_src, 13) ─────────────────────────────────────────────────
+    setreg $t0, $80101000
+    addiu  $t1, $zero, 13
+    crc32(t0, t1)
 
-    // heap init (use some memory at 0x80101100)
-    setreg $a0, $80101100
-    addiu $a1, $zero, $400   // 1KB heap
-    jal :lib_heap_init
-    nop
+    // ─ heap_init(0x80101100, 1024) ─────────────────────────────────────────
+    setreg $t0, $80101100
+    addiu  $t1, $zero, 1024
+    heap_init(t0, t1)
 
-    // allocate 16 bytes
-    addiu $a0, $zero, $10
-    jal :lib_malloc
-    nop
+    // ─ malloc(16) ──────────────────────────────────────────────────────────
+    addiu  $t0, $zero, 16
+    malloc(t0)
 
-    // format string example
-    setreg $a0, $80101020  // dst
-    addiu $a1, $zero, $40  // size
-    setreg $a2, $80101060  // fmt string label (below)
-    setreg $a3, $80101080  // args array
-    jal :lib_sprintf_args
-    nop
+    // ─ sprintf(dst=0x80101020, size=64, fmt, args) ─────────────────────────
+    setreg $t0, $80101020
+    addiu  $t1, $zero, 64
+    setreg $t2, $80101060
+    setreg $t3, $80101080
+    sprintf(t0, t1, t2, t3)
 
     j :main_test
     nop
@@ -79,8 +73,9 @@ main_test:
 address $80101060
 fmt_example:
     string "split_count=%d crc=%x name=%s"
+
 address $80101080
 args_arr:
-    hexcode $00000000    // place-holders: parser will fill at runtime in tests if desired
+    hexcode $00000000
     hexcode $00000000
     hexcode $00000000

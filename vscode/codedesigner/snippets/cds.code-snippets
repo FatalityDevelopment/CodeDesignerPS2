@@ -1,0 +1,212 @@
+{
+  "Function definition": {
+    "prefix": "function",
+    "body": [
+      "function ${1:my_func}(${2:param1}, ${3:param2}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Define a function with auto prologue/epilogue. Parameters alias to $a0..$a3."
+  },
+
+  "Extern function declaration": {
+    "prefix": "extern",
+    "body": [
+      "extern function ${1:name}(${2:param1}, ${3:param2}) at :${4:lib_label}"
+    ],
+    "description": "Declare an external function so call sites resolve to its label."
+  },
+
+  "Set address": {
+    "prefix": "address",
+    "body": ["address $${1:80100000}"],
+    "description": "Set the assembly emit address."
+  },
+
+  "Set 32-bit register immediate": {
+    "prefix": "setreg",
+    "body": ["setreg ${1:t0}, $${2:DEADBEEF}"],
+    "description": "Load a 32-bit immediate into a register (lui+addiu)."
+  },
+
+  "Load address of label": {
+    "prefix": "la",
+    "body": ["la $${1:t0}, :${2:label_name}"],
+    "description": "Load the resolved address of a label into a register (lui+ori)."
+  },
+
+  "Memory write": {
+    "prefix": "mem",
+    "body": ["mem[0x${1:0000}] ${2:t0} = 0x${3:00000000}"],
+    "description": "Write a value to memory at offset relative to the given register."
+  },
+
+  "Pointer-chain write": {
+    "prefix": "pointer",
+    "body": ["pointer $${1:80100000} + $${2:10} = $${3:00000001}"],
+    "description": "Walk a pointer chain and write a value at the resolved address."
+  },
+
+  "If / endif": {
+    "prefix": "if",
+    "body": [
+      "if ${1:\\$t0} ${2|==,!=,<,>,<=,>=,<u,>u,<=u,>=u|} ${3:\\$zero}",
+      "\t$0",
+      "endif"
+    ],
+    "description": "Conditional block (preprocessor-expanded into branch instructions)."
+  },
+
+  "If / else / endif": {
+    "prefix": "ifelse",
+    "body": [
+      "if ${1:\\$t0} ${2|==,!=,<,>,<=,>=,<u,>u,<=u,>=u|} ${3:\\$zero}",
+      "\t$4",
+      "else",
+      "\t$5",
+      "endif"
+    ],
+    "description": "if/else/endif block."
+  },
+
+  "While / endwhile": {
+    "prefix": "while",
+    "body": [
+      "while ${1:\\$t0} ${2|==,!=,<,>,<=,>=,<u,>u,<=u,>=u|} ${3:\\$zero}",
+      "\t$0",
+      "endwhile"
+    ],
+    "description": "Top-tested loop."
+  },
+
+  "Repeat N / endrepeat": {
+    "prefix": "repeat",
+    "body": [
+      "repeat ${1:10}",
+      "\t$0",
+      "endrepeat"
+    ],
+    "description": "Counter-driven loop (uses $t9)."
+  },
+
+  "Macro definition": {
+    "prefix": "macro",
+    "body": [
+      "macro ${1:my_macro}(${2:p1}, ${3:p2})",
+      "\t$0",
+      "endmacro"
+    ],
+    "description": "Define a parameterised macro."
+  },
+
+  "Scope block": {
+    "prefix": "scope",
+    "body": [
+      "scope ${1:Name} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Named scope block; labels inside are qualified with the scope path."
+  },
+
+  "Include stdlib": {
+    "prefix": "include",
+    "body": ["include \"${1:StdLib/stdlib.cds}\""],
+    "description": "Recursively include another .cds file."
+  },
+
+  "Label definition": {
+    "prefix": "label",
+    "body": ["${1:label_name}:"],
+    "description": "Define a label at the current address."
+  },
+
+  "Const definition": {
+    "prefix": "const",
+    "body": ["const ${1:NAME} = ${2:VALUE}"],
+    "description": "Define a named compile-time constant."
+  },
+
+  "Alias definition": {
+    "prefix": "alias",
+    "body": ["alias ${1:name} = $${2:t0}"],
+    "description": "Alias a register name."
+  },
+
+  "String literal": {
+    "prefix": "string",
+    "body": ["string \"${1:text}\""],
+    "description": "Emit a null-terminated ASCII string."
+  },
+
+  "Hexcode raw word": {
+    "prefix": "hexcode",
+    "body": ["hexcode $${1:00000000}"],
+    "description": "Emit a raw 32-bit instruction word."
+  },
+
+  "Breakpoint sidecar": {
+    "prefix": "breakpoint",
+    "body": ["breakpoint"],
+    "description": "Install a hardware breakpoint at the current address."
+  },
+
+  "Watchpoint sidecar": {
+    "prefix": "watchpoint",
+    "body": ["watchpoint ${1|write,read,rw|} $${2:80100000} ${3:4}"],
+    "description": "Install a memory watchpoint."
+  },
+
+  "Assert mem": {
+    "prefix": "assert",
+    "body": ["assert mem[$${1:80100000}] ${2|==,!=|} $${3:00000000}"],
+    "description": "Assert a memory value at injection time."
+  },
+
+  "Freeze byte/half/word": {
+    "prefix": "freeze",
+    "body": ["freeze ${1|byte,half,word|} $${2:80100000} = ${3:0}"],
+    "description": "Freeze a memory location to a value (cheat-engine)."
+  },
+
+  "Cond / endcond": {
+    "prefix": "cond",
+    "body": [
+      "cond mem[$${1:80100000}] == $${2:00000001}",
+      "\t$0",
+      "endcond"
+    ],
+    "description": "Conditional cheat block."
+  },
+
+  "Timer / endtimer": {
+    "prefix": "timer",
+    "body": [
+      "timer ${1:60}",
+      "\t$0",
+      "endtimer"
+    ],
+    "description": "Frame-interval gated cheat block."
+  },
+
+  "Standard stdlib include header": {
+    "prefix": "stdlib",
+    "body": [
+      "include \"StdLib/stdlib.cds\"",
+      "include \"StdLib/${1|string,mem,str_ext,strutils,hash,crc32,allocator,split,printf|}.cds\""
+    ],
+    "description": "Pull in stdlib declarations and an implementation file."
+  },
+
+  "Function call (str_copy)": {
+    "prefix": "str_copy",
+    "body": ["str_copy(${1:\\$t0}, ${2:\\$t1})"],
+    "description": "Call str_copy(dst, src) — requires StdLib/string.cds."
+  },
+
+  "Function call (mem_copy)": {
+    "prefix": "mem_copy",
+    "body": ["mem_copy(${1:\\$t0}, ${2:\\$t1}, ${3:\\$t2})"],
+    "description": "Call mem_copy(dst, src, n) — requires StdLib/mem.cds."
+  }
+}

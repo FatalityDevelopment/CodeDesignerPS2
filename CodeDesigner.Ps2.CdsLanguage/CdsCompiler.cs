@@ -153,6 +153,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         result.Add((setReg.AddiuOp.Address, setReg.AddiuOp.EncodedWord));
                         break;
 
+                    case LaSyntaxItem la:
+                        result.Add((la.LuiOp.Address, la.LuiOp.EncodedWord));
+                        result.Add((la.OriOp.Address, la.OriOp.EncodedWord));
+                        break;
+
                     case MemorySyntaxItem mem:
                         foreach (var op in mem.Operations)
                             result.Add((op.Address, op.EncodedWord));

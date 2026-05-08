@@ -59,6 +59,30 @@ namespace CodeDesigner.Ps2.CdsLanguage
             new(@"^([A-Za-z_]\w*)\s*\(([^)]*)\)$",
                 RegexOptions.Compiled);
 
+        // extern function NAME(p1, p2, ...) at :label_name
+        private static readonly Regex ExternFunctionRegex =
+            new(@"^extern\s+function\s+([A-Za-z_]\w*)\s*\(\s*([^)]*)\s*\)\s+at\s+:([a-zA-Z_][a-zA-Z0-9_.]*)$",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // function NAME(p1, p2, ...) {       — opens a function definition block
+        private static readonly Regex FunctionDefRegex =
+            new(@"^function\s+([A-Za-z_]\w*)\s*\(\s*([^)]*)\s*\)\s*\{$",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Function-call site: NAME(arg1, arg2, ...) — same shape as macro call;
+        // dispatch order in the main loop disambiguates macros from extern functions.
+        private static readonly Regex FunctionCallRegex = MacroCallRegex;
+
+        // Callee-saved registers a function body must preserve if it touches them.
+        private static readonly Regex CalleeSavedRegex =
+            new(@"\$(s[0-7]|fp)\b",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Detect any jal/jalr in a body — means $ra is live across the call and must be saved.
+        private static readonly Regex CallInBodyRegex =
+            new(@"\b(jal|jalr)\b",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         private static readonly Regex IncludeRegex =
             new(@"^include\s+""([^""]+)""$",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -104,6 +128,12 @@ namespace CodeDesigner.Ps2.CdsLanguage
         // Public entry point
         // -----------------------------------------------------------------------
 
+        // Stack of extern-function tables for nested Process calls. The outermost
+        // call's table is at the bottom; recursive calls (from `include`, `if`/`while`
+        // bodies, function-definition expansion) inherit the parent's bindings so
+        // that function-call dispatch sees declarations made in the enclosing file.
+        private readonly Stack<Dictionary<string, ExternFunction>> _externScopeStack = new();
+
         /// <summary>
         /// Preprocess <paramref name="source"/> and return the transformed source that
         /// can be passed to <see cref="CdsParser.Parse"/>.
@@ -120,6 +150,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
             {
                 _diagnostics.Clear();
                 _counter = 0;
+                _externScopeStack.Clear();
             }
 
             if (depth > 32)
@@ -138,6 +169,30 @@ namespace CodeDesigner.Ps2.CdsLanguage
             // First sub-pass: collect macro definitions (they may appear anywhere in the file
             // so we gather them all before processing calls).
             var macros = CollectMacros(lines);
+
+            // Collect extern-function declarations. Unlike macros, these traverse
+            // include boundaries so a stdlib header file can declare functions used
+            // by source that includes it. We also inherit any bindings made by an
+            // outer Process scope (e.g., function-body expansion sees the enclosing
+            // file's externs).
+            var externFunctions = CollectExternFunctions(lines, basePath, depth);
+            if (_externScopeStack.Count > 0)
+            {
+                foreach (var (k, v) in _externScopeStack.Peek())
+                    if (!externFunctions.ContainsKey(k))
+                        externFunctions[k] = v;
+            }
+
+            // Native function definitions. Each is registered as a callable extern
+            // function (target label = function name) so call sites resolve from
+            // anywhere in the document — including before the definition appears.
+            var localFunctions = CollectFunctionDefs(lines);
+            foreach (var (name, fnDef) in localFunctions)
+            {
+                externFunctions[name] = new ExternFunction(name, fnDef.Parameters, name);
+            }
+
+            _externScopeStack.Push(externFunctions);
 
             var consts  = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -203,6 +258,46 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         i++;
                     }
                     if (i < lines.Count) i++; // consume the 'endmacro' line itself
+                    continue;
+                }
+
+                // ---- extern function declaration — already collected, strip from output ----
+                if (ExternFunctionRegex.IsMatch(clean))
+                {
+                    continue;
+                }
+
+                // ---- function NAME(...) { body } — expand in place to label + prologue + body + epilogue ----
+                var funcDefMatch = FunctionDefRegex.Match(clean);
+                if (funcDefMatch.Success)
+                {
+                    string fnName = funcDefMatch.Groups[1].Value;
+                    if (!localFunctions.TryGetValue(fnName, out var fnDef))
+                    {
+                        // Should not happen — collected pass found the same regex — but guard anyway.
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            $"internal: function '{fnName}' missing from collection table",
+                            raw, fnName, "CDS2010");
+                        // Skip past the body so we don't emit it raw.
+                        SkipToMatchingBrace(lines, ref i);
+                        continue;
+                    }
+
+                    // Skip the body lines in this scan — CollectFunctionDefs already
+                    // captured them. Advance `i` past the closing brace.
+                    SkipToMatchingBrace(lines, ref i);
+
+                    if (fnDef.Parameters.Length > 4)
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            $"function '{fnName}' has {fnDef.Parameters.Length} parameters; the calling convention supports at most 4",
+                            raw, fnName, "CDS2011");
+                        continue;
+                    }
+
+                    string expanded = ExpandFunctionDefinition(fnDef);
+                    string recursed = Process(expanded, basePath, depth + 1);
+                    output.Add(recursed);
                     continue;
                 }
 
@@ -402,7 +497,26 @@ namespace CodeDesigner.Ps2.CdsLanguage
                         }
                         continue;
                     }
-                    // Not a known macro — fall through and emit as-is
+
+                    // Not a macro — try extern-function call dispatch
+                    if (externFunctions.TryGetValue(macroName, out var fn))
+                    {
+                        string argsRaw = macroCallMatch.Groups[2].Value;
+                        string[] args  = SplitArgs(argsRaw);
+
+                        if (args.Length != fn.Parameters.Length)
+                        {
+                            AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                                $"function '{fn.Name}' expects {fn.Parameters.Length} argument(s) but got {args.Length}",
+                                raw, fn.Name, "CDS2002");
+                            continue;
+                        }
+
+                        string expanded = ExpandExternFunctionCall(fn, args, lineNumber, raw);
+                        output.Add(expanded);
+                        continue;
+                    }
+                    // Not a known macro or extern function — fall through and emit as-is
                 }
 
                 // ---- Normal line: emit with substitutions applied ----
@@ -413,6 +527,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 output.Add(indent + clean);
             }
 
+            _externScopeStack.Pop();
             return string.Join("\n", output);
         }
 
@@ -773,9 +888,319 @@ namespace CodeDesigner.Ps2.CdsLanguage
         }
 
         // -----------------------------------------------------------------------
+        // Extern-function collection and call-site expansion
+        // -----------------------------------------------------------------------
+
+        private static Dictionary<string, ExternFunction> CollectExternFunctions(
+            IList<string> lines, string basePath, int depth)
+        {
+            var functions = new Dictionary<string, ExternFunction>(StringComparer.OrdinalIgnoreCase);
+            CollectExternFunctionsInto(lines, basePath, depth, functions, new HashSet<string>());
+            return functions;
+        }
+
+        private static void CollectExternFunctionsInto(
+            IList<string> lines, string basePath, int depth,
+            Dictionary<string, ExternFunction> sink, HashSet<string> visited)
+        {
+            if (depth > 32) return;
+
+            foreach (var raw in lines)
+            {
+                string clean = StripInlineComment(raw.Trim());
+
+                // Direct declaration in this file
+                var m = ExternFunctionRegex.Match(clean);
+                if (m.Success)
+                {
+                    string name = m.Groups[1].Value;
+                    string[] parms = SplitArgs(m.Groups[2].Value);
+                    string targetLabel = m.Groups[3].Value.ToLowerInvariant();
+                    sink[name] = new ExternFunction(name, parms, targetLabel);
+                    continue;
+                }
+
+                // Recurse into includes so declarations transit across `include "..."`.
+                var inclMatch = IncludeRegex.Match(clean);
+                if (!inclMatch.Success) continue;
+
+                string rel = inclMatch.Groups[1].Value;
+                string full = string.IsNullOrEmpty(basePath) ? rel : Path.Combine(basePath, rel);
+
+                string normalised;
+                try { normalised = Path.GetFullPath(full); }
+                catch { continue; }
+
+                if (!File.Exists(normalised)) continue;
+                if (!visited.Add(normalised)) continue;
+
+                string includedSource = File.ReadAllText(normalised);
+                var includedLines = includedSource.Replace("\r\n", "\n").Split('\n');
+                string includedBasePath = Path.GetDirectoryName(normalised) ?? string.Empty;
+                CollectExternFunctionsInto(includedLines, includedBasePath, depth + 1, sink, visited);
+            }
+        }
+
+        /// <summary>
+        /// Expand a call site like <c>str_copy(t0, t1)</c> into the calling-convention
+        /// register loads followed by <c>jal :targetLabel</c> + delay-slot <c>nop</c>.
+        ///
+        /// <para>Loads place each argument into <c>$a0..$a3</c>; if the argument is
+        /// already in the destination register the move is skipped. Cross-arg conflicts
+        /// (e.g., calling <c>f($a1, $a0)</c>) are resolved by routing one source through
+        /// <c>$at</c>.</para>
+        ///
+        /// <para>Maximum four arguments — beyond that requires stack-based passing,
+        /// which this layer does not implement. Caller is responsible for saving
+        /// <c>$ra</c> if it itself uses a return-address.</para>
+        /// </summary>
+        private string ExpandExternFunctionCall(
+            ExternFunction fn, string[] args, int lineNumber, string lineText)
+        {
+            if (fn.Parameters.Length > 4)
+            {
+                AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                    $"function '{fn.Name}' has {fn.Parameters.Length} parameters; the calling convention supports at most 4",
+                    lineText, fn.Name, "CDS2003");
+                return string.Empty;
+            }
+
+            // Build (target, source) pairs for the moves we need to emit. Skip identity moves.
+            // Sources/targets are normalised to "$xN" form so cycle-detection is by string equality.
+            var moves = new List<(string Target, string Source)>();
+            for (int idx = 0; idx < args.Length; idx++)
+            {
+                string target = $"$a{idx}";
+                string? source = NormaliseRegister(args[idx]);
+                if (source is null)
+                {
+                    AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                        $"argument {idx + 1} to '{fn.Name}' is not a recognised register: '{args[idx]}'",
+                        lineText, args[idx], "CDS2004");
+                    return string.Empty;
+                }
+                if (!string.Equals(target, source, StringComparison.OrdinalIgnoreCase))
+                    moves.Add((target, source));
+            }
+
+            var sb = new StringBuilder();
+
+            // Resolve moves with a simple iterative algorithm: emit any move whose target
+            // register is not the source of any remaining move; if stuck (a cycle exists),
+            // break the cycle by saving one source into $at.
+            while (moves.Count > 0)
+            {
+                int safeIndex = moves.FindIndex(m =>
+                    !moves.Any(other => other != m
+                        && string.Equals(other.Source, m.Target, StringComparison.OrdinalIgnoreCase)));
+
+                if (safeIndex >= 0)
+                {
+                    var move = moves[safeIndex];
+                    sb.AppendLine($"addu {move.Target}, {move.Source}, $zero");
+                    moves.RemoveAt(safeIndex);
+                    continue;
+                }
+
+                // Cycle: save the first move's source into $at, then rewrite any other
+                // moves that read from that register to read from $at instead.
+                var first = moves[0];
+                sb.AppendLine($"addu $at, {first.Source}, $zero");
+                for (int j = 0; j < moves.Count; j++)
+                {
+                    if (string.Equals(moves[j].Source, first.Source, StringComparison.OrdinalIgnoreCase))
+                        moves[j] = (moves[j].Target, "$at");
+                }
+            }
+
+            sb.AppendLine($"jal :{fn.TargetLabel}");
+            sb.AppendLine("nop");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Normalise a register reference to canonical <c>$name</c> form (e.g. <c>t0</c> →
+        /// <c>$t0</c>). Returns <see langword="null"/> if the token is not a register.
+        /// </summary>
+        private static string? NormaliseRegister(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return null;
+            string s = token.Trim();
+            if (!s.StartsWith("$")) s = "$" + s;
+            // Validate against the known names; lowercase for canonical form.
+            string lower = s.ToLowerInvariant();
+            if (KnownRegisters.Contains(lower)) return lower;
+            // Numeric forms ($0..$31, $rN) — accept as-is.
+            if (Regex.IsMatch(lower, @"^\$(r?\d{1,2})$")) return lower;
+            return null;
+        }
+
+        private static readonly HashSet<string> KnownRegisters = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "$zero","$at","$v0","$v1","$a0","$a1","$a2","$a3",
+            "$t0","$t1","$t2","$t3","$t4","$t5","$t6","$t7","$t8","$t9",
+            "$s0","$s1","$s2","$s3","$s4","$s5","$s6","$s7",
+            "$k0","$k1","$gp","$sp","$fp","$ra"
+        };
+
+        // -----------------------------------------------------------------------
+        // Native function definition collection + expansion
+        // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// First sub-pass: walk the lines and collect <c>function NAME(...) { body }</c>
+        /// definitions. Body lines are stored verbatim — they get parameter substitution,
+        /// prologue, and epilogue applied at expansion time.
+        /// </summary>
+        private static Dictionary<string, FunctionDef> CollectFunctionDefs(IList<string> lines)
+        {
+            var functions = new Dictionary<string, FunctionDef>(StringComparer.OrdinalIgnoreCase);
+            int i = 0;
+            while (i < lines.Count)
+            {
+                string clean = StripInlineComment(lines[i].Trim());
+                var m = FunctionDefRegex.Match(clean);
+                if (!m.Success) { i++; continue; }
+
+                string name = m.Groups[1].Value;
+                string[] parms = SplitArgs(m.Groups[2].Value);
+                i++;
+
+                var body = new List<string>();
+                int braceDepth = 1;
+                while (i < lines.Count && braceDepth > 0)
+                {
+                    string lineTrim = lines[i].Trim();
+                    // Count braces on the line — usually one per line, but be safe.
+                    foreach (char ch in StripInlineComment(lineTrim))
+                    {
+                        if (ch == '{') braceDepth++;
+                        else if (ch == '}') braceDepth--;
+                    }
+                    if (braceDepth > 0) body.Add(lines[i]);
+                    i++;
+                }
+                functions[name] = new FunctionDef(name, parms, body);
+            }
+            return functions;
+        }
+
+        /// <summary>
+        /// Advance <paramref name="i"/> past the body of a brace-delimited block whose
+        /// opening <c>{</c> was on the line just consumed by the caller. After the call,
+        /// <paramref name="i"/> points to the line after the matching <c>}</c>.
+        /// </summary>
+        private static void SkipToMatchingBrace(IList<string> lines, ref int i)
+        {
+            int braceDepth = 1;
+            while (i < lines.Count && braceDepth > 0)
+            {
+                foreach (char ch in StripInlineComment(lines[i].Trim()))
+                {
+                    if (ch == '{') braceDepth++;
+                    else if (ch == '}') braceDepth--;
+                }
+                i++;
+            }
+        }
+
+        /// <summary>
+        /// Expand a native function definition into the equivalent CDS source.
+        /// <para>
+        /// The expansion is:
+        /// <code>
+        ///   NAME:
+        ///   addiu $sp, $sp, -frameSize
+        ///   sw $ra, 0($sp)        // if body contains a jal/jalr
+        ///   sw $sN, off($sp)      // for each $sN/$fp written to in body
+        ///   ...body, with parameter names substituted for $a0..$a3...
+        ///   lw $ra, 0($sp)
+        ///   lw $sN, off($sp)
+        ///   addiu $sp, $sp, frameSize
+        ///   jr $ra
+        ///   nop
+        /// </code>
+        /// </para>
+        /// </summary>
+        private static string ExpandFunctionDefinition(FunctionDef fn)
+        {
+            // Substitute parameter names → $aN before scanning so the alias regs
+            // don't accidentally trip the saved-register detector.
+            var substitutedBody = new List<string>(fn.Body.Count);
+            foreach (var line in fn.Body)
+            {
+                string s = line;
+                for (int p = 0; p < fn.Parameters.Length; p++)
+                    s = ReplaceWholeWord(s, fn.Parameters[p], $"$a{p}");
+                substitutedBody.Add(s);
+            }
+
+            // Collect callee-saved registers touched in the body.
+            var savedRegs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            bool needsRa = false;
+            foreach (var line in substitutedBody)
+            {
+                string text = StripInlineComment(line);
+                if (CallInBodyRegex.IsMatch(text)) needsRa = true;
+                foreach (Match rm in CalleeSavedRegex.Matches(text))
+                    savedRegs.Add("$" + rm.Groups[1].Value.ToLowerInvariant());
+            }
+
+            // Build the final list: $ra first if needed, then $s0..$s7, $fp.
+            var orderedSaves = new List<string>();
+            if (needsRa) orderedSaves.Add("$ra");
+            orderedSaves.AddRange(savedRegs.OrderBy(r =>
+                r == "$fp" ? 100 : int.Parse(r.Substring(2))));
+
+            int frameSize = 0;
+            if (orderedSaves.Count > 0)
+            {
+                // Round (count * 4) up to a 16-byte multiple per the PS2 EE ABI.
+                int needed = orderedSaves.Count * 4;
+                frameSize = (needed + 15) & ~15;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("// --- function definition: " + fn.Name + " ---");
+            sb.AppendLine(fn.Name + ":");
+
+            if (frameSize > 0)
+            {
+                sb.AppendLine($"addiu $sp, $sp, -{frameSize}");
+                for (int idx = 0; idx < orderedSaves.Count; idx++)
+                    sb.AppendLine($"sw {orderedSaves[idx]}, {idx * 4}($sp)");
+            }
+
+            foreach (var line in substitutedBody)
+                sb.AppendLine(line);
+
+            if (frameSize > 0)
+            {
+                for (int idx = 0; idx < orderedSaves.Count; idx++)
+                    sb.AppendLine($"lw {orderedSaves[idx]}, {idx * 4}($sp)");
+                sb.AppendLine($"addiu $sp, $sp, {frameSize}");
+            }
+            sb.AppendLine("jr $ra");
+            sb.AppendLine("nop");
+            sb.AppendLine("// --- end function: " + fn.Name + " ---");
+            return sb.ToString();
+        }
+
+        // -----------------------------------------------------------------------
         // Inner types
         // -----------------------------------------------------------------------
 
         private sealed record MacroDef(string Name, string[] Parameters, List<string> Body);
+
+        /// <summary>
+        /// An <c>extern function NAME(p1, p2, ...) at :label</c> declaration.
+        /// </summary>
+        private sealed record ExternFunction(string Name, string[] Parameters, string TargetLabel);
+
+        /// <summary>
+        /// A native <c>function NAME(p1, p2, ...) { body }</c> definition collected
+        /// during the first sub-pass.
+        /// </summary>
+        private sealed record FunctionDef(string Name, string[] Parameters, List<string> Body);
     }
 }
