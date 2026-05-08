@@ -2,7 +2,9 @@ namespace CodeDesigner.Ps2.CdsLanguage.SyntaxItems
 {
     /// <summary>
     /// Represents a <c>setreg reg, $XXXXXXXX</c> directive that loads a 32-bit immediate
-    /// into a register via a <c>LUI</c> + <c>ADDIU</c> pair.
+    /// into a register via a <c>LUI</c> + <c>ORI</c> pair. <c>ORI</c> is used instead of
+    /// <c>ADDIU</c> because its 16-bit immediate is zero-extended rather than sign-extended,
+    /// so values whose lo16 has bit 15 set (e.g. <c>$80108000</c>) load correctly.
     /// </summary>
     public class SetRegSyntaxItem : CdsSyntaxItem
     {
@@ -18,7 +20,7 @@ namespace CodeDesigner.Ps2.CdsLanguage.SyntaxItems
         /// <summary>The generated <c>LUI reg, hi16</c> instruction.</summary>
         public OperationSyntaxItem LuiOp { get; set; } = new();
 
-        /// <summary>The generated <c>ADDIU reg, reg, lo16</c> instruction.</summary>
-        public OperationSyntaxItem AddiuOp { get; set; } = new();
+        /// <summary>The generated <c>ORI reg, reg, lo16</c> instruction.</summary>
+        public OperationSyntaxItem OriOp { get; set; } = new();
     }
 }

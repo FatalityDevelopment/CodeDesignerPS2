@@ -17,8 +17,7 @@
     { "open": "{", "close": "}" },
     { "open": "[", "close": "]" },
     { "open": "(", "close": ")" },
-    { "open": "\"", "close": "\"", "notIn": ["string"] },
-    { "open": "'", "close": "'", "notIn": ["string", "comment"] }
+    { "open": "\"", "close": "\"", "notIn": ["string"] }
   ],
 
   // Surrounding pairs (when selecting text and typing, wrap it)
@@ -26,27 +25,60 @@
     { "open": "{", "close": "}" },
     { "open": "[", "close": "]" },
     { "open": "(", "close": ")" },
-    { "open": "\"", "close": "\"" },
-    { "open": "'", "close": "'" }
+    { "open": "\"", "close": "\"" }
   ],
 
-  // Folding markers (optional, useful for /* */ blocks)
+  // Treat these as identifier characters for word-based selection / `Ctrl+D`.
+  // We *exclude* `$` so a register reference like `$t0` selects `t0` cleanly,
+  // but include underscores so `lib_strcpy` selects as one word.
+  "wordPattern": "(-?\\d*\\.\\d\\w*)|([A-Za-z_][A-Za-z0-9_]*)",
+
+  // Folding markers
   "folding": {
     "markers": {
-      "start": "^\\s*/\\*",
-      "end": "\\*/"
+      "start": "^\\s*(?://\\s*#?region\\b|/\\*\\s*#?region\\b|function\\s+[A-Za-z_]\\w*\\s*\\([^)]*\\)\\s*\\{|scope\\s+[A-Za-z_]\\w*\\s*\\{|macro\\s+[A-Za-z_]\\w*\\s*\\([^)]*\\)\\s*$|if\\s+|while\\s+|repeat\\s+|cond\\s+|timer\\s+)",
+      "end": "^\\s*(?://\\s*#?endregion\\b|\\*/|\\}|endmacro|endif|endwhile|endrepeat|endcond|endtimer)"
     }
   },
 
-  // Indentation rules
+  // Indentation rules — auto-indent inside function bodies, scope blocks,
+  // and control-flow constructs.
+  "indentationRules": {
+    "increaseIndentPattern": "(^\\s*(function|scope)\\s+[A-Za-z_]\\w*[^}]*\\{[^}]*$)|(^\\s*(if|while|repeat|macro|cond|timer)\\b.*$)|(^[^/]*\\{[^}\"']*$)",
+    "decreaseIndentPattern": "^\\s*(\\}|endif|else|endwhile|endrepeat|endmacro|endcond|endtimer)\\b.*$"
+  },
+
+  // On-enter rules — match the editor's auto-indent expectations.
   "onEnterRules": [
     {
-      "beforeText": "^\\s*.*:$", // Label definitions
-      "action": { "indentAction": "none", "indent": "none" }
+      // After a label definition, drop back to column 0 (labels are unindented).
+      "beforeText": "^\\s*[A-Za-z_]\\w*:\\s*$",
+      "action": { "indentAction": "none", "indent": "" }
     },
     {
-      "beforeText": "^\\s*(address|hexcode|print)\\b", // Directives
-      "action": { "indentAction": "none", "indent": "none" }
+      // Pressing Enter between `{` and `}` should split them onto two lines
+      // and indent the cursor.
+      "beforeText": "\\{\\s*$",
+      "afterText": "^\\s*\\}",
+      "action": { "indentAction": "indentOutdent" }
+    },
+    {
+      // Inside a /* ... */ block continue with leading ` * `.
+      "beforeText": "^\\s*/\\*\\*?(?!/)([^\\*]|\\*(?!/))*$",
+      "afterText": "^\\s*\\*/$",
+      "action": { "indentAction": "indentOutdent", "appendText": " * " }
+    },
+    {
+      "beforeText": "^\\s*/\\*\\*?(?!/)([^\\*]|\\*(?!/))*$",
+      "action": { "indentAction": "none", "appendText": " * " }
+    },
+    {
+      "beforeText": "^\\s*\\*(\\s([^\\*]|\\*(?!/))*)?$",
+      "action": { "indentAction": "none", "appendText": "* " }
+    },
+    {
+      "beforeText": "^\\s*\\*/\\s*$",
+      "action": { "indentAction": "none", "removeText": 1 }
     }
   ]
 }

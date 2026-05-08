@@ -66,6 +66,10 @@ namespace CodeDesigner.Ps2.CdsLanguage
         private static readonly Regex SetRegRegex =
             new(@"^setreg\s+\$?(\w+)\s*,\s*\$([0-9a-fA-F]+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // la $reg, :labelname  — load absolute address of label into reg via lui+ori
+        private static readonly Regex LaRegex =
+            new(@"^la\s+\$?(\w+)\s*,\s*:([a-zA-Z_][a-zA-Z0-9_.]*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         private static readonly Regex LabelDefRegex =
             new(@"^([a-zA-Z_][a-zA-Z0-9_]*):$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -383,6 +387,31 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     uint value = Convert.ToUInt32(setRegMatch.Groups[2].Value, 16);
                     var item = BuildSetReg(lineNumber, trimmed, reg, value, currentAddress);
                     current.Add(item);
+                    currentAddress += 8;
+                    continue;
+                }
+
+                // ---- Load-address directive (la $reg, :label) ----
+                var laMatch = LaRegex.Match(trimmed);
+                if (laMatch.Success)
+                {
+                    string reg = laMatch.Groups[1].Value;
+                    string labelRef = laMatch.Groups[2].Value.ToLowerInvariant();
+                    string? qualified = ResolveLabel(labelRef, scopeStack, labelMap);
+                    if (qualified == null)
+                    {
+                        AddDiagnostic(CdsDiagnosticSeverity.Error, lineNumber,
+                            $"unresolved label reference ':{labelRef}' in '{trimmed}'", trimmed,
+                            $":{labelRef}", "CDS0012");
+                        // Emit a placeholder that decodes to (lui+ori) of address 0 so downstream
+                        // address tracking stays in sync.
+                        current.Add(BuildLa(lineNumber, trimmed, reg, labelRef, 0u, currentAddress));
+                    }
+                    else
+                    {
+                        uint addr = labelMap[qualified];
+                        current.Add(BuildLa(lineNumber, trimmed, reg, qualified, addr, currentAddress));
+                    }
                     currentAddress += 8;
                     continue;
                 }
@@ -765,6 +794,8 @@ namespace CodeDesigner.Ps2.CdsLanguage
                 var setRegMatch = SetRegRegex.Match(t);
                 if (setRegMatch.Success) { currentAddress += 8; continue; }
 
+                if (LaRegex.IsMatch(t)) { currentAddress += 8; continue; }
+
                 var memMatch = MemRegex.Match(t);
                 if (memMatch.Success)
                 {
@@ -938,11 +969,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
             ushort hi = (ushort)(value >> 16);
             ushort lo = (ushort)(value & 0xFFFF);
 
-            string luiAsm    = $"lui {reg}, ${ hi:X4}";
-            string addiuAsm  = $"addiu {reg}, {reg}, ${lo:X4}";
+            string luiAsm = $"lui {reg}, ${ hi:X4}";
+            string oriAsm = $"ori {reg}, {reg}, ${lo:X4}";
 
-            uint luiEncoded   = TryAssemble(luiAsm);
-            uint addiuEncoded = TryAssemble(addiuAsm);
+            uint luiEncoded = TryAssemble(luiAsm);
+            uint oriEncoded = TryAssemble(oriAsm);
 
             return new SetRegSyntaxItem
             {
@@ -956,10 +987,47 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     LineNumber = lineNumber, LineText = lineText,
                     Address = address, EncodedWord = luiEncoded, Mnemonic = "lui"
                 },
-                AddiuOp = new OperationSyntaxItem
+                OriOp = new OperationSyntaxItem
                 {
                     LineNumber = lineNumber, LineText = lineText,
-                    Address = address + 4, EncodedWord = addiuEncoded, Mnemonic = "addiu"
+                    Address = address + 4, EncodedWord = oriEncoded, Mnemonic = "ori"
+                }
+            };
+        }
+
+        // Build the lui+ori pair for the `la reg, :label` directive. ori is used (instead of
+        // addiu) so the low-16 immediate is interpreted as unsigned — addresses with bit 15
+        // of the lower half set encode correctly without a hi-half compensation.
+        private static LaSyntaxItem BuildLa(
+            int lineNumber, string lineText, string reg, string resolvedLabel,
+            uint value, uint address)
+        {
+            ushort hi = (ushort)(value >> 16);
+            ushort lo = (ushort)(value & 0xFFFF);
+
+            string luiAsm = $"lui {reg}, ${ hi:X4}";
+            string oriAsm = $"ori {reg}, {reg}, ${lo:X4}";
+
+            uint luiEncoded = TryAssemble(luiAsm);
+            uint oriEncoded = TryAssemble(oriAsm);
+
+            return new LaSyntaxItem
+            {
+                LineNumber = lineNumber,
+                LineText = lineText,
+                Address = address,
+                Register = reg,
+                ResolvedLabel = resolvedLabel,
+                Value = value,
+                LuiOp = new OperationSyntaxItem
+                {
+                    LineNumber = lineNumber, LineText = lineText,
+                    Address = address, EncodedWord = luiEncoded, Mnemonic = "lui"
+                },
+                OriOp = new OperationSyntaxItem
+                {
+                    LineNumber = lineNumber, LineText = lineText,
+                    Address = address + 4, EncodedWord = oriEncoded, Mnemonic = "ori"
                 }
             };
         }
@@ -1126,7 +1194,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
             var loadBase = BuildSetReg(lineNumber, lineText, "t8", baseAddress, cur);
             item.Operations.Add(loadBase.LuiOp);
-            item.Operations.Add(loadBase.AddiuOp);
+            item.Operations.Add(loadBase.OriOp);
             cur += 8;
 
             item.Operations.Add(new OperationSyntaxItem
@@ -1155,7 +1223,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
             var loadValue = BuildSetReg(lineNumber, lineText, "t9", value, cur);
             item.Operations.Add(loadValue.LuiOp);
-            item.Operations.Add(loadValue.AddiuOp);
+            item.Operations.Add(loadValue.OriOp);
             cur += 8;
 
             string finalOffsetStr = $"${offsets[^1]:X4}";

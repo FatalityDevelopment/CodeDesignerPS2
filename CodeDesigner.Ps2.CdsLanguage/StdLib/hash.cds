@@ -7,10 +7,10 @@
 //   returns: $v0 = 32-bit FNV-1a hash
 //
 // Algorithm:
-//   hash = 2166136261
+//   hash = 2166136261     (0x811C9DC5, FNV offset basis)
 //   for each byte b:
 //     hash ^= b
-//     hash *= 16777619
+//     hash *= 16777619    (0x01000193, FNV prime)
 
 lib_hash_fnv1a:
     // init
@@ -21,7 +21,8 @@ lib_hash_fnv1a:
 fnv_loop:
     lb    $t1, 0($a0)
     beq   $t1, $zero, :fnv_done
-    // hash ^= b
+    nop
+    // hash ^= byte
     xor   $v0, $v0, $t1
     // multiply by 16777619 (0x01000193)
     // perform: hash = hash * 16777619
