@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -31,7 +31,6 @@
     <ProjectReference Include="..\CodeDesigner.Ps2.CheatEngine\CodeDesigner.Ps2.CheatEngine.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Common\CodeDesigner.Ps2.Common.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.Database\CodeDesigner.Ps2.Database.csproj" />
-    <ProjectReference Include="..\CodeDesigner.Ps2.Emulator\CodeDesigner.Ps2.Emulator.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.MCManager\CodeDesigner.Ps2.MCManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.HddManager\CodeDesigner.Ps2.HddManager.csproj" />
     <ProjectReference Include="..\CodeDesigner.Ps2.IsoManager\CodeDesigner.Ps2.IsoManager.csproj" />

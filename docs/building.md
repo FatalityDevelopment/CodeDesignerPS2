@@ -44,7 +44,7 @@ git submodule update --init --recursive
 |---|---|---|
 | `CodeDesigner.Ps2.Bridge` | Executable | Socket server, emulator host, PCSX2 bridge |
 | `CodeDesigner.Ps2.Common` | Library | MIPS R5900 ISA, assembler, disassembler |
-| `CodeDesigner.Ps2.Emulator` | Library | Full PS2 hardware emulation (EE + IOP) |
+| `CodeDesigner.Ps2.EmulatorCore` | Library | Full PS2 hardware emulation (EE + IOP) |
 | `CodeDesigner.Ps2.CheatEngine` | Library | Cheat application, cheat engine loop |
 | `CodeDesigner.Ps2.CdsLanguage` | Library | CDS script compiler and parser |
 | `CodeDesigner.Ps2.LabelManager` | Library | Label set management and storage |

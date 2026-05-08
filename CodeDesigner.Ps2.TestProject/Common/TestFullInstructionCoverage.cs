@@ -1,8 +1,8 @@
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Common.CPU;
 using CodeDesigner.Ps2.Common.Cpu.Instructions.EE;
-using CodeDesigner.Ps2.Emulator;
-using CodeDesigner.Ps2.Emulator.IOP;
+using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.EmulatorCore.IOP;
 
 namespace CodeDesigner.Ps2.TestProject
 {

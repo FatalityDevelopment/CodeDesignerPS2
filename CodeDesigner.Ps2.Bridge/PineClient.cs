@@ -30,7 +30,7 @@ namespace CodeDesigner.Ps2.Bridge
     /// <see href="https://github.com/PCSX2/pcsx2/blob/master/pcsx2/PINE.h"/>.
     /// </para>
     /// </summary>
-    public sealed class PineClient : IDisposable
+    public sealed class PineClient : IDebugClient
     {
         // ── Default slot / port ───────────────────────────────────────────────
         /// <summary>Default PCSX2 PINE TCP port (Windows) / Unix socket suffix.</summary>
@@ -512,6 +512,14 @@ namespace CodeDesigner.Ps2.Bridge
             isPaused = rep[9] != 0;
             return ReadU32LE(rep, 5);
         }
+
+        /// <summary>Convenience overload that ignores the paused flag.</summary>
+        public uint GetProgramCounter() => GetProgramCounter(out _);
+
+        /// <summary><see cref="IDebugClient"/> bridge — maps the PINE-specific
+        /// <see cref="EmuStatus"/> onto the cross-runtime
+        /// <see cref="DebugClientStatus"/>.</summary>
+        public DebugClientStatus GetStatusGeneric() => (DebugClientStatus)(uint)GetStatus();
 
         /// <summary>
         /// [Extended PINE] Pauses EE execution.

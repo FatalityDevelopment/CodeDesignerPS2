@@ -2,9 +2,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CodeDesigner.Ps2.Common;
 using CodeDesigner.Ps2.Common.CPU.COP0;
 using CodeDesigner.Ps2.Common.CPU.COP1;
-using CodeDesigner.Ps2.Emulator;
-using CodeDesigner.Ps2.Emulator.Hardware;
-using CodeDesigner.Ps2.Emulator.IOP;
+using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.EmulatorCore.Hardware;
+using CodeDesigner.Ps2.EmulatorCore.IOP;
 
 
 namespace CodeDesigner.Ps2.TestProject

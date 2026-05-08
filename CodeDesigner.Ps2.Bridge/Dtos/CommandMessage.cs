@@ -54,6 +54,11 @@ namespace CodeDesigner.Ps2.Bridge
         public string? BiosPath { get; set; }
         public string? DiscPath { get; set; }
         public long? Steps { get; set; }
+        // Optional STARTEMULATOR / STARTFILEMODE wire-up: which InternalPineSocket
+        // host:port the front end has launched CodeDesigner.Ps2.Emulator.exe on.
+        // When omitted Bridge defaults to 127.0.0.1:28012.
+        public string? InternalEmulatorHost { get; set; }
+        public int?    InternalEmulatorPort { get; set; }
         // COMPILECDS — pre-resolved pointer-manager labels (dotted names like "seal.health")
         public List<LabelEntry>? Labels { get; set; }
         // New PINE extended command fields

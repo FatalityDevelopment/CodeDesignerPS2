@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using CodeDesigner.Ps2.Emulator;
-using CodeDesigner.Ps2.Emulator.Hardware;
-using CodeDesigner.Ps2.Emulator.IOP;
+using CodeDesigner.Ps2.EmulatorCore;
+using CodeDesigner.Ps2.EmulatorCore.Hardware;
+using CodeDesigner.Ps2.EmulatorCore.IOP;
 using CodeDesigner.Ps2.Common.VectorUnits.VU0;
 using CodeDesigner.Ps2.Common.VectorUnits.VU1;
 
@@ -480,10 +480,10 @@ namespace CodeDesigner.Ps2.TestProject
             // Round up to 2 qwords (32 bytes) for DMA QWC.
             // Configure DMAC channel 0 (VIF0) for normal mode, DIR=0 (RAM→FIFO), STR=1
             var ch0 = emu.Bus.Dmac.Channels[0];
-            ch0.WriteRegister(CodeDesigner.Ps2.Emulator.Hardware.DmacChannel.REG_MADR, ramBase);
-            ch0.WriteRegister(CodeDesigner.Ps2.Emulator.Hardware.DmacChannel.REG_QWC,  2u);
+            ch0.WriteRegister(CodeDesigner.Ps2.EmulatorCore.Hardware.DmacChannel.REG_MADR, ramBase);
+            ch0.WriteRegister(CodeDesigner.Ps2.EmulatorCore.Hardware.DmacChannel.REG_QWC,  2u);
             // CHCR: DIR=0 (bit0=0 = RAM→FIFO), STR=1 (bit8=1) → 0x100
-            ch0.WriteRegister(CodeDesigner.Ps2.Emulator.Hardware.DmacChannel.REG_CHCR, 0x100u);
+            ch0.WriteRegister(CodeDesigner.Ps2.EmulatorCore.Hardware.DmacChannel.REG_CHCR, 0x100u);
             emu.Bus.Dmac.ExecuteChannel(0, emu.Bus);
 
             // Verify VU0 data memory (via the emulator's VU0 state)

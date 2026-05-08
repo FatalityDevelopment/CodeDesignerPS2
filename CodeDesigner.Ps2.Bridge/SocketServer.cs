@@ -8,7 +8,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using CodeDesigner.Ps2.Database;
-using CodeDesigner.Ps2.Emulator;
 using Microsoft.EntityFrameworkCore;
 using CodeDesigner.Ps2.LabelManager;
 using CodeDesigner.Ps2.Bridge.Repositories;
@@ -18,8 +17,37 @@ namespace CodeDesigner.Ps2.Bridge
     /// <summary>
     /// Socket server for communication with VSCode extension
     /// </summary>
-    public partial class SocketServer : IDisposable
+    public partial class SocketServer : IDisposable, Services.IBridgeContext
     {
+        // ── Service dispatcher ───────────────────────────────────────────────
+        // Per-domain command handlers register with this registry at startup;
+        // ProcessCommand asks the dispatcher first and only falls back to the
+        // legacy switch for handlers that have not been migrated yet.
+        private readonly Services.CommandDispatcher _dispatcher;
+
+        // ── IBridgeContext explicit implementations ──────────────────────────
+        // SocketServer's existing fields stay as `internal`; we expose them
+        // through the IBridgeContext surface using explicit impls so services
+        // get a clean read/write view without forcing public visibility.
+        Dictionary<uint, (string Label, string? Comment)> Services.IBridgeContext.Labels => _labels;
+        Dictionary<string, StructEntry>                   Services.IBridgeContext.Structs => _structs;
+        CodeDesigner.Ps2.Database.CodeDesignerDbContext   Services.IBridgeContext.Db                  => Db;
+        Repositories.DbLabelRepository                    Services.IBridgeContext.LabelRepo           => LabelRepo;
+        Repositories.DbSettingsRepository                 Services.IBridgeContext.SettingsRepo        => SettingsRepo;
+        Repositories.DbMcpMemoryRepository?               Services.IBridgeContext.McpMemoryRepo       => McpMemoryRepo;
+        Repositories.DbMcpAgentRepository?                Services.IBridgeContext.McpAgentRepo        => McpAgentRepo;
+        Repositories.DbMcpOrchestrationRepository?        Services.IBridgeContext.McpOrchestrationRepo => McpOrchestrationRepo;
+        CodeDesigner.Ps2.LabelManager.Ps2LabelManager     Services.IBridgeContext.LabelMgr            => LabelMgr;
+        void Services.IBridgeContext.RecordNavEntry(uint address, string source) => RecordNavEntry(address, source);
+        void Services.IBridgeContext.SyncLegacyDictsFromLabelManager() => SyncLegacyDictsFromLabelManager();
+        IReadOnlyList<NavHistoryEntry> Services.IBridgeContext.GetNavHistorySnapshot()
+        {
+            lock (_navHistoryLock) return new List<NavHistoryEntry>(_navHistory);
+        }
+        void Services.IBridgeContext.ClearNavHistory()
+        {
+            lock (_navHistoryLock) _navHistory.Clear();
+        }
         private TcpListener? _listener;
         private bool _isRunning;
         private readonly int _port;
@@ -81,32 +109,39 @@ namespace CodeDesigner.Ps2.Bridge
         internal DbMcpOrchestrationRepository? McpOrchestrationRepo { get; }
 
         /// <summary>
-        /// When set, the READMEM command reads live memory from this scheduler.
-        /// </summary>
-        public DualCpuScheduler? Scheduler { get; set; }
-
-        /// <summary>
-        /// When set, memory and debugger commands are routed through the PCSX2 PINE
-        /// IPC socket instead of the internal emulator.  Requires PCSX2 to have PINE
-        /// enabled (Settings → Advanced → Enable PINE).
-        /// <para>
-        /// Basic commands (READMEM, WRITEMEM, APPLYCHEATS, ASSEMBLE, DISASSEMBLE, …)
-        /// work with the standard upstream PINE protocol.
-        /// </para>
-        /// <para>
-        /// Debugger commands (PAUSE, RESUME, STEP, SETBP, GETPC, GETREGS) require
-        /// the PINE protocol extension — see <c>PINE_EXTENSION_PROPOSAL.md</c> for
-        /// the C++ implementation to submit as a PCSX2 pull request.
-        /// </para>
+        /// PCSX2 PINE client. Set in <c>--pcsx2</c> mode or after STARTPCSX2.
+        /// Runs the PCSX2-specific PINE protocol (game metadata, OS thread
+        /// inspection, etc.) on top of the cross-runtime <see cref="IDebugClient"/>
+        /// surface.
         /// </summary>
         public PineClient? PineClient { get; set; }
 
         /// <summary>
-        /// Returns <c>true</c> when the server should route memory operations
-        /// through PINE (a <see cref="PineClient"/> is attached and no internal
-        /// <see cref="Scheduler"/> is present).
+        /// Built-in emulator client. Set after STARTEMULATOR / STARTFILEMODE
+        /// spawns <c>CodeDesigner.Ps2.Emulator.exe</c>. Speaks PINE-shaped IPC
+        /// to the emulator's <c>InternalPineSocket</c> on TCP 28012 — the peer
+        /// of <see cref="PineClient"/> for the non-PCSX2 path.
         /// </summary>
-        private bool IsPineMode => PineClient != null && Scheduler == null;
+        public InternalEmulatorClient? InternalClient { get; set; }
+
+        /// <summary>
+        /// Active <see cref="IDebugClient"/> for the current runtime mode —
+        /// either <see cref="PineClient"/> (PCSX2 PINE) or
+        /// <see cref="InternalClient"/> (built-in emulator). Returns <c>null</c>
+        /// when neither client is attached. Handlers always go through this.
+        /// </summary>
+        public IDebugClient? Client => (IDebugClient?)PineClient ?? InternalClient;
+
+        /// <summary>Whether any debug client is currently attached.</summary>
+        public bool HasDebugClient => Client != null;
+
+        /// <summary>
+        /// Convenience for handlers that branch on PCSX2 mode specifically
+        /// (e.g. PINE-only opcodes like NETGETSTATUS, GETMODULES). Prefer
+        /// routing through <see cref="Client"/> when the operation is
+        /// supported on both runtimes.
+        /// </summary>
+        private bool IsPineMode => PineClient != null;
 
         // ── Navigation history ────────────────────────────────────────────────
         // A bounded circular log of recently visited EE addresses, populated
@@ -126,13 +161,13 @@ namespace CodeDesigner.Ps2.Bridge
         internal void RecordNavEntry(uint address, string source)
         {
             // Normalise to KSEG0 for a canonical display address.
-            uint display  = NormalizePcToKseg0(address);
+            uint display  = Services.AddressTranslator.NormalizePcToKseg0(address);
             string addrStr = $"0x{display:X8}";
 
             // Try to find a label — check both the KSEG0 address and the
             // physical address (labels may be stored under either form).
             string? label = null;
-            uint phys = NormalizeBreakpointToPhysical(address);
+            uint phys = Services.AddressTranslator.NormalizeBreakpointToPhysical(address);
             if (_labels.TryGetValue(display, out var l1)) label = l1.Label;
             else if (_labels.TryGetValue(phys, out var l2)) label = l2.Label;
 
@@ -153,23 +188,10 @@ namespace CodeDesigner.Ps2.Bridge
             }
         }
 
-        /// <summary>
-        /// Set to <c>true</c> by <see cref="HandleRestart"/> to ask the emulator
-        /// run-loop (in Program.cs) to perform a full hardware reset: create a
-        /// fresh <see cref="DualCpuScheduler"/>, re-load the BIOS and disc, and
-        /// leave the emulator paused at the reset vector.  The run-loop clears this
-        /// flag once the new scheduler is installed.
-        /// </summary>
-        public volatile bool PendingRestart;
-
-        /// <summary>
-        /// Signalled by the emulator run-loop once the new scheduler is fully installed
-        /// after a restart.  <see cref="HandleRestart"/> waits on this gate so that it
-        /// does not return "Restarted" to the client until <see cref="Scheduler"/> is
-        /// the new instance — guaranteeing that subsequent SETBP and RESUME commands
-        /// operate on the correct scheduler.
-        /// </summary>
-        private readonly ManualResetEventSlim _restartComplete = new ManualResetEventSlim(false);
+        // Restart used to be coordinated through PendingRestart + _restartComplete
+        // back when the scheduler ran in-process. With the emulator now in its
+        // own process, RESET is a fire-and-forget call to the active client
+        // (PineClient.Reset() or InternalEmulatorClient.RequestRestart()).
 
         public event EventHandler<string>? MessageReceived;
         public event EventHandler<string>? ClientConnected;
@@ -181,12 +203,11 @@ namespace CodeDesigner.Ps2.Bridge
         public Func<CommandMessage, string>? RuntimeCommandHandler { get; set; }
 
         /// <summary>
-        /// Called by the emulator run-loop after a restart is fully complete (new
-        /// scheduler installed and paused at the reset vector).  Unblocks
-        /// <see cref="HandleRestart"/> so it can return the "Restarted" response to
-        /// the client only once SETBP/RESUME will target the correct scheduler.
+        /// No-op retained for binary compatibility with code that may still call
+        /// it. The old in-process restart coordination is gone — restarts are
+        /// now driven through the active <see cref="IDebugClient"/>.
         /// </summary>
-        public void SignalRestartComplete() => _restartComplete.Set();
+        public void SignalRestartComplete() { /* no-op */ }
 
         public SocketServer(int port = 8765)
             : this(port, CreateLocalDbContext(), ownsDb: true)
@@ -206,6 +227,7 @@ namespace CodeDesigner.Ps2.Bridge
         private SocketServer(int port, CodeDesignerDbContext db, bool ownsDb)
         {
             _port       = port;
+            
             _ownsDb     = ownsDb;
             Db          = db;
             LabelRepo   = new DbLabelRepository(db);
@@ -213,7 +235,57 @@ namespace CodeDesigner.Ps2.Bridge
             McpMemoryRepo = new DbMcpMemoryRepository(db);
             McpAgentRepo  = new DbMcpAgentRepository(db);
             McpOrchestrationRepo = new DbMcpOrchestrationRepository(db);
+
+            // Build the per-domain command services and the dispatcher that
+            // routes commands to them. New services should be added to the
+            // list below — see ICommandService for the migration recipe.
+            Services.IBridgeContext ctx = this;
+            // MemoryService and RegisterService are constructed first so peer
+            // services that depend on them (e.g. WatchpointTraceService) can
+            // be wired up via constructor injection.
+            _memoryService   = new Services.MemoryService(ctx);
+            _registerService = new Services.RegisterService(ctx);
+            _dispatcher = new Services.CommandDispatcher(new Services.ICommandService[]
+            {
+                _memoryService,
+                _registerService,
+                new Services.ExecutionService(ctx),
+                new Services.CheatsService(ctx),
+                new Services.NetworkService(ctx),
+                new Services.PadService(ctx),
+                new Services.PineWatchService(ctx),
+                new Services.SaveStateService(ctx),
+                new Services.SteppingService(ctx),
+                new Services.QueryDbService(ctx),
+                new Services.NavHistoryService(ctx),
+                new Services.SettingsService(ctx),
+                new Services.StructService(ctx),
+                new Services.SnapshotsService(ctx),
+                new Services.MemoryCardService(ctx),
+                new Services.IsoService(ctx),
+                new Services.LabelService(ctx),
+                new Services.McpConfigService(ctx),
+                new Services.AgentService(ctx),
+                new Services.OrchestrationService(ctx),
+                new Services.MemoryEntryService(ctx),
+                new Services.SnapshotHistoryService(ctx),
+                new Services.SymbolDatabaseService(ctx),
+                new Services.GameDiscService(ctx),
+                new Services.HddService(ctx),
+                new Services.ProcessStateService(ctx),
+                new Services.WatchpointTraceService(ctx, _registerService),
+                new Services.ValueScanService(ctx),
+                new Services.BreakpointDisassemblyService(ctx),
+                new Services.LabelManagerService(ctx),
+                new Services.AssemblerService(ctx),
+                new Services.CodeAnalysisService(ctx),
+                new Services.EmulatorControlService(ctx),
+            });
         }
+
+        private readonly Services.MemoryService   _memoryService;
+        private readonly Services.RegisterService _registerService;
+        Services.MemoryService Services.IBridgeContext.Memory => _memoryService;
 
         /// <inheritdoc/>
         public void Dispose()
@@ -606,6 +678,12 @@ namespace CodeDesigner.Ps2.Bridge
                     RecordNavEntry(command.Address.Value, "mcp");
                 }
 
+                // Try the per-domain command dispatcher first. Returns null
+                // when no migrated service owns this command — falls through
+                // to the legacy switch for handlers still in partial classes.
+                var dispatched = _dispatcher.TryDispatch(command);
+                if (dispatched != null) return dispatched;
+
                 switch (command.Command.ToUpperInvariant())
                 {
                     case "STARTPCSX2":
@@ -624,668 +702,162 @@ namespace CodeDesigner.Ps2.Bridge
                             return CreateErrorResponse("Runtime mode switching is not enabled in this server instance");
                         return RuntimeCommandHandler(command);
 
-                    case "ASSEMBLE":
-                        return HandleAssemble(command.Data);
-
-                    case "COMPILECDS":
-                        return HandleCompileCds(command.Data, command.Labels);
-                    
-                    case "VALIDATECDS":
-                        return HandleValidateCds(command.Data, command.Labels);
-                    
-                    case "DISASSEMBLE":
-                        return HandleDisassemble(command.Data, command.Address);
-
-                    case "READMEM":
-                        return HandleReadMem(command.Address ?? 0, command.Length ?? 256, command.Region);
-
-                    case "SNAPSHOT":
-                        return HandleSnapshot(command.OutputPath, command.IsoName, command.Title, command.Description);
-
-                    case "LOADSNAPSHOT":
-                        return HandleLoadSnapshot(command.InputPath);
-
-                    case "LOADELF":
-                        return HandleLoadElf(command.InputPath);
-                    
-                    case "PAUSE":
-                        return HandlePause();
-
-                    case "RESUME":
-                        return HandleResume();
-
-                    case "STEP":
-                        return HandleStep();
-
-                    case "SETBP":
-                        return HandleSetBreakpoint(command.BreakpointAddress);
-
-                    case "CLEARBP":
-                        return HandleClearBreakpoint(command.BreakpointAddress);
-
-                    case "CLEARBP_ALL":
-                        return HandleClearAllBreakpoints();
-
-                    case "GETPC":
-                        return HandleGetPC();
-
-                    case "GETREGS":
-                        return HandleGetRegisters();
-
-                    case "SETREG":
-                        return HandleSetRegister(command.RegisterName, command.RegisterIndex, command.RegisterValue);
-
-                    case "WRITEMEM":
-                        return HandleWriteMem(command.Address ?? 0, command.Data, command.Region);
-
-                    case "LOADBIN":
-                        return HandleLoadBin(command.InputPath, command.Address ?? 0, command.Region);
-
-                    case "APPLYCHEATS":
-                        return HandleApplyCheats(command.Data);
-
-                    case "CDSPATCH":
-                        return HandleCdsPatch(command.Data, command.Labels);
-
-                    case "INJECTCHEATENGINE":
-                        return HandleInjectCheatEngine(command.Data, command.HookAddress, command.EngineBase, command.CdsSource);
-
-                    case "UPDATECHEATENGINE":
-                        return HandleUpdateCheatEngine(command.Data, command.CdsSource);
-
-                    case "REMOVECHEATENGINE":
-                        return HandleRemoveCheatEngine();
-
-                    case "GETGAMECHEATS":
-                    case "GET_GAME_CHEATS":
-                        return HandleGetGameCheats(command.GameSerial);
-
-                    case "RESTART":
-                        return HandleRestart();
-
-                    case "GETLABELS":
-                        return HandleGetLabels();
-
-                    case "ADDLABEL":
-                        return HandleAddLabel(command.Address, command.Label, command.Comment);
-
-                    case "DELETELABEL":
-                        return HandleDeleteLabel(command.Address);
-
-                    case "GETSTRINGS":
-                        return HandleGetStrings(command.Address ?? 0, command.Data);
-
-                    case "GETFUNCTIONS":
-                        return HandleGetFunctions(command.Address ?? 0, command.Data);
-
-                    case "GETPOINTERS":
-                        return HandleGetPointers(command.Address ?? 0, command.Data);
-
-                    case "GETFLOATS":
-                        return HandleGetFloats(command.Address ?? 0, command.Data);
-
-                    case "GETINTEGERS":
-                        return HandleGetIntegers(command.Address ?? 0, command.Data);
-
-                    case "SCANSTRINGS":
-                        return HandleScanStrings(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SCANFUNCTIONS":
-                        return HandleScanFunctions(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SCANPOINTERS":
-                        return HandleScanPointers(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SCANFLOATS":
-                        return HandleScanFloats(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SCANINTEGERS":
-                        return HandleScanIntegers(command.Address ?? 0, command.Length ?? 0, command.Region);
-
-                    case "SEARCH":
-                        return HandleSearch(command.Query ?? "", command.SearchMode ?? "text",
-                                            command.Address ?? 0, command.Length ?? 0,
-                                            command.Region, command.Data);
-
-                    case "SCANREFERENCES":
-                    case "SCAN_REFERENCES":
-                        return HandleScanReferences(
-                            command.TargetAddress,
-                            command.Address ?? 0,
-                            command.Length ?? 0,
-                            command.Region,
-                            command.Data,
-                            command.ReferenceKinds);
-
-                    case "GETTHREADS":
-                        return HandleGetThreads();
-
-                    case "GETIOPTHREADS":
+                    // All command-specific cases below have been migrated into
+                    // Services/* — see ICommandService for the recipe. The
+                    // dispatcher above handles them. Aliases that don't match
+                    // a registered name are bounced via DispatchAlias().
+                    // GETTHREADS, GETIOPTHREADS → ProcessStateService (migrated)
                     case "GET_IOP_THREADS":
-                    case "IOPTHREADS":
-                        return HandleGetIopThreads();
+                    case "IOPTHREADS":         return DispatchAlias(command, "GETIOPTHREADS");
 
-                    case "PINEDISASSEMBLE":
+                    // PINEDISASSEMBLE → BreakpointDisassemblyService (migrated)
                     case "PINE_DISASSEMBLE":
-                    case "PINE_DISASM":
-                        return HandlePineDisassemble(command.CpuSel, command.Address, command.Length.HasValue ? (ushort?)command.Length.Value : null);
+                    case "PINE_DISASM":        return DispatchAlias(command, "PINEDISASSEMBLE");
 
-                    case "LISTDISCELFS":
-                        return HandleListDiscElfs(command.IsoPath);
+                    case "SCAN_REFERENCES":    return DispatchAlias(command, "SCANREFERENCES");
 
-                    case "RECOMPILE":
-                        return HandleRecompile(command.IsoPath, command.ElfName, command.OutputDirectory);
+                    // CONVERTCHEAT, PORTCHEATS → CheatsService (migrated)
 
-                    case "CONVERTCHEAT":
-                        return HandleConvertCheat(command.Data, command.Format, command.Direction);
+                    // SCANVALUE → ValueScanService (migrated)
 
-                    case "PORTCHEATS":
-                        return HandlePortCheats(command.Data, command.SourceDumpPath, command.TargetDumpPath);
+                    // Structs → StructService (migrated)
 
-                    case "SCANVALUE":
-                        return HandleScanValue(
-                            command.Address    ?? 0,
-                            command.EndAddress ?? 0x02000000u,
-                            command.ScanValue,
-                            command.Comparison,
-                            command.DataType,
-                            command.Region,
-                            command.ScanAddresses);
+                    // Label-manager commands → LabelManagerService (migrated)
 
-                    case "GETSTRUCTS":
-                        return HandleGetStructs();
+                    // Memory-card → MemoryCardService (migrated)
 
-                    case "ADDSTRUCT":
-                        return HandleAddStruct(command.StructName, command.StructBaseAddress);
+                    // HDD → HddService (migrated)
 
-                    case "DELETESTRUCT":
-                        return HandleDeleteStruct(command.StructName);
-
-                    case "ADDSTRUCTMEMBER":
-                        return HandleAddStructMember(command.StructName, command.MemberOffset, command.MemberName);
-
-                    // ── Label Manager commands ────────────────────────────────────────
-                    case "GETLABELSETS":
-                        return HandleGetLabelSets(command.WorkspaceDir, command.GameId);
-
-                    case "GETLABELSET":
-                        return HandleGetLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "SETACTIVELABELSET":
-                        return HandleSetActiveLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "CREATELABELSET":
-                        return HandleCreateLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "DELETELABELSET":
-                        return HandleDeleteLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "RENAMELABELSET":
-                        return HandleRenameLabelSet(command.WorkspaceDir, command.GameId, command.SetName, command.NewSetName);
-
-                    case "ADDLABELENTRY":
-                        return HandleAddLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntry);
-
-                    case "DELETELABELENTRY":
-                        return HandleDeleteLabelEntry(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntryAddress, command.Address);
-
-                    case "IMPORTLABELSET":
-                        return HandleImportLabelSet(command.WorkspaceDir, command.GameId, command.SetName, command.Data);
-
-                    case "EXPORTLABELSET":
-                        return HandleExportLabelSet(command.WorkspaceDir, command.GameId, command.SetName);
-
-                    case "RESOLVESTRINGS":
-                        return HandleResolveStrings();
-
-                    case "RESOLVELINKEDLIST":
-                        if (command.Address is null)
-                            return CreateErrorResponse("Address is required for RESOLVELINKEDLIST");
-                        return HandleResolveLinkedList(command.Address.Value, command.MemberOffset ?? 0);
-
-                    case "MC_LIST":
-                        return HandleMcList(command.McPath);
-
-                    case "MC_EXPORT":
-                        return HandleMcExport(command.McPath, command.SaveName, command.ExportDir);
-
-                    case "MC_IMPORT":
-                        return HandleMcImport(command.McPath, command.ImportDir, command.McOverwrite ?? false);
-
-                    case "MC_DELETE":
-                        return HandleMcDelete(command.McPath, command.SaveName);
-
-                    case "MC_FORMAT":
-                        return HandleMcFormat(command.McPath);
-
-                    case "MC_READ_FILE":
-                    case "MC_READFILE":
-                        return HandleMcReadFile(command.McPath, command.SaveName, command.McFileName);
-
-                    case "HDD_LIST":
-                        return HandleHddList(command.HddPath);
-
-                    case "HDD_LIST_FILES":
-                        return HandleHddListFiles(command.HddPath, command.PartitionId);
-
-                    case "HDD_EXPORT":
-                        return HandleHddExport(command.HddPath, command.PartitionId, command.FileName, command.ExportDir);
-
-                    case "HDD_IMPORT":
-                        return HandleHddImport(command.HddPath, command.PartitionId, command.ImportDir, command.McOverwrite ?? false);
-
-                    case "HDD_DELETE":
-                        return HandleHddDelete(command.HddPath, command.PartitionId);
-
-                    case "HDD_CREATE":
-                        return HandleHddCreate(command.HddPath, command.HddSizeGb ?? 40);
-
-                    case "ISO_LIST_FILES":
-                        return HandleIsoListFiles(command.IsoPath);
-
-                    case "ISO_READ_FILE":
-                        return HandleIsoReadFile(command.IsoPath, command.FilePath, command.OutputPath);
-
-                    case "ISO_GET_INFO":
-                        return HandleIsoGetInfo(command.IsoPath);
+                    // ISO → IsoService (migrated)
 
                     case "PING":
                         return CreateSuccessResponse("PONG");
 
-                    case "PCSX2STATUS":
-                        return HandlePcsx2Status();
+                    // PCSX2STATUS, PCSX2GAMEINFO → EmulatorControlService (migrated)
 
-                    case "PCSX2GAMEINFO":
-                        return HandlePcsx2GameInfo();
+                    // RESET, STEPINTO/OVER/OUT, GETFPS, SETLIMITER, FRAMEADVANCE
+                    // → SaveStateService / SteppingService (migrated). Aliases:
+                    case "STEP_INTO":   return DispatchAlias(command, "STEPINTO");
+                    case "STEP_OVER":   return DispatchAlias(command, "STEPOVER");
+                    case "STEP_OUT":    return DispatchAlias(command, "STEPOUT");
+                    case "GET_FPS":     return DispatchAlias(command, "GETFPS");
+                    case "SET_LIMITER": return DispatchAlias(command, "SETLIMITER");
+                    case "FRAME_ADVANCE": return DispatchAlias(command, "FRAMEADVANCE");
 
-                    case "RESET":
-                        return HandleReset();
-
-                    case "STEPINTO":
-                    case "STEP_INTO":
-                        return HandleStepInto();
-
-                    case "STEPOVER":
-                    case "STEP_OVER":
-                        return HandleStepOver();
-
-                    case "STEPOUT":
-                    case "STEP_OUT":
-                        return HandleStepOut();
-
-                    case "GETFPS":
-                    case "GET_FPS":
-                        return HandleGetFps();
-
-                    case "SETLIMITER":
-                    case "SET_LIMITER":
-                    case "SETLIMITERMODE":
-                        return HandleSetLimiterMode(command.LimiterMode);
-
-                    case "FRAMEADVANCE":
-                    case "FRAME_ADVANCE":
-                        return HandleFrameAdvance(command.FrameCount);
-
-                    case "LISTBP":
+                    // LISTBP / LISTBREAKPOINTS → BreakpointDisassemblyService (migrated)
                     case "LIST_BP":
-                    case "LISTBREAKPOINTS":
-                        return HandleListBreakpoints(command.CpuSel);
+                    case "LISTBREAKPOINTS": return DispatchAlias(command, "LISTBP");
 
-                    case "GETSYMBOL":
-                    case "GET_SYMBOL":
-                        return HandleGetSymbol(command.Address);
+                    // GETSYMBOL → SteppingService (migrated)
+                    case "GET_SYMBOL": return DispatchAlias(command, "GETSYMBOL");
 
-                    case "GETSYMBOLBYNAME":
-                    case "GET_SYMBOL_BY_NAME":
-                        return HandleGetSymbolByName(command.SymbolName);
+                    // GETSYMBOLBYNAME, LISTFUNCTIONS, LISTGLOBALS, GETLOCALS → SymbolDatabaseService (migrated)
+                    case "GET_SYMBOL_BY_NAME": return DispatchAlias(command, "GETSYMBOLBYNAME");
 
-                    case "GETSTACK":
+                    // GETSTACK/GETMODULES → ProcessStateService; GETREGISTER/PINESETREG → RegisterService (migrated)
                     case "GET_STACK":
-                    case "CALLSTACK":
-                        return HandleGetStack();
-
-                    case "GETMODULES":
+                    case "CALLSTACK":         return DispatchAlias(command, "GETSTACK");
                     case "GET_MODULES":
-                    case "IOPMODULES":
-                        return HandleGetModules();
-
-                    case "GETREGISTER":
+                    case "IOPMODULES":        return DispatchAlias(command, "GETMODULES");
                     case "GET_REGISTER":
-                    case "PINEGETREGISTER":
-                        return HandleGetRegister(command.CpuSel, command.RegisterCategory, command.RegisterIndex);
-
-                    case "PINESETREG":
+                    case "PINEGETREGISTER":   return DispatchAlias(command, "GETREGISTER");
                     case "PINE_SETREG":
-                    case "PINESETREGISTER":
-                        return HandlePineSetRegister(command.CpuSel, command.RegisterCategory, command.RegisterIndex, command.RegisterValue);
+                    case "PINESETREGISTER":   return DispatchAlias(command, "PINESETREG");
 
-                    case "LISTFUNCTIONS":
-                    case "LIST_FUNCTIONS":
-                    case "PINEFUNCTIONS":
-                        return HandleListFunctions(command.Offset, command.MaxCount);
-
-                    case "LISTGLOBALS":
-                    case "LIST_GLOBALS":
-                    case "PINEGLOBALS":
-                        return HandleListGlobals(command.Offset, command.MaxCount);
-
-                    case "GETLOCALS":
-                    case "GET_LOCALS":
-                        return HandleGetLocals(command.Address);
-
-                    case "SAVESTATETOFILE":
-                    case "SAVE_STATE_FILE":
-                    case "SAVESTATEFILE":
-                        return HandleSaveStateFile(command.FilePath);
-
-                    case "LOADSTATEFROMFILE":
-                    case "LOAD_STATE_FILE":
-                    case "LOADSTATEFILE":
-                        return HandleLoadStateFile(command.FilePath);
-
-                    case "EXTRACTP2S":
-                    case "EXTRACT_P2S":
-                        return HandleExtractP2s(command.FilePath);
-
-                    case "PINEVERSION":
-                    case "PINE_VERSION":
-                        return HandlePineVersion();
-
-                    case "PINESAVESTATE":
+                    // SaveState slot/file ops → SaveStateService (migrated)
+                    case "SAVE_STATE_FILE":  return DispatchAlias(command, "SAVESTATETOFILE");
+                    case "LOAD_STATE_FILE":  return DispatchAlias(command, "LOADSTATEFROMFILE");
+                    case "PINE_VERSION":     return DispatchAlias(command, "PINEVERSION");
                     case "PINE_SAVESTATE":
-                    case "PINE_SAVE_STATE":
-                        return HandlePineSaveStateSlot(command.StateSlot);
-
-                    case "PINELOADSTATE":
+                    case "PINE_SAVE_STATE":  return DispatchAlias(command, "PINESAVESTATE");
                     case "PINE_LOADSTATE":
-                    case "PINE_LOAD_STATE":
-                        return HandlePineLoadStateSlot(command.StateSlot);
+                    case "PINE_LOAD_STATE":  return DispatchAlias(command, "PINELOADSTATE");
 
-                    case "READMEMREGION":
+                    // EXTRACTP2S → EmulatorControlService (migrated)
+                    case "EXTRACT_P2S": return DispatchAlias(command, "EXTRACTP2S");
+
+                    // READMEMREGION, SCANPATTERN → MemoryService (migrated). The
+                    // alias forms (READ_MEM_REGION, SCAN_PATTERN) are still
+                    // routed here for backwards compatibility — they redirect
+                    // through the dispatcher with the canonical name.
                     case "READ_MEM_REGION":
                     case "READMEM_REGION":
-                        return HandleReadMemRegion(
-                            command.Address    ?? 0,
-                            command.EndAddress ?? 0,
-                            command.SearchPattern,
-                            command.Region);
+                        return _dispatcher.TryDispatch(new CommandMessage
+                        {
+                            Command       = "READMEMREGION",
+                            Address       = command.Address,
+                            EndAddress    = command.EndAddress,
+                            SearchPattern = command.SearchPattern,
+                            Region        = command.Region,
+                        }) ?? CreateErrorResponse("READMEMREGION not registered");
 
-                    case "SCANPATTERN":
                     case "SCAN_PATTERN":
-                        return HandleScanPattern(
-                            command.Address    ?? 0,
-                            command.EndAddress ?? 0,
-                            command.SearchPattern,
-                            command.Region);
+                        return _dispatcher.TryDispatch(new CommandMessage
+                        {
+                            Command       = "SCANPATTERN",
+                            Address       = command.Address,
+                            EndAddress    = command.EndAddress,
+                            SearchPattern = command.SearchPattern,
+                            Region        = command.Region,
+                        }) ?? CreateErrorResponse("SCANPATTERN not registered");
 
-                    case "TRACECALLS":
-                    case "TRACE_CALLS":
-                        return HandleTraceCalls(
-                            command.EndAddress,
-                            command.MaxInstructions ?? 10_000);
+                    // TRACECALLS / RUNUNTILPC → WatchpointTraceService (migrated)
+                    case "TRACE_CALLS":   return DispatchAlias(command, "TRACECALLS");
+                    case "RUN_UNTIL_PC":  return DispatchAlias(command, "RUNUNTILPC");
 
-                    case "RUNUNTILPC":
-                    case "RUN_UNTIL_PC":
-                        return HandleRunUntilPc(command.TargetPc, command.TimeoutMs ?? 10_000);
 
-                    // ── PINE hardware watchpoints ─────────────────────────────
-                    case "PINEADDWATCH":
-                    case "PINE_ADD_WATCH":
-                        return HandlePineAddWatch(
-                            command.CpuSel,
-                            command.Address,
-                            command.EndAddress,
-                            command.WatchCond);
+                    // PINE hardware watchpoints → PineWatchService (migrated)
+                    case "PINE_ADD_WATCH":         return DispatchAlias(command, "PINEADDWATCH");
+                    case "PINE_REMOVE_WATCH":      return DispatchAlias(command, "PINEREMOVEWATCH");
+                    case "PINE_LIST_WATCHES":      return DispatchAlias(command, "PINELISTWATCHES");
+                    case "PINE_CLEAR_ALL_WATCHES": return DispatchAlias(command, "PINECLEARALLWATCHES");
+                    case "PINE_SAVE_SCREENSHOT":   return DispatchAlias(command, "PINESAVESCREENSHOT");
 
-                    case "PINEREMOVEWATCH":
-                    case "PINE_REMOVE_WATCH":
-                        return HandlePineRemoveWatch(
-                            command.CpuSel,
-                            command.Address,
-                            command.EndAddress);
+                    // Pad / controller input → PadService (migrated)
+                    case "PAD_GET_STATE":  return DispatchAlias(command, "PADGETSTATE");
+                    case "PAD_SET_BUTTON": return DispatchAlias(command, "PADSETBUTTON");
+                    case "PAD_SET_ANALOG": return DispatchAlias(command, "PADSETANALOG");
+                    case "PAD_SET_STATE":  return DispatchAlias(command, "PADSETSTATE");
+                    case "PAD_GET_TYPE":   return DispatchAlias(command, "PADGETTYPE");
 
-                    case "PINELISTWATCHES":
-                    case "PINE_LIST_WATCHES":
-                        return HandlePineListWatches(command.CpuSel);
+                    // DEV9 network bridge → NetworkService (migrated). Aliases
+                    // (NET_GET_STATUS / NET_CAPTURE / etc.) bounce through the
+                    // dispatcher with the canonical name.
+                    case "NET_GET_STATUS":   return DispatchAlias(command, "NETGETSTATUS");
+                    case "NET_CAPTURE":      return DispatchAlias(command, "NETCAPTURE");
+                    case "NET_RECV_CAPTURE": return DispatchAlias(command, "NETRECVCAPTURE");
+                    case "NET_INJECT":       return DispatchAlias(command, "NETINJECT");
+                    case "NET_INJECT_TX":    return DispatchAlias(command, "NETINJECTTX");
+                    case "NET_DISASSEMBLE":  return DispatchAlias(command, "NETDISASSEMBLE");
+                    case "NET_SET_FILTER":   return DispatchAlias(command, "NETSETFILTER");
+                    case "NET_GET_STATS":    return DispatchAlias(command, "NETGETSTATS");
 
-                    case "PINECLEARALLWATCHES":
-                    case "PINE_CLEAR_ALL_WATCHES":
-                        return HandlePineClearAllWatches();
+                    // QUERYDB / NAV history / Settings / Snapshots / Memory-card
+                    // → migrated to dedicated services. Aliases bounce through.
+                    case "QUERY_DB":            return DispatchAlias(command, "QUERYDB");
+                    case "GET_NAV_HISTORY":     return DispatchAlias(command, "GETNAVHISTORY");
+                    case "RECORD_NAV":          return DispatchAlias(command, "RECORDNAV");
+                    case "CLEAR_NAV_HISTORY":   return DispatchAlias(command, "CLEARNAVHISTORY");
+                    case "NAVIGATE_TO":         return DispatchAlias(command, "NAVIGATETO");
+                    case "GET_SETTING":         return DispatchAlias(command, "GETSETTING");
+                    case "SET_SETTING":         return DispatchAlias(command, "SETSETTING");
+                    case "GET_ALL_SETTINGS":    return DispatchAlias(command, "GETALLSETTINGS");
+                    case "DELETE_SETTING":      return DispatchAlias(command, "DELETESETTING");
 
-                    case "PINESAVESCREENSHOT":
-                    case "PINE_SAVE_SCREENSHOT":
-                        return HandlePineSaveScreenshot();
+                    // Game-disc + Snapshot-address-history → migrated
+                    case "UPDATE_GAME_DISC":   return DispatchAlias(command, "UPDATEGAMEDISC");
+                    case "GET_ADDRESS_HISTORY": return DispatchAlias(command, "GETADDRESSHISTORY");
 
-                    // ── Pad / controller input ────────────────────────────────
-                    case "PADGETSTATE":
-                    case "PAD_GET_STATE":
-                        return HandlePadGetState(command.PadSlot);
+                    // MCP Memory/Agent/Orchestration → MemoryEntryService /
+                    // AgentService / OrchestrationService (migrated)
 
-                    case "PADSETBUTTON":
-                    case "PAD_SET_BUTTON":
-                        return HandlePadSetButton(command.PadSlot, command.PadButtonIndex, command.PadButtonValue);
-
-                    case "PADSETANALOG":
-                    case "PAD_SET_ANALOG":
-                        return HandlePadSetAnalog(command.PadSlot, command.PadLx, command.PadLy, command.PadRx, command.PadRy);
-
-                    case "PADSETSTATE":
-                    case "PAD_SET_STATE":
-                        return HandlePadSetState(command.PadSlot, command.PadButtons,
-                            command.PadLx, command.PadLy, command.PadRx, command.PadRy,
-                            command.PadPressures);
-
-                    case "PADGETTYPE":
-                    case "PAD_GET_TYPE":
-                        return HandlePadGetType(command.PadSlot);
-
-                    // ── DEV9 network bridge ───────────────────────────────────
-                    case "NETGETSTATUS":
-                    case "NET_GET_STATUS":
-                        return HandleNetGetStatus();
-
-                    case "NETCAPTURE":
-                    case "NET_CAPTURE":
-                        return HandleNetCapture(command.NetCaptureEnable, command.NetCaptureDirection, command.NetCaptureMaxQueue);
-
-                    case "NETRECVCAPTURE":
-                    case "NET_RECV_CAPTURE":
-                        return HandleNetRecvCapture(command.NetMaxPackets);
-
-                    case "NETINJECT":
-                    case "NET_INJECT":
-                        return HandleNetInject(command.NetFrameData);
-
-                    case "NETINJECTTX":
-                    case "NET_INJECT_TX":
-                        return HandleNetInjectTx(command.NetFrameData);
-
-                    case "NETDISASSEMBLE":
-                    case "NET_DISASSEMBLE":
-                        return HandleNetDisassemble(command.NetFrameData);
-
-                    case "NETSETFILTER":
-                    case "NET_SET_FILTER":
-                        return HandleNetSetFilter(command.NetFilterType, command.NetFilterProtocol, command.NetFilterPort, command.NetFilterIP);
-
-                    case "NETGETSTATS":
-                    case "NET_GET_STATS":
-                        return HandleNetGetStats();
-
-                    // ── Database query (read-only) ────────────────────────────
-                    case "QUERYDB":
-                    case "QUERY_DB":
-                        return HandleQueryDb(command.SqlQuery);
-
-                    // ── Game Disc ─────────────────────────────────────────────
-                    case "UPDATEGAMEDISC":
-                    case "UPDATE_GAME_DISC":
-                        return HandleUpdateGameDisc(command.GameSerial, command.IsoPath, command.GameCrc, command.GameTitle);
-
-                    // ── Navigation history ────────────────────────────────────
-                    case "GETNAVHISTORY":
-                    case "GET_NAV_HISTORY":
-                        return HandleGetNavHistory();
-
-                    case "RECORDNAV":
-                    case "RECORD_NAV":
-                        return HandleRecordNav(command.Address, command.NavSource ?? "user");
-
-                    case "CLEARNAVHISTORY":
-                    case "CLEAR_NAV_HISTORY":
-                        return HandleClearNavHistory();
-
-                    // ── Navigate VS Code disasm view ──────────────────────────
-                    case "NAVIGATETO":
-                    case "NAVIGATE_TO":
-                        return HandleNavigateTo(command.Address);
-
-                    // ── Snapshot address history ──────────────────────────────
-                    case "GETADDRESSHISTORY":
-                    case "GET_ADDRESS_HISTORY":
-                        return HandleGetAddressHistory(command.Address, command.SnapshotDir);
-
-                    // ── Settings (DB-backed) ──────────────────────────────────
-                    case "GETSETTING":
-                    case "GET_SETTING":
-                        return HandleGetSetting(command.SettingKey);
-
-                    case "SETSETTING":
-                    case "SET_SETTING":
-                        return HandleSetSetting(command.SettingKey, command.SettingValue);
-
-                    case "GETALLSETTINGS":
-                    case "GET_ALL_SETTINGS":
-                        return HandleGetAllSettings(command.SettingPrefix);
-
-                    case "DELETESETTING":
-                    case "DELETE_SETTING":
-                        return HandleDeleteSetting(command.SettingKey);
-
-                    // ── Snapshots (DB-backed) ─────────────────────────────────
-                    case "GETSNAPSHOTS":
-                    case "GET_SNAPSHOTS":
-                        return HandleGetSnapshots(command.IsoName);
-
-                    // ── MCP Memory Manager (DB-backed) ───────────────────────
-                    case "MCPMEMORY_LIST":
-                    case "MCPMEMORYLIST":
-                        return HandleMcpMemoryList(command.GameId);
-
-                    case "MCPMEMORY_GET":
-                    case "MCPMEMORYGET":
-                        return HandleMcpMemoryGet(command.McpMemoryId);
-
-                    case "MCPMEMORY_ADD":
-                    case "MCPMEMORYADD":
-                        return HandleMcpMemoryAdd(command.McpMemoryName, command.McpMemoryContent, command.GameId, command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_UPDATE":
-                    case "MCPMEMORYUPDATE":
-                        return HandleMcpMemoryUpdate(command.McpMemoryId, command.McpMemoryName, command.McpMemoryContent, command.GameId, command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_DELETE":
-                    case "MCPMEMORYDELETE":
-                        return HandleMcpMemoryDelete(command.McpMemoryId);
-
-                    case "MCPMEMORY_IMPORT":
-                    case "MCPMEMORYIMPORT":
-                        return HandleMcpMemoryImport(command.FilePath);
-
-                    case "MCPMEMORY_EXPORT":
-                    case "MCPMEMORYEXPORT":
-                        return HandleMcpMemoryExport(command.McpMemoryId, command.OutputPath);
-
-                    case "MCPMEMORY_UPSERT":
-                    case "MCPMEMORYUPSERT":
-                        return HandleMcpMemoryUpsert(command.McpMemoryName, command.McpMemoryContent, command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_DELETE_BY_NAME":
-                    case "MCPMEMORYDELETEBYNAME":
-                        return HandleMcpMemoryDeleteByName(command.McpMemoryName);
-
-                    case "MCPMEMORY_LIST_FOR_AGENT":
-                    case "MCPMEMORYLISTFORAGENT":
-                        return HandleMcpMemoryListForAgent(command.McpMemoryAgentId);
-
-                    case "MCPMEMORY_LIST_SHARED":
-                    case "MCPMEMORYLISTSHARED":
-                        return HandleMcpMemoryListShared();
-
-                    // ── MCP Agent Profiles (DB-backed) ───────────────────────
-                    case "MCPAGENT_LIST":
-                    case "MCPAGENTLIST":
-                        return HandleMcpAgentList();
-
-                    case "MCPAGENT_GET":
-                    case "MCPAGENTGET":
-                        return HandleMcpAgentGet(command.McpAgentId);
-
-                    case "MCPAGENT_ADD":
-                    case "MCPAGENTADD":
-                        return HandleMcpAgentAdd(command);
-
-                    case "MCPAGENT_UPDATE":
-                    case "MCPAGENTUPDATE":
-                        return HandleMcpAgentUpdate(command);
-
-                    case "MCPAGENT_DELETE":
-                    case "MCPAGENTDELETE":
-                        return HandleMcpAgentDelete(command.McpAgentId);
-
-                    case "MCPAGENT_IMPORT":
-                    case "MCPAGENTIMPORT":
-                        return HandleMcpAgentImport(command.FilePath);
-
-                    case "MCPAGENT_EXPORT":
-                    case "MCPAGENTEXPORT":
-                        return HandleMcpAgentExport(command.McpAgentId, command.OutputPath);
-
-                    case "MCPORCHESTRATION_LIST":
-                    case "MCPORCHESTRATIONLIST":
-                        return HandleMcpOrchestrationList();
-
-                    case "MCPORCHESTRATION_GET":
-                    case "MCPORCHESTRATIONGET":
-                        return HandleMcpOrchestrationGet(command.McpOrchestrationId);
-
-                    case "MCPORCHESTRATION_ADD":
-                    case "MCPORCHESTRATIONADD":
-                        return HandleMcpOrchestrationAdd(command);
-
-                    case "MCPORCHESTRATION_UPDATE":
-                    case "MCPORCHESTRATIONUPDATE":
-                        return HandleMcpOrchestrationUpdate(command);
-
-                    case "MCPORCHESTRATION_DELETE":
-                    case "MCPORCHESTRATIONDELETE":
-                        return HandleMcpOrchestrationDelete(command.McpOrchestrationId);
-
-                    case "MCPORCHESTRATION_IMPORT":
-                    case "MCPORCHESTRATIONIMPORT":
-                        return HandleMcpOrchestrationImport(command.FilePath);
-
-                    case "MCPORCHESTRATION_EXPORT":
-                    case "MCPORCHESTRATIONEXPORT":
-                        return HandleMcpOrchestrationExport(command.McpOrchestrationId, command.OutputPath);
-
-                    case "MCPORCHESTRATION_SETACTIVE":
-                        return HandleMcpOrchestrationSetActive(command.McpOrchestrationId);
-
-                    // ── MCP Config commands ───────────────────────────────────────────
-                    case "MCPCONFIG_LIST":
-                        return HandleMcpConfigList();
-
-                    case "MCPCONFIG_UPDATE":
-                        return HandleMcpConfigUpdate(command.McpConfigKey, command.McpConfigValue);
+                    // MCP Config → McpConfigService (migrated)
 
                     // ── AI session lifecycle ───────────────────────────────────────────
                     case "SESSION_START":
                         return CreateSuccessResponse("AI session started");
 
-                    // ── Batch label entry ──────────────────────────────────────────────
-                    case "ADDLABELENTRIES":
-                        return HandleAddLabelEntries(command.WorkspaceDir, command.GameId, command.SetName, command.LabelEntries);
+                    // ADDLABELENTRIES → LabelManagerService (migrated)
 
                     default:
                         // Echo for unknown commands
@@ -1303,6 +875,20 @@ namespace CodeDesigner.Ps2.Bridge
                 return CreateErrorResponse($"Error processing command: {ex.Message}");
             }
         }
+        /// <summary>
+        /// Re-dispatch a command under a different (canonical) name. Used by
+        /// the legacy switch to forward snake_case aliases to the registered
+        /// canonical command name without duplicating handler logic.
+        /// </summary>
+        private string DispatchAlias(CommandMessage original, string canonicalName)
+        {
+            // Mutate the existing message's Command in-place so all the
+            // typed payload fields carry through unchanged.
+            original.Command = canonicalName;
+            return _dispatcher.TryDispatch(original)
+                ?? CreateErrorResponse($"{canonicalName} is not registered with the dispatcher");
+        }
+
         private string CreateSuccessResponse(string message)
         {
             var response = new CommandResponse

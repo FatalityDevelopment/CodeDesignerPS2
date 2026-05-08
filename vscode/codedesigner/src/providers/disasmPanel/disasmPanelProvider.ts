@@ -88,6 +88,12 @@ const ARCHIVE_BRANCH      = 'main';
 export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private webview?: vscode.Webview;
     private emulatorTerminal?: vscode.Terminal;
+    /**
+     * Terminal hosting CodeDesigner.Ps2.Emulator.exe (built-in emulator
+     * process). Set by {@link handleStartEmulatorProcess}; cleared by the
+     * onDidCloseTerminal hook so a subsequent Run respawns the process.
+     */
+    private emulatorProcessTerminal?: vscode.Terminal;
     private settings: EmuSettings = {};
     private workspaceRoot: string = '';
     private snapshots: SnapshotEntry[] = [];
@@ -205,6 +211,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     getOutputChannel().info('Emulator terminal closed.');
                     try { this.socketClient.disconnect(); } catch { /* ignore */ }
                     this.cleanupProcess();
+                }
+                if (t === this.emulatorProcessTerminal) {
+                    getOutputChannel().info('Built-in emulator process exited.');
+                    this.emulatorProcessTerminal = undefined;
                 }
             })
         );
@@ -512,6 +522,21 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const exeName = process.platform === 'win32'
             ? 'CodeDesigner.Ps2.Bridge.exe'
             : 'CodeDesigner.Ps2.Bridge';
+        const candidate = path.join(installDir, exeName);
+        return fs.existsSync(candidate) ? candidate : null;
+    }
+
+    /**
+     * Returns the path to CodeDesigner.Ps2.Emulator.exe (the built-in PS2
+     * emulator host) in the install directory, or null if it does not exist.
+     * Symmetric with {@link findBridgeExe}; the post-build deploy step in the
+     * Emulator project copies the exe alongside Bridge.
+     */
+    private static findEmulatorExe(): string | null {
+        const installDir = DisasmPanelProvider.getInstallDirectory();
+        const exeName = process.platform === 'win32'
+            ? 'CodeDesigner.Ps2.Emulator.exe'
+            : 'CodeDesigner.Ps2.Emulator';
         const candidate = path.join(installDir, exeName);
         return fs.existsSync(candidate) ? candidate : null;
     }
@@ -1173,6 +1198,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private cleanupProcess(): void {
         this.stopJokerPadPoll();
         this.emulatorTerminal = undefined;
+        // Tear down the built-in emulator process if it's still running so a
+        // subsequent Run respawns it cleanly.
+        if (this.emulatorProcessTerminal) {
+            try { this.emulatorProcessTerminal.dispose(); } catch { /* ignore */ }
+            this.emulatorProcessTerminal = undefined;
+        }
         this._paused = false;
         this._bridgeMode = false;
         this._pendingRunMode = null;
@@ -1229,6 +1260,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 if (mode === 'emulator') {
                     const resolvedBios = biosPath ? this.resolvePath(biosPath) : undefined;
                     const resolvedDisc = gamePath ? this.resolvePath(gamePath) : undefined;
+
+                    // The internal emulator runs in its own process — spawn
+                    // CodeDesigner.Ps2.Emulator.exe ourselves and let Bridge
+                    // simply connect to its InternalPineSocket. Mirrors how
+                    // we launch PCSX2 ourselves before sending STARTPCSX2.
+                    const spawned = this.handleStartEmulatorProcess(resolvedBios, resolvedDisc);
+                    if (!spawned) { return; }
+
                     out.info('Sending STARTEMULATOR command to control server...');
                     await this.socketClient.startEmulator(resolvedBios, resolvedDisc);
                     this._bridgeMode = false;
@@ -1306,6 +1345,56 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             shellArgs: args,
         });
         terminal.show(true);
+    }
+
+    /**
+     * Launch the built-in emulator (CodeDesigner.Ps2.Emulator.exe) in a
+     * VSCode terminal with the supplied BIOS / disc args, then leave it
+     * running so the Bridge can connect to its InternalPineSocket via
+     * STARTEMULATOR. Returns false when the binary cannot be found —
+     * caller aborts rather than sending STARTEMULATOR to a Bridge that
+     * has nothing to connect to.
+     *
+     * Symmetric with {@link handleStartPcsx2}: the front end owns
+     * process lifecycle for both runtimes; the Bridge is purely a
+     * router that connects to whichever process is already up.
+     */
+    private handleStartEmulatorProcess(biosPath?: string, discPath?: string): boolean {
+        const out = getOutputChannel();
+
+        // Don't spawn a second instance if one is already running from the
+        // current VS Code session.
+        if (this.emulatorProcessTerminal) {
+            out.info('Built-in emulator process is already running; reusing it.');
+            return true;
+        }
+
+        const exe = DisasmPanelProvider.findEmulatorExe();
+        if (!exe) {
+            const installDir = DisasmPanelProvider.getInstallDirectory();
+            const msg = `CodeDesigner.Ps2.Emulator binary not found in ${installDir}. Build the project first to deploy it.`;
+            out.error(msg);
+            vscode.window.showErrorMessage(msg);
+            return false;
+        }
+
+        const args: string[] = [];
+        if (biosPath && fs.existsSync(biosPath)) { args.push('--bios', biosPath); }
+        if (discPath && fs.existsSync(discPath)) { args.push('--disc', discPath); }
+
+        const preview = [exe, ...args]
+            .map(v => v.includes(' ') ? `"${v}"` : v)
+            .join(' ');
+        out.info(`Starting built-in emulator: ${preview}`);
+
+        const terminal = vscode.window.createTerminal({
+            name: 'CodeDesigner Emulator',
+            shellPath: exe,
+            shellArgs: args,
+        });
+        terminal.show(false);
+        this.emulatorProcessTerminal = terminal;
+        return true;
     }
 
     /**

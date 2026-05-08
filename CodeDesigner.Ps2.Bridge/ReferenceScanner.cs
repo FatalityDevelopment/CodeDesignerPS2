@@ -3,10 +3,18 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using CodeDesigner.Ps2.Common;
-using CodeDesigner.Ps2.Emulator;
 
 namespace CodeDesigner.Ps2.Bridge
 {
+    /// <summary>
+    /// PS2 EE main RAM size — duplicated locally to avoid an EmulatorCore
+    /// dependency. Matches CodeDesigner.Ps2.EmulatorCore.PS2MemoryBus.MainRamSize.
+    /// </summary>
+    internal static class ReferenceScannerConstants
+    {
+        public const uint MainRamSize = 32 * 1024 * 1024;
+    }
+
     [Flags]
     internal enum ReferenceScanKinds
     {
@@ -626,7 +634,7 @@ namespace CodeDesigner.Ps2.Bridge
             uint normalized = NormalizeComparableAddress(target);
             aliases.Add(normalized);
 
-            if (normalized < (uint)PS2MemoryBus.MainRamSize)
+            if (normalized < ReferenceScannerConstants.MainRamSize)
             {
                 aliases.Add(0x80000000u | normalized);
                 aliases.Add(0xA0000000u | normalized);
