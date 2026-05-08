@@ -152,8 +152,7 @@ spf_hex_rev_done:
 
 spf_write_hex_zero:
     beq   $t3, $zero, :spf_finish_write
-    sb    $zero, 0($t0)    // '0' char = 48 but we used 0; correct to ascii
-    sb    $48, 0($t0)
+    sb    $48, 0($t0)      // '0' character (ASCII 48)
     addiu $t0, $t0, 1
     addiu $v0, $v0, 1
     addiu $t1, $t1, 1

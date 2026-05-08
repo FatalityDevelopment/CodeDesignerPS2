@@ -181,15 +181,34 @@ atoi_maybe_hex:
     nop
 atoi_hex:
     addiu $a0, $a0, 2
-    addi $v0, $zero, $0
+    addi $v0, $zero, 0
 atoi_hex_loop:
     lb   $t3, 0($a0)
     beq  $t3, $zero, :atoi_apply_sign
-    // convert hex digit
-    blt  $t3, $58, :hex_digit_digit
-    blt  $t3, $71, :hex_digit_upper
-    blt  $t3, $103, :hex_digit_lower
-    j    :atoi_apply_sign
+    // convert hex digit (check ranges)
+    // digits 0-9 are ASCII 48-57
+    addi $t4, $zero, 48
+    addi $t5, $zero, 57
+    slt  $t6, $t3, $t4
+    bne  $t6, $zero, :hex_check_upper
+    slt  $t6, $t5, $t3
+    beq  $t6, $zero, :hex_digit_digit
+hex_check_upper:
+    // A-F are ASCII 65-70 or a-f are 97-102
+    addi $t4, $zero, 65
+    addi $t5, $zero, 70
+    slt  $t6, $t3, $t4
+    bne  $t6, $zero, :hex_check_lower
+    slt  $t6, $t5, $t3
+    beq  $t6, $zero, :hex_digit_upper
+hex_check_lower:
+    addi $t4, $zero, 97
+    addi $t5, $zero, 102
+    slt  $t6, $t3, $t4
+    bne  $t6, $zero, :atoi_apply_sign
+    slt  $t6, $t5, $t3
+    bne  $t6, $zero, :atoi_apply_sign
+    j    :hex_digit_lower
     nop
 hex_digit_digit:
     addiu $t3, $t3, -48
@@ -208,52 +227,66 @@ hex_acc:
     j    :atoi_hex_loop
     nop
 atoi_dec:
-    addi $v0, $zero, $0
+    addi $v0, $zero, 0     // init accumulator
+    addi $t2, $zero, 10    // load constant 10 for multiplier
 atoi_dec_loop:
     lb   $t3, 0($a0)
     beq  $t3, $zero, :atoi_apply_sign
-    blt  $t3, $48, :atoi_apply_sign
-    bgt  $t3, $57, :atoi_apply_sign
-    addiu $t3, $t3, -48
-    muli $v0, $v0, 10
-    addu $v0, $v0, $t3
+    addi $t4, $zero, 48
+    addi $t5, $zero, 57
+    slt  $t6, $t3, $t4
+    bne  $t6, $zero, :atoi_apply_sign
+    slt  $t6, $t5, $t3
+    bne  $t6, $zero, :atoi_apply_sign
+    addiu $t3, $t3, -48         // convert ASCII to digit value
+    mult $v0, $t2               // v0 * 10
+    mflo $v0                    // get result (low 32 bits)
+    addu $v0, $v0, $t3          // add new digit
     addiu $a0, $a0, 1
     j    :atoi_dec_loop
     nop
 atoi_apply_sign:
-    mul  $v0, $v0, $t1
+    mult $v0, $t1
+    mflo $v0           // get result
     jr   $ra
     nop
 atoi_zero:
-    addi $v0, $zero, $0
+    addi $v0, $zero, 0
     jr   $ra
     nop
 
 // itoa_dec(value, dst) -> write decimal string into dst, returns dst in v0
 lib_str_itoa:
     // $a0 = value, $a1 = dst
-    addi $v0, $a1, $0
+    addi $v0, $a1, 0
     // handle zero
     beq  $a0, $zero, :itoa_write_zero
-    addi $t0, $a1, $0     // dst ptr
-    addi $t1, $zero, $0   // digit count
+    addi $t0, $a1, 0           // dst ptr
+    addi $t1, $zero, 0         // digit count
     // handle negative (treat $a0 as signed)
     bltz $a0, :itoa_negative
 itoa_loop:
-    // get digit = value % 10  (simple repeated subtract is expensive; we use div pseudo)
-    div  $a0, $zero, $a0, 10  // pseudo: assume assembler supports dividing with immediate; if not replace with helper
-    mfhi $t2
-    mflo $a0
-    addiu $t2, $t2, 48
-    sb   $t2, 0($t0)
+    // get digit = value % 10
+    // Divide by 10 using mult/div helper
+    // For simplicity, use mod by repeated subtraction (slow but works)
+    addi $t2, $zero, 10
+    div  $a0, $t2              // a0 / 10; quotient in LO, remainder in HI
+    mfhi $t3                   // remainder = a0 % 10
+    mflo $a0                   // quotient for next iteration
+    addiu $t3, $t3, 48         // convert to ASCII digit
+    sb   $t3, 0($t0)
     addiu $t0, $t0, 1
     addiu $t1, $t1, 1
     bne  $a0, $zero, :itoa_loop
+    nop
     j    :itoa_finish
     nop
 itoa_negative:
-    negu $a0, $a0
+    subu $a0, $zero, $a0       // negate: use subu instead of negu
     addi $t3, $zero, 1
+    sb   $45, 0($t0)           // write '-' character
+    addiu $t0, $t0, 1
+    addiu $t1, $t1, 1
     j    :itoa_loop
     nop
 itoa_write_zero:

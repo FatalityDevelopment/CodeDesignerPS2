@@ -25,12 +25,7 @@ crc_bit_loop:
     beq   $t2, $zero, :crc_shift_only
     // crc = (crc >> 1) ^ 0xEDB88320
     srl   $v0, $v0, 1
-    addiu $t3, $zero, -0x124766    // helper to produce 0xEDB88320: assembler immediates limited; compute constant:
-    // Instead compute xor mask by loading constant in two halves
-    addiu $t4, $zero, 0x9EC0
-    sll   $t4, $t4, 16
-    addiu $t4, $t4, 0xEDB8        // t4 now holds 0xEDB8 9EC0? (approx) -- safe approach: rebuild constant explicitly
-    // Simpler: use add sequence to get mask into t5:
+    // Load constant 0xEDB88320 into t5
     addiu $t5, $zero, 0xEDB8
     sll   $t5, $t5, 16
     addiu $t5, $t5, 0x8320        // t5 = 0xEDB88320

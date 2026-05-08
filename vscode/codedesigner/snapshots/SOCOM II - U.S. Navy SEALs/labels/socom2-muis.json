@@ -1,0 +1,247 @@
+{
+  "setName": "socom2-muis",
+  "gameId": "SCUS-97275",
+  "isBuiltIn": false,
+  "entries": [
+    {
+      "address": "0x0031AE88",
+      "name": "UniverseStatusParser",
+      "comment": "Parses SERVER_APP payload into universe list entry; lw a1,0x18(a3) must=0 or handler skips; calls UniverseListAdd then MasConnectionInit if payload[0x2B4]!=0",
+      "type": "Function"
+    },
+    {
+      "address": "0x0031AA80",
+      "name": "UniverseSearch",
+      "comment": "Search list by displayName; lb entry\u002B0x338: if zero passes immediately (beqz); else strcmp(\u0022r0004\u0022,entry\u002B0x338)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0031C1E0",
+      "name": "UniverseListAdd",
+      "comment": "Add entry to universe list; stride=0x3D8; sw v1,0x4(s5) increments gUniverseCount; checks capacity (max 16)",
+      "type": "Function"
+    },
+    {
+      "address": "0x0019AA00",
+      "name": "ServerRegistryLookup",
+      "comment": "Lookup server registry by hostname key (a0) into table (a1); returns ptr or 0; populates entry\u002B0x338 (version) and entry\u002B0x358 (patch URL) if found",
+      "type": "Function"
+    },
+    {
+      "address": "0x00277690",
+      "name": "UniverseConnectDispatch",
+      "comment": "Calls UniverseSearch; if count=0 or not found falls back to ServerListConnect with a1=str_SERVER_LIST",
+      "type": "Function"
+    },
+    {
+      "address": "0x003A5AD0",
+      "name": "ServerListConnect",
+      "comment": "Connect using named entry from 256-entry server registry at 0x00725EF0; a1=key string e.g. \u0022SERVER_LIST\u0022",
+      "type": "Function"
+    },
+    {
+      "address": "0x00311560",
+      "name": "CheckStatusCode",
+      "comment": "Returns v0=(a1==0); gates UniverseStatusParser; any non-zero status code skips entire parse",
+      "type": "Function"
+    },
+    {
+      "address": "0x00351080",
+      "name": "MasConnectionInit",
+      "comment": "Init MAS TCP connection struct; called from UniverseStatusParser when payload[0x2B4]!=0; uses MAS hostname from entry\u002B0x09C",
+      "type": "Function"
+    },
+    {
+      "address": "0x00350F50",
+      "name": "MasConnectionConnect",
+      "comment": "Start MAS TCP connect; calls 0x002EC880; a1=0 or hostname string",
+      "type": "Function"
+    },
+    {
+      "address": "0x00199800",
+      "name": "StringCopyN",
+      "comment": "strncpy: a0=dst, a1=src, a2=maxLen",
+      "type": "Function"
+    },
+    {
+      "address": "0x00198F18",
+      "name": "StringCompare",
+      "comment": "strcmp; used in UniverseSearch for display name and version string match",
+      "type": "Function"
+    },
+    {
+      "address": "0x00453120",
+      "name": "gUniverseListMgmt",
+      "comment": "Universe list management struct: [\u002B0x00]=capacity(0x10), [\u002B0x04]=count, [\u002B0x08]=base ptr to entries",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00453124",
+      "name": "gUniverseCount",
+      "comment": "Current populated entry count; 0 causes SERVER_LIST fallback in UniverseConnectDispatch",
+      "type": "Value"
+    },
+    {
+      "address": "0x00453128",
+      "name": "gUniverseBase",
+      "comment": "Ptr to first universe entry; entry stride=0x3D8; max 16 entries; currently points to 0x00770650",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00453150",
+      "name": "gUniverseConnectFlag",
+      "comment": "Set to 1 after SERVER_LIST fallback path taken (0x0031B200) or status parse skipped (0x0031B218)"
+    },
+    {
+      "address": "0x00421998",
+      "name": "str_r0004",
+      "comment": "Patch version string; compared in UniverseSearch against entry\u002B0x338; empty entry\u002B0x338 also passes",
+      "type": "String"
+    },
+    {
+      "address": "0x004219B0",
+      "name": "str_UniverseStatusList",
+      "type": "String"
+    },
+    {
+      "address": "0x004219C8",
+      "name": "str_SERVER_LIST",
+      "comment": "Key used to look up fallback MAS server entry when universe list is empty",
+      "type": "String"
+    },
+    {
+      "address": "0x00453128:\u002B0x001c",
+      "parentAddress": "0x00453128",
+      "offset": 28,
+      "name": "displayName",
+      "comment": "Universe display name (128 bytes); compared in UniverseSearch via strcmp",
+      "type": "String"
+    },
+    {
+      "address": "0x00453128:\u002B0x009c",
+      "parentAddress": "0x00453128",
+      "offset": 156,
+      "name": "masHostname",
+      "comment": "MAS hostname/IP (128 bytes); PS2 connects to MAS at this address",
+      "type": "String"
+    },
+    {
+      "address": "0x00453128:\u002B0x011c",
+      "parentAddress": "0x00453128",
+      "offset": 284,
+      "name": "masPort",
+      "comment": "MAS port (int32 LE)",
+      "type": "Value"
+    },
+    {
+      "address": "0x00453128:\u002B0x0120",
+      "parentAddress": "0x00453128",
+      "offset": 288,
+      "name": "description",
+      "comment": "Universe description / news string (256 bytes)",
+      "type": "String"
+    },
+    {
+      "address": "0x00453128:\u002B0x0220",
+      "parentAddress": "0x00453128",
+      "offset": 544,
+      "name": "statusDot",
+      "comment": "Status dot (1=green)",
+      "type": "Value"
+    },
+    {
+      "address": "0x00453128:\u002B0x0224",
+      "parentAddress": "0x00453128",
+      "offset": 548,
+      "name": "userCount",
+      "comment": "Current user count displayed on server select",
+      "type": "Value"
+    },
+    {
+      "address": "0x00453128:\u002B0x0228",
+      "parentAddress": "0x00453128",
+      "offset": 552,
+      "name": "maxUsers",
+      "comment": "Max users (0x2710=10000)",
+      "type": "Value"
+    },
+    {
+      "address": "0x00453128:\u002B0x02b4",
+      "parentAddress": "0x00453128",
+      "offset": 692,
+      "name": "masEnableFlag",
+      "comment": "MAS enable flag (non-zero = initiate MAS TCP connection after entry added)"
+    },
+    {
+      "address": "0x00453128:\u002B0x02b5",
+      "parentAddress": "0x00453128",
+      "offset": 693,
+      "name": "versionPatchStr",
+      "comment": "Version/patch string from payload (128 bytes); e.g. \u0022r0004 http://patch...\u0022; used by ServerRegistryLookup to populate versionStr",
+      "type": "String"
+    },
+    {
+      "address": "0x00453128:\u002B0x0338",
+      "parentAddress": "0x00453128",
+      "offset": 824,
+      "name": "versionStr",
+      "comment": "Version string set by ServerRegistryLookup; if empty (zero byte) UniverseSearch passes automatically",
+      "type": "String"
+    },
+    {
+      "address": "0x00453128:\u002B0x0358",
+      "parentAddress": "0x00453128",
+      "offset": 856,
+      "name": "patchUrl",
+      "comment": "Patch download URL set by ServerRegistryLookup (128 bytes); e.g. \u0022http://patch.psrewired.com/s2/r0004/\u0022",
+      "type": "String"
+    },
+    {
+      "address": "0x001CC750",
+      "name": "gServerRegistryContext",
+      "comment": "Global pointer to server registry context; ServerRegistryLookup loads [0x001CC750] then uses \u002B0x005c.",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x001CC750:\u002B0x005c",
+      "parentAddress": "0x001CC750",
+      "offset": 92,
+      "name": "registryListHead",
+      "comment": "Pointer field at registry context \u002B0x005c used by ServerRegistryLookup; observed null in current run.",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x0031B0A8",
+      "name": "UniverseStatusAddContinue",
+      "comment": "Continuation after second ServerRegistryLookup null branch; control continues here into UniverseListAdd setup."
+    },
+    {
+      "address": "0x003FFD2C",
+      "name": "UniverseStatusDispatchWrapper",
+      "comment": "LobbyExt msg 0x04 wrapper; checks masEnableFlag, sets status bit, then dispatches via function pointer at 0x0040C9A0.",
+      "type": "Function"
+    },
+    {
+      "address": "0x0040C9A0",
+      "name": "pUniverseStatusParser",
+      "comment": "Dispatch table slot containing the UniverseStatusParser function pointer.",
+      "type": "Pointer"
+    },
+    {
+      "address": "0x00421AD0",
+      "name": "str_MP_MEDIUS_ERROR",
+      "comment": "Embedded string within the data block used by the second ServerRegistryLookup call context.",
+      "type": "String"
+    },
+    {
+      "address": "0x0031B218",
+      "name": "UniverseStatusStatusFailExit",
+      "comment": "Early parser exit path taken when CheckStatusCode returns zero; sets gUniverseConnectFlag=1 and returns."
+    },
+    {
+      "address": "0x00421AC0",
+      "name": "MpMediusErrorLookupData",
+      "comment": "Data block passed as the second ServerRegistryLookup key/context; begins with two 0x0920 words and contains MP_MEDIUS_ERROR at \u002B0x10."
+    }
+  ]
+}

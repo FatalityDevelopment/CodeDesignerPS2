@@ -22,12 +22,12 @@
 // -----------------------------
 lib_str_strlen:
     // expects: $a0 -> pointer to string
-    addi $v0, $zero, $0       // length = 0
+    addi $v0, $zero, 0        // length = 0
 strlen_loop:
-    lb   $t0, $0($a0)         // load byte
+    lb   $t0, 0($a0)          // load byte
     beq  $t0, $zero, :strlen_done
-    addiu $v0, $v0, $1
-    addiu $a0, $a0, $1
+    addiu $v0, $v0, 1
+    addiu $a0, $a0, 1
     j    :strlen_loop
     nop
 strlen_done:
@@ -40,13 +40,13 @@ strlen_done:
 // -----------------------------
 lib_strcpy:
     // $a0 = dst, $a1 = src
-    addi $v0, $a0, $0         // return dst in v0
+    addi $v0, $a0, 0          // return dst in v0
 copy_loop:
-    lb   $t0, $0($a1)         // load src byte
-    sb   $t0, $0($a0)         // store to dst
+    lb   $t0, 0($a1)          // load src byte
+    sb   $t0, 0($a0)          // store to dst
     beq  $t0, $zero, :copy_done
-    addiu $a0, $a0, $1
-    addiu $a1, $a1, $1
+    addiu $a0, $a0, 1
+    addiu $a1, $a1, 1
     j    :copy_loop
     nop
 copy_done:
@@ -59,21 +59,21 @@ copy_done:
 // -----------------------------
 lib_strcat:
     // $a0 = dst, $a1 = src
-    addi $v0, $a0, $0         // return dst in v0
+    addi $v0, $a0, 0          // return dst in v0
     // find end of dst
 strcat_find_end:
-    lb   $t0, $0($a0)
+    lb   $t0, 0($a0)
     beq  $t0, $zero, :strcat_copy
-    addiu $a0, $a0, $1
+    addiu $a0, $a0, 1
     j    :strcat_find_end
     nop
 strcat_copy:
     // now $a0 points at the terminator byte of dst
-    lb   $t0, $0($a1)
-    sb   $t0, $0($a0)
+    lb   $t0, 0($a1)
+    sb   $t0, 0($a0)
     beq  $t0, $zero, :strcat_done
-    addiu $a0, $a0, $1
-    addiu $a1, $a1, $1
+    addiu $a0, $a0, 1
+    addiu $a1, $a1, 1
     j    :strcat_copy
     nop
 strcat_done:
@@ -87,8 +87,8 @@ strcat_done:
 lib_strcmp:
     // $a0 = s1, $a1 = s2
 strcmp_loop:
-    lb   $t0, $0($a0)         // c1
-    lb   $t1, $0($a1)         // c2
+    lb   $t0, 0($a0)          // c1
+    lb   $t1, 0($a1)          // c2
     beq  $t0, $t1, :strcmp_check_zero
     // not equal: compute signed difference (byte signedness: ascii 0..127 safe)
     subu $v0, $t0, $t1
@@ -96,8 +96,8 @@ strcmp_loop:
     nop
 strcmp_check_zero:
     beq  $t0, $zero, :strcmp_equal
-    addiu $a0, $a0, $1
-    addiu $a1, $a1, $1
+    addiu $a0, $a0, 1
+    addiu $a1, $a1, 1
     j    :strcmp_loop
     nop
 strcmp_equal:
@@ -118,6 +118,7 @@ lib_str_replace_char:
 replace_loop:
     lb   $t0, $0($a0)
     beq  $t0, $zero, :replace_done
+    nop
     beq  $t0, $a1, :replace_do
     addiu $a0, $a0, $1
     j    :replace_loop

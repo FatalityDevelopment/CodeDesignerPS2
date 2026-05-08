@@ -18,9 +18,9 @@ _heap_end:    // alias to second word
 
 lib_heap_init:
     // a0 = base, a1 = size
-    addi  $v0, $zero, $0
+    addi  $v0, $zero, 0
     beq   $a0, $zero, :heap_init_fail
-    addiu $t0, $a0, $zero
+    addiu $t0, $a0, 0
     sw    $t0, 0(_heap_state)        // store cur
     addu  $t1, $a0, $a1
     sw    $t1, 4(_heap_state)        // store end
