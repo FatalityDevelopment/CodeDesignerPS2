@@ -4,35 +4,83 @@
   "scopeName": "source.cds",
   "patterns": [
     { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#functionDefinitions" },
+    { "include": "#externFunctionDeclarations" },
+    { "include": "#preprocessor" },
     { "include": "#labelReferences" },
     { "include": "#labels" },
+    { "include": "#functionCalls" },
     { "include": "#directives" },
+    { "include": "#sidecars" },
     { "include": "#pseudoInstructions" },
     { "include": "#instructions" },
     { "include": "#hexLiterals" },
     { "include": "#registers" },
-    { "include": "#numbers" },
-    { "include": "#strings" }
+    { "include": "#numbers" }
   ],
   "repository": {
     "comments": {
       "patterns": [
+        { "name": "comment.line.double-slash.cds", "match": "//.*$" },
+        { "name": "comment.line.semicolon.cds", "match": ";.*$" },
+        { "name": "comment.line.hash.cds", "match": "#.*$" },
+        { "name": "comment.block.cds", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+
+    "strings": {
+      "patterns": [
         {
-          "name": "comment.line.double-slash.cds",
-          "match": "//.*$"
-        },
+          "name": "string.quoted.double.cds",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.cds", "match": "\\\\." }
+          ]
+        }
+      ]
+    },
+
+    "functionDefinitions": {
+      "patterns": [
         {
-          "name": "comment.line.semicolon.cds",
-          "match": ";.*$"
-        },
+          "comment": "function NAME(p1, p2, ...) {  — highlights NAME as definition and each parameter as a parameter binding.",
+          "match": "^\\s*(function)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*(\\{)?",
+          "captures": {
+            "1": { "name": "keyword.declaration.function.cds" },
+            "2": { "name": "entity.name.function.definition.cds" },
+            "3": {
+              "patterns": [
+                {
+                  "match": "[A-Za-z_][A-Za-z0-9_]*",
+                  "name": "variable.parameter.cds"
+                }
+              ]
+            },
+            "4": { "name": "punctuation.definition.block.cds" }
+          }
+        }
+      ]
+    },
+
+    "externFunctionDeclarations": {
+      "patterns": [
         {
-          "name": "comment.line.hash.cds",
-          "match": "#.*$"
-        },
-        {
-          "name": "comment.block.cds",
-          "begin": "/\\*",
-          "end": "\\*/"
+          "comment": "extern function NAME(p1, p2, ...) at :label  — highlights structurally so users can see the name, parameters, and target label distinctly.",
+          "match": "^\\s*(extern)\\s+(function)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s+(at)\\s+(:[A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": { "name": "keyword.modifier.extern.cds" },
+            "2": { "name": "keyword.declaration.function.cds" },
+            "3": { "name": "entity.name.function.declaration.cds" },
+            "4": {
+              "patterns": [
+                { "match": "[A-Za-z_][A-Za-z0-9_]*", "name": "variable.parameter.cds" }
+              ]
+            },
+            "5": { "name": "keyword.other.at.cds" },
+            "6": { "name": "entity.name.label.reference.cds" }
+          }
         }
       ]
     },
@@ -50,7 +98,16 @@
       "patterns": [
         {
           "name": "entity.name.label.reference.cds",
-          "match": ":[A-Za-z_][A-Za-z0-9_]*"
+          "match": ":[A-Za-z_][A-Za-z0-9_.]*"
+        }
+      ]
+    },
+
+    "preprocessor": {
+      "patterns": [
+        {
+          "name": "keyword.preprocessor.cds",
+          "match": "\\b(const|alias|macro|endmacro|include|if|else|endif|while|endwhile|repeat|endrepeat|extern|function)\\b"
         }
       ]
     },
@@ -59,7 +116,7 @@
       "patterns": [
         {
           "name": "keyword.directive.cds",
-          "match": "\\b(address|hexcode|print)\\b"
+          "match": "\\b(address|hexcode|setreg|mem|load|store|pointer|string|scope)\\b"
         },
         {
           "name": "keyword.directive.mips",
@@ -68,11 +125,32 @@
       ]
     },
 
+    "sidecars": {
+      "patterns": [
+        {
+          "name": "keyword.sidecar.cds",
+          "match": "\\b(assert|breakpoint|watchpoint|log|print|freeze|cond|endcond|timer|endtimer)\\b"
+        }
+      ]
+    },
+
     "pseudoInstructions": {
       "patterns": [
         {
           "name": "keyword.instruction.pseudo.cds",
-          "match": "\\b(setreg)\\b"
+          "match": "\\b(setreg|la|move|li|not|negu|bnez|beqz|b|blt|bgt|ble|bge)\\b"
+        }
+      ]
+    },
+
+    "functionCalls": {
+      "patterns": [
+        {
+          "comment": "Highlight an identifier immediately followed by `(` as a function call. Real MIPS instructions and directives never use the `name(args)` shape, so this is unambiguous.",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*\\(",
+          "captures": {
+            "1": { "name": "entity.name.function.call.cds" }
+          }
         }
       ]
     },
@@ -98,7 +176,7 @@
     "registers": {
       "patterns": [
         {
-          "comment": "$zero — always-zero constant",
+          "comment": "$zero — always-zero constant. Word-boundary form matches both `$zero` and bare `zero`.",
           "name": "variable.register.zero.cds",
           "match": "\\bzero\\b"
         },
@@ -138,10 +216,12 @@
           "match": "\\b(?:gp|sp|fp|ra)\\b"
         },
         {
+          "comment": "$0-$31 numeric register form",
           "name": "variable.register.numeric.cds",
           "match": "\\$[0-9]{1,2}\\b"
         },
         {
+          "comment": "$f0-$f31 — floating-point registers",
           "name": "variable.register.fpu.cds",
           "match": "\\$f[0-9]{1,2}\\b"
         }
@@ -152,17 +232,7 @@
       "patterns": [
         {
           "name": "constant.numeric.decimal.cds",
-          "match": "\\b\\d+\\b"
-        }
-      ]
-    },
-
-    "strings": {
-      "patterns": [
-        {
-          "name": "string.quoted.double.cds",
-          "begin": "\"",
-          "end": "\""
+          "match": "\\b-?\\d+\\b"
         }
       ]
     }

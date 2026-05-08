@@ -14,8 +14,8 @@ lib_str_split:
     addi $v0, $zero, 0       // count = 0
     beq  $a0, $zero, :split_done
     beq  $a3, $zero, :split_done
-    addi $t0, $a0, $zero     // ptr
-    addi $t1, $a2, $zero     // outPtr base
+    addu $t0, $a0, $zero     // ptr
+    addu $t1, $a2, $zero     // outPtr base
 split_outer:
     lb   $t2, 0($t0)
     beq  $t2, $zero, :split_done
@@ -35,8 +35,10 @@ split_separator_found:
     // overwrite sep with NUL
     sb   $zero, 0($t0)
     addiu $t0, $t0, 1
-    // check if we've reached maxParts
-    bge  $v0, $a3, :split_done
+    // check if we've reached maxParts: bge $v0, $a3 == "skip if v0 < a3"
+    slt  $at, $v0, $a3
+    beq  $at, $zero, :split_done
+    nop
     j    :split_outer
     nop
 split_advance_to_end:

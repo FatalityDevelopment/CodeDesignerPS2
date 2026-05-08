@@ -164,6 +164,12 @@
         "path": "./syntaxes/cds.tmLanguage.json"
       }
     ],
+    "snippets": [
+      {
+        "language": "cds",
+        "path": "./snippets/cds.code-snippets"
+      }
+    ],
     "customEditors": [
       {
         "viewType": "codedesigner.ps2File",
@@ -179,66 +185,28 @@
     "configurationDefaults": {
       "editor.tokenColorCustomizations": {
         "textMateRules": [
-          {
-            "scope": "variable.register.zero.cds",
-            "settings": {
-              "foreground": "#858585"
-            }
-          },
-          {
-            "scope": "variable.register.at.cds",
-            "settings": {
-              "foreground": "#cca700"
-            }
-          },
-          {
-            "scope": "variable.register.value.cds",
-            "settings": {
-              "foreground": "#b5cea8"
-            }
-          },
-          {
-            "scope": "variable.register.arg.cds",
-            "settings": {
-              "foreground": "#ce9178"
-            }
-          },
-          {
-            "scope": "variable.register.temp.cds",
-            "settings": {
-              "foreground": "#dcdcaa"
-            }
-          },
-          {
-            "scope": "variable.register.saved.cds",
-            "settings": {
-              "foreground": "#9cdcfe"
-            }
-          },
-          {
-            "scope": "variable.register.kernel.cds",
-            "settings": {
-              "foreground": "#f48771"
-            }
-          },
-          {
-            "scope": "variable.register.special.cds",
-            "settings": {
-              "foreground": "#4ec9b0"
-            }
-          },
-          {
-            "scope": "variable.register.fpu.cds",
-            "settings": {
-              "foreground": "#b5cea8"
-            }
-          },
-          {
-            "scope": "variable.register.numeric.cds",
-            "settings": {
-              "foreground": "#9cdcfe"
-            }
-          }
+          { "scope": "variable.register.zero.cds",    "settings": { "foreground": "#858585" } },
+          { "scope": "variable.register.at.cds",      "settings": { "foreground": "#cca700" } },
+          { "scope": "variable.register.value.cds",   "settings": { "foreground": "#b5cea8" } },
+          { "scope": "variable.register.arg.cds",     "settings": { "foreground": "#ce9178" } },
+          { "scope": "variable.register.temp.cds",    "settings": { "foreground": "#dcdcaa" } },
+          { "scope": "variable.register.saved.cds",   "settings": { "foreground": "#9cdcfe" } },
+          { "scope": "variable.register.kernel.cds",  "settings": { "foreground": "#f48771" } },
+          { "scope": "variable.register.special.cds", "settings": { "foreground": "#4ec9b0" } },
+          { "scope": "variable.register.fpu.cds",     "settings": { "foreground": "#b5cea8" } },
+          { "scope": "variable.register.numeric.cds", "settings": { "foreground": "#9cdcfe" } },
+          { "scope": "entity.name.function.definition.cds",  "settings": { "foreground": "#dcdcaa", "fontStyle": "bold" } },
+          { "scope": "entity.name.function.declaration.cds", "settings": { "foreground": "#dcdcaa", "fontStyle": "italic" } },
+          { "scope": "entity.name.function.call.cds",        "settings": { "foreground": "#dcdcaa" } },
+          { "scope": "keyword.declaration.function.cds",     "settings": { "foreground": "#569cd6", "fontStyle": "bold" } },
+          { "scope": "keyword.modifier.extern.cds",          "settings": { "foreground": "#569cd6" } },
+          { "scope": "keyword.preprocessor.cds",             "settings": { "foreground": "#c586c0" } },
+          { "scope": "keyword.directive.cds",                "settings": { "foreground": "#569cd6" } },
+          { "scope": "keyword.sidecar.cds",                  "settings": { "foreground": "#4ec9b0" } },
+          { "scope": "keyword.instruction.pseudo.cds",       "settings": { "foreground": "#9cdcfe", "fontStyle": "italic" } },
+          { "scope": "keyword.other.at.cds",                 "settings": { "foreground": "#c586c0" } },
+          { "scope": "variable.parameter.cds",               "settings": { "foreground": "#9cdcfe", "fontStyle": "italic" } },
+          { "scope": "constant.character.escape.cds",        "settings": { "foreground": "#d7ba7d" } }
         ]
       }
     }
