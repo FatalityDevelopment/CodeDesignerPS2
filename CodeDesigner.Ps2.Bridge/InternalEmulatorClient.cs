@@ -42,6 +42,9 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgSetBreakpoint       = 0x14;
         private const byte MsgClearBreakpoint     = 0x15;
         private const byte MsgClearAllBreakpoints = 0x16;
+        private const byte MsgSetProgramCounter   = 0x17;
+        private const byte MsgWriteBuffer         = 0x18;
+        private const byte MsgReadBuffer          = 0x19;
         private const byte MsgReset               = 0x24;
         private const byte MsgInternalRequestRestart = 0x80;
 
@@ -68,17 +71,64 @@ namespace CodeDesigner.Ps2.Bridge
         public byte[] ReadBytes(uint address, int length)
         {
             if (length <= 0) return Array.Empty<byte>();
+
+            // Use the bulk MsgReadBuffer opcode so scanners that walk multi-MB
+            // regions (label, string, value, function, pointer) finish in
+            // seconds instead of timing out. Chunk to 1 MiB so each packet
+            // stays manageable.
+            const int ChunkSize = 1024 * 1024;
             var result = new byte[length];
-            for (int i = 0; i < length; i++)
-                result[i] = ReadOneByte((uint)(address + i));
+            int offset = 0;
+            while (offset < length)
+            {
+                int len = Math.Min(ChunkSize, length - offset);
+                byte[] req = new byte[5 + 4 + 4];
+                WriteU32LE(req, 0, (uint)req.Length);
+                req[4] = MsgReadBuffer;
+                WriteU32LE(req, 5, (uint)(address + offset));
+                WriteU32LE(req, 9, (uint)len);
+                // Reply layout: u32 size + u8 status + payload of `len` bytes.
+                byte[] rep = SendReceive(req, expectedReplySize: 5 + len);
+                if (rep[4] != IPC_OK) throw Fail($"MsgReadBuffer 0x{address + (uint)offset:X8} +{len}");
+                Buffer.BlockCopy(rep, 5, result, offset, len);
+                offset += len;
+            }
             return result;
         }
 
         public void WriteBytes(uint address, byte[] data)
         {
             if (data == null || data.Length == 0) return;
-            for (int i = 0; i < data.Length; i++)
-                WriteOneByte((uint)(address + i), data[i]);
+
+            // Use the bulk MsgWriteBuffer opcode so loading a 32 MB dump is a
+            // handful of round-trips, not 33 million. The protocol uses a u32
+            // length so we chunk anything bigger than ~4 GB; 1 MiB chunks keep
+            // each packet manageable.
+            const int ChunkSize = 1024 * 1024;
+            int offset = 0;
+            while (offset < data.Length)
+            {
+                int len = Math.Min(ChunkSize, data.Length - offset);
+                byte[] req = new byte[5 + 4 + 4 + len];
+                WriteU32LE(req, 0, (uint)req.Length);
+                req[4] = MsgWriteBuffer;
+                WriteU32LE(req, 5, address + (uint)offset);
+                WriteU32LE(req, 9, (uint)len);
+                Buffer.BlockCopy(data, offset, req, 13, len);
+                byte[] rep = SendReceive(req, expectedReplySize: 5);
+                if (rep[4] != IPC_OK) throw Fail($"MsgWriteBuffer 0x{address + (uint)offset:X8} +{len}");
+                offset += len;
+            }
+        }
+
+        /// <summary>
+        /// Set the EE program counter on the running emulator. Used by file-mode
+        /// load to point execution at the freshly written binary's entry point.
+        /// </summary>
+        public void SetProgramCounter(uint pc)
+        {
+            byte[] rep = SendReceive(BuildReadRequest(MsgSetProgramCounter, pc), expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw Fail($"MsgSetProgramCounter 0x{pc:X8}");
         }
 
         public byte ReadByte(uint address)

@@ -339,12 +339,44 @@ namespace CodeDesigner.Ps2.Bridge
         }
 
         /// <summary>
-        /// STARTFILEMODE — same connection flow as STARTEMULATOR. The front
-        /// end is expected to have launched <c>Emulator.exe --file &lt;elf&gt;</c>
-        /// before sending this command.
+        /// STARTFILEMODE — load a PS2 ELF, BIN, or RAW binary into a *running*
+        /// emulator's RAM via PINE writes, set PC to the entry point, and leave
+        /// it paused. Reuses any existing InternalEmulatorClient (the bare
+        /// emulator the front end just spawned, or a BIOS-mode emulator from a
+        /// previous Run); never spawns or tears down processes itself.
+        /// <para>
+        /// This restores the pre-decoupling design: file mode never re-runs
+        /// the BIOS/kernel boot sequence, it just drops the binary into RAM
+        /// and points PC at it.
+        /// </para>
         /// </summary>
         private static string HandleStartFileMode(SocketServer server, CommandMessage command)
         {
+            string? filePath = command.InputPath;
+            if (string.IsNullOrWhiteSpace(filePath))
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = false, Command = "STARTFILEMODE",
+                    Error = "InputPath is required for STARTFILEMODE"
+                });
+            if (!File.Exists(filePath))
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = false, Command = "STARTFILEMODE",
+                    Error = $"File not found: {filePath}"
+                });
+
+            byte[] fileData;
+            try { fileData = File.ReadAllBytes(filePath); }
+            catch (Exception ex)
+            {
+                return JsonSerializer.Serialize(new CommandResponse
+                {
+                    Success = false, Command = "STARTFILEMODE",
+                    Error = $"Cannot read file: {ex.Message}"
+                });
+            }
+
             lock (RuntimeModeLock)
             {
                 string host = string.IsNullOrWhiteSpace(command.InternalEmulatorHost)
@@ -352,58 +384,101 @@ namespace CodeDesigner.Ps2.Bridge
                     : command.InternalEmulatorHost!;
                 int port = command.InternalEmulatorPort ?? InternalEmulatorClient.DefaultPort;
 
+                // PCSX2 PINE makes no sense in file mode — drop it.
                 if (server.PineClient != null)
                 {
                     server.PineClient.Dispose();
                     server.PineClient = null;
                 }
-                server.InternalClient?.Dispose();
-                server.InternalClient = null;
 
-                InternalEmulatorClient? client = null;
-                Exception? lastEx = null;
-                for (int attempt = 0; attempt < 10; attempt++)
+                // Reuse the existing InternalClient when available so we don't
+                // tear down a perfectly good connection. Only create a new one
+                // (with a brief retry to absorb a fresh Emulator.exe startup)
+                // when we have nothing attached.
+                InternalEmulatorClient? client = server.InternalClient;
+                if (client == null)
                 {
-                    try
+                    Exception? lastEx = null;
+                    for (int attempt = 0; attempt < 25; attempt++)
                     {
-                        client = new InternalEmulatorClient(host, port);
-                        _ = client.GetStatus();
-                        lastEx = null;
-                        break;
+                        try
+                        {
+                            client = new InternalEmulatorClient(host, port);
+                            _ = client.GetStatus();
+                            lastEx = null;
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            client?.Dispose();
+                            client = null;
+                            lastEx = ex;
+                            Thread.Sleep(200);
+                        }
                     }
-                    catch (Exception ex)
+
+                    if (client == null)
                     {
-                        client?.Dispose();
-                        client = null;
-                        lastEx = ex;
-                        Thread.Sleep(200);
+                        return JsonSerializer.Serialize(new CommandResponse
+                        {
+                            Success = false, Command = "STARTFILEMODE",
+                            Error   = $"Could not connect to InternalPineSocket at {host}:{port} — " +
+                                      $"is CodeDesigner.Ps2.Emulator.exe running (try --bare)? ({lastEx?.Message})"
+                        });
                     }
+
+                    server.InternalClient = client;
                 }
 
-                if (client == null)
+                // ── Now load the file content into the running emulator. ──────
+                try
+                {
+                    // Pause first so we're not racing the run-loop while writes
+                    // land in RAM. Ignore failures — emulator may already be
+                    // paused (bare mode starts paused).
+                    try { client.Pause(); } catch { /* ignore */ }
+
+                    // Clear any breakpoints inherited from a previous session;
+                    // the binary's address space is fresh, old BPs are stale.
+                    try { client.ClearAllBreakpoints(); } catch { /* ignore */ }
+
+                    uint entryPoint;
+                    string ext = Path.GetExtension(filePath).ToLowerInvariant();
+                    if (ext == ".elf")
+                    {
+                        // Parse ELF locally and push each loadable segment via
+                        // the bulk-write opcode (avoids shipping the entire
+                        // 32 MB RAM image when only a few hundred KB are real).
+                        entryPoint = ElfPineLoader.LoadElfViaClient(fileData, client);
+                    }
+                    else
+                    {
+                        uint loadAddress = command.Address ?? 0u;
+                        client.WriteBytes(loadAddress, fileData);
+                        entryPoint = loadAddress;
+                    }
+
+                    client.SetProgramCounter(entryPoint);
+
+                    Console.WriteLine($"[File Mode] Loaded: {filePath}  entry=0x{entryPoint:X8}  size={fileData.Length:N0} bytes");
+
+                    return JsonSerializer.Serialize(new CommandResponse
+                    {
+                        Success  = true,
+                        Command  = "STARTFILEMODE",
+                        PC       = entryPoint,
+                        Paused   = true,
+                        Message  = $"File mode started; entry point 0x{entryPoint:X8}. Emulator is paused.",
+                    });
+                }
+                catch (Exception ex)
                 {
                     return JsonSerializer.Serialize(new CommandResponse
                     {
                         Success = false, Command = "STARTFILEMODE",
-                        Error   = $"Could not connect to InternalPineSocket at {host}:{port} — " +
-                                  $"is CodeDesigner.Ps2.Emulator.exe running? ({lastEx?.Message})"
+                        Error   = $"File mode load failed: {ex.Message}"
                     });
                 }
-
-                server.InternalClient = client;
-
-                uint entryPoint;
-                try { entryPoint = client.GetProgramCounter(); }
-                catch { entryPoint = command.Address ?? 0u; }
-
-                return JsonSerializer.Serialize(new CommandResponse
-                {
-                    Success  = true,
-                    Command  = "STARTFILEMODE",
-                    PC       = entryPoint,
-                    Paused   = true,
-                    Message  = $"File mode started; entry point 0x{entryPoint:X8}. Emulator is paused.",
-                });
             }
         }
 
