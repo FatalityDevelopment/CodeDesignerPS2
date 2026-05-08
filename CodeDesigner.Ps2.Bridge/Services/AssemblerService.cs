@@ -590,8 +590,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
                             break;
 
                         case SetRegSyntaxItem sr:
-                            d.TryAdd(sr.LuiOp.Address,   (sr.LineNumber, sr.LineText));
-                            d.TryAdd(sr.AddiuOp.Address, (sr.LineNumber, sr.LineText));
+                            d.TryAdd(sr.LuiOp.Address, (sr.LineNumber, sr.LineText));
+                            d.TryAdd(sr.OriOp.Address, (sr.LineNumber, sr.LineText));
                             break;
 
                         case MemorySyntaxItem mem:

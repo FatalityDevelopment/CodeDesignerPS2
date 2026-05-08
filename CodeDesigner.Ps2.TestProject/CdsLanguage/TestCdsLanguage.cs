@@ -104,16 +104,16 @@ hexcode $CAFEBABE
         // -----------------------------------------------------------------------
 
         [TestMethod]
-        public void SetReg_ExpandsToLuiAndAddiu()
+        public void SetReg_ExpandsToLuiAndOri()
         {
             var items = Parse("address $00200000\nsetreg t0, $ABCD1234");
             var sr = FindItem<SetRegSyntaxItem>(items);
             Assert.AreEqual(0x00200000u, sr.Address);
             Assert.AreEqual(0xABCD1234u, sr.Value);
-            Assert.AreEqual("lui",   sr.LuiOp.Mnemonic);
-            Assert.AreEqual("addiu", sr.AddiuOp.Mnemonic);
+            Assert.AreEqual("lui", sr.LuiOp.Mnemonic);
+            Assert.AreEqual("ori", sr.OriOp.Mnemonic);
             Assert.AreEqual(0x00200000u, sr.LuiOp.Address);
-            Assert.AreEqual(0x00200004u, sr.AddiuOp.Address);
+            Assert.AreEqual(0x00200004u, sr.OriOp.Address);
         }
 
         [TestMethod]
@@ -775,9 +775,9 @@ address $00100000
 setreg t0, MAXHP
 ";
             var pairs = Compile(src);
-            // setreg emits 2 words; value 0x00000064 → lui+addiu
+            // setreg emits 2 words; value 0x00000064 → lui+ori
             Assert.AreEqual(2, pairs.Count);
-            // addiu $t0, $t0, 0x0064 should be present
+            // ori $t0, $t0, 0x0064 should be present
             Assert.IsTrue(pairs.Any(p => (p.Word & 0xFFFF) == 0x0064));
         }
 
@@ -1528,9 +1528,9 @@ LoadVal(t0, $00000064)
             var pairs = Compile(src);
             // setreg t0, $00000064 = 2 instructions
             Assert.AreEqual(2, pairs.Count);
-            // lui $t0, 0 = 0x3C080000, addiu $t0,$t0,100 = 0x25080064
+            // lui $t0, 0 = 0x3C080000, ori $t0,$t0,$0064 = 0x35080064
             Assert.AreEqual(0x3C080000u, pairs[0].Word);
-            Assert.AreEqual(0x25080064u, pairs[1].Word);
+            Assert.AreEqual(0x35080064u, pairs[1].Word);
         }
 
         [TestMethod]

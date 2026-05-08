@@ -938,11 +938,11 @@ namespace CodeDesigner.Ps2.CdsLanguage
             ushort hi = (ushort)(value >> 16);
             ushort lo = (ushort)(value & 0xFFFF);
 
-            string luiAsm    = $"lui {reg}, ${ hi:X4}";
-            string addiuAsm  = $"addiu {reg}, {reg}, ${lo:X4}";
+            string luiAsm = $"lui {reg}, ${ hi:X4}";
+            string oriAsm = $"ori {reg}, {reg}, ${lo:X4}";
 
-            uint luiEncoded   = TryAssemble(luiAsm);
-            uint addiuEncoded = TryAssemble(addiuAsm);
+            uint luiEncoded = TryAssemble(luiAsm);
+            uint oriEncoded = TryAssemble(oriAsm);
 
             return new SetRegSyntaxItem
             {
@@ -956,10 +956,10 @@ namespace CodeDesigner.Ps2.CdsLanguage
                     LineNumber = lineNumber, LineText = lineText,
                     Address = address, EncodedWord = luiEncoded, Mnemonic = "lui"
                 },
-                AddiuOp = new OperationSyntaxItem
+                OriOp = new OperationSyntaxItem
                 {
                     LineNumber = lineNumber, LineText = lineText,
-                    Address = address + 4, EncodedWord = addiuEncoded, Mnemonic = "addiu"
+                    Address = address + 4, EncodedWord = oriEncoded, Mnemonic = "ori"
                 }
             };
         }
@@ -1126,7 +1126,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
             var loadBase = BuildSetReg(lineNumber, lineText, "t8", baseAddress, cur);
             item.Operations.Add(loadBase.LuiOp);
-            item.Operations.Add(loadBase.AddiuOp);
+            item.Operations.Add(loadBase.OriOp);
             cur += 8;
 
             item.Operations.Add(new OperationSyntaxItem
@@ -1155,7 +1155,7 @@ namespace CodeDesigner.Ps2.CdsLanguage
 
             var loadValue = BuildSetReg(lineNumber, lineText, "t9", value, cur);
             item.Operations.Add(loadValue.LuiOp);
-            item.Operations.Add(loadValue.AddiuOp);
+            item.Operations.Add(loadValue.OriOp);
             cur += 8;
 
             string finalOffsetStr = $"${offsets[^1]:X4}";
