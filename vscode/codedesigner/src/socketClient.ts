@@ -1673,6 +1673,16 @@ export class SocketClient {
     }
 
     /**
+     * PCSX2 PINE: step out (non-blocking). Emulator will run until the next pause/breakpoint.
+     */
+    public async stepOut(): Promise<void> {
+        const response = await this.sendCommand({ Command: 'STEPOUT' });
+        if (!response.Success) {
+            throw new Error(response.Error || 'StepOut failed');
+        }
+    }
+
+    /**
      * PCSX2 PINE: save emulator state to a named file path.
      * Uses the SAVESTATETOFILE command which delegates to PineClient.SaveStateFile (opcode 0x22).
      */
