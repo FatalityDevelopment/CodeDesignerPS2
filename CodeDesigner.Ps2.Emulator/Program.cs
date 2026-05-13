@@ -65,43 +65,76 @@ namespace CodeDesigner.Ps2.Emulator
         /// </summary>
         private static async Task<int> RunBareMode(int port)
         {
-            var scheduler = new DualCpuScheduler();
-            scheduler.Paused = true;
-
-            using var pine = new InternalPineSocket(scheduler, port);
-            pine.Start();
-            Console.WriteLine($"InternalPineSocket listening on port {port}. Bare mode — emulator paused; awaiting commands.");
-
-            using var cts = new CancellationTokenSource();
-            Console.CancelKeyPress += (_, e) =>
-            {
-                e.Cancel = true;
-                cts.Cancel();
-                Console.WriteLine("\nStopping bare-mode emulator...");
-            };
-
-            const int SliceSize = 256;
+            DualCpuScheduler scheduler;
+            InternalPineSocket pine;
             try
             {
-                while (!cts.Token.IsCancellationRequested)
+                scheduler = new DualCpuScheduler();
+                scheduler.Paused = true;
+
+                pine = new InternalPineSocket(scheduler, port);
+                pine.Start();
+            }
+            catch (System.Net.Sockets.SocketException ex) when ((uint)ex.SocketErrorCode == 10048u /* WSAEADDRINUSE */)
+            {
+                Console.Error.WriteLine($"[Bare] Port {port} is already bound — another CodeDesigner.Ps2.Emulator.exe is running.");
+                Console.Error.WriteLine("[Bare] If that one is responsive, the front end will reuse it; nothing more to do here.");
+                Console.Error.WriteLine("[Bare] Otherwise, kill the stale process (Task Manager → CodeDesigner.Ps2.Emulator) and retry.");
+                // Hold the window open briefly so the user sees the message
+                // before VS Code closes the terminal on exit.
+                await Task.Delay(3000).ConfigureAwait(false);
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Bare] Startup failed: {ex.GetType().Name}: {ex.Message}");
+                Console.Error.WriteLine(ex.StackTrace);
+                await Task.Delay(3000).ConfigureAwait(false);
+                return 1;
+            }
+
+            using (pine)
+            {
+                Console.WriteLine($"InternalPineSocket listening on port {port}. Bare mode — emulator paused; awaiting commands.");
+
+                using var cts = new CancellationTokenSource();
+                Console.CancelKeyPress += (_, e) =>
                 {
-                    if (scheduler.Paused)
-                    {
-                        await scheduler.WaitForResumeAsync(cts.Token).ConfigureAwait(false);
-                        continue;
-                    }
+                    e.Cancel = true;
+                    cts.Cancel();
+                    Console.WriteLine("\nStopping bare-mode emulator...");
+                };
 
-                    try { scheduler.RunSlice(SliceSize); }
-                    catch (Common.Cpu.Instructions.EE.BreakpointException)
+                const int SliceSize = 256;
+                try
+                {
+                    while (!cts.Token.IsCancellationRequested)
                     {
-                        uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
-                        Console.WriteLine($"[BREAK] pc=0x{bpPc:x8}");
-                    }
+                        if (scheduler.Paused)
+                        {
+                            await scheduler.WaitForResumeAsync(cts.Token).ConfigureAwait(false);
+                            continue;
+                        }
 
-                    scheduler.TickHardware((uint)SliceSize);
+                        try { scheduler.RunSlice(SliceSize); }
+                        catch (Common.Cpu.Instructions.EE.BreakpointException)
+                        {
+                            uint bpPc = (uint)(scheduler.EE.Cpu.PC & 0xFFFFFFFFUL);
+                            Console.WriteLine($"[BREAK] pc=0x{bpPc:x8}");
+                        }
+
+                        scheduler.TickHardware((uint)SliceSize);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[Bare] Run-loop exception: {ex.GetType().Name}: {ex.Message}");
+                    Console.Error.WriteLine(ex.StackTrace);
+                    await Task.Delay(3000).ConfigureAwait(false);
+                    return 1;
                 }
             }
-            catch (OperationCanceledException) { }
 
             return 0;
         }
