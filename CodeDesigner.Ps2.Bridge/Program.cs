@@ -392,10 +392,26 @@ namespace CodeDesigner.Ps2.Bridge
                 }
 
                 // Reuse the existing InternalClient when available so we don't
-                // tear down a perfectly good connection. Only create a new one
-                // (with a brief retry to absorb a fresh Emulator.exe startup)
-                // when we have nothing attached.
+                // tear down a perfectly good connection. But the emulator
+                // process behind it may have exited since we last talked to
+                // it (user closed the terminal, --bare hit AddressInUse and
+                // bailed, etc.). Probe before trusting; on probe failure the
+                // pause/clear/write calls below would otherwise fail with a
+                // confusing "Unable to connect to the remote server" because
+                // SendReceive's auto-reconnect can't reach a dead process.
                 InternalEmulatorClient? client = server.InternalClient;
+                if (client != null)
+                {
+                    try { _ = client.GetStatus(); }
+                    catch (Exception probeEx)
+                    {
+                        Console.WriteLine($"[File Mode] Existing InternalClient is dead ({probeEx.GetType().Name}: {probeEx.Message}); reconnecting.");
+                        try { client.Dispose(); } catch { /* ignore */ }
+                        server.InternalClient = null;
+                        client = null;
+                    }
+                }
+
                 if (client == null)
                 {
                     Exception? lastEx = null;
@@ -473,10 +489,26 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 catch (Exception ex)
                 {
+                    // Tee to the Bridge console: the JSON Error field is the
+                    // only thing the front end sees and VS Code's output panel
+                    // truncates long error strings. Surfacing the full type +
+                    // stack here makes debugging tractable.
+                    Console.WriteLine($"[File Mode] Load failed: {ex.GetType().Name}: {ex.Message}");
+                    Console.WriteLine(ex.StackTrace);
+
+                    // If the underlying socket died mid-load, drop the stale
+                    // client so the next STARTFILEMODE attempt reconnects
+                    // instead of immediately failing the same way.
+                    if (ex is System.Net.Sockets.SocketException || ex is IOException)
+                    {
+                        try { client.Dispose(); } catch { /* ignore */ }
+                        server.InternalClient = null;
+                    }
+
                     return JsonSerializer.Serialize(new CommandResponse
                     {
                         Success = false, Command = "STARTFILEMODE",
-                        Error   = $"File mode load failed: {ex.Message}"
+                        Error   = $"File mode load failed ({ex.GetType().Name}): {ex.Message}"
                     });
                 }
             }
