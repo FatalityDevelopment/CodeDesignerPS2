@@ -252,6 +252,36 @@ namespace CodeDesigner.Ps2.Bridge
         /// <summary>Injection success flag returned by NETINJECT / NETINJECTTX.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public bool? InjectionSuccess { get; set; }
+
+        // ── Data-format overrides (GETDATAFORMATS) ─────────────────────────────
+        /// <summary>
+        /// Data-format overrides returned by GETDATAFORMATS, ordered by address.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<DataFormatOverrideInfo>? DataFormatOverrides { get; set; }
+    }
+
+    /// <summary>
+    /// Wire payload for a single <c>DataFormatOverride</c> row returned by
+    /// GETDATAFORMATS / SETDATAFORMAT.
+    /// </summary>
+    public class DataFormatOverrideInfo
+    {
+        /// <summary>Database row ID.  Useful for follow-up deletes.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        /// <summary>Start address as an unsigned 32-bit integer.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("address")]
+        public uint Address { get; set; }
+
+        /// <summary>Total length of the span in bytes.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("length")]
+        public int Length { get; set; }
+
+        /// <summary>One of "byte", "half", "word", "dword", "qword".</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("kind")]
+        public string Kind { get; set; } = "byte";
     }
 
     /// <summary>Snapshot metadata wire payload returned by GETSNAPSHOTS.</summary>

@@ -94,6 +94,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     findReferences: null as (() => void) | null,
     findCodeReferences: null as (() => void) | null,
     addToLabelManager: null as (() => void) | null,
+    formatAs: null as ((kind: 'byte' | 'half' | 'word' | 'dword' | 'qword') => void) | null,
+    clearFormat: null as (() => void) | null,
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -414,6 +416,14 @@ export class DisasmEditorComponent implements AfterViewInit {
 
   protected onCtxAddToLabelManager(): void {
     this.contextMenuRuntime.addToLabelManager?.();
+  }
+
+  protected onCtxFormatAs(kind: 'byte' | 'half' | 'word' | 'dword' | 'qword'): void {
+    this.contextMenuRuntime.formatAs?.(kind);
+  }
+
+  protected onCtxClearFormat(): void {
+    this.contextMenuRuntime.clearFormat?.();
   }
 
   protected onCtxClosed(): void {
@@ -769,6 +779,8 @@ export class DisasmEditorComponent implements AfterViewInit {
     toggleBottomPanel: () => void;
     toggleSetPc: () => void;
     navigateBack: () => void;
+    setCursorRowFormat: (kind: 'byte' | 'half' | 'word' | 'dword' | 'qword') => void;
+    clearCursorRowFormat: () => void;
   }): void {
     window.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyA') {
@@ -792,6 +804,45 @@ export class DisasmEditorComponent implements AfterViewInit {
         );
         if (!isEditing) {
           e.preventDefault(); e.stopPropagation(); params.navigateBack();
+        }
+      }
+
+      // ── Data-format shortcuts (b/h/w/d/q + 'a' = auto/clear) ─────────────
+      // These are bare letter keys, so we must NOT swallow them while the
+      // user is typing in an input/textarea/select/contenteditable element.
+      if (!e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+        const active = document.activeElement as HTMLElement | null;
+        const isEditing = active && (
+          active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' ||
+          active.tagName === 'SELECT' || active.isContentEditable
+        );
+        if (isEditing) return;
+
+        switch (e.key.toLowerCase()) {
+          case 'b':
+            e.preventDefault(); e.stopPropagation();
+            params.setCursorRowFormat('byte');
+            return;
+          case 'h':
+            e.preventDefault(); e.stopPropagation();
+            params.setCursorRowFormat('half');
+            return;
+          case 'w':
+            e.preventDefault(); e.stopPropagation();
+            params.setCursorRowFormat('word');
+            return;
+          case 'd':
+            e.preventDefault(); e.stopPropagation();
+            params.setCursorRowFormat('dword');
+            return;
+          case 'q':
+            e.preventDefault(); e.stopPropagation();
+            params.setCursorRowFormat('qword');
+            return;
+          case 'a':
+            e.preventDefault(); e.stopPropagation();
+            params.clearCursorRowFormat();
+            return;
         }
       }
     });
@@ -2152,6 +2203,29 @@ export class DisasmEditorComponent implements AfterViewInit {
       this.vscode.postMessage({ type: 'openLabelManagerTab', address: this._ctxRow.addr });
     };
 
+    /**
+     * Format the right-clicked row as the requested data directive.  This
+     * uses the row the menu was opened on (`_ctxRow`), not the cursor row,
+     * so the user can right-click far below the cursor and still get the
+     * format applied to the clicked address.
+     */
+    this.contextMenuRuntime.formatAs = (kind: 'byte' | 'half' | 'word' | 'dword' | 'qword') => {
+      if (!this._ctxRow) { return; }
+      const address = parseInt(this._ctxRow.addr, 16);
+      if (!Number.isFinite(address)) { return; }
+      const length = kind === 'qword' ? 16 : kind === 'dword' ? 8 : 4;
+      const pageStart = params.getPageStart(params.state.cursor);
+      this.svc.setDataFormat(address, length, kind, pageStart);
+    };
+
+    this.contextMenuRuntime.clearFormat = () => {
+      if (!this._ctxRow) { return; }
+      const address = parseInt(this._ctxRow.addr, 16);
+      if (!Number.isFinite(address)) { return; }
+      const pageStart = params.getPageStart(params.state.cursor);
+      this.svc.clearDataFormat(address, 16, pageStart);
+    };
+
     this._debugEditRegisterCallback = (regType: string, regIdx: number, currentValue: string) => {
       console.log(`Edit register: type=${regType}, idx=${regIdx}, value=${currentValue}`);
     };
@@ -2651,6 +2725,61 @@ export class DisasmEditorComponent implements AfterViewInit {
 
     setpcToggleBtn.addEventListener('click', toggleSetPc);
 
+    /**
+     * Resolve the cursor's current row and forward a SETDATAFORMAT request to
+     * the extension host.  Honors the byte length the user picked: pressing
+     * `b` on a 4-byte instruction row splits it into four `.byte` rows; `h` →
+     * two `.half`; `w` keeps one `.word`; `d` and `q` widen by merging with
+     * the following bytes (8 / 16 byte total).  The extension host persists
+     * the override and re-fetches the page.
+     */
+    const setCursorRowFormat = (kind: 'byte' | 'half' | 'word' | 'dword' | 'qword') => {
+      const pageStart = getPageStart(state.cursor);
+      const rows = state.loadedPages.get(pageStart);
+      if (!rows) { return; }
+      const local = state.cursor - pageStart;
+      const row = rows[local];
+      if (!row) { return; }
+      const address = parseInt(row.addr, 16);
+      if (!Number.isFinite(address)) { return; }
+
+      // Element size implied by the kind.
+      const unit = kind === 'byte' ? 1
+                 : kind === 'half' ? 2
+                 : kind === 'word' ? 4
+                 : kind === 'dword' ? 8
+                 : 16;
+
+      // Default span = 4 bytes (the instruction row the cursor sits on).
+      // For dword/qword the user clearly wants more bytes covered, so widen
+      // the span to the next multiple of the unit (8 or 16 bytes).
+      let length = 4;
+      if (unit > 4) length = unit;
+      // For sub-word kinds we still convert 4 bytes so the whole instruction
+      // row is replaced (1×4 byte rows, or 2×half rows).
+      else length = 4;
+
+      svc.setDataFormat(address, length, kind, pageStart);
+    };
+
+    /**
+     * Remove any data-format overrides covering the cursor row so it falls
+     * back to default 4-byte instruction decoding.
+     */
+    const clearCursorRowFormat = () => {
+      const pageStart = getPageStart(state.cursor);
+      const rows = state.loadedPages.get(pageStart);
+      if (!rows) { return; }
+      const local = state.cursor - pageStart;
+      const row = rows[local];
+      if (!row) { return; }
+      const address = parseInt(row.addr, 16);
+      if (!Number.isFinite(address)) { return; }
+      // Clear a window of 16 bytes to make sure overlapping dword/qword
+      // overrides are removed too.
+      svc.clearDataFormat(address, 16, pageStart);
+    };
+
     this.bindGlobalShortcuts({
       state,
       toggleGoto,
@@ -2658,6 +2787,8 @@ export class DisasmEditorComponent implements AfterViewInit {
       toggleBottomPanel,
       toggleSetPc,
       navigateBack,
+      setCursorRowFormat,
+      clearCursorRowFormat,
     });
 
     registersToggleBtn.addEventListener('click', () => toggleRegistersPanel());

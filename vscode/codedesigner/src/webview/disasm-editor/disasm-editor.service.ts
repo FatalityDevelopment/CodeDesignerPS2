@@ -196,6 +196,44 @@ export class DisasmEditorService implements OnDestroy {
     this._bridge.postMessage({ type: 'requestPage', startIndex });
   }
 
+  /**
+   * Persist a data-format override that re-renders `[address, address+length)`
+   * as the given typed directive (`.byte`/`.half`/`.word`/`.dword`/`.qword`).
+   * The extension host then refreshes the affected page.
+   */
+  setDataFormat(
+    address: number,
+    length: number,
+    kind: 'byte' | 'half' | 'word' | 'dword' | 'qword',
+    startIndex?: number,
+  ): void {
+    this._bridge.postMessage({
+      type: 'setDataFormat',
+      address,
+      length,
+      kind,
+      startIndex,
+    });
+  }
+
+  /**
+   * Remove every data-format override that intersects
+   * `[address, address+length)`, restoring default 4-byte instruction
+   * decoding for the affected rows.
+   */
+  clearDataFormat(
+    address: number,
+    length: number,
+    startIndex?: number,
+  ): void {
+    this._bridge.postMessage({
+      type: 'clearDataFormat',
+      address,
+      length,
+      startIndex,
+    });
+  }
+
   // ── Message handlers ───────────────────────────────────────────────────────
 
   private _onInit(msg: Record<string, unknown>): void {

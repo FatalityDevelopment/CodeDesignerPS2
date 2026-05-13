@@ -20,7 +20,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
             reg.Add(c => HandleCompileCds(c.Data, c.Labels),                    "COMPILECDS");
             reg.Add(c => HandleValidateCds(c.Data, c.Labels),                   "VALIDATECDS");
             reg.Add(c => HandleCdsPatch(c.Data, c.Labels),                      "CDSPATCH");
-            reg.Add(c => HandleDisassemble(c.Data, c.Address),                  "DISASSEMBLE");
+            reg.Add(c => HandleDisassemble(c.Data, c.Address, c.GameId),        "DISASSEMBLE");
         }
 
 
@@ -683,9 +683,25 @@ namespace CodeDesigner.Ps2.Bridge.Services
         }
 
         /// <summary>
-        /// Handle DISASSEMBLE command
+        /// Handle DISASSEMBLE command.
+        ///
+        /// <para>
+        /// The hex payload is a list of 4-byte words (one per source line, e.g.
+        /// the contents of an ELF .text section as little-endian uint32s).  Each
+        /// word produces one MIPS instruction row.
+        /// </para>
+        ///
+        /// <para>
+        /// When a <c>gameId</c> is supplied, any persisted
+        /// <see cref="Database.Entities.DataFormatOverride"/> rows whose byte range
+        /// intersects the requested window are applied: the affected words are
+        /// re-emitted as one or more typed data rows (<c>.byte</c>, <c>.half</c>,
+        /// <c>.word</c>, <c>.dword</c>, <c>.qword</c>) instead of being decoded as
+        /// instructions.  Row stride therefore becomes variable — each row's
+        /// length is reported in <see cref="InstructionResult.ByteLength"/>.
+        /// </para>
         /// </summary>
-        private string HandleDisassemble(string? hexCode, uint? startAddress = null)
+        private string HandleDisassemble(string? hexCode, uint? startAddress = null, string? gameId = null)
         {
             try
             {
@@ -694,38 +710,142 @@ namespace CodeDesigner.Ps2.Bridge.Services
                     return Responses.Error("No hex code provided");
                 }
 
-                // Split into lines and disassemble each hex value
+                // ── Parse the hex payload back into a contiguous byte buffer ──
                 var lines = hexCode.Split(new[] { '\n', '\r', ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
-                var results = new List<InstructionResult>();
-                var instructionList = new List<(uint instruction, uint address)>();
-                
-                // Track current PC for branch calculations
-                uint currentPc = startAddress ?? 0;
-
+                var words = new List<uint>(lines.Length);
                 foreach (var line in lines)
                 {
                     var trimmed = line.Trim();
-                    
-                    // Skip empty lines and comments
                     if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#"))
+                        continue;
+                    string hexValue = trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                        ? trimmed.Substring(2)
+                        : trimmed;
+                    if (!uint.TryParse(hexValue, System.Globalization.NumberStyles.HexNumber, null, out uint w))
                     {
+                        // Preserve the original behaviour of reporting a bad
+                        // line as a failed row.  Use 0 as a placeholder so the
+                        // byte buffer offsets remain aligned with the source.
+                        words.Add(0);
+                        continue;
+                    }
+                    words.Add(w);
+                }
+
+                // Convert to a byte buffer so we can read partial slices for
+                // data-format rows below.  PS2 memory is little-endian.
+                var byteBuf = new byte[words.Count * 4];
+                for (int i = 0; i < words.Count; i++)
+                {
+                    uint w = words[i];
+                    int bi = i * 4;
+                    byteBuf[bi    ] = (byte) (w        & 0xFF);
+                    byteBuf[bi + 1] = (byte)((w >>  8) & 0xFF);
+                    byteBuf[bi + 2] = (byte)((w >> 16) & 0xFF);
+                    byteBuf[bi + 3] = (byte)((w >> 24) & 0xFF);
+                }
+
+                uint baseAddr = startAddress ?? 0;
+                long rangeStart = baseAddr;
+                long rangeEnd   = baseAddr + (long)byteBuf.Length;
+
+                // ── Pull overrides for the requested window ───────────────────
+                IReadOnlyList<Database.Entities.DataFormatOverride> overrides = System.Array.Empty<Database.Entities.DataFormatOverride>();
+                if (!string.IsNullOrWhiteSpace(gameId))
+                {
+                    try
+                    {
+                        overrides = _ctx.DataFormatRepo
+                            .GetInRangeAsync(gameId, rangeStart, rangeEnd)
+                            .GetAwaiter().GetResult();
+                    }
+                    catch
+                    {
+                        // Treat repository failures as "no overrides" — the
+                        // disassembler should still return instruction rows.
+                        overrides = System.Array.Empty<Database.Entities.DataFormatOverride>();
+                    }
+                }
+
+                var results        = new List<InstructionResult>();
+                var instructionList = new List<(uint instruction, uint address)>();
+
+                // Resolve a live memory bus so word-formatted rows can attempt
+                // to dereference pointers and resolve strings.
+                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? analysisBus =
+                    _ctx.Client != null
+                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.Client))
+                        : null;
+
+                // Walk the byte buffer.  For every offset, check whether an
+                // override covers it; if so emit data rows, otherwise emit an
+                // instruction row for the current 4-byte word.
+                int byteIndex = 0;
+                while (byteIndex < byteBuf.Length)
+                {
+                    uint rowAddr = (uint)(baseAddr + (uint)byteIndex);
+                    var ovr = FindOverride(overrides, rowAddr);
+                    if (ovr is not null)
+                    {
+                        int unit = Repositories.DbDataFormatRepository.ByteSizeOf(ovr.Kind);
+                        // Emit one row per element of the override span, but cap
+                        // at the actual buffer end to avoid reading past it.
+                        long ovrEnd = ovr.Address + ovr.Length;
+                        while (byteIndex < byteBuf.Length && (baseAddr + (uint)byteIndex) < ovrEnd)
+                        {
+                            uint rAddr = (uint)(baseAddr + (uint)byteIndex);
+                            int  rLen  = System.Math.Min(unit, byteBuf.Length - byteIndex);
+                            if (rLen < unit) break; // not enough bytes for a full element
+
+                            string asm     = FormatDataDirective(byteBuf, byteIndex, ovr.Kind, out string? hexStr);
+                            string? cmt    = null;
+                            if (ovr.Kind == Database.Entities.DataFormatKind.Word)
+                            {
+                                uint val = BitConverter.ToUInt32(byteBuf, byteIndex);
+                                cmt = TryResolvePointerString(val, analysisBus);
+                            }
+
+                            results.Add(new InstructionResult
+                            {
+                                Address    = rAddr,
+                                ByteLength = unit,
+                                Hex        = hexStr,
+                                Assembly   = asm,
+                                Success    = true,
+                                Comment    = cmt,
+                            });
+
+                            byteIndex += unit;
+                        }
                         continue;
                     }
 
+                    // No override at this address.  Treat as a 4-byte instruction
+                    // row — if we have fewer than 4 bytes left fall back to a
+                    // byte row to keep the output aligned with the source.
+                    if (byteIndex + 4 > byteBuf.Length)
+                    {
+                        string asm   = FormatDataDirective(byteBuf, byteIndex, Database.Entities.DataFormatKind.Byte, out string? hexStr);
+                        results.Add(new InstructionResult
+                        {
+                            Address    = rowAddr,
+                            ByteLength = 1,
+                            Hex        = hexStr,
+                            Assembly   = asm,
+                            Success    = true,
+                        });
+                        byteIndex += 1;
+                        continue;
+                    }
+
+                    uint instruction = BitConverter.ToUInt32(byteBuf, byteIndex);
                     try
                     {
-                        // Parse hex value (support 0x prefix or raw hex)
-                        string hexValue = trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase) 
-                            ? trimmed.Substring(2) 
-                            : trimmed;
-                        
-                        uint instruction = Convert.ToUInt32(hexValue, 16);
-                        // Pass PC to disassembler for proper branch target calculation
-                        string disasm = MipsDisassembler.Disassemble(instruction, currentPc);
+                        string disasm = MipsDisassembler.Disassemble(instruction, rowAddr);
 
-                        // For unknown instructions the disassembler returns ".word 0xXXXXXXXX  # Unknown ..."
-                        // Per the problem statement, the instruction column should just say "unknown"
-                        // and the details should be placed in the comment column instead.
+                        // Treat ".word 0x..." (unknown opcode) the same way as
+                        // before: surface "unknown" in the op column and move
+                        // the original directive into the comment.
                         string assembly = disasm;
                         string? unknownComment = null;
                         if (disasm.StartsWith(".word ", StringComparison.Ordinal))
@@ -736,72 +856,62 @@ namespace CodeDesigner.Ps2.Bridge.Services
 
                         results.Add(new InstructionResult
                         {
-                            Hex = $"0x{instruction:X8}",
-                            Assembly = assembly,
-                            Success = true,
-                            Comment = unknownComment
+                            Address    = rowAddr,
+                            ByteLength = 4,
+                            Hex        = $"0x{instruction:X8}",
+                            Assembly   = assembly,
+                            Success    = true,
+                            Comment    = unknownComment,
                         });
-                        
-                        // Store instruction for analysis
-                        instructionList.Add((instruction, currentPc));
-                        
-                        // Increment PC by 4 bytes (one instruction)
-                        currentPc += 4;
+                        instructionList.Add((instruction, rowAddr));
                     }
                     catch (Exception ex)
                     {
                         results.Add(new InstructionResult
                         {
-                            Hex = trimmed,
-                            Error = ex.Message,
-                            Success = false
+                            Address    = rowAddr,
+                            ByteLength = 4,
+                            Hex        = $"0x{instruction:X8}",
+                            Error      = ex.Message,
+                            Success    = false,
                         });
-                        
-                        // Still increment PC even on error to maintain alignment
-                        currentPc += 4;
                     }
-                }
 
-                // Resolve a live memory bus so the analyzer can peek at strings
-                // and pointer chains. Wraps the active debug _ctx.Client through the
-                // ByteEditor → IPs2MemoryBus adapter chain. When no backend is
-                // available (file-only mode) the bus remains null and the
-                // analyzer falls back to label/MMIO-name hints only.
-                CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? analysisBus =
-                    _ctx.Client != null
-                        ? new ByteEditorMemoryBusAdapter(new DebugClientByteEditor(_ctx.Client))
-                        : null;
+                    byteIndex += 4;
+                }
 
                 // Run analyzer using the instruction's built-in Analyze() method.
                 // State-specific hints (TAKEN / NOT TAKEN) are suppressed here because
-                // the batch analyzer starts from a blank CPU state.
+                // the batch analyzer starts from a blank CPU state.  Only the
+                // rows that were emitted as MIPS instructions participate —
+                // data-format rows (.byte/.half/.word/...) are skipped so the
+                // analyzer does not try to "execute" embedded data.
                 var comments = MipsAnalyzer.AnalyzeInstructions(
-                    instructionList, 
+                    instructionList,
                     startAddress ?? 0,
                     executeInstructions: true,  // Execute instructions to track register state
                     bus: analysisBus,
                     lookupLabel: addr => _ctx.Labels.TryGetValue(addr, out var e) ? e.Label : null,
                     includeStateHints: false);
 
-                // Apply comments and labels to results
-                for (int i = 0; i < results.Count; i++)
+                // Apply comments and labels to results.  Look each row up by
+                // address rather than by index because the row stride is now
+                // variable (data-format rows can be smaller than 4 bytes).
+                foreach (var row in results)
                 {
-                    if (results[i].Success && instructionList.Count > i)
-                    {
-                        var addr = instructionList[i].address;
-                        if (comments.TryGetValue(addr, out var comment))
-                        {
-                            results[i].Comment = comment;
-                        }
+                    if (!row.Success || row.Address is null) continue;
+                    uint addr = row.Address.Value;
 
-                        // Apply label from the database
-                        if (_ctx.Labels.TryGetValue(addr, out var labelEntry))
-                        {
-                            results[i].Label = labelEntry.Label;
-                            // Use the label's comment only when the analyzer produced nothing
-                            if (string.IsNullOrEmpty(results[i].Comment) && labelEntry.Comment != null)
-                                results[i].Comment = labelEntry.Comment;
-                        }
+                    if (string.IsNullOrEmpty(row.Comment) && comments.TryGetValue(addr, out var aComment))
+                    {
+                        row.Comment = aComment;
+                    }
+
+                    if (_ctx.Labels.TryGetValue(addr, out var labelEntry))
+                    {
+                        row.Label = labelEntry.Label;
+                        if (string.IsNullOrEmpty(row.Comment) && labelEntry.Comment != null)
+                            row.Comment = labelEntry.Comment;
                     }
                 }
 
@@ -826,6 +936,135 @@ namespace CodeDesigner.Ps2.Bridge.Services
             // Type-2 prefix (0x20000000) ORed with the low 28 bits of the target address.
             uint codeAddr = 0x20000000u | (address & 0x0FFFFFFFu);
             return $"{codeAddr:X8} {value:X8}";
+        }
+
+        // ─── Data-format helpers ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Returns the override (if any) whose byte range contains
+        /// <paramref name="address"/>.  Overrides are guaranteed non-overlapping
+        /// by the repository, so a linear scan is sufficient and a single match
+        /// is unambiguous.
+        /// </summary>
+        private static Database.Entities.DataFormatOverride? FindOverride(
+            IReadOnlyList<Database.Entities.DataFormatOverride> overrides, uint address)
+        {
+            foreach (var o in overrides)
+            {
+                long start = o.Address;
+                long end   = start + o.Length;
+                if (address >= start && address < end) return o;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Formats <paramref name="buf"/> starting at <paramref name="index"/>
+        /// as a typed data directive (<c>.byte</c>, <c>.half</c>, <c>.word</c>,
+        /// <c>.dword</c>, <c>.qword</c>).  Reads PS2-native little-endian.
+        /// Also returns a uniform <c>0xHEX</c> string in <paramref name="hex"/>
+        /// for the bytes column.
+        /// </summary>
+        private static string FormatDataDirective(
+            byte[] buf, int index, Database.Entities.DataFormatKind kind, out string hex)
+        {
+            switch (kind)
+            {
+                case Database.Entities.DataFormatKind.Byte:
+                {
+                    byte b = buf[index];
+                    hex = $"0x{b:X2}";
+                    return $".byte 0x{b:X2}";
+                }
+                case Database.Entities.DataFormatKind.Half:
+                {
+                    ushort v = BitConverter.ToUInt16(buf, index);
+                    hex = $"0x{v:X4}";
+                    return $".half 0x{v:X4}";
+                }
+                case Database.Entities.DataFormatKind.Word:
+                {
+                    uint v = BitConverter.ToUInt32(buf, index);
+                    hex = $"0x{v:X8}";
+                    return $".word 0x{v:X8}";
+                }
+                case Database.Entities.DataFormatKind.DWord:
+                {
+                    ulong v = BitConverter.ToUInt64(buf, index);
+                    hex = $"0x{v:X16}";
+                    return $".dword 0x{v:X16}";
+                }
+                case Database.Entities.DataFormatKind.QWord:
+                {
+                    ulong lo = BitConverter.ToUInt64(buf, index);
+                    ulong hi = BitConverter.ToUInt64(buf, index + 8);
+                    hex = $"0x{hi:X16}{lo:X16}";
+                    return $".qword 0x{hi:X16}{lo:X16}";
+                }
+                default:
+                {
+                    byte b = buf[index];
+                    hex = $"0x{b:X2}";
+                    return $".byte 0x{b:X2}";
+                }
+            }
+        }
+
+        /// <summary>
+        /// When <paramref name="value"/> looks like a PS2 RAM pointer, tries to
+        /// read up to 64 printable ASCII bytes starting at that address from the
+        /// supplied memory bus.  Returns a <c>-&gt; "string"</c> comment on
+        /// success, or <c>null</c> when the value does not point at a printable
+        /// null-terminated string, when no bus is available, or when any read
+        /// throws.
+        ///
+        /// <para>
+        /// Plausible pointer windows:
+        /// <list type="bullet">
+        ///   <item><c>0x00100000–0x02000000</c> — physical EE RAM (32 MB,
+        ///         skipping the first 1 MB of kernel reserved area).</item>
+        ///   <item><c>0x80100000–0x82000000</c> — KSEG0 mirror of the same.</item>
+        /// </list>
+        /// </para>
+        /// </summary>
+        private static string? TryResolvePointerString(
+            uint value, CodeDesigner.Ps2.Common.Interfaces.IPs2MemoryBus? bus)
+        {
+            if (bus is null) return null;
+            if (!LooksLikeRamPointer(value)) return null;
+
+            try
+            {
+                const int MaxLen = 64;
+                var sb = new System.Text.StringBuilder();
+                for (int i = 0; i < MaxLen; i++)
+                {
+                    byte b = bus.ReadByte((uint)(value + i));
+                    if (b == 0)
+                    {
+                        // Require at least 3 printable chars to consider this a
+                        // real string and not random data that happens to start
+                        // with a zero byte.
+                        if (sb.Length < 3) return null;
+                        return $"-> \"{sb}\"";
+                    }
+                    if (b < 0x20 || b > 0x7E) return null; // non-printable → bail
+                    sb.Append((char)b);
+                }
+                // No null terminator within MaxLen; truncate and mark.
+                return sb.Length >= 3 ? $"-> \"{sb}…\"" : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>True when <paramref name="address"/> falls inside the EE RAM windows usable as a pointer target.</summary>
+        private static bool LooksLikeRamPointer(uint address)
+        {
+            return (address >= 0x00100000u && address <  0x02000000u)
+                || (address >= 0x80100000u && address <  0x82000000u);
         }
     }
 }

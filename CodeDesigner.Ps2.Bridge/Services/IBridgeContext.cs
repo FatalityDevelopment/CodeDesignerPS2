@@ -40,6 +40,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
         DbMcpMemoryRepository? McpMemoryRepo { get; }
         DbMcpAgentRepository? McpAgentRepo { get; }
         DbMcpOrchestrationRepository? McpOrchestrationRepo { get; }
+        DbDataFormatRepository DataFormatRepo { get; }
 
         // ── Shared state used by multiple services ───────────────────────────
         /// <summary>EE-address → (label, comment) — populated by LabelService and read by many.</summary>

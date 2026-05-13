@@ -294,6 +294,13 @@ namespace CodeDesigner.Ps2.Bridge
         /// the GameShark-format <see cref="Data"/> field.
         /// </summary>
         public string? CdsSource { get; set; }
+
+        // ── Data-format overrides (GETDATAFORMATS / SETDATAFORMAT / CLEARDATAFORMAT) ──
+        /// <summary>
+        /// Format kind for SETDATAFORMAT — one of <c>"byte"</c>, <c>"half"</c>,
+        /// <c>"word"</c>, <c>"dword"</c>, <c>"qword"</c> (case-insensitive).
+        /// </summary>
+        public string? DataFormatKind { get; set; }
     }
 
     /// <summary>

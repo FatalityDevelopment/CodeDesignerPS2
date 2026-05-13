@@ -121,6 +121,36 @@ namespace CodeDesigner.Ps2.Database.Migrations
                     b.ToTable("CheatLists");
                 });
 
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.DataFormatOverride", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("Address")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("GameDiscId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Length")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GameDiscId", "Address");
+
+                    b.ToTable("DataFormatOverrides");
+                });
+
             modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.Game", b =>
                 {
                     b.Property<int>("Id")
@@ -590,10 +620,19 @@ namespace CodeDesigner.Ps2.Database.Migrations
 
                     b.HasOne("CodeDesigner.Ps2.Database.Entities.Game", "Game")
                         .WithMany("CheatLists")
-                        .HasForeignKey("GameId")
-                        .OnDelete(DeleteBehavior.ClientSetNull);
+                        .HasForeignKey("GameId");
 
                     b.Navigation("Game");
+
+                    b.Navigation("GameDisc");
+                });
+
+            modelBuilder.Entity("CodeDesigner.Ps2.Database.Entities.DataFormatOverride", b =>
+                {
+                    b.HasOne("CodeDesigner.Ps2.Database.Entities.GameDisc", "GameDisc")
+                        .WithMany()
+                        .HasForeignKey("GameDiscId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("GameDisc");
                 });

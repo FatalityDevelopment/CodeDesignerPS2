@@ -37,6 +37,7 @@ namespace CodeDesigner.Ps2.Bridge
         Repositories.DbMcpMemoryRepository?               Services.IBridgeContext.McpMemoryRepo       => McpMemoryRepo;
         Repositories.DbMcpAgentRepository?                Services.IBridgeContext.McpAgentRepo        => McpAgentRepo;
         Repositories.DbMcpOrchestrationRepository?        Services.IBridgeContext.McpOrchestrationRepo => McpOrchestrationRepo;
+        Repositories.DbDataFormatRepository               Services.IBridgeContext.DataFormatRepo      => DataFormatRepo;
         CodeDesigner.Ps2.LabelManager.Ps2LabelManager     Services.IBridgeContext.LabelMgr            => LabelMgr;
         void Services.IBridgeContext.RecordNavEntry(uint address, string source) => RecordNavEntry(address, source);
         void Services.IBridgeContext.SyncLegacyDictsFromLabelManager() => SyncLegacyDictsFromLabelManager();
@@ -107,6 +108,9 @@ namespace CodeDesigner.Ps2.Bridge
 
         /// <summary>Persistence layer for MCP Orchestration profiles backed by the database.</summary>
         internal DbMcpOrchestrationRepository? McpOrchestrationRepo { get; }
+
+        /// <summary>Persistence layer for disassembler data-format overrides.</summary>
+        internal DbDataFormatRepository DataFormatRepo { get; }
 
         /// <summary>
         /// PCSX2 PINE client. Set in <c>--pcsx2</c> mode or after STARTPCSX2.
@@ -235,6 +239,7 @@ namespace CodeDesigner.Ps2.Bridge
             McpMemoryRepo = new DbMcpMemoryRepository(db);
             McpAgentRepo  = new DbMcpAgentRepository(db);
             McpOrchestrationRepo = new DbMcpOrchestrationRepository(db);
+            DataFormatRepo = new DbDataFormatRepository(db, LabelRepo);
 
             // Build the per-domain command services and the dispatcher that
             // routes commands to them. New services should be added to the
@@ -280,6 +285,7 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.AssemblerService(ctx),
                 new Services.CodeAnalysisService(ctx),
                 new Services.EmulatorControlService(ctx),
+                new Services.DataFormatService(ctx),
             });
         }
 

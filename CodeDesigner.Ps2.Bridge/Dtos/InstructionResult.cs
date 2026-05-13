@@ -1,7 +1,16 @@
 namespace CodeDesigner.Ps2.Bridge
 {
     /// <summary>
-    /// Result for individual instruction assembly/disassembly
+    /// Result for individual instruction assembly/disassembly.
+    ///
+    /// <para>
+    /// Disassembly results may represent either a single 4-byte MIPS instruction
+    /// or a typed data row (.byte/.half/.word/.dword/.qword) produced by a
+    /// <c>DataFormatOverride</c>.  In the latter case <see cref="ByteLength"/>
+    /// reflects the row's size and <see cref="Address"/> is the row's start
+    /// address — both of which are mandatory because the caller cannot derive
+    /// them from a fixed 4-byte stride any more.
+    /// </para>
     /// </summary>
     public class InstructionResult
     {
@@ -12,5 +21,19 @@ namespace CodeDesigner.Ps2.Bridge
         public string? Comment { get; set; }  // Added for analyzer-generated comments
         public string? Label { get; set; }    // Symbol label from ps2MemMap.json
         public int? LineNumber { get; set; }  // 1-based source line number
+
+        /// <summary>
+        /// Address of this row.  For instruction rows this matches the PC the
+        /// caller passed in; for data-format rows it advances by
+        /// <see cref="ByteLength"/> instead of the default 4.
+        /// </summary>
+        public uint? Address { get; set; }
+
+        /// <summary>
+        /// Byte length of this row.  4 for normal instruction rows;
+        /// 1/2/4/8/16 for data-format rows (.byte/.half/.word/.dword/.qword).
+        /// </summary>
+        public int? ByteLength { get; set; }
     }
 }
+
