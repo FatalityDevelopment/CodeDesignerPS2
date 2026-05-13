@@ -31,6 +31,16 @@ namespace CodeDesigner.Ps2.EmulatorCore
     {
         public const int DefaultPort = 28012;
 
+        /// <summary>
+        /// Hard cap on incoming request packet size. The bulk-write opcode
+        /// (<see cref="MsgWriteBuffer"/>) sends up to ~1 MiB of payload + a
+        /// 13-byte header in a single request; the cap must comfortably
+        /// exceed that. 16 MiB gives Bridge room to grow the bulk chunk size
+        /// without needing to touch this constant again. Any packet bigger
+        /// than this is treated as malformed and the connection is dropped.
+        /// </summary>
+        public const int MaxIncomingPacketBytes = 16 * 1024 * 1024;
+
         // ── Opcodes (mirror CodeDesigner.Ps2.Bridge.PineClient) ───────────────
         private const byte MsgRead8       = 0x00;
         private const byte MsgRead16      = 0x01;
@@ -156,7 +166,16 @@ namespace CodeDesigner.Ps2.EmulatorCore
                         got += n;
                     }
                     int totalSize = (int)ReadU32LE(header, 0);
-                    if (totalSize < 5 || totalSize > 1_000_000) return;
+                    // Bulk-write packets carry up to MaxBulkPayloadBytes of
+                    // payload plus an MsgWriteBuffer header (13 bytes). Cap a
+                    // safe margin above that — small enough to reject obviously
+                    // malformed lengths, large enough that legitimate bulk
+                    // transfers fit. 1 MB was the old cap; it silently dropped
+                    // any bulk write whose ChunkSize matched it, closing the
+                    // socket from under the client ("connection forcibly closed
+                    // by the remote host"). Sized symmetrically with
+                    // InternalEmulatorClient.MaxBulkChunkBytes.
+                    if (totalSize < 5 || totalSize > MaxIncomingPacketBytes) return;
 
                     var packet = new byte[totalSize];
                     Buffer.BlockCopy(header, 0, packet, 0, 4);
