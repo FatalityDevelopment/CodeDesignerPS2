@@ -68,20 +68,31 @@ namespace CodeDesigner.Ps2.Bridge
 
         // ── Public API ────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Bulk read/write chunk size. Each MsgWriteBuffer request packet
+        /// carries this many payload bytes plus a 13-byte header; each
+        /// MsgReadBuffer reply carries this many payload bytes plus a 5-byte
+        /// header. Must stay strictly below
+        /// <c>InternalPineSocket.MaxIncomingPacketBytes</c> minus the header
+        /// overhead, otherwise the emulator silently drops the packet and
+        /// forcibly closes the connection ("An existing connection was
+        /// forcibly closed by the remote host"). 1 MiB sits well under the
+        /// 16 MiB server cap.
+        /// </summary>
+        private const int MaxBulkChunkBytes = 1024 * 1024;
+
         public byte[] ReadBytes(uint address, int length)
         {
             if (length <= 0) return Array.Empty<byte>();
 
             // Use the bulk MsgReadBuffer opcode so scanners that walk multi-MB
             // regions (label, string, value, function, pointer) finish in
-            // seconds instead of timing out. Chunk to 1 MiB so each packet
-            // stays manageable.
-            const int ChunkSize = 1024 * 1024;
+            // seconds instead of timing out.
             var result = new byte[length];
             int offset = 0;
             while (offset < length)
             {
-                int len = Math.Min(ChunkSize, length - offset);
+                int len = Math.Min(MaxBulkChunkBytes, length - offset);
                 byte[] req = new byte[5 + 4 + 4];
                 WriteU32LE(req, 0, (uint)req.Length);
                 req[4] = MsgReadBuffer;
@@ -101,14 +112,11 @@ namespace CodeDesigner.Ps2.Bridge
             if (data == null || data.Length == 0) return;
 
             // Use the bulk MsgWriteBuffer opcode so loading a 32 MB dump is a
-            // handful of round-trips, not 33 million. The protocol uses a u32
-            // length so we chunk anything bigger than ~4 GB; 1 MiB chunks keep
-            // each packet manageable.
-            const int ChunkSize = 1024 * 1024;
+            // handful of round-trips, not 33 million.
             int offset = 0;
             while (offset < data.Length)
             {
-                int len = Math.Min(ChunkSize, data.Length - offset);
+                int len = Math.Min(MaxBulkChunkBytes, data.Length - offset);
                 byte[] req = new byte[5 + 4 + 4 + len];
                 WriteU32LE(req, 0, (uint)req.Length);
                 req[4] = MsgWriteBuffer;
