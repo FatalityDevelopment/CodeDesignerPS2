@@ -631,17 +631,25 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         return rows;
       }
 
-      // Call C# backend to disassemble
+      // Call C# backend to disassemble.  Passing the current game serial lets
+      // the bridge apply any persisted DataFormatOverrides so the response
+      // rows have variable byte length (.byte/.half/.word/.dword/.qword).
       const hexCode = hexInstructions.join(' ');
+      const gameId = this._currentGameSerial || undefined;
       console.log(`[DISASM] Disassembling ${hexInstructions.length} instructions starting at 0x${startAddr.toString(16)}`);
-      const results = await this.socketClient.disassemble(hexCode, startAddr);
+      const results = await this.socketClient.disassemble(hexCode, startAddr, gameId);
       console.log(`[DISASM] Received ${results.length} results from backend`);
 
-      // Convert results to row format
+      // Convert results to row format.  Each result carries its own Address
+      // and ByteLength when produced by the variable-stride disassembler — we
+      // honour those rather than re-deriving from a fixed 4-byte stride.
       for (let i = 0; i < results.length; i++) {
         const result = results[i];
-        const offset = i * DisasmEditorProvider.INSTRUCTION_SIZE;
-        const currentAddr = startAddr + offset;
+        const byteLen = result.ByteLength ?? DisasmEditorProvider.INSTRUCTION_SIZE;
+        const currentAddr = result.Address !== undefined
+          ? result.Address
+          : (startAddr + i * DisasmEditorProvider.INSTRUCTION_SIZE);
+        const offset = currentAddr - startAddr;
 
         if (result.Success && result.Assembly) {
           // Parse the assembly instruction to extract op and args
@@ -650,7 +658,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           const args = parts.slice(1).join(' ');
 
           // Get bytes in display format (space-separated, big-endian)
-          const bytesLE = this.formatBytesForDisplay(buffer, offset, 4);
+          const bytesLE = (offset >= 0 && offset + byteLen <= buffer.length)
+            ? this.formatBytesForDisplay(buffer, offset, byteLen)
+            : '';
 
           rows.push({
             addr: currentAddr.toString(16).toUpperCase().padStart(8, "0"),
@@ -664,7 +674,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           // Handle error case
           const errorMsg = `Disassembly error at offset ${offset}: ${result.Error}`;
           console.error(`[DISASM] ${errorMsg}`);
-          const bytesLE = this.formatBytesForDisplay(buffer, offset, 4);
+          const bytesLE = (offset >= 0 && offset + byteLen <= buffer.length)
+            ? this.formatBytesForDisplay(buffer, offset, byteLen)
+            : '';
 
           rows.push({
             addr: currentAddr.toString(16).toUpperCase().padStart(8, "0"),
@@ -915,6 +927,23 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         await this._handleLabelManagerAction(webviewPanel.webview, message.action as any);
       } else if (message.type === 'openLabelManagerTab') {
         this.openLabelManagerTab(message.address as string | undefined);
+      } else if (message.type === 'setDataFormat') {
+        await this._handleSetDataFormat(
+          webviewPanel,
+          fileData,
+          message.address as number,
+          message.length as number,
+          message.kind as 'byte' | 'half' | 'word' | 'dword' | 'qword',
+          message.startIndex as number | undefined,
+        );
+      } else if (message.type === 'clearDataFormat') {
+        await this._handleClearDataFormat(
+          webviewPanel,
+          fileData,
+          message.address as number,
+          message.length as number,
+          message.startIndex as number | undefined,
+        );
       }
     });
 
@@ -1650,6 +1679,41 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 await this.onOpenMemoryView?.(message.label as string ?? '');
             } else if (message.type === 'toggleFollowAi') {
                 this.setFollowAiEnabled(!this._followAiEnabled);
+            } else if (message.type === 'setDataFormat') {
+                // Live panel — re-read RAM and re-disassemble the affected page
+                // so the new typed rows show up immediately.
+                if (!this.socketClient?.isConnected()) { return; }
+                try {
+                    const gameId = this._currentGameSerial || undefined;
+                    await this.socketClient.setDataFormat(
+                        message.address as number,
+                        message.length as number,
+                        message.kind as 'byte' | 'half' | 'word' | 'dword' | 'qword',
+                        gameId,
+                    );
+                } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    vscode.window.showErrorMessage(`Failed to set data format: ${msg}`);
+                    return;
+                }
+                const refreshStart = (message.startIndex as number | undefined) ?? 0;
+                await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, refreshStart);
+            } else if (message.type === 'clearDataFormat') {
+                if (!this.socketClient?.isConnected()) { return; }
+                try {
+                    const gameId = this._currentGameSerial || undefined;
+                    await this.socketClient.clearDataFormat(
+                        message.address as number,
+                        message.length as number,
+                        gameId,
+                    );
+                } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    vscode.window.showErrorMessage(`Failed to clear data format: ${msg}`);
+                    return;
+                }
+                const refreshStart = (message.startIndex as number | undefined) ?? 0;
+                await this.sendLiveDisasmPage(panel, region, baseAddress, totalBytes, refreshStart);
             }
         });
 
@@ -2714,6 +2778,77 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     } catch (err: any) {
       console.error(`[SYMBOLS] DeleteLabel failed: ${err?.message ?? err}`);
     }
+  }
+
+  /**
+   * Persist a data-format override (.byte/.half/.word/.dword/.qword) for the
+   * requested span, then re-disassemble the surrounding page so the user sees
+   * the change immediately.
+   *
+   * <p>
+   * The override is keyed by the current game serial; when no game is
+   * selected, the bridge stores it with a null GameDiscId so the override is
+   * still persisted for the duration of the project file.
+   * </p>
+   */
+  private async _handleSetDataFormat(
+    webviewPanel: vscode.WebviewPanel,
+    fileData: Buffer,
+    address: number,
+    length: number,
+    kind: 'byte' | 'half' | 'word' | 'dword' | 'qword',
+    startIndex?: number,
+  ): Promise<void> {
+    if (!this.socketClient?.isConnected()) {
+      vscode.window.showErrorMessage('Not connected — cannot persist data-format override.');
+      return;
+    }
+    try {
+      const gameId = this._currentGameSerial || undefined;
+      await this.socketClient.setDataFormat(address, length, kind, gameId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Failed to set data format: ${msg}`);
+      return;
+    }
+    // Refresh the affected page so the new typed rows show up.
+    const pageStart = this._pageStartForAddress(address);
+    await this.sendDisasmPage(webviewPanel, fileData, startIndex ?? pageStart);
+  }
+
+  /**
+   * Remove every override that intersects the requested span, then refresh the
+   * page so the affected rows fall back to standard 4-byte instruction
+   * decoding.
+   */
+  private async _handleClearDataFormat(
+    webviewPanel: vscode.WebviewPanel,
+    fileData: Buffer,
+    address: number,
+    length: number,
+    startIndex?: number,
+  ): Promise<void> {
+    if (!this.socketClient?.isConnected()) {
+      vscode.window.showErrorMessage('Not connected — cannot clear data-format override.');
+      return;
+    }
+    try {
+      const gameId = this._currentGameSerial || undefined;
+      await this.socketClient.clearDataFormat(address, length, gameId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Failed to clear data format: ${msg}`);
+      return;
+    }
+    const pageStart = this._pageStartForAddress(address);
+    await this.sendDisasmPage(webviewPanel, fileData, startIndex ?? pageStart);
+  }
+
+  /** Round <c>address</c> down to the nearest PAGE_SIZE * INSTRUCTION_SIZE boundary, expressed as an instruction index. */
+  private _pageStartForAddress(address: number): number {
+    const offset = address - DisasmEditorProvider.BASE_ADDRESS;
+    const idx    = Math.floor(offset / DisasmEditorProvider.INSTRUCTION_SIZE);
+    return Math.floor(idx / DisasmEditorProvider.PAGE_SIZE) * DisasmEditorProvider.PAGE_SIZE;
   }
 
   private async sendDisasmPage(

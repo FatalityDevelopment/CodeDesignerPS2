@@ -56,6 +56,9 @@ public class CodeDesignerDbContext : DbContext
     /// <summary>Individual raw code lines within a cheat.</summary>
     public DbSet<CheatLine> CheatLines { get; set; } = null!;
 
+    /// <summary>User-defined data-format overrides for the disassembler view.</summary>
+    public DbSet<DataFormatOverride> DataFormatOverrides { get; set; } = null!;
+
     // ── Construction ──────────────────────────────────────────────────────────
 
     public CodeDesignerDbContext(DbContextOptions<CodeDesignerDbContext> options)
@@ -267,6 +270,20 @@ public class CodeDesignerDbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(l => new { l.CheatId, l.SortOrder });
+        });
+
+        // ── DataFormatOverride ─────────────────────────────────────────────────
+        modelBuilder.Entity<DataFormatOverride>(entity =>
+        {
+            entity.HasKey(o => o.Id);
+
+            entity.HasOne(o => o.GameDisc)
+                  .WithMany()
+                  .HasForeignKey(o => o.GameDiscId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // Fast lookup by (disc, address range).
+            entity.HasIndex(o => new { o.GameDiscId, o.Address });
         });
     }
 }

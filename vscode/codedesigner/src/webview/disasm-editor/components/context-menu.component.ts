@@ -96,6 +96,25 @@ export interface ContextMenuData {
     <div class="ctx-menu-item" (click)="onAddToLabelManager()">
       <span class="ctx-menu-icon">&#128211;</span>{{ data()?.currentLabel ? 'Edit Label…' : 'Add Label…' }}
     </div>
+    <div class="ctx-menu-separator"></div>
+    <div class="ctx-menu-item" (click)="onFormatAs('byte')">
+      <span class="ctx-menu-icon">B</span>Format as .byte
+    </div>
+    <div class="ctx-menu-item" (click)="onFormatAs('half')">
+      <span class="ctx-menu-icon">H</span>Format as .half
+    </div>
+    <div class="ctx-menu-item" (click)="onFormatAs('word')">
+      <span class="ctx-menu-icon">W</span>Format as .word
+    </div>
+    <div class="ctx-menu-item" (click)="onFormatAs('dword')">
+      <span class="ctx-menu-icon">D</span>Format as .dword
+    </div>
+    <div class="ctx-menu-item" (click)="onFormatAs('qword')">
+      <span class="ctx-menu-icon">Q</span>Format as .qword
+    </div>
+    <div class="ctx-menu-item" (click)="onClearFormat()">
+      <span class="ctx-menu-icon">A</span>Auto (clear override)
+    </div>
   `,
   styles: [`
     /* Styles are provided by the parent disasm-editor.css via ViewEncapsulation.None */
@@ -123,6 +142,14 @@ export class ContextMenuComponent {
   readonly findReferences = output<void>();
   readonly findCodeReferences = output<void>();
   readonly addToLabelManager = output<void>();
+  /**
+   * Emits when the user picks one of the "Format as …" entries.  The payload
+   * is the chosen data-format kind; the parent component forwards it to the
+   * service so the override is persisted and the page refreshed.
+   */
+  readonly formatAs = output<'byte' | 'half' | 'word' | 'dword' | 'qword'>();
+  /** Emits when the user picks "Auto (clear override)". */
+  readonly clearFormat = output<void>();
   readonly closed = output<void>();
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -217,6 +244,16 @@ export class ContextMenuComponent {
 
   onAddToLabelManager(): void {
     this.addToLabelManager.emit();
+    this.close();
+  }
+
+  onFormatAs(kind: 'byte' | 'half' | 'word' | 'dword' | 'qword'): void {
+    this.formatAs.emit(kind);
+    this.close();
+  }
+
+  onClearFormat(): void {
+    this.clearFormat.emit();
     this.close();
   }
 }

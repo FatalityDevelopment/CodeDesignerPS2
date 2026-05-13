@@ -158,6 +158,9 @@ interface CommandMessage {
     NetFilterProtocol?: number;
     NetFilterPort?: number;
     NetFilterIP?: string;
+    // Data-format overrides (GETDATAFORMATS / SETDATAFORMAT / CLEARDATAFORMAT)
+    /** One of "byte" | "half" | "word" | "dword" | "qword" for SETDATAFORMAT. */
+    DataFormatKind?: string;
 }
 
 /**
@@ -503,6 +506,8 @@ interface CommandResponse {
     Sidecars?: CdsSidecarResult[];
     // Structured CDS diagnostics from VALIDATECDS / COMPILECDS.
     Diagnostics?: CdsDiagnostic[];
+    // GETDATAFORMATS / SETDATAFORMAT results
+    DataFormatOverrides?: DataFormatOverrideInfo[];
 }
 
 /**
@@ -662,7 +667,11 @@ export interface McpConfigEntry {
 }
 
 /**
- * Result for individual instruction assembly/disassembly
+ * Result for individual instruction assembly/disassembly.
+ *
+ * Rows produced by a {@link DataFormatOverrideInfo} carry their own
+ * {@link Address} and {@link ByteLength} because row stride is no longer a
+ * fixed 4 bytes: a `.byte` row is 1 byte, a `.dword` row is 8, etc.
  */
 interface InstructionResult {
     Success: boolean;
@@ -672,6 +681,33 @@ interface InstructionResult {
     Comment?: string;
     Label?: string;
     LineNumber?: number;
+    /** Row start address (unsigned 32-bit). Present when emitted by the new variable-stride disassembly path. */
+    Address?: number;
+    /** Row byte length (1/2/4/8/16). Defaults to 4 when absent. */
+    ByteLength?: number;
+}
+
+/**
+ * Wire payload for a single disassembler data-format override returned by
+ * GETDATAFORMATS / SETDATAFORMAT.
+ */
+export interface DataFormatOverrideInfo {
+    id: number;
+    address: number;
+    length: number;
+    kind: 'byte' | 'half' | 'word' | 'dword' | 'qword';
+}
+
+/** Number of bytes per element for a given data-format kind. */
+export function dataFormatKindByteSize(kind: DataFormatOverrideInfo['kind']): number {
+    switch (kind) {
+        case 'byte':  return 1;
+        case 'half':  return 2;
+        case 'word':  return 4;
+        case 'dword': return 8;
+        case 'qword': return 16;
+        default:      return 4;
+    }
 }
 
 export interface CdsDiagnostic {
@@ -1283,28 +1319,106 @@ export class SocketClient {
     }
 
     /**
-     * Disassemble hex code to MIPS assembly
+     * Disassemble hex code to MIPS assembly.
+     *
      * @param hexCode - Hex instruction codes to disassemble (space/comma separated)
      * @param startAddress - Optional starting address for branch calculation
+     * @param gameId - Optional game/disc identifier so the bridge can apply
+     *                 any persisted data-format overrides for the range.
      */
-    public async disassemble(hexCode: string, startAddress?: number): Promise<InstructionResult[]> {
+    public async disassemble(hexCode: string, startAddress?: number, gameId?: string): Promise<InstructionResult[]> {
         const command: CommandMessage = {
             Command: 'DISASSEMBLE',
             Data: hexCode
         };
-        
+
         // Include address if provided
         if (startAddress !== undefined) {
             command.Address = startAddress;
         }
+        if (gameId) {
+            command.GameId = gameId;
+        }
 
         const response = await this.sendCommand(command);
-        
+
         if (!response.Success) {
             throw new Error(response.Error || 'Disassembly failed');
         }
 
         return response.Results || [];
+    }
+
+    /**
+     * Fetch the persisted data-format overrides whose byte range intersects
+     * `[startAddress, endAddress)` for the given game.  Pass `undefined` for
+     * `gameId` (or omit both addresses) to fetch all overrides.
+     */
+    public async getDataFormats(
+        gameId?: string,
+        startAddress?: number,
+        endAddress?: number,
+    ): Promise<DataFormatOverrideInfo[]> {
+        const command: CommandMessage = { Command: 'GETDATAFORMATS' };
+        if (gameId) command.GameId = gameId;
+        if (startAddress !== undefined) command.Address = startAddress;
+        if (endAddress !== undefined) command.EndAddress = endAddress;
+
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'GETDATAFORMATS failed');
+        }
+        return response.DataFormatOverrides ?? [];
+    }
+
+    /**
+     * Persist a new override for the disassembler so the span
+     * `[address, address + length)` is rendered as the given typed directive
+     * (`.byte`/`.half`/`.word`/`.dword`/`.qword`).  Any existing overrides that
+     * overlap are replaced atomically.
+     */
+    public async setDataFormat(
+        address: number,
+        length: number,
+        kind: DataFormatOverrideInfo['kind'],
+        gameId?: string,
+    ): Promise<DataFormatOverrideInfo | undefined> {
+        const command: CommandMessage = {
+            Command: 'SETDATAFORMAT',
+            Address: address,
+            Length: length,
+            DataFormatKind: kind,
+        };
+        if (gameId) command.GameId = gameId;
+
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'SETDATAFORMAT failed');
+        }
+        return response.DataFormatOverrides?.[0];
+    }
+
+    /**
+     * Remove every override whose byte range intersects
+     * `[address, address + length)`, restoring default 4-byte instruction
+     * decoding.  Returns the number of rows deleted.
+     */
+    public async clearDataFormat(
+        address: number,
+        length: number,
+        gameId?: string,
+    ): Promise<void> {
+        const command: CommandMessage = {
+            Command: 'CLEARDATAFORMAT',
+            Address: address,
+            Length: length,
+        };
+        if (gameId) command.GameId = gameId;
+
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'CLEARDATAFORMAT failed');
+        }
     }
 
     /**
