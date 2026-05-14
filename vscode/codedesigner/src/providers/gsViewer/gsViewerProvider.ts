@@ -188,9 +188,17 @@ export class GsViewerProvider {
                 // to postMessage as a transferable. (slice() over a shared
                 // pool would keep _readBuf pinned.)
                 const out = Buffer.from(payload);
+                // VS Code webview message passing does not preserve Node's
+                // Buffer type. Send a plain ArrayBuffer slice so the webview
+                // receives stable binary bytes (instead of an object that can
+                // decode as zero-length data).
+                const payloadBuffer = out.buffer.slice(
+                    out.byteOffset,
+                    out.byteOffset + out.byteLength,
+                );
 
                 this._panel?.webview.postMessage(
-                    { type: 'frame', frameIdx, width, height, codec, payload: out },
+                    { type: 'frame', frameIdx, width, height, codec, payload: payloadBuffer },
                 );
             }
 
@@ -420,7 +428,11 @@ export class GsViewerProvider {
                 return;
             }
             if (msg.type === 'frame') {
-                const payload = msg.payload instanceof Uint8Array ? msg.payload : new Uint8Array(msg.payload);
+                const payload = msg.payload instanceof Uint8Array
+                    ? msg.payload
+                    : msg.payload instanceof ArrayBuffer
+                        ? new Uint8Array(msg.payload)
+                        : new Uint8Array(msg.payload?.data ?? msg.payload);
                 drawFrame(payload, msg.width, msg.height, msg.codec);
             }
         });

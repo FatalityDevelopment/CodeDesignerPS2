@@ -1281,6 +1281,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                     const slot = this.settings.pcsx2?.slot ?? 28011;
                     out.info(`Sending STARTPCSX2 command to control server (${host}:${slot})...`);
                     await this.socketClient.startPcsx2(host, slot);
+                    // Open the GS viewer when runtime actually starts (Run),
+                    // not when the user only launches the PCSX2 process.
+                    void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
                     this._bridgeMode = true;
                     this._setPauseState(false);
                     // Notify webview of PCSX2 mode so the cheats tab shows the archive section.
@@ -1350,12 +1353,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         });
         terminal.show(true);
 
-        // Open the live GS frame viewer alongside PCSX2 so the game window is
-        // available inside VS Code as soon as frames start flowing. Safe even
-        // if the running PCSX2 build pre-dates GSStreamServer — the viewer
-        // shows a "disconnected" state and a Reconnect button until the
-        // bridge attaches and frames arrive.
-        void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
     }
 
     /**
