@@ -135,6 +135,10 @@ const SNAP_PREVIEW = 5;
                 <button id="saveScreenshotBtn" (click)="saveScreenshotClick.emit()" [disabled]="!isConnected()">
                   🖼 Screenshot
                 </button>
+                <button id="previewBtn" (click)="previewClick.emit()"
+                        title="Open the live PCSX2 display inside VS Code (requires the GSStreamServer-enabled PCSX2 build)">
+                  🎮 Preview
+                </button>
               }
 
               <button id="docsBtn" (click)="docsClick.emit()">📖 Docs</button>
@@ -322,6 +326,7 @@ export class SettingsTabComponent {
   readonly snapshotClick      = output<void>();
   readonly snapshotPcsx2Click = output<void>();
   readonly saveScreenshotClick = output<void>();
+  readonly previewClick        = output<void>();
   readonly docsClick           = output<void>();
   readonly archiveDocsClick    = output<void>();
   readonly importBinClick     = output<void>();

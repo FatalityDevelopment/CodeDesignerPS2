@@ -321,6 +321,9 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'saveScreenshot':
                     await this.handleSaveScreenshot();
                     break;
+                case 'openGsViewer':
+                    await vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
+                    break;
                 case 'importBin':
                     await this.handleImportBin();
                     break;
@@ -1346,6 +1349,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             shellArgs: args,
         });
         terminal.show(true);
+
+        // Open the live GS frame viewer alongside PCSX2 so the game window is
+        // available inside VS Code as soon as frames start flowing. Safe even
+        // if the running PCSX2 build pre-dates GSStreamServer — the viewer
+        // shows a "disconnected" state and a Reconnect button until the
+        // bridge attaches and frames arrive.
+        void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
     }
 
     /**
