@@ -149,6 +149,8 @@ public sealed partial class CodeDesignerPs2Tools
         uint? end   = TryParseAddress(endAddress);
         if (start is null) return $"Error: invalid startAddress '{startAddress}'.";
         if (end   is null) return $"Error: invalid endAddress '{endAddress}'.";
+        if (end.Value <= start.Value)
+            return $"Error: endAddress (0x{end.Value:X8}) must be greater than startAddress (0x{start.Value:X8}).";
 
         // Parse the optional search pattern ("0x4D,0x57" or "77,87").
         List<int>? pattern = null;
@@ -242,6 +244,8 @@ public sealed partial class CodeDesignerPs2Tools
         uint? end   = TryParseAddress(endAddress);
         if (start is null) return $"Error: invalid startAddress '{startAddress}'.";
         if (end   is null) return $"Error: invalid endAddress '{endAddress}'.";
+        if (start.Value != 0 && end.Value != 0 && end.Value <= start.Value)
+            return $"Error: endAddress (0x{end.Value:X8}) must be greater than startAddress (0x{start.Value:X8}).";
 
         if (string.IsNullOrWhiteSpace(searchPattern))
             return "Error: searchPattern is required.";
