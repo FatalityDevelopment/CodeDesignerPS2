@@ -273,6 +273,10 @@ export class DisasmPanelComponent implements OnInit, AfterViewInit, OnDestroy {
     this.bridge.postMessage({ command: 'saveScreenshot' });
   }
 
+  openGsViewer(): void {
+    this.bridge.postMessage({ command: 'openGsViewer' });
+  }
+
   openDocs(): void {
     this.bridge.postMessage({ command: 'openMarkdownHelp', file: 'docs/README.md' });
   }
