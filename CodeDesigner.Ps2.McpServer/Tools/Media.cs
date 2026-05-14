@@ -380,4 +380,56 @@ public sealed partial class CodeDesignerPs2Tools
             cancellationToken);
         return SimpleMessage(json);
     }
+
+    // -------------------------------------------------------------------------
+    // GS framebuffer streaming (live PCSX2 display)
+    // -------------------------------------------------------------------------
+
+    [McpServerTool(Name = "get_gs_frame")]
+    [Description("Get the latest PCSX2 GS framebuffer frame (the game's current display) as a base64-encoded JPEG. Returns the most recent frame the bridge has received over its dedicated GS streaming socket — no PCSX2 round-trip, just an in-memory snapshot. Useful for AI vision queries on the running game. Call sparingly (e.g. once per question), not in a loop. Requires PCSX2 to be running with PINE enabled and a current build that exposes GSStreamServer.")]
+    public async Task<string> GetGsFrame(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "GETGSFRAME" }, cancellationToken);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("Error", out var err))
+                return $"Error: {err.GetString()}";
+            if (!root.TryGetProperty("GsFrame", out var frame))
+                return SimpleMessage(json);
+
+            uint   idx     = frame.TryGetProperty("frame_index",  out var fi) ? fi.GetUInt32() : 0u;
+            ushort width   = frame.TryGetProperty("width",        out var w)  ? (ushort)w.GetUInt32() : (ushort)0;
+            ushort height  = frame.TryGetProperty("height",       out var h)  ? (ushort)h.GetUInt32() : (ushort)0;
+            byte   codec   = frame.TryGetProperty("codec",        out var c)  ? (byte)c.GetUInt32()   : (byte)0;
+            string b64     = frame.TryGetProperty("data_base64",  out var d)  ? (d.GetString() ?? "") : "";
+            string utc     = frame.TryGetProperty("received_utc", out var u)  ? (u.GetString() ?? "") : "";
+
+            string codecName = codec switch
+            {
+                1 => "MJPEG (JPEG)",
+                _ => $"unknown({codec})",
+            };
+
+            int sizeBytes = b64.Length * 3 / 4; // approximate decoded size
+
+            return $"Latest GS frame:\n" +
+                   $"  frame_index : {idx}\n" +
+                   $"  resolution  : {width}x{height}\n" +
+                   $"  codec       : {codecName}\n" +
+                   $"  size        : ~{sizeBytes} bytes (base64-encoded length {b64.Length})\n" +
+                   $"  received_utc: {utc}\n" +
+                   $"  data_base64 : {b64}";
+        }
+        catch { return json; }
+    }
+
+    [McpServerTool(Name = "get_gs_stream_status")]
+    [Description("Diagnostic: report the live GS streaming pipeline health — whether the bridge is connected to PCSX2's GSStreamServer, the bound port, subscriber count, frame counters, and any drops on either side.")]
+    public async Task<string> GetGsStreamStatus(CancellationToken cancellationToken = default)
+    {
+        var json = await bridge.SendAsync(new { Command = "GSSTREAMSTATUS" }, cancellationToken);
+        return SimpleMessage(json);
+    }
 }
