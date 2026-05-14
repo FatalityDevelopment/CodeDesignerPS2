@@ -149,6 +149,19 @@ namespace CodeDesigner.Ps2.Bridge
             // Close any previous inbound link so we always reflect the current pine.
             DetachPineClient();
 
+            // Diagnostic kill switch: with CDS_DISABLE_GS_STREAM=1 set, the
+            // bridge does NOT subscribe to PCSX2's GSStreamServer. PCSX2 then
+            // sees zero subscribers and skips its per-frame snapshot path
+            // entirely (HasSubscribers() returns false in GSRenderer::VSync).
+            // Lets us isolate whether the streaming path is at fault for any
+            // PCSX2-side display issue without rebuilding PCSX2.
+            var disabled = Environment.GetEnvironmentVariable("CDS_DISABLE_GS_STREAM");
+            if (!string.IsNullOrEmpty(disabled) && disabled != "0")
+            {
+                Console.WriteLine("GSStream: CDS_DISABLE_GS_STREAM is set; skipping PCSX2 inbound attach.");
+                return;
+            }
+
             ushort port;
             try
             {
@@ -274,7 +287,11 @@ namespace CodeDesigner.Ps2.Bridge
                     if (snap == null)
                         continue;
 
-                    Interlocked.Increment(ref _framesIn);
+                    long n = Interlocked.Increment(ref _framesIn);
+                    if (n == 1)
+                    {
+                        Console.WriteLine($"GSStream: first inbound frame received from PCSX2: {snap.Width}x{snap.Height} codec={snap.Codec} {snap.Payload.Length}B");
+                    }
                     lock (_latestLock) _latest = snap;
 
                     Broadcast(raw);
