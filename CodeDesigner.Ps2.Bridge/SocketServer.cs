@@ -57,6 +57,21 @@ namespace CodeDesigner.Ps2.Bridge
         private readonly bool _ownsDb;
 
         /// <summary>
+        /// Dedicated binary fan-out for GS framebuffer streaming. Owns its own
+        /// inbound socket to PCSX2's GSStreamServer and a separate outbound
+        /// listener for webview/MCP subscribers. Independent from this class's
+        /// JSON command socket so 60fps frame traffic cannot back up the
+        /// JSON-RPC channel.
+        /// </summary>
+        private readonly GSStreamForwarder _gsStreamForwarder;
+
+        /// <summary>
+        /// Port the GS frame fan-out listens on for binary subscribers (the
+        /// webview's high-rate path). 8765 is the JSON channel; 8766 is this.
+        /// </summary>
+        public int GsStreamListenerPort => _gsStreamForwarder.ListenerPort;
+
+        /// <summary>
         /// Streams of clients that have subscribed to AI activity push notifications.
         /// </summary>
         private readonly List<NetworkStream> _activitySubscribers = new();
@@ -117,8 +132,26 @@ namespace CodeDesigner.Ps2.Bridge
         /// Runs the PCSX2-specific PINE protocol (game metadata, OS thread
         /// inspection, etc.) on top of the cross-runtime <see cref="IDebugClient"/>
         /// surface.
+        ///
+        /// <para>
+        /// Setting this also notifies <see cref="GSStreamForwarder"/> so it can
+        /// open / drop the inbound GS-frame connection in lockstep with the
+        /// PCSX2 attachment.
+        /// </para>
         /// </summary>
-        public PineClient? PineClient { get; set; }
+        private PineClient? _pineClient;
+        public PineClient? PineClient
+        {
+            get => _pineClient;
+            set
+            {
+                _pineClient = value;
+                if (value != null)
+                    _gsStreamForwarder.AttachPineClient(value);
+                else
+                    _gsStreamForwarder.DetachPineClient();
+            }
+        }
 
         /// <summary>
         /// Built-in emulator client. Set after STARTEMULATOR / STARTFILEMODE
@@ -231,7 +264,7 @@ namespace CodeDesigner.Ps2.Bridge
         private SocketServer(int port, CodeDesignerDbContext db, bool ownsDb)
         {
             _port       = port;
-            
+
             _ownsDb     = ownsDb;
             Db          = db;
             LabelRepo   = new DbLabelRepository(db);
@@ -240,6 +273,10 @@ namespace CodeDesigner.Ps2.Bridge
             McpAgentRepo  = new DbMcpAgentRepository(db);
             McpOrchestrationRepo = new DbMcpOrchestrationRepository(db);
             DataFormatRepo = new DbDataFormatRepository(db, LabelRepo);
+
+            // Constructed before the service list because GsStreamService takes
+            // a reference to it. The listener doesn't actually bind until Start().
+            _gsStreamForwarder = new GSStreamForwarder();
 
             // Build the per-domain command services and the dispatcher that
             // routes commands to them. New services should be added to the
@@ -286,6 +323,7 @@ namespace CodeDesigner.Ps2.Bridge
                 new Services.CodeAnalysisService(ctx),
                 new Services.EmulatorControlService(ctx),
                 new Services.DataFormatService(ctx),
+                new Services.GsStreamService(ctx, _gsStreamForwarder),
             });
         }
 
@@ -296,6 +334,7 @@ namespace CodeDesigner.Ps2.Bridge
         /// <inheritdoc/>
         public void Dispose()
         {
+            try { _gsStreamForwarder.Dispose(); } catch { /* swallow */ }
             if (_ownsDb)
                 Db.Dispose();
         }
@@ -439,6 +478,11 @@ namespace CodeDesigner.Ps2.Bridge
             _listener = new TcpListener(IPAddress.Loopback, _port);
             _listener.Start();
             _isRunning = true;
+
+            // Bring up the GS frame fan-out alongside the JSON channel. Safe to
+            // start unconditionally — it just listens; nothing flows until a
+            // PineClient is attached and a subscriber connects.
+            _gsStreamForwarder.Start();
 
             Console.WriteLine($"Socket server started on port {_port}");
             Console.WriteLine("Waiting for VSCode extension to connect...");

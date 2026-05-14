@@ -110,6 +110,14 @@ namespace CodeDesigner.Ps2.Bridge
         private const byte MsgNetSetFilter      = 0x3E;
         private const byte MsgNetGetStats       = 0x3F;
 
+        // ── GS stream control opcodes ─────────────────────────────────────────
+        // The bulk frame data does NOT travel over PINE — these opcodes only
+        // expose discovery/status for the dedicated GSStreamServer socket
+        // (see GSStreamClient.cs).
+        private const byte MsgGSStreamGetPort   = 0x40;
+        private const byte MsgGSStreamGetStatus = 0x41;
+        private const byte MsgGSStreamPing      = 0x42;
+
         // ── PINE result codes ─────────────────────────────────────────────────
         private const byte IPC_OK   = 0x00;
         private const byte IPC_FAIL = 0xFF;
@@ -1323,6 +1331,68 @@ namespace CodeDesigner.Ps2.Bridge
         {
             byte[] rep = SendReceive(BuildSingleRequest(MsgSaveScreenshot), expectedReplySize: 5);
             if (rep[4] != IPC_OK) throw PineFail("MsgSaveScreenshot");
+        }
+
+        // ── GS stream control ─────────────────────────────────────────────────
+
+        /// <summary>Status snapshot returned by <see cref="GSStreamGetStatus"/>.</summary>
+        public sealed class GSStreamStatus
+        {
+            public bool   Active           { get; }
+            public ushort Port             { get; }
+            public uint   Subscribers      { get; }
+            public uint   FramesDelivered  { get; }
+            public uint   FramesDropped    { get; }
+
+            internal GSStreamStatus(bool active, ushort port, uint subs, uint delivered, uint dropped)
+            {
+                Active          = active;
+                Port            = port;
+                Subscribers     = subs;
+                FramesDelivered = delivered;
+                FramesDropped   = dropped;
+            }
+        }
+
+        /// <summary>
+        /// [GS stream control] Returns the TCP port on which PCSX2's GSStreamServer
+        /// is listening. 0 means the listener is not initialized in this PCSX2
+        /// instance (older build, or PINE disabled).
+        /// </summary>
+        public ushort GSStreamGetPort()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgGSStreamGetPort), expectedReplySize: 7);
+            if (rep[4] != IPC_OK) throw PineFail("MsgGSStreamGetPort");
+            return ReadU16LE(rep, 5);
+        }
+
+        /// <summary>
+        /// [GS stream control] Returns runtime statistics for the GSStreamServer:
+        /// whether it is initialized, the port it is bound to, current subscriber
+        /// count, and frame counters.
+        /// </summary>
+        public GSStreamStatus GSStreamGetStatus()
+        {
+            // Reply: status(1) + active(1) + port(2) + subs(4) + delivered(4) + dropped(4) = 16 bytes
+            byte[] rep = SendReceive(BuildSingleRequest(MsgGSStreamGetStatus), expectedReplySize: 20);
+            if (rep[4] != IPC_OK) throw PineFail("MsgGSStreamGetStatus");
+            bool   active     = rep[5] != 0;
+            ushort port       = ReadU16LE(rep, 6);
+            uint   subs       = ReadU32LE(rep, 8);
+            uint   delivered  = ReadU32LE(rep, 12);
+            uint   dropped    = ReadU32LE(rep, 16);
+            return new GSStreamStatus(active, port, subs, delivered, dropped);
+        }
+
+        /// <summary>
+        /// [GS stream control] Lightweight liveness probe for the GS stream
+        /// control plane. Returns successfully if the PCSX2 build understands
+        /// the GS stream opcodes; throws otherwise.
+        /// </summary>
+        public void GSStreamPing()
+        {
+            byte[] rep = SendReceive(BuildSingleRequest(MsgGSStreamPing), expectedReplySize: 5);
+            if (rep[4] != IPC_OK) throw PineFail("MsgGSStreamPing");
         }
 
         // ── Pad / controller input ────────────────────────────────────────────
