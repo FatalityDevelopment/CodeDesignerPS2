@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import * as child_process from 'child_process';
@@ -3268,20 +3269,63 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     // ── File mode (internal emulator, no BIOS) ────────────────────────────────
 
     /**
+     * Probe whether a TCP listener is accepting connections on the given
+     * loopback port. Used to detect an already-running InternalPineSocket
+     * (default 28012) so we don't redundantly spawn a second Emulator.exe
+     * that will just fail to bind the port and exit 1, polluting the UI
+     * with a phantom "terminal terminated with exit code: 1" toast.
+     *
+     * Resolves true if the connect succeeds, false on refused / timeout /
+     * any error. Times out at 500 ms so the probe never blocks the user's
+     * File→Open noticeably.
+     */
+    private static probePortListening(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+        return new Promise(resolve => {
+            const socket = new net.Socket();
+            let settled = false;
+            const done = (listening: boolean) => {
+                if (settled) { return; }
+                settled = true;
+                try { socket.destroy(); } catch { /* ignore */ }
+                resolve(listening);
+            };
+            socket.setTimeout(500);
+            socket.once('connect', () => done(true));
+            socket.once('timeout', () => done(false));
+            socket.once('error',   () => done(false));
+            try { socket.connect(port, host); }
+            catch { done(false); }
+        });
+    }
+
+    /**
      * Ensure CodeDesigner.Ps2.Emulator.exe is running in *bare* mode (no BIOS,
      * no file) so Bridge's STARTFILEMODE handler has an InternalPineSocket to
      * push the binary into. Reuses any existing emulator process — including
-     * a BIOS-mode one from a previous Run — because Bridge writes the file
-     * straight into RAM via PINE and resets PC, so no fresh process spawn or
+     * a BIOS-mode one from a previous Run, *and* one we didn't spawn ourselves
+     * (e.g. a leftover instance from a previous VS Code session whose
+     * extension has been reloaded) — because Bridge writes the file straight
+     * into RAM via PINE and resets PC, so no fresh process spawn or
      * port-collision dance is needed.
      *
      * Returns false only when the binary itself cannot be found.
      */
-    private ensureEmulatorRunningForFileMode(): boolean {
+    private async ensureEmulatorRunningForFileMode(): Promise<boolean> {
         const out = getOutputChannel();
 
         if (this.emulatorProcessTerminal) {
             out.info('Reusing running built-in emulator process for file-mode load.');
+            return true;
+        }
+
+        // If something is already listening on the InternalPineSocket port
+        // (28012), don't spawn another emulator — Bridge will use whatever's
+        // there. Without this probe we'd spawn a second --bare which fails to
+        // bind the port, exits with code 1, and shows the user a confusing
+        // "terminal terminated with exit code: 1" toast even though file mode
+        // actually worked.
+        if (await DisasmPanelProvider.probePortListening(28012)) {
+            out.info('Built-in emulator already listening on port 28012; reusing instead of spawning another.');
             return true;
         }
 
@@ -3332,7 +3376,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         // Make sure *some* Emulator.exe is running — bare-mode if none yet.
         // Bridge will load the binary into its RAM via PINE, regardless of
         // whether the emulator is bare, BIOS-mode, or already file-loaded.
-        if (!this.ensureEmulatorRunningForFileMode()) { return; }
+        if (!(await this.ensureEmulatorRunningForFileMode())) { return; }
 
         try {
             const result = await this.socketClient.startFileMode(filePath);
