@@ -397,3 +397,5 @@ vscode/codedesigner/emu-settings.json
 
 # ── Build artifacts with literal backslashes (Windows path remnants) ────────
 website/obj\\Debug/
+/vscode/codedesigner/snapshots/SCUS-97275/labels/SOCOM2_r0004.json
+/vscode/codedesigner/snapshots/SOCOM II - U.S. Navy SEALs/labels/SOCOM2_r0004.json
