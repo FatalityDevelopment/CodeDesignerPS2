@@ -41,6 +41,7 @@ export class GsViewerProvider {
     private _panel: vscode.WebviewPanel | undefined;
     private _socket: net.Socket | undefined;
     private _readBuf: Buffer = Buffer.alloc(0);
+    private _frameCount = 0;
 
     constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -86,7 +87,14 @@ export class GsViewerProvider {
             if (msg?.type === 'reconnect') {
                 log.info('[GsViewer] webview requested reconnect');
                 this._teardownSocket();
-                this._connect();
+                // Defer the new connect by a microtask so the OS-side close
+                // for the old socket finishes draining before we bind a new one
+                // on the same loopback peer. Avoids transient EADDRNOTAVAIL.
+                setImmediate(() => {
+                    if (this._panel) this._connect();
+                });
+            } else if (msg?.type === 'decodeError') {
+                log.warn(`[GsViewer] webview decode error: ${msg.error}`);
             }
         });
 
@@ -96,23 +104,36 @@ export class GsViewerProvider {
     private _connect(): void {
         const log = getOutputChannel();
         this._readBuf = Buffer.alloc(0);
+        this._frameCount = 0;
 
         const sock = new net.Socket();
         sock.setNoDelay(true);
 
+        // Each event handler captures `sock` in its closure and checks against
+        // `this._socket` before mutating state. Without this, the `'close'`
+        // event from a torn-down OLD socket fires on next tick — AFTER a NEW
+        // socket has connected — and clobbers the new socket's "connected"
+        // status. Result: the user sees the red dot one tick after a successful
+        // reconnect.
         sock.on('connect', () => {
+            if (this._socket !== sock) return;
             log.info(`[GsViewer] connected to bridge ${GsViewerProvider.DEFAULT_HOST}:${GsViewerProvider.DEFAULT_PORT}`);
             this._panel?.webview.postMessage({ type: 'status', connected: true });
         });
 
-        sock.on('data', (chunk) => this._onData(chunk));
+        sock.on('data', (chunk) => {
+            if (this._socket !== sock) return;
+            this._onData(chunk);
+        });
 
         sock.on('error', (err) => {
+            if (this._socket !== sock) return;
             log.warn(`[GsViewer] socket error: ${err.message}`);
             this._panel?.webview.postMessage({ type: 'status', connected: false, error: err.message });
         });
 
         sock.on('close', () => {
+            if (this._socket !== sock) return;
             log.info('[GsViewer] socket closed');
             this._panel?.webview.postMessage({ type: 'status', connected: false });
         });
@@ -157,6 +178,11 @@ export class GsViewerProvider {
                 const codec    = this._readBuf.readUInt8(13);
                 // const flags = this._readBuf.readUInt8(14);
                 const payload  = this._readBuf.subarray(HEADER, totalSize);
+
+                if (this._frameCount === 0) {
+                    getOutputChannel().info(`[GsViewer] first frame received: ${width}x${height} codec=${codec} ${payload.length}B`);
+                }
+                this._frameCount++;
 
                 // Copy to a fresh buffer so we can hand its underlying ArrayBuffer
                 // to postMessage as a transferable. (slice() over a shared
@@ -207,8 +233,9 @@ export class GsViewerProvider {
             background: var(--vscode-titleBar-activeBackground, #1a1a1a);
         }
         #status .dot { width: 10px; height: 10px; border-radius: 50%; background: #555; }
-        #status .dot.live { background: #4caf50; }
-        #status .dot.dead { background: #d32f2f; }
+        #status .dot.live { background: #4caf50; }       /* green: connected + receiving */
+        #status .dot.idle { background: #f9a825; }       /* yellow: connected, no recent frames */
+        #status .dot.dead { background: #d32f2f; }       /* red: disconnected */
         #status button {
             background: var(--vscode-button-background, #303030);
             color: var(--vscode-button-foreground, #ddd);
@@ -217,10 +244,27 @@ export class GsViewerProvider {
         }
         #status button:hover { background: var(--vscode-button-hoverBackground, #404040); }
         #stage {
+            position: relative;
             flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
             overflow: hidden;
         }
         canvas { max-width: 100%; max-height: 100%; image-rendering: pixelated; background: #000; }
+        #overlay {
+            position: absolute; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            color: #ddd; pointer-events: none;
+            font-family: var(--vscode-font-family, sans-serif);
+            text-align: center; padding: 16px;
+        }
+        #overlay .box {
+            background: rgba(20, 20, 20, 0.85);
+            padding: 14px 18px;
+            border-radius: 6px;
+            border: 1px solid #2a2a2a;
+            max-width: 420px;
+            line-height: 1.4;
+        }
+        #overlay .hint { color: #888; font-size: 11px; margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -231,7 +275,10 @@ export class GsViewerProvider {
         <span id="meta"></span>
         <button id="reconnect">Reconnect</button>
     </div>
-    <div id="stage"><canvas id="canvas" width="640" height="480"></canvas></div>
+    <div id="stage">
+        <canvas id="canvas" width="640" height="480"></canvas>
+        <div id="overlay"><div class="box" id="overlayBox">Waiting for connection to bridge…</div></div>
+    </div>
 
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
@@ -240,28 +287,93 @@ export class GsViewerProvider {
         const meta = document.getElementById('meta');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d', { alpha: false });
+        const overlay = document.getElementById('overlay');
+        const overlayBox = document.getElementById('overlayBox');
 
+        // Bridge socket state, separate from frame-flow state below.
+        let connected = false;
+        let lastErr = '';
+
+        // Frame-flow tracking — used to colour the dot yellow when the socket
+        // is up but no frames are arriving (PCSX2 not running, or its build
+        // pre-dates GSStreamServer, or no game is rendering yet).
+        let firstFrameAt = 0;
         let lastFrameAt = 0;
         let framesShown = 0;
-        let busy = false;          // single in-flight decode; drop frames if behind
+        let frameTimes = [];           // sliding window for FPS calc
+        let decodeErrors = 0;
+        let busy = false;              // single in-flight decode; drop frames if behind
         let lastWidth = 0, lastHeight = 0;
 
-        function setStatus(connected, errMsg) {
-            dot.className = 'dot ' + (connected ? 'live' : 'dead');
-            text.textContent = connected ? 'connected to bridge :8766' :
-                               (errMsg ? 'disconnected (' + errMsg + ')' : 'disconnected');
-        }
+        const STALE_MS = 2000;         // no frames for this long → yellow dot
 
-        function updateMeta() {
-            const fps = framesShown ? (1000 / Math.max(1, performance.now() - lastFrameAt)).toFixed(0) : '–';
-            meta.textContent = lastWidth + 'x' + lastHeight + '   ~' + fps + ' fps   #' + framesShown;
+        function showOverlay(message, hintHtml) {
+            overlay.style.display = 'flex';
+            overlayBox.innerHTML =
+                '<div>' + message + '</div>' +
+                (hintHtml ? '<div class="hint">' + hintHtml + '</div>' : '');
+        }
+        function hideOverlay() { overlay.style.display = 'none'; }
+
+        function refreshUi() {
+            const now = performance.now();
+            const ageMs = lastFrameAt ? (now - lastFrameAt) : Infinity;
+            const flowing = connected && framesShown > 0 && ageMs < STALE_MS;
+            const stale   = connected && (framesShown === 0 || ageMs >= STALE_MS);
+
+            // Dot
+            dot.className = 'dot ' + (flowing ? 'live' : (stale ? 'idle' : 'dead'));
+
+            // Status text
+            if (!connected) {
+                text.textContent = lastErr ? ('disconnected (' + lastErr + ')') : 'disconnected from bridge :8766';
+            } else if (framesShown === 0) {
+                text.textContent = 'connected — waiting for frames from PCSX2';
+            } else if (ageMs >= STALE_MS) {
+                text.textContent = 'connected — no frames for ' + (ageMs / 1000).toFixed(1) + 's';
+            } else {
+                text.textContent = 'connected — live';
+            }
+
+            // Meta (right-aligned)
+            const dur = lastFrameAt - firstFrameAt;
+            const fps = (framesShown > 1 && dur > 0) ? (1000 * (framesShown - 1) / dur).toFixed(0) : '–';
+            const recentFps = (frameTimes.length >= 2)
+                ? (1000 * (frameTimes.length - 1) / (frameTimes[frameTimes.length - 1] - frameTimes[0])).toFixed(0)
+                : fps;
+            const dims = lastWidth ? (lastWidth + 'x' + lastHeight) : '–';
+            const ageStr = lastFrameAt ? ('  age: ' + (ageMs < 1000 ? Math.round(ageMs) + 'ms' : (ageMs / 1000).toFixed(1) + 's')) : '';
+            const errStr = decodeErrors ? ('   decode errors: ' + decodeErrors) : '';
+            meta.textContent = dims + '   ~' + recentFps + ' fps   #' + framesShown + ageStr + errStr;
+
+            // Overlay
+            if (!connected) {
+                showOverlay(
+                    'Bridge socket disconnected',
+                    'Make sure CodeDesigner.Ps2.Bridge is running. Click <b>Reconnect</b> to retry.'
+                );
+            } else if (framesShown === 0) {
+                showOverlay(
+                    'Waiting for frames from PCSX2…',
+                    'Connected to the bridge on :8766, but no frames have arrived yet.<br>' +
+                    'Check that: PCSX2 is running with the GSStreamServer-enabled build, ' +
+                    'PINE is attached (use the disasm panel\\'s Run / STARTPCSX2), and a game is actually rendering.'
+                );
+            } else if (ageMs >= STALE_MS) {
+                showOverlay('No frames for ' + (ageMs / 1000).toFixed(1) + 's',
+                            'PCSX2 may have paused, lost focus, or stopped streaming.');
+            } else {
+                hideOverlay();
+            }
         }
 
         async function drawFrame(payload, width, height, codec) {
             if (busy) return; // drop, decoder is behind
             busy = true;
             try {
-                if (codec !== 1) { // unknown codec — skip
+                if (codec !== 1) {
+                    decodeErrors++;
+                    vscode.postMessage({ type: 'decodeError', error: 'unknown codec ' + codec });
                     return;
                 }
                 const blob = new Blob([payload], { type: 'image/jpeg' });
@@ -273,12 +385,18 @@ export class GsViewerProvider {
                 ctx.drawImage(bitmap, 0, 0, width, height);
                 bitmap.close();
                 lastWidth = width; lastHeight = height;
+
                 framesShown++;
-                lastFrameAt = performance.now();
-                updateMeta();
+                const now = performance.now();
+                if (firstFrameAt === 0) firstFrameAt = now;
+                lastFrameAt = now;
+                frameTimes.push(now);
+                if (frameTimes.length > 30) frameTimes.shift();
+                refreshUi();
             } catch (err) {
-                // Decode failure is non-fatal — just skip the frame.
-                console.warn('GsViewer: decode failed', err);
+                decodeErrors++;
+                const msg = (err && err.message) ? err.message : String(err);
+                vscode.postMessage({ type: 'decodeError', error: msg + ' (payload ' + payload.length + 'B, ' + width + 'x' + height + ')' });
             } finally {
                 busy = false;
             }
@@ -288,11 +406,20 @@ export class GsViewerProvider {
             const msg = event.data;
             if (!msg) return;
             if (msg.type === 'status') {
-                setStatus(!!msg.connected, msg.error);
+                connected = !!msg.connected;
+                lastErr = msg.error || '';
+                if (!connected) {
+                    // A reconnect resets the frame-flow counters so the
+                    // overlay accurately reflects the new session.
+                    firstFrameAt = 0;
+                    lastFrameAt = 0;
+                    framesShown = 0;
+                    frameTimes = [];
+                }
+                refreshUi();
                 return;
             }
             if (msg.type === 'frame') {
-                // payload arrives as a Uint8Array (Buffer is wrapped client-side).
                 const payload = msg.payload instanceof Uint8Array ? msg.payload : new Uint8Array(msg.payload);
                 drawFrame(payload, msg.width, msg.height, msg.codec);
             }
@@ -302,7 +429,11 @@ export class GsViewerProvider {
             vscode.postMessage({ type: 'reconnect' });
         });
 
-        setStatus(false);
+        // Tick the UI every second so the "no frames for Ns" indicator
+        // updates even when no events are arriving.
+        setInterval(refreshUi, 1000);
+
+        refreshUi();
     </script>
 </body>
 </html>`;
