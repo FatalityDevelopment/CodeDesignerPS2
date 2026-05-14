@@ -56,6 +56,10 @@
         "title": "CodeDesigner: Open in Emulator (File Mode)"
       },
       {
+        "command": "codedesigner.openGsFrameViewer",
+        "title": "CodeDesigner: Open GS Frame Viewer (Live PCSX2 Display)"
+      },
+      {
         "command": "codedesigner.pointerManager.addPointer",
         "title": "Add Struct",
         "icon": "$(add)"

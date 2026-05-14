@@ -3,6 +3,7 @@
 import * as vscode from 'vscode';
 import { DisasmEditorProvider } from './providers/disasmEditor/disasmEditorProvider';
 import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider';
+import { GsViewerProvider } from './providers/gsViewer/gsViewerProvider';
 import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorProvider';
 import { SocketClient } from './socketClient';
 
@@ -264,6 +265,17 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 	context.subscriptions.push(openElfFileCommand);
+
+	// ── GS frame viewer ───────────────────────────────────────────────────────
+	// Live PCSX2 display surfaced inside VS Code via the bridge's binary fan-out
+	// socket on port 8766. Decoupled from the JSON command channel (port 8765)
+	// so 60fps frame traffic never backs up command/response.
+	const gsViewerProvider = new GsViewerProvider(context.extensionUri);
+	const openGsFrameViewerCommand = vscode.commands.registerCommand(
+		'codedesigner.openGsFrameViewer',
+		() => gsViewerProvider.open(),
+	);
+	context.subscriptions.push(openGsFrameViewerCommand);
 
 	// NOTE: File → Open for .elf/.bin/.raw is now handled by the
 	// Ps2FileEditorProvider custom editor registered above (via
