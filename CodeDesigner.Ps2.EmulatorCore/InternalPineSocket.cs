@@ -206,7 +206,21 @@ namespace CodeDesigner.Ps2.EmulatorCore
         {
             using var ms = new MemoryStream();
             // Reserve 4 bytes for size + 1 for status; we fill them at the end.
-            ms.Position = 5;
+            //
+            // CAREFUL: setting Position alone does NOT extend Length — for
+            // opcodes that write to ms (Read*, Status, GetPC, …) the very
+            // first write advances Length past 5 and the header fill at the
+            // bottom works. But for opcodes that don't write anything to
+            // the reply (Pause, ClearBP, SetBP, SetPC, WriteBuffer, etc.)
+            // Length stays at 0, ToArray() returns Array.Empty<byte>(), and
+            // `reply[0] = ...` throws IndexOutOfRangeException — which
+            // bubbles out of HandleClientAsync and closes the socket
+            // ("InternalPineSocket connection closed" on the client side).
+            //
+            // Actually write 5 placeholder zero bytes so Length is always
+            // ≥ 5 regardless of which opcodes run. The header fill at the
+            // bottom of this method overwrites them.
+            ms.Write(stackalloc byte[5]);
             byte status = IPC_OK;
 
             int pos = 4;
