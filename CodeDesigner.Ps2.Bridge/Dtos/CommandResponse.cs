@@ -259,6 +259,14 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<DataFormatOverrideInfo>? DataFormatOverrides { get; set; }
+
+        // ── GS frame (GETGSFRAME) ──────────────────────────────────────────────
+        /// <summary>
+        /// Latest GS framebuffer frame returned by GETGSFRAME. Null when the GS
+        /// stream is not connected or no frame has arrived yet.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public GsFrameInfo? GsFrame { get; set; }
     }
 
     /// <summary>
@@ -504,5 +512,30 @@ namespace CodeDesigner.Ps2.Bridge
         /// Message text carried by a <c>log</c> / <c>print</c> sidecar.
         /// </summary>
         public string? MessageText { get; set; }
+    }
+
+    /// <summary>Wire payload for an MJPEG-encoded GS frame returned by GETGSFRAME.</summary>
+    public class GsFrameInfo
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("frame_index")]
+        public uint FrameIndex { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("width")]
+        public ushort Width { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("height")]
+        public ushort Height { get; set; }
+
+        /// <summary>Codec id — 1 = MJPEG. Determines how to decode <see cref="DataBase64"/>.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("codec")]
+        public byte Codec { get; set; }
+
+        /// <summary>Encoded frame bytes (e.g. a complete JPEG when codec=1) as base64.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("data_base64")]
+        public string DataBase64 { get; set; } = string.Empty;
+
+        /// <summary>UTC timestamp the bridge received the frame from PCSX2.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("received_utc")]
+        public string ReceivedUtc { get; set; } = string.Empty;
     }
 }
