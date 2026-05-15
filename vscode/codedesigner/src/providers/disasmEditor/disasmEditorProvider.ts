@@ -3413,6 +3413,40 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       }
       const entries = action.entries ?? [];
       const values: Record<string, string> = {};
+      const scalarEntries: Array<{ addrHex: string; addr: number; entryType?: string; valueType?: string }> = [];
+      const stringEntries: Array<{ addrHex: string; addr: number }> = [];
+      for (const entry of entries) {
+        const addr = parseInt((entry.address ?? '').replace(/^0x/i, ''), 16);
+        if (isNaN(addr)) { continue; }
+        if (entry.entryType === 'String') { stringEntries.push({ addrHex: entry.address, addr }); continue; }
+        if (entry.entryType === 'Function') { continue; }
+        scalarEntries.push({ addrHex: entry.address, addr, entryType: entry.entryType, valueType: entry.valueType });
+      }
+      if (scalarEntries.length > 0) {
+        try {
+          const batch = await this.socketClient.readMemoryBatch(scalarEntries.map(e => e.addr), 4, 'ee');
+          for (const e of scalarEntries) {
+            const buf = batch.get(e.addr >>> 0);
+            if (buf && buf.length >= 4) {
+              values[e.addrHex] = formatLiveValueByEntryType(buf, e.entryType, e.valueType);
+            }
+          }
+        } catch {
+          // Fallback path below still handles reads individually.
+        }
+      }
+      // Batch 4-byte probes for String entries so we don't issue one READMEM(4) per entry.
+      const stringProbe = new Map<number, Buffer>();
+      if (stringEntries.length > 0) {
+        try {
+          const sb = await this.socketClient.readMemoryBatch(
+            Array.from(new Set(stringEntries.map(s => s.addr))),
+            4,
+            'ee',
+          );
+          for (const [k, v] of sb) stringProbe.set(k, v);
+        } catch { /* fallback to per-entry string reads below */ }
+      }
       for (const entry of entries) {
         const addrHex = entry.address;
         const addr = parseInt(addrHex.replace(/^0x/i, ''), 16);
@@ -3420,9 +3454,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         try {
           if (entry.entryType === 'String') {
             // Read up to 256 bytes. If the first byte isn't printable ASCII, try pointer dereference.
+            const probe = stringProbe.get(addr >>> 0);
+            const firstByteFromProbe = probe && probe.length > 0 ? probe[0] : undefined;
             const buf = await this.socketClient.readMemory(addr, 256, 'ee');
             const firstByte = buf.length > 0 ? buf[0] : 0;
-            if (firstByte >= 0x20 && firstByte < 0x7F) {
+            const fb = firstByteFromProbe ?? firstByte;
+            if (fb >= 0x20 && fb < 0x7F) {
               const nullIdx = buf.indexOf(0);
               values[addrHex] = buf.slice(0, nullIdx !== -1 ? nullIdx : buf.length).toString('latin1');
             } else if (buf.length >= 4) {
@@ -3452,7 +3489,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 }
               }
             } catch { /* non-fatal: keep previous live value */ }
-          } else {
+          } else if (values[addrHex] === undefined) {
             // Pointer, Address, Float, Value — read 4 bytes and format by type.
             const buf = await this.socketClient.readMemory(addr, 4, 'ee');
             if (buf.length >= 4) {
@@ -3473,13 +3510,52 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       const members = action.members ?? [];
       const values: Record<string, string> = {};
       const sc = this.socketClient;
+      let resolvedByPath = new Map<string, number>();
+      try {
+        resolvedByPath = await resolveMemberPathsBatch(
+          members.map(m => m.path),
+          sc,
+        );
+      } catch {
+        // Fallback to legacy per-path pointer walk if batch path resolution fails.
+        for (const m of members) {
+          try {
+            const resolved = await resolveMemberPath(m.path, sc);
+            if (resolved === null) { continue; }
+            resolvedByPath.set(m.path, resolved >>> 0);
+          } catch { /* ignore unreadable members */ }
+        }
+      }
+
+      // Batch scalar member reads first (Value/Float/Pointer/Address-like paths),
+      // then fall back to legacy per-item logic for String handling.
+      const scalarMembers = members.filter(m => {
+        const t = (m.entryType ?? '').toLowerCase();
+        const vt = (m.valueType ?? '').toLowerCase();
+        return t !== 'string' && vt !== 'string';
+      });
+      if (scalarMembers.length > 0) {
+        try {
+          const addrs = scalarMembers
+            .map(m => resolvedByPath.get(m.path))
+            .filter((v): v is number => typeof v === 'number');
+          const uniqueAddrs = Array.from(new Set(addrs));
+          const batch = await sc.readMemoryBatch(uniqueAddrs, 4, 'ee');
+          for (const m of scalarMembers) {
+            const resolved = resolvedByPath.get(m.path);
+            if (resolved === undefined) continue;
+            const dataBuf = batch.get(resolved >>> 0);
+            if (dataBuf && dataBuf.length >= 4) {
+              values[m.path] = formatLiveValueByEntryType(dataBuf, m.entryType, m.valueType);
+            }
+          }
+        } catch { /* fallback path below */ }
+      }
+
       for (const m of members) {
         try {
-          // Resolve the member address by walking the synthetic path chain.
-          // Path format: "0xROOT:+0xOFF1:+0xOFF2" — each segment means
-          // "dereference current address as uint32, then add the offset".
-          const resolved = await resolveMemberPath(m.path, sc);
-          if (resolved === null) { continue; }
+          const resolved = resolvedByPath.get(m.path);
+          if (resolved === undefined) { continue; }
           const entryType: string | undefined = m.entryType;
           if (entryType === 'String' || m.valueType?.toLowerCase() === 'string') {
             const dataBuf = await sc.readMemory(resolved, 256, 'ee');
@@ -3497,7 +3573,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 } catch { /* ignore */ }
               }
             }
-          } else {
+          } else if (values[m.path] === undefined) {
             const dataBuf = await sc.readMemory(resolved, 4, 'ee');
             if (dataBuf.length >= 4) {
               values[m.path] = formatLiveValueByEntryType(dataBuf, entryType, m.valueType);
@@ -3779,6 +3855,54 @@ async function resolveMemberPath(
   }
 
   return addr;
+}
+
+/**
+ * Batch-resolves many synthetic member paths by dereferencing each depth level
+ * with READMEMBATCH, deduplicating shared intermediate addresses.
+ */
+async function resolveMemberPathsBatch(
+  paths: string[],
+  socketClient: {
+    readMemory(addr: number, length: number, region: string): Promise<Buffer>;
+    readMemoryBatch(addresses: number[], length: number, region: string): Promise<Map<number, Buffer>>;
+  },
+): Promise<Map<string, number>> {
+  type PathState = { parts: string[]; step: number; addr: number; valid: boolean };
+  const states = new Map<string, PathState>();
+  for (const path of paths) {
+    const parts = path.split(':');
+    const root = parseInt(parts[0].replace(/^0x/i, ''), 16);
+    states.set(path, { parts, step: 1, addr: root >>> 0, valid: !isNaN(root) });
+  }
+
+  const maxDepth = Math.max(0, ...Array.from(states.values(), s => s.parts.length - 1));
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    const needs = Array.from(states.values()).filter(s => s.valid && s.step === depth);
+    if (needs.length === 0) continue;
+    const uniqueAddrs = Array.from(new Set(needs.map(s => s.addr >>> 0)));
+    const ptrBatch = await socketClient.readMemoryBatch(uniqueAddrs, 4, 'ee');
+
+    for (const s of needs) {
+      const ptrBuf = ptrBatch.get(s.addr >>> 0);
+      if (!ptrBuf || ptrBuf.length < 4) { s.valid = false; continue; }
+      const base = ptrBuf.readUInt32LE(0);
+      if (base === 0) { s.valid = false; continue; }
+      const offsetStr = s.parts[depth].replace(/^\+0x/i, '').replace(/^\+/, '');
+      const offset = parseInt(offsetStr, 16);
+      if (isNaN(offset)) { s.valid = false; continue; }
+      s.addr = (base + offset) >>> 0;
+      s.step++;
+    }
+  }
+
+  const out = new Map<string, number>();
+  for (const [path, s] of states) {
+    if (s.valid && s.step === s.parts.length) {
+      out.set(path, s.addr >>> 0);
+    }
+  }
+  return out;
 }
 
 /**
