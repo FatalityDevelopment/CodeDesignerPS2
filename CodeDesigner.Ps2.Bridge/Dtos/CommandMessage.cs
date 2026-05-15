@@ -113,6 +113,11 @@ namespace CodeDesigner.Ps2.Bridge
         /// Each element is an unsigned byte value (0–255).
         /// </summary>
         public List<int>? SearchPattern { get; set; }
+        /// <summary>
+        /// Address list for READMEMBATCH. Each address is read with <see cref="Length"/>
+        /// bytes in the selected <see cref="Region"/>.
+        /// </summary>
+        public List<uint>? Addresses { get; set; }
 
         // PINEADDWATCH / PINEREMOVEWATCH / PINELISTWATCHES fields
         /// <summary>
