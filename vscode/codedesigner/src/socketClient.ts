@@ -58,6 +58,7 @@ interface CommandMessage {
     ScanValue?: string;
     EndAddress?: number;
     ScanAddresses?: number[];
+    Addresses?: number[];
     // ADDSTRUCT / DELETESTRUCT / ADDSTRUCTMEMBER fields
     StructName?: string;
     StructBaseAddress?: string;
@@ -474,6 +475,7 @@ interface CommandResponse {
     Structs?: StructEntry[];
     // READMEMREGION results
     MatchAddresses?: number[];
+    ReadMemBatch?: Record<string, string>;
     // PINELISTWATCHES result
     PineWatches?: PineWatchInfo[];
     // TRACECALLS result
@@ -919,6 +921,11 @@ export class SocketClient {
      * destroys the first one's listeners and leaves its Promise permanently pending.
      */
     private _connectingPromise: Promise<void> | null = null;
+    /**
+     * In-flight coalescing for identical READMEM requests. This collapses
+     * concurrent duplicate polls from multiple UI sources into one socket command.
+     */
+    private _readMemInflight = new Map<string, Promise<Buffer>>();
 
     constructor(host: string = 'localhost', port: number = 8765) {
         this.host = host;
@@ -1428,6 +1435,13 @@ export class SocketClient {
      * @param region   - "ee" (default) or "iop"
      */
     public async readMemory(address: number, length: number, region: string = 'ee'): Promise<Buffer> {
+        const key = `${region}:${address >>> 0}:${length >>> 0}`;
+        const existing = this._readMemInflight.get(key);
+        if (existing) {
+            return existing;
+        }
+
+        const pending = (async () => {
         const command: CommandMessage = {
             Command: 'READMEM',
             Address: address,
@@ -1442,6 +1456,46 @@ export class SocketClient {
         }
 
         return Buffer.from(response.Data, 'base64');
+        })();
+
+        this._readMemInflight.set(key, pending);
+        try {
+            return await pending;
+        } finally {
+            this._readMemInflight.delete(key);
+        }
+    }
+
+    /**
+     * Read fixed-size slices from many addresses in one bridge command.
+     * Returns a map keyed by uppercase 8-digit hex address (no 0x prefix).
+     */
+    public async readMemoryBatch(
+        addresses: number[],
+        length: number,
+        region: string = 'ee',
+    ): Promise<Map<number, Buffer>> {
+        if (addresses.length === 0) return new Map();
+
+        const command: CommandMessage = {
+            Command: 'READMEMBATCH',
+            Addresses: addresses.map(a => a >>> 0),
+            Length: length,
+            Region: region,
+        };
+        const response = await this.sendCommand(command);
+        if (!response.Success) {
+            throw new Error(response.Error || 'READMEMBATCH failed');
+        }
+        const raw = response.ReadMemBatch ?? {};
+        const out = new Map<number, Buffer>();
+        for (const [hex, b64] of Object.entries(raw)) {
+            const addr = parseInt(hex, 16) >>> 0;
+            if (!Number.isNaN(addr) && typeof b64 === 'string') {
+                out.set(addr, Buffer.from(b64, 'base64'));
+            }
+        }
+        return out;
     }
 
     /**
