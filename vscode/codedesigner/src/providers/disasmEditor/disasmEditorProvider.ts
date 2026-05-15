@@ -3414,10 +3414,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       const entries = action.entries ?? [];
       const values: Record<string, string> = {};
       const scalarEntries: Array<{ addrHex: string; addr: number; entryType?: string; valueType?: string }> = [];
+      const stringEntries: Array<{ addrHex: string; addr: number }> = [];
       for (const entry of entries) {
         const addr = parseInt((entry.address ?? '').replace(/^0x/i, ''), 16);
         if (isNaN(addr)) { continue; }
-        if (entry.entryType === 'String' || entry.entryType === 'Function') { continue; }
+        if (entry.entryType === 'String') { stringEntries.push({ addrHex: entry.address, addr }); continue; }
+        if (entry.entryType === 'Function') { continue; }
         scalarEntries.push({ addrHex: entry.address, addr, entryType: entry.entryType, valueType: entry.valueType });
       }
       if (scalarEntries.length > 0) {
@@ -3433,6 +3435,18 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           // Fallback path below still handles reads individually.
         }
       }
+      // Batch 4-byte probes for String entries so we don't issue one READMEM(4) per entry.
+      const stringProbe = new Map<number, Buffer>();
+      if (stringEntries.length > 0) {
+        try {
+          const sb = await this.socketClient.readMemoryBatch(
+            Array.from(new Set(stringEntries.map(s => s.addr))),
+            4,
+            'ee',
+          );
+          for (const [k, v] of sb) stringProbe.set(k, v);
+        } catch { /* fallback to per-entry string reads below */ }
+      }
       for (const entry of entries) {
         const addrHex = entry.address;
         const addr = parseInt(addrHex.replace(/^0x/i, ''), 16);
@@ -3440,9 +3454,12 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
         try {
           if (entry.entryType === 'String') {
             // Read up to 256 bytes. If the first byte isn't printable ASCII, try pointer dereference.
+            const probe = stringProbe.get(addr >>> 0);
+            const firstByteFromProbe = probe && probe.length > 0 ? probe[0] : undefined;
             const buf = await this.socketClient.readMemory(addr, 256, 'ee');
             const firstByte = buf.length > 0 ? buf[0] : 0;
-            if (firstByte >= 0x20 && firstByte < 0x7F) {
+            const fb = firstByteFromProbe ?? firstByte;
+            if (fb >= 0x20 && fb < 0x7F) {
               const nullIdx = buf.indexOf(0);
               values[addrHex] = buf.slice(0, nullIdx !== -1 ? nullIdx : buf.length).toString('latin1');
             } else if (buf.length >= 4) {
