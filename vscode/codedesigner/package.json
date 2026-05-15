@@ -60,6 +60,10 @@
         "title": "CodeDesigner: Open GS Frame Viewer (Live PCSX2 Display)"
       },
       {
+        "command": "codedesigner.openJokerMaker",
+        "title": "CodeDesigner: Open Joker Maker"
+      },
+      {
         "command": "codedesigner.pointerManager.addPointer",
         "title": "Add Struct",
         "icon": "$(add)"

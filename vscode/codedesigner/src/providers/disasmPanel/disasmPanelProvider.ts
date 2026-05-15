@@ -13,6 +13,7 @@ import { McpProgressReportEditorProvider } from '../mcpProgressReportEditor/mcpP
 import { PacketViewerProvider } from '../packetViewer/packetViewerProvider';
 import { SnapshotManagerProvider, SnapshotDataDelegate } from '../snapshotManager/snapshotManagerProvider';
 import { DiffViewerProvider } from '../diffViewer/diffViewerProvider';
+import { JokerMakerProvider } from '../jokerMaker/jokerMakerProvider';
 import { ArchiveCheat } from '../../webview/disasm-panel/types';
 
 interface EmuSettings {
@@ -126,15 +127,17 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _globalStoragePath: string = '';
     /** In-flight archive sync promise — reused so concurrent callers don't start duplicate clones. */
     private _archiveSyncPromise: Promise<void> | null = null;
-    /** Interval timer for live Joker pad-status polling (cleared on close/disconnect). */
-    private _jokerPadPollTimer: ReturnType<typeof setInterval> | undefined;
-    /** Last pad button bitmask sent to the webview — used to skip duplicate messages. */
-    private _lastJokerPadButtons: number | undefined;
+    /** Standalone Joker Maker webview, registered from extension.ts after provider setup. */
+    private _jokerMakerProvider?: JokerMakerProvider;
 
     /** Returns the workspace root directory (used by DisasmEditorProvider for history lookup). */
     public getWorkspaceRoot(): string { return this.workspaceRoot; }
     /** Returns the ISO name derived from the currently selected game path. */
     public getSelectedGameName(): string { return this.selectedGameName; }
+    /** Provides the standalone Joker Maker panel used by the cheats tab. */
+    public setJokerMakerProvider(provider: JokerMakerProvider): void {
+        this._jokerMakerProvider = provider;
+    }
     /**
      * Optional callback invoked during CDS compilation to obtain the current set of
      * live-resolved Pointer Manager labels (e.g. "seal.health" → 0x8012AB34).
@@ -373,11 +376,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 case 'applyAllArchiveCheats':
                     await this.handleApplyAllArchiveCheats();
                     break;
-                case 'startJokerPadPoll':
-                    this.startJokerPadPoll();
-                    break;
-                case 'stopJokerPadPoll':
-                    this.stopJokerPadPoll();
+                case 'openJokerMaker':
+                    this._jokerMakerProvider?.open();
                     break;
                 case 'compileCds':
                     await this.handleCompileCds();
@@ -1200,7 +1200,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private cleanupProcess(): void {
-        this.stopJokerPadPoll();
         this.emulatorTerminal = undefined;
         // Tear down the built-in emulator process if it's still running so a
         // subsequent Run respawns it cleanly.
@@ -1212,44 +1211,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this._bridgeMode = false;
         this._pendingRunMode = null;
         this.webview?.postMessage({ command: 'connectionStatus', connected: false });
-    }
-
-    // ── Joker live pad polling ──────────────────────────────────────────────
-
-    private startJokerPadPoll(): void {
-        this.stopJokerPadPoll();
-        if (!this.socketClient.isConnected()) { return; }
-
-        let errorCount = 0;
-        this._lastJokerPadButtons = undefined;
-        const poll = async () => {
-            try {
-                const state = await this.socketClient.padGetState(0);
-                errorCount = 0;
-                // Only post to webview when the pad state actually changed.
-                if (state.buttons !== this._lastJokerPadButtons) {
-                    this._lastJokerPadButtons = state.buttons;
-                    this.webview?.postMessage({ command: 'jokerPadState', buttons: state.buttons });
-                }
-            } catch {
-                errorCount++;
-                if (errorCount >= 5) {
-                    getOutputChannel().warn('Joker pad poll: too many consecutive failures, stopping.');
-                    this.stopJokerPadPoll();
-                }
-            }
-        };
-        // Fire immediately, then every 500ms.
-        void poll();
-        this._jokerPadPollTimer = setInterval(() => void poll(), 500);
-    }
-
-    private stopJokerPadPoll(): void {
-        if (this._jokerPadPollTimer !== undefined) {
-            clearInterval(this._jokerPadPollTimer);
-            this._jokerPadPollTimer = undefined;
-        }
-        this._lastJokerPadButtons = undefined;
     }
 
     private startRuntimeMode(mode: 'emulator' | 'pcsx2', biosPath: string, gamePath: string): void {

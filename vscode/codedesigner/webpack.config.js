@@ -74,6 +74,10 @@ const extensionConfig = {
         {
           from: 'src/resources/*.png',
           to: 'resources/[name][ext]'
+        },
+        {
+          from: 'src/resources/*.webp',
+          to: 'resources/[name][ext]'
         }
       ]
     })
@@ -91,6 +95,7 @@ const webviewConfig = {
     'packet-viewer':      './src/webview/packet-viewer/main.ts',
     'snapshot-manager':   './src/webview/snapshot-manager/main.ts',
     'diff-viewer':        './src/webview/diff-viewer/main.ts',
+    'joker-maker':        './src/webview/joker-maker/main.ts',
   },
   output: {
     path: path.resolve(__dirname, 'dist/webview'),

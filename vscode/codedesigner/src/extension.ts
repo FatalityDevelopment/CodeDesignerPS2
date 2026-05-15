@@ -4,12 +4,14 @@ import * as vscode from 'vscode';
 import { DisasmEditorProvider } from './providers/disasmEditor/disasmEditorProvider';
 import { DisasmPanelProvider } from './providers/disasmPanel/disasmPanelProvider';
 import { GsViewerProvider } from './providers/gsViewer/gsViewerProvider';
+import { JokerMakerProvider } from './providers/jokerMaker/jokerMakerProvider';
 import { Ps2FileEditorProvider } from './providers/ps2FileEditor/ps2FileEditorProvider';
 import { SocketClient } from './socketClient';
 
 let socketClient: SocketClient | null = null;
 let outputChannel: vscode.LogOutputChannel;
 let debugOutputChannel: vscode.LogOutputChannel;
+let padStateChannel: vscode.OutputChannel;
 
 /**
  * Get the socket client instance
@@ -32,6 +34,14 @@ export function getDebugChannel(): vscode.LogOutputChannel {
     return debugOutputChannel;
 }
 
+/**
+ * Get the PadState channel - receives Joker Maker virtual controller events
+ * (button presses, releases, stick motion) and live pad-state updates.
+ */
+export function getPadStateChannel(): vscode.OutputChannel {
+    return padStateChannel;
+}
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -44,6 +54,11 @@ export function activate(context: vscode.ExtensionContext) {
 	// Create a separate debug channel for CDS compilation errors (shown in red).
 	debugOutputChannel = vscode.window.createOutputChannel('CodeDesigner - Debug', { log: true });
 	context.subscriptions.push(debugOutputChannel);
+
+	// Joker Maker / live pad-state events land in their own channel so they
+	// don't drown out the main extension log.
+	padStateChannel = vscode.window.createOutputChannel('Code Designer PadState');
+	context.subscriptions.push(padStateChannel);
 
 	// Initialize socket client
 	socketClient = new SocketClient('localhost', 8765);
@@ -276,6 +291,19 @@ export function activate(context: vscode.ExtensionContext) {
 		() => gsViewerProvider.open(),
 	);
 	context.subscriptions.push(openGsFrameViewerCommand);
+
+	// Joker Maker (virtual PS2 controller)
+	// Standalone webview that builds GameShark joker codes from a canvas-rendered
+	// controller, mirrors live pad state via PINE, and can drive PCSX2 pad input.
+	const jokerMakerProvider = new JokerMakerProvider(context.extensionUri, socketClient);
+	const openJokerMakerCommand = vscode.commands.registerCommand(
+		'codedesigner.openJokerMaker',
+		() => jokerMakerProvider.open(),
+	);
+	context.subscriptions.push(openJokerMakerCommand);
+	disasmPanelProvider.setJokerMakerProvider(jokerMakerProvider);
+	socketClient.onConnected(()    => jokerMakerProvider.notifyConnectionChanged());
+	socketClient.onDisconnected(() => jokerMakerProvider.notifyConnectionChanged());
 
 	// NOTE: File → Open for .elf/.bin/.raw is now handled by the
 	// Ps2FileEditorProvider custom editor registered above (via
