@@ -148,6 +148,12 @@ namespace CodeDesigner.Ps2.Bridge
         /// supplied or no matches were found.
         /// </summary>
         public List<uint>? MatchAddresses { get; set; }
+        /// <summary>
+        /// READMEMBATCH result map: key = uppercase hex address without 0x prefix
+        /// (e.g. "80010000"), value = Base64 payload for that address.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public Dictionary<string, string>? ReadMemBatch { get; set; }
 
         // TRACECALLS result
         /// <summary>
