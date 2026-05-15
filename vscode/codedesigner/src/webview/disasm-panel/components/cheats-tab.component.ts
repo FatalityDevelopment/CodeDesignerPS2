@@ -8,12 +8,10 @@ import {
   model,
   OnDestroy,
   inject,
-  viewChild,
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { VsCodeBridgeService } from '../../shared/vscode-bridge.service';
 import { ArchiveCheat } from '../types';
-import { JokerMakerOverlayComponent } from './joker-maker-overlay.component';
 
 interface CheatsAppliedMsg {
   command: 'cheatsApplied';
@@ -46,7 +44,6 @@ interface ArchiveCheatsUpdatedMsg {
 @Component({
   selector: 'app-cheats-tab',
   standalone: true,
-  imports: [JokerMakerOverlayComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   template: `
@@ -144,7 +141,6 @@ interface ArchiveCheatsUpdatedMsg {
       }
     </div>
 
-    <app-joker-maker-overlay #jokerOverlay [isConnected]="isConnected()" />
   `,
 })
 export class CheatsTabComponent implements OnDestroy {
@@ -159,8 +155,6 @@ export class CheatsTabComponent implements OnDestroy {
   readonly openConverterClick = output<void>();
   readonly openPorterClick    = output<void>();
   readonly openScannerClick   = output<void>();
-
-  private readonly jokerOverlay = viewChild.required<JokerMakerOverlayComponent>('jokerOverlay');
 
   /** Two-way bound cheat text — parent can push text in (e.g. from CDS tab). */
   readonly cheatText = model('');
@@ -231,7 +225,7 @@ export class CheatsTabComponent implements OnDestroy {
   }
 
   openJokerMaker(): void {
-    this.jokerOverlay().open();
+    this.bridge.postMessage({ command: 'openJokerMaker' });
   }
 
   onOpenHelp(): void {
