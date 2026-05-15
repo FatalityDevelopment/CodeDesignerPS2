@@ -926,6 +926,9 @@ export class SocketClient {
      * concurrent duplicate polls from multiple UI sources into one socket command.
      */
     private _readMemInflight = new Map<string, Promise<Buffer>>();
+    private _interactiveQueue: Array<() => Promise<void>> = [];
+    private _backgroundQueue: Array<() => Promise<void>> = [];
+    private _queuePumping = false;
 
     constructor(host: string = 'localhost', port: number = 8765) {
         this.host = host;
@@ -1187,6 +1190,51 @@ export class SocketClient {
      * Send a command and wait for response
      */
     private sendCommand(command: CommandMessage, timeoutMs: number = 10000): Promise<CommandResponse> {
+        return this.enqueueCommand(command, timeoutMs);
+    }
+
+    private enqueueCommand(command: CommandMessage, timeoutMs: number): Promise<CommandResponse> {
+        return new Promise((resolve, reject) => {
+            const run = async () => {
+                try {
+                    const r = await this.sendCommandNow(command, timeoutMs);
+                    resolve(r);
+                } catch (e) {
+                    reject(e);
+                }
+            };
+            const prio = this.commandPriority(command.Command);
+            if (prio === 'interactive') this._interactiveQueue.push(run);
+            else this._backgroundQueue.push(run);
+            void this.pumpQueue();
+        });
+    }
+
+    private async pumpQueue(): Promise<void> {
+        if (this._queuePumping) return;
+        this._queuePumping = true;
+        try {
+            while (this._interactiveQueue.length > 0 || this._backgroundQueue.length > 0) {
+                const next = this._interactiveQueue.shift() ?? this._backgroundQueue.shift();
+                if (!next) break;
+                await next();
+            }
+        } finally {
+            this._queuePumping = false;
+        }
+    }
+
+    private commandPriority(command: string): 'interactive' | 'background' {
+        const c = command.toUpperCase();
+        if (
+            c === 'PAUSE' || c === 'RESUME' || c === 'STEP' || c === 'STEPINTO' || c === 'STEPOVER' || c === 'STEPOUT' ||
+            c === 'SETBP' || c === 'CLEARBP' || c === 'CLEARBP_ALL' || c === 'GETPC' || c === 'GETSTATUS' ||
+            c === 'READMEM' || c === 'READMEMBATCH' || c === 'GETREGS'
+        ) return 'interactive';
+        return 'background';
+    }
+
+    private sendCommandNow(command: CommandMessage, timeoutMs: number = 10000): Promise<CommandResponse> {
         return new Promise((resolve, reject) => {
             if (!this.connected || !this.client) {
                 reject(new Error('Not connected to server'));
