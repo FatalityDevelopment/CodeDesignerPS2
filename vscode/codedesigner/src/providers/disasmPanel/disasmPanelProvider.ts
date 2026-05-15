@@ -127,6 +127,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _globalStoragePath: string = '';
     /** In-flight archive sync promise — reused so concurrent callers don't start duplicate clones. */
     private _archiveSyncPromise: Promise<void> | null = null;
+    /** Monotonic token used to invalidate stale socket retry loops. */
+    private _connectAttemptVersion = 0;
+    /** Timer handle for deferred socket retry; cleared before scheduling a new retry. */
+    private _connectRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    /** Track whether this session launched PCSX2 so we can clean up orphans on disconnect/restart. */
+    private _launchedPcsx2InSession = false;
     /** Standalone Joker Maker webview, registered from extension.ts after provider setup. */
     private _jokerMakerProvider?: JokerMakerProvider;
 
@@ -1003,6 +1009,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
             out.info('Disconnected from server.');
             this.socketClient.disconnect();
+            this.terminateOrphanedPcsx2ProcessesIfNeeded('disconnect');
             this.cleanupProcess();
             return;
         }
@@ -1174,32 +1181,40 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const out = getOutputChannel();
         const maxAttempts = 20;
         let attempts = 0;
+        const attemptVersion = ++this._connectAttemptVersion;
+        this.clearPendingSocketRetry();
 
         const tryConnect = async () => {
+            if (attemptVersion !== this._connectAttemptVersion) { return; }
             attempts++;
             try {
                 if (!this.socketClient.isConnected()) {
                     await this.socketClient.connect();
                 }
+                if (attemptVersion !== this._connectAttemptVersion) { return; }
+                this.clearPendingSocketRetry();
                 out.info('Socket connected to emulator. Opening memory views…');
                 for (const r of LIVE_REGIONS_DEFAULT) {
                     await this.editorProvider.openLiveMemoryView(
                         r.region, r.address, r.size, r.label);
                 }
             } catch {
+                if (attemptVersion !== this._connectAttemptVersion) { return; }
                 if (attempts < maxAttempts) {
-                    setTimeout(tryConnect, 500);
+                    this.clearPendingSocketRetry();
+                    this._connectRetryTimer = setTimeout(tryConnect, 500);
                 } else {
                     out.warn('Could not connect to emulator socket server.');
                 }
             }
         };
 
-        // Give the emulator ~1 s to start listening before first attempt
-        setTimeout(tryConnect, 1000);
+        this._connectRetryTimer = setTimeout(tryConnect, 1000);
     }
 
     private cleanupProcess(): void {
+        this._connectAttemptVersion++;
+        this.clearPendingSocketRetry();
         this.emulatorTerminal = undefined;
         // Tear down the built-in emulator process if it's still running so a
         // subsequent Run respawns it cleanly.
@@ -1259,6 +1274,41 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         })();
     }
 
+    private clearPendingSocketRetry(): void {
+        if (this._connectRetryTimer) {
+            clearTimeout(this._connectRetryTimer);
+            this._connectRetryTimer = undefined;
+        }
+    }
+
+    private terminateOrphanedPcsx2ProcessesIfNeeded(reason: string): void {
+        if (!this._launchedPcsx2InSession) { return; }
+
+        const out = getOutputChannel();
+        const platform = process.platform;
+        try {
+            if (platform === "win32") {
+                const kill = child_process.spawnSync("taskkill", ["/F", "/IM", "pcsx2-qt.exe", "/T"], { stdio: "pipe" });
+                const stdout = String(kill.stdout ?? "").trim();
+                const stderr = String(kill.stderr ?? "").trim();
+                if (kill.status === 0) {
+                    out.info(`[PCSX2] Cleared orphan process (${reason}). ${stdout}`.trim());
+                } else if (stdout || stderr) {
+                    out.info(`[PCSX2] No orphan cleanup needed (${reason}): ${(stderr || stdout).replace(/\s+/g, " " )}`);
+                }
+            } else {
+                const kill = child_process.spawnSync("pkill", ["-f", "pcsx2"], { stdio: "pipe" });
+                if (kill.status === 0) {
+                    out.info(`[PCSX2] Cleared orphan process (${reason}).`);
+                }
+            }
+        } catch (err: any) {
+            out.warn(`[PCSX2] Orphan cleanup failed (${reason}): ${err?.message ?? err}`);
+        }
+
+        this._launchedPcsx2InSession = false;
+    }
+
     /**
      * Launch the external PCSX2 application using CLI arguments from panel selections.
      * This does not connect sockets by itself; Connect/Run still control CodeDesigner.
@@ -1314,6 +1364,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             shellArgs: args,
         });
         terminal.show(true);
+        this._launchedPcsx2InSession = true;
 
     }
 
