@@ -3413,6 +3413,26 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       }
       const entries = action.entries ?? [];
       const values: Record<string, string> = {};
+      const scalarEntries: Array<{ addrHex: string; addr: number; entryType?: string; valueType?: string }> = [];
+      for (const entry of entries) {
+        const addr = parseInt((entry.address ?? '').replace(/^0x/i, ''), 16);
+        if (isNaN(addr)) { continue; }
+        if (entry.entryType === 'String' || entry.entryType === 'Function') { continue; }
+        scalarEntries.push({ addrHex: entry.address, addr, entryType: entry.entryType, valueType: entry.valueType });
+      }
+      if (scalarEntries.length > 0) {
+        try {
+          const batch = await this.socketClient.readMemoryBatch(scalarEntries.map(e => e.addr), 4, 'ee');
+          for (const e of scalarEntries) {
+            const buf = batch.get(e.addr >>> 0);
+            if (buf && buf.length >= 4) {
+              values[e.addrHex] = formatLiveValueByEntryType(buf, e.entryType, e.valueType);
+            }
+          }
+        } catch {
+          // Fallback path below still handles reads individually.
+        }
+      }
       for (const entry of entries) {
         const addrHex = entry.address;
         const addr = parseInt(addrHex.replace(/^0x/i, ''), 16);
@@ -3452,7 +3472,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 }
               }
             } catch { /* non-fatal: keep previous live value */ }
-          } else {
+          } else if (values[addrHex] === undefined) {
             // Pointer, Address, Float, Value — read 4 bytes and format by type.
             const buf = await this.socketClient.readMemory(addr, 4, 'ee');
             if (buf.length >= 4) {

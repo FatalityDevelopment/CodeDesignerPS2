@@ -33,6 +33,8 @@ namespace CodeDesigner.Ps2.Bridge.Services
         {
             reg.Add(c => HandleReadMem(c.Address ?? 0, c.Length ?? 256, c.Region),
                 "READMEM");
+            reg.Add(c => HandleReadMemBatch(c.Addresses, c.Length ?? 4, c.Region),
+                "READMEMBATCH");
             reg.Add(c => HandleWriteMem(c.Address ?? 0, c.Data, c.Region),
                 "WRITEMEM");
             reg.Add(c => HandleLoadBin(c.InputPath, c.Address ?? 0, c.Region),
@@ -119,6 +121,57 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 return Responses.Success($"Wrote {bytes.Length} byte(s) to 0x{address:X8}");
             }
             catch (Exception ex) { return Responses.Error($"WriteMem error: {ex.Message}"); }
+        }
+
+        private string HandleReadMemBatch(IList<uint>? addresses, int length, string? region)
+        {
+            if (_ctx.Client == null)
+                return Responses.Error("No live memory backend — start with --pcsx2 or STARTEMULATOR");
+            if (addresses == null || addresses.Count == 0)
+                return Responses.Error("Addresses is required for READMEMBATCH");
+            if (length <= 0 || length > MaxReadMemLength)
+                return Responses.Error($"Invalid length {length} — must be 1–{MaxReadMemLength} bytes");
+
+            bool useIop = string.Equals(region, "iop", StringComparison.OrdinalIgnoreCase);
+            var map = new Dictionary<string, string>(addresses.Count, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var address in addresses)
+            {
+                try
+                {
+                    byte[] bytes;
+                    if (useIop)
+                    {
+                        uint iopOffset = address < AddressTranslator.EeIopMirrorBase
+                            ? address
+                            : address - AddressTranslator.EeIopMirrorBase;
+                        if (iopOffset >= AddressTranslator.IopRamSize)
+                            continue;
+                        int safeLen = (int)Math.Min((uint)length, AddressTranslator.IopRamSize - iopOffset);
+                        uint clientAddr = 0xBC000000u + iopOffset;
+                        bytes = _ctx.Client.ReadBytes(clientAddr, safeLen);
+                    }
+                    else
+                    {
+                        uint clientAddr = AddressTranslator.ToClientAddress(address, useIop: false);
+                        bytes = _ctx.Client.ReadBytes(clientAddr, length);
+                    }
+
+                    map[address.ToString("X8")] = Convert.ToBase64String(bytes);
+                }
+                catch
+                {
+                    // Best-effort batch read: skip unreadable addresses rather than
+                    // failing the entire batch.
+                }
+            }
+
+            return Responses.Json(new CommandResponse
+            {
+                Success = true,
+                Command = "READMEMBATCH",
+                ReadMemBatch = map
+            });
         }
 
         private string HandleLoadBin(string? filePath, uint address, string? region)
