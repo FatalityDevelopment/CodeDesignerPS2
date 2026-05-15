@@ -310,7 +310,7 @@ namespace CodeDesigner.Ps2.Bridge.Services
                 };
 
                 var regions  = new List<SnapshotRegion>();
-                using var archive = ArchiveFactory.Open(filePath);
+                using var archive = ArchiveFactory.OpenArchive(filePath);
 
                 foreach (var entry in archive.Entries)
                 {

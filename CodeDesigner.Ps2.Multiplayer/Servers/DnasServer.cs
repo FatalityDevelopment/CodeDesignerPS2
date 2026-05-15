@@ -512,9 +512,13 @@ public class DnasServer
                 using var reader = new PemReader(new StringReader(File.ReadAllText(keyPath)));
                 var keyObject = reader.ReadObject();
                 _log.LogDebug("[DNAS] PEM key object type: {Type}", keyObject?.GetType().Name ?? "<null>");
-                bcKey = keyObject is AsymmetricCipherKeyPair kp
-                    ? kp.Private
-                    : (AsymmetricKeyParameter)keyObject;
+
+                if (keyObject is AsymmetricCipherKeyPair kp)
+                    bcKey = kp.Private;
+                else if (keyObject is AsymmetricKeyParameter akp)
+                    bcKey = akp;
+                else
+                    bcKey = null;
             }
             else
             {

@@ -1340,6 +1340,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         args.push('-earlyconsolelog');
+        args.push('-nogui');
 
         const preview = [pcsx2Exe, ...args]
             .map(v => v.includes(' ') ? `"${v}"` : v)
