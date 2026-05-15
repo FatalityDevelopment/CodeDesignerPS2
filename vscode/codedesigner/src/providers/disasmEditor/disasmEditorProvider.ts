@@ -3407,6 +3407,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     if (action.type === 'readLiveValues') {
+      if (action.setName && this._activeSetName && action.setName !== this._activeSetName) {
+        return;
+      }
       if (!this.socketClient?.isConnected()) {
         webview.postMessage({ type: 'labelManagerLiveValues', values: {} });
         return;
@@ -3503,6 +3506,9 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
     }
 
     if (action.type === 'readMemberLiveValues') {
+      if (action.setName && this._activeSetName && action.setName !== this._activeSetName) {
+        return;
+      }
       if (!this.socketClient?.isConnected()) {
         webview.postMessage({ type: 'labelManagerMemberLiveValues', values: {} });
         return;

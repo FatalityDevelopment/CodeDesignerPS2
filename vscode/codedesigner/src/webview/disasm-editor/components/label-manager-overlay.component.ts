@@ -103,9 +103,9 @@ export type LabelManagerAction =
   /** Read the pointer at parentAddress, add offset, then navigate (handled by provider). */
   | { type: 'navigateToMember';  parentAddress: string; offset: number }
   /** Poll live values at each address (handled by provider). String entries read as null-terminated strings. */
-  | { type: 'readLiveValues';    entries: { address: string; entryType?: LabelType; valueType?: string }[] }
+  | { type: 'readLiveValues';    setName?: string; entries: { address: string; entryType?: LabelType; valueType?: string }[] }
   /** Poll live values at resolved member addresses (handled by provider). */
-  | { type: 'readMemberLiveValues'; members: { parentAddress: string; offset: number; path: string; entryType?: LabelType; valueType?: string }[] }
+  | { type: 'readMemberLiveValues'; setName?: string; members: { parentAddress: string; offset: number; path: string; entryType?: LabelType; valueType?: string }[] }
   /** Run a memory scanner and display results as entries in the tree. */
   | { type: 'runScanner';        scannerKind: ScannerKind }
   /** Clear scanner results. */
@@ -1871,12 +1871,13 @@ export class LabelManagerOverlayComponent {
     this._pollTimer = setInterval(() => {
       const entries = this._dynamicAddresses();
       if (entries.length > 0) {
-        this.action$.emit({ type: 'readLiveValues', entries });
+        this.action$.emit({ type: 'readLiveValues', setName: this.activeSetName(), entries });
       }
       const dynMembers = this._dynamicMemberRows();
       if (dynMembers.length > 0) {
         this.action$.emit({
           type: 'readMemberLiveValues',
+          setName: this.activeSetName(),
           members: dynMembers.map(r => ({
             parentAddress: r.entry.parentAddress!,
             offset: r.entry.offset ?? 0,
@@ -1900,12 +1901,13 @@ export class LabelManagerOverlayComponent {
   private _emitOnePoll(): void {
     const entries = this._dynamicAddresses();
     if (entries.length > 0) {
-      this.action$.emit({ type: 'readLiveValues', entries });
+      this.action$.emit({ type: 'readLiveValues', setName: this.activeSetName(), entries });
     }
     const dynMembers = this._dynamicMemberRows();
     if (dynMembers.length > 0) {
       this.action$.emit({
         type: 'readMemberLiveValues',
+        setName: this.activeSetName(),
         members: dynMembers.map(r => ({
           parentAddress: r.entry.parentAddress!,
           offset: r.entry.offset ?? 0,
