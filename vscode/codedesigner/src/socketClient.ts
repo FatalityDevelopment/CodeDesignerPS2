@@ -1547,38 +1547,6 @@ export class SocketClient {
     }
 
     /**
-     * Read fixed-size slices from many addresses in one bridge command.
-     * Returns a map keyed by uppercase 8-digit hex address (no 0x prefix).
-     */
-    public async readMemoryBatch(
-        addresses: number[],
-        length: number,
-        region: string = 'ee',
-    ): Promise<Map<number, Buffer>> {
-        if (addresses.length === 0) return new Map();
-
-        const command: CommandMessage = {
-            Command: 'READMEMBATCH',
-            Addresses: addresses.map(a => a >>> 0),
-            Length: length,
-            Region: region,
-        };
-        const response = await this.sendCommand(command);
-        if (!response.Success) {
-            throw new Error(response.Error || 'READMEMBATCH failed');
-        }
-        const raw = response.ReadMemBatch ?? {};
-        const out = new Map<number, Buffer>();
-        for (const [hex, b64] of Object.entries(raw)) {
-            const addr = parseInt(hex, 16) >>> 0;
-            if (!Number.isNaN(addr) && typeof b64 === 'string') {
-                out.set(addr, Buffer.from(b64, 'base64'));
-            }
-        }
-        return out;
-    }
-
-    /**
      * Read a contiguous region of EE RAM (up to 16 MB) in one call.
      * Optionally search for a byte pattern within the result.
      *
