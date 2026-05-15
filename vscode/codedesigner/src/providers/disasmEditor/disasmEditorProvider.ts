@@ -3493,6 +3493,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
       const members = action.members ?? [];
       const values: Record<string, string> = {};
       const sc = this.socketClient;
+      const resolvedByPath = new Map<string, number>();
       for (const m of members) {
         try {
           // Resolve the member address by walking the synthetic path chain.
@@ -3500,6 +3501,39 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
           // "dereference current address as uint32, then add the offset".
           const resolved = await resolveMemberPath(m.path, sc);
           if (resolved === null) { continue; }
+          resolvedByPath.set(m.path, resolved >>> 0);
+        } catch { /* ignore unreadable members */ }
+      }
+
+      // Batch scalar member reads first (Value/Float/Pointer/Address-like paths),
+      // then fall back to legacy per-item logic for String handling.
+      const scalarMembers = members.filter(m => {
+        const t = (m.entryType ?? '').toLowerCase();
+        const vt = (m.valueType ?? '').toLowerCase();
+        return t !== 'string' && vt !== 'string';
+      });
+      if (scalarMembers.length > 0) {
+        try {
+          const addrs = scalarMembers
+            .map(m => resolvedByPath.get(m.path))
+            .filter((v): v is number => typeof v === 'number');
+          const uniqueAddrs = Array.from(new Set(addrs));
+          const batch = await sc.readMemoryBatch(uniqueAddrs, 4, 'ee');
+          for (const m of scalarMembers) {
+            const resolved = resolvedByPath.get(m.path);
+            if (resolved === undefined) continue;
+            const dataBuf = batch.get(resolved >>> 0);
+            if (dataBuf && dataBuf.length >= 4) {
+              values[m.path] = formatLiveValueByEntryType(dataBuf, m.entryType, m.valueType);
+            }
+          }
+        } catch { /* fallback path below */ }
+      }
+
+      for (const m of members) {
+        try {
+          const resolved = resolvedByPath.get(m.path);
+          if (resolved === undefined) { continue; }
           const entryType: string | undefined = m.entryType;
           if (entryType === 'String' || m.valueType?.toLowerCase() === 'string') {
             const dataBuf = await sc.readMemory(resolved, 256, 'ee');
@@ -3517,7 +3551,7 @@ export class DisasmEditorProvider implements vscode.CustomReadonlyEditorProvider
                 } catch { /* ignore */ }
               }
             }
-          } else {
+          } else if (values[m.path] === undefined) {
             const dataBuf = await sc.readMemory(resolved, 4, 'ee');
             if (dataBuf.length >= 4) {
               values[m.path] = formatLiveValueByEntryType(dataBuf, entryType, m.valueType);
