@@ -133,6 +133,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _connectRetryTimer: ReturnType<typeof setTimeout> | undefined;
     /** Track whether this session launched PCSX2 so we can clean up orphans on disconnect/restart. */
     private _launchedPcsx2InSession = false;
+    /** PID of a background PCSX2 process spawned by this VS Code session (if available). */
+    private _launchedPcsx2Pid: number | null = null;
     /** Standalone Joker Maker webview, registered from extension.ts after provider setup. */
     private _jokerMakerProvider?: JokerMakerProvider;
 
@@ -1287,6 +1289,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         const out = getOutputChannel();
         const platform = process.platform;
         try {
+            if (this._launchedPcsx2Pid && Number.isFinite(this._launchedPcsx2Pid)) {
+                const pid = this._launchedPcsx2Pid;
+                if (platform === "win32") {
+                    child_process.spawnSync("taskkill", ["/F", "/PID", String(pid), "/T"], { stdio: "pipe" });
+                } else {
+                    process.kill(pid, "SIGTERM");
+                }
+                out.info(`[PCSX2] Requested shutdown for launched background PID ${pid} (${reason}).`);
+            }
             if (platform === "win32") {
                 const kill = child_process.spawnSync("taskkill", ["/F", "/IM", "pcsx2-qt.exe", "/T"], { stdio: "pipe" });
                 const stdout = String(kill.stdout ?? "").trim();
@@ -1307,6 +1318,7 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
 
         this._launchedPcsx2InSession = false;
+        this._launchedPcsx2Pid = null;
     }
 
     /**
@@ -1358,12 +1370,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             .join(' ');
         out.info(`Starting PCSX2: ${preview}`);
 
-        const terminal = vscode.window.createTerminal({
-            name: 'PCSX2',
-            shellPath: pcsx2Exe,
-            shellArgs: args,
+        const child = child_process.spawn(pcsx2Exe, args, {
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true,
         });
-        terminal.show(true);
+        child.unref();
+        this._launchedPcsx2Pid = child.pid ?? null;
+        out.info(`PCSX2 started in background${child.pid ? ` (PID ${child.pid})` : ''}.`);
         this._launchedPcsx2InSession = true;
 
     }
