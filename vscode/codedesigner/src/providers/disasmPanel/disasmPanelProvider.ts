@@ -1370,11 +1370,40 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             .join(' ');
         out.info(`Starting PCSX2: ${preview}`);
 
-        const child = child_process.spawn(pcsx2Exe, args, {
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: true,
-        });
+        if (process.platform === 'win32') {
+            // `windowsHide` only hides console windows; PCSX2 is a GUI app and can still
+            // show in the taskbar. Launch via PowerShell and force-hide the main window
+            // handle once available so background mode stays out of the taskbar.
+            const ps = `
+$exe = ${JSON.stringify(pcsx2Exe)}
+$argv = @(${args.map(a => JSON.stringify(a)).join(',')})
+$p = Start-Process -FilePath $exe -ArgumentList $argv -PassThru
+Add-Type -Name Win32 -Namespace Native -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);'
+for ($i = 0; $i -lt 80; $i++) {
+  try { $p.Refresh() } catch {}
+  if ($p.MainWindowHandle -ne 0) {
+    [Native.Win32]::ShowWindowAsync($p.MainWindowHandle, 0) | Out-Null
+    break
+  }
+  Start-Sleep -Milliseconds 100
+}
+Write-Output $p.Id
+`.trim();
+
+            const launch = child_process.spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8' });
+            if (launch.status !== 0) {
+                out.error(`Failed to launch hidden PCSX2: ${launch.stderr || launch.stdout || 'Unknown error'}`);
+                vscode.window.showErrorMessage('Failed to launch PCSX2 in hidden background mode. Check output for details.');
+                return;
+            }
+            const pidMatch = String(launch.stdout ?? '').match(/(\d+)/);
+            this._launchedPcsx2Pid = pidMatch ? Number(pidMatch[1]) : null;
+            out.info(`PCSX2 started in hidden background mode${this._launchedPcsx2Pid ? ` (PID ${this._launchedPcsx2Pid})` : ''}.`);
+            this._launchedPcsx2InSession = true;
+            return;
+        }
+
+        const child = child_process.spawn(pcsx2Exe, args, { detached: true, stdio: 'ignore', windowsHide: true });
         child.unref();
         this._launchedPcsx2Pid = child.pid ?? null;
         out.info(`PCSX2 started in background${child.pid ? ` (PID ${child.pid})` : ''}.`);
