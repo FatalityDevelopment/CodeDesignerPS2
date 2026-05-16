@@ -80,11 +80,12 @@ namespace CodeDesigner.Ps2.Bridge.Services
             // PCSX2-side stats are best-effort — a missing PineClient or an
             // older PCSX2 build (pre-GSStreamServer) just omits them.
             string pcsx2Msg = "pcsx2 stats unavailable (no PINE client attached)";
-            if (_ctx.PineClient != null)
+            var pine = _ctx.PineClient;
+            if (pine != null)
             {
                 try
                 {
-                    var s = _ctx.PineClient.GSStreamGetStatus();
+                    var s = pine.GSStreamGetStatus();
                     pcsx2Msg = $"pcsx2 active={s.Active}, port={s.Port}, " +
                                $"subscribers={s.Subscribers}, delivered={s.FramesDelivered}, dropped={s.FramesDropped}";
                 }
