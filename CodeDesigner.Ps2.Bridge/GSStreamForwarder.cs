@@ -302,8 +302,6 @@ namespace CodeDesigner.Ps2.Bridge
             }
             finally
             {
-                bool shouldReconnect = false;
-
                 // If this loop was serving the currently tracked inbound link,
                 // clear it so status callers don't see a stale "connected"
                 // state after the socket has dropped.
@@ -314,11 +312,6 @@ namespace CodeDesigner.Ps2.Bridge
                     // Also drop the latest-frame slot; once the link is down we
                     // should not report stale pixels as if they were current.
                     lock (_latestLock) _latest = null;
-
-                    // Only reconnect when the connection that ended was still
-                    // the active inbound link. If this loop ended because we
-                    // intentionally detached/replaced the socket, skip reconnect.
-                    shouldReconnect = true;
                 }
 
                 Console.WriteLine("GSStream: inbound connection closed.");
