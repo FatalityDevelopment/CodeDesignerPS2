@@ -149,20 +149,41 @@ namespace CodeDesigner.Ps2.Bridge
             // Close any previous inbound link so we always reflect the current pine.
             DetachPineClient();
 
-            ushort port;
-            try
+            // PCSX2 can report port=0 briefly during startup. Retry for a short
+            // window so first-time attach behaves like a later manual reconnect.
+            const int maxAttempts = 12; // ~3.6s total with 300ms backoff
+            ushort port = 0;
+            Exception? lastPortError = null;
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                port = pine.GSStreamGetPort();
+                try
+                {
+                    port = pine.GSStreamGetPort();
+                    if (port != 0)
+                        break;
+                }
+                catch (Exception ex)
+                {
+                    lastPortError = ex;
+                    break;
+                }
+
+                if (_cts.IsCancellationRequested)
+                    return;
+
+                Thread.Sleep(300);
             }
-            catch (Exception ex)
+
+            if (lastPortError != null)
             {
-                Console.WriteLine($"GSStream: PCSX2 build does not expose GSStreamServer ({ex.Message}). Live frames disabled.");
+                Console.WriteLine($"GSStream: PCSX2 build does not expose GSStreamServer ({lastPortError.Message}). Live frames disabled.");
                 return;
             }
 
             if (port == 0)
             {
-                Console.WriteLine("GSStream: PCSX2 reported port 0 — listener not initialized. Live frames disabled.");
+                Console.WriteLine("GSStream: PCSX2 reported GS stream port 0 after startup retries. Live frames disabled for now.");
                 return;
             }
 
@@ -287,6 +308,18 @@ namespace CodeDesigner.Ps2.Bridge
             }
             finally
             {
+                // If this loop was serving the currently tracked inbound link,
+                // clear it so status callers don't see a stale "connected"
+                // state after the socket has dropped.
+                if (ReferenceEquals(_inbound, client))
+                {
+                    _inbound = null;
+
+                    // Also drop the latest-frame slot; once the link is down we
+                    // should not report stale pixels as if they were current.
+                    lock (_latestLock) _latest = null;
+                }
+
                 Console.WriteLine("GSStream: inbound connection closed.");
             }
         }
