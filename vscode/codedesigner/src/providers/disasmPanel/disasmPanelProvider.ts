@@ -1096,9 +1096,14 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             // bridge can attach — lets users keep their own PCSX2 open.
             if (await DisasmPanelProvider.probePortListening(slot, host)) {
                 out.info(`A PCSX2 instance is listening on ${host}:${slot} — trying to attach…`);
-                if (await this._waitForSocketConnected(20000) && await this._attachPcsx2()) {
-                    out.info('Attached to the existing PCSX2 instance.');
-                    return;
+                if (await this._waitForSocketConnected(20000)) {
+                    // Bridge is up; its GS fan-out listener is too, so the
+                    // viewer can connect now and fill in once the stream starts.
+                    void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
+                    if (await this._attachPcsx2()) {
+                        out.info('Attached to the existing PCSX2 instance.');
+                        return;
+                    }
                 }
                 out.warn('Existing PCSX2 did not attach — replacing it with a fresh instance.');
             }
@@ -1107,6 +1112,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             this.terminateOrphanedPcsx2ProcessesIfNeeded('starting a fresh PCSX2', true);
             if (!this.handleStartPcsx2(emulatorPath, biosPath, gamePath)) { return; }
 
+            if (!await this._waitForSocketConnected(20000)) {
+                out.error('Control socket never connected — cannot attach PCSX2.');
+                return;
+            }
+            // Pop the GS viewer as soon as the bridge is up — it connects to the
+            // bridge's frame fan-out and shows "waiting for frames" until the
+            // attach below starts the stream, so the window appears promptly
+            // even while PCSX2 is still booting (and even if the attach is slow).
+            void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
+
             out.info('Waiting for PCSX2 to initialize (PINE + GS stream)…');
             if (await this._waitForPcsx2GraphicsReady(45000)) {
                 out.info('PCSX2 GS stream is listening — PINE and graphics are up.');
@@ -1114,10 +1129,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
                 out.warn('Timed out waiting for PCSX2 GS stream; attaching anyway.');
             }
 
-            if (!await this._waitForSocketConnected(20000)) {
-                out.error('Control socket never connected — cannot attach PCSX2.');
-                return;
-            }
             if (!await this._attachPcsx2()) {
                 out.error('Failed to attach to the freshly launched PCSX2.');
             }
@@ -1126,8 +1137,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
     /**
      * Sends STARTPCSX2 over the control socket so the bridge attaches to
-     * PCSX2's PINE, then opens the GS viewer. Returns false if the attach
-     * fails (e.g. the targeted PCSX2 is unreachable or unhealthy).
+     * PCSX2's PINE and starts forwarding the GS stream. Returns false if the
+     * attach fails (e.g. the targeted PCSX2 is unreachable or unhealthy).
      */
     private async _attachPcsx2(): Promise<boolean> {
         const out = getOutputChannel();
@@ -1140,7 +1151,6 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             out.warn(`STARTPCSX2 failed: ${err?.message ?? err}`);
             return false;
         }
-        void vscode.commands.executeCommand('codedesigner.openGsFrameViewer');
         this._bridgeMode = true;
         this._setPauseState(false);
         this.webview?.postMessage({ command: 'pcsx2ModeChanged', isPcsx2: true });
