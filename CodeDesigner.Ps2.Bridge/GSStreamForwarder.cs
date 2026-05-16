@@ -164,22 +164,15 @@ namespace CodeDesigner.Ps2.Bridge
 
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                try
+                port = pine.GSStreamGetPort();
+
+                // PCSX2 may briefly report port=0 during startup; do a short
+                // bounded retry window so first attach behaves like manual retry.
+                for (int i = 0; port == 0 && i < 6 && !_cts.IsCancellationRequested; i++)
                 {
+                    Thread.Sleep(200);
                     port = pine.GSStreamGetPort();
-                    if (port != 0)
-                        break;
                 }
-                catch (Exception ex)
-                {
-                    lastPortError = ex;
-                    break;
-                }
-
-                if (_cts.IsCancellationRequested)
-                    return;
-
-                Thread.Sleep(300);
             }
 
             if (lastPortError != null)
