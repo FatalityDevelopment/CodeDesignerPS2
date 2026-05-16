@@ -1384,13 +1384,15 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         if (resolvedDisc && fs.existsSync(resolvedDisc)) {
             out.info(`PCSX2 game selection: ${resolvedDisc}`);
-            args.push('--batch', resolvedDisc);
+            args.push('-batch');
         } else {
             out.warn('No valid game selected for PCSX2 launch; starting without a boot image.');
         }
 
-        args.push('--earlyconsolelog');
-        args.push('--nogui');
+        args.push('-earlyconsolelog');
+        args.push('-nogui');
+        args.push('--');
+        args.push(resolvedDisc);
 
         const preview = [pcsx2Exe, ...args]
             .map(v => v.includes(' ') ? `"${v}"` : v)
