@@ -1023,7 +1023,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             }
             out.info('Disconnected from server.');
             this.socketClient.disconnect();
-            this.terminateOrphanedPcsx2ProcessesIfNeeded('disconnect');
+            // PCSX2 is intentionally left running — disconnect/reconnect only
+            // re-attaches the sockets and must not disturb emulator state.
             this.cleanupProcess();
             return;
         }
@@ -1361,6 +1362,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         this.selectedBiosPath = biosPath;
         this.selectedGamePath = gamePath;
 
+        // A launch always starts a fresh instance, so sweep a PCSX2 this session
+        // started earlier — otherwise instances accumulate (disconnect now leaves
+        // PCSX2 running). No-ops on the first launch of the session.
+        this.terminateOrphanedPcsx2ProcessesIfNeeded('relaunch');
+
         // Resolve PCSX2 path: prefer the passed value (from emulator selector if PCSX2 entry),
         // then fall back to auto-detection.
         let pcsx2Exe = '';
@@ -1402,13 +1408,24 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         if (process.platform === 'win32') {
             const scriptPath = path.join(this.extensionPath, 'scripts', 'launch-pcsx2-hidden.ps1');
             const logDir = path.join(this._globalStoragePath, 'pcsx2');
-            const logPath = path.join(logDir, 'console.log');
-            const errPath = path.join(logDir, 'console.err.log');
+            const emuLogPath = path.join(logDir, 'emulog.txt');
             const pidPath = path.join(logDir, 'pid.txt');
             try { fs.mkdirSync(logDir, { recursive: true }); } catch { /* ignore */ }
-            try { fs.writeFileSync(logPath, ''); } catch { /* ignore */ }
-            try { fs.writeFileSync(errPath, ''); } catch { /* ignore */ }
+            try { fs.rmSync(emuLogPath, { force: true }); } catch { /* ignore */ }
             try { fs.writeFileSync(pidPath, ''); } catch { /* ignore */ }
+
+            // Route PCSX2's application log to a path we control. pcsx2-qt opens
+            // the -logfile target while parsing args — before EmuFolders::LoadConfig
+            // prints the startup directory listing — so that listing is captured
+            // in the file. -logfile must precede the "--" boot-file separator.
+            const pcsx2Args = [...args];
+            const sepIdx = pcsx2Args.indexOf('--');
+            const logFileArgs = ['-logfile', emuLogPath];
+            if (sepIdx >= 0) {
+                pcsx2Args.splice(sepIdx, 0, ...logFileArgs);
+            } else {
+                pcsx2Args.push(...logFileArgs);
+            }
 
             if (this._pcsx2Terminal) {
                 try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
@@ -1417,12 +1434,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             const terminal = vscode.window.createTerminal({ name: 'PCSX2 Launcher', shellPath: 'powershell.exe', shellArgs: ['-NoLogo'] });
             this._pcsx2Terminal = terminal;
             terminal.show(true);
-            const cmd = `& "${scriptPath}" -ExePath "${pcsx2Exe}" -LogPath "${logPath}" -ErrPath "${errPath}" -PidPath "${pidPath}" -ArgList @(${args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')})`;
+            const cmd = `& "${scriptPath}" -ExePath "${pcsx2Exe}" -EmuLogPath "${emuLogPath}" -PidPath "${pidPath}" -ArgList @(${pcsx2Args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')})`;
             terminal.sendText(cmd, true);
 
-            this.startPcsx2LogParsing(logPath, errPath);
+            this.startPcsx2LogParsing(emuLogPath);
             void this.capturePcsx2PidFromFile(pidPath);
-            out.info(`PCSX2 hidden launcher started via terminal. Log: ${logPath}`);
+            out.info(`PCSX2 launched. Emu log: ${emuLogPath}`);
             this._launchedPcsx2InSession = true;
             return;
         }
