@@ -59,6 +59,8 @@ namespace CodeDesigner.Ps2.Bridge
         // Inbound side (this process is the TCP client of PCSX2's GSStreamServer).
         private TcpClient? _inbound;
         private Task? _readerTask;
+        private PineClient? _attachedPineClient;
+        private readonly object _attachLock = new();
 
         // Subscribers (this process is the TCP server for the webview / others).
         private readonly object _subscribersLock = new();
@@ -146,8 +148,13 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public void AttachPineClient(PineClient pine)
         {
+            lock (_attachLock)
+            {
+                _attachedPineClient = pine;
+            }
+
             // Close any previous inbound link so we always reflect the current pine.
-            DetachPineClient();
+            DetachPineClient(clearAttached: false);
 
             // PCSX2 can report port=0 briefly during startup. Retry for a short
             // window so first-time attach behaves like a later manual reconnect.
@@ -209,8 +216,16 @@ namespace CodeDesigner.Ps2.Bridge
         /// Drop the inbound connection without affecting subscribers. Called
         /// when the active <see cref="PineClient"/> is replaced or removed.
         /// </summary>
-        public void DetachPineClient()
+        public void DetachPineClient(bool clearAttached = true)
         {
+            if (clearAttached)
+            {
+                lock (_attachLock)
+                {
+                    _attachedPineClient = null;
+                }
+            }
+
             try { _inbound?.Close(); } catch { /* swallow */ }
             _inbound = null;
             _readerTask = null;
@@ -321,6 +336,8 @@ namespace CodeDesigner.Ps2.Bridge
                 }
 
                 Console.WriteLine("GSStream: inbound connection closed.");
+                if (shouldReconnect)
+                    _ = Task.Run(() => TryReconnectAfterDropAsync(ct));
             }
         }
 
@@ -389,6 +406,33 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 Console.WriteLine($"GSStream: dropped {toDrop.Count} slow/dead subscriber(s); now {SubscriberCount} total.");
             }
+        }
+
+        private async Task TryReconnectAfterDropAsync(CancellationToken ct)
+        {
+            if (ct.IsCancellationRequested) return;
+
+            PineClient? pine;
+            lock (_attachLock)
+            {
+                pine = _attachedPineClient;
+            }
+
+            if (pine == null) return;
+            if (!ReferenceEquals(_inbound, null)) return;
+
+            try
+            {
+                await Task.Delay(350, ct);
+            }
+            catch (OperationCanceledException) { return; }
+
+            // Only reconnect if nothing else has already attached a new inbound
+            // link in the meantime.
+            if (_inbound != null || ct.IsCancellationRequested) return;
+
+            Console.WriteLine("GSStream: attempting automatic reconnect to PCSX2 GS stream...");
+            AttachPineClient(pine);
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────
