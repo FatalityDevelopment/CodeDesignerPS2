@@ -287,6 +287,18 @@ namespace CodeDesigner.Ps2.Bridge
             }
             finally
             {
+                // If this loop was serving the currently tracked inbound link,
+                // clear it so status callers don't see a stale "connected"
+                // state after the socket has dropped.
+                if (ReferenceEquals(_inbound, client))
+                {
+                    _inbound = null;
+
+                    // Also drop the latest-frame slot; once the link is down we
+                    // should not report stale pixels as if they were current.
+                    lock (_latestLock) _latest = null;
+                }
+
                 Console.WriteLine("GSStream: inbound connection closed.");
             }
         }
