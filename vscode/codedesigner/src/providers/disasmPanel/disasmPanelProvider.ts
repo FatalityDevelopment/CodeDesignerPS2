@@ -1357,13 +1357,13 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
 
         if (resolvedDisc && fs.existsSync(resolvedDisc)) {
             out.info(`PCSX2 game selection: ${resolvedDisc}`);
-            args.push('-batch', resolvedDisc);
+            args.push('--batch', resolvedDisc);
         } else {
             out.warn('No valid game selected for PCSX2 launch; starting without a boot image.');
         }
 
-        args.push('-earlyconsolelog');
-        args.push('-nogui');
+        args.push('--earlyconsolelog');
+        args.push('--nogui');
 
         const preview = [pcsx2Exe, ...args]
             .map(v => v.includes(' ') ? `"${v}"` : v)
@@ -1377,7 +1377,8 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             const ps = `
 $exe = ${JSON.stringify(pcsx2Exe)}
 $argv = @(${args.map(a => JSON.stringify(a)).join(',')})
-$p = Start-Process -FilePath $exe -ArgumentList $argv -PassThru
+$argLine = ($argv | ForEach-Object { if ($_ -match '[\\s"]') { '"' + ($_.Replace('"','\\"')) + '"' } else { $_ } }) -join ' '
+$p = Start-Process -FilePath $exe -ArgumentList $argLine -PassThru
 Add-Type -Name Win32 -Namespace Native -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);'
 for ($i = 0; $i -lt 80; $i++) {
   try { $p.Refresh() } catch {}
