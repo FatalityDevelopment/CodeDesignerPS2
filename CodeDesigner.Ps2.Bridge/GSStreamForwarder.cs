@@ -59,6 +59,8 @@ namespace CodeDesigner.Ps2.Bridge
         // Inbound side (this process is the TCP client of PCSX2's GSStreamServer).
         private TcpClient? _inbound;
         private Task? _readerTask;
+        private PineClient? _attachedPineClient;
+        private readonly object _attachLock = new();
 
         // Subscribers (this process is the TCP server for the webview / others).
         private readonly object _subscribersLock = new();
@@ -146,11 +148,21 @@ namespace CodeDesigner.Ps2.Bridge
         /// </summary>
         public void AttachPineClient(PineClient pine)
         {
-            // Close any previous inbound link so we always reflect the current pine.
-            DetachPineClient();
+            lock (_attachLock)
+            {
+                _attachedPineClient = pine;
+            }
 
-            ushort port;
-            try
+            // Close any previous inbound link so we always reflect the current pine.
+            DetachPineClient(clearAttached: false);
+
+            // PCSX2 can report port=0 briefly during startup. Retry for a short
+            // window so first-time attach behaves like a later manual reconnect.
+            const int maxAttempts = 12; // ~3.6s total with 300ms backoff
+            ushort port = 0;
+            Exception? lastPortError = null;
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 port = pine.GSStreamGetPort();
 
@@ -162,15 +174,16 @@ namespace CodeDesigner.Ps2.Bridge
                     port = pine.GSStreamGetPort();
                 }
             }
-            catch (Exception ex)
+
+            if (lastPortError != null)
             {
-                Console.WriteLine($"GSStream: PCSX2 build does not expose GSStreamServer ({ex.Message}). Live frames disabled.");
+                Console.WriteLine($"GSStream: PCSX2 build does not expose GSStreamServer ({lastPortError.Message}). Live frames disabled.");
                 return;
             }
 
             if (port == 0)
             {
-                Console.WriteLine("GSStream: PCSX2 reported port 0 — listener not initialized. Live frames disabled.");
+                Console.WriteLine("GSStream: PCSX2 reported GS stream port 0 after startup retries. Live frames disabled for now.");
                 return;
             }
 
@@ -196,8 +209,16 @@ namespace CodeDesigner.Ps2.Bridge
         /// Drop the inbound connection without affecting subscribers. Called
         /// when the active <see cref="PineClient"/> is replaced or removed.
         /// </summary>
-        public void DetachPineClient()
+        public void DetachPineClient(bool clearAttached = true)
         {
+            if (clearAttached)
+            {
+                lock (_attachLock)
+                {
+                    _attachedPineClient = null;
+                }
+            }
+
             try { _inbound?.Close(); } catch { /* swallow */ }
             _inbound = null;
             _readerTask = null;
@@ -295,7 +316,21 @@ namespace CodeDesigner.Ps2.Bridge
             }
             finally
             {
+                // If this loop was serving the currently tracked inbound link,
+                // clear it so status callers don't see a stale "connected"
+                // state after the socket has dropped.
+                if (ReferenceEquals(_inbound, client))
+                {
+                    _inbound = null;
+
+                    // Also drop the latest-frame slot; once the link is down we
+                    // should not report stale pixels as if they were current.
+                    lock (_latestLock) _latest = null;
+                }
+
                 Console.WriteLine("GSStream: inbound connection closed.");
+                if (shouldReconnect)
+                    _ = Task.Run(() => TryReconnectAfterDropAsync(ct));
             }
         }
 
@@ -364,6 +399,33 @@ namespace CodeDesigner.Ps2.Bridge
                 }
                 Console.WriteLine($"GSStream: dropped {toDrop.Count} slow/dead subscriber(s); now {SubscriberCount} total.");
             }
+        }
+
+        private async Task TryReconnectAfterDropAsync(CancellationToken ct)
+        {
+            if (ct.IsCancellationRequested) return;
+
+            PineClient? pine;
+            lock (_attachLock)
+            {
+                pine = _attachedPineClient;
+            }
+
+            if (pine == null) return;
+            if (!ReferenceEquals(_inbound, null)) return;
+
+            try
+            {
+                await Task.Delay(350, ct);
+            }
+            catch (OperationCanceledException) { return; }
+
+            // Only reconnect if nothing else has already attached a new inbound
+            // link in the meantime.
+            if (_inbound != null || ct.IsCancellationRequested) return;
+
+            Console.WriteLine("GSStream: attempting automatic reconnect to PCSX2 GS stream...");
+            AttachPineClient(pine);
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────
