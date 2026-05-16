@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$ExePath,
     [Parameter(Mandatory = $true)][string]$LogPath,
+    [Parameter(Mandatory = $true)][string]$ErrPath,
     [Parameter(Mandatory = $true)][string]$PidPath,
     [string[]]$ArgList = @()
 )
@@ -25,7 +26,7 @@ $proc = Start-Process -FilePath $ExePath `
     -ArgumentList $ArgList `
     -WindowStyle Hidden `
     -RedirectStandardOutput $LogPath `
-    -RedirectStandardError $LogPath `
+    -RedirectStandardError $ErrPath `
     -PassThru
 
 $proc.Id | Out-File -FilePath $PidPath -Encoding ascii -Force

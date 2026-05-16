@@ -139,8 +139,12 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
     private _pcsx2Terminal?: vscode.Terminal;
     /** Tail watcher for the PCSX2 console log file. */
     private _pcsx2LogWatcher?: fs.FSWatcher;
+    /** Tail watcher for the PCSX2 console error log file. */
+    private _pcsx2ErrWatcher?: fs.FSWatcher;
     /** Byte offset already parsed in the PCSX2 console log. */
     private _pcsx2LogOffset = 0;
+    /** Byte offset already parsed in the PCSX2 console error log. */
+    private _pcsx2ErrOffset = 0;
     /** Unique file paths discovered in PCSX2 console output. */
     private _pcsx2DiscoveredPaths = new Set<string>();
     /** Standalone Joker Maker webview, registered from extension.ts after provider setup. */
@@ -1331,11 +1335,16 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             try { this._pcsx2LogWatcher.close(); } catch { /* ignore */ }
             this._pcsx2LogWatcher = undefined;
         }
+        if (this._pcsx2ErrWatcher) {
+            try { this._pcsx2ErrWatcher.close(); } catch { /* ignore */ }
+            this._pcsx2ErrWatcher = undefined;
+        }
         if (this._pcsx2Terminal) {
             try { this._pcsx2Terminal.dispose(); } catch { /* ignore */ }
             this._pcsx2Terminal = undefined;
         }
         this._pcsx2LogOffset = 0;
+        this._pcsx2ErrOffset = 0;
         this._pcsx2DiscoveredPaths.clear();
     }
 
@@ -1392,9 +1401,11 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             const scriptPath = path.join(this.extensionPath, 'scripts', 'launch-pcsx2-hidden.ps1');
             const logDir = path.join(this._globalStoragePath, 'pcsx2');
             const logPath = path.join(logDir, 'console.log');
+            const errPath = path.join(logDir, 'console.err.log');
             const pidPath = path.join(logDir, 'pid.txt');
             try { fs.mkdirSync(logDir, { recursive: true }); } catch { /* ignore */ }
             try { fs.writeFileSync(logPath, ''); } catch { /* ignore */ }
+            try { fs.writeFileSync(errPath, ''); } catch { /* ignore */ }
             try { fs.writeFileSync(pidPath, ''); } catch { /* ignore */ }
 
             if (this._pcsx2Terminal) {
@@ -1404,10 +1415,10 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
             const terminal = vscode.window.createTerminal({ name: 'PCSX2 Launcher', shellPath: 'powershell.exe', shellArgs: ['-NoLogo'] });
             this._pcsx2Terminal = terminal;
             terminal.show(true);
-            const cmd = `& "${scriptPath}" -ExePath "${pcsx2Exe}" -LogPath "${logPath}" -PidPath "${pidPath}" -ArgList @(${args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')})`;
+            const cmd = `& "${scriptPath}" -ExePath "${pcsx2Exe}" -LogPath "${logPath}" -ErrPath "${errPath}" -PidPath "${pidPath}" -ArgList @(${args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')})`;
             terminal.sendText(cmd, true);
 
-            this.startPcsx2LogParsing(logPath);
+            this.startPcsx2LogParsing(logPath, errPath);
             void this.capturePcsx2PidFromFile(pidPath);
             out.info(`PCSX2 hidden launcher started via terminal. Log: ${logPath}`);
             this._launchedPcsx2InSession = true;
@@ -1441,25 +1452,32 @@ export class DisasmPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private startPcsx2LogParsing(logPath: string): void {
+    private startPcsx2LogParsing(logPath: string, errPath?: string): void {
         if (this._pcsx2LogWatcher) { try { this._pcsx2LogWatcher.close(); } catch { /* ignore */ } }
+        if (this._pcsx2ErrWatcher) { try { this._pcsx2ErrWatcher.close(); } catch { /* ignore */ } }
         this._pcsx2LogOffset = 0;
+        this._pcsx2ErrOffset = 0;
         this._pcsx2DiscoveredPaths.clear();
-        const consume = async () => {
+        const consume = async (target: 'out' | 'err') => {
             try {
-                const stat = await fs.promises.stat(logPath);
-                if (stat.size <= this._pcsx2LogOffset) { return; }
-                const fh = await fs.promises.open(logPath, 'r');
-                const len = stat.size - this._pcsx2LogOffset;
+                const file = target === 'out' ? logPath : (errPath ?? logPath);
+                const curOffset = target === 'out' ? this._pcsx2LogOffset : this._pcsx2ErrOffset;
+                const stat = await fs.promises.stat(file);
+                if (stat.size <= curOffset) { return; }
+                const fh = await fs.promises.open(file, 'r');
+                const len = stat.size - curOffset;
                 const buf = Buffer.alloc(len);
-                await fh.read(buf, 0, len, this._pcsx2LogOffset);
+                await fh.read(buf, 0, len, curOffset);
                 await fh.close();
-                this._pcsx2LogOffset = stat.size;
+                if (target === 'out') { this._pcsx2LogOffset = stat.size; } else { this._pcsx2ErrOffset = stat.size; }
                 const chunk = buf.toString('utf8');
                 this.extractAndPersistPcsx2Paths(chunk);
             } catch { /* ignore */ }
         };
-        this._pcsx2LogWatcher = fs.watch(logPath, () => { void consume(); });
+        this._pcsx2LogWatcher = fs.watch(logPath, () => { void consume('out'); });
+        if (errPath) {
+            this._pcsx2ErrWatcher = fs.watch(errPath, () => { void consume('err'); });
+        }
     }
 
     private extractAndPersistPcsx2Paths(chunk: string): void {
